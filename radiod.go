@@ -1,0 +1,628 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"math"
+	"net"
+	"syscall"
+	"time"
+
+	"golang.org/x/net/ipv4"
+)
+
+// RadiodController manages communication with ka9q-radio's radiod
+type RadiodController struct {
+	statusAddr *net.UDPAddr
+	dataAddr   *net.UDPAddr
+	conn       *net.UDPConn
+	iface      *net.Interface
+}
+
+// NewRadiodController creates a new radiod controller
+func NewRadiodController(statusGroup, dataGroup, ifaceName string) (*RadiodController, error) {
+	// Parse status multicast address
+	statusAddr, err := net.ResolveUDPAddr("udp", statusGroup)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve status address: %w", err)
+	}
+
+	// Parse data multicast address
+	dataAddr, err := net.ResolveUDPAddr("udp", dataGroup)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve data address: %w", err)
+	}
+
+	// Get network interface
+	var iface *net.Interface
+	if ifaceName != "" {
+		iface, err = net.InterfaceByName(ifaceName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get interface %s: %w", ifaceName, err)
+		}
+	} else {
+		// Use default interface if none specified
+		iface, err = getDefaultInterface()
+		if err != nil {
+			log.Printf("Warning: could not determine default interface: %v", err)
+		}
+	}
+
+	// Create UDP connection for sending control commands
+	// Match ka9q-radio's connect_mcast() behavior from multicast.c
+	conn, err := setupControlSocket(statusAddr, iface)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create control socket: %w", err)
+	}
+
+	rc := &RadiodController{
+		statusAddr: statusAddr,
+		dataAddr:   dataAddr,
+		conn:       conn,
+		iface:      iface,
+	}
+
+	log.Printf("Radiod controller initialized (status: %s, data: %s, iface: %v)", statusGroup, dataGroup, iface)
+	return rc, nil
+}
+
+// setupControlSocket creates a UDP socket for sending control commands
+// This matches ka9q-radio's connect_mcast() and output_mcast() behavior
+func setupControlSocket(addr *net.UDPAddr, iface *net.Interface) (*net.UDPConn, error) {
+	// Create raw UDP socket
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create UDP socket: %w", err)
+	}
+
+	// Get raw file descriptor for socket options
+	rawConn, err := conn.SyscallConn()
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to get raw connection: %w", err)
+	}
+
+	// Set socket options to match ka9q-radio's multicast.c
+	var sockErr error
+	err = rawConn.Control(func(fd uintptr) {
+		// Issue #5: Set IP_MULTICAST_LOOP = 1 (ensure local listeners get packets)
+		if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_MULTICAST_LOOP, 1); err != nil {
+			sockErr = fmt.Errorf("failed to set IP_MULTICAST_LOOP: %w", err)
+			return
+		}
+
+		// Set IP_MULTICAST_TTL = 1 (local network only)
+		if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_MULTICAST_TTL, 1); err != nil {
+			sockErr = fmt.Errorf("failed to set IP_MULTICAST_TTL: %w", err)
+			return
+		}
+
+		// Issue #2: Set IP_MULTICAST_IF to specify outbound interface
+		if iface != nil {
+			// Use ip_mreqn structure to set interface by index
+			mreqn := syscall.IPMreqn{
+				Ifindex: int32(iface.Index),
+			}
+			if err := syscall.SetsockoptIPMreqn(int(fd), syscall.IPPROTO_IP, syscall.IP_MULTICAST_IF, &mreqn); err != nil {
+				sockErr = fmt.Errorf("failed to set IP_MULTICAST_IF: %w", err)
+				return
+			}
+		}
+
+		// Set non-blocking mode (better to drop packets than block real-time processing)
+		if err := syscall.SetNonblock(int(fd), true); err != nil {
+			sockErr = fmt.Errorf("failed to set non-blocking: %w", err)
+			return
+		}
+	})
+
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to control socket: %w", err)
+	}
+	if sockErr != nil {
+		conn.Close()
+		return nil, sockErr
+	}
+
+	// Issue #1: Join the multicast group (even for output sockets)
+	// This avoids IGMP snooping issues on switches
+	p := ipv4.NewPacketConn(conn)
+	if iface != nil {
+		if err := p.JoinGroup(iface, addr); err != nil {
+			log.Printf("Warning: failed to join multicast group on %s: %v", iface.Name, err)
+		}
+	}
+
+	// Issue #4: Also join on loopback interface for local traffic
+	loopback, err := getLoopbackInterface()
+	if err == nil && loopback != nil {
+		if err := p.JoinGroup(loopback, addr); err != nil {
+			log.Printf("Warning: failed to join multicast group on loopback: %v", err)
+		}
+	}
+
+	return conn, nil
+}
+
+// getDefaultInterface returns the default network interface
+func getDefaultInterface() (*net.Interface, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, iface := range ifaces {
+		// Skip loopback and down interfaces
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		// Skip interfaces without multicast support
+		if iface.Flags&net.FlagMulticast == 0 {
+			continue
+		}
+		return &iface, nil
+	}
+
+	return nil, fmt.Errorf("no suitable interface found")
+}
+
+// getLoopbackInterface returns the loopback interface
+func getLoopbackInterface() (*net.Interface, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			return &iface, nil
+		}
+	}
+
+	return nil, fmt.Errorf("loopback interface not found")
+}
+
+// CreateChannel creates a new radiod channel with specified parameters and SSRC (default bandwidth)
+func (rc *RadiodController) CreateChannel(name string, frequency uint64, mode string, sampleRate int, ssrc uint32) error {
+	return rc.CreateChannelWithBandwidth(name, frequency, mode, sampleRate, ssrc, 0) // 0 = use radiod default
+}
+
+// CreateChannelWithBandwidth creates a new radiod channel with specified parameters, SSRC, and bandwidth
+// NOTE: Bandwidth parameter is currently ignored - radiod preset filter settings are used
+// Dynamic bandwidth control proved incompatible with radiod's command processing
+func (rc *RadiodController) CreateChannelWithBandwidth(name string, frequency uint64, mode string, sampleRate int, ssrc uint32, bandwidth int) error {
+	// Build control command with SSRC - match ka9q-multidecoder order exactly
+	buf := make([]byte, 0, 1500)
+	
+	// Start with CMD packet type
+	buf = append(buf, 1) // CMD = 1
+	
+	// Add SSRC (tag 18 = 0x12)
+	buf = encodeInt32(&buf, 0x12, ssrc)
+	
+	// Add RADIO_FREQUENCY (tag 33 = 0x21) - MUST come before PRESET
+	buf = encodeDouble(&buf, 0x21, float64(frequency))
+	
+	// Add PRESET (tag 85 = 0x55)
+	buf = encodeString(&buf, 0x55, mode)
+	
+	// Add COMMAND_TAG (tag 1 = 0x01)
+	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
+	
+	// Add EOL marker
+	buf = append(buf, 0)
+
+	if DebugMode {
+		log.Printf("DEBUG: Sending CreateChannel command (%d bytes) to %s", len(buf), rc.statusAddr)
+		log.Printf("DEBUG: Command hex: % x", buf)
+	}
+
+	// Send command
+	if err := rc.sendCommand(buf); err != nil {
+		return fmt.Errorf("failed to send create command: %w", err)
+	}
+
+	log.Printf("Created channel: %s (SSRC: 0x%08x (%d), freq: %d Hz, mode: %s, rate: %d Hz)",
+		name, ssrc, ssrc, frequency, mode, sampleRate)
+	return nil
+}
+
+// CreateSpectrumChannel creates a new radiod spectrum channel with specified parameters
+// CRITICAL: Must send PRESET first to set demod_type, then override parameters
+func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64, binCount int, binBandwidth float64, ssrc uint32) error {
+	log.Printf("CreateSpectrumChannel called: name=%s, freq=%d, bins=%d, bw=%.1f, ssrc=0x%08x",
+		name, frequency, binCount, binBandwidth, ssrc)
+	
+	// Calculate filter edges for full bandwidth coverage
+	// Total bandwidth = binCount * binBandwidth
+	// For 0-30 MHz with center at 15 MHz: edges at ±15 MHz
+	halfBandwidth := float64(binCount) * binBandwidth / 2.0
+	
+	log.Printf("Calculated filter edges: LOW=%.1f Hz, HIGH=%.1f Hz (total BW=%.1f Hz)",
+		-halfBandwidth, halfBandwidth, halfBandwidth*2)
+	
+	// Build control command for spectrum mode
+	buf := make([]byte, 0, 1500)
+	
+	// Start with CMD packet type
+	buf = append(buf, 1) // CMD = 1
+	
+	// Add SSRC (tag 18 = 0x12)
+	buf = encodeInt32(&buf, 0x12, ssrc)
+	
+	// Add RADIO_FREQUENCY (tag 33 = 0x21) - MUST come before PRESET
+	buf = encodeDouble(&buf, 0x21, float64(frequency))
+	
+	// Add PRESET (tag 85 = 0x55) - MUST come early to set demod_type
+	// This calls loadpreset() which sets demod_type=SPECT_DEMOD and default parameters
+	buf = encodeString(&buf, 0x55, "spectrum")
+	
+	// Now override the preset defaults with our custom parameters
+	// These come AFTER preset so they override the defaults
+	
+	// Add LOW_EDGE (tag 39 = 0x27) - lower frequency edge relative to center
+	buf = encodeDouble(&buf, 0x27, -halfBandwidth)
+	
+	// Add HIGH_EDGE (tag 40 = 0x28) - upper frequency edge relative to center
+	buf = encodeDouble(&buf, 0x28, halfBandwidth)
+	
+	// Add BIN_COUNT (tag 94 = 0x5e)
+	buf = encodeInt32(&buf, 0x5e, uint32(binCount))
+	
+	// Add NONCOHERENT_BIN_BW (tag 93 = 0x5d)
+	buf = encodeFloat(&buf, 0x5d, float32(binBandwidth))
+	
+	// Add COMMAND_TAG (tag 1 = 0x01)
+	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
+	
+	// Add EOL marker
+	buf = append(buf, 0)
+
+	log.Printf("Sending spectrum command: %d bytes", len(buf))
+	log.Printf("Command hex: % x", buf)
+
+	// Send command
+	if err := rc.sendCommand(buf); err != nil {
+		return fmt.Errorf("failed to send create spectrum command: %w", err)
+	}
+
+	log.Printf("Spectrum channel created: SSRC 0x%08x, freq=%d Hz, LOW=%.1f Hz, HIGH=%.1f Hz, bins=%d, bw=%.1f Hz",
+		ssrc, frequency, -halfBandwidth, halfBandwidth, binCount, binBandwidth)
+	return nil
+}
+
+// UpdateSpectrumChannel updates spectrum channel parameters (for zoom/pan)
+// binCount is needed to calculate filter edges when binBandwidth changes
+// If binCount changes, it will also be sent to radiod
+func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool) error {
+	// Build control command to update spectrum parameters
+	buf := make([]byte, 0, 1500)
+	
+	// Start with CMD packet type
+	buf = append(buf, 1) // CMD = 1
+	
+	// Add SSRC (tag 18 = 0x12)
+	buf = encodeInt32(&buf, 0x12, ssrc)
+	
+	// Add RADIO_FREQUENCY (tag 33 = 0x21) if changed
+	if frequency > 0 {
+		buf = encodeDouble(&buf, 0x21, float64(frequency))
+	}
+	
+	// Add BIN_COUNT (tag 94 = 0x5e) if it changed
+	if sendBinCount && binCount > 0 {
+		buf = encodeInt32(&buf, 0x5e, uint32(binCount))
+		if DebugMode {
+			log.Printf("DEBUG: Sending BIN_COUNT=%d", binCount)
+		}
+	}
+	
+	// Add NONCOHERENT_BIN_BW (tag 93 = 0x5d) if changed
+	if binBandwidth > 0 {
+		buf = encodeFloat(&buf, 0x5d, float32(binBandwidth))
+		
+		// When bin bandwidth changes, we must also update filter edges
+		// Calculate new filter edges based on total bandwidth
+		halfBandwidth := float64(binCount) * binBandwidth / 2.0
+		
+		// Add LOW_EDGE (tag 39 = 0x27)
+		buf = encodeDouble(&buf, 0x27, -halfBandwidth)
+		
+		// Add HIGH_EDGE (tag 40 = 0x28)
+		buf = encodeDouble(&buf, 0x28, halfBandwidth)
+		
+		if DebugMode {
+			log.Printf("DEBUG: Updated filter edges: LOW=%.1f Hz, HIGH=%.1f Hz", -halfBandwidth, halfBandwidth)
+		}
+	}
+	
+	// Add COMMAND_TAG (tag 1 = 0x01)
+	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
+	
+	// Add EOL marker
+	buf = append(buf, 0)
+
+	if DebugMode {
+		log.Printf("DEBUG: Sending UpdateSpectrumChannel command for SSRC 0x%08x", ssrc)
+	}
+
+	// Send command
+	if err := rc.sendCommand(buf); err != nil {
+		return fmt.Errorf("failed to send update spectrum command: %w", err)
+	}
+
+	if sendBinCount {
+		log.Printf("Updated spectrum channel: SSRC 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz", ssrc, frequency, binCount, binBandwidth)
+	} else {
+		log.Printf("Updated spectrum channel: SSRC 0x%08x, freq: %d Hz, bw: %.1f Hz", ssrc, frequency, binBandwidth)
+	}
+	return nil
+}
+
+// UpdateChannel updates an existing channel's frequency, mode, and/or bandwidth edges
+// This allows changing parameters without destroying and recreating the channel
+// bandwidthLow and bandwidthHigh are the filter edges in Hz (can be negative for low edge)
+// sendBandwidth controls whether to send bandwidth parameters
+func (rc *RadiodController) UpdateChannel(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error {
+	// Build control command with SSRC to identify the channel
+	buf := make([]byte, 0, 1500)
+	
+	// Start with CMD packet type
+	buf = append(buf, 1) // CMD = 1
+	
+	// Add SSRC (tag 18 = 0x12) - identifies which channel to update
+	buf = encodeInt32(&buf, 0x12, ssrc)
+	
+	// Add RADIO_FREQUENCY (tag 33 = 0x21) if provided
+	if frequency > 0 {
+		buf = encodeDouble(&buf, 0x21, float64(frequency))
+	}
+	
+	// Add PRESET (tag 85 = 0x55) if provided
+	if mode != "" {
+		buf = encodeString(&buf, 0x55, mode)
+	}
+	
+	// Add bandwidth via LOW_EDGE and HIGH_EDGE if requested
+	if sendBandwidth {
+		// Add LOW_EDGE (tag 39 = 0x27)
+		buf = encodeFloat(&buf, 0x27, float32(bandwidthLow))
+		
+		// Add HIGH_EDGE (tag 40 = 0x28)
+		buf = encodeFloat(&buf, 0x28, float32(bandwidthHigh))
+	}
+	
+	// Add COMMAND_TAG (tag 1 = 0x01)
+	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
+	
+	// Add EOL marker
+	buf = append(buf, 0)
+
+	// Always log what we're sending for debugging
+	log.Printf("UpdateChannel - SSRC 0x%08x, freq: %d Hz, mode: '%s'",
+		ssrc, frequency, mode)
+	if sendBandwidth {
+		log.Printf("  Sending LOW_EDGE: %d Hz, HIGH_EDGE: %d Hz", bandwidthLow, bandwidthHigh)
+	}
+	log.Printf("  Command hex: % x", buf)
+
+	// Send command
+	if err := rc.sendCommand(buf); err != nil {
+		return fmt.Errorf("failed to send update command: %w", err)
+	}
+
+	if sendBandwidth {
+		log.Printf("Updated channel: SSRC 0x%08x (freq: %d Hz, mode: %s, edges: %d-%d Hz)", ssrc, frequency, mode, bandwidthLow, bandwidthHigh)
+	} else {
+		log.Printf("Updated channel: SSRC 0x%08x (freq: %d Hz, mode: %s)", ssrc, frequency, mode)
+	}
+	return nil
+}
+
+// DisableChannel disables a channel by setting its frequency to 0
+func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
+	cmd := rc.buildCommand(name, ssrc, map[string]interface{}{
+		"radio.frequency": uint64(0),
+	})
+
+	if DebugMode {
+		log.Printf("DEBUG: Sending DisableChannel command for SSRC 0x%08x", ssrc)
+	}
+
+	if err := rc.sendCommand(cmd); err != nil {
+		return fmt.Errorf("failed to send disable command: %w", err)
+	}
+
+	log.Printf("Disabled channel: %s (SSRC: 0x%08x)", name, ssrc)
+	return nil
+}
+
+// buildCommand constructs a radiod control command packet
+// Format: TLV (Type-Length-Value) encoding with leading zero suppression
+// Tag numbers from ka9q-radio/src/status.h enum status_type
+// This matches ka9q-radio's encode_int64() and encode_double() exactly
+func (rc *RadiodController) buildCommand(channelName string, ssrc uint32, params map[string]interface{}) []byte {
+	buf := make([]byte, 0, 1500)
+	
+	// Start with CMD packet type
+	buf = append(buf, 1) // CMD = 1 (from enum pkt_type)
+
+	// Add SSRC (tag 18 = 0x12 for OUTPUT_SSRC) with leading zero suppression
+	buf = encodeInt32(&buf, 0x12, ssrc)
+
+	// Add parameters in the same order as multidecoder
+	for key, value := range params {
+		switch key {
+		case "radio.frequency":
+			// Tag 33 (0x21): RADIO_FREQUENCY (double)
+			// Must encode as IEEE 754 double with leading zero suppression
+			freq := value.(uint64)
+			buf = encodeDouble(&buf, 0x21, float64(freq))
+
+		case "radio.mode":
+			// Tag 85 (0x55): PRESET (string) - mode preset name
+			mode := value.(string)
+			buf = encodeString(&buf, 0x55, mode)
+		}
+	}
+	
+	// Add COMMAND_TAG for tracking (tag 1 = 0x01)
+	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
+	
+	// Add EOL marker (tag 0)
+	buf = append(buf, 0)
+
+	return buf
+}
+
+// encodeInt32 encodes a 32-bit integer with leading zero suppression
+// Matches ka9q-radio's encode_int32() -> encode_int64()
+func encodeInt32(buf *[]byte, tag byte, value uint32) []byte {
+	*buf = append(*buf, tag)
+	
+	if value == 0 {
+		*buf = append(*buf, 0) // Zero length for zero value
+		return *buf
+	}
+	
+	// Convert to uint64 and suppress leading zeros
+	x := uint64(value)
+	length := 8
+	for length > 0 && ((x >> 56) == 0) {
+		x <<= 8
+		length--
+	}
+	
+	*buf = append(*buf, byte(length))
+	for i := 0; i < length; i++ {
+		*buf = append(*buf, byte(x>>56))
+		x <<= 8
+	}
+	
+	return *buf
+}
+
+// encodeDouble encodes a double (float64) with leading zero suppression
+// Matches ka9q-radio's encode_double() which converts to uint64 then suppresses zeros
+func encodeDouble(buf *[]byte, tag byte, value float64) []byte {
+	*buf = append(*buf, tag)
+	
+	// Convert double to uint64 via IEEE 754 bits
+	bits := math.Float64bits(value)
+	
+	if bits == 0 {
+		*buf = append(*buf, 0) // Zero length for zero value
+		return *buf
+	}
+	
+	// Suppress leading zeros
+	length := 8
+	for length > 0 && ((bits >> 56) == 0) {
+		bits <<= 8
+		length--
+	}
+	
+	*buf = append(*buf, byte(length))
+	for i := 0; i < length; i++ {
+		*buf = append(*buf, byte(bits>>56))
+		bits <<= 8
+	}
+	
+	return *buf
+}
+
+// encodeFloat encodes a float32 with leading zero suppression
+// Matches ka9q-radio's encode_float() which converts to uint32 then suppresses zeros
+func encodeFloat(buf *[]byte, tag byte, value float32) []byte {
+	*buf = append(*buf, tag)
+	
+	// Convert float to uint32 via IEEE 754 bits
+	bits := math.Float32bits(value)
+	
+	if bits == 0 {
+		*buf = append(*buf, 0) // Zero length for zero value
+		return *buf
+	}
+	
+	// Suppress leading zeros
+	length := 4
+	for length > 0 && ((bits >> 24) == 0) {
+		bits <<= 8
+		length--
+	}
+	
+	*buf = append(*buf, byte(length))
+	for i := 0; i < length; i++ {
+		*buf = append(*buf, byte(bits>>24))
+		bits <<= 8
+	}
+	
+	return *buf
+}
+
+// encodeByte encodes a single byte value
+func encodeByte(buf *[]byte, tag byte, value byte) []byte {
+	*buf = append(*buf, tag)
+	*buf = append(*buf, 1) // Length = 1
+	*buf = append(*buf, value)
+	return *buf
+}
+
+// encodeString encodes a string
+// Matches ka9q-radio's encode_string()
+func encodeString(buf *[]byte, tag byte, value string) []byte {
+	*buf = append(*buf, tag)
+	
+	length := len(value)
+	if length < 128 {
+		*buf = append(*buf, byte(length))
+	} else {
+		// For longer strings, use extended length encoding
+		// Not needed for our use case, but included for completeness
+		*buf = append(*buf, 0x80|2)
+		*buf = append(*buf, byte(length>>8))
+		*buf = append(*buf, byte(length))
+	}
+	
+	*buf = append(*buf, []byte(value)...)
+	return *buf
+}
+
+// sendCommand sends a command packet to radiod
+func (rc *RadiodController) sendCommand(cmd []byte) error {
+	// Set write deadline
+	if err := rc.conn.SetWriteDeadline(time.Now().Add(1 * time.Second)); err != nil {
+		return fmt.Errorf("failed to set write deadline: %w", err)
+	}
+
+	// Send command using WriteTo since we're not using a connected socket
+	n, err := rc.conn.WriteTo(cmd, rc.statusAddr)
+	if err != nil {
+		return fmt.Errorf("failed to write command: %w", err)
+	}
+
+	if n != len(cmd) {
+		return fmt.Errorf("incomplete write: sent %d of %d bytes", n, len(cmd))
+	}
+
+	return nil
+}
+
+// Close closes the radiod controller connection
+func (rc *RadiodController) Close() error {
+	if rc.conn != nil {
+		return rc.conn.Close()
+	}
+	return nil
+}
+
+// GetDataAddr returns the data multicast address
+func (rc *RadiodController) GetDataAddr() *net.UDPAddr {
+	return rc.dataAddr
+}
+
+// GetInterface returns the network interface
+func (rc *RadiodController) GetInterface() *net.Interface {
+	return rc.iface
+}

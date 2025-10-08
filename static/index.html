@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ka9q UberSDR - Web SDR Receiver</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Audio Start Overlay -->
+    <div id="audio-start-overlay" class="audio-start-overlay">
+        <div class="audio-start-content">
+            <button id="audio-start-button" class="audio-start-button">
+                <svg width="80" height="80" viewBox="0 0 80 80">
+                    <polygon points="25,15 25,65 65,40" fill="white"/>
+                </svg>
+                <span>Click to Start</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Full-band Spectrum Display -->
+        <div class="spectrum-display-panel">
+            <div class="spectrum-display-container">
+                <canvas id="spectrum-display-canvas"></canvas>
+                <div class="spectrum-display-controls">
+                    <div class="spectrum-control-group">
+                        <label>Zoom:</label>
+                        <button onclick="spectrumZoomOut()" title="Zoom Out">−</button>
+                        <button onclick="spectrumZoomIn()" title="Zoom In">+</button>
+                        <button onclick="spectrumResetZoom()" title="Reset Zoom">Reset</button>
+                    </div>
+                    <div class="spectrum-control-group">
+                        <label>Color Scheme:</label>
+                        <select id="spectrum-colorscheme" onchange="updateSpectrumColorScheme()">
+                            <option value="viridis">Viridis</option>
+                            <option value="plasma">Plasma</option>
+                            <option value="jet" selected>Jet</option>
+                        </select>
+                    </div>
+                    <div class="spectrum-control-group">
+                        <label for="spectrum-intensity">Intensity:</label>
+                        <input type="range" id="spectrum-intensity" min="-1" max="1" value="0.20" step="0.05" oninput="updateSpectrumIntensity()">
+                        <span id="spectrum-intensity-value">+0.20</span>
+                    </div>
+                    <div class="spectrum-control-group">
+                        <label for="spectrum-contrast">Contrast:</label>
+                        <input type="range" id="spectrum-contrast" min="0" max="100" value="70" step="5" oninput="updateSpectrumContrast()">
+                        <span id="spectrum-contrast-value">70</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="frequency">Frequency (Hz)</label>
+                <input type="number" id="frequency" value="14074000" min="100000" max="30000000" step="1000" oninput="validateFrequencyInput(this)" onchange="handleFrequencyChange()">
+                <div class="tuning-buttons">
+                    <button onclick="adjustFrequency(-1000)" title="Down 1 kHz">◄◄</button>
+                    <button onclick="adjustFrequency(-100)" title="Down 100 Hz">◄</button>
+                    <button onclick="adjustFrequency(-10)" title="Down 10 Hz">◂</button>
+                    <button onclick="adjustFrequency(10)" title="Up 10 Hz">▸</button>
+                    <button onclick="adjustFrequency(100)" title="Up 100 Hz">►</button>
+                    <button onclick="adjustFrequency(1000)" title="Up 1 kHz">►►</button>
+                </div>
+                <div class="preset-buttons">
+                    <button onclick="setFrequency(3573000)" class="band-btn" data-band="80m">80m</button>
+                    <button onclick="setFrequency(7074000)" class="band-btn" data-band="40m">40m</button>
+                    <button onclick="setFrequency(10136000)" class="band-btn" data-band="30m">30m</button>
+                    <button onclick="setFrequency(14074000)" class="band-btn" data-band="20m">20m</button>
+                    <button onclick="setFrequency(18100000)" class="band-btn" data-band="17m">17m</button>
+                    <button onclick="setFrequency(21074000)" class="band-btn" data-band="15m">15m</button>
+                    <button onclick="setFrequency(24915000)" class="band-btn" data-band="12m">12m</button>
+                    <button onclick="setFrequency(28074000)" class="band-btn" data-band="10m">10m</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Mode</label>
+                <div class="preset-buttons">
+                    <button onclick="setMode('usb')" id="mode-usb" class="mode-btn active">USB</button>
+                    <button onclick="setMode('lsb')" id="mode-lsb" class="mode-btn">LSB</button>
+                    <button onclick="setMode('cwu')" id="mode-cwu" class="mode-btn">CWU</button>
+                    <button onclick="setMode('cwl')" id="mode-cwl" class="mode-btn">CWL</button>
+                    <button onclick="setMode('am')" id="mode-am" class="mode-btn">AM</button>
+                    <button onclick="setMode('sam')" id="mode-sam" class="mode-btn" disabled style="opacity: 0.5; cursor: not-allowed;" title="SAM mode temporarily disabled due to known issues">SAM</button>
+                    <button onclick="setMode('fm')" id="mode-fm" class="mode-btn">FM</button>
+                    <button onclick="setMode('nfm')" id="mode-nfm" class="mode-btn">NFM</button>
+                </div>
+                <div class="current-settings-text">
+                    <span id="current-freq">-</span> • <span id="current-mode">-</span>
+                </div>
+                <div class="bandwidth-controls">
+                    <div class="control-group">
+                        <label for="bandwidth-low">Low: <span id="bandwidth-low-value">50</span> Hz</label>
+                        <input type="range" id="bandwidth-low" min="-8000" max="500" value="50" step="10" oninput="updateBandwidthDisplay()" onchange="updateBandwidth()">
+                    </div>
+                    <div class="control-group">
+                        <label for="bandwidth-high">High: <span id="bandwidth-high-value">3000</span> Hz</label>
+                        <input type="range" id="bandwidth-high" min="500" max="6000" value="3000" step="100" oninput="updateBandwidthDisplay()" onchange="updateBandwidth()">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="audio-controls">
+            <div class="control-group">
+                <label for="volume">Volume</label>
+                <input type="range" id="volume" min="0" max="100" value="100">
+                <span id="volume-value">100%</span>
+            </div>
+            <div class="control-group">
+                <button id="mute-btn" onclick="toggleMute()">🔊 Mute</button>
+            </div>
+            <div class="control-group vu-meter-compact-container" id="vu-meter-compact">
+                <div class="vu-meter">
+                    <div id="vu-meter-bar-compact" class="vu-meter-bar"></div>
+                    <div id="vu-meter-peak-compact" class="vu-meter-peak"></div>
+                    <div class="vu-meter-scale">
+                        <span>-60</span>
+                        <span>-40</span>
+                        <span>-20</span>
+                        <span>-10</span>
+                        <span>-5</span>
+                        <span>0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Visualization Section (Collapsible) -->
+        <div class="audio-visualization-section">
+            <div class="audio-visualization-header" onclick="toggleAudioVisualization()">
+                <h3>📊 Audio Visualisation</h3>
+                <span id="audio-viz-toggle" class="toggle-icon">▼</span>
+            </div>
+            <div id="audio-visualization-content" class="audio-visualization-content" style="display: none;">
+                <div class="visualizer-panel">
+                    <div class="top-visualizers">
+                <div class="vu-meter-container">
+                    <div class="vu-meter">
+                        <div id="vu-meter-bar" class="vu-meter-bar"></div>
+                        <div id="vu-meter-peak" class="vu-meter-peak"></div>
+                        <div class="vu-meter-scale">
+                            <span>-60</span>
+                            <span>-40</span>
+                            <span>-20</span>
+                            <span>-10</span>
+                            <span>-5</span>
+                            <span>0</span>
+                        </div>
+                    </div>
+                    <div class="vu-meter-values">
+                        <div class="vu-value-item">
+                            <span class="vu-label">RMS:</span>
+                            <span id="vu-rms-value" class="vu-value">-∞ dB</span>
+                        </div>
+                        <div class="vu-value-item">
+                            <span class="vu-label">Peak:</span>
+                            <span id="vu-peak-value" class="vu-value">-∞ dB</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="oscilloscope-container">
+                    <canvas id="oscilloscope-canvas" width="400" height="140"></canvas>
+                    <div class="oscilloscope-controls">
+                        <label for="oscilloscope-zoom">Timebase:</label>
+                        <input type="range" id="oscilloscope-zoom" min="1" max="100" value="100" step="1" oninput="updateOscilloscopeZoom()">
+                        <span id="oscilloscope-zoom-value">-- ms</span>
+                    </div>
+                </div>
+            </div>
+            <div class="spectrum-container">
+                <canvas id="spectrum-canvas" width="2048" height="150"></canvas>
+            </div>
+            <div class="waterfall-container">
+                <div style="position: relative;">
+                    <canvas id="waterfall-canvas" width="2048" height="400"></canvas>
+                    <canvas id="waterfall-overlay-canvas" width="2048" height="400" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+                </div>
+                <div class="waterfall-controls">
+                    <div class="waterfall-control-group">
+                        <label for="fft-size">FFT Size:</label>
+                        <select id="fft-size" onchange="updateFFTSize()">
+                            <option value="2048">2048 (Fastest)</option>
+                            <option value="4096">4096 (Fast)</option>
+                            <option value="8192">8192 (Balanced)</option>
+                            <option value="16384" selected>16384 (High Detail)</option>
+                            <option value="32768">32768 (Maximum Detail)</option>
+                        </select>
+                    </div>
+                    <div class="waterfall-control-group">
+                        <label for="scroll-rate">Scroll Rate:</label>
+                        <select id="scroll-rate" onchange="updateScrollRate()">
+                            <option value="100">Slow (10 fps)</option>
+                            <option value="50">Medium (20 fps)</option>
+                            <option value="33" selected>Fast (30 fps)</option>
+                            <option value="16">Very Fast (60 fps)</option>
+                        </select>
+                    </div>
+                    <div class="waterfall-control-group">
+                        <label for="waterfall-intensity">Intensity:</label>
+                        <input type="range" id="waterfall-intensity" min="-1" max="1" value="0" step="0.05" oninput="updateWaterfallIntensity()">
+                        <span id="waterfall-intensity-value">+0.00</span>
+                    </div>
+                    <div class="waterfall-control-group">
+                        <label for="waterfall-contrast">Contrast:</label>
+                        <input type="range" id="waterfall-contrast" min="0" max="100" value="50" step="5" oninput="updateWaterfallContrast()">
+                        <span id="waterfall-contrast-value">50</span>
+                    </div>
+                </div>
+            </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CW Decoder (shown only in CWU/CWL modes) -->
+        <div class="cw-decoder-panel" id="cw-decoder-panel" style="display: none;">
+            <div class="cw-decoder-container">
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="cw-decoder-enable" onchange="toggleCWDecoder()">
+                        Enable CW Decoder
+                    </label>
+                </div>
+                <div id="cw-decoder-controls" style="display: none;">
+                    <div class="control-group">
+                        <label for="cw-wpm">WPM: <span id="cw-wpm-value">20</span></label>
+                        <input type="range" id="cw-wpm" min="5" max="60" value="20" step="1" oninput="updateCWDecoderWPM()">
+                    </div>
+                    <div class="control-group">
+                        <label for="cw-threshold">Threshold: <span id="cw-threshold-value">0.01</span></label>
+                        <input type="range" id="cw-threshold" min="0.001" max="0.1" value="0.01" step="0.001" oninput="updateCWDecoderThreshold()">
+                    </div>
+                    
+                    <div class="cw-decoder-display">
+                        <div class="cw-status-bar">
+                            <div class="cw-signal-indicator">
+                                <label>Signal:</label>
+                                <div class="cw-signal-meter">
+                                    <div id="cw-signal-bar" class="cw-signal-bar"></div>
+                                </div>
+                                <span id="cw-signal-value">0%</span>
+                            </div>
+                            <div class="cw-current-symbol">
+                                <label>Symbol:</label>
+                                <span id="cw-current-symbol">—</span>
+                            </div>
+                        </div>
+                        <div class="cw-decoded-text-container">
+                            <label>Decoded Text:</label>
+                            <div id="cw-decoded-text" class="cw-decoded-text"></div>
+                        </div>
+                        <div class="cw-decoder-buttons">
+                            <button onclick="clearCWText()" class="cw-btn">Clear</button>
+                            <button onclick="copyCWText()" class="cw-btn">Copy</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bandpass-panel">
+            <div class="bandpass-container">
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="bandpass-enable" onchange="toggleBandpassFilter()">
+                        Enable Bandpass Filter
+                    </label>
+                </div>
+                <div id="bandpass-controls" style="display: none;">
+                    <div class="control-group">
+                        <label for="bandpass-center">Center Frequency: <span id="bandpass-center-value">800 Hz</span></label>
+                        <input type="range" id="bandpass-center" min="100" max="3000" value="800" step="10" oninput="updateBandpassFilter()">
+                    </div>
+                    <div class="control-group">
+                        <label for="bandpass-width">Bandwidth: <span id="bandpass-width-value">200 Hz</span></label>
+                        <input type="range" id="bandpass-width" min="20" max="1000" value="200" step="10" oninput="updateBandpassFilter()">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="notch-panel">
+            <div class="notch-container">
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="notch-enable" onchange="toggleNotchFilter()">
+                        Enable Notch Filters <span id="notch-count" style="color: #888;">(0/5)</span>
+                    </label>
+                </div>
+                <div id="notch-controls" style="display: none;">
+                    <div style="margin-bottom: 15px;">
+                        <button onclick="addManualNotch()" class="notch-add-btn">+ Add Notch Filter</button>
+                    </div>
+                    <div id="notch-list">
+                        <p style="color: #888; font-style: italic; margin: 10px 0;">No notch filters added yet</p>
+                    </div>
+                    <button onclick="clearAllNotches()" class="eq-reset-btn" style="margin-top: 10px;">Clear All Notches</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="compressor-panel">
+            <div class="compressor-container" style="position: relative;">
+                <span id="compressor-clip-indicator" style="display: none; position: absolute; top: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="compressor-enable" onchange="toggleCompressor()">
+                        Enable Audio Compressor (AGC)
+                    </label>
+                </div>
+                <div id="compressor-controls" style="display: none;">
+                    <div class="control-group">
+                        <label for="compressor-threshold">Threshold: <span id="compressor-threshold-value">-24 dB</span></label>
+                        <input type="range" id="compressor-threshold" min="-100" max="0" value="-24" step="1" oninput="updateCompressor()">
+                    </div>
+                    <div class="control-group">
+                        <label for="compressor-ratio">Ratio: <span id="compressor-ratio-value">12:1</span></label>
+                        <input type="range" id="compressor-ratio" min="1" max="20" value="12" step="1" oninput="updateCompressor()">
+                    </div>
+                    <div class="control-group">
+                        <label for="compressor-attack">Attack: <span id="compressor-attack-value">0.003 s</span></label>
+                        <input type="range" id="compressor-attack" min="0" max="1" value="0.003" step="0.001" oninput="updateCompressor()">
+                    </div>
+                    <div class="control-group">
+                        <label for="compressor-release">Release: <span id="compressor-release-value">0.25 s</span></label>
+                        <input type="range" id="compressor-release" min="0" max="1" value="0.25" step="0.01" oninput="updateCompressor()">
+                    </div>
+                    <div class="control-group">
+                        <label for="compressor-makeup-gain">Makeup Gain: <span id="compressor-makeup-gain-value">+0 dB</span></label>
+                        <input type="range" id="compressor-makeup-gain" min="0" max="40" value="0" step="1" oninput="updateCompressor()">
+                    </div>
+                    <button onclick="resetCompressor()" class="eq-reset-btn">Reset Compressor</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="equalizer-panel">
+            <div class="equalizer-container" style="position: relative;">
+                <span id="equalizer-clip-indicator" style="display: none; position: absolute; top: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="equalizer-enable" onchange="toggleEqualizer()">
+                        Enable 12-Band Equalizer
+                    </label>
+                </div>
+                <div id="equalizer-controls" style="display: none;">
+                    <div class="equalizer-bands">
+                        <div class="eq-band">
+                    <label class="eq-label">60 Hz</label>
+                    <input type="range" class="eq-slider" id="eq-60" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-60-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">170 Hz</label>
+                    <input type="range" class="eq-slider" id="eq-170" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-170-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">310 Hz</label>
+                    <input type="range" class="eq-slider" id="eq-310" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-310-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">600 Hz</label>
+                    <input type="range" class="eq-slider" id="eq-600" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-600-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">1 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-1000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-1000-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">1.5 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-1500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-1500-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">2 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-2000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-2000-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">2.5 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-2500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-2500-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">3 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-3000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-3000-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">4 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-4000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-4000-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">6 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-6000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-6000-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">8 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-8000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-8000-value">0 dB</span>
+                        </div>
+                    </div>
+                    <button onclick="resetEqualizer()" class="eq-reset-btn">Reset EQ</button>
+                </div>
+            </div>
+        </div>
+
+
+    </div>
+
+    <script src="spectrum-display.js"></script>
+    <script src="cw-decoder.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

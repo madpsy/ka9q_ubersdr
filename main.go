@@ -18,7 +18,7 @@ func main() {
 	configFile := flag.String("config", "config.yaml", "Path to configuration file")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	flag.Parse()
-	
+
 	// Set global debug mode
 	DebugMode = *debug
 	if DebugMode {
@@ -67,23 +67,7 @@ func main() {
 	audioReceiver.Start()
 	defer audioReceiver.Stop()
 
-	// OLD STATIC SPECTRUM - DISABLED in favor of per-user dynamic spectrum
-	// The old SpectrumManager expected a pre-configured static spectrum channel in radiod
-	// The new UserSpectrumManager creates dynamic channels per-user on demand
-	// Uncomment below only if you need backward compatibility with static spectrum
-	/*
-	spectrumManager, err := NewSpectrumManager(radiod, config, audioReceiver)
-	if err != nil {
-		log.Fatalf("Failed to initialize spectrum manager: %v", err)
-	}
-	if err := spectrumManager.Start(); err != nil {
-		log.Fatalf("Failed to start spectrum manager: %v", err)
-	}
-	defer spectrumManager.Stop()
-	*/
-	var spectrumManager *SpectrumManager // nil for now, only used by /stats endpoint
-
-	// Initialize per-user spectrum manager (new dynamic spectrum)
+	// Initialize per-user spectrum manager
 	userSpectrumManager, err := NewUserSpectrumManager(radiod, config, sessions)
 	if err != nil {
 		log.Fatalf("Failed to initialize user spectrum manager: %v", err)
@@ -104,7 +88,7 @@ func main() {
 	http.HandleFunc("/ws/user-spectrum", userSpectrumWsHandler.HandleSpectrumWebSocket) // New endpoint
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		handleStats(w, r, sessions, spectrumManager)
+		handleStats(w, r, sessions)
 	})
 	http.HandleFunc("/test-spectrum", func(w http.ResponseWriter, r *http.Request) {
 		handleTestSpectrum(w, r, sessions)
@@ -126,10 +110,10 @@ func main() {
 		<-sigChan
 
 		log.Println("Shutting down server...")
-		
+
 		// Clean up all active sessions first
 		sessions.Shutdown()
-		
+
 		// Then close the HTTP server
 		if err := server.Close(); err != nil {
 			log.Printf("Error closing server: %v", err)
@@ -154,20 +138,15 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStats handles statistics requests
-func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManager, spectrum *SpectrumManager) {
+func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManager) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	
+
 	count := sessions.GetSessionCount()
 	response := map[string]interface{}{
 		"active_sessions": count,
 	}
-	
-	// Only include spectrum info if static spectrum is enabled
-	if spectrum != nil {
-		response["spectrum"] = spectrum.GetInfo()
-	}
-	
+
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding stats: %v", err)
 	}
@@ -176,7 +155,7 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 // handleTestSpectrum creates a test spectrum session for debugging
 func handleTestSpectrum(w http.ResponseWriter, r *http.Request, sessions *SessionManager) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	log.Println("TEST: Creating spectrum session...")
 	session, err := sessions.CreateSpectrumSession()
 	if err != nil {
@@ -185,7 +164,7 @@ func handleTestSpectrum(w http.ResponseWriter, r *http.Request, sessions *Sessio
 		log.Printf("TEST: Failed to create spectrum session: %v", err)
 		return
 	}
-	
+
 	log.Printf("TEST: Spectrum session created successfully: %s", session.ID)
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{

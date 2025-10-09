@@ -346,7 +346,7 @@
                     <div class="control-group">
                         <label>
                             <input type="checkbox" id="noise-reduction-enable" onchange="toggleNoiseReduction()">
-                            🎙️ Noise Reduction (NR2)
+                            Noise Reduction (NR2)
                         </label>
                     </div>
                     <div id="noise-reduction-controls">
@@ -355,8 +355,8 @@
                             <input type="range" id="noise-reduction-strength" min="0" max="100" value="40" step="5" oninput="updateNoiseReduction()">
                         </div>
                         <div class="control-group">
-                            <label for="noise-reduction-floor">Spectral Floor: <span id="noise-reduction-floor-value">4%</span></label>
-                            <input type="range" id="noise-reduction-floor" min="0" max="10" value="4" step="0.5" oninput="updateNoiseReduction()">
+                            <label for="noise-reduction-floor">Spectral Floor: <span id="noise-reduction-floor-value">10%</span></label>
+                            <input type="range" id="noise-reduction-floor" min="0" max="10" value="10" step="0.5" oninput="updateNoiseReduction()">
                         </div>
                         <p class="help-text" style="font-size: 11px; margin-top: 8px;">Auto-learns noise on startup and frequency changes. Continuously adapts to slow variations. Higher strength = more aggressive.</p>
                     </div>

@@ -69,7 +69,7 @@ let squelchTargetGain = 1.0; // Target gain value (0 = closed, 1 = open)
 let noiseReductionEnabled = false; // Track if noise reduction is enabled
 let noiseReductionProcessor = null; // ScriptProcessor for noise reduction
 let noiseReductionStrength = 40; // Noise reduction strength (0-100%)
-let noiseReductionFloor = 4; // Spectral floor (0-10%)
+let noiseReductionFloor = 10; // Spectral floor (0-10%)
 let nr2 = null; // NR2 processor instance
 
 // Amateur radio band ranges (in Hz) - UK RSGB allocations

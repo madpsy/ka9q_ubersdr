@@ -2977,7 +2977,7 @@ function addNotchFilter(centerFreq) {
     
     // Default bandwidth and gain for new notch
     const defaultWidth = 100; // Hz
-    const defaultGain = -40; // dB (negative = attenuation)
+    const defaultGain = -80; // dB (negative = attenuation)
     
     // centerFreq comes from click handler and may be negative in LSB mode
     // Store it as-is for display purposes
@@ -3157,7 +3157,7 @@ function updateNotchFilterUI() {
             </div>
             <div class="control-group">
                 <label for="notch-gain-${index}">Reduction: <span id="notch-gain-value-${index}">${notch.gain} dB</span></label>
-                <input type="range" id="notch-gain-${index}" min="-60" max="0" value="${notch.gain}" step="1" oninput="updateNotchFilterParams(${index})">
+                <input type="range" id="notch-gain-${index}" min="-100" max="0" value="${notch.gain}" step="1" oninput="updateNotchFilterParams(${index})">
             </div>
         `;
         container.appendChild(notchDiv);

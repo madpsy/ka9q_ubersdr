@@ -1047,7 +1047,12 @@ function setBand(bandName) {
     document.getElementById('frequency').value = centerFreq;
     updateBandButtons(centerFreq);
     
-    // Update URL with new frequency
+    // Set mode based on frequency: LSB below 10 MHz (80m, 40m), USB at 10 MHz and above (30m+)
+    // This follows amateur radio convention where LSB is used on lower HF bands
+    const mode = centerFreq < 10000000 ? 'lsb' : 'usb';
+    setMode(mode);
+    
+    // Update URL with new frequency and mode
     updateURL();
     
     // Auto-connect if not connected
@@ -1074,9 +1079,9 @@ function setBand(bandName) {
             binBandwidth: binBandwidth
         }));
         
-        log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} (zoomed to ${formatFrequency(centerFreq - focusedBandwidth/2)} - ${formatFrequency(centerFreq + focusedBandwidth/2)})`);
+        log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - focusedBandwidth/2)} - ${formatFrequency(centerFreq + focusedBandwidth/2)})`);
     } else {
-        log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)}`);
+        log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()}`);
     }
 }
 
@@ -3258,7 +3263,7 @@ document.addEventListener('DOMContentLoaded', () => {
             minDb: -120,
             maxDb: -20,
             colorScheme: 'jet',
-            intensity: 0.20,  // Default +0.20 for brighter display
+            intensity: 0.30,  // Default +0.30 for brighter display
             contrast: 70,     // Default 70 for more noise suppression
             showGrid: true,
             showLabels: true,

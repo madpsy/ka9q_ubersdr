@@ -746,8 +746,8 @@ class SpectrumDisplay {
         
         // Draw bandwidth bracket if both edges are visible
         if (xLow >= 0 && xLow <= this.width && xHigh >= 0 && xHigh <= this.width) {
-            const bracketY = 20; // Position for bracket
-            const bracketHeight = 10;
+            const bracketY = 30; // Position for bracket (at bottom of overlay, top of waterfall)
+            const bracketHeight = 8;
             
             // Draw horizontal line connecting the edges (thicker)
             this.overlayCtx.strokeStyle = 'rgba(0, 255, 0, 0.9)'; // Brighter green

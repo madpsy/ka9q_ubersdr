@@ -1240,10 +1240,10 @@ function setMode(mode) {
     		break;
     	case 'lsb':
     		minLow = -3200;
-    		maxLow = -50;
+    		maxLow = 0;
     		defaultLow = -2700;
     		maxHigh = 0;
-    		defaultHigh = -50;
+    		defaultHigh = -50;  // -50 Hz is correct for LSB upper edge
     		break;
         case 'am':
         case 'sam':
@@ -1290,7 +1290,8 @@ function setMode(mode) {
     currentBandwidthLow = defaultLow;
     document.getElementById('bandwidth-low-value').textContent = defaultLow;
     
-    bandwidthHighSlider.min = 0;  // High slider always starts at 0
+    // For LSB mode, high slider needs negative range; for other modes it starts at 0
+    bandwidthHighSlider.min = (currentMode === 'lsb') ? -3200 : 0;
     bandwidthHighSlider.max = maxHigh;
     bandwidthHighSlider.value = defaultHigh;
     currentBandwidthHigh = defaultHigh;
@@ -3281,6 +3282,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateSpectrumCursor();
                 // Update zoom display with new zoom level from config
                 updateSpectrumZoomDisplay();
+                // Update URL with new zoom parameters
+                updateURL();
             },
             onFrequencyClick: (freq) => {
                 // When user clicks on spectrum, tune to that frequency

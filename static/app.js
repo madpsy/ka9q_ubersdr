@@ -1132,8 +1132,11 @@ function adjustFrequency(deltaHz) {
     const MAX_FREQ = 30000000; // 30 MHz
     const clampedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
     
-    freqInput.value = clampedFreq;
-    updateBandButtons(clampedFreq);
+    // Round down to nearest 10 Hz (set last digit to 0)
+    const roundedFreq = Math.floor(clampedFreq / 10) * 10;
+    
+    freqInput.value = roundedFreq;
+    updateBandButtons(roundedFreq);
     
     // Log with appropriate precision based on step size
     let stepDesc;
@@ -1142,7 +1145,7 @@ function adjustFrequency(deltaHz) {
     } else {
         stepDesc = `${deltaHz > 0 ? '+' : ''}${deltaHz} Hz`;
     }
-    log(`Frequency adjusted: ${stepDesc} → ${formatFrequency(clampedFreq)}`);
+    log(`Frequency adjusted: ${stepDesc} → ${formatFrequency(roundedFreq)}`);
     
     // Update URL with new frequency
     updateURL();

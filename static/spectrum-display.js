@@ -1526,7 +1526,7 @@ class SpectrumDisplay {
             percentage = Math.max(0, Math.min(100, percentage));
 
             meterBar.style.width = percentage + '%';
-            meterValue.textContent = avgPeakDb.toFixed(1) + ' dB';
+            meterValue.textContent = avgPeakDb.toFixed(1) + ' dBFS';
 
             // Color code both bar and text based on signal strength
             let color;

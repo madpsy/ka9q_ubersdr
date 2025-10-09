@@ -1592,6 +1592,10 @@ function pixelToFrequency(pixel, canvasWidth) {
 let lastVUMeterUpdate = 0;
 const vuMeterUpdateInterval = 100; // 10 fps (1000ms / 10 = 100ms)
 
+// Squelch status throttling
+let lastSquelchStatusUpdate = 0;
+const squelchStatusUpdateInterval = 100; // 10 Hz (1000ms / 10 = 100ms)
+
 function startVisualization() {
     if (!analyser) return;
     
@@ -3807,8 +3811,12 @@ function processSquelch() {
         squelchGate.gain.linearRampToValueAtTime(squelchTargetGain, currentTime + fadeTime);
     }
     
-    // Update status display (after processing so it shows current state)
-    updateSquelchStatus();
+    // Update status display at 10 Hz (throttled)
+    const now = performance.now();
+    if (now - lastSquelchStatusUpdate >= squelchStatusUpdateInterval) {
+        updateSquelchStatus();
+        lastSquelchStatusUpdate = now;
+    }
 }
 
 // Update squelch status display

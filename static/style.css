@@ -429,6 +429,15 @@ input[type="range"]::-moz-range-thumb {
     transform: scale(0.75);
     transform-origin: top center;
     margin-top: 20px;
+}
+
+/* When collapsed, reduce negative margin */
+.audio-visualization-section:has(.audio-visualization-content[style*="display: none"]) {
+    margin-bottom: 0px;
+}
+
+/* When expanded, use full negative margin */
+.audio-visualization-section:has(.audio-visualization-content[style*="display: block"]) {
     margin-bottom: -180px;
 }
 

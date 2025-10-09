@@ -1026,7 +1026,7 @@ input[type="range"]::-moz-range-thumb {
     transform: translateY(-2px);
 }
 
-/* Filter Panels Grid Container - 2x2 Grid */
+/* Filter Panels Grid Container - 2x2 Grid (default) */
 .filters-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1038,11 +1038,17 @@ input[type="range"]::-moz-range-thumb {
     margin-bottom: -220px;
 }
 
+/* Filter Panels Grid Container - 2x3 Grid (with NR2) */
+.filters-grid.filters-grid-2x3 {
+    grid-template-columns: 1fr 1fr 1fr;
+}
+
 /* Uniform styling for filter panels in grid */
 .squelch-panel,
 .bandpass-panel,
 .notch-panel,
-.compressor-panel {
+.compressor-panel,
+.noise-reduction-panel {
     padding: 0;
     background: transparent;
     border-top: none;
@@ -1052,11 +1058,19 @@ input[type="range"]::-moz-range-thumb {
     min-height: 400px;
 }
 
+/* Empty panel slot */
+.empty-panel {
+    padding: 0;
+    background: transparent;
+    min-height: 400px;
+}
+
 /* Uniform styling for filter containers in grid */
 .squelch-container,
 .bandpass-container,
 .notch-container,
-.compressor-container {
+.compressor-container,
+.noise-reduction-container {
     padding: 15px 20px;
     background: #2c3e50;
     border-radius: 6px;
@@ -1200,12 +1214,22 @@ input[type="range"]::-moz-range-thumb {
 #bandpass-controls,
 #notch-controls,
 #compressor-controls,
+#noise-reduction-controls,
 #equalizer-controls,
 #cw-decoder-controls {
     margin-top: 15px;
     padding-top: 15px;
     border-top: 2px solid #34495e;
     flex: 1;
+}
+
+/* Help text styling for noise reduction */
+.help-text {
+    color: #95a5a6;
+    font-size: 0.85em;
+    font-style: italic;
+    margin-top: 10px;
+    line-height: 1.4;
 }
 
 .squelch-status {

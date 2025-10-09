@@ -66,6 +66,11 @@ let squelchAnalyser = null; // Analyser to measure signal level
 let squelchOpen = true; // Track if gate is currently open
 let squelchCurrentLevel = -Infinity; // Current signal level in dB
 let squelchTargetGain = 1.0; // Target gain value (0 = closed, 1 = open)
+let noiseReductionEnabled = false; // Track if noise reduction is enabled
+let noiseReductionProcessor = null; // ScriptProcessor for noise reduction
+let noiseReductionStrength = 50; // Noise reduction strength (0-100%)
+let noiseReductionFloor = 1; // Spectral floor (0-10%)
+let nr2 = null; // NR2 processor instance
 
 // Amateur radio band ranges (in Hz) - UK RSGB allocations
 const bandRanges = {
@@ -558,6 +563,8 @@ function disconnect() {
     compressor = null;
     squelchGate = null;
     squelchAnalyser = null;
+    noiseReductionProcessor = null;
+    noiseReductionEnabled = false;
     isPlaying = false;
     audioQueue = [];
     nextPlayTime = 0;
@@ -811,7 +818,20 @@ function playAudioBuffer(buffer) {
     // Build the audio processing chain step by step
     let nextNode = source;
     
-    // Step 0: Squelch gate (FIRST - before all other processing)
+    // Step 0: Noise Reduction (FIRST - clean signal before squelch/other processing)
+    if (noiseReductionEnabled && noiseReductionProcessor) {
+        try {
+            noiseReductionProcessor.disconnect();
+        } catch (e) {
+            // Ignore if already disconnected
+        }
+        
+        // Connect processor in signal chain
+        nextNode.connect(noiseReductionProcessor);
+        nextNode = noiseReductionProcessor;
+    }
+    
+    // Step 1: Squelch gate (after noise reduction so it sees cleaned signal)
     if (squelchEnabled && squelchGate) {
         // Disconnect squelch gate to clear old connections
         try {
@@ -833,7 +853,7 @@ function playAudioBuffer(buffer) {
         }
     }
     
-    // Step 1: Compressor with makeup gain (optional)
+    // Step 2: Compressor with makeup gain (optional)
     if (compressorEnabled && compressor) {
         // Disconnect compressor and makeup gain to clear old connections
         try {
@@ -856,7 +876,7 @@ function playAudioBuffer(buffer) {
         }
     }
     
-    // Step 2: Bandpass filter (optional)
+    // Step 3: Bandpass filter (optional)
     if (bandpassEnabled && bandpassFilters.length > 0) {
         // Disconnect all bandpass filters first to clear any old connections
         for (let filter of bandpassFilters) {
@@ -878,7 +898,7 @@ function playAudioBuffer(buffer) {
         nextNode = bandpassFilters[bandpassFilters.length - 1];
     }
     
-    // Step 2.5: Notch filters (optional)
+    // Step 4: Notch filters (optional)
     if (notchEnabled && notchFilters.length > 0) {
         // Process each notch filter
         for (let notch of notchFilters) {
@@ -905,7 +925,7 @@ function playAudioBuffer(buffer) {
         }
     }
     
-    // Step 3: EQ chain with makeup gain (optional)
+    // Step 5: EQ chain with makeup gain (optional)
     if (equalizerEnabled && eqFilters.length > 0) {
         // Disconnect all EQ filters first to clear any old connections
         for (let filter of eqFilters) {
@@ -941,12 +961,12 @@ function playAudioBuffer(buffer) {
         }
     }
     
-    // Step 4: Gain node for volume/mute control
+    // Step 6: Gain node for volume/mute control
     const gainNode = audioContext.createGain();
     gainNode.gain.value = isMuted ? 0 : currentVolume;
     nextNode.connect(gainNode);
     
-    // Step 5: Tap signal for monitoring AFTER all processing but BEFORE final output
+    // Step 7: Tap signal for monitoring AFTER all processing but BEFORE final output
     // These are just monitoring taps and don't affect the audio path
     if (compressorEnabled && compressorAnalyser) {
         gainNode.connect(compressorAnalyser);
@@ -958,7 +978,7 @@ function playAudioBuffer(buffer) {
         gainNode.connect(vuAnalyser);
     }
     
-    // Step 6: Final output to destination
+    // Step 8: Final output to destination
     gainNode.connect(audioContext.destination);
     
     // Schedule playback to maintain continuous audio
@@ -1005,6 +1025,12 @@ function tune() {
     
     ws.send(JSON.stringify(msg));
     log(`Tuning to ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)...`);
+    
+    // Re-learn noise profile when frequency changes (if NR2 is enabled)
+    if (noiseReductionEnabled && nr2) {
+        nr2.resetLearning();
+        log('NR2: Re-learning noise profile for new frequency...');
+    }
 }
 
 // Validate frequency input - only allow digits and max 8 digits
@@ -3334,6 +3360,131 @@ function resetCompressor() {
     }
     
     log('Compressor reset to default values');
+}
+
+// Noise Reduction Functions (NR2 Spectral Subtraction with Overlap-Add)
+
+// Initialize noise reduction processor
+function initNoiseReduction() {
+    if (!audioContext) {
+        log('Audio context not initialized', 'error');
+        return false;
+    }
+    
+    if (noiseReductionProcessor) {
+        log('Noise reduction already initialized');
+        return true;
+    }
+    
+    // Check if FFT and NR2 classes are available
+    if (typeof FFT === 'undefined' || typeof NR2Processor === 'undefined') {
+        log('NR2 libraries not loaded', 'error');
+        log('Please ensure fft.js and nr2.js are loaded', 'error');
+        return false;
+    }
+    
+    try {
+        // Create NR2 processor instance
+        nr2 = new NR2Processor(audioContext, 2048, 4);
+        nr2.setParameters(noiseReductionStrength, noiseReductionFloor);
+        
+        // Create script processor
+        const bufferSize = 2048;
+        noiseReductionProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+        
+        noiseReductionProcessor.onaudioprocess = (e) => {
+            const input = e.inputBuffer.getChannelData(0);
+            const output = e.outputBuffer.getChannelData(0);
+            
+            // Process through NR2
+            nr2.process(input, output);
+        };
+        
+        log('✅ NR2 Noise Reduction initialized');
+        log('Using proper FFT-based spectral subtraction with overlap-add');
+        return true;
+    } catch (e) {
+        console.error('Failed to initialize noise reduction:', e);
+        log('Failed to initialize noise reduction: ' + e.message, 'error');
+        return false;
+    }
+}
+
+// Update noise reduction parameters from sliders
+function updateNoiseReduction() {
+    const strengthSlider = document.getElementById('noise-reduction-strength');
+    const floorSlider = document.getElementById('noise-reduction-floor');
+    
+    if (strengthSlider) {
+        noiseReductionStrength = parseFloat(strengthSlider.value);
+        document.getElementById('noise-reduction-strength-value').textContent = noiseReductionStrength + '%';
+    }
+    
+    if (floorSlider) {
+        noiseReductionFloor = parseFloat(floorSlider.value);
+        document.getElementById('noise-reduction-floor-value').textContent = noiseReductionFloor + '%';
+    }
+    
+    // Update NR2 processor parameters
+    if (nr2) {
+        nr2.setParameters(noiseReductionStrength, noiseReductionFloor);
+    }
+}
+
+
+// Toggle noise reduction on/off
+function toggleNoiseReduction() {
+    const checkbox = document.getElementById('noise-reduction-enable');
+    const statusBadge = document.getElementById('noise-reduction-status-badge');
+    
+    if (!checkbox) {
+        console.error('Noise reduction checkbox not found');
+        return;
+    }
+    
+    noiseReductionEnabled = checkbox.checked;
+    
+    if (noiseReductionEnabled) {
+        if (!audioContext) {
+            log('Please start audio first (click "Click to Start")', 'error');
+            checkbox.checked = false;
+            noiseReductionEnabled = false;
+            return;
+        }
+        
+        if (!noiseReductionProcessor) {
+            const success = initNoiseReduction();
+            if (!success) {
+                checkbox.checked = false;
+                noiseReductionEnabled = false;
+                return;
+            }
+        }
+        
+        // Enable processing in NR2
+        if (nr2) {
+            nr2.enabled = true;
+        }
+        
+        if (statusBadge) {
+            statusBadge.textContent = 'ENABLED';
+            statusBadge.className = 'filter-status-badge filter-enabled';
+        }
+        log('✅ NR2 Noise Reduction ENABLED');
+        log('Using FFT-based spectral subtraction with overlap-add processing');
+    } else {
+        // Disable processing in NR2
+        if (nr2) {
+            nr2.enabled = false;
+        }
+        
+        if (statusBadge) {
+            statusBadge.textContent = 'DISABLED';
+            statusBadge.className = 'filter-status-badge filter-disabled';
+        }
+        
+        log('❌ NR2 Noise Reduction DISABLED');
+    }
 }
 
 // Low-pass filter functions (removed - using radiod bandwidth instead)

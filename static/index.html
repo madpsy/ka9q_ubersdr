@@ -6,7 +6,10 @@
     <title>ka9q UberSDR - Web SDR Receiver</title>
     <link rel="stylesheet" href="style.css">
     <!-- Opus decoder for handling Opus-compressed audio -->
-    <script src="https://cdn.jsdelivr.net/npm/@wasm-audio-decoders/opus@0.1.12/dist/opus-decoder.min.js"></script>
+    <script src="https://unpkg.com/@wasm-audio-decoders/opus@0.1.12/dist/opus-decoder.min.js"></script>
+    <!-- FFT and NR2 libraries for noise reduction -->
+    <script src="fft.js"></script>
+    <script src="nr2.js"></script>
 </head>
 <body>
     <!-- Audio Start Overlay -->
@@ -275,8 +278,8 @@
             </div>
         </div>
 
-        <!-- Filters: 2x2 Grid for Squelch, Bandpass, Notch, Compressor -->
-        <div class="filters-grid">
+        <!-- Filters: 2x3 Grid for Squelch, Bandpass, NR2, Notch, Compressor, (empty) -->
+        <div class="filters-grid filters-grid-2x3">
             <!-- Row 1, Column 1: Squelch -->
             <div class="squelch-panel">
                 <div class="squelch-container" style="position: relative;">
@@ -332,6 +335,30 @@
                             <label for="bandpass-width">Bandwidth: <span id="bandpass-width-value">200 Hz</span></label>
                             <input type="range" id="bandpass-width" min="20" max="1000" value="200" step="10" oninput="updateBandpassFilter()">
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 1, Column 3: Noise Reduction (NR2) -->
+            <div class="noise-reduction-panel">
+                <div class="noise-reduction-container" style="position: relative;">
+                    <span id="noise-reduction-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="noise-reduction-enable" onchange="toggleNoiseReduction()">
+                            🎙️ Noise Reduction (NR2)
+                        </label>
+                    </div>
+                    <div id="noise-reduction-controls">
+                        <div class="control-group">
+                            <label for="noise-reduction-strength">Strength: <span id="noise-reduction-strength-value">50%</span></label>
+                            <input type="range" id="noise-reduction-strength" min="0" max="100" value="50" step="5" oninput="updateNoiseReduction()">
+                        </div>
+                        <div class="control-group">
+                            <label for="noise-reduction-floor">Spectral Floor: <span id="noise-reduction-floor-value">1%</span></label>
+                            <input type="range" id="noise-reduction-floor" min="0" max="10" value="1" step="0.5" oninput="updateNoiseReduction()">
+                        </div>
+                        <p class="help-text" style="font-size: 11px; margin-top: 8px;">Auto-learns noise on startup and frequency changes. Continuously adapts to slow variations. Higher strength = more aggressive.</p>
                     </div>
                 </div>
             </div>
@@ -394,8 +421,12 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Row 2, Column 3: Empty slot -->
+            <div class="empty-panel"></div>
         </div>
-        <!-- End 2x2 Filters Grid -->
+        
+        <!-- End 2x3 Filters Grid -->
 
         <!-- Equalizer: Full Width Below Grid -->
         <div class="equalizer-panel">

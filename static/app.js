@@ -55,6 +55,16 @@ let compressorClipping = false; // Track if compressor output is clipping
 let compressorClipIndicatorTimeout = null; // Timeout for hiding clip indicator
 let lowpassFilters = []; // Array of cascaded low-pass filters for steep rolloff
 let audioVisualizationEnabled = false; // Track if audio visualization is expanded
+let squelchEnabled = false; // Track if squelch is enabled
+let squelchThreshold = -35; // Threshold in dB
+let squelchHysteresis = 3; // Hysteresis in dB (prevents rapid open/close)
+let squelchAttack = 0.020; // Attack time in seconds (20ms) - how fast gate opens
+let squelchRelease = 0.500; // Release time in seconds (500ms) - how fast gate closes
+let squelchGate = null; // GainNode used as gate
+let squelchAnalyser = null; // Analyser to measure signal level
+let squelchOpen = true; // Track if gate is currently open
+let squelchCurrentLevel = -Infinity; // Current signal level in dB
+let squelchTargetGain = 1.0; // Target gain value (0 = closed, 1 = open)
 
 // Amateur radio band ranges (in Hz) - UK RSGB allocations
 const bandRanges = {
@@ -211,6 +221,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Clamp to valid range within display bandwidth
             const clampedFreq = Math.max(displayLow + 50, Math.min(displayHigh - 50, freq));
             
+            // For LSB mode, convert negative frequency to positive for slider
+            const sliderFreq = (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) ? Math.abs(clampedFreq) : clampedFreq;
+            
+            console.log(`Spectrum click: freq=${freq}, displayLow=${displayLow}, displayHigh=${displayHigh}, clampedFreq=${clampedFreq}, sliderFreq=${sliderFreq}`);
+            
             // Enable bandpass filter if not already enabled
             if (!bandpassEnabled) {
                 const checkbox = document.getElementById('bandpass-enable');
@@ -220,23 +235,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             
-            // Update bandpass center frequency directly
+            // Update bandpass center frequency
             const centerSlider = document.getElementById('bandpass-center');
             if (centerSlider) {
-                centerSlider.value = clampedFreq;
-                // Trigger input event to update display
-                centerSlider.dispatchEvent(new Event('input'));
+                console.log(`Before setting: slider min=${centerSlider.min}, max=${centerSlider.max}, value=${centerSlider.value}`);
+                centerSlider.value = sliderFreq;
+                console.log(`After setting: slider value=${centerSlider.value}`);
+                // Call updateBandpassFilter to update both display and filters
+                updateBandpassFilter();
             }
             
-            // Update filters directly
-            const width = parseInt(document.getElementById('bandpass-width').value);
-            const Q = clampedFreq / width;
-            for (let filter of bandpassFilters) {
-                filter.frequency.value = clampedFreq;
-                filter.Q.value = Q;
-            }
-            
-            log(`Bandpass center adjusted to ${clampedFreq} Hz from spectrum click`);
+            log(`Bandpass center adjusted to ${sliderFreq} Hz from spectrum click`);
         });
         
         // Add double-click handler to disable bandpass filter
@@ -293,6 +302,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Clamp to valid range within display bandwidth
             const clampedFreq = Math.max(displayLow + 50, Math.min(displayHigh - 50, freq));
             
+            // For LSB mode, convert negative frequency to positive for slider
+            const sliderFreq = (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) ? Math.abs(clampedFreq) : clampedFreq;
+            
+            console.log(`Waterfall click: freq=${freq}, displayLow=${displayLow}, displayHigh=${displayHigh}, clampedFreq=${clampedFreq}, sliderFreq=${sliderFreq}`);
+            
             // Enable bandpass filter if not already enabled
             if (!bandpassEnabled) {
                 const checkbox = document.getElementById('bandpass-enable');
@@ -302,23 +316,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             
-            // Update bandpass center frequency directly
+            // Update bandpass center frequency
             const centerSlider = document.getElementById('bandpass-center');
             if (centerSlider) {
-                centerSlider.value = clampedFreq;
-                // Trigger input event to update display
-                centerSlider.dispatchEvent(new Event('input'));
+                console.log(`Before setting: slider min=${centerSlider.min}, max=${centerSlider.max}, value=${centerSlider.value}`);
+                centerSlider.value = sliderFreq;
+                console.log(`After setting: slider value=${centerSlider.value}`);
+                // Call updateBandpassFilter to update both display and filters
+                updateBandpassFilter();
             }
             
-            // Update filters directly
-            const width = parseInt(document.getElementById('bandpass-width').value);
-            const Q = clampedFreq / width;
-            for (let filter of bandpassFilters) {
-                filter.frequency.value = clampedFreq;
-                filter.Q.value = Q;
-            }
-            
-            log(`Bandpass center adjusted to ${clampedFreq} Hz from waterfall click`);
+            log(`Bandpass center adjusted to ${sliderFreq} Hz from waterfall click`);
         });
         
         // Add double-click handler to disable bandpass filter
@@ -471,6 +479,9 @@ function connect() {
             vuAnalyser.fftSize = 2048; // Smaller FFT for VU meter (we only need time domain data)
             vuAnalyser.smoothingTimeConstant = 0; // No smoothing
             
+            // Initialize squelch (must be first in chain)
+            initializeSquelch();
+            
             // Initialize compressor
             initializeCompressor();
             
@@ -544,6 +555,8 @@ function disconnect() {
     notchFilters = [];
     lowpassFilters = [];
     compressor = null;
+    squelchGate = null;
+    squelchAnalyser = null;
     isPlaying = false;
     audioQueue = [];
     nextPlayTime = 0;
@@ -788,13 +801,36 @@ function playAudioBuffer(buffer) {
     source.buffer = buffer;
     
     // Audio chain:
-    // source -> analyser (for spectrum/waterfall) -> [compressor] -> [bandpass] -> EQ -> vuAnalyser (for VU meter) -> gain (for volume/mute) -> destination
+    // source -> analyser (for spectrum/waterfall) -> [squelch] -> [compressor] -> [bandpass] -> [notch] -> EQ -> vuAnalyser (for VU meter) -> gain (for volume/mute) -> destination
     // The main analyser taps the signal for visualizations but doesn't affect it
+    // The squelch gate is FIRST to prevent noise from reaching other filters
     // The VU analyser measures after all processing but before volume/mute
     source.connect(analyser);
     
     // Build the audio processing chain step by step
     let nextNode = source;
+    
+    // Step 0: Squelch gate (FIRST - before all other processing)
+    if (squelchEnabled && squelchGate) {
+        // Disconnect squelch gate to clear old connections
+        try {
+            squelchGate.disconnect();
+            if (squelchAnalyser) {
+                squelchAnalyser.disconnect();
+            }
+        } catch (e) {
+            // Ignore if already disconnected
+        }
+        
+        // Connect to squelch gate
+        nextNode.connect(squelchGate);
+        nextNode = squelchGate;
+        
+        // Also connect to squelch analyser for level monitoring
+        if (squelchAnalyser) {
+            source.connect(squelchAnalyser);
+        }
+    }
     
     // Step 1: Compressor with makeup gain (optional)
     if (compressorEnabled && compressor) {
@@ -1302,6 +1338,11 @@ function setMode(mode) {
     // Update URL with new mode
     updateURL();
     
+    // Update bandpass slider ranges for new mode (important for LSB)
+    if (bandpassEnabled) {
+        updateBandpassSliderRanges();
+    }
+    
     // Show/hide CW decoder panel based on mode
     const cwDecoderPanel = document.getElementById('cw-decoder-panel');
     if (cwDecoderPanel) {
@@ -1387,6 +1428,11 @@ function updateBandwidth() {
             bandwidthLow: bandwidthLow,
             bandwidthHigh: bandwidthHigh
         });
+    }
+    
+    // Update bandpass slider ranges if bandpass is enabled
+    if (bandpassEnabled) {
+        updateBandpassSliderRanges();
     }
     
     log(`Bandwidth changed to ${bandwidthLow} to ${bandwidthHigh} Hz`);
@@ -1578,6 +1624,9 @@ function startVisualization() {
         
         // Process CW decoder if enabled (always run, independent of visualization)
         processCWAudio();
+        
+        // Process squelch gate if enabled (always run, independent of visualization)
+        processSquelch();
         
         animationFrameId = requestAnimationFrame(draw);
     }
@@ -2003,20 +2052,26 @@ function updateSpectrum() {
     
     // Draw bandpass filter indicators if enabled
     if (bandpassEnabled && bandpassFilters.length > 0) {
-        const center = bandpassFilters[0].frequency.value;
+        // Use slider value for display (positive in LSB mode)
+        const sliderCenter = parseInt(document.getElementById('bandpass-center').value);
         const filterBandwidth = parseInt(document.getElementById('bandpass-width').value);
-        const lowFreq = center - filterBandwidth / 2;
-        const highFreq = center + filterBandwidth / 2;
+        
+        // For LSB mode, convert positive slider value back to negative for display coordinates
+        const displayCenter = (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
+        const lowFreq = displayCenter - filterBandwidth / 2;
+        const highFreq = displayCenter + filterBandwidth / 2;
         
         // Get display range (accounts for CW offset)
         const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
         const displayLow = cwOffset + currentBandwidthLow;
         const displayHigh = cwOffset + currentBandwidthHigh;
         
+        console.log(`Spectrum bandpass viz: sliderCenter=${sliderCenter}, displayCenter=${displayCenter}, displayLow=${displayLow}, displayHigh=${displayHigh}`);
+        
         // Only draw if within visible range
-        if (center >= displayLow && center <= displayHigh) {
+        if (displayCenter >= displayLow && displayCenter <= displayHigh) {
             // Draw center line (bright yellow) using shared mapping
-            const centerX = frequencyToPixel(center, width);
+            const centerX = frequencyToPixel(displayCenter, width);
             spectrumCtx.strokeStyle = 'rgba(255, 255, 0, 0.9)';
             spectrumCtx.lineWidth = 2;
             spectrumCtx.beginPath();
@@ -2057,18 +2112,21 @@ function updateSpectrum() {
     // Draw notch filter indicators if enabled
     if (notchEnabled && notchFilters.length > 0) {
         for (let notch of notchFilters) {
-            const center = notch.center;
+            // notch.center is stored as display value (negative for LSB)
+            const displayCenter = notch.center;
             const filterBandwidth = notch.width;
-            const lowFreq = center - filterBandwidth / 2;
-            const highFreq = center + filterBandwidth / 2;
+            const lowFreq = displayCenter - filterBandwidth / 2;
+            const highFreq = displayCenter + filterBandwidth / 2;
             
             // Get display range (accounts for CW offset)
             const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
             const displayLow = cwOffset + currentBandwidthLow;
             const displayHigh = cwOffset + currentBandwidthHigh;
             
+            console.log(`Spectrum notch viz: displayCenter=${displayCenter}, displayLow=${displayLow}, displayHigh=${displayHigh}, visible=${displayCenter >= displayLow && displayCenter <= displayHigh}`);
+            
             // Only draw if within visible range
-            if (center >= displayLow && center <= displayHigh) {
+            if (displayCenter >= displayLow && displayCenter <= displayHigh) {
                 // Draw shaded notch region first (so lines appear on top)
                 if (lowFreq >= displayLow && highFreq <= displayHigh) {
                     const lowX = Math.max(0, frequencyToPixel(lowFreq, width));
@@ -2078,7 +2136,7 @@ function updateSpectrum() {
                 }
                 
                 // Draw center line (bright red)
-                const centerX = frequencyToPixel(center, width);
+                const centerX = frequencyToPixel(displayCenter, width);
                 spectrumCtx.strokeStyle = 'rgba(255, 0, 0, 0.9)';
                 spectrumCtx.lineWidth = 2;
                 spectrumCtx.beginPath();
@@ -2135,6 +2193,9 @@ function updateSpectrum() {
         const x = frequencyToPixel(freq, width);
         spectrumCtx.fillText(freq + ' Hz', x, height - 5);
     }
+    
+    // Redraw waterfall overlay to ensure filter lines persist
+    drawWaterfallFilterOverlay();
 }
 
 function updateWaterfall() {
@@ -2311,32 +2372,47 @@ function updateWaterfall() {
         }
     }
     
-    // Clear overlay canvas and redraw all filter indicators
-    if (waterfallOverlayCtx && waterfallOverlayCanvas) {
-        waterfallOverlayCtx.clearRect(0, 0, waterfallOverlayCanvas.width, waterfallOverlayCanvas.height);
-    }
+    // Redraw filter overlays
+    drawWaterfallFilterOverlay();
+}
+
+// Draw filter indicators on waterfall overlay canvas
+function drawWaterfallFilterOverlay() {
+    if (!waterfallOverlayCtx || !waterfallOverlayCanvas) return;
     
-    // Draw bandpass filter indicators on overlay canvas
-    if (waterfallOverlayCtx && bandpassEnabled && bandpassFilters.length > 0) {
-        const center = bandpassFilters[0].frequency.value;
+    // Clear overlay canvas
+    waterfallOverlayCtx.clearRect(0, 0, waterfallOverlayCanvas.width, waterfallOverlayCanvas.height);
+    
+    const width = waterfallOverlayCanvas.width;
+    const height = waterfallOverlayCanvas.height;
+    
+    // Draw bandpass filter indicators
+    if (bandpassEnabled && bandpassFilters.length > 0) {
+        // Use slider value for display (positive in LSB mode)
+        const sliderCenter = parseInt(document.getElementById('bandpass-center').value);
         const filterBandwidth = parseInt(document.getElementById('bandpass-width').value);
-        const lowFreq = center - filterBandwidth / 2;
-        const highFreq = center + filterBandwidth / 2;
+        
+        // For LSB mode, convert positive slider value back to negative for display coordinates
+        const displayCenter = (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
+        const lowFreq = displayCenter - filterBandwidth / 2;
+        const highFreq = displayCenter + filterBandwidth / 2;
         
         // Get display range (accounts for CW offset)
         const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
         const displayLow = cwOffset + currentBandwidthLow;
         const displayHigh = cwOffset + currentBandwidthHigh;
         
+        console.log(`Waterfall bandpass viz: sliderCenter=${sliderCenter}, displayCenter=${displayCenter}, displayLow=${displayLow}, displayHigh=${displayHigh}`);
+        
         // Only draw if within visible range
-        if (center >= displayLow && center <= displayHigh) {
+        if (displayCenter >= displayLow && displayCenter <= displayHigh) {
             // CRITICAL: Account for CSS scale(0.75) on .audio-visualization-section
             // The overlay canvas is scaled by CSS, so we need to scale our drawing coordinates
             const cssScale = 0.75;
             const scaledWidth = waterfallOverlayCanvas.width / cssScale;
             
             // Draw center line (bright yellow solid) on overlay - full height
-            const centerX = frequencyToPixel(center, scaledWidth);
+            const centerX = frequencyToPixel(displayCenter, scaledWidth);
             waterfallOverlayCtx.strokeStyle = 'rgba(255, 255, 0, 0.9)';
             waterfallOverlayCtx.lineWidth = 2 / cssScale; // Scale line width too
             waterfallOverlayCtx.beginPath();
@@ -2371,13 +2447,14 @@ function updateWaterfall() {
         }
     }
     
-    // Draw notch filter indicators on overlay canvas
-    if (waterfallOverlayCtx && notchEnabled && notchFilters.length > 0) {
+    // Draw notch filter indicators
+    if (notchEnabled && notchFilters.length > 0) {
         for (let notch of notchFilters) {
-            const center = notch.center;
+            // notch.center is stored as display value (negative for LSB)
+            const displayCenter = notch.center;
             const filterBandwidth = notch.width;
-            const lowFreq = center - filterBandwidth / 2;
-            const highFreq = center + filterBandwidth / 2;
+            const lowFreq = displayCenter - filterBandwidth / 2;
+            const highFreq = displayCenter + filterBandwidth / 2;
             
             // Get display range (accounts for CW offset)
             const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
@@ -2385,13 +2462,13 @@ function updateWaterfall() {
             const displayHigh = cwOffset + currentBandwidthHigh;
             
             // Only draw if within visible range
-            if (center >= displayLow && center <= displayHigh) {
+            if (displayCenter >= displayLow && displayCenter <= displayHigh) {
                 // CRITICAL: Account for CSS scale(0.75) on .audio-visualization-section
                 const cssScale = 0.75;
                 const scaledWidth = waterfallOverlayCanvas.width / cssScale;
                 
                 // Draw center line (bright red solid) on overlay - full height
-                const centerX = frequencyToPixel(center, scaledWidth);
+                const centerX = frequencyToPixel(displayCenter, scaledWidth);
                 waterfallOverlayCtx.strokeStyle = 'rgba(255, 0, 0, 0.9)';
                 waterfallOverlayCtx.lineWidth = 2 / cssScale;
                 waterfallOverlayCtx.beginPath();
@@ -2595,14 +2672,22 @@ function initializeEqualizer() {
 // Toggle equalizer on/off
 function toggleEqualizer() {
     const checkbox = document.getElementById('equalizer-enable');
-    const controls = document.getElementById('equalizer-controls');
+    const badge = document.getElementById('equalizer-status-badge');
     equalizerEnabled = checkbox.checked;
     
     if (equalizerEnabled) {
-        controls.style.display = 'block';
+        if (badge) {
+            badge.textContent = 'ENABLED';
+            badge.classList.remove('filter-disabled');
+            badge.classList.add('filter-enabled');
+        }
         log('12-band equalizer enabled');
     } else {
-        controls.style.display = 'none';
+        if (badge) {
+            badge.textContent = 'DISABLED';
+            badge.classList.remove('filter-enabled');
+            badge.classList.add('filter-disabled');
+        }
         log('12-band equalizer disabled');
     }
 }
@@ -2647,18 +2732,74 @@ function resetEqualizer() {
 // Toggle bandpass filter on/off
 function toggleBandpassFilter() {
     const checkbox = document.getElementById('bandpass-enable');
-    const controls = document.getElementById('bandpass-controls');
+    const badge = document.getElementById('bandpass-status-badge');
     bandpassEnabled = checkbox.checked;
     
     if (bandpassEnabled) {
-        controls.style.display = 'block';
+        // Update slider ranges FIRST before initializing filter
+        updateBandpassSliderRanges();
+        
         if (bandpassFilters.length === 0 && audioContext) {
             initializeBandpassFilter();
         }
+        
+        if (badge) {
+            badge.textContent = 'ENABLED';
+            badge.classList.remove('filter-disabled');
+            badge.classList.add('filter-enabled');
+        }
         log('Bandpass filter enabled (4-stage cascade, 48 dB/octave)');
     } else {
-        controls.style.display = 'none';
+        if (badge) {
+            badge.textContent = 'DISABLED';
+            badge.classList.remove('filter-enabled');
+            badge.classList.add('filter-disabled');
+        }
         log('Bandpass filter disabled');
+    }
+}
+
+// Update bandpass slider ranges based on current bandwidth (for LSB support)
+function updateBandpassSliderRanges() {
+    const centerSlider = document.getElementById('bandpass-center');
+    const widthSlider = document.getElementById('bandpass-width');
+    
+    if (!centerSlider || !widthSlider) return;
+    
+    // Get display range (accounts for CW offset and negative frequencies)
+    const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
+    
+    // For LSB mode, bandwidth is negative (e.g., -2700 to -50)
+    // We need to convert to positive display values (50 to 2700)
+    let displayLow, displayHigh;
+    
+    if (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) {
+        // LSB mode: both negative, convert to positive and reverse order
+        displayLow = Math.abs(currentBandwidthHigh);  // -50 -> 50
+        displayHigh = Math.abs(currentBandwidthLow);  // -2700 -> 2700
+    } else {
+        // USB/other modes: use as-is with CW offset
+        displayLow = cwOffset + currentBandwidthLow;
+        displayHigh = cwOffset + currentBandwidthHigh;
+    }
+    
+    console.log(`updateBandpassSliderRanges: mode=${currentMode}, BW=${currentBandwidthLow} to ${currentBandwidthHigh}, cwOffset=${cwOffset}, displayLow=${displayLow}, displayHigh=${displayHigh}`);
+    
+    // Update center slider range
+    const newMin = Math.max(50, displayLow);
+    const newMax = displayHigh;
+    centerSlider.min = newMin;
+    centerSlider.max = newMax;
+    
+    console.log(`Bandpass center slider: min=${centerSlider.min}, max=${centerSlider.max}, current value=${centerSlider.value}`);
+    
+    // Clamp current value to new range
+    const currentCenter = parseInt(centerSlider.value);
+    if (currentCenter < newMin || currentCenter > newMax) {
+        const clampedValue = Math.max(newMin, Math.min(newMax, currentCenter));
+        console.log(`Clamping bandpass center from ${currentCenter} to ${clampedValue}`);
+        centerSlider.value = clampedValue;
+        updateBandpassFilter();
     }
 }
 
@@ -2709,28 +2850,35 @@ function updateBandpassFilter() {
         return;
     }
     
-    const center = parseInt(document.getElementById('bandpass-center').value);
+    const sliderCenter = parseInt(document.getElementById('bandpass-center').value);
     const width = parseInt(document.getElementById('bandpass-width').value);
-    const Q = Math.max(0.7, center / (width * 4)); // Low Q for cascaded filters to avoid resonance
     
-    // Update all filter stages with same parameters
+    // For LSB mode, slider shows positive values but filter needs negative frequencies
+    // Convert back to negative for the actual audio filter
+    const actualCenter = (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
+    
+    const Q = Math.max(0.7, Math.abs(actualCenter) / (width * 4)); // Low Q for cascaded filters to avoid resonance
+    
+    console.log(`updateBandpassFilter: sliderCenter=${sliderCenter}, actualCenter=${actualCenter}, width=${width}, Q=${Q.toFixed(2)}`);
+    
+    // Update all filter stages with actual frequency (negative for LSB)
     for (let filter of bandpassFilters) {
-        filter.frequency.value = center;
+        filter.frequency.value = Math.abs(actualCenter); // Web Audio API uses absolute frequencies
         filter.Q.value = Q;
     }
     
-    // Update display values
-    document.getElementById('bandpass-center-value').textContent = center + ' Hz';
+    // Update display values (show positive)
+    document.getElementById('bandpass-center-value').textContent = sliderCenter + ' Hz';
     document.getElementById('bandpass-width-value').textContent = width + ' Hz';
     
     // Log occasionally (not on every slider movement)
     if (Math.random() < 0.05) {  // 5% chance to log
-        log(`Bandpass: ${center} Hz ± ${width/2} Hz (Q=${Q.toFixed(2)}, 4-stage)`);
+        log(`Bandpass: ${sliderCenter} Hz ± ${width/2} Hz (Q=${Q.toFixed(2)}, 4-stage)`);
     }
     
     // Update CW decoder frequency if enabled
     if (cwDecoder && cwDecoder.enabled) {
-        updateCWDecoderFrequency(center);
+        updateCWDecoderFrequency(Math.abs(actualCenter));
     }
 }
 
@@ -2756,13 +2904,17 @@ function addNotchFilter(centerFreq) {
     const defaultWidth = 100; // Hz
     const defaultGain = -40; // dB (negative = attenuation)
     
+    // centerFreq comes from click handler and may be negative in LSB mode
+    // Store it as-is for display purposes
     // Create notch filter object with peaking filter for adjustable gain
     const notch = {
-        center: centerFreq,
+        center: centerFreq,  // Store display value (negative for LSB)
         width: defaultWidth,
         gain: defaultGain,
         filters: []
     };
+    
+    console.log(`addNotchFilter: centerFreq=${centerFreq}, abs=${Math.abs(centerFreq)}`);
     
     // Create 4 cascaded peaking filters with negative gain for adjustable notch depth
     // Peaking filters allow gain control, unlike pure notch filters
@@ -2772,9 +2924,10 @@ function addNotchFilter(centerFreq) {
     for (let i = 0; i < 4; i++) {
         const filter = audioContext.createBiquadFilter();
         filter.type = 'peaking';
-        filter.frequency.value = centerFreq;
+        // Web Audio API uses absolute frequencies
+        filter.frequency.value = Math.abs(centerFreq);
         // Use higher Q for narrower, more effective notch
-        filter.Q.value = Math.max(1.0, centerFreq / defaultWidth);
+        filter.Q.value = Math.max(1.0, Math.abs(centerFreq) / defaultWidth);
         filter.gain.value = defaultGain / 4; // Split gain across 4 stages
         notch.filters.push(filter);
     }
@@ -2825,25 +2978,33 @@ function updateNotchFilterParams(index) {
     const gainInput = document.getElementById(`notch-gain-${index}`);
     
     if (centerInput && widthInput && gainInput) {
-        const center = parseInt(centerInput.value);
+        const sliderCenter = parseInt(centerInput.value);
         const width = parseInt(widthInput.value);
         const gain = parseInt(gainInput.value);
-        // Higher Q = narrower bandwidth for peaking filters
-        const Q = Math.max(1.0, center / width);
         
-        notch.center = center;
+        // Slider shows positive values (50-2700)
+        // For LSB mode, convert back to negative for display coordinates
+        const displayCenter = (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
+        
+        // Higher Q = narrower bandwidth for peaking filters
+        const Q = Math.max(1.0, Math.abs(displayCenter) / width);
+        
+        notch.center = displayCenter; // Store display value (negative for LSB)
         notch.width = width;
         notch.gain = gain;
         
+        console.log(`updateNotchFilterParams[${index}]: sliderCenter=${sliderCenter}, displayCenter=${displayCenter}, width=${width}, Q=${Q.toFixed(2)}`);
+        
         // Update all filter stages in this notch
+        // Web Audio API uses absolute frequencies
         for (let filter of notch.filters) {
-            filter.frequency.value = center;
+            filter.frequency.value = Math.abs(displayCenter);
             filter.Q.value = Q;
             filter.gain.value = gain / 4; // Split gain across 4 stages
         }
         
-        // Update display values
-        document.getElementById(`notch-center-value-${index}`).textContent = center + ' Hz';
+        // Update display values (show positive)
+        document.getElementById(`notch-center-value-${index}`).textContent = sliderCenter + ' Hz';
         document.getElementById(`notch-width-value-${index}`).textContent = width + ' Hz';
         document.getElementById(`notch-gain-value-${index}`).textContent = gain + ' dB';
     }
@@ -2851,15 +3012,23 @@ function updateNotchFilterParams(index) {
 
 function toggleNotchFilter() {
     const checkbox = document.getElementById('notch-enable');
-    const controls = document.getElementById('notch-controls');
+    const badge = document.getElementById('notch-status-badge');
     notchEnabled = checkbox.checked;
     
     if (notchEnabled) {
-        controls.style.display = 'block';
         updateNotchFilterUI();
+        if (badge) {
+            badge.textContent = 'ENABLED';
+            badge.classList.remove('filter-disabled');
+            badge.classList.add('filter-enabled');
+        }
         log('Notch filters enabled');
     } else {
-        controls.style.display = 'none';
+        if (badge) {
+            badge.textContent = 'DISABLED';
+            badge.classList.remove('filter-enabled');
+            badge.classList.add('filter-disabled');
+        }
         log('Notch filters disabled');
     }
 }
@@ -2876,13 +3045,26 @@ function updateNotchFilterUI() {
         return;
     }
     
-    // Get display range (accounts for CW offset)
+    // Get display range (accounts for CW offset and LSB negative frequencies)
     const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
-    const displayLow = cwOffset + currentBandwidthLow;
-    const displayHigh = cwOffset + currentBandwidthHigh;
+    
+    // For LSB mode, convert negative bandwidth to positive slider range
+    let sliderMin, sliderMax;
+    if (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) {
+        // LSB: -2700 to -50 becomes 50 to 2700 for sliders
+        sliderMin = Math.abs(currentBandwidthHigh);
+        sliderMax = Math.abs(currentBandwidthLow);
+    } else {
+        // USB/other modes
+        sliderMin = cwOffset + currentBandwidthLow;
+        sliderMax = cwOffset + currentBandwidthHigh;
+    }
     
     // Create UI for each notch filter
     notchFilters.forEach((notch, index) => {
+        // Convert stored display value (negative for LSB) to positive slider value
+        const sliderValue = Math.abs(notch.center);
+        
         const notchDiv = document.createElement('div');
         notchDiv.className = 'notch-filter-item';
         notchDiv.innerHTML = `
@@ -2891,8 +3073,8 @@ function updateNotchFilterUI() {
                 <button onclick="removeNotchFilter(${index})" class="notch-remove-btn">✕</button>
             </div>
             <div class="control-group">
-                <label for="notch-center-${index}">Center: <span id="notch-center-value-${index}">${notch.center} Hz</span></label>
-                <input type="range" id="notch-center-${index}" min="${displayLow}" max="${displayHigh}" value="${notch.center}" step="10" oninput="updateNotchFilterParams(${index})">
+                <label for="notch-center-${index}">Center: <span id="notch-center-value-${index}">${sliderValue} Hz</span></label>
+                <input type="range" id="notch-center-${index}" min="${sliderMin}" max="${sliderMax}" value="${sliderValue}" step="10" oninput="updateNotchFilterParams(${index})">
             </div>
             <div class="control-group">
                 <label for="notch-width-${index}">Width: <span id="notch-width-value-${index}">${notch.width} Hz</span></label>
@@ -2999,17 +3181,25 @@ function initializeCompressor() {
 // Toggle compressor on/off
 function toggleCompressor() {
     const checkbox = document.getElementById('compressor-enable');
-    const controls = document.getElementById('compressor-controls');
+    const badge = document.getElementById('compressor-status-badge');
     compressorEnabled = checkbox.checked;
     
     if (compressorEnabled) {
-        controls.style.display = 'block';
         if (!compressor && audioContext) {
             initializeCompressor();
         }
+        if (badge) {
+            badge.textContent = 'ENABLED';
+            badge.classList.remove('filter-disabled');
+            badge.classList.add('filter-enabled');
+        }
         log('Audio compressor enabled (AGC)');
     } else {
-        controls.style.display = 'none';
+        if (badge) {
+            badge.textContent = 'DISABLED';
+            badge.classList.remove('filter-enabled');
+            badge.classList.add('filter-disabled');
+        }
         log('Audio compressor disabled');
     }
 }
@@ -3481,5 +3671,173 @@ function updateSpectrumZoomDisplay() {
     const zoomElement = document.getElementById('spectrum-zoom-level');
     if (zoomElement) {
         zoomElement.textContent = displayText;
+    }
+}
+
+// Squelch (Audio Gate) Functions
+
+// Initialize squelch gate
+function initializeSquelch() {
+    if (!audioContext) return;
+    
+    // Create gain node to act as gate
+    squelchGate = audioContext.createGain();
+    squelchGate.gain.value = 1.0; // Start open
+    
+    // Create analyser to monitor signal level
+    squelchAnalyser = audioContext.createAnalyser();
+    squelchAnalyser.fftSize = 2048;
+    squelchAnalyser.smoothingTimeConstant = 0.3; // Some smoothing for level detection
+    
+    squelchOpen = true;
+    squelchCurrentLevel = -Infinity;
+    
+    log('Squelch gate initialized');
+}
+
+// Toggle squelch on/off
+function toggleSquelch() {
+    const checkbox = document.getElementById('squelch-enable');
+    const badge = document.getElementById('squelch-status-badge');
+    squelchEnabled = checkbox.checked;
+    
+    if (squelchEnabled) {
+        if (!squelchGate && audioContext) {
+            initializeSquelch();
+        }
+        // Start monitoring squelch level
+        if (!animationFrameId) {
+            startVisualization();
+        }
+        if (badge) {
+            badge.textContent = 'ENABLED';
+            badge.classList.remove('filter-disabled');
+            badge.classList.add('filter-enabled');
+        }
+        log('Squelch enabled (audio gate active)');
+    } else {
+        // Open the gate when disabled
+        if (squelchGate) {
+            squelchGate.gain.setValueAtTime(1.0, audioContext.currentTime);
+            squelchOpen = true;
+            updateSquelchStatus();
+        }
+        if (badge) {
+            badge.textContent = 'DISABLED';
+            badge.classList.remove('filter-enabled');
+            badge.classList.add('filter-disabled');
+        }
+        log('Squelch disabled');
+    }
+}
+
+// Update squelch parameters
+function updateSquelch() {
+    const thresholdDb = parseInt(document.getElementById('squelch-threshold').value);
+    const hysteresisDb = parseFloat(document.getElementById('squelch-hysteresis').value);
+    const attackMs = parseInt(document.getElementById('squelch-attack').value);
+    const releaseMs = parseInt(document.getElementById('squelch-release').value);
+    
+    squelchThreshold = thresholdDb;
+    squelchHysteresis = hysteresisDb;
+    squelchAttack = attackMs / 1000; // Convert to seconds
+    squelchRelease = releaseMs / 1000; // Convert to seconds
+    
+    // Update display values
+    document.getElementById('squelch-threshold-value').textContent = thresholdDb + ' dB';
+    document.getElementById('squelch-hysteresis-value').textContent = hysteresisDb + ' dB';
+    document.getElementById('squelch-attack-value').textContent = attackMs + ' ms';
+    document.getElementById('squelch-release-value').textContent = releaseMs + ' ms';
+    
+    // Log occasionally (not on every slider movement)
+    if (Math.random() < 0.05) {
+        log(`Squelch: ${thresholdDb} dB threshold, ${hysteresisDb} dB hysteresis, ${attackMs}ms attack, ${releaseMs}ms release`);
+    }
+}
+
+// Process squelch gate (called from visualization loop)
+function processSquelch() {
+    if (!squelchEnabled || !squelchAnalyser || !squelchGate || !audioContext) return;
+    
+    // Get signal level
+    const dataArray = new Uint8Array(squelchAnalyser.frequencyBinCount);
+    squelchAnalyser.getByteTimeDomainData(dataArray);
+    
+    // Calculate RMS level
+    let sumSquares = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+        const normalized = (dataArray[i] - 128) / 128;
+        sumSquares += normalized * normalized;
+    }
+    const rms = Math.sqrt(sumSquares / dataArray.length);
+    
+    // Convert to dB
+    const levelDb = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+    squelchCurrentLevel = levelDb;
+    
+    // Determine target gain using hysteresis
+    // Hysteresis prevents rapid open/close when signal hovers near threshold
+    const currentTime = audioContext.currentTime;
+    let newTargetGain = squelchTargetGain;
+    
+    if (squelchOpen) {
+        // Gate is open - close only if signal drops below (threshold - hysteresis)
+        if (levelDb < (squelchThreshold - squelchHysteresis)) {
+            newTargetGain = 0.0;
+            squelchOpen = false;
+        }
+    } else {
+        // Gate is closed - open only if signal rises above (threshold + hysteresis)
+        if (levelDb > (squelchThreshold + squelchHysteresis)) {
+            newTargetGain = 1.0;
+            squelchOpen = true;
+        }
+    }
+    
+    // Apply smooth fade if target changed
+    if (newTargetGain !== squelchTargetGain) {
+        squelchTargetGain = newTargetGain;
+        squelchGate.gain.cancelScheduledValues(currentTime);
+        squelchGate.gain.setValueAtTime(squelchGate.gain.value, currentTime);
+        // Use attack time when opening (0->1), release time when closing (1->0)
+        const fadeTime = newTargetGain > 0 ? squelchAttack : squelchRelease;
+        squelchGate.gain.linearRampToValueAtTime(squelchTargetGain, currentTime + fadeTime);
+    }
+    
+    // Update status display (after processing so it shows current state)
+    updateSquelchStatus();
+}
+
+// Update squelch status display
+function updateSquelchStatus() {
+    const statusEl = document.getElementById('squelch-status');
+    const levelEl = document.getElementById('squelch-level');
+    
+    if (!statusEl || !levelEl) return;
+    
+    // Get actual current gain value to show real-time state during fade
+    const currentGain = squelchGate ? squelchGate.gain.value : 1.0;
+    
+    // Update status text and color based on actual gain
+    // Consider gate "open" if gain > 0.5, "closing/opening" if in between
+    if (currentGain > 0.9) {
+        statusEl.textContent = 'OPEN';
+        statusEl.style.color = '#28a745'; // Green
+    } else if (currentGain < 0.1) {
+        statusEl.textContent = 'CLOSED';
+        statusEl.style.color = '#dc3545'; // Red
+    } else if (squelchTargetGain > 0.5) {
+        statusEl.textContent = 'OPENING';
+        statusEl.style.color = '#ffc107'; // Yellow/amber
+    } else {
+        statusEl.textContent = 'CLOSING';
+        statusEl.style.color = '#ff9800'; // Orange
+    }
+    
+    // Update level display
+    if (squelchCurrentLevel === -Infinity) {
+        levelEl.textContent = 'Level: -∞ dB';
+    } else {
+        levelEl.textContent = `Level: ${squelchCurrentLevel.toFixed(1)} dB`;
     }
 }

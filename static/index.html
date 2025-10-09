@@ -275,92 +275,140 @@
             </div>
         </div>
 
-        <div class="bandpass-panel">
-            <div class="bandpass-container">
-                <div class="control-group">
-                    <label>
-                        <input type="checkbox" id="bandpass-enable" onchange="toggleBandpassFilter()">
-                        Enable Bandpass Filter
-                    </label>
-                </div>
-                <div id="bandpass-controls" style="display: none;">
+        <!-- Filters: 2x2 Grid for Squelch, Bandpass, Notch, Compressor -->
+        <div class="filters-grid">
+            <!-- Row 1, Column 1: Squelch -->
+            <div class="squelch-panel">
+                <div class="squelch-container" style="position: relative;">
+                    <span id="squelch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <div class="control-group">
-                        <label for="bandpass-center">Center Frequency: <span id="bandpass-center-value">800 Hz</span></label>
-                        <input type="range" id="bandpass-center" min="100" max="3000" value="800" step="10" oninput="updateBandpassFilter()">
+                        <label>
+                            <input type="checkbox" id="squelch-enable" onchange="toggleSquelch()">
+                            Squelch (Audio Gate)
+                        </label>
                     </div>
+                    <div id="squelch-controls">
+                        <div class="control-group">
+                            <label for="squelch-threshold">Threshold: <span id="squelch-threshold-value">-35 dB</span></label>
+                            <input type="range" id="squelch-threshold" min="-80" max="-10" value="-35" step="1" oninput="updateSquelch()">
+                        </div>
+                        <div class="control-group">
+                            <label for="squelch-hysteresis">Hysteresis: <span id="squelch-hysteresis-value">3 dB</span></label>
+                            <input type="range" id="squelch-hysteresis" min="1" max="10" value="3" step="0.5" oninput="updateSquelch()">
+                        </div>
+                        <div class="control-group">
+                            <label for="squelch-attack">Attack (Open): <span id="squelch-attack-value">20 ms</span></label>
+                            <input type="range" id="squelch-attack" min="5" max="200" value="20" step="5" oninput="updateSquelch()">
+                        </div>
+                        <div class="control-group">
+                            <label for="squelch-release">Release (Close): <span id="squelch-release-value">500 ms</span></label>
+                            <input type="range" id="squelch-release" min="10" max="500" value="500" step="10" oninput="updateSquelch()">
+                        </div>
+                        <div class="squelch-status">
+                            <label>Status:</label>
+                            <span id="squelch-status" style="font-weight: bold; color: #28a745;">OPEN</span>
+                            <span id="squelch-level" style="margin-left: 15px; color: #888;">Level: -- dB</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 1, Column 2: Bandpass -->
+            <div class="bandpass-panel">
+                <div class="bandpass-container" style="position: relative;">
+                    <span id="bandpass-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <div class="control-group">
-                        <label for="bandpass-width">Bandwidth: <span id="bandpass-width-value">200 Hz</span></label>
-                        <input type="range" id="bandpass-width" min="20" max="1000" value="200" step="10" oninput="updateBandpassFilter()">
+                        <label>
+                            <input type="checkbox" id="bandpass-enable" onchange="toggleBandpassFilter()">
+                            Bandpass Filter
+                        </label>
+                    </div>
+                    <div id="bandpass-controls">
+                        <div class="control-group">
+                            <label for="bandpass-center">Center Frequency: <span id="bandpass-center-value">800 Hz</span></label>
+                            <input type="range" id="bandpass-center" min="100" max="3000" value="800" step="10" oninput="updateBandpassFilter()">
+                        </div>
+                        <div class="control-group">
+                            <label for="bandpass-width">Bandwidth: <span id="bandpass-width-value">200 Hz</span></label>
+                            <input type="range" id="bandpass-width" min="20" max="1000" value="200" step="10" oninput="updateBandpassFilter()">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2, Column 1: Notch -->
+            <div class="notch-panel">
+                <div class="notch-container" style="position: relative;">
+                    <span id="notch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="notch-enable" onchange="toggleNotchFilter()">
+                            Notch Filters <span id="notch-count" style="color: #888;">(0/5)</span>
+                        </label>
+                    </div>
+                    <div id="notch-controls">
+                        <div style="margin-bottom: 15px;">
+                            <button onclick="addManualNotch()" class="notch-add-btn">+ Add Notch Filter</button>
+                        </div>
+                        <div id="notch-list">
+                            <p style="color: #888; font-style: italic; margin: 10px 0;">No notch filters added yet</p>
+                        </div>
+                        <button onclick="clearAllNotches()" class="eq-reset-btn" style="margin-top: 10px;">Clear All Notches</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2, Column 2: Compressor -->
+            <div class="compressor-panel">
+                <div class="compressor-container" style="position: relative;">
+                    <span id="compressor-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <span id="compressor-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="compressor-enable" onchange="toggleCompressor()">
+                            Audio Compressor (AGC)
+                        </label>
+                    </div>
+                    <div id="compressor-controls">
+                        <div class="control-group">
+                            <label for="compressor-threshold">Threshold: <span id="compressor-threshold-value">-24 dB</span></label>
+                            <input type="range" id="compressor-threshold" min="-100" max="0" value="-24" step="1" oninput="updateCompressor()">
+                        </div>
+                        <div class="control-group">
+                            <label for="compressor-ratio">Ratio: <span id="compressor-ratio-value">12:1</span></label>
+                            <input type="range" id="compressor-ratio" min="1" max="20" value="12" step="1" oninput="updateCompressor()">
+                        </div>
+                        <div class="control-group">
+                            <label for="compressor-attack">Attack: <span id="compressor-attack-value">0.003 s</span></label>
+                            <input type="range" id="compressor-attack" min="0" max="1" value="0.003" step="0.001" oninput="updateCompressor()">
+                        </div>
+                        <div class="control-group">
+                            <label for="compressor-release">Release: <span id="compressor-release-value">0.25 s</span></label>
+                            <input type="range" id="compressor-release" min="0" max="1" value="0.25" step="0.01" oninput="updateCompressor()">
+                        </div>
+                        <div class="control-group">
+                            <label for="compressor-makeup-gain">Makeup Gain: <span id="compressor-makeup-gain-value">+0 dB</span></label>
+                            <input type="range" id="compressor-makeup-gain" min="0" max="40" value="0" step="1" oninput="updateCompressor()">
+                        </div>
+                        <button onclick="resetCompressor()" class="eq-reset-btn">Reset Compressor</button>
                     </div>
                 </div>
             </div>
         </div>
+        <!-- End 2x2 Filters Grid -->
 
-        <div class="notch-panel">
-            <div class="notch-container">
-                <div class="control-group">
-                    <label>
-                        <input type="checkbox" id="notch-enable" onchange="toggleNotchFilter()">
-                        Enable Notch Filters <span id="notch-count" style="color: #888;">(0/5)</span>
-                    </label>
-                </div>
-                <div id="notch-controls" style="display: none;">
-                    <div style="margin-bottom: 15px;">
-                        <button onclick="addManualNotch()" class="notch-add-btn">+ Add Notch Filter</button>
-                    </div>
-                    <div id="notch-list">
-                        <p style="color: #888; font-style: italic; margin: 10px 0;">No notch filters added yet</p>
-                    </div>
-                    <button onclick="clearAllNotches()" class="eq-reset-btn" style="margin-top: 10px;">Clear All Notches</button>
-                </div>
-            </div>
-        </div>
-
-        <div class="compressor-panel">
-            <div class="compressor-container" style="position: relative;">
-                <span id="compressor-clip-indicator" style="display: none; position: absolute; top: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
-                <div class="control-group">
-                    <label>
-                        <input type="checkbox" id="compressor-enable" onchange="toggleCompressor()">
-                        Enable Audio Compressor (AGC)
-                    </label>
-                </div>
-                <div id="compressor-controls" style="display: none;">
-                    <div class="control-group">
-                        <label for="compressor-threshold">Threshold: <span id="compressor-threshold-value">-24 dB</span></label>
-                        <input type="range" id="compressor-threshold" min="-100" max="0" value="-24" step="1" oninput="updateCompressor()">
-                    </div>
-                    <div class="control-group">
-                        <label for="compressor-ratio">Ratio: <span id="compressor-ratio-value">12:1</span></label>
-                        <input type="range" id="compressor-ratio" min="1" max="20" value="12" step="1" oninput="updateCompressor()">
-                    </div>
-                    <div class="control-group">
-                        <label for="compressor-attack">Attack: <span id="compressor-attack-value">0.003 s</span></label>
-                        <input type="range" id="compressor-attack" min="0" max="1" value="0.003" step="0.001" oninput="updateCompressor()">
-                    </div>
-                    <div class="control-group">
-                        <label for="compressor-release">Release: <span id="compressor-release-value">0.25 s</span></label>
-                        <input type="range" id="compressor-release" min="0" max="1" value="0.25" step="0.01" oninput="updateCompressor()">
-                    </div>
-                    <div class="control-group">
-                        <label for="compressor-makeup-gain">Makeup Gain: <span id="compressor-makeup-gain-value">+0 dB</span></label>
-                        <input type="range" id="compressor-makeup-gain" min="0" max="40" value="0" step="1" oninput="updateCompressor()">
-                    </div>
-                    <button onclick="resetCompressor()" class="eq-reset-btn">Reset Compressor</button>
-                </div>
-            </div>
-        </div>
-
+        <!-- Equalizer: Full Width Below Grid -->
         <div class="equalizer-panel">
             <div class="equalizer-container" style="position: relative;">
-                <span id="equalizer-clip-indicator" style="display: none; position: absolute; top: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
+                <span id="equalizer-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                <span id="equalizer-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
                 <div class="control-group">
                     <label>
                         <input type="checkbox" id="equalizer-enable" onchange="toggleEqualizer()">
-                        Enable 12-Band Equalizer
+                        12-Band Equalizer
                     </label>
                 </div>
-                <div id="equalizer-controls" style="display: none;">
+                <div id="equalizer-controls">
                     <div class="equalizer-bands">
                         <div class="eq-band">
                     <label class="eq-label">60 Hz</label>
@@ -426,8 +474,9 @@
                     <button onclick="resetEqualizer()" class="eq-reset-btn">Reset EQ</button>
                 </div>
             </div>
+            </div>
         </div>
-
+        <!-- End Filters Grid -->
 
     </div>
 

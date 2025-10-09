@@ -429,7 +429,7 @@ input[type="range"]::-moz-range-thumb {
     transform: scale(0.75);
     transform-origin: top center;
     margin-top: 20px;
-    margin-bottom: -20px;
+    margin-bottom: -180px;
 }
 
 .audio-visualization-header {
@@ -1017,8 +1017,93 @@ input[type="range"]::-moz-range-thumb {
     transform: translateY(-2px);
 }
 
-/* Bandpass Filter Panel */
-.bandpass-panel {
+/* Filter Panels Grid Container - 2x2 Grid */
+.filters-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    padding: 10px 30px;
+    background: #adb5bd;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-bottom: -220px;
+}
+
+/* Uniform styling for filter panels in grid */
+.squelch-panel,
+.bandpass-panel,
+.notch-panel,
+.compressor-panel {
+    padding: 0;
+    background: transparent;
+    border-top: none;
+    transform: none;
+    transform-origin: top center;
+    margin-bottom: 0;
+    min-height: 400px;
+}
+
+/* Uniform styling for filter containers in grid */
+.squelch-container,
+.bandpass-container,
+.notch-container,
+.compressor-container {
+    padding: 15px 20px;
+    background: #2c3e50;
+    border-radius: 6px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Equalizer Panel - Full Width Below Grid */
+.equalizer-panel {
+    padding: 10px 30px;
+    background: #adb5bd;
+    border-top: none;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-top: 0;
+    margin-bottom: -80px;
+}
+
+.equalizer-container {
+    padding: 15px 20px;
+    background: #2c3e50;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Filter Status Badges */
+.filter-status-badge {
+    position: absolute;
+    top: 8px;
+    right: 15px;
+    font-weight: bold;
+    padding: 4px 10px;
+    border-radius: 4px;
+    z-index: 100;
+    font-size: 11px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    border: 2px solid;
+    transition: all 0.3s ease;
+}
+
+.filter-status-badge.filter-disabled {
+    color: #dc3545;
+    background-color: rgba(220, 53, 69, 0.15);
+    border-color: #dc3545;
+}
+
+.filter-status-badge.filter-enabled {
+    color: #28a745;
+    background-color: rgba(40, 167, 69, 0.15);
+    border-color: #28a745;
+}
+
+/* CW Decoder Panel - Full Width */
+.cw-decoder-panel {
     padding: 10px 30px;
     background: #adb5bd;
     border-top: none;
@@ -1027,101 +1112,121 @@ input[type="range"]::-moz-range-thumb {
     margin-bottom: -20px;
 }
 
-.bandpass-panel h3 {
-    margin-bottom: 20px;
-    color: #495057;
-}
-
-.bandpass-container {
+.cw-decoder-container {
     padding: 15px 20px;
     background: #2c3e50;
     border-radius: 6px;
+    display: flex;
+    flex-direction: column;
 }
 
-.bandpass-container .control-group {
+/* Uniform control group styling within filters */
+.filters-grid .control-group {
+    margin-bottom: 12px;
+}
+
+.filters-grid .control-group label {
+    font-size: 0.9em;
+    color: #ecf0f1;
+    margin-bottom: 6px;
+    display: block;
+}
+
+.filters-grid .control-group input[type="range"] {
+    width: 100%;
+}
+
+.filters-grid .control-group span {
+    font-size: 0.9em;
+    color: #3498db;
+}
+
+/* Uniform control group styling for all filter containers */
+.filters-grid .control-group,
+.equalizer-panel .control-group,
+.cw-decoder-panel .control-group {
     margin-bottom: 15px;
 }
 
-.bandpass-container .control-group label {
+.filters-grid .control-group label,
+.equalizer-panel .control-group label,
+.cw-decoder-panel .control-group label {
     display: flex;
     align-items: center;
     font-weight: bold;
     color: #ecf0f1;
     margin-bottom: 8px;
-    font-size: 1em;
+    font-size: 0.9em;
     cursor: pointer;
     user-select: none;
 }
 
-.bandpass-container .control-group input[type="checkbox"] {
+.filters-grid .control-group input[type="checkbox"],
+.equalizer-panel .control-group input[type="checkbox"],
+.cw-decoder-panel .control-group input[type="checkbox"] {
     width: 18px;
     height: 18px;
     cursor: pointer;
     margin-right: 8px;
 }
 
-.bandpass-container .control-group input[type="range"] {
+.filters-grid .control-group input[type="range"],
+.equalizer-panel .control-group input[type="range"],
+.cw-decoder-panel .control-group input[type="range"] {
     width: 100%;
-    max-width: 600px;
 }
 
-.bandpass-container .control-group span {
+.filters-grid .control-group span,
+.equalizer-panel .control-group span,
+.cw-decoder-panel .control-group span {
     display: inline-block;
-    min-width: 80px;
+    min-width: 60px;
     font-weight: bold;
     color: #3498db;
     margin-left: 10px;
+    font-size: 0.9em;
 }
 
-#bandpass-controls {
+#squelch-controls,
+#bandpass-controls,
+#notch-controls,
+#compressor-controls,
+#equalizer-controls,
+#cw-decoder-controls {
     margin-top: 15px;
     padding-top: 15px;
     border-top: 2px solid #34495e;
+    flex: 1;
 }
 
-/* Notch Filter Panel */
-.notch-panel {
-    padding: 10px 30px;
-    background: #adb5bd;
-    border-top: none;
-    transform: scale(0.75);
-    transform-origin: top center;
-    margin-bottom: -20px;
-}
-
-.notch-container {
-    padding: 15px 20px;
-    background: #2c3e50;
-    border-radius: 6px;
-}
-
-.notch-container .control-group {
-    margin-bottom: 15px;
-}
-
-.notch-container .control-group label {
+.squelch-status {
     display: flex;
     align-items: center;
+    gap: 10px;
+    margin-top: 15px;
+    padding: 10px 15px;
+    background: #34495e;
+    border-radius: 4px;
+}
+
+.squelch-status label {
     font-weight: bold;
     color: #ecf0f1;
-    margin-bottom: 8px;
+    font-size: 0.9em;
+    margin: 0;
+}
+
+#squelch-status {
     font-size: 1em;
-    cursor: pointer;
-    user-select: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
 }
 
-.notch-container .control-group input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-    margin-right: 8px;
+#squelch-level {
+    font-size: 0.9em;
 }
 
-#notch-controls {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 2px solid #34495e;
-}
 
 #notch-list {
     display: flex;
@@ -1216,116 +1321,6 @@ input[type="range"]::-moz-range-thumb {
     transform: translateY(0);
 }
 
-/* Compressor Panel */
-.compressor-panel {
-    padding: 10px 30px;
-    background: #adb5bd;
-    border-top: none;
-    transform: scale(0.75);
-    transform-origin: top center;
-    margin-bottom: -20px;
-}
-
-.compressor-panel h3 {
-    margin-bottom: 20px;
-    color: #495057;
-}
-
-.compressor-container {
-    padding: 15px 20px;
-    background: #2c3e50;
-    border-radius: 6px;
-}
-
-.compressor-container .control-group {
-    margin-bottom: 15px;
-}
-
-.compressor-container .control-group label {
-    display: flex;
-    align-items: center;
-    font-weight: bold;
-    color: #ecf0f1;
-    margin-bottom: 8px;
-    font-size: 1em;
-    cursor: pointer;
-    user-select: none;
-}
-
-.compressor-container .control-group input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-    margin-right: 8px;
-}
-
-.compressor-container .control-group input[type="range"] {
-    width: 100%;
-    max-width: 600px;
-}
-
-.compressor-container .control-group span {
-    display: inline-block;
-    min-width: 80px;
-    font-weight: bold;
-    color: #3498db;
-    margin-left: 10px;
-}
-
-#compressor-controls {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 2px solid #34495e;
-}
-
-/* Equalizer Panel */
-.equalizer-panel {
-    padding: 10px 30px;
-    background: #adb5bd;
-    border-top: none;
-    transform: scale(0.75);
-    transform-origin: top center;
-    margin-bottom: -20px;
-}
-
-.equalizer-panel h3 {
-    margin-bottom: 20px;
-    color: #495057;
-}
-
-.equalizer-container {
-    padding: 15px 20px;
-    background: #2c3e50;
-    border-radius: 6px;
-}
-
-.equalizer-container .control-group {
-    margin-bottom: 15px;
-}
-
-.equalizer-container .control-group label {
-    display: flex;
-    align-items: center;
-    font-weight: bold;
-    color: #ecf0f1;
-    margin-bottom: 8px;
-    font-size: 1em;
-    cursor: pointer;
-    user-select: none;
-}
-
-.equalizer-container .control-group input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-    margin-right: 8px;
-}
-
-#equalizer-controls {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 2px solid #34495e;
-}
 
 .equalizer-bands {
     display: grid;
@@ -1418,62 +1413,6 @@ input[type="range"]::-moz-range-thumb {
 .eq-reset-btn:hover {
     background: #c0392b;
     transform: translateY(-2px);
-}
-/* CW Decoder Panel */
-.cw-decoder-panel {
-    padding: 10px 30px;
-    background: #adb5bd;
-    border-top: none;
-    transform: scale(0.75);
-    transform-origin: top center;
-    margin-bottom: -20px;
-}
-
-.cw-decoder-container {
-    padding: 15px 20px;
-    background: #2c3e50;
-    border-radius: 6px;
-}
-
-.cw-decoder-container .control-group {
-    margin-bottom: 15px;
-}
-
-.cw-decoder-container .control-group label {
-    display: flex;
-    align-items: center;
-    font-weight: bold;
-    color: #ecf0f1;
-    margin-bottom: 8px;
-    font-size: 1em;
-    cursor: pointer;
-    user-select: none;
-}
-
-.cw-decoder-container .control-group input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-    margin-right: 8px;
-}
-
-.cw-decoder-container .control-group input[type="range"] {
-    width: 100%;
-    max-width: 600px;
-}
-
-.cw-decoder-container .control-group span {
-    display: inline-block;
-    min-width: 80px;
-    font-weight: bold;
-    color: #3498db;
-    margin-left: 10px;
-}
-
-#cw-decoder-controls {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 2px solid #34495e;
 }
 
 .cw-decoder-display {

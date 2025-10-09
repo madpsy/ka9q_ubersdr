@@ -37,6 +37,17 @@ audio:
     fm: 24000   # FM preset in radiod uses 24 kHz
     nfm: 24000  # NFM (Narrow FM) preset in radiod uses 24 kHz
     iq: 192000
+  # Opus compression settings
+  opus:
+    # Enable Opus compression for audio streaming (reduces bandwidth significantly)
+    enabled: false
+    # Opus bitrate in bits per second (6000-510000, typical: 24000-64000)
+    # Lower = more compression but lower quality, Higher = better quality but more bandwidth
+    # 24000 = good for voice, 48000 = excellent for voice, 64000 = near-transparent
+    bitrate: 48000
+    # Opus complexity (0-10, higher = better quality but more CPU)
+    # 0 = fastest/lowest quality, 10 = slowest/highest quality
+    complexity: 5
 
 # Spectrum analyzer settings - per-user dynamic channels
 spectrum:

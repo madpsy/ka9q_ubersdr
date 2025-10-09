@@ -230,12 +230,22 @@ func (usm *UserSpectrumManager) receiveLoop() {
 	}
 }
 
-// parseStatusPacket extracts spectrum data from a STATUS packet
+// parseStatusPacket extracts spectrum data and channel parameters from a STATUS packet
 func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 	var ssrc uint32
 	var binData []float32
+	var radiodBinBW float32
+	var radiodBinCount int
+	var radiodFreq uint64
+	var radiodLowEdge float32
+	var radiodHighEdge float32
 	foundSSRC := false
 	foundBinData := false
+	foundBinBW := false
+	foundBinCount := false
+	foundFreq := false
+	foundLowEdge := false
+	foundHighEdge := false
 
 	i := 0
 	for i < len(payload) {
@@ -274,6 +284,48 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 				ssrc = (ssrc << 8) | uint32(payload[i+j])
 			}
 			foundSSRC = true
+
+		case 0x5d: // NONCOHERENT_BIN_BW (float32)
+			if length == 4 {
+				bits := binary.BigEndian.Uint32(payload[i : i+4])
+				radiodBinBW = math.Float32frombits(bits)
+				foundBinBW = true
+			}
+
+		case 0x5e: // BIN_COUNT (int32)
+			radiodBinCount = 0
+			for j := 0; j < length && j < 8; j++ {
+				radiodBinCount = (radiodBinCount << 8) | int(payload[i+j])
+			}
+			foundBinCount = true
+
+		case 0x21: // RADIO_FREQUENCY (double)
+			if length <= 8 {
+				bits := uint64(0)
+				for j := 0; j < length; j++ {
+					bits = (bits << 8) | uint64(payload[i+j])
+				}
+				// Shift left to fill 64 bits if needed
+				for j := length; j < 8; j++ {
+					bits <<= 8
+				}
+				radiodFreq = uint64(math.Float64frombits(bits))
+				foundFreq = true
+			}
+
+		case 0x27: // LOW_EDGE (float32)
+			if length == 4 {
+				bits := binary.BigEndian.Uint32(payload[i : i+4])
+				radiodLowEdge = math.Float32frombits(bits)
+				foundLowEdge = true
+			}
+
+		case 0x28: // HIGH_EDGE (float32)
+			if length == 4 {
+				bits := binary.BigEndian.Uint32(payload[i : i+4])
+				radiodHighEdge = math.Float32frombits(bits)
+				foundHighEdge = true
+			}
 
 		case 0x60: // BIN_DATA (large length means bin data array)
 			if length > 100 {
@@ -353,15 +405,139 @@ func (usm *UserSpectrumManager) parseStatusPacket(payload []byte) {
 		i += length
 	}
 
-	// Distribute spectrum data to the appropriate session
+	// Handle spectrum channels
 	if foundSSRC && foundBinData {
-		// Removed debug logging
+		// Check for parameter mismatches (with rate limiting to avoid log spam)
+		if foundBinBW && foundBinCount {
+			usm.checkSpectrumParameterMismatch(ssrc, radiodBinBW, radiodBinCount)
+		}
 		usm.distributeSpectrum(ssrc, binData)
+	} else if foundSSRC {
+		// Handle audio channels (no bin data, but has frequency and filter edges)
+		if foundFreq && foundLowEdge && foundHighEdge {
+			usm.checkAudioParameterMismatch(ssrc, radiodFreq, radiodLowEdge, radiodHighEdge)
+		}
 	} else if DebugMode {
 		if !foundSSRC {
 			log.Printf("DEBUG: No SSRC found in STATUS packet")
 		}
-		// Removed debug logging
+	}
+}
+
+// Track last mismatch log and retry time per SSRC
+var (
+	lastMismatchLog   = make(map[uint32]time.Time)
+	lastRetryTime     = make(map[uint32]time.Time)
+	mismatchMutex     sync.Mutex
+	mismatchLogPeriod = 30 * time.Second // Only log once per 30 seconds per SSRC
+	retryPeriod       = 1 * time.Second  // Only retry once per second per SSRC
+)
+
+// checkSpectrumParameterMismatch compares radiod's actual spectrum parameters with our session state
+// and automatically retries the update if they don't match (rate-limited to avoid spam)
+func (usm *UserSpectrumManager) checkSpectrumParameterMismatch(ssrc uint32, radiodBinBW float32, radiodBinCount int) {
+	session, ok := usm.sessions.GetSessionBySSRC(ssrc)
+	if !ok {
+		return
+	}
+
+	if !session.IsSpectrum {
+		return
+	}
+
+	session.mu.RLock()
+	sessionFreq := session.Frequency
+	sessionBinBW := float32(session.BinBandwidth)
+	sessionBinCount := session.BinCount
+	session.mu.RUnlock()
+
+	// Check if parameters match (with small tolerance for floating point comparison)
+	const tolerance = 0.01
+	binBWMatch := math.Abs(float64(radiodBinBW-sessionBinBW)) < tolerance
+	binCountMatch := radiodBinCount == sessionBinCount
+
+	if !binBWMatch || !binCountMatch {
+		now := time.Now()
+		
+		mismatchMutex.Lock()
+		lastLog, logExists := lastMismatchLog[ssrc]
+		lastRetry, retryExists := lastRetryTime[ssrc]
+		
+		// Determine if we should log
+		shouldLog := !logExists || now.Sub(lastLog) > mismatchLogPeriod
+		
+		// Determine if we should retry (once per second)
+		shouldRetry := !retryExists || now.Sub(lastRetry) > retryPeriod
+		
+		if shouldLog {
+			lastMismatchLog[ssrc] = now
+		}
+		if shouldRetry {
+			lastRetryTime[ssrc] = now
+		}
+		mismatchMutex.Unlock()
+
+		if shouldLog {
+			log.Printf("INFO: Parameter mismatch for SSRC 0x%08x - Session: bins=%d bw=%.1f Hz, Radiod: bins=%d bw=%.1f Hz",
+				ssrc, sessionBinCount, sessionBinBW, radiodBinCount, radiodBinBW)
+		}
+
+		// Automatically retry sending the update command
+		if shouldRetry {
+			log.Printf("INFO: Retrying spectrum update for SSRC 0x%08x to correct mismatch", ssrc)
+			
+			// Determine if bin count changed (compare with radiod's current value)
+			binCountChanged := sessionBinCount != radiodBinCount
+			
+			if err := usm.radiod.UpdateSpectrumChannel(ssrc, sessionFreq, float64(sessionBinBW), sessionBinCount, binCountChanged); err != nil {
+				log.Printf("ERROR: Failed to retry spectrum update for SSRC 0x%08x: %v", ssrc, err)
+			}
+		}
+	}
+}
+
+// checkAudioParameterMismatch compares radiod's actual audio channel parameters with our session state
+// and logs informational messages if they don't match (rate-limited to avoid spam)
+func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodFreq uint64, radiodLowEdge, radiodHighEdge float32) {
+	session, ok := usm.sessions.GetSessionBySSRC(ssrc)
+	if !ok {
+		return
+	}
+
+	if session.IsSpectrum {
+		return // This is a spectrum channel, not audio
+	}
+
+	session.mu.RLock()
+	sessionFreq := session.Frequency
+	sessionLowEdge := float32(session.BandwidthLow)
+	sessionHighEdge := float32(session.BandwidthHigh)
+	session.mu.RUnlock()
+
+	// Check if parameters match (with small tolerance for floating point comparison)
+	const tolerance = 0.01
+	freqMatch := sessionFreq == radiodFreq
+	lowEdgeMatch := math.Abs(float64(radiodLowEdge-sessionLowEdge)) < tolerance
+	highEdgeMatch := math.Abs(float64(radiodHighEdge-sessionHighEdge)) < tolerance
+
+	if !freqMatch || !lowEdgeMatch || !highEdgeMatch {
+		now := time.Now()
+		
+		mismatchMutex.Lock()
+		lastLog, logExists := lastMismatchLog[ssrc]
+		
+		// Determine if we should log
+		shouldLog := !logExists || now.Sub(lastLog) > mismatchLogPeriod
+		
+		if shouldLog {
+			lastMismatchLog[ssrc] = now
+		}
+		mismatchMutex.Unlock()
+
+		if shouldLog {
+			log.Printf("INFO: Audio parameter mismatch for SSRC 0x%08x - Session: freq=%d Hz edges=%.1f-%.1f Hz, Radiod: freq=%d Hz edges=%.1f-%.1f Hz",
+				ssrc, sessionFreq, sessionLowEdge, sessionHighEdge, radiodFreq, radiodLowEdge, radiodHighEdge)
+		}
 	}
 }
 

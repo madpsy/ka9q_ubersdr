@@ -56,17 +56,25 @@ let compressorClipIndicatorTimeout = null; // Timeout for hiding clip indicator
 let lowpassFilters = []; // Array of cascaded low-pass filters for steep rolloff
 let audioVisualizationEnabled = false; // Track if audio visualization is expanded
 
-// Amateur radio band ranges (in Hz)
+// Amateur radio band ranges (in Hz) - UK RSGB allocations
 const bandRanges = {
-    '80m': { min: 3500000, max: 4000000 },
-    '40m': { min: 7000000, max: 7300000 },
-    '30m': { min: 10100000, max: 10150000 },
-    '20m': { min: 14000000, max: 14350000 },
-    '17m': { min: 18068000, max: 18168000 },
-    '15m': { min: 21000000, max: 21450000 },
-    '12m': { min: 24890000, max: 24990000 },
-    '10m': { min: 28000000, max: 29700000 }
+    '80m': { min: 3500000, max: 3800000 },   // UK: 3.5-3.8 MHz
+    '40m': { min: 7000000, max: 7200000 },   // UK: 7.0-7.2 MHz
+    '30m': { min: 10100000, max: 10150000 }, // UK: 10.1-10.15 MHz (WARC band)
+    '20m': { min: 14000000, max: 14350000 }, // UK: 14.0-14.35 MHz
+    '17m': { min: 18068000, max: 18168000 }, // UK: 18.068-18.168 MHz (WARC band)
+    '15m': { min: 21000000, max: 21450000 }, // UK: 21.0-21.45 MHz
+    '12m': { min: 24890000, max: 24990000 }, // UK: 24.89-24.99 MHz (WARC band)
+    '10m': { min: 28000000, max: 29700000 }  // UK: 28.0-29.7 MHz
 };
+
+// Bookmarks (expose on window for spectrum-display.js access)
+let bookmarks = [];
+window.bookmarks = bookmarks;
+
+// Bookmark positions for hover detection (expose on window for spectrum-display.js access)
+let bookmarkPositions = [];
+window.bookmarkPositions = bookmarkPositions;
 
 // Update band button highlighting based on frequency
 function updateBandButtons(frequency) {
@@ -134,12 +142,55 @@ document.addEventListener('DOMContentLoaded', () => {
     vuMeterBarCompact = document.getElementById('vu-meter-bar-compact');
     vuMeterPeakCompact = document.getElementById('vu-meter-peak-compact');
     
-    // Initialize waterfall with black background
-    if (waterfallCtx) {
-        waterfallCtx.fillStyle = '#000';
-        waterfallCtx.fillRect(0, 0, waterfallCanvas.width, waterfallCanvas.height);
-        waterfallImageData = waterfallCtx.createImageData(waterfallCanvas.width, 1);
-    }
+    // Set audio visualization as enabled by default (since it's visible)
+    audioVisualizationEnabled = true;
+    
+    // Hide compact VU meter since full visualization is shown
+    const compactVU = document.getElementById('vu-meter-compact');
+    if (compactVU) compactVU.style.display = 'none';
+    
+    // Initialize canvas sizes for visible audio visualization
+    setTimeout(() => {
+        if (spectrumCanvas && spectrumCtx) {
+            const rect = spectrumCanvas.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                spectrumCanvas.width = Math.floor(rect.width);
+                spectrumCanvas.height = Math.floor(rect.height);
+            }
+        }
+        
+        if (waterfallCanvas && waterfallCtx) {
+            const rect = waterfallCanvas.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                const newWidth = Math.max(1, Math.floor(rect.width));
+                const newHeight = Math.max(1, Math.floor(rect.height));
+                
+                waterfallCanvas.width = newWidth;
+                waterfallCanvas.height = newHeight;
+                
+                // Also set overlay canvas to match
+                if (waterfallOverlayCanvas) {
+                    waterfallOverlayCanvas.width = newWidth;
+                    waterfallOverlayCanvas.height = newHeight;
+                }
+                
+                waterfallCtx.fillStyle = '#000';
+                waterfallCtx.fillRect(0, 0, newWidth, newHeight);
+                
+                if (newWidth > 0) {
+                    waterfallImageData = waterfallCtx.createImageData(newWidth, 1);
+                }
+            }
+        }
+        
+        if (oscilloscopeCanvas && oscilloscopeCtx) {
+            const rect = oscilloscopeCanvas.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                oscilloscopeCanvas.width = Math.floor(rect.width);
+                oscilloscopeCanvas.height = Math.floor(rect.height);
+            }
+        }
+    }, 100);
     
     // Add click handlers for spectrum and waterfall to adjust bandpass filter
     if (spectrumCanvas) {
@@ -342,6 +393,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     waterfallCanvas.width = newWidth;
                     waterfallCanvas.height = newHeight;
                     
+                    // Also resize overlay canvas to match
+                    if (waterfallOverlayCanvas) {
+                        waterfallOverlayCanvas.width = newWidth;
+                        waterfallOverlayCanvas.height = newHeight;
+                    }
+                    
                     // Clear waterfall to black (fresh start with correct frequency alignment)
                     waterfallCtx.fillStyle = '#000';
                     waterfallCtx.fillRect(0, 0, newWidth, newHeight);
@@ -534,6 +591,56 @@ function handleMessage(msg) {
     }
 }
 
+// Opus decoder context (will be initialized when needed)
+let opusDecoder = null;
+let opusDecoderInitialized = false;
+let opusDecoderFailed = false;
+
+// Initialize Opus decoder
+async function initOpusDecoder(sampleRate, channels) {
+    console.log('initOpusDecoder called:', sampleRate, 'Hz,', channels, 'channels');
+    
+    if (opusDecoderFailed) {
+        console.log('Decoder previously failed, skipping');
+        return false;
+    }
+    
+    if (opusDecoderInitialized) {
+        console.log('Decoder already initialized');
+        return true;
+    }
+    
+    // Check if OpusDecoder library is available
+    console.log('Checking for OpusDecoder:', typeof OpusDecoder);
+    if (typeof OpusDecoder === 'undefined') {
+        console.error('OpusDecoder library not loaded');
+        log('ERROR: Opus decoder library failed to load from CDN', 'error');
+        log('Please disable Opus in config.yaml: set audio.opus.enabled: false', 'error');
+        opusDecoderFailed = true;
+        return false;
+    }
+    
+    try {
+        console.log('Creating OpusDecoder instance...');
+        opusDecoder = new OpusDecoder({
+            sampleRate: sampleRate,
+            channels: channels
+        });
+        console.log('Waiting for decoder.ready...');
+        await opusDecoder.ready;
+        opusDecoderInitialized = true;
+        console.log('Opus decoder initialized successfully');
+        log(`Opus decoder initialized for ${sampleRate} Hz, ${channels} channel(s)`);
+        return true;
+    } catch (e) {
+        console.error('Failed to initialize Opus decoder:', e);
+        log('Opus decoder initialization failed: ' + e.message, 'error');
+        log('Please disable Opus in config.yaml: set audio.opus.enabled: false', 'error');
+        opusDecoderFailed = true;
+        return false;
+    }
+}
+
 // Update status display
 function updateStatus(msg) {
     if (msg.frequency) {
@@ -556,45 +663,122 @@ function updateStatus(msg) {
 }
 
 // Handle audio data
-function handleAudio(msg) {
+async function handleAudio(msg) {
     if (!audioContext) {
         return;
     }
     
     try {
-        // Decode base64 PCM data
+        const audioFormat = msg.audioFormat || 'pcm'; // Default to PCM if not specified
+        
+        if (audioFormat === 'opus') {
+            // Handle Opus-encoded audio
+            await handleOpusAudio(msg);
+        } else {
+            // Handle PCM audio (original behavior)
+            handlePCMAudio(msg);
+        }
+    } catch (e) {
+        console.error('Failed to process audio:', e);
+    }
+}
+
+// Handle PCM audio data
+function handlePCMAudio(msg) {
+    // Decode base64 PCM data
+    const binaryString = atob(msg.data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    // RTP audio from radiod is big-endian signed 16-bit PCM
+    // Monitor application confirms all modes use identical processing
+    const numSamples = bytes.length / 2;
+    const floatData = new Float32Array(numSamples);
+    
+    // Parse big-endian int16 and convert to float, exactly like monitor
+    for (let i = 0; i < numSamples; i++) {
+        const highByte = bytes[i * 2];
+        const lowByte = bytes[i * 2 + 1];
+        let sample = (highByte << 8) | lowByte;
+        if (sample >= 0x8000) {
+            sample -= 0x10000;
+        }
+        // Use 32767 (INT16_MAX) not 32768, matching monitor's SCALE16
+        floatData[i] = sample / 32767.0;
+    }
+    
+    // Create audio buffer
+    const audioBuffer = audioContext.createBuffer(1, floatData.length, msg.sampleRate);
+    audioBuffer.getChannelData(0).set(floatData);
+    
+    // Play audio
+    playAudioBuffer(audioBuffer);
+}
+
+// Handle Opus-encoded audio data
+async function handleOpusAudio(msg) {
+    console.log('handleOpusAudio called, packet size:', msg.data.length);
+    
+    // Initialize Opus decoder if needed
+    const decoderReady = await initOpusDecoder(msg.sampleRate, msg.channels || 1);
+    
+    if (!decoderReady || !opusDecoder) {
+        console.error('Decoder not ready');
+        // Decoder failed to initialize - error already logged
+        // Silently drop this packet to avoid spam
+        return;
+    }
+    
+    console.log('Decoder ready, decoding packet...');
+    
+    try {
+        // Decode base64 Opus data
         const binaryString = atob(msg.data);
-        const bytes = new Uint8Array(binaryString.length);
+        const opusPacket = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
+            opusPacket[i] = binaryString.charCodeAt(i);
         }
         
-        // RTP audio from radiod is big-endian signed 16-bit PCM
-        // Monitor application confirms all modes use identical processing
-        const numSamples = bytes.length / 2;
-        const floatData = new Float32Array(numSamples);
+        console.log('Opus packet size:', opusPacket.length, 'bytes');
         
-        // Parse big-endian int16 and convert to float, exactly like monitor
-        for (let i = 0; i < numSamples; i++) {
-            const highByte = bytes[i * 2];
-            const lowByte = bytes[i * 2 + 1];
-            let sample = (highByte << 8) | lowByte;
-            if (sample >= 0x8000) {
-                sample -= 0x10000;
-            }
-            // Use 32767 (INT16_MAX) not 32768, matching monitor's SCALE16
-            floatData[i] = sample / 32767.0;
+        // Decode Opus packet to PCM
+        const decoded = await opusDecoder.decode(opusPacket);
+        
+        console.log('Decoded result:', decoded);
+        
+        if (!decoded || !decoded.channelData || decoded.channelData.length === 0) {
+            console.error('Opus decode returned empty data');
+            return;
         }
         
-        // Create audio buffer
-        const audioBuffer = audioContext.createBuffer(1, floatData.length, msg.sampleRate);
-        audioBuffer.getChannelData(0).set(floatData);
+        console.log('Decoded channels:', decoded.channelData.length, 'samples:', decoded.channelData[0].length);
         
-        // Play audio
+        // Create audio buffer from decoded PCM data
+        const audioBuffer = audioContext.createBuffer(
+            decoded.channelData.length,
+            decoded.channelData[0].length,
+            decoded.sampleRate
+        );
+        
+        // Copy decoded data to audio buffer
+        for (let channel = 0; channel < decoded.channelData.length; channel++) {
+            audioBuffer.getChannelData(channel).set(decoded.channelData[channel]);
+        }
+        
+        console.log('Playing decoded audio buffer');
+        
+        // Play the decoded audio
         playAudioBuffer(audioBuffer);
         
     } catch (e) {
-        console.error('Failed to process audio:', e);
+        console.error('Failed to decode Opus audio:', e);
+        log('Opus decoding error: ' + e.message, 'error');
+        
+        // Mark decoder as failed to avoid repeated errors
+        opusDecoderFailed = true;
+        log('Disabling Opus decoder due to errors. Please use PCM mode.', 'error');
     }
 }
 
@@ -845,6 +1029,57 @@ function setFrequency(freq) {
     }
 }
 
+// Set band - zoom spectrum to show entire band and tune to center
+function setBand(bandName) {
+    const range = bandRanges[bandName];
+    if (!range) {
+        log(`Unknown band: ${bandName}`, 'error');
+        return;
+    }
+    
+    // Calculate band center frequency
+    const centerFreq = Math.round((range.min + range.max) / 2);
+    
+    // Calculate band width
+    const bandWidth = range.max - range.min;
+    
+    // Set frequency to band center
+    document.getElementById('frequency').value = centerFreq;
+    updateBandButtons(centerFreq);
+    
+    // Update URL with new frequency
+    updateURL();
+    
+    // Auto-connect if not connected
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connect();
+    } else {
+        autoTune();
+    }
+    
+    // Zoom spectrum to show band with tighter view (0.6x band width for more detail)
+    // This provides one additional zoom level beyond showing the full band
+    if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
+        // Calculate bin bandwidth to show 60% of the band width
+        // This gives a focused view while still showing context
+        // totalBandwidth = binBandwidth * binCount
+        // Assuming binCount is typically 2048, calculate binBandwidth
+        const focusedBandwidth = bandWidth * 0.6;
+        const binCount = spectrumDisplay.binCount || 2048;
+        const binBandwidth = focusedBandwidth / binCount;
+        
+        spectrumDisplay.ws.send(JSON.stringify({
+            type: 'zoom',
+            frequency: centerFreq,
+            binBandwidth: binBandwidth
+        }));
+        
+        log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} (zoomed to ${formatFrequency(centerFreq - focusedBandwidth/2)} - ${formatFrequency(centerFreq + focusedBandwidth/2)})`);
+    } else {
+        log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)}`);
+    }
+}
+
 // Adjust frequency by a given amount (Hz)
 function adjustFrequency(deltaHz) {
     const freqInput = document.getElementById('frequency');
@@ -915,6 +1150,16 @@ function loadSettingsFromURL() {
             document.getElementById('bandwidth-high-value').textContent = bwh;
         }
     }
+
+    // Load spectrum zoom parameters (will be applied when spectrum display initializes)
+    if (params.has('zoom_freq') && params.has('zoom_bw')) {
+        const zoomFreq = parseInt(params.get('zoom_freq'));
+        const zoomBw = parseFloat(params.get('zoom_bw'));
+        if (!isNaN(zoomFreq) && !isNaN(zoomBw) && zoomBw > 0) {
+            // Store for later application when spectrum display is ready
+            window.spectrumZoomParams = { frequency: zoomFreq, binBandwidth: zoomBw };
+        }
+    }
     
     log('Settings loaded from URL');
 }
@@ -935,6 +1180,27 @@ function updateURL() {
     // Add bandwidth
     params.set('bwl', currentBandwidthLow);
     params.set('bwh', currentBandwidthHigh);
+
+    // Add spectrum zoom parameters if zoomed
+    // Check if spectrum display exists, has valid zoom data, AND is connected
+    if (spectrumDisplay &&
+        spectrumDisplay.centerFreq &&
+        spectrumDisplay.binBandwidth &&
+        spectrumDisplay.ws &&
+        spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+        // Only add zoom params if actually zoomed (not at default 1x)
+        if (spectrumDisplay.zoomLevel > 1) {
+            params.set('zoom_freq', Math.round(spectrumDisplay.centerFreq));
+            params.set('zoom_bw', spectrumDisplay.binBandwidth.toFixed(1));
+        }
+    } else {
+        // If spectrum display not ready yet or not connected, preserve existing zoom params from URL
+        const currentParams = new URLSearchParams(window.location.search);
+        if (currentParams.has('zoom_freq') && currentParams.has('zoom_bw')) {
+            params.set('zoom_freq', currentParams.get('zoom_freq'));
+            params.set('zoom_bw', currentParams.get('zoom_bw'));
+        }
+    }
     
     // Update URL without reloading page
     const newURL = window.location.pathname + '?' + params.toString();
@@ -991,11 +1257,11 @@ function setMode(mode) {
         	defaultHigh = 200;
         	break;
         case 'fm':
-            minLow = -8000;
+            minLow = -5000;
             maxLow = 0;
-            defaultLow = -8000;
-            maxHigh = 8000;
-            defaultHigh = 8000;
+            defaultLow = -5000;
+            maxHigh = 5000;
+            defaultHigh = 5000;
             break;
         case 'nfm':
             minLow = -6250;
@@ -1267,6 +1533,10 @@ function pixelToFrequency(pixel, canvasWidth) {
     return displayLow + (pixel / canvasWidth) * displayBandwidth;
 }
 
+// VU meter throttling
+let lastVUMeterUpdate = 0;
+const vuMeterUpdateInterval = 100; // 10 fps (1000ms / 10 = 100ms)
+
 function startVisualization() {
     if (!analyser) return;
     
@@ -1278,8 +1548,11 @@ function startVisualization() {
         // Always check for clipping (independent of visualization state)
         checkClipping();
         
-        // Always update VU meter (for compact version when visualization is hidden)
-        updateVUMeter();
+        // Update VU meter at 30 fps (for compact version when visualization is hidden)
+        if (now - lastVUMeterUpdate >= vuMeterUpdateInterval) {
+            updateVUMeter();
+            lastVUMeterUpdate = now;
+        }
         
         // Only update other visualizations if the section is expanded (performance optimization)
         if (audioVisualizationEnabled) {
@@ -1339,6 +1612,12 @@ function toggleAudioVisualization() {
                     
                     waterfallCanvas.width = newWidth;
                     waterfallCanvas.height = newHeight;
+                    
+                    // Also resize overlay canvas to match
+                    if (waterfallOverlayCanvas) {
+                        waterfallOverlayCanvas.width = newWidth;
+                        waterfallOverlayCanvas.height = newHeight;
+                    }
                     
                     // Clear and recreate waterfall
                     waterfallCtx.fillStyle = '#000';
@@ -2027,8 +2306,8 @@ function updateWaterfall() {
     }
     
     // Clear overlay canvas and redraw all filter indicators
-    if (waterfallOverlayCtx) {
-        waterfallOverlayCtx.clearRect(0, 0, width, height);
+    if (waterfallOverlayCtx && waterfallOverlayCanvas) {
+        waterfallOverlayCtx.clearRect(0, 0, waterfallOverlayCanvas.width, waterfallOverlayCanvas.height);
     }
     
     // Draw bandpass filter indicators on overlay canvas
@@ -2045,36 +2324,41 @@ function updateWaterfall() {
         
         // Only draw if within visible range
         if (center >= displayLow && center <= displayHigh) {
-            // Draw center line (bright yellow solid) on overlay
-            const centerX = frequencyToPixel(center, width);
+            // CRITICAL: Account for CSS scale(0.75) on .audio-visualization-section
+            // The overlay canvas is scaled by CSS, so we need to scale our drawing coordinates
+            const cssScale = 0.75;
+            const scaledWidth = waterfallOverlayCanvas.width / cssScale;
+            
+            // Draw center line (bright yellow solid) on overlay - full height
+            const centerX = frequencyToPixel(center, scaledWidth);
             waterfallOverlayCtx.strokeStyle = 'rgba(255, 255, 0, 0.9)';
-            waterfallOverlayCtx.lineWidth = 2;
+            waterfallOverlayCtx.lineWidth = 2 / cssScale; // Scale line width too
             waterfallOverlayCtx.beginPath();
             waterfallOverlayCtx.moveTo(centerX, 0);
-            waterfallOverlayCtx.lineTo(centerX, height - 30);
+            waterfallOverlayCtx.lineTo(centerX, waterfallOverlayCanvas.height);
             waterfallOverlayCtx.stroke();
             
-            // Draw bandwidth edges (semi-transparent yellow dashed) on overlay
+            // Draw bandwidth edges (semi-transparent yellow dashed) on overlay - full height
             if (lowFreq >= displayLow && lowFreq <= displayHigh) {
-                const lowX = frequencyToPixel(lowFreq, width);
+                const lowX = frequencyToPixel(lowFreq, scaledWidth);
                 waterfallOverlayCtx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
-                waterfallOverlayCtx.lineWidth = 1;
-                waterfallOverlayCtx.setLineDash([5, 5]);
+                waterfallOverlayCtx.lineWidth = 1 / cssScale;
+                waterfallOverlayCtx.setLineDash([5 / cssScale, 5 / cssScale]);
                 waterfallOverlayCtx.beginPath();
                 waterfallOverlayCtx.moveTo(lowX, 0);
-                waterfallOverlayCtx.lineTo(lowX, height - 30);
+                waterfallOverlayCtx.lineTo(lowX, waterfallOverlayCanvas.height);
                 waterfallOverlayCtx.stroke();
                 waterfallOverlayCtx.setLineDash([]);
             }
             
             if (highFreq >= displayLow && highFreq <= displayHigh) {
-                const highX = frequencyToPixel(highFreq, width);
+                const highX = frequencyToPixel(highFreq, scaledWidth);
                 waterfallOverlayCtx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
-                waterfallOverlayCtx.lineWidth = 1;
-                waterfallOverlayCtx.setLineDash([5, 5]);
+                waterfallOverlayCtx.lineWidth = 1 / cssScale;
+                waterfallOverlayCtx.setLineDash([5 / cssScale, 5 / cssScale]);
                 waterfallOverlayCtx.beginPath();
                 waterfallOverlayCtx.moveTo(highX, 0);
-                waterfallOverlayCtx.lineTo(highX, height - 30);
+                waterfallOverlayCtx.lineTo(highX, waterfallOverlayCanvas.height);
                 waterfallOverlayCtx.stroke();
                 waterfallOverlayCtx.setLineDash([]);
             }
@@ -2096,36 +2380,40 @@ function updateWaterfall() {
             
             // Only draw if within visible range
             if (center >= displayLow && center <= displayHigh) {
-                // Draw center line (bright red solid) on overlay
-                const centerX = frequencyToPixel(center, width);
+                // CRITICAL: Account for CSS scale(0.75) on .audio-visualization-section
+                const cssScale = 0.75;
+                const scaledWidth = waterfallOverlayCanvas.width / cssScale;
+                
+                // Draw center line (bright red solid) on overlay - full height
+                const centerX = frequencyToPixel(center, scaledWidth);
                 waterfallOverlayCtx.strokeStyle = 'rgba(255, 0, 0, 0.9)';
-                waterfallOverlayCtx.lineWidth = 2;
+                waterfallOverlayCtx.lineWidth = 2 / cssScale;
                 waterfallOverlayCtx.beginPath();
                 waterfallOverlayCtx.moveTo(centerX, 0);
-                waterfallOverlayCtx.lineTo(centerX, height - 30);
+                waterfallOverlayCtx.lineTo(centerX, waterfallOverlayCanvas.height);
                 waterfallOverlayCtx.stroke();
                 
-                // Draw bandwidth edges (semi-transparent red dashed) on overlay
+                // Draw bandwidth edges (semi-transparent red dashed) on overlay - full height
                 if (lowFreq >= displayLow && lowFreq <= displayHigh) {
-                    const lowX = frequencyToPixel(lowFreq, width);
+                    const lowX = frequencyToPixel(lowFreq, scaledWidth);
                     waterfallOverlayCtx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
-                    waterfallOverlayCtx.lineWidth = 1;
-                    waterfallOverlayCtx.setLineDash([5, 5]);
+                    waterfallOverlayCtx.lineWidth = 1 / cssScale;
+                    waterfallOverlayCtx.setLineDash([5 / cssScale, 5 / cssScale]);
                     waterfallOverlayCtx.beginPath();
                     waterfallOverlayCtx.moveTo(lowX, 0);
-                    waterfallOverlayCtx.lineTo(lowX, height - 30);
+                    waterfallOverlayCtx.lineTo(lowX, waterfallOverlayCanvas.height);
                     waterfallOverlayCtx.stroke();
                     waterfallOverlayCtx.setLineDash([]);
                 }
                 
                 if (highFreq >= displayLow && highFreq <= displayHigh) {
-                    const highX = frequencyToPixel(highFreq, width);
+                    const highX = frequencyToPixel(highFreq, scaledWidth);
                     waterfallOverlayCtx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
-                    waterfallOverlayCtx.lineWidth = 1;
-                    waterfallOverlayCtx.setLineDash([5, 5]);
+                    waterfallOverlayCtx.lineWidth = 1 / cssScale;
+                    waterfallOverlayCtx.setLineDash([5 / cssScale, 5 / cssScale]);
                     waterfallOverlayCtx.beginPath();
                     waterfallOverlayCtx.moveTo(highX, 0);
-                    waterfallOverlayCtx.lineTo(highX, height - 30);
+                    waterfallOverlayCtx.lineTo(highX, waterfallOverlayCanvas.height);
                     waterfallOverlayCtx.stroke();
                     waterfallOverlayCtx.setLineDash([]);
                 }
@@ -2819,8 +3107,151 @@ let spectrumDisplay = null;
 let lastZoomTime = 0;
 const ZOOM_THROTTLE_MS = 1000;
 
+// Load bookmarks from server
+async function loadBookmarks() {
+    try {
+        const response = await fetch('/api/bookmarks');
+        if (response.ok) {
+            bookmarks = await response.json();
+            window.bookmarks = bookmarks; // Update window reference
+            log(`Loaded ${bookmarks.length} bookmarks`);
+            // Bookmarks will be drawn automatically when spectrum display draws
+        } else {
+            log('No bookmarks available', 'error');
+        }
+    } catch (err) {
+        console.error('Failed to load bookmarks:', err);
+        log('Failed to load bookmarks: ' + err.message, 'error');
+    }
+}
+
+// Draw bookmark flags on the spectrum display (expose on window for spectrum-display.js access)
+function drawBookmarksOnSpectrum() {
+    if (!spectrumDisplay || !bookmarks || bookmarks.length === 0) {
+        bookmarkPositions = [];
+        window.bookmarkPositions = bookmarkPositions;
+        return;
+    }
+
+    const ctx = spectrumDisplay.overlayCtx;
+    
+    if (!ctx || !spectrumDisplay.totalBandwidth || !spectrumDisplay.centerFreq) {
+        bookmarkPositions = [];
+        window.bookmarkPositions = bookmarkPositions;
+        return;
+    }
+
+    // Calculate frequency range (same as frequency cursor)
+    const startFreq = spectrumDisplay.centerFreq - spectrumDisplay.totalBandwidth / 2;
+    const endFreq = spectrumDisplay.centerFreq + spectrumDisplay.totalBandwidth / 2;
+
+    // Clear bookmark positions array
+    bookmarkPositions = [];
+
+    // Draw each bookmark that's within the visible range
+    bookmarks.forEach(bookmark => {
+        // Only draw if tuned frequency is within range (same check as cursor)
+        if (bookmark.frequency < startFreq || bookmark.frequency > endFreq) {
+            return;
+        }
+        
+        // Calculate x position (same formula as frequency cursor at line 633)
+        const x = ((bookmark.frequency - startFreq) / (endFreq - startFreq)) * spectrumDisplay.width;
+
+        // Draw at same height as bandwidth marker (y=20)
+        const labelY = 20;
+        
+        // Draw bookmark label (similar to frequency cursor but gold)
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        
+        // Background for label
+        const labelWidth = ctx.measureText(bookmark.name).width + 8;
+        const labelHeight = 12;
+        
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.95)'; // Gold background
+        ctx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
+        
+        // Border for label
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
+        
+        // Label text
+        ctx.fillStyle = '#000000'; // Black text on gold background
+        ctx.fillText(bookmark.name, x, labelY + 2);
+        
+        // Draw downward arrow below label (smaller than frequency cursor)
+        const arrowY = labelY + labelHeight;
+        const arrowLength = 6;
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.95)';
+        ctx.beginPath();
+        ctx.moveTo(x, arrowY + arrowLength); // Arrow tip
+        ctx.lineTo(x - 4, arrowY); // Left point
+        ctx.lineTo(x + 4, arrowY); // Right point
+        ctx.closePath();
+        ctx.fill();
+        
+        // Arrow border
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        // Store bookmark position for hover detection
+        bookmarkPositions.push({
+            x: x,
+            y: labelY,
+            width: labelWidth,
+            height: labelHeight + arrowLength,
+            bookmark: bookmark
+        });
+    });
+    
+    // Update window reference
+    window.bookmarkPositions = bookmarkPositions;
+}
+window.drawBookmarksOnSpectrum = drawBookmarksOnSpectrum;
+
+// Handle bookmark click (expose on window for spectrum-display.js access)
+function handleBookmarkClick(frequency, mode) {
+    // Set frequency
+    document.getElementById('frequency').value = frequency;
+    updateBandButtons(frequency);
+
+    // Set mode (mode is already lowercase from JSON)
+    setMode(mode);
+
+    // Update URL
+    updateURL();
+
+    // Connect if not connected, otherwise tune
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connect();
+    } else {
+        autoTune();
+    }
+
+    // Zoom spectrum to maximum (1 Hz/bin)
+    if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
+        // Send zoom request directly to 1 Hz/bin for maximum zoom
+        spectrumDisplay.ws.send(JSON.stringify({
+            type: 'zoom',
+            frequency: frequency,
+            binBandwidth: 1.0  // Minimum bin bandwidth = maximum zoom
+        }));
+        log(`Tuned to bookmark: ${formatFrequency(frequency)} ${mode.toUpperCase()} (zoomed to max)`);
+    } else {
+        log(`Tuned to bookmark: ${formatFrequency(frequency)} ${mode.toUpperCase()}`);
+    }
+}
+window.handleBookmarkClick = handleBookmarkClick;
+
 // Initialize spectrum display on page load
 document.addEventListener('DOMContentLoaded', () => {
+    // Load bookmarks
+    loadBookmarks();
+
     // Initialize spectrum display
     try {
         spectrumDisplay = new SpectrumDisplay('spectrum-display-canvas', {
@@ -2843,6 +3274,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 log(`Spectrum: ${config.binCount} bins @ ${config.binBandwidth} Hz, ${formatFrequency(config.centerFreq)}`);
                 // Update cursor with current frequency input value
                 updateSpectrumCursor();
+                // Update zoom display with new zoom level from config
+                updateSpectrumZoomDisplay();
             },
             onFrequencyClick: (freq) => {
                 // When user clicks on spectrum, tune to that frequency
@@ -2865,6 +3298,23 @@ document.addEventListener('DOMContentLoaded', () => {
         // Connect to spectrum WebSocket
         spectrumDisplay.connect();
         
+        // Apply zoom from URL parameters if present
+        if (window.spectrumZoomParams) {
+            const { frequency, binBandwidth } = window.spectrumZoomParams;
+            // Wait a bit for the connection to establish and initial config to arrive
+            setTimeout(() => {
+                if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+                    spectrumDisplay.ws.send(JSON.stringify({
+                        type: 'zoom',
+                        frequency: frequency,
+                        binBandwidth: binBandwidth
+                    }));
+                    log(`Restored spectrum zoom from URL: ${formatFrequency(frequency)} @ ${binBandwidth} Hz/bin`);
+                }
+            }, 1000);
+            delete window.spectrumZoomParams;
+        }
+
         // Set initial cursor position
         updateSpectrumCursor();
         
@@ -2951,45 +3401,75 @@ function updateSpectrumContrast() {
 // Spectrum zoom control functions
 function spectrumZoomIn() {
     if (!spectrumDisplay) return;
-    
+
     const now = Date.now();
     if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
     lastZoomTime = now;
-    
+
     spectrumDisplay.zoomIn();
-    updateSpectrumZoomDisplay();
-    log(`Spectrum zoomed in to ${spectrumDisplay.zoomLevel.toFixed(1)}×`);
+    // Zoom display will be updated when config arrives from server
+    updateURL(); // Save zoom to URL
 }
 
 function spectrumZoomOut() {
     if (!spectrumDisplay) return;
-    
+
     const now = Date.now();
     if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
     lastZoomTime = now;
-    
+
     spectrumDisplay.zoomOut();
-    updateSpectrumZoomDisplay();
-    log(`Spectrum zoomed out to ${spectrumDisplay.zoomLevel.toFixed(1)}×`);
+    // Zoom display will be updated when config arrives from server
+    updateURL(); // Save zoom to URL
 }
 
 function spectrumResetZoom() {
     if (!spectrumDisplay) return;
-    
+
     const now = Date.now();
     if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
     lastZoomTime = now;
-    
+
     spectrumDisplay.resetZoom();
-    updateSpectrumZoomDisplay();
-    log('Spectrum zoom reset to full view');
+    // Zoom display will be updated when config arrives from server
+    updateURL(); // Save zoom to URL (will remove zoom params when at 1x)
+}
+
+function spectrumMaxZoom() {
+    if (!spectrumDisplay) return;
+
+    const now = Date.now();
+    if (now - lastZoomTime < ZOOM_THROTTLE_MS) return;
+    lastZoomTime = now;
+
+    // Get current frequency from input
+    const freqInput = document.getElementById('frequency');
+    const frequency = parseInt(freqInput.value);
+    
+    if (isNaN(frequency)) {
+        log('Invalid frequency for max zoom', 'error');
+        return;
+    }
+
+    // Send zoom request to maximum (1 Hz/bin) at current frequency
+    if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+        spectrumDisplay.ws.send(JSON.stringify({
+            type: 'zoom',
+            frequency: frequency,
+            binBandwidth: 1.0  // Minimum bin bandwidth = maximum zoom
+        }));
+        log(`Zoomed to maximum at ${formatFrequency(frequency)}`);
+    }
+    
+    // Zoom display will be updated when config arrives from server
+    updateURL(); // Save zoom to URL
 }
 
 function updateSpectrumZoomDisplay() {
     if (!spectrumDisplay) return;
-    
+
     const zoomLevel = spectrumDisplay.zoomLevel;
-    const displayText = zoomLevel === 1 ? '1×' : zoomLevel.toFixed(1) + '×';
+    const displayText = Math.round(zoomLevel) + '×';
     const zoomElement = document.getElementById('spectrum-zoom-level');
     if (zoomElement) {
         zoomElement.textContent = displayText;

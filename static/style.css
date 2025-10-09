@@ -65,7 +65,7 @@
 
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: #1a1a1a;
+    background: #adb5bd;
     min-height: 100vh;
     padding: 0;
     margin: 0;
@@ -75,7 +75,7 @@ body {
 .container {
     width: 100%;
     margin: 0;
-    background: white;
+    background: #adb5bd;
     overflow: hidden;
 }
 
@@ -83,8 +83,8 @@ body {
     display: flex;
     justify-content: space-around;
     padding: 20px;
-    background: #f8f9fa;
-    border-bottom: 2px solid #e9ecef;
+    background: #adb5bd;
+    border-bottom: 2px solid #868e96;
 }
 
 .status-item {
@@ -116,10 +116,14 @@ body {
 }
 
 .controls {
-    padding: 30px;
+    padding: 30px 12.5% 10px 12.5%; /* Use percentage padding for centering */
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 20px;
+    gap: 40px; /* Gap between columns */
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-top: -30px; /* Reduce gap from waterfall */
+    margin-bottom: -60px; /* Compensate for scaled height */
 }
 
 .control-group {
@@ -131,6 +135,33 @@ body {
     font-weight: bold;
     margin-bottom: 8px;
     color: #495057;
+}
+
+.frequency-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.frequency-input-wrapper input[type="number"] {
+    flex: 1;
+    padding-right: 35px; /* Make room for Hz text */
+    -moz-appearance: textfield; /* Firefox */
+}
+
+.frequency-input-wrapper input[type="number"]::-webkit-outer-spin-button,
+.frequency-input-wrapper input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.frequency-unit {
+    position: absolute;
+    right: 12px;
+    color: #6c757d;
+    font-weight: bold;
+    font-size: 0.9em;
+    pointer-events: none;
 }
 
 .control-group input[type="number"],
@@ -315,13 +346,18 @@ button:not(.primary-btn):not(:disabled):hover {
 }
 
 .audio-controls {
-    padding: 20px 30px;
-    background: #f8f9fa;
-    border-top: 2px solid #e9ecef;
-    border-bottom: 2px solid #e9ecef;
+    padding: 5px 0;
+    background: #adb5bd;
+    border-top: none;
+    border-bottom: none;
     display: flex;
     gap: 30px;
     align-items: center;
+    justify-content: center;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-top: -70px; /* Reduce gap from controls */
+    margin-bottom: -20px; /* Compensate for scaled height */
 }
 
 .audio-controls .control-group {
@@ -388,8 +424,12 @@ input[type="range"]::-moz-range-thumb {
 /* Audio Visualization Section (Collapsible) */
 .audio-visualization-section {
     padding: 0 30px;
-    background: #f8f9fa;
-    border-top: 2px solid #e9ecef;
+    background: #adb5bd;
+    border-top: none;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-top: 20px;
+    margin-bottom: -20px;
 }
 
 .audio-visualization-header {
@@ -432,8 +472,8 @@ input[type="range"]::-moz-range-thumb {
 
 /* Visualizer Panel */
 .visualizer-panel {
-    padding: 10px 0 30px 0;
-    background: #f8f9fa;
+    padding: 10px 0 10px 0;
+    background: #adb5bd;
 }
 
 .visualizer-panel h3 {
@@ -544,7 +584,7 @@ input[type="range"]::-moz-range-thumb {
 .oscilloscope-container {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 0;
 }
 
 .oscilloscope-container label {
@@ -618,8 +658,8 @@ input[type="range"]::-moz-range-thumb {
 .spectrum-container {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-bottom: 10px;
+    gap: 0;
+    margin-bottom: 0;
 }
 
 .spectrum-container label {
@@ -639,7 +679,7 @@ input[type="range"]::-moz-range-thumb {
 .waterfall-container {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 0;
 }
 
 .waterfall-container label {
@@ -654,6 +694,8 @@ input[type="range"]::-moz-range-thumb {
     border-radius: 0;
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
     image-rendering: pixelated; /* Crisp pixels for waterfall */
+    display: block;
+    margin-bottom: 0;
 }
 
 .waterfall-controls {
@@ -661,7 +703,7 @@ input[type="range"]::-moz-range-thumb {
     gap: 20px;
     padding: 15px;
     background: #2c3e50;
-    border-radius: 0 0 6px 6px;
+    border-radius: 0;
     align-items: center;
 }
 
@@ -793,7 +835,7 @@ input[type="range"]::-moz-range-thumb {
 
 .log-panel {
     padding: 30px;
-    background: #f8f9fa;
+    background: #adb5bd;
 }
 
 .log-panel h3 {
@@ -978,8 +1020,11 @@ input[type="range"]::-moz-range-thumb {
 /* Bandpass Filter Panel */
 .bandpass-panel {
     padding: 10px 30px;
-    background: #f8f9fa;
-    border-top: 2px solid #e9ecef;
+    background: #adb5bd;
+    border-top: none;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-bottom: -20px;
 }
 
 .bandpass-panel h3 {
@@ -1037,8 +1082,11 @@ input[type="range"]::-moz-range-thumb {
 /* Notch Filter Panel */
 .notch-panel {
     padding: 10px 30px;
-    background: #f8f9fa;
-    border-top: 2px solid #e9ecef;
+    background: #adb5bd;
+    border-top: none;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-bottom: -20px;
 }
 
 .notch-container {
@@ -1171,8 +1219,11 @@ input[type="range"]::-moz-range-thumb {
 /* Compressor Panel */
 .compressor-panel {
     padding: 10px 30px;
-    background: #f8f9fa;
-    border-top: 2px solid #e9ecef;
+    background: #adb5bd;
+    border-top: none;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-bottom: -20px;
 }
 
 .compressor-panel h3 {
@@ -1230,8 +1281,11 @@ input[type="range"]::-moz-range-thumb {
 /* Equalizer Panel */
 .equalizer-panel {
     padding: 10px 30px;
-    background: #f8f9fa;
-    border-top: 2px solid #e9ecef;
+    background: #adb5bd;
+    border-top: none;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-bottom: -20px;
 }
 
 .equalizer-panel h3 {
@@ -1368,8 +1422,11 @@ input[type="range"]::-moz-range-thumb {
 /* CW Decoder Panel */
 .cw-decoder-panel {
     padding: 10px 30px;
-    background: #f8f9fa;
-    border-top: 2px solid #e9ecef;
+    background: #adb5bd;
+    border-top: none;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-bottom: -20px;
 }
 
 .cw-decoder-container {
@@ -1582,9 +1639,9 @@ input[type="range"]::-moz-range-thumb {
 
 /* Spectrum Display Panel (Full-band FFT from radiod) */
 .spectrum-display-panel {
-    padding: 30px;
-    background: #f8f9fa;
-    border-top: 2px solid #e9ecef;
+    padding: 0 0 5px 0;
+    background: #adb5bd;
+    border-top: none;
 }
 
 .spectrum-display-panel h3 {
@@ -1593,9 +1650,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .spectrum-display-container {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
+    position: relative; /* For absolute positioning of controls overlay */
 }
 
 #spectrum-display-canvas {
@@ -1611,19 +1666,52 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .spectrum-display-controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
     display: flex;
-    gap: 20px;
-    padding: 15px;
-    background: #2c3e50;
-    border-radius: 0 0 6px 6px;
+    gap: 10px; /* Reduced gap */
+    padding: 5px 10px; /* Reduced padding for less height */
+    background: rgba(44, 62, 80, 0.65);
     align-items: center;
+    justify-content: center;
     flex-wrap: wrap;
+    z-index: 10;
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.3);
+    font-size: 0.65em; /* Scale down text */
 }
 
 .spectrum-control-group {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px; /* Scaled down */
+}
+
+.spectrum-control-group button {
+    padding: 4px 8px; /* Scaled down from default */
+    font-size: 0.85em;
+    min-width: 30px;
+}
+
+.spectrum-control-group select {
+    padding: 3px 6px; /* Scaled down */
+    font-size: 0.85em;
+}
+
+.spectrum-control-group input[type="range"] {
+    width: 100px; /* Scaled down from 150px */
+    height: 4px; /* Scaled down from 6px */
+}
+
+.spectrum-control-group input[type="range"]::-webkit-slider-thumb {
+    width: 12px; /* Scaled down from 18px */
+    height: 12px;
+}
+
+.spectrum-control-group input[type="range"]::-moz-range-thumb {
+    width: 12px; /* Scaled down from 18px */
+    height: 12px;
 }
 
 .spectrum-control-group label {
@@ -1657,9 +1745,9 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .spectrum-control-group input[type="range"] {
-    width: 150px;
-    height: 6px;
-    border-radius: 3px;
+    width: 100px; /* Scaled down to match other sliders */
+    height: 4px; /* Scaled down */
+    border-radius: 2px;
     background: #34495e;
     outline: none;
     -webkit-appearance: none;
@@ -1668,8 +1756,8 @@ input[type="range"]::-moz-range-thumb {
 .spectrum-control-group input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 18px;
-    height: 18px;
+    width: 12px; /* Scaled down to match other sliders */
+    height: 12px;
     border-radius: 50%;
     background: #667eea;
     cursor: pointer;
@@ -1677,8 +1765,8 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .spectrum-control-group input[type="range"]::-moz-range-thumb {
-    width: 18px;
-    height: 18px;
+    width: 12px; /* Scaled down to match other sliders */
+    height: 12px;
     border-radius: 50%;
     background: #667eea;
     cursor: pointer;
@@ -1705,4 +1793,43 @@ input[type="range"]::-moz-range-thumb {
 
 .spectrum-status.connected {
     color: #4CAF50;
+}
+
+/* Signal Meter in Spectrum Controls */
+.signal-meter {
+    position: relative;
+    width: 120px;
+    height: 16px;
+    background: #1a252f;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 2px solid #34495e;
+}
+
+.signal-meter-bar {
+    position: absolute;
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(to right, #28a745 0%, #ffc107 50%, #dc3545 100%);
+    transition: width 0.1s ease-out, background 0.3s ease-out;
+    border-radius: 6px;
+}
+
+#signal-meter-value {
+    min-width: 55px;
+    text-align: center;
+    transition: color 0.3s ease-out;
+}
+
+#signal-meter-value.flashing {
+    animation: signal-flash 0.5s ease-in-out infinite;
+}
+
+@keyframes signal-flash {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.3;
+    }
 }

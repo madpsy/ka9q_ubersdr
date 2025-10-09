@@ -9,11 +9,19 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Radiod   RadiodConfig   `yaml:"radiod"`
-	Server   ServerConfig   `yaml:"server"`
-	Audio    AudioConfig    `yaml:"audio"`
-	Spectrum SpectrumConfig `yaml:"spectrum"`
-	Logging  LoggingConfig  `yaml:"logging"`
+	Radiod    RadiodConfig   `yaml:"radiod"`
+	Server    ServerConfig   `yaml:"server"`
+	Audio     AudioConfig    `yaml:"audio"`
+	Spectrum  SpectrumConfig `yaml:"spectrum"`
+	Logging   LoggingConfig  `yaml:"logging"`
+	Bookmarks []Bookmark     `yaml:"bookmarks"`
+}
+
+// Bookmark represents a frequency bookmark
+type Bookmark struct {
+	Name      string `yaml:"name" json:"name"`
+	Frequency uint64 `yaml:"frequency" json:"frequency"`
+	Mode      string `yaml:"mode" json:"mode"`
 }
 
 // RadiodConfig contains radiod connection settings
@@ -33,26 +41,34 @@ type ServerConfig struct {
 
 // AudioConfig contains audio processing settings
 type AudioConfig struct {
-	BufferSize         int            `yaml:"buffer_size"`
-	DefaultSampleRate  int            `yaml:"default_sample_rate"`
-	ModeSampleRates    map[string]int `yaml:"mode_sample_rates"`
+	BufferSize        int            `yaml:"buffer_size"`
+	DefaultSampleRate int            `yaml:"default_sample_rate"`
+	ModeSampleRates   map[string]int `yaml:"mode_sample_rates"`
+	Opus              OpusConfig     `yaml:"opus"`
+}
+
+// OpusConfig contains Opus compression settings
+type OpusConfig struct {
+	Enabled    bool `yaml:"enabled"`
+	Bitrate    int  `yaml:"bitrate"`
+	Complexity int  `yaml:"complexity"`
 }
 
 // SpectrumConfig contains spectrum analyzer settings
 type SpectrumConfig struct {
-	Enabled              bool                  `yaml:"enabled"`
-	Default              SpectrumDefaultConfig `yaml:"default"`
-	PollPeriodMs         int                   `yaml:"poll_period_ms"`
-	MaxSessionsPerUser   int                   `yaml:"max_sessions_per_user"`
-	GainDB               float64               `yaml:"gain_db"` // Gain adjustment in dB applied to spectrum data
-	Smoothing            SmoothingConfig       `yaml:"smoothing"` // Smoothing settings for waterfall display
+	Enabled            bool                  `yaml:"enabled"`
+	Default            SpectrumDefaultConfig `yaml:"default"`
+	PollPeriodMs       int                   `yaml:"poll_period_ms"`
+	MaxSessionsPerUser int                   `yaml:"max_sessions_per_user"`
+	GainDB             float64               `yaml:"gain_db"`   // Gain adjustment in dB applied to spectrum data
+	Smoothing          SmoothingConfig       `yaml:"smoothing"` // Smoothing settings for waterfall display
 }
 
 // SmoothingConfig contains smoothing parameters for spectrum data
 type SmoothingConfig struct {
-	Enabled        bool    `yaml:"enabled"`         // Enable/disable smoothing
-	TemporalAlpha  float32 `yaml:"temporal_alpha"`  // EMA alpha for time smoothing (0-1, lower = more smoothing)
-	SpatialSigma   float32 `yaml:"spatial_sigma"`   // Gaussian sigma for frequency smoothing (0 = disabled)
+	Enabled       bool    `yaml:"enabled"`        // Enable/disable smoothing
+	TemporalAlpha float32 `yaml:"temporal_alpha"` // EMA alpha for time smoothing (0-1, lower = more smoothing)
+	SpatialSigma  float32 `yaml:"spatial_sigma"`  // Gaussian sigma for frequency smoothing (0 = disabled)
 }
 
 // SpectrumDefaultConfig contains default parameters for new spectrum channels
@@ -93,13 +109,20 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Audio.DefaultSampleRate == 0 {
 		config.Audio.DefaultSampleRate = 12000
 	}
+	// Set Opus defaults if not specified
+	if config.Audio.Opus.Bitrate == 0 {
+		config.Audio.Opus.Bitrate = 48000 // 48 kbps default
+	}
+	if config.Audio.Opus.Complexity == 0 {
+		config.Audio.Opus.Complexity = 5 // Medium complexity default
+	}
 	if config.Logging.Level == "" {
 		config.Logging.Level = "info"
 	}
 	if config.Logging.Format == "" {
 		config.Logging.Format = "text"
 	}
-	
+
 	// Set spectrum defaults if not specified
 	if config.Spectrum.Default.CenterFrequency == 0 {
 		config.Spectrum.Default.CenterFrequency = 15000000 // 15 MHz for 0-30 MHz coverage
@@ -116,7 +139,7 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Spectrum.MaxSessionsPerUser == 0 {
 		config.Spectrum.MaxSessionsPerUser = 2
 	}
-	
+
 	// Set smoothing defaults if not specified
 	// Note: enabled defaults to false, so only set alpha/sigma if they're 0
 	if config.Spectrum.Smoothing.TemporalAlpha == 0 {

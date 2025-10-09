@@ -1,7 +1,9 @@
 package main
 
 import (
-	"encoding/base64"
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,6 +16,8 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
+	// Disable Gorilla's compression - we'll do it manually
+	EnableCompression: false,
 	CheckOrigin: func(r *http.Request) bool {
 		// Allow all origins for now (configure CORS properly in production)
 		return true
@@ -40,14 +44,121 @@ func (sh *sessionHolder) setSession(s *Session) {
 
 // wsConn wraps a WebSocket connection with a write mutex to prevent concurrent writes
 type wsConn struct {
-	conn     *websocket.Conn
-	writeMu  sync.Mutex
+	conn            *websocket.Conn
+	writeMu         sync.Mutex
+	bytesWritten    int64
+	messagesWritten int64
+	statsStartTime  time.Time
+	lastStatsLog    time.Time
+	label           string // "Audio" or "Spectrum"
 }
 
 func (wc *wsConn) writeJSON(v interface{}) error {
 	wc.writeMu.Lock()
 	defer wc.writeMu.Unlock()
-	return wc.conn.WriteJSON(v)
+
+	// Marshal to JSON
+	jsonData, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	// Track bytes for statistics
+	wc.bytesWritten += int64(len(jsonData))
+	wc.messagesWritten++
+
+	// Write as text message (uncompressed)
+	wc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	if err := wc.conn.WriteMessage(websocket.TextMessage, jsonData); err != nil {
+		return err
+	}
+
+	// Log stats every 5 seconds
+	now := time.Now()
+	if wc.statsStartTime.IsZero() {
+		wc.statsStartTime = now
+		wc.lastStatsLog = now
+	}
+
+	if now.Sub(wc.lastStatsLog) >= 5*time.Second {
+		elapsed := now.Sub(wc.lastStatsLog).Seconds()
+		kbps := float64(wc.bytesWritten) / 1024 / elapsed
+
+		label := wc.label
+		if label == "" {
+			label = "WebSocket"
+		}
+		log.Printf("%s stats: %.1f KB/s (%d msgs)",
+			label, kbps, wc.messagesWritten)
+
+		// Reset counters for next interval
+		wc.bytesWritten = 0
+		wc.messagesWritten = 0
+		wc.lastStatsLog = now
+	}
+
+	return nil
+}
+
+func (wc *wsConn) writeJSONCompressed(v interface{}) error {
+	wc.writeMu.Lock()
+	defer wc.writeMu.Unlock()
+
+	// Marshal to JSON first
+	jsonData, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	uncompressedSize := len(jsonData)
+
+	// Compress with gzip
+	var compressedBuf bytes.Buffer
+	gzipWriter := gzip.NewWriter(&compressedBuf)
+	if _, err := gzipWriter.Write(jsonData); err != nil {
+		return err
+	}
+	if err := gzipWriter.Close(); err != nil {
+		return err
+	}
+	compressedData := compressedBuf.Bytes()
+	compressedSize := len(compressedData)
+
+	// Track compressed bytes for statistics
+	wc.bytesWritten += int64(compressedSize)
+	wc.messagesWritten++
+
+	// Write compressed message as binary
+	wc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	if err := wc.conn.WriteMessage(websocket.BinaryMessage, compressedData); err != nil {
+		return err
+	}
+
+	// Log stats every 5 seconds
+	now := time.Now()
+	if wc.statsStartTime.IsZero() {
+		wc.statsStartTime = now
+		wc.lastStatsLog = now
+	}
+
+	if now.Sub(wc.lastStatsLog) >= 5*time.Second {
+		elapsed := now.Sub(wc.lastStatsLog).Seconds()
+		kbps := float64(wc.bytesWritten) / 1024 / elapsed
+		compressionRatio := float64(uncompressedSize) / float64(compressedSize)
+
+		label := wc.label
+		if label == "" {
+			label = "WebSocket"
+		}
+		log.Printf("%s stats: %.1f KB/s (%d msgs, compression: %.1fx, uncompressed would be: %.1f KB/s)",
+			label, kbps, wc.messagesWritten, compressionRatio, kbps*compressionRatio)
+
+		// Reset counters for next interval
+		wc.bytesWritten = 0
+		wc.messagesWritten = 0
+		wc.lastStatsLog = now
+	}
+
+	return nil
 }
 
 func (wc *wsConn) setWriteDeadline(t time.Time) error {
@@ -68,13 +179,15 @@ func (wc *wsConn) close() error {
 type WebSocketHandler struct {
 	sessions      *SessionManager
 	audioReceiver *AudioReceiver
+	config        *Config
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
-func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver) *WebSocketHandler {
+func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config) *WebSocketHandler {
 	return &WebSocketHandler{
 		sessions:      sessions,
 		audioReceiver: audioReceiver,
+		config:        config,
 	}
 }
 
@@ -89,15 +202,16 @@ type ClientMessage struct {
 
 // ServerMessage represents a message to the client
 type ServerMessage struct {
-	Type       string      `json:"type"`
-	Data       string      `json:"data,omitempty"`
-	SampleRate int         `json:"sampleRate,omitempty"`
-	Channels   int         `json:"channels,omitempty"`
-	Frequency  uint64      `json:"frequency,omitempty"`
-	Mode       string      `json:"mode,omitempty"`
-	SessionID  string      `json:"sessionId,omitempty"`
-	Error      string      `json:"error,omitempty"`
-	Info       interface{} `json:"info,omitempty"`
+	Type        string      `json:"type"`
+	Data        string      `json:"data,omitempty"`
+	SampleRate  int         `json:"sampleRate,omitempty"`
+	Channels    int         `json:"channels,omitempty"`
+	Frequency   uint64      `json:"frequency,omitempty"`
+	Mode        string      `json:"mode,omitempty"`
+	SessionID   string      `json:"sessionId,omitempty"`
+	Error       string      `json:"error,omitempty"`
+	Info        interface{} `json:"info,omitempty"`
+	AudioFormat string      `json:"audioFormat,omitempty"` // "pcm" or "opus"
 }
 
 // HandleWebSocket handles WebSocket connections
@@ -108,9 +222,9 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		log.Printf("Failed to upgrade connection: %v", err)
 		return
 	}
-	
-	// Wrap connection with write mutex
-	conn := &wsConn{conn: rawConn}
+
+	// Wrap connection with write mutex and label it as Audio
+	conn := &wsConn{conn: rawConn, label: "Audio"}
 	defer conn.close()
 
 	// Get initial parameters from query string
@@ -168,7 +282,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	// Handle incoming messages (this will manage session lifecycle)
 	wsh.handleMessages(conn, sessionHolder, done)
-	
+
 	// Cleanup
 	currentSession := sessionHolder.getSession()
 	wsh.audioReceiver.ReleaseChannelAudio(currentSession)
@@ -204,7 +318,7 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			newMode := currentSession.Mode
 			newBandwidthLow := currentSession.BandwidthLow
 			newBandwidthHigh := currentSession.BandwidthHigh
-			
+
 			if msg.Frequency > 0 {
 				// Validate frequency range: 100 kHz to 30 MHz
 				const minFreq uint64 = 100000   // 100 kHz
@@ -234,17 +348,17 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					newBandwidthHigh = *msg.BandwidthHigh
 				}
 			}
-			
+
 			// Check what actually changed
 			freqChanged := newFreq != currentSession.Frequency
 			modeChanged := newMode != currentSession.Mode
 			bandwidthChanged := newBandwidthLow != currentSession.BandwidthLow || newBandwidthHigh != currentSession.BandwidthHigh
-			
+
 			if freqChanged || modeChanged || bandwidthChanged {
 				log.Printf("Updating session: %d Hz %s (BW:%d-%d) -> %d Hz %s (BW:%d-%d)",
 					currentSession.Frequency, currentSession.Mode, currentSession.BandwidthLow, currentSession.BandwidthHigh,
 					newFreq, newMode, newBandwidthLow, newBandwidthHigh)
-				
+
 				// Validate bandwidth if it changed
 				if bandwidthChanged {
 					if newBandwidthLow == newBandwidthHigh {
@@ -252,7 +366,7 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 						continue // Non-fatal, keep connection open
 					}
 				}
-				
+
 				// Special handling when mode changes:
 				// Mode change triggers preset reload in radiod which resets bandwidth
 				// So we need to send mode first, then send bandwidth separately with mode-specific defaults
@@ -262,17 +376,17 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					if freqChanged {
 						updateFreq = newFreq
 					}
-					
+
 					if err := wsh.sessions.UpdateSessionWithEdges(currentSession.ID, updateFreq, newMode, 0, 0, false); err != nil {
 						wsh.sendError(conn, "Failed to update mode: "+err.Error())
 						continue
 					}
-					
+
 					// CRITICAL: Wait for radiod to process mode change and load preset
 					// Without this delay, the bandwidth command arrives before preset is loaded
 					// 500ms gives radiod enough time to fully process the preset
 					time.Sleep(500 * time.Millisecond)
-					
+
 					// Step 2: Send bandwidth values that match frontend defaults for this mode
 					// These match the defaults in app.js setMode() function
 					var defaultLow, defaultHigh int
@@ -299,7 +413,7 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 						defaultLow = 50
 						defaultHigh = 3000
 					}
-					
+
 					// Use custom bandwidth if provided, otherwise use mode defaults
 					sendBandwidthLow := defaultLow
 					sendBandwidthHigh := defaultHigh
@@ -307,7 +421,7 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 						sendBandwidthLow = newBandwidthLow
 						sendBandwidthHigh = newBandwidthHigh
 					}
-					
+
 					if err := wsh.sessions.UpdateSessionWithEdges(currentSession.ID, 0, "", sendBandwidthLow, sendBandwidthHigh, true); err != nil {
 						wsh.sendError(conn, "Failed to update bandwidth after mode change: "+err.Error())
 						continue
@@ -318,7 +432,7 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					updateBandwidthLow := 0
 					updateBandwidthHigh := 0
 					sendBandwidth := false
-					
+
 					if freqChanged {
 						updateFreq = newFreq
 					}
@@ -327,13 +441,13 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 						updateBandwidthHigh = newBandwidthHigh
 						sendBandwidth = true
 					}
-					
+
 					if err := wsh.sessions.UpdateSessionWithEdges(currentSession.ID, updateFreq, "", updateBandwidthLow, updateBandwidthHigh, sendBandwidth); err != nil {
 						wsh.sendError(conn, "Failed to update channel: "+err.Error())
 						continue
 					}
 				}
-				
+
 				// Send updated status
 				wsh.sendStatus(conn, currentSession)
 			}
@@ -353,9 +467,13 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 
 // streamAudio streams audio data to the client
 func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHolder, done <-chan struct{}) {
+	// Initialize Opus encoder (will be stub if not compiled with opus tag)
+	session := sessionHolder.getSession()
+	opusEncoder := NewOpusEncoder(wsh.config, session.SampleRate)
+
 	for {
 		session := sessionHolder.getSession()
-		
+
 		select {
 		case <-done:
 			return
@@ -364,7 +482,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			// Session was destroyed, wait a bit for new session
 			time.Sleep(10 * time.Millisecond)
 			continue
-			
+
 		case pcmData, ok := <-session.AudioChan:
 			if !ok {
 				// Channel closed, wait for new session
@@ -372,15 +490,16 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				continue
 			}
 
-			// Encode PCM data as base64
-			encoded := base64.StdEncoding.EncodeToString(pcmData)
+			// Encode audio (will return PCM if Opus not available/enabled)
+			encoded, audioFormat, _ := opusEncoder.Encode(pcmData)
 
-			// Send audio message
+			// Send audio message with format indicator
 			msg := ServerMessage{
-				Type:       "audio",
-				Data:       encoded,
-				SampleRate: session.SampleRate,
-				Channels:   1, // Mono
+				Type:        "audio",
+				Data:        encoded,
+				SampleRate:  session.SampleRate,
+				Channels:    1, // Mono
+				AudioFormat: audioFormat,
 			}
 
 			if err := wsh.sendMessage(conn, msg); err != nil {

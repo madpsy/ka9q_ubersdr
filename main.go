@@ -35,6 +35,15 @@ func main() {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
+	// Load bookmarks from bookmarks.conf if it exists
+	bookmarksConfig, err := LoadConfig("bookmarks.conf")
+	if err == nil {
+		config.Bookmarks = bookmarksConfig.Bookmarks
+		log.Printf("Loaded %d bookmarks from bookmarks.conf", len(config.Bookmarks))
+	} else {
+		log.Printf("No bookmarks.conf found or error loading: %v", err)
+	}
+
 	log.Printf("Starting ka9q_ubersdr server...")
 	log.Printf("Radiod status: %s", config.Radiod.StatusGroup)
 	log.Printf("Radiod data: %s", config.Radiod.DataGroup)
@@ -78,7 +87,7 @@ func main() {
 	defer userSpectrumManager.Stop()
 
 	// Initialize WebSocket handlers
-	wsHandler := NewWebSocketHandler(sessions, audioReceiver)
+	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config)
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
 	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions) // New per-user spectrum
 
@@ -92,6 +101,9 @@ func main() {
 	})
 	http.HandleFunc("/test-spectrum", func(w http.ResponseWriter, r *http.Request) {
 		handleTestSpectrum(w, r, sessions)
+	})
+	http.HandleFunc("/api/bookmarks", func(w http.ResponseWriter, r *http.Request) {
+		handleBookmarks(w, r, config)
 	})
 
 	// Serve static files
@@ -171,4 +183,14 @@ func handleTestSpectrum(w http.ResponseWriter, r *http.Request, sessions *Sessio
 		"success": true,
 		"session": session.GetInfo(),
 	})
+}
+
+// handleBookmarks serves the bookmarks configuration
+func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	if err := json.NewEncoder(w).Encode(config.Bookmarks); err != nil {
+		log.Printf("Error encoding bookmarks: %v", err)
+	}
 }

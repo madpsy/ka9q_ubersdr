@@ -75,7 +75,8 @@ class SpectrumDisplay {
         this.overlayDiv.style.position = 'relative';
         this.overlayDiv.style.width = this.width + 'px';
         this.overlayDiv.style.height = '35px'; // Height for label and arrow
-        this.overlayDiv.style.pointerEvents = 'none';
+        this.overlayDiv.style.pointerEvents = 'auto'; // Enable pointer events for bookmark clicks
+        this.overlayDiv.style.cursor = 'pointer'; // Show pointer cursor over bookmarks
         
         // Create canvas inside overlay div
         this.overlayCanvas = document.createElement('canvas');
@@ -88,9 +89,35 @@ class SpectrumDisplay {
         
         this.overlayCtx = this.overlayCanvas.getContext('2d', { alpha: true });
         
+        // Add click handler for bookmarks on overlay canvas
+        this.overlayCanvas.addEventListener('click', (e) => {
+            const rect = this.overlayCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // Check if click is on a bookmark
+            if (typeof window.bookmarks !== 'undefined' && typeof window.handleBookmarkClick === 'function') {
+                const startFreq = this.centerFreq - this.totalBandwidth / 2;
+                const endFreq = this.centerFreq + this.totalBandwidth / 2;
+                
+                // Check each bookmark to see if click is near it
+                for (let bookmark of window.bookmarks) {
+                    if (bookmark.frequency >= startFreq && bookmark.frequency <= endFreq) {
+                        const bookmarkX = ((bookmark.frequency - startFreq) / this.totalBandwidth) * this.width;
+                        
+                        // Check if click is within 30 pixels of bookmark (wider hit area)
+                        if (Math.abs(x - bookmarkX) <= 30) {
+                            window.handleBookmarkClick(bookmark.frequency, bookmark.mode);
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        
         // Configuration
         this.config = {
-            wsUrl: config.wsUrl || `ws://${window.location.host}/ws/user-spectrum`,
+            wsUrl: config.wsUrl || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/user-spectrum`,
             minDb: config.minDb !== undefined ? config.minDb : -100,
             maxDb: config.maxDb !== undefined ? config.maxDb : 0,
             autoRange: config.autoRange === true, // Disable auto-ranging by default
@@ -135,6 +162,7 @@ class SpectrumDisplay {
         // Waterfall
         this.waterfallImageData = null;
         this.waterfallLineCount = 0;
+        this.waterfallStartTime = null;
         
         // WebSocket
         this.ws = null;
@@ -146,6 +174,12 @@ class SpectrumDisplay {
         // Animation
         this.animationFrame = null;
         this.lastUpdate = 0;
+
+        // Bit rate tracking
+        this.bytesReceived = 0;
+        this.messageCount = 0;
+        this.lastBitrateUpdate = Date.now();
+        this.currentBitrate = 0;
         
         // Mouse interaction
         this.mouseX = -1;
@@ -208,9 +242,47 @@ class SpectrumDisplay {
                 }
             };
             
-            this.ws.onmessage = (event) => {
+            this.ws.onmessage = async (event) => {
                 try {
-                    const msg = JSON.parse(event.data);
+                    let msg;
+                    let byteLength;
+
+                    // Check if message is binary (compressed) or text (uncompressed)
+                    if (event.data instanceof Blob) {
+                        // Binary message - decompress with gzip
+                        const compressedData = await event.data.arrayBuffer();
+                        byteLength = compressedData.byteLength;
+
+                        // Decompress using DecompressionStream (modern browsers)
+                        const decompressedStream = new Response(
+                            new Blob([compressedData]).stream().pipeThrough(new DecompressionStream('gzip'))
+                        );
+                        const decompressedText = await decompressedStream.text();
+                        msg = JSON.parse(decompressedText);
+                    } else {
+                        // Text message - parse directly
+                        byteLength = event.data.length;
+                        msg = JSON.parse(event.data);
+                    }
+
+                    this.bytesReceived += byteLength;
+                    this.messageCount++;
+
+                    // Update bit rate display every second
+                    const now = Date.now();
+                    const timeSinceLastUpdate = now - this.lastBitrateUpdate;
+                    if (timeSinceLastUpdate >= 1000) {
+                        // Calculate KB/s
+                        this.currentBitrate = (this.bytesReceived / 1024) / (timeSinceLastUpdate / 1000);
+
+                        this.updateBitrateDisplay();
+
+                        // Reset counters
+                        this.bytesReceived = 0;
+                        this.messageCount = 0;
+                        this.lastBitrateUpdate = now;
+                    }
+
                     this.handleMessage(msg);
                 } catch (err) {
                     console.error('Error parsing spectrum message:', err);
@@ -356,6 +428,12 @@ class SpectrumDisplay {
                 
                 this.lastUpdate = Date.now();
                 this.draw();
+                // Update tooltip with new data even if mouse hasn't moved
+                if (this.mouseX >= 0 && this.mouseY >= 0 && !this.isDragging) {
+                    this.updateTooltip();
+                }
+                // Update signal meter with new data
+                this.updateSignalMeter();
                 break;
                 
             case 'pong':
@@ -387,13 +465,19 @@ class SpectrumDisplay {
         if (this.config.autoRange) {
             this.updateAutoRange();
         }
-        
+
         // Initialize waterfall image data if needed
         if (!this.waterfallImageData) {
             this.waterfallImageData = this.ctx.createImageData(this.width, 1);
             // Initialize with black background
             this.ctx.fillStyle = '#000';
             this.ctx.fillRect(0, 0, this.width, this.height);
+        }
+
+        // Initialize start time if needed
+        if (!this.waterfallStartTime) {
+            this.waterfallStartTime = Date.now();
+            this.waterfallLineCount = 0;
         }
         
         // Scroll existing waterfall down by 1 pixel
@@ -466,9 +550,39 @@ class SpectrumDisplay {
         
         // Draw the new line at y=30 (below frequency scale)
         this.ctx.putImageData(this.waterfallImageData, 0, 30);
-        
+
         this.waterfallLineCount++;
-        
+
+        // Draw timestamps on left side frequently (about 4 visible on 600px canvas)
+        // With 600px height, we want timestamps every ~150 pixels
+        // At 60 fps, that's every ~150 frames = ~2.5 seconds
+        const linesPerSecond = 60; // Approximate frame rate
+        const secondsPerTimestamp = 2.5; // Timestamp frequency
+        const linesPerTimestamp = Math.floor(linesPerSecond * secondsPerTimestamp);
+
+        if (this.waterfallLineCount % linesPerTimestamp === 0) {
+            const elapsedSeconds = Math.floor((Date.now() - this.waterfallStartTime) / 1000);
+            const minutes = Math.floor(elapsedSeconds / 60);
+            const seconds = elapsedSeconds % 60;
+            const timestamp = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+            // Draw timestamp on left with background (at y=30 where new line appears)
+            this.ctx.font = 'bold 11px monospace';
+            const textWidth = this.ctx.measureText(timestamp).width;
+
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            this.ctx.fillRect(0, 30, textWidth + 6, 16);
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.strokeStyle = '#000000';
+            this.ctx.lineWidth = 2;
+            this.ctx.textAlign = 'left';
+            this.ctx.textBaseline = 'top';
+
+            this.ctx.strokeText(timestamp, 3, 32);
+            this.ctx.fillText(timestamp, 3, 32);
+        }
+
         // Always draw frequency scale (it gets scrolled away otherwise)
         this.drawFrequencyScale();
     }
@@ -543,7 +657,7 @@ class SpectrumDisplay {
             this.ctx.strokeStyle = '#000000';
             this.ctx.lineWidth = 3;
             
-            const label = this.formatFrequency(freq);
+            const label = this.formatFrequencyScale(freq);
             this.ctx.strokeText(label, x, 20);
             this.ctx.fillText(label, x, 20);
         }
@@ -566,6 +680,12 @@ class SpectrumDisplay {
     drawTunedFrequencyCursor() {
         // Clear overlay canvas
         this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+        
+        // Draw bookmarks first (so cursor appears on top)
+        // This needs to be redrawn because we just cleared the canvas
+        if (typeof window.drawBookmarksOnSpectrum === 'function') {
+            window.drawBookmarksOnSpectrum();
+        }
         
         if (!this.currentTunedFreq || !this.totalBandwidth) return;
         
@@ -645,30 +765,6 @@ class SpectrumDisplay {
             this.overlayCtx.moveTo(xHigh, bracketY - bracketHeight/2);
             this.overlayCtx.lineTo(xHigh, bracketY + bracketHeight/2);
             this.overlayCtx.stroke();
-            
-            // Draw bandwidth label right against the bracket
-            const bwHz = this.currentBandwidthHigh - this.currentBandwidthLow;
-            const bwLabel = bwHz >= 1000 ? `${(bwHz/1000).toFixed(1)} kHz` : `${bwHz} Hz`;
-            this.overlayCtx.font = 'bold 10px monospace';
-            this.overlayCtx.textAlign = 'center';
-            this.overlayCtx.textBaseline = 'top';
-            
-            // Background for bandwidth label (right against the bracket)
-            const bwLabelWidth = this.overlayCtx.measureText(bwLabel).width + 6;
-            const bwLabelX = (xLow + xHigh) / 2;
-            const bwLabelY = bracketY + bracketHeight/2; // Right against the bracket
-            
-            this.overlayCtx.fillStyle = 'rgba(0, 200, 0, 0.95)';
-            this.overlayCtx.fillRect(bwLabelX - bwLabelWidth/2, bwLabelY, bwLabelWidth, 12);
-            
-            // Border for label
-            this.overlayCtx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-            this.overlayCtx.lineWidth = 1;
-            this.overlayCtx.strokeRect(bwLabelX - bwLabelWidth/2, bwLabelY, bwLabelWidth, 12);
-            
-            // Bandwidth label text
-            this.overlayCtx.fillStyle = '#ffffff';
-            this.overlayCtx.fillText(bwLabel, bwLabelX, bwLabelY + 1);
         }
     }
     
@@ -829,7 +925,7 @@ class SpectrumDisplay {
         this.ctx.fillText('Waiting for spectrum data...', this.width / 2, this.height / 2);
     }
     
-    // Format frequency for display
+    // Format frequency for display (used by tooltips and cursor - high precision)
     formatFrequency(freq) {
         if (freq >= 1e9) {
             // GHz: show 5 decimals
@@ -843,6 +939,28 @@ class SpectrumDisplay {
             // kHz: show 2 decimals
             const khz = freq / 1e3;
             return `${khz.toFixed(2)} kHz`;
+        } else {
+            return `${freq.toFixed(0)} Hz`;
+        }
+    }
+
+    // Format frequency for scale markers (lower precision for cleaner display)
+    formatFrequencyScale(freq) {
+        // Use 3 decimal places when zoomed in (zoom level > 1)
+        const decimals = this.zoomLevel > 1 ? 3 : 2;
+        
+        if (freq >= 1e9) {
+            // GHz: show 2 or 3 decimals based on zoom
+            const ghz = freq / 1e9;
+            return `${ghz.toFixed(decimals)} GHz`;
+        } else if (freq >= 1e6) {
+            // MHz: show 2 or 3 decimals based on zoom
+            const mhz = freq / 1e6;
+            return `${mhz.toFixed(decimals)} MHz`;
+        } else if (freq >= 1e3) {
+            // kHz: show 1 or 2 decimals based on zoom
+            const khz = freq / 1e3;
+            return `${khz.toFixed(decimals - 1)} kHz`;
         } else {
             return `${freq.toFixed(0)} Hz`;
         }
@@ -1028,17 +1146,43 @@ class SpectrumDisplay {
             
             const rect = this.canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
             
-            // If we didn't drag (dragDidMove is false), treat it as a click for frequency tuning
-            if (!this.dragDidMove && this.config.onFrequencyClick) {
-                // Calculate frequency from server data range
-                const startFreq = this.centerFreq - this.totalBandwidth / 2;
-                const freq = startFreq + (x / this.width) * this.totalBandwidth;
+            // If we didn't drag (dragDidMove is false), treat it as a click
+            if (!this.dragDidMove) {
+                // Check if click is on a bookmark (top 35 pixels where bookmarks are drawn)
+                if (y <= 35 && typeof window.bookmarks !== 'undefined' && typeof window.handleBookmarkClick === 'function') {
+                    const startFreq = this.centerFreq - this.totalBandwidth / 2;
+                    const endFreq = this.centerFreq + this.totalBandwidth / 2;
+                    
+                    // Check each bookmark to see if click is near it
+                    for (let bookmark of window.bookmarks) {
+                        if (bookmark.frequency >= startFreq && bookmark.frequency <= endFreq) {
+                            const bookmarkX = ((bookmark.frequency - startFreq) / this.totalBandwidth) * this.width;
+                            
+                            // Check if click is within 20 pixels of bookmark
+                            if (Math.abs(x - bookmarkX) <= 20) {
+                                window.handleBookmarkClick(bookmark.frequency, bookmark.mode);
+                                this.isDragging = false;
+                                this.dragDidMove = false;
+                                this.updateCursorStyle();
+                                return;
+                            }
+                        }
+                    }
+                }
                 
-                // Set flag to skip auto-pan since this frequency change is from clicking
-                this.skipNextPan = true;
-                
-                this.config.onFrequencyClick(freq);
+                // If not a bookmark click, handle as frequency tuning
+                if (this.config.onFrequencyClick) {
+                    // Calculate frequency from server data range
+                    const startFreq = this.centerFreq - this.totalBandwidth / 2;
+                    const freq = startFreq + (x / this.width) * this.totalBandwidth;
+                    
+                    // Set flag to skip auto-pan since this frequency change is from clicking
+                    this.skipNextPan = true;
+                    
+                    this.config.onFrequencyClick(freq);
+                }
             }
             
             this.isDragging = false;
@@ -1084,6 +1228,31 @@ class SpectrumDisplay {
         if (!this.spectrumData || this.mouseX < 0 || this.mouseY < 0) {
             this.hideTooltip();
             return;
+        }
+        
+        // Check if mouse is over a bookmark (bookmarks are in overlay canvas at top, height 35px)
+        if (window.bookmarkPositions && window.bookmarkPositions.length > 0 && this.mouseY <= 35) {
+            for (let pos of window.bookmarkPositions) {
+                // Check if mouse is within bookmark bounds (x position only, y is already checked)
+                if (this.mouseX >= pos.x - pos.width / 2 &&
+                    this.mouseX <= pos.x + pos.width / 2) {
+                    
+                    // Show bookmark info
+                    const freqStr = this.formatFrequency(pos.bookmark.frequency);
+                    const modeStr = pos.bookmark.mode.toUpperCase();
+                    this.tooltip.textContent = `${pos.bookmark.name}: ${freqStr} ${modeStr}`;
+                    
+                    // Position tooltip near cursor
+                    const rect = this.canvas.getBoundingClientRect();
+                    const tooltipX = rect.left + this.mouseX + 15;
+                    const tooltipY = rect.top + this.mouseY - 10;
+                    
+                    this.tooltip.style.left = tooltipX + 'px';
+                    this.tooltip.style.top = tooltipY + 'px';
+                    this.tooltip.style.display = 'block';
+                    return;
+                }
+            }
         }
         
         const binIndex = Math.floor((this.mouseX / this.width) * this.spectrumData.length);
@@ -1190,29 +1359,30 @@ class SpectrumDisplay {
     // Zoom out - same bins over wider bandwidth (increase bin bandwidth)
     zoomOut() {
         if (!this.connected || !this.ws) return;
-        
-        // Double the bin bandwidth = double the total bandwidth = 0.5x zoom
-        const newBinBandwidth = this.binBandwidth * 2;
-        
+
         // Don't zoom out past initial bandwidth
         if (!this.initialBinBandwidth) {
             this.initialBinBandwidth = this.binBandwidth;
         }
-        
-        if (newBinBandwidth > this.initialBinBandwidth) {
-            console.log('Minimum zoom reached (full bandwidth)');
+
+        // Double the bin bandwidth = double the total bandwidth = 0.5x zoom
+        let newBinBandwidth = this.binBandwidth * 2;
+
+        // Clamp to initial bandwidth (don't zoom out past full view)
+        if (newBinBandwidth >= this.initialBinBandwidth) {
+            console.log('Already at full bandwidth, use Reset to return to default view');
             return;
         }
-        
+
         // Center on current tuned frequency, or spectrum center if not tuned
         const newCenterFreq = this.currentTunedFreq || this.centerFreq;
-        
+
         const currentTotalBW = this.binBandwidth * this.binCount;
         const newTotalBW = newBinBandwidth * this.binCount;
-        
+
         console.log(`Zoom out: ${(currentTotalBW/1e6).toFixed(3)} MHz -> ${(newTotalBW/1e6).toFixed(3)} MHz ` +
                     `(${this.binBandwidth.toFixed(1)} -> ${newBinBandwidth.toFixed(1)} Hz/bin)`);
-        
+
         // Send zoom request to server
         this.ws.send(JSON.stringify({
             type: 'zoom',
@@ -1221,23 +1391,15 @@ class SpectrumDisplay {
         }));
     }
     
-    // Reset zoom to full view
+    // Reset zoom to full view (0-30 MHz)
     resetZoom() {
         if (!this.connected || !this.ws) return;
-        
-        // Return to initial bin bandwidth
-        if (!this.initialBinBandwidth) {
-            console.log('No initial bandwidth stored');
-            return;
-        }
-        
-        console.log(`Reset zoom: ${this.binBandwidth.toFixed(1)} Hz/bin -> ${this.initialBinBandwidth.toFixed(1)} Hz/bin (full bandwidth)`);
-        
-        // Send zoom request to server - use initial center frequency
+
+        console.log(`Reset zoom to full bandwidth view`);
+
+        // Send reset request to server - backend will use default config values
         this.ws.send(JSON.stringify({
-            type: 'zoom',
-            frequency: 15000000, // Reset to 15 MHz center for 0-30 MHz coverage
-            binBandwidth: this.initialBinBandwidth
+            type: 'reset'
         }));
     }
     
@@ -1264,6 +1426,130 @@ class SpectrumDisplay {
         this.ws.send(JSON.stringify(panMsg));
     }
     
+    // Update bit rate display
+    updateBitrateDisplay() {
+        const bitrateElement = document.getElementById('spectrum-bitrate');
+        if (bitrateElement) {
+            if (this.currentBitrate > 0) {
+                bitrateElement.textContent = `${this.currentBitrate.toFixed(1)} KB/s`;
+                // Color code based on bandwidth usage
+                if (this.currentBitrate < 50) {
+                    bitrateElement.style.color = '#4CAF50'; // Green - good
+                } else if (this.currentBitrate < 100) {
+                    bitrateElement.style.color = '#FFA500'; // Orange - moderate
+                } else {
+                    bitrateElement.style.color = '#FF5722'; // Red - high
+                }
+            } else {
+                bitrateElement.textContent = '-- KB/s';
+                bitrateElement.style.color = '#888';
+            }
+        }
+    }
+
+    // Update signal meter based on peak (highest) dB in tuned bandwidth
+    updateSignalMeter() {
+        if (!this.spectrumData || !this.currentTunedFreq || !this.totalBandwidth) {
+            // Reset meter if no data
+            const meterBar = document.getElementById('signal-meter-bar');
+            const meterValue = document.getElementById('signal-meter-value');
+            if (meterBar) meterBar.style.width = '0%';
+            if (meterValue) meterValue.textContent = '-- dB';
+            return;
+        }
+
+        // Calculate frequency range for tuned bandwidth
+        const startFreq = this.centerFreq - this.totalBandwidth / 2;
+        const lowFreq = this.currentTunedFreq + this.currentBandwidthLow;
+        const highFreq = this.currentTunedFreq + this.currentBandwidthHigh;
+
+        // Convert frequencies to bin indices
+        const lowBinFloat = ((lowFreq - startFreq) / this.totalBandwidth) * this.spectrumData.length;
+        const highBinFloat = ((highFreq - startFreq) / this.totalBandwidth) * this.spectrumData.length;
+
+        const lowBin = Math.max(0, Math.floor(lowBinFloat));
+        const highBin = Math.min(this.spectrumData.length - 1, Math.ceil(highBinFloat));
+
+        // Find peak (maximum) dB across the bandwidth
+        let peakDb = -120;
+        for (let i = lowBin; i <= highBin; i++) {
+            if (i >= 0 && i < this.spectrumData.length) {
+                peakDb = Math.max(peakDb, this.spectrumData[i]);
+            }
+        }
+        
+        // Initialize peak history array and display throttling if needed
+        if (!this.peakHistory) {
+            this.peakHistory = [];
+            this.peakHistoryMaxAge = 500; // 500ms window
+            this.lastMeterUpdate = 0;
+            this.meterUpdateInterval = 100; // Update display every 100ms
+        }
+        
+        // Add current peak to history with timestamp
+        const now = Date.now();
+        this.peakHistory.push({ value: peakDb, timestamp: now });
+        
+        // Remove peaks older than 500ms
+        this.peakHistory = this.peakHistory.filter(p => now - p.timestamp <= this.peakHistoryMaxAge);
+        
+        // Calculate average of peaks in the window
+        const avgPeakDb = this.peakHistory.reduce((sum, p) => sum + p.value, 0) / this.peakHistory.length;
+
+        // Throttle display updates to every 100ms for smoother appearance
+        if (now - this.lastMeterUpdate < this.meterUpdateInterval) {
+            return;
+        }
+        this.lastMeterUpdate = now;
+
+        // Update meter display using averaged peak
+        const meterBar = document.getElementById('signal-meter-bar');
+        const meterValue = document.getElementById('signal-meter-value');
+
+        if (meterBar && meterValue) {
+            // S-meter style logarithmic scale
+            // Weak signals (-120 to -80 dB) use 0-40% of meter
+            // Medium signals (-80 to -60 dB) use 40-80% of meter
+            // Strong signals (-60 to -20 dB) use 80-100% of meter (highly compressed)
+            let percentage;
+            if (avgPeakDb < -80) {
+                // Weak: -120 to -80 dB maps to 0-40%
+                percentage = ((avgPeakDb + 120) / 40) * 40;
+            } else if (avgPeakDb < -60) {
+                // Medium: -80 to -60 dB maps to 40-80%
+                percentage = 40 + ((avgPeakDb + 80) / 20) * 40;
+            } else {
+                // Strong: -60 to -20 dB maps to 80-100% (highly compressed)
+                percentage = 80 + ((avgPeakDb + 60) / 40) * 20;
+            }
+
+            percentage = Math.max(0, Math.min(100, percentage));
+
+            meterBar.style.width = percentage + '%';
+            meterValue.textContent = avgPeakDb.toFixed(1) + ' dB';
+
+            // Color code both bar and text based on signal strength
+            let color;
+            if (avgPeakDb >= -70) {
+                color = '#28a745'; // Green - strong signal
+            } else if (avgPeakDb >= -85) {
+                color = '#ffc107'; // Yellow - moderate signal
+            } else {
+                color = '#dc3545'; // Red - weak signal
+            }
+            
+            // Add flashing animation for extremely strong signals (above -30 dB)
+            if (avgPeakDb > -30) {
+                meterValue.classList.add('flashing');
+            } else {
+                meterValue.classList.remove('flashing');
+            }
+
+            meterBar.style.background = color;
+            meterValue.style.color = color;
+        }
+    }
+
     // Get current status
     getStatus() {
         return {
@@ -1273,7 +1559,8 @@ class SpectrumDisplay {
             binBandwidth: this.binBandwidth,
             totalBandwidth: this.totalBandwidth,
             lastUpdate: this.lastUpdate,
-            zoomLevel: this.zoomLevel
+            zoomLevel: this.zoomLevel,
+            bitrate: this.currentBitrate
         };
     }
 }

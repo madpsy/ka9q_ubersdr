@@ -36,14 +36,14 @@ func (m *UserSpectrumClientMessage) UnmarshalJSON(data []byte) error {
 		Frequency    *float64 `json:"frequency,omitempty"`
 		BinBandwidth *float64 `json:"binBandwidth,omitempty"`
 	}
-	
+
 	var aux Alias
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-	
+
 	m.Type = aux.Type
-	
+
 	// Convert frequency from float64 to uint64, rounding if necessary
 	if aux.Frequency != nil {
 		if *aux.Frequency < 0 {
@@ -52,24 +52,24 @@ func (m *UserSpectrumClientMessage) UnmarshalJSON(data []byte) error {
 			m.Frequency = uint64(*aux.Frequency + 0.5) // Round to nearest integer
 		}
 	}
-	
+
 	// BinBandwidth can stay as float64
 	if aux.BinBandwidth != nil {
 		m.BinBandwidth = *aux.BinBandwidth
 	}
-	
+
 	return nil
 }
 
 // UserSpectrumServerMessage represents a message to the client
 type UserSpectrumServerMessage struct {
-	Type         string    `json:"type"`
-	Data         []float32 `json:"data,omitempty"`         // Spectrum bin data
-	Frequency    uint64    `json:"frequency,omitempty"`    // Current center frequency
-	BinCount     int       `json:"binCount,omitempty"`     // Number of bins (constant)
-	BinBandwidth float64   `json:"binBandwidth,omitempty"` // Bandwidth per bin
-	SessionID    string    `json:"sessionId,omitempty"`
-	Error        string    `json:"error,omitempty"`
+	Type         string      `json:"type"`
+	Data         []float32   `json:"data,omitempty"`         // Spectrum bin data
+	Frequency    uint64      `json:"frequency,omitempty"`    // Current center frequency
+	BinCount     int         `json:"binCount,omitempty"`     // Number of bins (constant)
+	BinBandwidth float64     `json:"binBandwidth,omitempty"` // Bandwidth per bin
+	SessionID    string      `json:"sessionId,omitempty"`
+	Error        string      `json:"error,omitempty"`
 	Info         interface{} `json:"info,omitempty"`
 }
 
@@ -81,8 +81,10 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 		log.Printf("Failed to upgrade spectrum connection: %v", err)
 		return
 	}
-	
-	conn := &wsConn{conn: rawConn}
+
+	log.Printf("Spectrum WebSocket connected - Using manual gzip compression")
+
+	conn := &wsConn{conn: rawConn, label: "Spectrum"}
 	defer conn.close()
 
 	// Create spectrum session with default parameters
@@ -104,7 +106,7 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 
 	// Handle incoming messages
 	swsh.handleMessages(conn, session, done)
-	
+
 	// Cleanup
 	swsh.sessions.DestroySession(session.ID)
 }
@@ -131,12 +133,38 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 
 		// Handle message based on type
 		switch msg.Type {
+		case "reset":
+			// Reset to full bandwidth view
+			defaultFreq := swsh.sessions.config.Spectrum.Default.CenterFrequency
+			defaultBinBW := swsh.sessions.config.Spectrum.Default.BinBandwidth
+			defaultBinCount := swsh.sessions.config.Spectrum.Default.BinCount
+
+			// Check if already at defaults
+			if session.Frequency == defaultFreq && session.BinBandwidth == defaultBinBW && session.BinCount == defaultBinCount {
+				log.Printf("Spectrum session %s already at defaults (freq: %d Hz, bins: %d, bw: %.1f Hz) - skipping radiod update",
+					session.ID, defaultFreq, defaultBinCount, defaultBinBW)
+
+				// Still send status to acknowledge the request
+				swsh.sendStatus(conn, session)
+			} else {
+				log.Printf("Resetting spectrum session %s to defaults: freq %d Hz, bins %d, bw %.1f Hz",
+					session.ID, defaultFreq, defaultBinCount, defaultBinBW)
+
+				if err := swsh.sessions.UpdateSpectrumSession(session.ID, defaultFreq, defaultBinBW, defaultBinCount); err != nil {
+					swsh.sendError(conn, "Failed to reset spectrum: "+err.Error())
+					continue
+				}
+
+				// Send updated status
+				swsh.sendStatus(conn, session)
+			}
+
 		case "zoom", "pan":
 			// Update spectrum parameters (zoom changes bin_bw, pan changes frequency)
 			newFreq := session.Frequency
 			newBinBW := session.BinBandwidth
 			newBinCount := session.BinCount
-			
+
 			if msg.Frequency > 0 {
 				// Enforce minimum center frequency of 100 kHz
 				const minCenterFreq = 100000 // 100 kHz
@@ -151,7 +179,7 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			if msg.BinBandwidth > 0 {
 				newBinBW = msg.BinBandwidth
 			}
-			
+
 			// Smart zoom logic: dynamically adjust bin_count for deep zoom levels
 			// Keep current behavior up to 256x zoom (bin_bw down to safe minimum)
 			// Beyond that, reduce bin_count to allow deeper zooming
@@ -159,13 +187,13 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			defaultBinCount := swsh.sessions.config.Spectrum.Default.BinCount
 			currentBinCount := session.BinCount
 			session.mu.RUnlock()
-			
+
 			// Radiod has constraints on valid sample rates (must be compatible with block rate)
 			// Safe bin_bw values that work with radiod: 50, 100, 200, 500, 1000, 2000, 5000 Hz
 			// Below 50 Hz, we need to reduce bin_count instead
 			const minSafeBinBW = 50.0        // Minimum safe bin_bw before reducing bin_count
-			const maxBinBWForRestore = 200.0  // Above this, restore bin_count if reduced
-			
+			const maxBinBWForRestore = 200.0 // Above this, restore bin_count if reduced
+
 			// Round bin_bw to nearest safe value
 			safeBinBW := newBinBW
 			if newBinBW < 50 {
@@ -182,10 +210,14 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 				safeBinBW = 1000
 			} else if newBinBW < 3500 {
 				safeBinBW = 2000
-			} else {
+			} else if newBinBW < 7500 {
 				safeBinBW = 5000
+			} else {
+				// For very large bin bandwidths (e.g., default 29296.875 for full 0-30 MHz),
+				// don't round - pass through as-is for full bandwidth view
+				safeBinBW = newBinBW
 			}
-			
+
 			// If user is trying to zoom deeper than min safe bin_bw, reduce bin_count instead
 			if newBinBW < minSafeBinBW && currentBinCount > 256 {
 				// Reduce bin_count by half, keep bin_bw at safe minimum
@@ -209,18 +241,25 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 				// Normal zoom: use safe bin_bw value
 				newBinBW = safeBinBW
 			}
-			
+
 			// Only update if something changed
 			if newFreq != session.Frequency || newBinBW != session.BinBandwidth || newBinCount != session.BinCount {
 				log.Printf("Updating spectrum session %s: freq %d -> %d Hz, bins %d -> %d, bw %.1f -> %.1f Hz",
 					session.ID, session.Frequency, newFreq, session.BinCount, newBinCount, session.BinBandwidth, newBinBW)
-				
+
 				if err := swsh.sessions.UpdateSpectrumSession(session.ID, newFreq, newBinBW, newBinCount); err != nil {
 					swsh.sendError(conn, "Failed to update spectrum: "+err.Error())
 					continue
 				}
-				
+
 				// Send updated status
+				swsh.sendStatus(conn, session)
+			} else {
+				// State is already correct, accept request but don't send to radiod
+				log.Printf("Spectrum session %s already at requested state (freq: %d Hz, bins: %d, bw: %.1f Hz) - skipping radiod update",
+					session.ID, newFreq, newBinCount, newBinBW)
+
+				// Still send status to acknowledge the request
 				swsh.sendStatus(conn, session)
 			}
 
@@ -246,7 +285,7 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 
 		case <-session.Done:
 			return
-			
+
 		case spectrumData, ok := <-session.SpectrumChan:
 			if !ok {
 				return
@@ -289,21 +328,21 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 func (swsh *UserSpectrumWebSocketHandler) sendStatus(conn *wsConn, session *Session) error {
 	session.mu.RLock()
 	totalBandwidth := float64(session.BinCount) * session.BinBandwidth
-	
+
 	// Create message matching the format spectrum-display.js expects
 	// It looks for: centerFreq, binCount, binBandwidth, totalBandwidth
 	msg := map[string]interface{}{
-		"type":          "config",
-		"centerFreq":    session.Frequency,      // JavaScript expects centerFreq (camelCase)
-		"binCount":      session.BinCount,
-		"binBandwidth":  session.BinBandwidth,
+		"type":           "config",
+		"centerFreq":     session.Frequency, // JavaScript expects centerFreq (camelCase)
+		"binCount":       session.BinCount,
+		"binBandwidth":   session.BinBandwidth,
 		"totalBandwidth": totalBandwidth,
-		"sessionId":     session.ID,
+		"sessionId":      session.ID,
 	}
 	session.mu.RUnlock()
-	
+
 	conn.setWriteDeadline(time.Now().Add(10 * time.Second))
-	return conn.writeJSON(msg)
+	return conn.writeJSONCompressed(msg)
 }
 
 // sendError sends an error message to the client
@@ -318,7 +357,7 @@ func (swsh *UserSpectrumWebSocketHandler) sendError(conn *wsConn, errMsg string)
 // sendMessage sends a message to the client
 func (swsh *UserSpectrumWebSocketHandler) sendMessage(conn *wsConn, msg UserSpectrumServerMessage) error {
 	conn.setWriteDeadline(time.Now().Add(10 * time.Second))
-	return conn.writeJSON(msg)
+	return conn.writeJSONCompressed(msg)
 }
 
 // Helper function to convert spectrum data to JSON-friendly format

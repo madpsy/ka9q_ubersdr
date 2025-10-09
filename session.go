@@ -15,19 +15,19 @@ import (
 type Session struct {
 	ID            string
 	ChannelName   string
-	SSRC          uint32      // Unique SSRC for this session's radiod channel
+	SSRC          uint32 // Unique SSRC for this session's radiod channel
 	Frequency     uint64
 	Mode          string
-	Bandwidth     int         // Bandwidth in Hz (for USB/LSB modes) - DEPRECATED, use BandwidthLow/High
-	BandwidthLow  int         // Low edge of filter in Hz (can be negative)
-	BandwidthHigh int         // High edge of filter in Hz
+	Bandwidth     int // Bandwidth in Hz (for USB/LSB modes) - DEPRECATED, use BandwidthLow/High
+	BandwidthLow  int // Low edge of filter in Hz (can be negative)
+	BandwidthHigh int // High edge of filter in Hz
 	SampleRate    int
 	CreatedAt     time.Time
 	LastActive    time.Time
 	AudioChan     chan []byte
 	Done          chan struct{}
 	mu            sync.RWMutex
-	
+
 	// Spectrum-specific fields (only used when Mode == "spectrum")
 	IsSpectrum   bool
 	BinCount     int
@@ -56,11 +56,22 @@ func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager
 		maxSessions:   config.Server.MaxSessions,
 		timeout:       time.Duration(config.Server.SessionTimeout) * time.Second,
 	}
-	
+
 	// Start cleanup goroutine
 	go sm.cleanupLoop()
-	
+
 	return sm
+}
+
+// translateModeForRadiod translates UI mode names to radiod preset names
+// This allows the UI to show user-friendly names while sending correct presets to radiod
+func translateModeForRadiod(mode string) string {
+	// FM in the UI should request "pm" (phase modulation) preset from radiod
+	if mode == "fm" {
+		return "pm"
+	}
+	// All other modes pass through unchanged
+	return mode
 }
 
 // CreateSession creates a new session with a unique channel (default bandwidth)
@@ -127,19 +138,22 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 		Done:          make(chan struct{}),
 	}
 
+	// Translate mode for radiod (e.g., "fm" -> "pm")
+	radiodMode := translateModeForRadiod(mode)
+
 	// Create radiod channel with unique random SSRC and bandwidth
-	if err := sm.radiod.CreateChannelWithBandwidth(channelName, frequency, mode, sampleRate, ssrc, bandwidth); err != nil {
+	if err := sm.radiod.CreateChannelWithBandwidth(channelName, frequency, radiodMode, sampleRate, ssrc, bandwidth); err != nil {
 		return nil, fmt.Errorf("failed to create radiod channel: %w", err)
 	}
 
 	sm.sessions[sessionID] = session
 	sm.ssrcToSession[ssrc] = session
-	
+
 	if DebugMode {
 		log.Printf("DEBUG: Session registered in ssrcToSession map: SSRC 0x%08x -> Session %s", ssrc, sessionID)
 		log.Printf("DEBUG: Total sessions: %d, Total SSRC mappings: %d", len(sm.sessions), len(sm.ssrcToSession))
 	}
-	
+
 	log.Printf("Session created: %s (channel: %s, SSRC: 0x%08x, freq: %d Hz, mode: %s, bandwidth: %d Hz)",
 		sessionID, channelName, ssrc, frequency, mode, bandwidth)
 
@@ -211,7 +225,7 @@ func (sm *SessionManager) CreateSpectrumSession() (*Session, error) {
 
 	sm.sessions[sessionID] = session
 	sm.ssrcToSession[ssrc] = session
-	
+
 	log.Printf("Spectrum session created: %s (SSRC: 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz)",
 		sessionID, ssrc, frequency, binCount, binBandwidth)
 
@@ -225,18 +239,18 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 	if !ok {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
-	
+
 	if !session.IsSpectrum {
 		return fmt.Errorf("session %s is not a spectrum session", sessionID)
 	}
-	
+
 	// Track if bin_count changed
 	binCountChanged := false
-	
+
 	// Update session state
 	session.mu.Lock()
 	oldBinCount := session.BinCount
-	
+
 	if frequency > 0 {
 		session.Frequency = frequency
 	}
@@ -249,13 +263,13 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 	}
 	session.LastActive = time.Now()
 	session.mu.Unlock()
-	
+
 	// Send update command to radiod
 	// The radiod controller will calculate appropriate filter edges based on the new bandwidth
 	if err := sm.radiod.UpdateSpectrumChannel(session.SSRC, frequency, binBandwidth, session.BinCount, binCountChanged); err != nil {
 		return fmt.Errorf("failed to update radiod spectrum channel: %w", err)
 	}
-	
+
 	totalBandwidth := float64(session.BinCount) * binBandwidth
 	if binCountChanged {
 		log.Printf("Spectrum session updated: %s (center: %d Hz, bins: %d->%d, bw: %.1f Hz/bin, total: %.1f MHz)",
@@ -275,17 +289,17 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 	if !ok {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
-	
+
 	if session.IsSpectrum {
 		return fmt.Errorf("cannot update spectrum session with UpdateSession, use UpdateSpectrumSession instead")
 	}
-	
+
 	// Update session state only for parameters that changed
 	session.mu.Lock()
 	oldFreq := session.Frequency
 	oldMode := session.Mode
 	oldBandwidth := session.Bandwidth
-	
+
 	if frequency > 0 {
 		session.Frequency = frequency
 	}
@@ -296,20 +310,23 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 		session.Bandwidth = bandwidth
 	}
 	session.LastActive = time.Now()
-	
+
 	// Get the actual values to send (use current if not changing)
 	sendFreq := frequency
 	if sendFreq == 0 {
 		sendFreq = session.Frequency
 	}
 	sendMode := mode
-	// Don't send mode if empty - this avoids triggering preset reload
+	if sendMode != "" {
+		// Translate mode for radiod (e.g., "fm" -> "pm")
+		sendMode = translateModeForRadiod(sendMode)
+	}
 	sendBandwidth := bandwidth
 	if sendBandwidth == 0 {
 		sendBandwidth = session.Bandwidth
 	}
 	session.mu.Unlock()
-	
+
 	// Send update command to radiod with existing SSRC
 	// Convert single bandwidth to low/high edges (50 Hz to bandwidth Hz for SSB)
 	sendBandwidthFlag := sendBandwidth > 0
@@ -322,7 +339,7 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 		session.mu.Unlock()
 		return fmt.Errorf("failed to update radiod channel: %w", err)
 	}
-	
+
 	// Log what actually changed
 	changes := []string{}
 	if frequency > 0 && frequency != oldFreq {
@@ -334,7 +351,7 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 	if bandwidth > 0 && bandwidth != oldBandwidth {
 		changes = append(changes, fmt.Sprintf("bw: %d -> %d Hz", oldBandwidth, bandwidth))
 	}
-	
+
 	if len(changes) > 0 {
 		log.Printf("Session updated: %s (SSRC: 0x%08x) - %s", sessionID, session.SSRC, strings.Join(changes, ", "))
 	}
@@ -350,18 +367,18 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 	if !ok {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
-	
+
 	if session.IsSpectrum {
 		return fmt.Errorf("cannot update spectrum session with UpdateSessionWithEdges, use UpdateSpectrumSession instead")
 	}
-	
+
 	// Update session state only for parameters that changed
 	session.mu.Lock()
 	oldFreq := session.Frequency
 	oldMode := session.Mode
 	oldBandwidthLow := session.BandwidthLow
 	oldBandwidthHigh := session.BandwidthHigh
-	
+
 	if frequency > 0 {
 		session.Frequency = frequency
 	}
@@ -373,16 +390,19 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		session.BandwidthHigh = bandwidthHigh
 	}
 	session.LastActive = time.Now()
-	
+
 	// Get the actual values to send (use current if not changing)
 	sendFreq := frequency
 	if sendFreq == 0 {
 		sendFreq = session.Frequency
 	}
 	sendMode := mode
-	// Don't send mode if empty - this avoids triggering preset reload
+	if sendMode != "" {
+		// Translate mode for radiod (e.g., "fm" -> "pm")
+		sendMode = translateModeForRadiod(sendMode)
+	}
 	session.mu.Unlock()
-	
+
 	// Send update command to radiod with existing SSRC
 	// radiod.UpdateChannel will handle the bandwidth edges
 	if err := sm.radiod.UpdateChannel(session.SSRC, sendFreq, sendMode, bandwidthLow, bandwidthHigh, sendBandwidth); err != nil {
@@ -395,7 +415,7 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		session.mu.Unlock()
 		return fmt.Errorf("failed to update radiod channel: %w", err)
 	}
-	
+
 	// Log what actually changed
 	changes := []string{}
 	if frequency > 0 && frequency != oldFreq {
@@ -407,7 +427,7 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 	if sendBandwidth && (bandwidthLow != oldBandwidthLow || bandwidthHigh != oldBandwidthHigh) {
 		changes = append(changes, fmt.Sprintf("bw: %d-%d -> %d-%d Hz", oldBandwidthLow, oldBandwidthHigh, bandwidthLow, bandwidthHigh))
 	}
-	
+
 	if len(changes) > 0 {
 		log.Printf("Session updated: %s (SSRC: 0x%08x) - %s", sessionID, session.SSRC, strings.Join(changes, ", "))
 	}
@@ -441,7 +461,7 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	}
 	delete(sm.sessions, sessionID)
 	delete(sm.ssrcToSession, session.SSRC)
-	
+
 	if DebugMode {
 		log.Printf("DEBUG: Session removed from ssrcToSession map: SSRC 0x%08x", session.SSRC)
 		log.Printf("DEBUG: Remaining sessions: %d, Remaining SSRC mappings: %d", len(sm.sessions), len(sm.ssrcToSession))
@@ -556,12 +576,12 @@ func (sm *SessionManager) Shutdown() {
 	sm.mu.Unlock()
 
 	log.Printf("Shutting down session manager: destroying %d active sessions", len(sessionIDs))
-	
+
 	for _, id := range sessionIDs {
 		if err := sm.DestroySession(id); err != nil {
 			log.Printf("Error destroying session %s during shutdown: %v", id, err)
 		}
 	}
-	
+
 	log.Println("All sessions destroyed")
 }

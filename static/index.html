@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ka9q UberSDR - Web SDR Receiver</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Opus decoder for handling Opus-compressed audio -->
+    <script src="https://cdn.jsdelivr.net/npm/@wasm-audio-decoders/opus@0.1.12/dist/opus-decoder.min.js"></script>
 </head>
 <body>
     <!-- Audio Start Overlay -->
@@ -24,15 +26,17 @@
         <div class="spectrum-display-panel">
             <div class="spectrum-display-container">
                 <canvas id="spectrum-display-canvas"></canvas>
+                <!-- All controls overlay on bottom of spectrum -->
                 <div class="spectrum-display-controls">
                     <div class="spectrum-control-group">
-                        <label>Zoom:</label>
+                        <button onclick="spectrumResetZoom()" title="Reset Zoom">Reset</button>
                         <button onclick="spectrumZoomOut()" title="Zoom Out">−</button>
                         <button onclick="spectrumZoomIn()" title="Zoom In">+</button>
-                        <button onclick="spectrumResetZoom()" title="Reset Zoom">Reset</button>
+                        <button onclick="spectrumMaxZoom()" title="Maximum Zoom">Max</button>
+                        <span id="spectrum-zoom-level">1×</span>
                     </div>
                     <div class="spectrum-control-group">
-                        <label>Color Scheme:</label>
+                        <label>Colour Scheme:</label>
                         <select id="spectrum-colorscheme" onchange="updateSpectrumColorScheme()">
                             <option value="viridis">Viridis</option>
                             <option value="plasma">Plasma</option>
@@ -49,14 +53,23 @@
                         <input type="range" id="spectrum-contrast" min="0" max="100" value="70" step="5" oninput="updateSpectrumContrast()">
                         <span id="spectrum-contrast-value">70</span>
                     </div>
+                    <div class="spectrum-control-group">
+                        <label>Signal:</label>
+                        <div class="signal-meter">
+                            <div id="signal-meter-bar" class="signal-meter-bar"></div>
+                        </div>
+                        <span id="signal-meter-value">-- dB</span>
+                    </div>
                 </div>
             </div>
         </div>
 
         <div class="controls">
             <div class="control-group">
-                <label for="frequency">Frequency (Hz)</label>
-                <input type="number" id="frequency" value="14074000" min="100000" max="30000000" step="1000" oninput="validateFrequencyInput(this)" onchange="handleFrequencyChange()">
+                <div class="frequency-input-wrapper">
+                    <input type="number" id="frequency" value="14074000" min="100000" max="30000000" step="1000" oninput="validateFrequencyInput(this)" onchange="handleFrequencyChange()">
+                    <span class="frequency-unit">Hz</span>
+                </div>
                 <div class="tuning-buttons">
                     <button onclick="adjustFrequency(-1000)" title="Down 1 kHz">◄◄</button>
                     <button onclick="adjustFrequency(-100)" title="Down 100 Hz">◄</button>
@@ -66,19 +79,18 @@
                     <button onclick="adjustFrequency(1000)" title="Up 1 kHz">►►</button>
                 </div>
                 <div class="preset-buttons">
-                    <button onclick="setFrequency(3573000)" class="band-btn" data-band="80m">80m</button>
-                    <button onclick="setFrequency(7074000)" class="band-btn" data-band="40m">40m</button>
-                    <button onclick="setFrequency(10136000)" class="band-btn" data-band="30m">30m</button>
-                    <button onclick="setFrequency(14074000)" class="band-btn" data-band="20m">20m</button>
-                    <button onclick="setFrequency(18100000)" class="band-btn" data-band="17m">17m</button>
-                    <button onclick="setFrequency(21074000)" class="band-btn" data-band="15m">15m</button>
-                    <button onclick="setFrequency(24915000)" class="band-btn" data-band="12m">12m</button>
-                    <button onclick="setFrequency(28074000)" class="band-btn" data-band="10m">10m</button>
+                    <button onclick="setBand('80m')" class="band-btn" data-band="80m">80m</button>
+                    <button onclick="setBand('40m')" class="band-btn" data-band="40m">40m</button>
+                    <button onclick="setBand('30m')" class="band-btn" data-band="30m">30m</button>
+                    <button onclick="setBand('20m')" class="band-btn" data-band="20m">20m</button>
+                    <button onclick="setBand('17m')" class="band-btn" data-band="17m">17m</button>
+                    <button onclick="setBand('15m')" class="band-btn" data-band="15m">15m</button>
+                    <button onclick="setBand('12m')" class="band-btn" data-band="12m">12m</button>
+                    <button onclick="setBand('10m')" class="band-btn" data-band="10m">10m</button>
                 </div>
             </div>
 
             <div class="control-group">
-                <label>Mode</label>
                 <div class="preset-buttons">
                     <button onclick="setMode('usb')" id="mode-usb" class="mode-btn active">USB</button>
                     <button onclick="setMode('lsb')" id="mode-lsb" class="mode-btn">LSB</button>
@@ -137,7 +149,7 @@
                 <h3>📊 Audio Visualisation</h3>
                 <span id="audio-viz-toggle" class="toggle-icon">▼</span>
             </div>
-            <div id="audio-visualization-content" class="audio-visualization-content" style="display: none;">
+            <div id="audio-visualization-content" class="audio-visualization-content" style="display: block;">
                 <div class="visualizer-panel">
                     <div class="top-visualizers">
                 <div class="vu-meter-container">

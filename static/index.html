@@ -302,7 +302,7 @@
                         </div>
                         <div class="control-group">
                             <label for="squelch-release">Release (Close): <span id="squelch-release-value">500 ms</span></label>
-                            <input type="range" id="squelch-release" min="10" max="500" value="500" step="10" oninput="updateSquelch()">
+                            <input type="range" id="squelch-release" min="10" max="1000" value="500" step="10" oninput="updateSquelch()">
                         </div>
                         <div class="squelch-status">
                             <label>Status:</label>
@@ -409,6 +409,10 @@
                     </label>
                 </div>
                 <div id="equalizer-controls">
+                    <div class="control-group">
+                        <label for="equalizer-makeup-gain">Makeup Gain: <span id="equalizer-makeup-gain-value">+0 dB</span></label>
+                        <input type="range" id="equalizer-makeup-gain" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    </div>
                     <div class="equalizer-bands">
                         <div class="eq-band">
                     <label class="eq-label">60 Hz</label>

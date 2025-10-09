@@ -32,6 +32,7 @@ let vuMeterBarCompact = null;
 let vuMeterPeakCompact = null;
 let vuPeakHold = 0; // Peak hold value (0-100%)
 let eqFilters = []; // Array to store equalizer filter nodes
+let eqMakeupGain = null; // GainNode for makeup gain after EQ
 let eqAnalyser = null; // Analyser to monitor equalizer output for clipping
 let eqClipping = false; // Track if equalizer output is clipping
 let eqClipIndicatorTimeout = null; // Timeout for hiding EQ clip indicator
@@ -904,12 +905,21 @@ function playAudioBuffer(buffer) {
         }
     }
     
-    // Step 3: EQ chain (optional)
+    // Step 3: EQ chain with makeup gain (optional)
     if (equalizerEnabled && eqFilters.length > 0) {
         // Disconnect all EQ filters first to clear any old connections
         for (let filter of eqFilters) {
             try {
                 filter.disconnect();
+            } catch (e) {
+                // Ignore if already disconnected
+            }
+        }
+        
+        // Disconnect makeup gain to clear old connections
+        if (eqMakeupGain) {
+            try {
+                eqMakeupGain.disconnect();
             } catch (e) {
                 // Ignore if already disconnected
             }
@@ -923,7 +933,12 @@ function playAudioBuffer(buffer) {
             eqFilters[i].connect(eqFilters[i + 1]);
         }
         
+        // Connect last EQ filter to makeup gain
         nextNode = eqFilters[eqFilters.length - 1];
+        if (eqMakeupGain) {
+            nextNode.connect(eqMakeupGain);
+            nextNode = eqMakeupGain;
+        }
     }
     
     // Step 4: Gain node for volume/mute control
@@ -2668,12 +2683,16 @@ function initializeEqualizer() {
         eqFilters.push(filter);
     });
     
+    // Create makeup gain node
+    eqMakeupGain = audioContext.createGain();
+    eqMakeupGain.gain.value = 1.0; // 0 dB default (no makeup gain)
+    
     // Create analyser to monitor equalizer output for clipping detection
     eqAnalyser = audioContext.createAnalyser();
     eqAnalyser.fftSize = 2048;
     eqAnalyser.smoothingTimeConstant = 0;
     
-    log('12-band equalizer initialized with clipping detection');
+    log('12-band equalizer initialized with makeup gain and clipping detection');
 }
 
 // Toggle equalizer on/off
@@ -2713,6 +2732,16 @@ function updateEqualizer() {
             valueDisplay.textContent = `${gain > 0 ? '+' : ''}${gain.toFixed(1)} dB`;
         }
     });
+    
+    // Update makeup gain
+    const makeupGainSlider = document.getElementById('equalizer-makeup-gain');
+    const makeupGainDisplay = document.getElementById('equalizer-makeup-gain-value');
+    
+    if (makeupGainSlider && makeupGainDisplay && eqMakeupGain) {
+        const makeupGainDb = parseFloat(makeupGainSlider.value);
+        eqMakeupGain.gain.value = Math.pow(10, makeupGainDb / 20);
+        makeupGainDisplay.textContent = `${makeupGainDb > 0 ? '+' : ''}${makeupGainDb.toFixed(1)} dB`;
+    }
 }
 
 // Reset equalizer to flat response
@@ -2732,6 +2761,19 @@ function resetEqualizer() {
             eqFilters[index].gain.value = 0;
         }
     });
+    
+    // Reset makeup gain
+    const makeupGainSlider = document.getElementById('equalizer-makeup-gain');
+    const makeupGainDisplay = document.getElementById('equalizer-makeup-gain-value');
+    
+    if (makeupGainSlider && makeupGainDisplay) {
+        makeupGainSlider.value = 0;
+        makeupGainDisplay.textContent = '+0 dB';
+    }
+    
+    if (eqMakeupGain) {
+        eqMakeupGain.gain.value = 1.0;
+    }
     
     log('Equalizer reset to flat response');
 }

@@ -3874,6 +3874,33 @@ function updateSpectrumZoomDisplay() {
     }
 }
 
+function toggleSpectrumLineGraph() {
+    if (!spectrumDisplay) return;
+
+    spectrumDisplay.toggleLineGraph();
+
+    // Update button appearance and text based on mode
+    const button = document.getElementById('spectrum-line-graph-toggle');
+    if (button) {
+        if (spectrumDisplay.displayMode === 'waterfall') {
+            // Waterfall mode - button shows what's next (Split)
+            button.style.background = '';
+            button.style.color = '';
+            button.textContent = 'Split';
+        } else if (spectrumDisplay.displayMode === 'split') {
+            // Split mode - button shows what's next (Graph)
+            button.style.background = '#ffc107';
+            button.style.color = 'white';
+            button.textContent = 'Graph';
+        } else {
+            // Graph mode - button shows what's next (Waterfall)
+            button.style.background = '#28a745';
+            button.style.color = 'white';
+            button.textContent = 'Waterfall';
+        }
+    }
+}
+
 // Squelch (Audio Gate) Functions
 
 // Initialize squelch gate

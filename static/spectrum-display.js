@@ -8,6 +8,30 @@ class SpectrumDisplay {
             throw new Error(`Canvas element '${canvasId}' not found`);
         }
         
+        // Line graph canvas for split view
+        this.lineGraphCanvas = document.getElementById('spectrum-line-graph-canvas');
+        this.lineGraphCtx = this.lineGraphCanvas ? this.lineGraphCanvas.getContext('2d', { alpha: false }) : null;
+        // Display mode: 'waterfall', 'graph', or 'split'
+        this.displayMode = 'waterfall';
+        
+        // Line graph noise floor tracking for smoother display
+        this.lineGraphMinHistory = [];
+        this.lineGraphMinHistoryMaxAge = 2000; // 2 second window for noise floor
+        
+        // Line graph maximum tracking for smoother scaling
+        this.lineGraphMaxHistory = [];
+        this.lineGraphMaxHistoryMaxAge = 20000; // 20 second window for maximum (handles FT8 cycles)
+        
+        // Line graph data smoothing - store recent spectrum data for averaging
+        this.lineGraphDataHistory = [];
+        this.lineGraphDataHistoryMaxAge = 300; // 300ms window for smoothing
+        this.lineGraphDataHistoryMaxSize = 5; // Keep last 5 frames
+        
+        // Setup mouse handlers for line graph canvas
+        if (this.lineGraphCanvas) {
+            this.setupLineGraphMouseHandlers();
+        }
+        
         // Set canvas size to match container
         this.resizeCanvas();
         
@@ -62,6 +86,10 @@ class SpectrumDisplay {
                     this.overlayDiv.style.width = this.width + 'px';
                     this.overlayCanvas.width = this.width;
                     
+                    // Update bandwidth lines canvas dimensions
+                    this.bandwidthLinesCanvas.width = this.width;
+                    this.bandwidthLinesCanvas.style.width = this.width + 'px';
+                    
                     // Redraw the bandwidth indicator with new dimensions
                     this.drawTunedFrequencyCursor();
                     
@@ -88,6 +116,22 @@ class SpectrumDisplay {
         this.canvas.parentElement.insertBefore(this.overlayDiv, this.canvas);
         
         this.overlayCtx = this.overlayCanvas.getContext('2d', { alpha: true });
+        
+        // Create bandwidth lines overlay canvas (positioned over main canvas)
+        this.bandwidthLinesCanvas = document.createElement('canvas');
+        this.bandwidthLinesCanvas.width = this.width;
+        this.bandwidthLinesCanvas.height = 600;
+        this.bandwidthLinesCanvas.style.position = 'absolute';
+        this.bandwidthLinesCanvas.style.top = '0';
+        this.bandwidthLinesCanvas.style.left = '0';
+        this.bandwidthLinesCanvas.style.width = this.width + 'px';
+        this.bandwidthLinesCanvas.style.height = '600px';
+        this.bandwidthLinesCanvas.style.pointerEvents = 'none'; // Allow clicks to pass through
+        this.bandwidthLinesCanvas.style.zIndex = '10'; // Above waterfall but below cursor overlay
+        this.bandwidthLinesCtx = this.bandwidthLinesCanvas.getContext('2d', { alpha: true });
+        
+        // Insert bandwidth lines canvas after main canvas (so it overlays it)
+        this.canvas.parentElement.insertBefore(this.bandwidthLinesCanvas, this.canvas.nextSibling);
         
         // Add click handler for bookmarks on overlay canvas
         this.overlayCanvas.addEventListener('click', (e) => {
@@ -452,8 +496,38 @@ class SpectrumDisplay {
             return;
         }
         
-        // Draw waterfall on main canvas
-        this.drawWaterfall();
+        // Draw based on display mode
+        if (this.displayMode === 'graph') {
+            // Graph-only mode: draw line graph in full height
+            this.drawLineGraphFullHeight();
+
+            // Update line graph tooltip with new data if mouse is over it
+            if (this.lineGraphMouseX && this.lineGraphMouseY) {
+                const x = this.lineGraphMouseX();
+                const y = this.lineGraphMouseY();
+                if (x >= 0 && y >= 0) {
+                    this.updateLineGraphTooltip(x, y);
+                }
+            }
+        } else if (this.displayMode === 'split') {
+            // Split mode: draw line graph in top half
+            this.drawLineGraph();
+
+            // Update line graph tooltip with new data if mouse is over it
+            if (this.lineGraphMouseX && this.lineGraphMouseY) {
+                const x = this.lineGraphMouseX();
+                const y = this.lineGraphMouseY();
+                if (x >= 0 && y >= 0) {
+                    this.updateLineGraphTooltip(x, y);
+                }
+            }
+
+            // Draw waterfall in bottom half
+            this.drawWaterfall();
+        } else {
+            // Waterfall-only mode (default)
+            this.drawWaterfall();
+        }
         
         // Draw tuned frequency cursor on overlay canvas
         this.drawTunedFrequencyCursor();
@@ -480,10 +554,16 @@ class SpectrumDisplay {
             this.waterfallLineCount = 0;
         }
         
+        // Calculate waterfall start position based on display mode
+        // In split mode (300px height), start at y=150 (halfway down)
+        // In waterfall-only mode (600px height), start at y=30 (below frequency scale)
+        const waterfallStartY = this.displayMode === 'split' ? 150 : 30;
+        const waterfallHeight = this.height - waterfallStartY - 1;
+        
         // Scroll existing waterfall down by 1 pixel
-        // Use drawImage like the audio waterfall does (line 832 in app.js)
-        // Important: scroll from line 30 down (leave room for frequency scale at top)
-        this.ctx.drawImage(this.canvas, 0, 30, this.width, this.height - 31, 0, 31, this.width, this.height - 31);
+        // CRITICAL: Copy pixel-for-pixel without scaling to avoid stretching
+        // Source and destination dimensions must match exactly
+        this.ctx.drawImage(this.canvas, 0, waterfallStartY, this.width, waterfallHeight - 1, 0, waterfallStartY + 1, this.width, waterfallHeight - 1);
         
         // Create new line at top with current spectrum data (at y=30, below frequency scale)
         const pixelData = this.waterfallImageData.data;
@@ -548,8 +628,8 @@ class SpectrumDisplay {
             pixelData[offset + 3] = 255; // Alpha
         }
         
-        // Draw the new line at y=30 (below frequency scale)
-        this.ctx.putImageData(this.waterfallImageData, 0, 30);
+        // Draw the new line at waterfallStartY (below frequency scale)
+        this.ctx.putImageData(this.waterfallImageData, 0, waterfallStartY);
 
         this.waterfallLineCount++;
 
@@ -566,12 +646,19 @@ class SpectrumDisplay {
             const seconds = elapsedSeconds % 60;
             const timestamp = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
-            // Draw timestamp on left with background (at y=30 where new line appears)
+            // Draw timestamp on left with background (at waterfallStartY where new line appears)
             this.ctx.font = 'bold 11px monospace';
             const textWidth = this.ctx.measureText(timestamp).width;
+            
+            // Save current state
+            this.ctx.save();
+            
+            // Set fixed height for timestamp background (not affected by canvas scaling)
+            const timestampHeight = 14;
+            const timestampPadding = 2;
 
             this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-            this.ctx.fillRect(0, 30, textWidth + 6, 16);
+            this.ctx.fillRect(0, waterfallStartY, textWidth + 6, timestampHeight);
 
             this.ctx.fillStyle = '#ffffff';
             this.ctx.strokeStyle = '#000000';
@@ -579,12 +666,770 @@ class SpectrumDisplay {
             this.ctx.textAlign = 'left';
             this.ctx.textBaseline = 'top';
 
-            this.ctx.strokeText(timestamp, 3, 32);
-            this.ctx.fillText(timestamp, 3, 32);
+            this.ctx.strokeText(timestamp, 3, waterfallStartY + timestampPadding);
+            this.ctx.fillText(timestamp, 3, waterfallStartY + timestampPadding);
+            
+            // Restore state
+            this.ctx.restore();
         }
 
-        // Always draw frequency scale (it gets scrolled away otherwise)
+        // Always draw frequency scale at top (y=0)
         this.drawFrequencyScale();
+    }
+    
+    // Draw frequency scale at a specific Y position
+    drawFrequencyScaleAtPosition(yPos) {
+        if (!this.totalBandwidth) return;
+        
+        const startFreq = this.centerFreq - this.totalBandwidth / 2;
+        const endFreq = this.centerFreq + this.totalBandwidth / 2;
+        
+        // Clear the frequency scale area completely (solid black, not transparent)
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(0, yPos, this.width, 30);
+        
+        // Draw semi-transparent overlay for better text contrast
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        this.ctx.fillRect(0, yPos, this.width, 30);
+        
+        // Calculate appropriate frequency step
+        const targetStep = this.totalBandwidth / 7;
+        
+        let freqStep;
+        if (targetStep >= 5e6) {
+            freqStep = 5e6;
+        } else if (targetStep >= 2e6) {
+            freqStep = 2e6;
+        } else if (targetStep >= 1e6) {
+            freqStep = 1e6;
+        } else if (targetStep >= 500e3) {
+            freqStep = 500e3;
+        } else if (targetStep >= 200e3) {
+            freqStep = 200e3;
+        } else if (targetStep >= 100e3) {
+            freqStep = 100e3;
+        } else if (targetStep >= 50e3) {
+            freqStep = 50e3;
+        } else if (targetStep >= 20e3) {
+            freqStep = 20e3;
+        } else if (targetStep >= 10e3) {
+            freqStep = 10e3;
+        } else if (targetStep >= 5e3) {
+            freqStep = 5e3;
+        } else if (targetStep >= 2e3) {
+            freqStep = 2e3;
+        } else if (targetStep >= 1e3) {
+            freqStep = 1e3;
+        } else if (targetStep >= 500) {
+            freqStep = 500;
+        } else if (targetStep >= 200) {
+            freqStep = 200;
+        } else {
+            freqStep = 100;
+        }
+        
+        this.ctx.font = 'bold 13px monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        
+        // Draw major ticks and labels
+        const firstFreq = Math.ceil(startFreq / freqStep) * freqStep;
+        for (let freq = firstFreq; freq <= endFreq; freq += freqStep) {
+            const x = ((freq - startFreq) / this.totalBandwidth) * this.width;
+            
+            // Draw major tick mark
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.fillRect(x - 1, yPos, 2, 12);
+            
+            // Draw label with strong contrast
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.strokeStyle = '#000000';
+            this.ctx.lineWidth = 3;
+            
+            const label = this.formatFrequencyScale(freq);
+            this.ctx.strokeText(label, x, yPos + 20);
+            this.ctx.fillText(label, x, yPos + 20);
+        }
+        
+        // Draw minor ticks
+        const minorStep = freqStep / 5;
+        this.ctx.fillStyle = '#ffffff';
+        const firstMinor = Math.ceil(startFreq / minorStep) * minorStep;
+        for (let freq = firstMinor; freq <= endFreq; freq += minorStep) {
+            if (Math.abs(freq % freqStep) < 1) continue;
+            
+            const x = ((freq - startFreq) / this.totalBandwidth) * this.width;
+            this.ctx.fillRect(x - 0.75, yPos, 1.5, 8);
+        }
+    }
+    
+    // Draw line graph in top half (split mode)
+    drawLineGraph() {
+        if (!this.lineGraphCanvas || !this.lineGraphCtx || !this.spectrumData) return;
+        
+        // Set canvas size to match main canvas width
+        if (this.lineGraphCanvas.width !== this.width) {
+            this.lineGraphCanvas.width = this.width;
+            this.lineGraphCanvas.height = 300;
+            this.lineGraphCanvas.style.width = this.width + 'px';
+            this.lineGraphCanvas.style.height = '300px';
+        }
+        
+        const ctx = this.lineGraphCtx;
+        const graphHeight = 300;
+        const graphWidth = this.width;
+        const graphTopMargin = 70; // Space for frequency scale at top (35px) + bookmarks overlay (35px)
+        const graphDrawHeight = graphHeight - graphTopMargin; // Actual drawing area height
+        
+        // Clear canvas and set background colors
+        // Top 35px: grey background for bookmarks area (matching waterfall mode)
+        ctx.fillStyle = '#adb5bd'; // Grey background color from body/container
+        ctx.fillRect(0, 0, graphWidth, 35);
+        // Rest: black background for graph
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 35, graphWidth, graphHeight - 35);
+        
+        // Add current spectrum data to history for temporal smoothing
+        const now = Date.now();
+        this.lineGraphDataHistory.push({
+            data: new Float32Array(this.spectrumData),
+            timestamp: now
+        });
+        
+        // Remove old data (keep last 5 frames or data older than 300ms)
+        this.lineGraphDataHistory = this.lineGraphDataHistory
+            .filter(d => now - d.timestamp <= this.lineGraphDataHistoryMaxAge)
+            .slice(-this.lineGraphDataHistoryMaxSize);
+        
+        // Create smoothed data by averaging recent frames
+        const smoothedData = new Float32Array(this.spectrumData.length);
+        for (let i = 0; i < this.spectrumData.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < this.lineGraphDataHistory.length; j++) {
+                sum += this.lineGraphDataHistory[j].data[i];
+            }
+            smoothedData[i] = sum / this.lineGraphDataHistory.length;
+        }
+        
+        // Find min and max values in smoothed data
+        let currentMinDb = Infinity;
+        let currentMaxDb = -Infinity;
+        for (let i = 0; i < smoothedData.length; i++) {
+            const db = smoothedData[i];
+            if (isFinite(db)) {
+                currentMinDb = Math.min(currentMinDb, db);
+                currentMaxDb = Math.max(currentMaxDb, db);
+            }
+        }
+        
+        // Track minimum values over time for stable noise floor
+        this.lineGraphMinHistory.push({ value: currentMinDb, timestamp: now });
+        
+        // Remove values older than 2 seconds
+        this.lineGraphMinHistory = this.lineGraphMinHistory.filter(m => now - m.timestamp <= this.lineGraphMinHistoryMaxAge);
+        
+        // Use the average of recent minimums as the noise floor for smoother display
+        const avgMinDb = this.lineGraphMinHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMinHistory.length;
+        
+        // Track maximum values over time for stable ceiling
+        this.lineGraphMaxHistory.push({ value: currentMaxDb, timestamp: now });
+        
+        // Remove values older than 2 seconds
+        this.lineGraphMaxHistory = this.lineGraphMaxHistory.filter(m => now - m.timestamp <= this.lineGraphMaxHistoryMaxAge);
+        
+        // Use the average of recent maximums as the ceiling for smoother display
+        const avgMaxDb = this.lineGraphMaxHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMaxHistory.length;
+        
+        // Use smoothed minimum as floor, smoothed maximum as ceiling
+        const minDb = avgMinDb;
+        const maxDb = avgMaxDb;
+        const dbRange = maxDb - minDb;
+        if (dbRange === 0 || !isFinite(dbRange)) return;
+        
+        // Create vertical gradient with more color stops for smoother transitions
+        const gradient = ctx.createLinearGradient(0, graphHeight, 0, 0);
+        gradient.addColorStop(0, 'rgba(128, 0, 0, 0.8)');      // Dark red at bottom
+        gradient.addColorStop(0.2, 'rgba(220, 53, 69, 0.8)');  // Red
+        gradient.addColorStop(0.4, 'rgba(255, 140, 0, 0.8)');  // Orange
+        gradient.addColorStop(0.6, 'rgba(255, 193, 7, 0.8)');  // Yellow
+        gradient.addColorStop(0.8, 'rgba(144, 238, 144, 0.8)'); // Light green
+        gradient.addColorStop(1, 'rgba(40, 167, 69, 0.8)');    // Green at top
+        
+        // Draw filled area with graduated colors
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(0, graphHeight); // Start at bottom left
+        
+        for (let x = 0; x < graphWidth; x++) {
+            // Map pixel x to exact bin position (floating point)
+            const binPos = (x / graphWidth) * smoothedData.length;
+            const binIndex = Math.floor(binPos);
+            const binFrac = binPos - binIndex;
+            
+            // Get dB value with linear interpolation between adjacent bins (using smoothed data)
+            let db;
+            if (binIndex >= 0 && binIndex < smoothedData.length - 1) {
+                const db1 = smoothedData[binIndex];
+                const db2 = smoothedData[binIndex + 1];
+                db = db1 + (db2 - db1) * binFrac;
+            } else if (binIndex === smoothedData.length - 1) {
+                db = smoothedData[binIndex];
+            } else {
+                db = minDb;
+            }
+            
+            // Calculate y position using actual data range (inverted - higher dB at top)
+            // Draw in the area below the frequency scale (from graphTopMargin to graphHeight)
+            const normalized = Math.max(0, Math.min(1, (db - minDb) / dbRange));
+            const y = graphHeight - (normalized * graphDrawHeight);
+            
+            ctx.lineTo(x, y);
+        }
+        
+        // Close the path at bottom right
+        ctx.lineTo(graphWidth, graphHeight);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Draw frequency scale at top
+        this.drawLineGraphFrequencyScale();
+        
+        // Draw dBFS scale on left side (in the drawing area below frequency scale)
+        this.drawLineGraphDbScale(minDb, maxDb, graphDrawHeight, graphTopMargin);
+    }
+
+    // Draw line graph in full height (graph-only mode)
+    drawLineGraphFullHeight() {
+        if (!this.lineGraphCanvas || !this.lineGraphCtx || !this.spectrumData) return;
+
+        // Set canvas size to match main canvas
+        if (this.lineGraphCanvas.width !== this.width || this.lineGraphCanvas.height !== 600) {
+            this.lineGraphCanvas.width = this.width;
+            this.lineGraphCanvas.height = 600;
+            this.lineGraphCanvas.style.width = this.width + 'px';
+            this.lineGraphCanvas.style.height = '600px';
+        }
+
+        const ctx = this.lineGraphCtx;
+        const graphHeight = 600;
+        const graphWidth = this.width;
+        const graphTopMargin = 35; // Space for frequency scale at top
+        const graphDrawHeight = graphHeight - graphTopMargin;
+
+        // Clear canvas
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, graphWidth, graphHeight);
+
+        // Add current spectrum data to history for temporal smoothing
+        const now = Date.now();
+        this.lineGraphDataHistory.push({
+            data: new Float32Array(this.spectrumData),
+            timestamp: now
+        });
+
+        // Remove old data
+        this.lineGraphDataHistory = this.lineGraphDataHistory
+            .filter(d => now - d.timestamp <= this.lineGraphDataHistoryMaxAge)
+            .slice(-this.lineGraphDataHistoryMaxSize);
+
+        // Create smoothed data
+        const smoothedData = new Float32Array(this.spectrumData.length);
+        for (let i = 0; i < this.spectrumData.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < this.lineGraphDataHistory.length; j++) {
+                sum += this.lineGraphDataHistory[j].data[i];
+            }
+            smoothedData[i] = sum / this.lineGraphDataHistory.length;
+        }
+
+        // Find min and max values
+        let currentMinDb = Infinity;
+        let currentMaxDb = -Infinity;
+        for (let i = 0; i < smoothedData.length; i++) {
+            const db = smoothedData[i];
+            if (isFinite(db)) {
+                currentMinDb = Math.min(currentMinDb, db);
+                currentMaxDb = Math.max(currentMaxDb, db);
+            }
+        }
+
+        // Track minimum and maximum values over time
+        this.lineGraphMinHistory.push({ value: currentMinDb, timestamp: now });
+        this.lineGraphMinHistory = this.lineGraphMinHistory.filter(m => now - m.timestamp <= this.lineGraphMinHistoryMaxAge);
+        const avgMinDb = this.lineGraphMinHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMinHistory.length;
+
+        this.lineGraphMaxHistory.push({ value: currentMaxDb, timestamp: now });
+        this.lineGraphMaxHistory = this.lineGraphMaxHistory.filter(m => now - m.timestamp <= this.lineGraphMaxHistoryMaxAge);
+        const avgMaxDb = this.lineGraphMaxHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMaxHistory.length;
+
+        const minDb = avgMinDb;
+        const maxDb = avgMaxDb;
+        const dbRange = maxDb - minDb;
+        if (dbRange === 0 || !isFinite(dbRange)) return;
+
+        // Create gradient
+        const gradient = ctx.createLinearGradient(0, graphHeight, 0, 0);
+        gradient.addColorStop(0, 'rgba(128, 0, 0, 0.8)');
+        gradient.addColorStop(0.2, 'rgba(220, 53, 69, 0.8)');
+        gradient.addColorStop(0.4, 'rgba(255, 140, 0, 0.8)');
+        gradient.addColorStop(0.6, 'rgba(255, 193, 7, 0.8)');
+        gradient.addColorStop(0.8, 'rgba(144, 238, 144, 0.8)');
+        gradient.addColorStop(1, 'rgba(40, 167, 69, 0.8)');
+
+        // Draw filled area
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(0, graphHeight);
+
+        for (let x = 0; x < graphWidth; x++) {
+            const binPos = (x / graphWidth) * smoothedData.length;
+            const binIndex = Math.floor(binPos);
+            const binFrac = binPos - binIndex;
+
+            let db;
+            if (binIndex >= 0 && binIndex < smoothedData.length - 1) {
+                const db1 = smoothedData[binIndex];
+                const db2 = smoothedData[binIndex + 1];
+                db = db1 + (db2 - db1) * binFrac;
+            } else if (binIndex === smoothedData.length - 1) {
+                db = smoothedData[binIndex];
+            } else {
+                db = minDb;
+            }
+
+            const normalized = Math.max(0, Math.min(1, (db - minDb) / dbRange));
+            const y = graphHeight - (normalized * graphDrawHeight);
+
+            ctx.lineTo(x, y);
+        }
+
+        ctx.lineTo(graphWidth, graphHeight);
+        ctx.closePath();
+        ctx.fill();
+
+        // Draw frequency scale at top
+        this.drawLineGraphFrequencyScale();
+
+        // Draw dBFS scale on left side
+        this.drawLineGraphDbScale(minDb, maxDb, graphDrawHeight, graphTopMargin);
+    }
+
+    // Draw dBFS scale on left side of line graph
+    drawLineGraphDbScale(minDb, maxDb, graphDrawHeight, graphTopMargin) {
+        if (!this.lineGraphCtx) return;
+        
+        const ctx = this.lineGraphCtx;
+        const dbRange = maxDb - minDb;
+        if (dbRange === 0 || !isFinite(dbRange)) return;
+        
+        // Calculate appropriate dB step (aim for 5-8 major ticks)
+        const targetStep = dbRange / 6;
+        let dbStep;
+        if (targetStep >= 20) dbStep = 20;
+        else if (targetStep >= 10) dbStep = 10;
+        else if (targetStep >= 5) dbStep = 5;
+        else if (targetStep >= 2) dbStep = 2;
+        else dbStep = 1;
+        
+        // Draw major ticks with labels
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        
+        const firstDb = Math.ceil(minDb / dbStep) * dbStep;
+        for (let db = firstDb; db <= maxDb; db += dbStep) {
+            // Calculate y position in the drawing area (below frequency scale)
+            const y = graphTopMargin + graphDrawHeight - ((db - minDb) / dbRange) * graphDrawHeight;
+            
+            // Draw major tick (8 pixels long)
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(8, y);
+            ctx.stroke();
+            
+            // Draw label with background for better visibility
+            const label = `${db.toFixed(0)}`;
+            const textWidth = ctx.measureText(label).width;
+            
+            // Semi-transparent background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(10, y - 7, textWidth + 4, 14);
+            
+            // White text
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(label, 12 + textWidth, y);
+        }
+        
+        // Draw minor ticks (at 1/5 of major step)
+        const minorStep = dbStep / 5;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#ffffff';
+        const firstMinor = Math.ceil(minDb / minorStep) * minorStep;
+        for (let db = firstMinor; db <= maxDb; db += minorStep) {
+            // Skip major ticks
+            if (Math.abs(db % dbStep) < 0.01) continue;
+            
+            // Calculate y position in the drawing area (below frequency scale)
+            const y = graphTopMargin + graphDrawHeight - ((db - minDb) / dbRange) * graphDrawHeight;
+            
+            // Draw minor tick (4 pixels long)
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(4, y);
+            ctx.stroke();
+        }
+    }
+    
+    // Draw frequency scale for line graph
+    drawLineGraphFrequencyScale() {
+        if (!this.totalBandwidth || !this.lineGraphCtx) return;
+        
+        const ctx = this.lineGraphCtx;
+        const startFreq = this.centerFreq - this.totalBandwidth / 2;
+        const endFreq = this.centerFreq + this.totalBandwidth / 2;
+        
+        // Clear the frequency scale area (starts at 35px to leave room for bookmarks)
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 35, this.width, 30);
+        
+        // Calculate appropriate frequency step
+        const targetStep = this.totalBandwidth / 7;
+        let freqStep;
+        if (targetStep >= 5e6) freqStep = 5e6;
+        else if (targetStep >= 2e6) freqStep = 2e6;
+        else if (targetStep >= 1e6) freqStep = 1e6;
+        else if (targetStep >= 500e3) freqStep = 500e3;
+        else if (targetStep >= 200e3) freqStep = 200e3;
+        else if (targetStep >= 100e3) freqStep = 100e3;
+        else if (targetStep >= 50e3) freqStep = 50e3;
+        else if (targetStep >= 20e3) freqStep = 20e3;
+        else if (targetStep >= 10e3) freqStep = 10e3;
+        else if (targetStep >= 5e3) freqStep = 5e3;
+        else if (targetStep >= 2e3) freqStep = 2e3;
+        else if (targetStep >= 1e3) freqStep = 1e3;
+        else if (targetStep >= 500) freqStep = 500;
+        else if (targetStep >= 200) freqStep = 200;
+        else freqStep = 100;
+        
+        ctx.font = 'bold 13px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // Draw major ticks and labels (offset by 35px for bookmarks)
+        const firstFreq = Math.ceil(startFreq / freqStep) * freqStep;
+        for (let freq = firstFreq; freq <= endFreq; freq += freqStep) {
+            const x = ((freq - startFreq) / this.totalBandwidth) * this.width;
+            
+            // Draw tick mark (offset by 35px)
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(x - 1, 35, 2, 12);
+            
+            // Draw label (offset by 35px)
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 3;
+            
+            const label = this.formatFrequencyScale(freq);
+            ctx.strokeText(label, x, 55);
+            ctx.fillText(label, x, 55);
+        }
+        
+        // Draw minor ticks (at 1/5 of major step, offset by 35px)
+        const minorStep = freqStep / 5;
+        ctx.fillStyle = '#ffffff';
+        const firstMinor = Math.ceil(startFreq / minorStep) * minorStep;
+        for (let freq = firstMinor; freq <= endFreq; freq += minorStep) {
+            // Skip major ticks
+            if (Math.abs(freq % freqStep) < 1) continue;
+            
+            const x = ((freq - startFreq) / this.totalBandwidth) * this.width;
+            // Draw minor tick (8 pixels tall, 1.5 pixels wide, offset by 35px)
+            ctx.fillRect(x - 0.75, 35, 1.5, 8);
+        }
+    }
+    
+    // Toggle through display modes: waterfall -> split -> graph -> waterfall
+    toggleLineGraph() {
+        if (this.displayMode === 'waterfall') {
+            // Switch to split mode
+            this.displayMode = 'split';
+
+            // Show line graph canvas with split-mode class
+            if (this.lineGraphCanvas) {
+                this.lineGraphCanvas.classList.remove('graph-only-mode');
+                this.lineGraphCanvas.classList.add('split-mode');
+            }
+            
+            // Add split-view class to main canvas
+            this.canvas.classList.add('split-view');
+
+            // Update canvas height to 300px
+            this.canvas.height = 300;
+            this.height = 300;
+            this.canvasHeight = 300;
+            
+            // Update bandwidth lines canvas height to 600px for split mode (to cover both graph and waterfall)
+            this.bandwidthLinesCanvas.height = 600;
+            this.bandwidthLinesCanvas.style.height = '600px';
+            
+            // In split mode, position overlay absolutely at top (above line graph)
+            this.overlayDiv.style.position = 'absolute';
+            this.overlayDiv.style.top = '0';
+            this.overlayDiv.style.left = '0';
+            this.overlayDiv.style.zIndex = '15'; // Above line graph (z-index: 1)
+            this.overlayDiv.style.backgroundColor = '#adb5bd'; // Grey background to match page
+
+            // Clear with black
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0, 0, this.width, 300);
+
+            // Reset waterfall image data
+            this.waterfallImageData = null;
+
+            // Update line graph cursor style
+            this.updateLineGraphCursorStyle();
+
+        } else if (this.displayMode === 'split') {
+            // Switch to graph-only mode
+            this.displayMode = 'graph';
+
+            // Hide main canvas (waterfall)
+            this.canvas.style.display = 'none';
+            
+            // Hide bandwidth lines canvas (not needed in graph-only mode)
+            this.bandwidthLinesCanvas.style.display = 'none';
+
+            // Show line graph canvas at full height with graph-only-mode class
+            if (this.lineGraphCanvas) {
+                this.lineGraphCanvas.classList.remove('split-mode');
+                this.lineGraphCanvas.classList.add('graph-only-mode');
+            }
+
+        } else {
+            // Switch back to waterfall-only mode
+            this.displayMode = 'waterfall';
+
+            // Hide line graph canvas
+            if (this.lineGraphCanvas) {
+                this.lineGraphCanvas.classList.remove('split-mode', 'graph-only-mode');
+            }
+
+            // Show main canvas
+            this.canvas.style.display = 'block';
+            this.canvas.classList.remove('split-view');
+            
+            // Show bandwidth lines canvas
+            this.bandwidthLinesCanvas.style.display = 'block';
+
+            // Update canvas height back to 600px
+            this.canvas.height = 600;
+            this.height = 600;
+            this.canvasHeight = 600;
+            
+            // Update bandwidth lines canvas height back to 600px
+            this.bandwidthLinesCanvas.height = 600;
+            this.bandwidthLinesCanvas.style.height = '600px';
+
+            // Restore overlay div to original relative positioning
+            this.overlayDiv.style.position = 'relative';
+            this.overlayDiv.style.top = 'auto';
+            this.overlayDiv.style.left = 'auto';
+            this.overlayDiv.style.zIndex = 'auto';
+            this.overlayDiv.style.backgroundColor = ''; // Remove background color
+
+            // Clear the waterfall canvas
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0, 0, this.width, 600);
+
+            // Reset waterfall image data
+            this.waterfallImageData = null;
+        }
+
+        // Redraw
+        if (this.spectrumData && this.spectrumData.length > 0) {
+            this.draw();
+        }
+    }
+    
+    // Setup mouse handlers for line graph canvas
+    setupLineGraphMouseHandlers() {
+        if (!this.lineGraphCanvas) return;
+        
+        // Track dragging state for line graph
+        let lineGraphDragging = false;
+        let lineGraphDragDidMove = false;
+        let lineGraphDragStartX = 0;
+        let lineGraphDragStartFreq = 0;
+        
+        // Track mouse position for line graph
+        let lineGraphMouseX = -1;
+        let lineGraphMouseY = -1;
+        
+        // Track mouse position for tooltip and dragging
+        this.lineGraphCanvas.addEventListener('mousemove', (e) => {
+            const rect = this.lineGraphCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // Store mouse position for automatic tooltip updates
+            lineGraphMouseX = x;
+            lineGraphMouseY = y;
+            
+            // Handle dragging
+            if (lineGraphDragging) {
+                const deltaX = x - lineGraphDragStartX;
+                
+                // Mark that we've moved if delta is significant
+                if (Math.abs(deltaX) > 5) {
+                    lineGraphDragDidMove = true;
+                }
+                
+                // Calculate frequency change based on pixel movement
+                const freqPerPixel = this.totalBandwidth / this.width;
+                const freqDelta = -deltaX * freqPerPixel;
+                let newCenterFreq = lineGraphDragStartFreq + freqDelta;
+                
+                // Apply boundary constraints (0-30 MHz)
+                const halfBandwidth = this.totalBandwidth / 2;
+                const minCenterFreq = 0 + halfBandwidth;
+                const maxCenterFreq = 30e6 - halfBandwidth;
+                
+                // Clamp to boundaries
+                newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
+                
+                // Throttle pan requests
+                const now = Date.now();
+                const timeSinceLastPan = now - this.lastPanTime;
+                
+                // Only pan if we've moved significantly and enough time has passed
+                if (lineGraphDragDidMove && Math.abs(newCenterFreq - this.centerFreq) > 1000 && timeSinceLastPan >= this.panThrottleMs) {
+                    this.panTo(newCenterFreq);
+                    this.lastPanTime = now;
+                    
+                    // Update drag start position for smooth continuous dragging
+                    lineGraphDragStartX = x;
+                    lineGraphDragStartFreq = newCenterFreq;
+                }
+                
+                // Don't show tooltip while dragging
+                this.hideTooltip();
+            } else {
+                // Update tooltip with frequency and dB value when not dragging
+                this.updateLineGraphTooltip(x, y);
+            }
+        });
+        
+        this.lineGraphCanvas.addEventListener('mouseleave', () => {
+            lineGraphDragging = false;
+            lineGraphMouseX = -1;
+            lineGraphMouseY = -1;
+            this.hideTooltip();
+            this.updateLineGraphCursorStyle();
+        });
+        
+        // Store mouse position tracking for automatic updates
+        this.lineGraphMouseX = () => lineGraphMouseX;
+        this.lineGraphMouseY = () => lineGraphMouseY;
+        
+        // Mouse down - start dragging
+        this.lineGraphCanvas.addEventListener('mousedown', (e) => {
+            if (!this.spectrumData) return;
+            
+            // Check if we're showing full bandwidth (0-30 MHz)
+            const startFreq = this.centerFreq - this.totalBandwidth / 2;
+            const endFreq = this.centerFreq + this.totalBandwidth / 2;
+            const isFullBandwidth = (startFreq <= 0 && endFreq >= 30e6);
+            
+            if (isFullBandwidth) {
+                // Don't start dragging if showing full bandwidth
+                return;
+            }
+            
+            const rect = this.lineGraphCanvas.getBoundingClientRect();
+            lineGraphDragStartX = e.clientX - rect.left;
+            lineGraphDragStartFreq = this.centerFreq;
+            lineGraphDragging = true;
+            lineGraphDragDidMove = false;
+            this.lineGraphCanvas.style.cursor = 'grabbing';
+            
+            // Prevent text selection while dragging
+            e.preventDefault();
+        });
+        
+        // Mouse up - stop dragging or handle click
+        this.lineGraphCanvas.addEventListener('mouseup', (e) => {
+            if (!this.spectrumData) return;
+            
+            const rect = this.lineGraphCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            
+            // If we didn't drag, treat it as a click to tune
+            if (!lineGraphDragDidMove && this.config.onFrequencyClick && x >= 0 && x < this.width) {
+                // Calculate frequency from click position
+                const startFreq = this.centerFreq - this.totalBandwidth / 2;
+                const freq = startFreq + (x / this.width) * this.totalBandwidth;
+                
+                // Set flag to skip auto-pan since this frequency change is from clicking
+                this.skipNextPan = true;
+                
+                this.config.onFrequencyClick(freq);
+            }
+            
+            lineGraphDragging = false;
+            lineGraphDragDidMove = false;
+            this.updateLineGraphCursorStyle();
+        });
+        
+        // Set initial cursor style
+        this.updateLineGraphCursorStyle();
+    }
+    
+    // Update line graph tooltip content and position
+    updateLineGraphTooltip(x, y) {
+        if (!this.spectrumData || !this.lineGraphCanvas) {
+            this.hideTooltip();
+            return;
+        }
+        
+        if (x < 0 || x >= this.width) {
+            this.hideTooltip();
+            return;
+        }
+        
+        const binIndex = Math.floor((x / this.width) * this.spectrumData.length);
+        if (binIndex >= 0 && binIndex < this.spectrumData.length) {
+            const db = this.spectrumData[binIndex];
+            const startFreq = this.centerFreq - this.totalBandwidth / 2;
+            const freq = startFreq + (x / this.width) * this.totalBandwidth;
+            
+            // Update tooltip content
+            this.tooltip.textContent = `${this.formatFrequency(freq)} | ${db.toFixed(1)} dB`;
+            
+            // Position tooltip near cursor
+            const rect = this.lineGraphCanvas.getBoundingClientRect();
+            const tooltipX = rect.left + x + 15;
+            const tooltipY = rect.top + y - 10;
+            
+            this.tooltip.style.left = tooltipX + 'px';
+            this.tooltip.style.top = tooltipY + 'px';
+            this.tooltip.style.display = 'block';
+        }
+    }
+    
+    // Update cursor style for line graph based on zoom level
+    updateLineGraphCursorStyle() {
+        if (!this.lineGraphCanvas || !this.totalBandwidth) return;
+        
+        // Check if we're showing full bandwidth (0-30 MHz)
+        const startFreq = this.centerFreq - this.totalBandwidth / 2;
+        const endFreq = this.centerFreq + this.totalBandwidth / 2;
+        const isFullBandwidth = (startFreq <= 0 && endFreq >= 30e6);
+        
+        // Set cursor based on whether dragging is allowed
+        this.lineGraphCanvas.style.cursor = isFullBandwidth ? 'crosshair' : 'grab';
     }
     
     // Draw frequency scale at top of waterfall
@@ -766,6 +1611,58 @@ class SpectrumDisplay {
             this.overlayCtx.lineTo(xHigh, bracketY + bracketHeight/2);
             this.overlayCtx.stroke();
         }
+        
+        // Draw vertical bandwidth lines extending down over waterfall/graph
+        this.drawBandwidthLines(xLow, xHigh);
+    }
+    
+    // Draw vertical green lines at bandwidth edges over waterfall/graph
+    drawBandwidthLines(xLow, xHigh) {
+        // Only draw if both edges are visible
+        if (xLow < 0 || xLow > this.width || xHigh < 0 || xHigh > this.width) return;
+        
+        // Clear the bandwidth lines overlay canvas
+        this.bandwidthLinesCtx.clearRect(0, 0, this.bandwidthLinesCanvas.width, this.bandwidthLinesCanvas.height);
+        
+        // Determine start Y and height based on display mode
+        let startY, height;
+        
+        if (this.displayMode === 'graph') {
+            // Graph-only mode: don't draw on waterfall overlay (line graph has its own handling)
+            return;
+        } else if (this.displayMode === 'split') {
+            // Split mode: draw on line graph (from 70px where graph starts) and waterfall
+            // Line graph is 300px tall, waterfall is 300px tall
+            // Total height needed: 600px (to cover both)
+            startY = 70; // Start where line graph drawing area begins (after bookmarks + freq scale)
+            height = 600; // Cover both line graph and waterfall
+        } else {
+            // Waterfall-only mode: draw full height
+            startY = 30; // Start below frequency scale
+            height = 600;
+        }
+        
+        // Draw the bandwidth lines on the overlay canvas
+        this.bandwidthLinesCtx.save();
+        
+        // Set line style for bandwidth edges
+        this.bandwidthLinesCtx.strokeStyle = 'rgba(0, 255, 0, 0.6)'; // Semi-transparent green
+        this.bandwidthLinesCtx.lineWidth = 2;
+        this.bandwidthLinesCtx.setLineDash([5, 5]); // Dashed line pattern
+        
+        // Draw left edge line
+        this.bandwidthLinesCtx.beginPath();
+        this.bandwidthLinesCtx.moveTo(xLow, startY);
+        this.bandwidthLinesCtx.lineTo(xLow, height);
+        this.bandwidthLinesCtx.stroke();
+        
+        // Draw right edge line
+        this.bandwidthLinesCtx.beginPath();
+        this.bandwidthLinesCtx.moveTo(xHigh, startY);
+        this.bandwidthLinesCtx.lineTo(xHigh, height);
+        this.bandwidthLinesCtx.stroke();
+        
+        this.bandwidthLinesCtx.restore();
     }
     
     // Update auto-range based on current data

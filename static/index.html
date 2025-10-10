@@ -28,9 +28,13 @@
         <!-- Full-band Spectrum Display -->
         <div class="spectrum-display-panel">
             <div class="spectrum-display-container">
+                <canvas id="spectrum-line-graph-canvas" style="display: none;"></canvas>
                 <canvas id="spectrum-display-canvas"></canvas>
                 <!-- All controls overlay on bottom of spectrum -->
                 <div class="spectrum-display-controls">
+                    <div class="spectrum-control-group">
+                        <button onclick="toggleSpectrumLineGraph()" id="spectrum-line-graph-toggle" title="Toggle Display Mode">Split</button>
+                    </div>
                     <div class="spectrum-control-group">
                         <button onclick="spectrumResetZoom()" title="Reset Zoom">Reset</button>
                         <button onclick="spectrumZoomOut()" title="Zoom Out">−</button>

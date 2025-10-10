@@ -1622,7 +1622,12 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .spectrum-display-container {
-    position: relative; /* For absolute positioning of controls overlay */
+    position: relative; /* For absolute positioning of controls overlay and line graph */
+}
+
+/* In split view, container needs to be tall enough for both line graph and waterfall */
+.spectrum-display-container:has(#spectrum-line-graph-canvas.split-mode) {
+    min-height: 635px; /* 300px line graph + 300px waterfall + 35px overlay */
 }
 
 #spectrum-display-canvas {
@@ -1635,6 +1640,39 @@ input[type="range"]::-moz-range-thumb {
     image-rendering: pixelated; /* Crisp pixels for waterfall, no smoothing */
     image-rendering: -moz-crisp-edges;
     image-rendering: crisp-edges;
+}
+
+/* Split view mode - waterfall takes bottom half */
+#spectrum-display-canvas.split-view {
+    height: 300px;
+    border-radius: 0 0 0 0;
+}
+
+/* Line graph canvas - absolutely positioned within spectrum-display-container */
+#spectrum-line-graph-canvas {
+    width: 100%;
+    height: 300px;
+    background: #000;
+    border-radius: 6px 6px 0 0;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    pointer-events: auto;
+}
+
+/* Line graph canvas in split mode - 300px height, overlays top of waterfall */
+#spectrum-line-graph-canvas.split-mode {
+    display: block !important;
+    height: 300px;
+}
+
+/* Line graph canvas in graph-only mode - 600px height, covers entire waterfall */
+#spectrum-line-graph-canvas.graph-only-mode {
+    display: block !important;
+    height: 600px;
 }
 
 .spectrum-display-controls {

@@ -1318,9 +1318,14 @@ class SpectrumDisplay {
             // Switch back to waterfall-only mode
             this.displayMode = 'waterfall';
 
-            // Hide line graph canvas
+            // Hide line graph canvas and clear it
             if (this.lineGraphCanvas) {
                 this.lineGraphCanvas.classList.remove('split-mode', 'graph-only-mode');
+                // Clear the line graph canvas to prevent artifacts
+                if (this.lineGraphCtx) {
+                    this.lineGraphCtx.fillStyle = '#000';
+                    this.lineGraphCtx.fillRect(0, 0, this.lineGraphCanvas.width, this.lineGraphCanvas.height);
+                }
             }
 
             // Show main canvas

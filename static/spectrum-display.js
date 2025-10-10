@@ -782,6 +782,8 @@ class SpectrumDisplay {
     
     // Draw line graph in top half (split mode)
     drawLineGraph() {
+        // Skip processing if not in split mode to save CPU
+        if (this.displayMode !== 'split') return;
         if (!this.lineGraphCanvas || !this.lineGraphCtx || !this.spectrumData) return;
         
         // Set canvas size to match main canvas width
@@ -915,6 +917,8 @@ class SpectrumDisplay {
 
     // Draw line graph in full height (graph-only mode)
     drawLineGraphFullHeight() {
+        // Skip processing if not in graph mode to save CPU
+        if (this.displayMode !== 'graph') return;
         if (!this.lineGraphCanvas || !this.lineGraphCtx || !this.spectrumData) return;
 
         // Set canvas size to match main canvas
@@ -1536,6 +1540,11 @@ class SpectrumDisplay {
     
     // Update line graph tooltip content and position
     updateLineGraphTooltip(x, y) {
+        // Skip if not in graph or split mode to save CPU
+        if (this.displayMode !== 'graph' && this.displayMode !== 'split') {
+            this.hideTooltip();
+            return;
+        }
         if (!this.spectrumData || !this.lineGraphCanvas) {
             this.hideTooltip();
             return;
@@ -1568,6 +1577,8 @@ class SpectrumDisplay {
     
     // Update cursor style for line graph based on zoom level
     updateLineGraphCursorStyle() {
+        // Skip if not in graph or split mode to save CPU
+        if (this.displayMode !== 'graph' && this.displayMode !== 'split') return;
         if (!this.lineGraphCanvas || !this.totalBandwidth) return;
         
         // Check if we're showing full bandwidth (0-30 MHz)

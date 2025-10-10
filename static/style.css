@@ -1630,6 +1630,11 @@ input[type="range"]::-moz-range-thumb {
     min-height: 635px; /* 300px line graph + 300px waterfall + 35px overlay */
 }
 
+/* In graph-only view, container needs to be tall enough for the full-height line graph */
+.spectrum-display-container:has(#spectrum-line-graph-canvas.graph-only-mode) {
+    min-height: 600px; /* 600px line graph */
+}
+
 #spectrum-display-canvas {
     width: 100%;
     height: 600px;

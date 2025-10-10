@@ -27,6 +27,11 @@ class SpectrumDisplay {
         this.lineGraphDataHistoryMaxAge = 300; // 300ms window for smoothing
         this.lineGraphDataHistoryMaxSize = 5; // Keep last 5 frames
         
+        // Peak hold line - tracks maximum values with slow decay
+        this.peakHoldData = null;
+        this.peakHoldDecayRate = 3.0; // dB per second decay rate (faster decay)
+        this.lastPeakHoldUpdate = Date.now();
+        
         // Setup mouse handlers for line graph canvas
         if (this.lineGraphCanvas) {
             this.setupLineGraphMouseHandlers();
@@ -846,14 +851,8 @@ class SpectrumDisplay {
         const dbRange = maxDb - minDb;
         if (dbRange === 0 || !isFinite(dbRange)) return;
         
-        // Create vertical gradient with more color stops for smoother transitions
-        const gradient = ctx.createLinearGradient(0, graphHeight, 0, 0);
-        gradient.addColorStop(0, 'rgba(128, 0, 0, 0.8)');      // Dark red at bottom
-        gradient.addColorStop(0.2, 'rgba(220, 53, 69, 0.8)');  // Red
-        gradient.addColorStop(0.4, 'rgba(255, 140, 0, 0.8)');  // Orange
-        gradient.addColorStop(0.6, 'rgba(255, 193, 7, 0.8)');  // Yellow
-        gradient.addColorStop(0.8, 'rgba(144, 238, 144, 0.8)'); // Light green
-        gradient.addColorStop(1, 'rgba(40, 167, 69, 0.8)');    // Green at top
+        // Create vertical gradient using the same color scheme as waterfall
+        const gradient = this.createLineGraphGradient(ctx, graphHeight);
         
         // Draw filled area with graduated colors
         ctx.fillStyle = gradient;
@@ -891,6 +890,10 @@ class SpectrumDisplay {
         ctx.closePath();
         ctx.fill();
         
+        // Update and draw peak hold line
+        this.updatePeakHold(smoothedData, minDb, maxDb);
+        this.drawPeakHold(ctx, graphWidth, graphHeight, graphDrawHeight, graphTopMargin, minDb, maxDb);
+        
         // Draw frequency scale at top
         this.drawLineGraphFrequencyScale();
         
@@ -913,12 +916,16 @@ class SpectrumDisplay {
         const ctx = this.lineGraphCtx;
         const graphHeight = 600;
         const graphWidth = this.width;
-        const graphTopMargin = 35; // Space for frequency scale at top
+        const graphTopMargin = 70; // Space for bookmarks (35px) + frequency scale (35px) at top
         const graphDrawHeight = graphHeight - graphTopMargin;
 
-        // Clear canvas
+        // Clear canvas and set background colors
+        // Top 35px: grey background for bookmarks area
+        ctx.fillStyle = '#adb5bd';
+        ctx.fillRect(0, 0, graphWidth, 35);
+        // Rest: black background for graph
         ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, graphWidth, graphHeight);
+        ctx.fillRect(0, 35, graphWidth, graphHeight - 35);
 
         // Add current spectrum data to history for temporal smoothing
         const now = Date.now();
@@ -967,14 +974,8 @@ class SpectrumDisplay {
         const dbRange = maxDb - minDb;
         if (dbRange === 0 || !isFinite(dbRange)) return;
 
-        // Create gradient
-        const gradient = ctx.createLinearGradient(0, graphHeight, 0, 0);
-        gradient.addColorStop(0, 'rgba(128, 0, 0, 0.8)');
-        gradient.addColorStop(0.2, 'rgba(220, 53, 69, 0.8)');
-        gradient.addColorStop(0.4, 'rgba(255, 140, 0, 0.8)');
-        gradient.addColorStop(0.6, 'rgba(255, 193, 7, 0.8)');
-        gradient.addColorStop(0.8, 'rgba(144, 238, 144, 0.8)');
-        gradient.addColorStop(1, 'rgba(40, 167, 69, 0.8)');
+        // Create vertical gradient using the same color scheme as waterfall
+        const gradient = this.createLineGraphGradient(ctx, graphHeight);
 
         // Draw filled area
         ctx.fillStyle = gradient;
@@ -1006,6 +1007,10 @@ class SpectrumDisplay {
         ctx.lineTo(graphWidth, graphHeight);
         ctx.closePath();
         ctx.fill();
+
+        // Update and draw peak hold line
+        this.updatePeakHold(smoothedData, minDb, maxDb);
+        this.drawPeakHold(ctx, graphWidth, graphHeight, graphDrawHeight, graphTopMargin, minDb, maxDb);
 
         // Draw frequency scale at top
         this.drawLineGraphFrequencyScale();
@@ -1081,6 +1086,97 @@ class SpectrumDisplay {
             ctx.lineTo(4, y);
             ctx.stroke();
         }
+    }
+    
+    // Create vertical gradient for line graph using waterfall color scheme
+    createLineGraphGradient(ctx, graphHeight) {
+        const gradient = ctx.createLinearGradient(0, graphHeight, 0, 0);
+        
+        // Get the color scheme colors
+        const colors = this.getColorScheme(this.config.colorScheme);
+        
+        // Create gradient stops based on the color scheme
+        // Map colors from bottom (weak signal) to top (strong signal)
+        for (let i = 0; i < colors.length; i++) {
+            const position = i / (colors.length - 1);
+            const color = colors[i];
+            gradient.addColorStop(position, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.8)`);
+        }
+        
+        return gradient;
+    }
+    
+    // Update peak hold data with current spectrum and apply decay
+    updatePeakHold(currentData, minDb, maxDb) {
+        const now = Date.now();
+        const timeDelta = (now - this.lastPeakHoldUpdate) / 1000; // seconds
+        this.lastPeakHoldUpdate = now;
+        
+        // Initialize peak hold array if needed
+        if (!this.peakHoldData || this.peakHoldData.length !== currentData.length) {
+            this.peakHoldData = new Float32Array(currentData.length);
+            for (let i = 0; i < currentData.length; i++) {
+                this.peakHoldData[i] = currentData[i];
+            }
+            return;
+        }
+        
+        // Update peak hold: take max of current and decayed previous peak
+        const decay = this.peakHoldDecayRate * timeDelta;
+        for (let i = 0; i < currentData.length; i++) {
+            // Decay previous peak
+            const decayedPeak = this.peakHoldData[i] - decay;
+            // Take maximum of current value and decayed peak
+            this.peakHoldData[i] = Math.max(currentData[i], decayedPeak);
+            // Clamp to valid range
+            this.peakHoldData[i] = Math.max(minDb, Math.min(maxDb, this.peakHoldData[i]));
+        }
+    }
+    
+    // Draw peak hold line on line graph
+    drawPeakHold(ctx, graphWidth, graphHeight, graphDrawHeight, graphTopMargin, minDb, maxDb) {
+        if (!this.peakHoldData) return;
+        
+        const dbRange = maxDb - minDb;
+        if (dbRange === 0 || !isFinite(dbRange)) return;
+        
+        // Draw peak hold line in light yellow color as solid line
+        ctx.strokeStyle = 'rgba(255, 255, 200, 0.5)'; // Light yellow, semi-transparent
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        
+        let firstPoint = true;
+        for (let x = 0; x < graphWidth; x++) {
+            // Map pixel x to exact bin position
+            const binPos = (x / graphWidth) * this.peakHoldData.length;
+            const binIndex = Math.floor(binPos);
+            const binFrac = binPos - binIndex;
+            
+            // Get dB value with linear interpolation
+            let db;
+            if (binIndex >= 0 && binIndex < this.peakHoldData.length - 1) {
+                const db1 = this.peakHoldData[binIndex];
+                const db2 = this.peakHoldData[binIndex + 1];
+                db = db1 + (db2 - db1) * binFrac;
+            } else if (binIndex === this.peakHoldData.length - 1) {
+                db = this.peakHoldData[binIndex];
+            } else {
+                continue;
+            }
+            
+            // Calculate y position
+            const normalized = Math.max(0, Math.min(1, (db - minDb) / dbRange));
+            const y = graphHeight - (normalized * graphDrawHeight);
+            
+            if (firstPoint) {
+                ctx.moveTo(x, y);
+                firstPoint = false;
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        ctx.stroke();
     }
     
     // Draw frequency scale for line graph
@@ -1199,8 +1295,18 @@ class SpectrumDisplay {
             // Hide main canvas (waterfall)
             this.canvas.style.display = 'none';
             
-            // Hide bandwidth lines canvas (not needed in graph-only mode)
-            this.bandwidthLinesCanvas.style.display = 'none';
+            // Show bandwidth lines canvas in graph-only mode (600px to cover full graph)
+            this.bandwidthLinesCanvas.style.display = 'block';
+            this.bandwidthLinesCanvas.height = 600;
+            this.bandwidthLinesCanvas.style.height = '600px';
+            
+            // Show overlay div (bookmarks) in graph-only mode, positioned at top
+            this.overlayDiv.style.display = 'block';
+            this.overlayDiv.style.position = 'absolute';
+            this.overlayDiv.style.top = '0';
+            this.overlayDiv.style.left = '0';
+            this.overlayDiv.style.zIndex = '15';
+            this.overlayDiv.style.backgroundColor = '#adb5bd';
 
             // Show line graph canvas at full height with graph-only-mode class
             if (this.lineGraphCanvas) {
@@ -1221,8 +1327,13 @@ class SpectrumDisplay {
             this.canvas.style.display = 'block';
             this.canvas.classList.remove('split-view');
             
-            // Show bandwidth lines canvas
+            // Show bandwidth lines canvas and restore to 600px height
             this.bandwidthLinesCanvas.style.display = 'block';
+            this.bandwidthLinesCanvas.height = 600;
+            this.bandwidthLinesCanvas.style.height = '600px';
+            
+            // Show overlay div (bookmarks)
+            this.overlayDiv.style.display = 'block';
 
             // Update canvas height back to 600px
             this.canvas.height = 600;
@@ -1628,8 +1739,9 @@ class SpectrumDisplay {
         let startY, height;
         
         if (this.displayMode === 'graph') {
-            // Graph-only mode: don't draw on waterfall overlay (line graph has its own handling)
-            return;
+            // Graph-only mode: draw from where graph starts (70px after bookmarks + freq scale)
+            startY = 70;
+            height = 600;
         } else if (this.displayMode === 'split') {
             // Split mode: draw on line graph (from 70px where graph starts) and waterfall
             // Line graph is 300px tall, waterfall is 300px tall

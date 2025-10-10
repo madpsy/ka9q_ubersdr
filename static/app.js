@@ -3888,8 +3888,8 @@ function toggleSpectrumLineGraph() {
             button.style.color = '';
             button.textContent = 'Split';
         } else if (spectrumDisplay.displayMode === 'split') {
-            // Split mode - button shows what's next (Graph)
-            button.style.background = '#ffc107';
+            // Split mode - button shows what's next (Graph) - keep green
+            button.style.background = '#28a745';
             button.style.color = 'white';
             button.textContent = 'Graph';
         } else {

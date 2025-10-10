@@ -547,6 +547,7 @@ class SpectrumDisplay {
 
         // Initialize waterfall image data if needed
         if (!this.waterfallImageData) {
+            console.log(`[drawWaterfall] Initializing waterfall in ${this.displayMode} mode, canvas height: ${this.height}`);
             this.waterfallImageData = this.ctx.createImageData(this.width, 1);
             // Initialize with black background
             this.ctx.fillStyle = '#000';
@@ -564,6 +565,12 @@ class SpectrumDisplay {
         // In waterfall-only mode (600px height), start at y=30 (below frequency scale)
         const waterfallStartY = this.displayMode === 'split' ? 150 : 30;
         const waterfallHeight = this.height - waterfallStartY - 1;
+        
+        // Log only first time in split mode
+        if (this.displayMode === 'split' && !this.splitModeLogged) {
+            console.log(`[drawWaterfall] Split mode - waterfallStartY: ${waterfallStartY}, waterfallHeight: ${waterfallHeight}, canvas height: ${this.height}`);
+            this.splitModeLogged = true;
+        }
         
         // Scroll existing waterfall down by 1 pixel
         // CRITICAL: Copy pixel-for-pixel without scaling to avoid stretching
@@ -637,6 +644,11 @@ class SpectrumDisplay {
         this.ctx.putImageData(this.waterfallImageData, 0, waterfallStartY);
 
         this.waterfallLineCount++;
+        
+        // Log only first few lines in split mode
+        if (this.displayMode === 'split' && this.waterfallLineCount <= 3) {
+            console.log(`[drawWaterfall] Drew waterfall line #${this.waterfallLineCount} at y=${waterfallStartY}`);
+        }
 
         // Draw timestamps on left side frequently (about 4 visible on 600px canvas)
         // With 600px height, we want timestamps every ~150 pixels
@@ -897,8 +909,8 @@ class SpectrumDisplay {
         // Draw frequency scale at top
         this.drawLineGraphFrequencyScale();
         
-        // Draw dBFS scale on left side (in the drawing area below frequency scale)
-        this.drawLineGraphDbScale(minDb, maxDb, graphDrawHeight, graphTopMargin);
+        // Draw dBFS scale on left side
+        this.drawLineGraphDbScale(minDb, maxDb, graphHeight, graphTopMargin);
     }
 
     // Draw line graph in full height (graph-only mode)
@@ -1249,23 +1261,36 @@ class SpectrumDisplay {
     
     // Toggle through display modes: waterfall -> split -> graph -> waterfall
     toggleLineGraph() {
+        console.log(`[toggleLineGraph] Current mode: ${this.displayMode}`);
+        
         if (this.displayMode === 'waterfall') {
             // Switch to split mode
+            console.log('[toggleLineGraph] Switching to SPLIT mode');
             this.displayMode = 'split';
+            this.splitModeLogged = false; // Reset flag for new split mode session
 
+            // Ensure main canvas is visible
+            this.canvas.style.display = 'block';
+            
             // Show line graph canvas with split-mode class
             if (this.lineGraphCanvas) {
                 this.lineGraphCanvas.classList.remove('graph-only-mode');
                 this.lineGraphCanvas.classList.add('split-mode');
+                this.lineGraphCanvas.style.display = 'block';
             }
             
             // Add split-view class to main canvas
             this.canvas.classList.add('split-view');
 
-            // Update canvas height to 300px
+            // Update canvas height to 300px (this clears the canvas!)
             this.canvas.height = 300;
             this.height = 300;
             this.canvasHeight = 300;
+            
+            // Reset waterfall line count when entering split mode
+            this.waterfallLineCount = 0;
+            
+            console.log(`[toggleLineGraph] Split mode setup complete - canvas height: ${this.canvas.height}, display: ${this.canvas.style.display}`);
             
             // Update bandwidth lines canvas height to 600px for split mode (to cover both graph and waterfall)
             this.bandwidthLinesCanvas.height = 600;
@@ -1290,10 +1315,12 @@ class SpectrumDisplay {
 
         } else if (this.displayMode === 'split') {
             // Switch to graph-only mode
+            console.log('[toggleLineGraph] Switching to GRAPH mode');
             this.displayMode = 'graph';
 
             // Hide main canvas (waterfall)
             this.canvas.style.display = 'none';
+            console.log('[toggleLineGraph] Main canvas hidden for graph mode');
             
             // Show bandwidth lines canvas in graph-only mode (600px to cover full graph)
             this.bandwidthLinesCanvas.style.display = 'block';
@@ -1316,11 +1343,14 @@ class SpectrumDisplay {
 
         } else {
             // Switch back to waterfall-only mode
+            console.log('[toggleLineGraph] Switching to WATERFALL mode');
             this.displayMode = 'waterfall';
 
             // Hide line graph canvas and clear it
             if (this.lineGraphCanvas) {
                 this.lineGraphCanvas.classList.remove('split-mode', 'graph-only-mode');
+                this.lineGraphCanvas.style.display = 'none'; // Actually hide the canvas
+                console.log('[toggleLineGraph] Line graph canvas hidden');
                 // Clear the line graph canvas to prevent artifacts
                 if (this.lineGraphCtx) {
                     this.lineGraphCtx.fillStyle = '#000';
@@ -1331,6 +1361,7 @@ class SpectrumDisplay {
             // Show main canvas
             this.canvas.style.display = 'block';
             this.canvas.classList.remove('split-view');
+            console.log(`[toggleLineGraph] Main canvas shown, display: ${this.canvas.style.display}, height: ${this.canvas.height}`);
             
             // Show bandwidth lines canvas and restore to 600px height
             this.bandwidthLinesCanvas.style.display = 'block';

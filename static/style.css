@@ -1048,7 +1048,8 @@ input[type="range"]::-moz-range-thumb {
 .bandpass-panel,
 .notch-panel,
 .compressor-panel,
-.noise-reduction-panel {
+.noise-reduction-panel,
+.stereo-virtualizer-panel {
     padding: 0;
     background: transparent;
     border-top: none;
@@ -1070,7 +1071,8 @@ input[type="range"]::-moz-range-thumb {
 .bandpass-container,
 .notch-container,
 .compressor-container,
-.noise-reduction-container {
+.noise-reduction-container,
+.stereo-virtualizer-container {
     padding: 15px 20px;
     background: #2c3e50;
     border-radius: 6px;
@@ -1215,6 +1217,7 @@ input[type="range"]::-moz-range-thumb {
 #notch-controls,
 #compressor-controls,
 #noise-reduction-controls,
+#stereo-virtualizer-controls,
 #equalizer-controls,
 #cw-decoder-controls {
     margin-top: 15px;

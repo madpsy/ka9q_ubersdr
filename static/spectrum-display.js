@@ -12,7 +12,7 @@ class SpectrumDisplay {
         this.lineGraphCanvas = document.getElementById('spectrum-line-graph-canvas');
         this.lineGraphCtx = this.lineGraphCanvas ? this.lineGraphCanvas.getContext('2d', { alpha: false }) : null;
         // Display mode: 'waterfall', 'graph', or 'split'
-        this.displayMode = 'waterfall';
+        this.displayMode = 'split';
         
         // Line graph noise floor tracking for smoother display
         this.lineGraphMinHistory = [];
@@ -243,6 +243,38 @@ class SpectrumDisplay {
         
         // Color gradient cache
         this.colorGradient = this.createColorGradient();
+        
+        // Initialize split mode if it's the default
+        if (this.displayMode === 'split') {
+            this.splitModeLogged = false;
+            this.canvas.classList.add('split-view');
+            this.canvas.height = 300;
+            this.height = 300;
+            this.canvasHeight = 300;
+            
+            if (this.lineGraphCanvas) {
+                this.lineGraphCanvas.classList.add('split-mode');
+                this.lineGraphCanvas.style.display = 'block';
+                this.lineGraphCanvas.width = this.width;
+                this.lineGraphCanvas.height = 300;
+                this.lineGraphCanvas.style.width = this.width + 'px';
+                this.lineGraphCanvas.style.height = '300px';
+            }
+            
+            this.bandwidthLinesCanvas.height = 600;
+            this.bandwidthLinesCanvas.style.height = '600px';
+            
+            this.overlayDiv.style.position = 'absolute';
+            this.overlayDiv.style.top = '0';
+            this.overlayDiv.style.left = '0';
+            this.overlayDiv.style.zIndex = '15';
+            this.overlayDiv.style.backgroundColor = '#adb5bd';
+            
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0, 0, this.width, 300);
+            
+            this.waterfallImageData = null;
+        }
     }
     
     // Resize canvas to match container

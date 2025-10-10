@@ -44,11 +44,15 @@ class NR2Processor {
     }
     
     // Update parameters from UI
-    setParameters(strength, floor) {
+    setParameters(strength, floor, adaptRate) {
         // Strength 0-100% maps to alpha 1.0-4.0
         this.alpha = 1.0 + (strength / 100) * 3.0;
         // Floor 0-10% maps to beta 0.001-0.1
         this.beta = 0.001 + (floor / 100) * 0.099;
+        // Adapt rate 0.1-5.0% maps to 0.001-0.05
+        if (adaptRate !== undefined) {
+            this.noiseAdaptRate = adaptRate / 100;
+        }
     }
     
     // Reset noise learning

@@ -70,7 +70,19 @@ let noiseReductionEnabled = false; // Track if noise reduction is enabled
 let noiseReductionProcessor = null; // ScriptProcessor for noise reduction
 let noiseReductionStrength = 40; // Noise reduction strength (0-100%)
 let noiseReductionFloor = 10; // Spectral floor (0-10%)
+let noiseReductionMakeupGain = null; // GainNode for makeup gain after NR2
+let noiseReductionAnalyser = null; // Analyser to monitor NR2 output for clipping
+let noiseReductionClipping = false; // Track if NR2 output is clipping
+let noiseReductionClipIndicatorTimeout = null; // Timeout for hiding clip indicator
 let nr2 = null; // NR2 processor instance
+let stereoVirtualizerEnabled = false; // Track if stereo virtualizer is enabled
+let stereoSplitter = null; // ChannelSplitterNode to split mono to stereo
+let stereoMerger = null; // ChannelMergerNode to merge back to stereo
+let stereoDelayLeft = null; // DelayNode for left channel
+let stereoDelayRight = null; // DelayNode for right channel
+let stereoGainLeft = null; // GainNode for left channel separation
+let stereoGainRight = null; // GainNode for right channel separation
+let stereoWidthGain = null; // GainNode for overall width control
 
 // Amateur radio band ranges (in Hz) - UK RSGB allocations
 const bandRanges = {
@@ -822,6 +834,9 @@ function playAudioBuffer(buffer) {
     if (noiseReductionEnabled && noiseReductionProcessor) {
         try {
             noiseReductionProcessor.disconnect();
+            if (noiseReductionMakeupGain) {
+                noiseReductionMakeupGain.disconnect();
+            }
         } catch (e) {
             // Ignore if already disconnected
         }
@@ -829,6 +844,12 @@ function playAudioBuffer(buffer) {
         // Connect processor in signal chain
         nextNode.connect(noiseReductionProcessor);
         nextNode = noiseReductionProcessor;
+        
+        // Add makeup gain after NR2
+        if (noiseReductionMakeupGain) {
+            nextNode.connect(noiseReductionMakeupGain);
+            nextNode = noiseReductionMakeupGain;
+        }
     }
     
     // Step 1: Squelch gate (after noise reduction so it sees cleaned signal)
@@ -968,6 +989,9 @@ function playAudioBuffer(buffer) {
     
     // Step 7: Tap signal for monitoring AFTER all processing but BEFORE final output
     // These are just monitoring taps and don't affect the audio path
+    if (noiseReductionEnabled && noiseReductionAnalyser) {
+        gainNode.connect(noiseReductionAnalyser);
+    }
     if (compressorEnabled && compressorAnalyser) {
         gainNode.connect(compressorAnalyser);
     }
@@ -978,8 +1002,57 @@ function playAudioBuffer(buffer) {
         gainNode.connect(vuAnalyser);
     }
     
-    // Step 8: Final output to destination
-    gainNode.connect(audioContext.destination);
+    // Step 8: Stereo Virtualizer (optional, creates wider stereo image from mono)
+    let outputNode = gainNode;
+    if (stereoVirtualizerEnabled && stereoSplitter && stereoMerger && stereoMakeupGain) {
+        // Disconnect stereo nodes to clear old connections
+        try {
+            stereoSplitter.disconnect();
+            stereoDelayLeft.disconnect();
+            stereoDelayRight.disconnect();
+            stereoGainLeft.disconnect();
+            stereoGainRight.disconnect();
+            stereoWidthGain.disconnect();
+            stereoMerger.disconnect();
+            stereoMakeupGain.disconnect();
+            if (stereoAnalyser) stereoAnalyser.disconnect();
+        } catch (e) {
+            // Ignore if already disconnected
+        }
+        
+        // Build stereo virtualizer chain:
+        // Input (mono) -> Splitter -> [Left: No delay + gain, Right: Delay + gain] -> Merger -> Width -> Makeup Gain -> Output
+        // Equal gains on both channels for balanced output
+        
+        // Split mono signal - connect input to both channels
+        outputNode.connect(stereoSplitter);
+        
+        // Left channel: no delay + balanced gain
+        stereoSplitter.connect(stereoDelayLeft, 0); // Channel 0 (mono) to left delay node
+        stereoDelayLeft.connect(stereoGainLeft);
+        stereoGainLeft.connect(stereoMerger, 0, 0); // To left output channel
+        
+        // Right channel: with delay + balanced gain (Haas effect)
+        stereoSplitter.connect(stereoDelayRight, 0); // Channel 0 (mono) to right delay node
+        stereoDelayRight.connect(stereoGainRight);
+        stereoGainRight.connect(stereoMerger, 0, 1); // To right output channel
+        
+        // Width control after merger
+        stereoMerger.connect(stereoWidthGain);
+        
+        // Makeup gain after width control
+        stereoWidthGain.connect(stereoMakeupGain);
+        
+        // Connect analyser for clipping detection
+        if (stereoAnalyser) {
+            stereoMakeupGain.connect(stereoAnalyser);
+        }
+        
+        outputNode = stereoMakeupGain;
+    }
+    
+    // Step 9: Final output to destination
+    outputNode.connect(audioContext.destination);
     
     // Schedule playback to maintain continuous audio
     const currentTime = audioContext.currentTime;
@@ -1757,6 +1830,40 @@ function toggleAudioVisualization() {
 
 // Check for clipping (runs independently of visualization state)
 function checkClipping() {
+    // Check for clipping at stereo virtualizer output if enabled
+    if (stereoVirtualizerEnabled && stereoAnalyser) {
+        const stereoDataArray = new Uint8Array(stereoAnalyser.frequencyBinCount);
+        stereoAnalyser.getByteTimeDomainData(stereoDataArray);
+        
+        let stereoMaxSample = 0;
+        for (let i = 0; i < stereoDataArray.length; i++) {
+            const normalized = (stereoDataArray[i] - 128) / 128;
+            stereoMaxSample = Math.max(stereoMaxSample, Math.abs(normalized));
+        }
+        
+        // Clipping occurs when samples exceed ±0.99 (close to ±1.0)
+        if (stereoMaxSample > 0.99) {
+            showStereoClipIndicator();
+        }
+    }
+    
+    // Check for clipping at noise reduction output if enabled
+    if (noiseReductionEnabled && noiseReductionAnalyser) {
+        const nrDataArray = new Uint8Array(noiseReductionAnalyser.frequencyBinCount);
+        noiseReductionAnalyser.getByteTimeDomainData(nrDataArray);
+        
+        let nrMaxSample = 0;
+        for (let i = 0; i < nrDataArray.length; i++) {
+            const normalized = (nrDataArray[i] - 128) / 128;
+            nrMaxSample = Math.max(nrMaxSample, Math.abs(normalized));
+        }
+        
+        // Clipping occurs when samples exceed ±0.99 (close to ±1.0)
+        if (nrMaxSample > 0.99) {
+            showNoiseReductionClipIndicator();
+        }
+    }
+    
     // Check for clipping at compressor output if enabled
     if (compressorEnabled && compressorAnalyser) {
         const compDataArray = new Uint8Array(compressorAnalyser.frequencyBinCount);
@@ -2878,7 +2985,7 @@ function updateBandpassSliderRanges() {
     }
 }
 
-// Initialize bandpass filter (4 cascaded stages for 48 dB/octave rolloff)
+// Initialize bandpass filter (configurable cascaded stages for adjustable rolloff)
 function initializeBandpassFilter() {
     if (!audioContext) return;
     
@@ -2895,16 +3002,27 @@ function initializeBandpassFilter() {
     // Get initial values from sliders
     const center = parseInt(document.getElementById('bandpass-center').value);
     const width = parseInt(document.getElementById('bandpass-width').value);
+    const stages = parseInt(document.getElementById('bandpass-stages').value);
+    const autoQ = document.getElementById('bandpass-auto-q').checked;
+    const qMultiplier = parseFloat(document.getElementById('bandpass-q-multiplier').value);
     
-    // Calculate Q value - use a LOW Q for each stage to avoid resonance/ringing
-    // For cascaded filters, each stage multiplies the effect, so use very low Q
-    // Q = center / width gives the basic bandwidth, but we need much lower for 4 stages
-    const Q = Math.max(0.7, center / (width * 4)); // Divide by 4 for very gentle filtering per stage
+    // Calculate Q value
+    let Q;
+    if (autoQ) {
+        // Auto mode: use a LOW Q for each stage to avoid resonance/ringing
+        // For cascaded filters, each stage multiplies the effect, so use very low Q
+        // Q = center / width gives the basic bandwidth, but we need much lower for multiple stages
+        Q = Math.max(0.7, center / (width * stages));
+    } else {
+        // Manual mode: apply multiplier to auto-calculated Q
+        const baseQ = Math.max(0.7, center / (width * stages));
+        Q = baseQ * qMultiplier;
+    }
     
-    // Create 4 cascaded bandpass filters for steep rolloff
-    // Each stage adds 12 dB/octave, so 4 stages = 48 dB/octave
+    // Create cascaded bandpass filters for steep rolloff
+    // Each stage adds 12 dB/octave, so N stages = N*12 dB/octave
     // Note: Do NOT chain them permanently here - they will be chained per-buffer
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < stages; i++) {
         const filter = audioContext.createBiquadFilter();
         filter.type = 'bandpass';
         filter.frequency.value = center;
@@ -2913,11 +3031,47 @@ function initializeBandpassFilter() {
         bandpassFilters.push(filter);
     }
     
-    log(`Bandpass filter initialized: ${center} Hz ± ${width/2} Hz, Q=${Q.toFixed(2)}, 4-stage cascade (48 dB/octave rolloff)`);
+    const rolloff = stages * 12;
+    log(`Bandpass filter initialized: ${center} Hz ± ${width/2} Hz, Q=${Q.toFixed(2)}, ${stages}-stage cascade (${rolloff} dB/octave rolloff)`);
 }
 
 // Update bandpass filter parameters
 function updateBandpassFilter() {
+    const sliderCenter = parseInt(document.getElementById('bandpass-center').value);
+    const width = parseInt(document.getElementById('bandpass-width').value);
+    const stages = parseInt(document.getElementById('bandpass-stages').value);
+    const autoQ = document.getElementById('bandpass-auto-q').checked;
+    const qMultiplier = parseFloat(document.getElementById('bandpass-q-multiplier').value);
+    
+    // Show/hide Q multiplier control based on Auto Q checkbox
+    const qControl = document.getElementById('bandpass-q-control');
+    if (qControl) {
+        qControl.style.display = autoQ ? 'none' : 'block';
+    }
+    
+    // Update display values
+    document.getElementById('bandpass-center-value').textContent = sliderCenter + ' Hz';
+    document.getElementById('bandpass-width-value').textContent = width + ' Hz';
+    
+    const stagesDisplay = document.getElementById('bandpass-stages-rolloff-value');
+    if (stagesDisplay) {
+        stagesDisplay.textContent = stages + ' (' + (stages * 12) + ' dB/oct)';
+    }
+    
+    const qDisplay = document.getElementById('bandpass-q-multiplier-value');
+    if (qDisplay) {
+        qDisplay.textContent = qMultiplier.toFixed(1) + 'x';
+    }
+    
+    // If number of stages changed, reinitialize filters
+    if (bandpassFilters.length !== stages) {
+        if (audioContext) {
+            initializeBandpassFilter();
+        }
+        return;
+    }
+    
+    // If no filters exist yet, initialize them
     if (bandpassFilters.length === 0) {
         if (audioContext) {
             initializeBandpassFilter();
@@ -2925,16 +3079,22 @@ function updateBandpassFilter() {
         return;
     }
     
-    const sliderCenter = parseInt(document.getElementById('bandpass-center').value);
-    const width = parseInt(document.getElementById('bandpass-width').value);
-    
     // For LSB mode, slider shows positive values but filter needs negative frequencies
     // Convert back to negative for the actual audio filter
     const actualCenter = (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
     
-    const Q = Math.max(0.7, Math.abs(actualCenter) / (width * 4)); // Low Q for cascaded filters to avoid resonance
+    // Calculate Q value
+    let Q;
+    if (autoQ) {
+        // Auto mode: adjust Q based on number of stages
+        Q = Math.max(0.7, Math.abs(actualCenter) / (width * stages));
+    } else {
+        // Manual mode: apply multiplier to auto-calculated Q
+        const baseQ = Math.max(0.7, Math.abs(actualCenter) / (width * stages));
+        Q = baseQ * qMultiplier;
+    }
     
-    console.log(`updateBandpassFilter: sliderCenter=${sliderCenter}, actualCenter=${actualCenter}, width=${width}, Q=${Q.toFixed(2)}`);
+    console.log(`updateBandpassFilter: sliderCenter=${sliderCenter}, actualCenter=${actualCenter}, width=${width}, stages=${stages}, Q=${Q.toFixed(2)}, autoQ=${autoQ}`);
     
     // Update all filter stages with actual frequency (negative for LSB)
     for (let filter of bandpassFilters) {
@@ -2942,13 +3102,10 @@ function updateBandpassFilter() {
         filter.Q.value = Q;
     }
     
-    // Update display values (show positive)
-    document.getElementById('bandpass-center-value').textContent = sliderCenter + ' Hz';
-    document.getElementById('bandpass-width-value').textContent = width + ' Hz';
-    
     // Log occasionally (not on every slider movement)
     if (Math.random() < 0.05) {  // 5% chance to log
-        log(`Bandpass: ${sliderCenter} Hz ± ${width/2} Hz (Q=${Q.toFixed(2)}, 4-stage)`);
+        const rolloff = stages * 12;
+        log(`Bandpass: ${sliderCenter} Hz ± ${width/2} Hz (Q=${Q.toFixed(2)}, ${stages}-stage, ${rolloff} dB/oct)`);
     }
     
     // Update CW decoder frequency if enabled
@@ -3386,7 +3543,7 @@ function initNoiseReduction() {
     try {
         // Create NR2 processor instance
         nr2 = new NR2Processor(audioContext, 2048, 4);
-        nr2.setParameters(noiseReductionStrength, noiseReductionFloor);
+        nr2.setParameters(noiseReductionStrength, noiseReductionFloor, 1.0);
         
         // Create script processor
         const bufferSize = 2048;
@@ -3400,7 +3557,16 @@ function initNoiseReduction() {
             nr2.process(input, output);
         };
         
-        log('✅ NR2 Noise Reduction initialized');
+        // Create makeup gain node
+        noiseReductionMakeupGain = audioContext.createGain();
+        noiseReductionMakeupGain.gain.value = Math.pow(10, 2 / 20); // Default +2 dB
+        
+        // Create analyser to monitor NR2 output for clipping detection
+        noiseReductionAnalyser = audioContext.createAnalyser();
+        noiseReductionAnalyser.fftSize = 2048;
+        noiseReductionAnalyser.smoothingTimeConstant = 0;
+        
+        log('✅ NR2 Noise Reduction initialized with makeup gain and clipping detection');
         log('Using proper FFT-based spectral subtraction with overlap-add');
         return true;
     } catch (e) {
@@ -3414,6 +3580,8 @@ function initNoiseReduction() {
 function updateNoiseReduction() {
     const strengthSlider = document.getElementById('noise-reduction-strength');
     const floorSlider = document.getElementById('noise-reduction-floor');
+    const adaptRateSlider = document.getElementById('noise-reduction-adapt-rate');
+    const makeupGainSlider = document.getElementById('noise-reduction-makeup-gain');
     
     if (strengthSlider) {
         noiseReductionStrength = parseFloat(strengthSlider.value);
@@ -3425,12 +3593,66 @@ function updateNoiseReduction() {
         document.getElementById('noise-reduction-floor-value').textContent = noiseReductionFloor + '%';
     }
     
+    let adaptRate = 1.0; // Default value
+    if (adaptRateSlider) {
+        adaptRate = parseFloat(adaptRateSlider.value);
+        document.getElementById('noise-reduction-adapt-rate-value').textContent = adaptRate.toFixed(1) + '%';
+    }
+    
+    // Update makeup gain
+    if (makeupGainSlider && noiseReductionMakeupGain) {
+        const makeupGainDb = parseFloat(makeupGainSlider.value);
+        noiseReductionMakeupGain.gain.value = Math.pow(10, makeupGainDb / 20);
+        document.getElementById('noise-reduction-makeup-gain-value').textContent = '+' + makeupGainDb + ' dB';
+    }
+    
     // Update NR2 processor parameters
     if (nr2) {
-        nr2.setParameters(noiseReductionStrength, noiseReductionFloor);
+        nr2.setParameters(noiseReductionStrength, noiseReductionFloor, adaptRate);
     }
 }
 
+// Show noise reduction clipping indicator
+function showNoiseReductionClipIndicator() {
+    const indicator = document.getElementById('noise-reduction-clip-indicator');
+    if (!indicator) return;
+    
+    // Show the indicator
+    indicator.style.display = 'inline';
+    noiseReductionClipping = true;
+    
+    // Clear any existing timeout
+    if (noiseReductionClipIndicatorTimeout) {
+        clearTimeout(noiseReductionClipIndicatorTimeout);
+    }
+    
+    // Hide after 2 seconds of no clipping
+    noiseReductionClipIndicatorTimeout = setTimeout(() => {
+        indicator.style.display = 'none';
+        noiseReductionClipping = false;
+    }, 2000);
+}
+
+// Show stereo virtualizer clipping indicator
+function showStereoClipIndicator() {
+    const indicator = document.getElementById('stereo-virtualizer-clip-indicator');
+    if (!indicator) return;
+    
+    // Show the indicator
+    indicator.style.display = 'inline';
+    stereoClipping = true;
+    
+    // Clear any existing timeout
+    if (stereoClipIndicatorTimeout) {
+        clearTimeout(stereoClipIndicatorTimeout);
+    }
+    
+    // Hide after 2 seconds of no clipping
+    stereoClipIndicatorTimeout = setTimeout(() => {
+        indicator.style.display = 'none';
+        stereoClipping = false;
+    }, 2000);
+}
 
 // Toggle noise reduction on/off
 function toggleNoiseReduction() {
@@ -3898,6 +4120,129 @@ function toggleSpectrumLineGraph() {
             button.style.color = 'white';
             button.textContent = 'Waterfall';
         }
+    }
+}
+
+// Initialize button text for split mode default
+document.addEventListener('DOMContentLoaded', () => {
+    // Wait for spectrum display to be initialized
+    setTimeout(() => {
+        const button = document.getElementById('spectrum-line-graph-toggle');
+        if (button && spectrumDisplay && spectrumDisplay.displayMode === 'split') {
+            button.style.background = '#28a745';
+            button.style.color = 'white';
+            button.textContent = 'Graph';
+        }
+    }, 100);
+});
+
+// Stereo Virtualizer Functions
+
+// Initialize stereo virtualizer
+function initializeStereoVirtualizer() {
+    if (!audioContext) return;
+    
+    // Create channel splitter (mono to 2 channels)
+    stereoSplitter = audioContext.createChannelSplitter(2);
+    
+    // Create delay nodes for Haas effect
+    stereoDelayLeft = audioContext.createDelay(0.1);
+    stereoDelayRight = audioContext.createDelay(0.1);
+    stereoDelayLeft.delayTime.value = 0.016; // 16ms default
+    stereoDelayRight.delayTime.value = 0; // No delay on right
+    
+    // Create gain nodes for channel separation/independence
+    stereoGainLeft = audioContext.createGain();
+    stereoGainRight = audioContext.createGain();
+    stereoGainLeft.gain.value = 1.0; // Full gain on both channels
+    stereoGainRight.gain.value = 1.0;
+    
+    // Create gain node for overall width control
+    stereoWidthGain = audioContext.createGain();
+    stereoWidthGain.gain.value = 0.5; // 50% width default
+    
+    // Create channel merger (2 channels back to stereo)
+    stereoMerger = audioContext.createChannelMerger(2);
+    
+    // Create makeup gain node
+    stereoMakeupGain = audioContext.createGain();
+    stereoMakeupGain.gain.value = 1.0; // 0 dB default
+    
+    // Create analyser to monitor output for clipping detection
+    stereoAnalyser = audioContext.createAnalyser();
+    stereoAnalyser.fftSize = 2048;
+    stereoAnalyser.smoothingTimeConstant = 0;
+    
+    log('Stereo virtualizer initialized (Haas effect + channel separation + makeup gain)');
+}
+
+// Toggle stereo virtualizer on/off
+function toggleStereoVirtualizer() {
+    const checkbox = document.getElementById('stereo-virtualizer-enable');
+    const badge = document.getElementById('stereo-virtualizer-status-badge');
+    stereoVirtualizerEnabled = checkbox.checked;
+    
+    if (stereoVirtualizerEnabled) {
+        if (!stereoSplitter && audioContext) {
+            initializeStereoVirtualizer();
+        }
+        if (badge) {
+            badge.textContent = 'ENABLED';
+            badge.classList.remove('filter-disabled');
+            badge.classList.add('filter-enabled');
+        }
+        log('Stereo virtualizer enabled (creates wider stereo image)');
+    } else {
+        if (badge) {
+            badge.textContent = 'DISABLED';
+            badge.classList.remove('filter-enabled');
+            badge.classList.add('filter-disabled');
+        }
+        log('Stereo virtualizer disabled');
+    }
+}
+
+// Update stereo virtualizer parameters
+function updateStereoVirtualizer() {
+    const width = parseInt(document.getElementById('stereo-width').value);
+    const delay = parseInt(document.getElementById('stereo-delay').value);
+    const separation = parseInt(document.getElementById('stereo-separation').value);
+    const makeupGainDb = parseFloat(document.getElementById('stereo-makeup-gain').value);
+    
+    // Update display values
+    document.getElementById('stereo-width-value').textContent = width + '%';
+    document.getElementById('stereo-delay-value').textContent = delay + ' ms';
+    document.getElementById('stereo-separation-value').textContent = separation + '%';
+    document.getElementById('stereo-makeup-gain-value').textContent = '+' + makeupGainDb.toFixed(1) + ' dB';
+    
+    if (!stereoDelayLeft || !stereoDelayRight || !stereoGainLeft || !stereoGainRight || !stereoWidthGain || !stereoMakeupGain) {
+        if (audioContext) {
+            initializeStereoVirtualizer();
+        }
+        return;
+    }
+    
+    // Update delay times (convert ms to seconds)
+    // Left channel gets the delay, right stays at 0
+    stereoDelayLeft.delayTime.value = delay / 1000;
+    stereoDelayRight.delayTime.value = 0;
+    
+    // Update separation (0-100% -> 0.0-1.0)
+    // Keep both channels at full gain for equal volume
+    const separationValue = separation / 100;
+    stereoGainLeft.gain.value = 1.0;
+    stereoGainRight.gain.value = 1.0;
+    
+    // Update width (0-100% -> 0.0-1.0)
+    const widthValue = width / 100;
+    stereoWidthGain.gain.value = widthValue;
+    
+    // Update makeup gain (convert dB to linear)
+    stereoMakeupGain.gain.value = Math.pow(10, makeupGainDb / 20);
+    
+    // Log occasionally (not on every slider movement)
+    if (Math.random() < 0.05) {
+        log(`Stereo virtualizer: ${width}% width, ${delay}ms delay, ${separation}% separation, +${makeupGainDb.toFixed(1)} dB makeup`);
     }
 }
 

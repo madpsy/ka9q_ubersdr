@@ -339,6 +339,20 @@
                             <label for="bandpass-width">Bandwidth: <span id="bandpass-width-value">200 Hz</span></label>
                             <input type="range" id="bandpass-width" min="20" max="1000" value="200" step="10" oninput="updateBandpassFilter()">
                         </div>
+                        <div class="control-group">
+                            <label for="bandpass-stages">Filter Stages: <span id="bandpass-stages-rolloff-value">4 (48 dB/oct)</span></label>
+                            <input type="range" id="bandpass-stages" min="1" max="6" value="4" step="1" oninput="updateBandpassFilter()">
+                        </div>
+                        <div class="control-group">
+                            <label>
+                                <input type="checkbox" id="bandpass-auto-q" checked onchange="updateBandpassFilter()">
+                                Auto Q Factor
+                            </label>
+                        </div>
+                        <div class="control-group" id="bandpass-q-control" style="display: none;">
+                            <label for="bandpass-q-multiplier">Q Multiplier: <span id="bandpass-q-multiplier-value">1.0x</span></label>
+                            <input type="range" id="bandpass-q-multiplier" min="0.5" max="2.0" value="1.0" step="0.1" oninput="updateBandpassFilter()">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -347,6 +361,7 @@
             <div class="noise-reduction-panel">
                 <div class="noise-reduction-container" style="position: relative;">
                     <span id="noise-reduction-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <span id="noise-reduction-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
                     <div class="control-group">
                         <label>
                             <input type="checkbox" id="noise-reduction-enable" onchange="toggleNoiseReduction()">
@@ -362,7 +377,15 @@
                             <label for="noise-reduction-floor">Spectral Floor: <span id="noise-reduction-floor-value">10%</span></label>
                             <input type="range" id="noise-reduction-floor" min="0" max="10" value="10" step="0.5" oninput="updateNoiseReduction()">
                         </div>
-                        <p class="help-text" style="font-size: 11px; margin-top: 8px;">Auto-learns noise on startup and frequency changes. Continuously adapts to slow variations. Higher strength = more aggressive.</p>
+                        <div class="control-group">
+                            <label for="noise-reduction-adapt-rate">Adaptation Rate: <span id="noise-reduction-adapt-rate-value">1.0%</span></label>
+                            <input type="range" id="noise-reduction-adapt-rate" min="0.1" max="5.0" value="1.0" step="0.1" oninput="updateNoiseReduction()">
+                        </div>
+                        <div class="control-group">
+                            <label for="noise-reduction-makeup-gain">Makeup Gain: <span id="noise-reduction-makeup-gain-value">+2 dB</span></label>
+                            <input type="range" id="noise-reduction-makeup-gain" min="0" max="12" value="2" step="0.5" oninput="updateNoiseReduction()">
+                        </div>
+                        <p class="help-text" style="font-size: 11px; margin-top: 8px;">Auto-learns noise on startup and frequency changes. Continuously adapts to slow variations. Higher strength = more aggressive. Adaptation rate controls how quickly the filter tracks changing noise.</p>
                     </div>
                 </div>
             </div>
@@ -426,8 +449,38 @@
                 </div>
             </div>
 
-            <!-- Row 2, Column 3: Empty slot -->
-            <div class="empty-panel"></div>
+            <!-- Row 2, Column 3: Stereo Virtualizer -->
+            <div class="stereo-virtualizer-panel">
+                <div class="stereo-virtualizer-container" style="position: relative;">
+                    <span id="stereo-virtualizer-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <span id="stereo-virtualizer-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="stereo-virtualizer-enable" onchange="toggleStereoVirtualizer()">
+                            Stereo Virtualiser
+                        </label>
+                    </div>
+                    <div id="stereo-virtualizer-controls">
+                        <div class="control-group">
+                            <label for="stereo-width">Width: <span id="stereo-width-value">50%</span></label>
+                            <input type="range" id="stereo-width" min="0" max="100" value="50" step="5" oninput="updateStereoVirtualizer()">
+                        </div>
+                        <div class="control-group">
+                            <label for="stereo-delay">Delay: <span id="stereo-delay-value">16 ms</span></label>
+                            <input type="range" id="stereo-delay" min="5" max="30" value="16" step="1" oninput="updateStereoVirtualizer()">
+                        </div>
+                        <div class="control-group">
+                            <label for="stereo-separation">Separation: <span id="stereo-separation-value">40%</span></label>
+                            <input type="range" id="stereo-separation" min="0" max="100" value="40" step="5" oninput="updateStereoVirtualizer()">
+                        </div>
+                        <div class="control-group">
+                            <label for="stereo-makeup-gain">Makeup Gain: <span id="stereo-makeup-gain-value">+0.0 dB</span></label>
+                            <input type="range" id="stereo-makeup-gain" min="0" max="12" value="0" step="0.5" oninput="updateStereoVirtualizer()">
+                        </div>
+                        <p class="help-text" style="font-size: 11px; margin-top: 8px;">Creates a wider stereo image from mono audio. Width controls overall effect, Delay adds spatial depth, Separation controls channel independence.</p>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- End 2x3 Filters Grid -->

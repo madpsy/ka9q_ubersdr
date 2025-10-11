@@ -106,6 +106,36 @@ body {
     text-decoration: underline;
 }
 
+/* Site Footer */
+.site-footer {
+    text-align: center;
+    padding: 20px;
+    margin-top: 20px;
+}
+
+.site-footer p {
+    display: inline-block;
+    margin: 0;
+    padding: 4px 15px;
+    background: rgba(44, 62, 80, 0.9);
+    border-radius: 6px;
+    color: #ecf0f1;
+    font-size: 0.9em;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.site-footer a {
+    color: #3498db;
+    text-decoration: none;
+    font-weight: bold;
+    transition: color 0.3s;
+}
+
+.site-footer a:hover {
+    color: #5dade2;
+    text-decoration: underline;
+}
+
 .status-bar {
     display: flex;
     justify-content: space-around;

@@ -6,7 +6,7 @@ admin:
   password: "NKj66s5y@Y5fZq2p"
   # Description HTML to display in the top right of the page
   # This can include HTML tags like links
-  description: 'Dalgety Bay SDR operated by <a href="https://qrz.com/db/mm3ndh" target="_blank">MM3NDH</a> running <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a>'
+  description: 'Dalgety Bay SDR operated by <a href="https://qrz.com/db/mm3ndh" target="_blank">MM3NDH</a>'
 
 # Radiod connection settings
 radiod:

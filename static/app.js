@@ -17,6 +17,7 @@ let vuAnalyser = null; // Dedicated analyser for VU meter (after all processing)
 let spectrumCanvas = null;
 let spectrumCtx = null;
 let spectrumPeaks = null; // Array to store peak values for each bar
+let spectrumLabelsCache = null; // Cached canvas for dB scale labels
 let waterfallCanvas = null;
 let waterfallCtx = null;
 let waterfallOverlayCanvas = null;
@@ -2148,6 +2149,51 @@ function updateOscilloscope() {
     oscilloscopeCtx.stroke();
 }
 
+// Create cached canvas for dB scale labels (only when size changes)
+function createSpectrumLabelsCache(width, height) {
+    // Create offscreen canvas for labels
+    const cache = document.createElement('canvas');
+    cache.width = width;
+    cache.height = height;
+    const ctx = cache.getContext('2d');
+    
+    // Draw dB scale labels
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    
+    const dbLevels = [0, -10, -20, -30, -40, -50, -60];
+    
+    for (let i = 0; i < dbLevels.length; i++) {
+        const db = dbLevels[i];
+        const y = ((Math.abs(db) / 60) * height);
+        
+        // Draw horizontal grid line
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+        
+        // Draw dB label with background
+        const label = db + ' dB';
+        const labelWidth = ctx.measureText(label).width + 6;
+        
+        ctx.fillStyle = 'rgba(44, 62, 80, 0.8)';
+        ctx.fillRect(2, y - 8, labelWidth, 16);
+        
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        ctx.strokeText(label, 5, y);
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, 5, y);
+    }
+    
+    return cache;
+}
+
 function updateSpectrum() {
     if (!analyser || !spectrumCtx) return;
     
@@ -2161,41 +2207,15 @@ function updateSpectrum() {
     spectrumCtx.fillStyle = '#2c3e50';
     spectrumCtx.fillRect(0, 0, width, height);
     
-    // Draw dB scale on left side
-    spectrumCtx.font = 'bold 11px monospace';
-    spectrumCtx.textAlign = 'left';
-    spectrumCtx.textBaseline = 'middle';
-    
-    // dB scale: 0 dB at top, -60 dB at bottom (assuming 0-255 maps to -60 to 0 dB)
-    const dbLevels = [0, -10, -20, -30, -40, -50, -60];
-    
-    for (let i = 0; i < dbLevels.length; i++) {
-        const db = dbLevels[i];
-        // Map dB to height: 0 dB = top (0), -60 dB = bottom (height)
-        const y = ((Math.abs(db) / 60) * height);
-        
-        // Draw horizontal grid line
-        spectrumCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        spectrumCtx.lineWidth = 1;
-        spectrumCtx.beginPath();
-        spectrumCtx.moveTo(0, y);
-        spectrumCtx.lineTo(width, y);
-        spectrumCtx.stroke();
-        
-        // Draw dB label with background
-        const label = db + ' dB';
-        const labelWidth = spectrumCtx.measureText(label).width + 6;
-        
-        spectrumCtx.fillStyle = 'rgba(44, 62, 80, 0.8)';
-        spectrumCtx.fillRect(2, y - 8, labelWidth, 16);
-        
-        spectrumCtx.strokeStyle = '#000000';
-        spectrumCtx.lineWidth = 3;
-        spectrumCtx.strokeText(label, 5, y);
-        
-        spectrumCtx.fillStyle = '#ffffff';
-        spectrumCtx.fillText(label, 5, y);
+    // Create or use cached labels if size changed
+    if (!spectrumLabelsCache ||
+        spectrumLabelsCache.width !== width ||
+        spectrumLabelsCache.height !== height) {
+        spectrumLabelsCache = createSpectrumLabelsCache(width, height);
     }
+    
+    // Draw cached labels (much faster than redrawing text)
+    spectrumCtx.drawImage(spectrumLabelsCache, 0, 0);
     
     // Get frequency bin mapping using shared helper
     const binMapping = getFrequencyBinMapping();

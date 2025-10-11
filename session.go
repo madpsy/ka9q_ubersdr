@@ -45,28 +45,30 @@ type Session struct {
 
 // SessionManager manages all active sessions
 type SessionManager struct {
-	sessions      map[string]*Session
-	ssrcToSession map[uint32]*Session  // Map SSRC to session for audio routing
-	kickedUUIDs   map[string]time.Time // Map of kicked user_session_ids with expiry time
-	mu            sync.RWMutex
-	config        *Config
-	radiod        *RadiodController
-	maxSessions   int
-	timeout       time.Duration
-	kickedUUIDTTL time.Duration // How long to remember kicked UUIDs (default 1 hour)
+	sessions         map[string]*Session
+	ssrcToSession    map[uint32]*Session  // Map SSRC to session for audio routing
+	kickedUUIDs      map[string]time.Time // Map of kicked user_session_ids with expiry time
+	userSessionFirst map[string]time.Time // Map of user_session_id to first seen time
+	mu               sync.RWMutex
+	config           *Config
+	radiod           *RadiodController
+	maxSessions      int
+	timeout          time.Duration
+	kickedUUIDTTL    time.Duration // How long to remember kicked UUIDs (default 1 hour)
 }
 
 // NewSessionManager creates a new session manager
 func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager {
 	sm := &SessionManager{
-		sessions:      make(map[string]*Session),
-		ssrcToSession: make(map[uint32]*Session),
-		kickedUUIDs:   make(map[string]time.Time),
-		config:        config,
-		radiod:        radiod,
-		maxSessions:   config.Server.MaxSessions,
-		timeout:       time.Duration(config.Server.SessionTimeout) * time.Second,
-		kickedUUIDTTL: 1 * time.Hour, // Remember kicked UUIDs for 1 hour
+		sessions:         make(map[string]*Session),
+		ssrcToSession:    make(map[uint32]*Session),
+		kickedUUIDs:      make(map[string]time.Time),
+		userSessionFirst: make(map[string]time.Time),
+		config:           config,
+		radiod:           radiod,
+		maxSessions:      config.Server.MaxSessions,
+		timeout:          time.Duration(config.Server.SessionTimeout) * time.Second,
+		kickedUUIDTTL:    1 * time.Hour, // Remember kicked UUIDs for 1 hour
 	}
 
 	// Start cleanup goroutine
@@ -105,6 +107,13 @@ func (sm *SessionManager) CreateSessionWithUserID(frequency uint64, mode string,
 func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode string, bandwidth int, sourceIP, clientIP, userSessionID string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	// Track first time we see this user_session_id
+	if userSessionID != "" {
+		if _, exists := sm.userSessionFirst[userSessionID]; !exists {
+			sm.userSessionFirst[userSessionID] = time.Now()
+		}
+	}
 
 	// Check session limit
 	if len(sm.sessions) >= sm.maxSessions {
@@ -205,6 +214,13 @@ func (sm *SessionManager) CreateSpectrumSessionWithUserID(sourceIP, clientIP, us
 func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, userSessionID string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	// Track first time we see this user_session_id
+	if userSessionID != "" {
+		if _, exists := sm.userSessionFirst[userSessionID]; !exists {
+			sm.userSessionFirst[userSessionID] = time.Now()
+		}
+	}
 
 	// Check session limit
 	if len(sm.sessions) >= sm.maxSessions {
@@ -674,6 +690,13 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			info["bandwidth_low"] = session.BandwidthLow
 			info["bandwidth_high"] = session.BandwidthHigh
 		}
+		// Add user_session_first_seen if available
+		if session.UserSessionID != "" {
+			if firstSeen, exists := sm.userSessionFirst[session.UserSessionID]; exists {
+				info["user_session_first_seen"] = firstSeen.Format(time.RFC3339)
+			}
+		}
+
 		session.mu.RUnlock()
 
 		sessions = append(sessions, info)

@@ -241,9 +241,11 @@ class SpectrumDisplay {
         this.ws = null;
         this.connected = false;
         this.reconnectTimer = null;
-        this.reconnectDelay = 1000;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 10;
         this.pingInterval = null;
         this.userDisconnected = false; // Flag to prevent reconnection after user disconnect
+        this.connectionFailureNotified = false; // Track if we've already shown the connection failure notification
         
         // Animation
         this.animationFrame = null;
@@ -338,8 +340,10 @@ class SpectrumDisplay {
             this.ws.onopen = () => {
                 console.log('Spectrum WebSocket connected');
                 this.connected = true;
-                this.reconnectDelay = 1000;
-                
+                // Don't reset reconnection attempts immediately - wait for first successful message
+                // This prevents resetting the counter when server immediately kicks us
+                // The counter will be reset when we receive our first config message
+
                 // Start keepalive ping every 15 seconds
                 this.startPing();
                 
@@ -402,14 +406,18 @@ class SpectrumDisplay {
             this.ws.onclose = () => {
                 console.log('Spectrum WebSocket closed');
                 this.connected = false;
-                
+
                 // Stop keepalive ping
                 this.stopPing();
-                
+
                 if (this.config.onDisconnect) {
                     this.config.onDisconnect();
                 }
-                this.scheduleReconnect();
+
+                // Only schedule reconnect if we don't already have one pending
+                if (!this.reconnectTimer) {
+                    this.scheduleReconnect();
+                }
             };
         } catch (err) {
             console.error('Failed to create spectrum WebSocket:', err);
@@ -435,24 +443,42 @@ class SpectrumDisplay {
         this.connected = false;
     }
     
-    // Schedule reconnection attempt
+    // Schedule reconnection attempt with exponential backoff
     scheduleReconnect() {
         // Don't reconnect if user explicitly disconnected (e.g., idle timeout)
         if (this.userDisconnected) {
-            console.log('Skipping reconnect - user disconnected');
+            console.log('Skipping spectrum reconnect - user disconnected');
             return;
         }
 
+        // Check if we've exceeded max attempts FIRST
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.log(`Spectrum reconnection failed after ${this.maxReconnectAttempts} attempts`);
+            // Only show notification once when max attempts reached (check flag FIRST)
+            if (!this.connectionFailureNotified && typeof showNotification === 'function') {
+                this.connectionFailureNotified = true;
+                showNotification('Connection lost. Please refresh the page.', 'error');
+            }
+            return;
+        }
+
+        // Don't schedule if we already have a timer pending
         if (this.reconnectTimer) {
+            console.log('Spectrum reconnect already scheduled, skipping');
             return;
         }
 
-        console.log(`Reconnecting in ${this.reconnectDelay}ms...`);
+        this.reconnectAttempts++;
+
+        // Calculate delay with exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped)
+        const delay = Math.min(Math.pow(2, this.reconnectAttempts - 1) * 1000, 60000);
+
+        console.log(`Spectrum reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`);
+
         this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
-            this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
             this.connect();
-        }, this.reconnectDelay);
+        }, delay);
     }
     
     // Start sending keepalive pings

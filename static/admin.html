@@ -1025,6 +1025,29 @@
             event.target.value = '';
         }
 
+        // Helper function to format duration in a human-readable way
+        function formatDuration(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            const days = Math.floor(hours / 24);
+
+            if (days > 0) {
+                const h = hours % 24;
+                const m = minutes % 60;
+                return `${days}d ${h}h ${m}m`;
+            } else if (hours > 0) {
+                const m = minutes % 60;
+                const s = seconds % 60;
+                return `${hours}h ${m}m ${s}s`;
+            } else if (minutes > 0) {
+                const s = seconds % 60;
+                return `${minutes}m ${s}s`;
+            } else {
+                return `${seconds}s`;
+            }
+        }
+
         // Sessions management
         let currentSessions = [];
         let sessionsRefreshInterval = null;
@@ -1099,6 +1122,7 @@
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                         <th style="padding: 12px; text-align: left;">User Session ID</th>
                         <th style="padding: 12px; text-align: left;">IP Address</th>
+                        <th style="padding: 12px; text-align: left;">First Seen</th>
                         <th style="padding: 12px; text-align: center;">Audio</th>
                         <th style="padding: 12px; text-align: center;">Spectrum</th>
                         <th style="padding: 12px; text-align: left;">Details</th>
@@ -1120,6 +1144,16 @@
                 const clientIP = audioSession?.client_ip || spectrumSession?.client_ip || 'N/A';
                 const sourceIP = audioSession?.source_ip || spectrumSession?.source_ip || 'N/A';
                 const userSessionID = sessions.hasUUID ? key : 'N/A';
+
+                // Get first seen timestamp and calculate duration
+                const firstSeen = audioSession?.user_session_first_seen || spectrumSession?.user_session_first_seen;
+                let firstSeenDisplay = 'N/A';
+                if (firstSeen) {
+                    const firstSeenDate = new Date(firstSeen);
+                    const now = new Date();
+                    const durationMs = now - firstSeenDate;
+                    firstSeenDisplay = formatDuration(durationMs) + ' ago';
+                }
 
                 // Combine IP display: show client IP, with source IP in parentheses if different
                 let ipDisplay = clientIP;
@@ -1148,11 +1182,12 @@
 
                 row.innerHTML = `
                     <td style="padding: 12px; font-family: monospace; font-size: 11px; word-break: break-all; max-width: 150px;">${userSessionID === 'N/A' ? '<em style="color: #999;">N/A</em>' : userSessionID}</td>
-                    <td style="padding: 12px; font-family: monospace;">${ipDisplay}</td>
+                    <td style="padding: 12px; font-family: monospace; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
+                    <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>
                     <td style="padding: 12px; text-align: center;">${sessions.audio.length > 0 ? '✓' : '—'}</td>
                     <td style="padding: 12px; text-align: center;">${sessions.spectrum.length > 0 ? '✓' : '—'}</td>
                     <td style="padding: 12px; font-size: 12px;">${details}</td>
-                    <td style="padding: 12px; text-align: center;">${actionButtons}</td>
+                    <td style="padding: 12px; text-align: center; white-space: nowrap;">${actionButtons}</td>
                 `;
                 tbody.appendChild(row);
             }

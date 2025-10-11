@@ -36,11 +36,11 @@ console.log('User session ID:', userSessionID);
 let ws = null;
 let audioContext = null;
 let reconnectTimer = null;
-let reconnectDelay = 1000;
 let reconnectAttempts = 0; // Track number of reconnection attempts
 const maxReconnectAttempts = 10; // Give up after 10 attempts
 let lastConnectionParams = null; // Store connection parameters for reconnection
 let audioUserDisconnected = false; // Flag to prevent reconnection after user disconnect
+let connectionFailureNotified = false; // Track if we've already shown the connection failure notification
 // Expose audioContext globally for recorder
 window.audioContext = null;
 let audioQueue = [];
@@ -688,9 +688,9 @@ function connect() {
         log('Connected!');
         updateConnectionStatus('connected');
 
-        // Reset reconnect delay and attempts on successful connection
-        reconnectDelay = 1000;
-        reconnectAttempts = 0;
+        // Don't reset reconnection attempts immediately - wait for first successful message
+        // This prevents resetting the counter when server immediately kicks us
+        // The counter will be reset when we receive our first status message
 
         // Start stats updates
         startStatsUpdates();
@@ -775,23 +775,26 @@ function connect() {
         // Stop stats updates
         stopStatsUpdates();
 
-        // Show notification for abnormal closures
+        // Show notification for abnormal closures ONLY ONCE (not on every reconnection attempt)
         // Code 1000 = normal closure (user initiated)
         // Code 1001 = going away (page navigation)
-        // Any other code or unclean close = show notification
-        if (event.code !== 1000 && event.code !== 1001) {
+        // Any other code or unclean close = show notification (but only the first time)
+        if (event.code !== 1000 && event.code !== 1001 && !connectionFailureNotified) {
+            connectionFailureNotified = true; // Set flag so we don't show again
+
             // Check if this was during initial connection (never opened)
             if (!event.wasClean || event.code === 1006) {
                 // 1006 = abnormal closure (no close frame received)
-                showNotification('Connection failed. You may have been disconnected by an administrator. Please refresh the page.', 'error');
+                showNotification('Connection failed. You may have been disconnected by an administrator. Attempting to reconnect...', 'error', 10000);
             } else {
-                showNotification('Connection lost. Please refresh the page if it does not reconnect automatically.', 'error');
+                showNotification('Connection lost. Attempting to reconnect...', 'error', 10000);
             }
         }
 
         // Schedule reconnection if we have saved parameters AND user didn't explicitly disconnect
         // Check window.audioUserDisconnected (set by idle detector) as well as local variable
-        if (lastConnectionParams && !audioUserDisconnected && !window.audioUserDisconnected) {
+        // Only schedule if we don't already have a reconnect pending
+        if (lastConnectionParams && !audioUserDisconnected && !window.audioUserDisconnected && !reconnectTimer) {
             scheduleReconnect();
         }
     };
@@ -799,29 +802,30 @@ function connect() {
 
 // Schedule reconnection attempt with exponential backoff
 function scheduleReconnect() {
-    if (reconnectTimer) {
-        return;
-    }
-
-    // Check if we've exceeded max attempts
+    // Check if we've exceeded max attempts FIRST
     if (reconnectAttempts >= maxReconnectAttempts) {
         log('Maximum reconnection attempts reached. Please refresh the page.', 'error');
         showNotification('Unable to reconnect after multiple attempts. You may have been disconnected by an administrator. Please refresh the page.', 'error', 10000);
         return;
     }
 
+    // Don't schedule if we already have a timer pending OR if we're already attempting to reconnect
+    if (reconnectTimer) {
+        console.log('Reconnect already scheduled, skipping');
+        return;
+    }
+
     reconnectAttempts++;
-    
-    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped at 60s)
-    // This spreads 10 attempts over approximately 1 minute
-    const delay = Math.min(reconnectDelay, 60000); // Cap at 60 seconds
-    
+
+    // Calculate delay for THIS attempt using exponential backoff
+    // Attempt 1: 1s, 2: 2s, 3: 4s, 4: 8s, 5: 16s, 6: 32s, 7-10: 60s
+    const delay = Math.min(Math.pow(2, reconnectAttempts - 1) * 1000, 60000);
+
     console.log(`Reconnection attempt ${reconnectAttempts}/${maxReconnectAttempts} in ${delay}ms...`);
-    log(`Reconnecting (${reconnectAttempts}/${maxReconnectAttempts}) in ${delay/1000}s...`);
-    
+    log(`Reconnecting (${reconnectAttempts}/${maxReconnectAttempts}) in ${(delay/1000).toFixed(1)}s...`);
+
     reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
-        reconnectDelay = Math.min(reconnectDelay * 2, 60000); // Exponential backoff, max 60 seconds
         reconnect();
     }, delay);
 }
@@ -1111,6 +1115,12 @@ function handleMessage(msg) {
             if (msg.sessionId) {
                 currentSessionId = msg.sessionId;
             }
+
+            // Reset reconnection attempts and notification flag on first successful message
+            // This indicates a stable connection (not immediately kicked)
+            reconnectAttempts = 0;
+            connectionFailureNotified = false;
+
             updateStatus(msg);
             break;
         case 'audio':

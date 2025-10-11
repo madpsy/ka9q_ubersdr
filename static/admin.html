@@ -1036,8 +1036,7 @@
                 <thead>
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                         <th style="padding: 12px; text-align: left;">User Session ID</th>
-                        <th style="padding: 12px; text-align: left;">Client IP</th>
-                        <th style="padding: 12px; text-align: left;">Source IP</th>
+                        <th style="padding: 12px; text-align: left;">IP Address</th>
                         <th style="padding: 12px; text-align: center;">Audio</th>
                         <th style="padding: 12px; text-align: center;">Spectrum</th>
                         <th style="padding: 12px; text-align: left;">Details</th>
@@ -1048,17 +1047,23 @@
             container.appendChild(table);
 
             const tbody = document.getElementById('sessionsTableBody');
-            
+
             for (const [key, sessions] of Object.entries(sessionsByUser)) {
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
-                
+
                 const audioSession = sessions.audio[0];
                 const spectrumSession = sessions.spectrum[0];
                 const clientIP = audioSession?.client_ip || spectrumSession?.client_ip || 'N/A';
                 const sourceIP = audioSession?.source_ip || spectrumSession?.source_ip || 'N/A';
                 const userSessionID = sessions.hasUUID ? key : 'N/A';
-                
+
+                // Combine IP display: show client IP, with source IP in parentheses if different
+                let ipDisplay = clientIP;
+                if (sourceIP !== clientIP && sourceIP !== 'N/A') {
+                    ipDisplay += ` <span style="color: #666; font-size: 11px;">(via ${sourceIP})</span>`;
+                }
+
                 let details = '';
                 if (audioSession) {
                     details += `<strong>Audio:</strong> ${(audioSession.frequency / 1e6).toFixed(3)} MHz, ${audioSession.mode.toUpperCase()}<br>`;
@@ -1068,11 +1073,10 @@
                     details += `<strong>Spectrum:</strong> ${(spectrumSession.frequency / 1e6).toFixed(3)} MHz<br>`;
                     details += `Session: ${spectrumSession.id.substring(0, 8)}...<br>`;
                 }
-                
+
                 row.innerHTML = `
                     <td style="padding: 12px; font-family: monospace; font-size: 11px; word-break: break-all; max-width: 150px;">${userSessionID === 'N/A' ? '<em style="color: #999;">N/A</em>' : userSessionID}</td>
-                    <td style="padding: 12px; font-family: monospace;">${clientIP}</td>
-                    <td style="padding: 12px; font-family: monospace;">${sourceIP}</td>
+                    <td style="padding: 12px; font-family: monospace;">${ipDisplay}</td>
                     <td style="padding: 12px; text-align: center;">${sessions.audio.length > 0 ? '✓' : '—'}</td>
                     <td style="padding: 12px; text-align: center;">${sessions.spectrum.length > 0 ? '✓' : '—'}</td>
                     <td style="padding: 12px; font-size: 12px;">${details}</td>
@@ -1086,9 +1090,8 @@
             summary.style.padding = '15px';
             summary.style.background = '#f8f9fa';
             summary.style.borderRadius = '5px';
-            const withUUID = Object.values(sessionsByUser).filter(s => s.hasUUID).length;
             summary.innerHTML = `
-                <strong>Summary:</strong> ${Object.keys(sessionsByUser).length} unique session(s) (${withUUID} with UUID),
+                <strong>Summary:</strong> ${Object.keys(sessionsByUser).length} unique session(s),
                 ${currentSessions.filter(s => !s.is_spectrum).length} audio connection(s),
                 ${currentSessions.filter(s => s.is_spectrum).length} spectrum connection(s)
             `;

@@ -2244,10 +2244,22 @@ function updateSpectrum() {
         }
         
         // Color gradient based on signal level (amplitude)
-        // Weak signal = green (120°), strong signal = red (0°)
+        // Weak signal = green, strong signal = red
+        // Use direct RGB instead of HSL for better performance
         const levelPercent = average / 255; // 0 to 1
-        const hue = 120 * (1 - levelPercent); // 120 (green) to 0 (red)
-        spectrumCtx.fillStyle = `hsl(${hue}, 80%, 50%)`;
+        
+        // Interpolate from green (0,255,0) to yellow (255,255,0) to red (255,0,0)
+        let r, g;
+        if (levelPercent < 0.5) {
+            // Green to yellow: increase red, keep green at max
+            r = Math.floor(levelPercent * 2 * 255);
+            g = 255;
+        } else {
+            // Yellow to red: keep red at max, decrease green
+            r = 255;
+            g = Math.floor((1 - levelPercent) * 2 * 255);
+        }
+        spectrumCtx.fillStyle = `rgb(${r}, ${g}, 0)`;
         
         // Draw bar (1 pixel wide, no gaps)
         const x = i;

@@ -27,6 +27,8 @@ server:
   session_timeout: 300
   # Enable CORS
   enable_cors: false
+  # HTTP request log file (Apache combined log format)
+  logfile: "web.log"
 
 # Audio settings
 audio:

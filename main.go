@@ -3,15 +3,102 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 // Global debug flag
 var DebugMode bool
+
+// responseWriter wraps http.ResponseWriter to capture status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+	written    int64
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	n, err := rw.ResponseWriter.Write(b)
+	rw.written += int64(n)
+	return n, err
+}
+
+// httpLogger creates a logging middleware that logs requests in Apache combined log format
+func httpLogger(logFile *os.File, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip logging for WebSocket connections
+		if r.Header.Get("Upgrade") == "websocket" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		start := time.Now()
+
+		// Wrap the response writer to capture status code and bytes written
+		wrapped := &responseWriter{
+			ResponseWriter: w,
+			statusCode:     200, // default status code
+			written:        0,
+		}
+
+		// Call the next handler
+		next.ServeHTTP(wrapped, r)
+
+		// Calculate duration
+		duration := time.Since(start)
+
+		// Get client IP (handle X-Forwarded-For and X-Real-IP headers)
+		clientIP := r.RemoteAddr
+		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+			clientIP = forwarded
+		} else if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+			clientIP = realIP
+		}
+
+		// Get user agent
+		userAgent := r.Header.Get("User-Agent")
+		if userAgent == "" {
+			userAgent = "-"
+		}
+
+		// Get referer
+		referer := r.Referer()
+		if referer == "" {
+			referer = "-"
+		}
+
+		// Apache Combined Log Format:
+		// %h %l %u %t "%r" %>s %b "%{Referer}i" "%{User-agent}i"
+		// Example: 127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326 "http://www.example.com/start.html" "Mozilla/4.08 [en] (Win98; I ;Nav)"
+		logLine := fmt.Sprintf("%s - - [%s] \"%s %s %s\" %d %d \"%s\" \"%s\" %.3fms\n",
+			clientIP,
+			start.Format("02/Jan/2006:15:04:05 -0700"),
+			r.Method,
+			r.RequestURI,
+			r.Proto,
+			wrapped.statusCode,
+			wrapped.written,
+			referer,
+			userAgent,
+			float64(duration.Microseconds())/1000.0,
+		)
+
+		// Write to log file
+		if _, err := logFile.WriteString(logLine); err != nil {
+			log.Printf("Error writing to access log: %v", err)
+		}
+	})
+}
 
 func main() {
 	// Parse command line flags
@@ -136,13 +223,25 @@ func main() {
 	http.HandleFunc("/admin/unban", adminHandler.AuthMiddleware(adminHandler.HandleUnbanIP))
 	http.HandleFunc("/admin/banned-ips", adminHandler.AuthMiddleware(adminHandler.HandleBannedIPs))
 
+	// Open log file for HTTP request logging
+	logFile, err := os.OpenFile(config.Server.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatalf("Failed to open log file %s: %v", config.Server.LogFile, err)
+	}
+	defer logFile.Close()
+	log.Printf("HTTP request logging to: %s", config.Server.LogFile)
+
 	// Serve static files
 	fs := http.FileServer(http.Dir("static"))
 	http.Handle("/", fs)
 
+	// Wrap the default ServeMux with logging middleware
+	loggedHandler := httpLogger(logFile, http.DefaultServeMux)
+
 	// Start HTTP server
 	server := &http.Server{
-		Addr: config.Server.Listen,
+		Addr:    config.Server.Listen,
+		Handler: loggedHandler,
 	}
 
 	// Handle graceful shutdown

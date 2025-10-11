@@ -44,6 +44,7 @@ type ServerConfig struct {
 	MaxSessions    int    `yaml:"max_sessions"`
 	SessionTimeout int    `yaml:"session_timeout"`
 	EnableCORS     bool   `yaml:"enable_cors"`
+	LogFile        string `yaml:"logfile"` // HTTP request log file path
 }
 
 // AudioConfig contains audio processing settings
@@ -109,6 +110,9 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Server.SessionTimeout == 0 {
 		config.Server.SessionTimeout = 300
+	}
+	if config.Server.LogFile == "" {
+		config.Server.LogFile = "web.log"
 	}
 	if config.Audio.BufferSize == 0 {
 		config.Audio.BufferSize = 4096

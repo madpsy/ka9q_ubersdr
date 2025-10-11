@@ -888,7 +888,8 @@ function displayActiveChannels(channels) {
             : '';
 
         html += `<tr style="${rowStyle}">`;
-        html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${channel.index}</td>`;
+        // Don't show icon number for current user, leave cell empty
+        html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${isCurrentUser ? '' : channel.index}</td>`;
         html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${formatFrequency(channel.frequency)}</td>`;
         html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${channel.mode.toUpperCase()}</td>`;
         html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${channel.bandwidth_low} to ${channel.bandwidth_high} Hz</td>`;

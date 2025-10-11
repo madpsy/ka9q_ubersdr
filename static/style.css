@@ -2218,7 +2218,6 @@ input[type="range"]::-moz-range-thumb {
 
 #active-channels-list tbody tr:hover {
     background-color: rgba(102, 126, 234, 0.15);
-    transform: translateX(5px);
 }
 
 /* Highlight current user row */
@@ -2232,10 +2231,6 @@ input[type="range"]::-moz-range-thumb {
     color: #a8e6cf;
 }
 
-#active-channels-list tbody tr:first-child td:first-child::before {
-    content: "👤 ";
-    margin-right: 5px;
-}
 
 /* Empty state styling */
 #active-channels-list p {

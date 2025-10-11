@@ -61,28 +61,42 @@ class SpectrumDisplay {
                 const oldWidth = this.width;
                 const oldHeight = this.height;
                 
-                // Save current canvas content before resize
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = this.canvas.width;
-                tempCanvas.height = this.canvas.height;
-                const tempCtx = tempCanvas.getContext('2d');
-                tempCtx.drawImage(this.canvas, 0, 0);
+                // Calculate new dimensions without applying them yet
+                const container = this.canvas.parentElement;
+                const rect = container.getBoundingClientRect();
+                const newWidth = Math.floor(rect.width);
+                const newHeight = 600;
                 
-                // Resize canvas
-                this.resizeCanvas();
-                this.canvasWidth = this.canvas.width;
-                this.canvasHeight = this.canvas.height;
-                this.width = parseInt(this.canvas.style.width);
-                this.height = parseInt(this.canvas.style.height);
-                
-                // Restore content if dimensions changed
-                if (oldWidth !== this.width || oldHeight !== this.height) {
+                // Check if width actually changed
+                if (oldWidth !== newWidth) {
+                    // Save current canvas content before width change
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = this.canvas.width;
+                    tempCanvas.height = this.canvas.height;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCtx.drawImage(this.canvas, 0, 0);
+                    
+                    // Now resize canvas (this clears it)
+                    this.canvas.style.width = newWidth + 'px';
+                    this.canvas.style.height = newHeight + 'px';
+                    this.canvas.width = newWidth;
+                    this.canvas.height = newHeight;
+                    
+                    // Update stored dimensions
+                    this.width = newWidth;
+                    this.height = newHeight;
+                    this.canvasWidth = newWidth;
+                    this.canvasHeight = newHeight;
+                    
+                    // Reset context transform
+                    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+                    
                     // Clear canvas with black
                     this.ctx.fillStyle = '#000';
                     this.ctx.fillRect(0, 0, this.width, this.height);
                     
-                    // Copy old content, scaling horizontally if needed
-                    this.ctx.drawImage(tempCanvas, 0, 0, oldWidth, oldHeight, 0, 0, this.width, this.height);
+                    // Copy old content, scaling horizontally to new width but keeping original height
+                    this.ctx.drawImage(tempCanvas, 0, 0, oldWidth, oldHeight, 0, 0, this.width, oldHeight);
                     
                     // Recreate waterfall image data for new width
                     this.waterfallImageData = this.ctx.createImageData(this.width, 1);
@@ -98,7 +112,12 @@ class SpectrumDisplay {
                     // Redraw the bandwidth indicator with new dimensions
                     this.drawTunedFrequencyCursor();
                     
-                    console.log(`Canvas resized: ${this.width}x${this.height} CSS pixels`);
+                    console.log(`Canvas width resized: ${oldWidth} -> ${this.width} CSS pixels`);
+                } else if (oldHeight !== newHeight) {
+                    // Height-only change - just update CSS, don't touch canvas pixels
+                    this.canvas.style.height = newHeight + 'px';
+                    this.height = newHeight;
+                    console.log(`Canvas height changed: ${oldHeight} -> ${this.height} CSS pixels (waterfall preserved)`);
                 }
             }, 250); // Debounce resize events
         });

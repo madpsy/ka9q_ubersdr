@@ -11,15 +11,15 @@ class CWDecoder {
         this.decodedText = '';
         this.maxTextLength = 1000; // Maximum characters to keep in buffer
         this.wpm = 20; // Default words per minute
-        this.threshold = 0.005; // Detection threshold (0-1) - 0.5% for weak signals
-        this.centerFrequency = 800; // Default CW tone frequency in Hz
+        this.threshold = 0.0005; // Detection threshold (0-1) - 0.05% for weak signals
+        this.centerFrequency = 400; // Default CW tone frequency in Hz
         
         // Goertzel algorithm state for tone detection
         this.goertzelCoeff = 0;
         this.goertzelQ1 = 0;
         this.goertzelQ2 = 0;
         this.sampleRate = 12000;
-        this.targetFreq = 800;
+        this.targetFreq = 400;
         
         // Timing state for dot/dash detection
         this.signalState = false; // true = tone present, false = silence
@@ -63,8 +63,9 @@ class CWDecoder {
     }
     
     updateGoertzelCoeff() {
-        const k = Math.floor(0.5 + (this.analyser.fftSize * this.targetFreq) / this.sampleRate);
-        const omega = (2.0 * Math.PI * k) / this.analyser.fftSize;
+        // Calculate the Goertzel coefficient for the target frequency
+        // Use the actual sample rate from the audio context, not FFT size
+        const omega = (2.0 * Math.PI * this.targetFreq) / this.sampleRate;
         this.goertzelCoeff = 2.0 * Math.cos(omega);
     }
     
@@ -92,6 +93,16 @@ class CWDecoder {
         log('CW Decoder frequency set to ' + freq + ' Hz');
     }
     
+    resetWPM() {
+        this.observedDurations = [];
+        this.wpm = null;
+        const wpmElement = document.getElementById('cw-wpm-value');
+        if (wpmElement) {
+            wpmElement.textContent = '-- (auto-detecting)';
+        }
+        log('CW Decoder WPM reset - will auto-detect from signal');
+    }
+    
     enable() {
         if (this.enabled) return;
         this.enabled = true;
@@ -112,16 +123,34 @@ class CWDecoder {
         log('CW Decoder disabled');
     }
     
-    // Simple RMS detection - works with any frequency
+    // Goertzel algorithm - frequency-selective tone detection
     detectTone(samples) {
-        // Calculate RMS (Root Mean Square) - detects audio energy at any frequency
-        let sumSquares = 0;
-        for (let i = 0; i < samples.length; i++) {
-            sumSquares += samples[i] * samples[i];
-        }
-        const rms = Math.sqrt(sumSquares / samples.length);
+        // Reset Goertzel state for new block
+        this.goertzelQ1 = 0;
+        this.goertzelQ2 = 0;
         
-        return rms;
+        // Process all samples through Goertzel filter
+        for (let i = 0; i < samples.length; i++) {
+            const q0 = this.goertzelCoeff * this.goertzelQ1 - this.goertzelQ2 + samples[i];
+            this.goertzelQ2 = this.goertzelQ1;
+            this.goertzelQ1 = q0;
+        }
+        
+        // Calculate magnitude at target frequency using standard Goertzel formula
+        // This gives us the power at the target frequency
+        const N = samples.length;
+        const omega = (2.0 * Math.PI * this.targetFreq) / this.sampleRate;
+        const cosine = Math.cos(omega);
+        const sine = Math.sin(omega);
+        
+        const real = this.goertzelQ1 - this.goertzelQ2 * cosine;
+        const imag = this.goertzelQ2 * sine;
+        
+        // Calculate magnitude and normalize by N for proper scaling
+        // Multiply by 2/N to match FFT magnitude scaling
+        const magnitude = (2.0 / N) * Math.sqrt(real * real + imag * imag);
+        
+        return magnitude;
     }
     
     processAudio() {
@@ -215,6 +244,12 @@ class CWDecoder {
                 // Use shortest duration as dot length estimate
                 const minDuration = Math.min(...this.observedDurations);
                 this.dotLength = minDuration * 1.2; // Add 20% margin
+                
+                // Calculate and display WPM from dot length
+                // PARIS standard: 50 dot units per word
+                // WPM = 60000 / (dotLength * 50)
+                this.wpm = Math.round(60000 / (this.dotLength * 50));
+                this.updateWPMDisplay();
             }
             
             console.log(`CW: TONE END - duration=${duration}ms, dotLength=${this.dotLength.toFixed(0)}ms`);
@@ -273,6 +308,13 @@ class CWDecoder {
         const symbolElement = document.getElementById('cw-current-symbol');
         if (symbolElement) {
             symbolElement.textContent = this.currentSymbol || '—';
+        }
+    }
+    
+    updateWPMDisplay() {
+        const wpmElement = document.getElementById('cw-wpm-value');
+        if (wpmElement && this.wpm) {
+            wpmElement.textContent = this.wpm + ' WPM (auto)';
         }
     }
     

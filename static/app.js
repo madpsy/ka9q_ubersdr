@@ -4,7 +4,7 @@ let audioContext = null;
 let audioQueue = [];
 let isPlaying = false;
 let isMuted = false;
-let currentVolume = 1.0;
+let currentVolume = 0.7;
 let nextPlayTime = 0;
 let audioStartTime = 0;
 let currentMode = 'usb';
@@ -133,7 +133,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Start audio by triggering the current mode (from URL or default)
             // This will initialize audio context and connect
-            setMode(currentMode);
+            // Preserve bandwidth values loaded from URL
+            setMode(currentMode, true);
         });
     }
     
@@ -170,12 +171,20 @@ document.addEventListener('DOMContentLoaded', () => {
     vuMeterBarCompact = document.getElementById('vu-meter-bar-compact');
     vuMeterPeakCompact = document.getElementById('vu-meter-peak-compact');
     
-    // Set audio visualization as enabled by default (since it's visible)
-    audioVisualizationEnabled = true;
+    // Set audio visualization as disabled by default (collapsed for better performance)
+    audioVisualizationEnabled = false;
     
-    // Hide compact VU meter since full visualization is shown
+    // Show compact VU meter since full visualization is hidden
     const compactVU = document.getElementById('vu-meter-compact');
-    if (compactVU) compactVU.style.display = 'none';
+    if (compactVU) compactVU.style.display = 'flex';
+    
+    // Hide the full visualization content
+    const content = document.getElementById('audio-visualization-content');
+    if (content) content.style.display = 'none';
+    
+    // Remove expanded class from toggle
+    const toggle = document.getElementById('audio-viz-toggle');
+    if (toggle) toggle.classList.remove('expanded');
     
     // Initialize canvas sizes for visible audio visualization
     setTimeout(() => {
@@ -470,7 +479,8 @@ function connect() {
     const mode = currentMode;
     
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${frequency}&mode=${mode}`;
+    // Include bandwidth parameters in WebSocket URL so backend creates session with correct bandwidth
+    const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${frequency}&mode=${mode}&bandwidthLow=${currentBandwidthLow}&bandwidthHigh=${currentBandwidthHigh}`;
     
     log(`Connecting to ${wsUrl}...`);
     
@@ -1366,7 +1376,7 @@ function updateURL() {
 }
 
 // Set mode from buttons
-function setMode(mode) {
+function setMode(mode, preserveBandwidth = false) {
     currentMode = mode;
     
     // Update button states
@@ -1439,18 +1449,32 @@ function setMode(mode) {
     // Update sliders min/max and values
     bandwidthLowSlider.min = minLow;
     bandwidthLowSlider.max = maxLow;
-    bandwidthLowSlider.value = defaultLow;
-    currentBandwidthLow = defaultLow;
-    document.getElementById('bandwidth-low-value').textContent = defaultLow;
     
     // For LSB mode, high slider needs negative range; for other modes it starts at 0
     bandwidthHighSlider.min = (currentMode === 'lsb') ? -3200 : 0;
     bandwidthHighSlider.max = maxHigh;
-    bandwidthHighSlider.value = defaultHigh;
-    currentBandwidthHigh = defaultHigh;
-    document.getElementById('bandwidth-high-value').textContent = defaultHigh;
     
-    log(`Mode changed to ${mode.toUpperCase()} (BW: ${defaultLow} to ${defaultHigh} Hz)`);
+    // Only reset bandwidth to defaults if not preserving (i.e., user clicked mode button)
+    if (!preserveBandwidth) {
+        bandwidthLowSlider.value = defaultLow;
+        currentBandwidthLow = defaultLow;
+        document.getElementById('bandwidth-low-value').textContent = defaultLow;
+        
+        bandwidthHighSlider.value = defaultHigh;
+        currentBandwidthHigh = defaultHigh;
+        document.getElementById('bandwidth-high-value').textContent = defaultHigh;
+        
+        log(`Mode changed to ${mode.toUpperCase()} (BW: ${defaultLow} to ${defaultHigh} Hz)`);
+    } else {
+        // Preserve existing bandwidth values, just update the display
+        bandwidthLowSlider.value = currentBandwidthLow;
+        document.getElementById('bandwidth-low-value').textContent = currentBandwidthLow;
+        
+        bandwidthHighSlider.value = currentBandwidthHigh;
+        document.getElementById('bandwidth-high-value').textContent = currentBandwidthHigh;
+        
+        log(`Mode changed to ${mode.toUpperCase()} (BW: ${currentBandwidthLow} to ${currentBandwidthHigh} Hz)`);
+    }
     
     // Update URL with new mode
     updateURL();
@@ -1575,6 +1599,29 @@ function toggleMute() {
     log(isMuted ? 'Muted' : 'Unmuted');
 }
 
+// Quick toggle for NR2 filter
+function toggleNR2Quick() {
+    const checkbox = document.getElementById('noise-reduction-enable');
+    const btn = document.getElementById('nr2-quick-toggle');
+    
+    if (!checkbox) return;
+    
+    // Toggle the checkbox
+    checkbox.checked = !checkbox.checked;
+    
+    // Call the main toggle function
+    toggleNoiseReduction();
+    
+    // Update button appearance
+    if (checkbox.checked) {
+        btn.style.backgroundColor = '#28a745'; // Green when enabled
+        log('NR2 enabled via quick toggle');
+    } else {
+        btn.style.backgroundColor = '#dc3545'; // Red when disabled
+        log('NR2 disabled via quick toggle');
+    }
+}
+
 // Update connection status display (removed from UI, kept for compatibility)
 function updateConnectionStatus(status) {
     // Status bar removed from UI - function kept for compatibility
@@ -1660,10 +1707,6 @@ function getFrequencyBinMapping() {
     const startBinIndex = Math.floor((binStartFreq / nyquist) * bufferLength);
     const binsForBandwidth = Math.floor((bandwidth / nyquist) * bufferLength);
     
-    // Debug logging for CW modes
-    if (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) {
-        console.log(`CW Mode Debug: BW=${currentBandwidthLow} to ${currentBandwidthHigh}, cwOffset=${cwOffset}, display=${binStartFreq}-${binEndFreq}Hz, startBin=${startBinIndex}, numBins=${binsForBandwidth}`);
-    }
     
     return {
         startBinIndex,
@@ -2221,7 +2264,6 @@ function updateSpectrum() {
         const displayLow = cwOffset + currentBandwidthLow;
         const displayHigh = cwOffset + currentBandwidthHigh;
         
-        console.log(`Spectrum bandpass viz: sliderCenter=${sliderCenter}, displayCenter=${displayCenter}, displayLow=${displayLow}, displayHigh=${displayHigh}`);
         
         // Only draw if within visible range
         if (displayCenter >= displayLow && displayCenter <= displayHigh) {
@@ -2278,7 +2320,6 @@ function updateSpectrum() {
             const displayLow = cwOffset + currentBandwidthLow;
             const displayHigh = cwOffset + currentBandwidthHigh;
             
-            console.log(`Spectrum notch viz: displayCenter=${displayCenter}, displayLow=${displayLow}, displayHigh=${displayHigh}, visible=${displayCenter >= displayLow && displayCenter <= displayHigh}`);
             
             // Only draw if within visible range
             if (displayCenter >= displayLow && displayCenter <= displayHigh) {
@@ -2323,6 +2364,41 @@ function updateSpectrum() {
         }
     }
     
+    // Draw CW decoder frequency indicator if enabled
+    if (cwDecoder && cwDecoder.enabled) {
+        const cwFreq = cwDecoder.centerFrequency;
+        
+        // Get display range (accounts for CW offset)
+        const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
+        const displayLow = cwOffset + currentBandwidthLow;
+        const displayHigh = cwOffset + currentBandwidthHigh;
+        
+        // Only draw if within visible range
+        if (cwFreq >= displayLow && cwFreq <= displayHigh) {
+            // Draw center line (dark orange)
+            const centerX = frequencyToPixel(cwFreq, width);
+            spectrumCtx.strokeStyle = 'rgba(255, 140, 0, 0.9)'; // Dark orange
+            spectrumCtx.lineWidth = 2;
+            spectrumCtx.beginPath();
+            spectrumCtx.moveTo(centerX, 0);
+            spectrumCtx.lineTo(centerX, height);
+            spectrumCtx.stroke();
+            
+            // Add label at top
+            spectrumCtx.font = 'bold 10px monospace';
+            spectrumCtx.textAlign = 'center';
+            spectrumCtx.textBaseline = 'top';
+            
+            const label = 'CW';
+            const labelWidth = spectrumCtx.measureText(label).width + 6;
+            
+            spectrumCtx.fillStyle = 'rgba(255, 140, 0, 0.95)';
+            spectrumCtx.fillRect(centerX - labelWidth / 2, 2, labelWidth, 12);
+            
+            spectrumCtx.fillStyle = '#000000';
+            spectrumCtx.fillText(label, centerX, 4);
+        }
+    }
     
     // Draw frequency labels in Hz
     spectrumCtx.fillStyle = '#000000';
@@ -2330,23 +2406,37 @@ function updateSpectrum() {
     spectrumCtx.textAlign = 'center';
     
     // Calculate appropriate label spacing based on bandwidth
-    const audioBandwidth = currentBandwidthHigh - currentBandwidthLow;
+    // Dynamically adjust to ensure we always show labels
+    const audioBandwidth = Math.abs(currentBandwidthHigh - currentBandwidthLow);
     let labelStep;
-    if (audioBandwidth <= 500) {
-        labelStep = 100;
+    if (audioBandwidth <= 100) {
+        labelStep = 20;  // Very narrow (CW): 20 Hz steps
+    } else if (audioBandwidth <= 200) {
+        labelStep = 50;  // Narrow CW: 50 Hz steps
+    } else if (audioBandwidth <= 500) {
+        labelStep = 100; // Narrow: 100 Hz steps
+    } else if (audioBandwidth <= 1000) {
+        labelStep = 200; // Medium-narrow: 200 Hz steps
     } else if (audioBandwidth <= 2000) {
-        labelStep = 250;
+        labelStep = 250; // Medium: 250 Hz steps
     } else if (audioBandwidth <= 5000) {
-        labelStep = 500;
+        labelStep = 500; // Wide: 500 Hz steps
     } else {
-        labelStep = 1000;
+        labelStep = 1000; // Very wide: 1 kHz steps
     }
     
     // Draw labels from low to high frequency using shared mapping
-    const startFreq = Math.ceil(currentBandwidthLow / labelStep) * labelStep;
-    for (let freq = startFreq; freq <= currentBandwidthHigh; freq += labelStep) {
+    // Account for CW offset in display coordinates
+    const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
+    const displayLow = cwOffset + currentBandwidthLow;
+    const displayHigh = cwOffset + currentBandwidthHigh;
+    
+    const startFreq = Math.ceil(displayLow / labelStep) * labelStep;
+    for (let freq = startFreq; freq <= displayHigh; freq += labelStep) {
         const x = frequencyToPixel(freq, width);
-        spectrumCtx.fillText(freq + ' Hz', x, height - 5);
+        // Show the actual frequency value (subtract CW offset for display)
+        const labelFreq = freq - cwOffset;
+        spectrumCtx.fillText(labelFreq + ' Hz', x, height - 5);
     }
     
     // Redraw waterfall overlay to ensure filter lines persist
@@ -2485,21 +2575,33 @@ function updateWaterfall() {
     waterfallCtx.textBaseline = 'middle';
     
     // Calculate appropriate label spacing based on bandwidth
-    const audioBandwidth = currentBandwidthHigh - currentBandwidthLow;
+    // Dynamically adjust to ensure we always show labels
+    const audioBandwidth = Math.abs(currentBandwidthHigh - currentBandwidthLow);
     let labelStep;
-    if (audioBandwidth <= 500) {
-        labelStep = 100;
+    if (audioBandwidth <= 100) {
+        labelStep = 20;  // Very narrow (CW): 20 Hz steps
+    } else if (audioBandwidth <= 200) {
+        labelStep = 50;  // Narrow CW: 50 Hz steps
+    } else if (audioBandwidth <= 500) {
+        labelStep = 100; // Narrow: 100 Hz steps
+    } else if (audioBandwidth <= 1000) {
+        labelStep = 200; // Medium-narrow: 200 Hz steps
     } else if (audioBandwidth <= 2000) {
-        labelStep = 250;
+        labelStep = 250; // Medium: 250 Hz steps
     } else if (audioBandwidth <= 5000) {
-        labelStep = 500;
+        labelStep = 500; // Wide: 500 Hz steps
     } else {
-        labelStep = 1000;
+        labelStep = 1000; // Very wide: 1 kHz steps
     }
     
     // Major ticks and labels using shared mapping
-    const startFreq = Math.ceil(currentBandwidthLow / labelStep) * labelStep;
-    for (let freq = startFreq; freq <= currentBandwidthHigh; freq += labelStep) {
+    // Account for CW offset in display coordinates
+    const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
+    const displayLow = cwOffset + currentBandwidthLow;
+    const displayHigh = cwOffset + currentBandwidthHigh;
+    
+    const startFreq = Math.ceil(displayLow / labelStep) * labelStep;
+    for (let freq = startFreq; freq <= displayHigh; freq += labelStep) {
         const x = frequencyToPixel(freq, width);
         
         // Draw major tick mark (white)
@@ -2511,7 +2613,9 @@ function updateWaterfall() {
         waterfallCtx.strokeStyle = '#000000';
         waterfallCtx.lineWidth = 3;
         
-        const label = freq + ' Hz';
+        // Show the actual frequency value (subtract CW offset for display)
+        const labelFreq = freq - cwOffset;
+        const label = labelFreq + ' Hz';
         waterfallCtx.strokeText(label, x, height - 10);
         waterfallCtx.fillText(label, x, height - 10);
     }
@@ -2519,8 +2623,8 @@ function updateWaterfall() {
     // Minor ticks (half of label step) using shared mapping
     const minorStep = labelStep / 2;
     waterfallCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-    const minorStartFreq = Math.ceil(currentBandwidthLow / minorStep) * minorStep;
-    for (let freq = minorStartFreq; freq < currentBandwidthHigh; freq += minorStep) {
+    const minorStartFreq = Math.ceil(displayLow / minorStep) * minorStep;
+    for (let freq = minorStartFreq; freq < displayHigh; freq += minorStep) {
         if ((freq - startFreq) % labelStep !== 0) { // Skip major ticks
             const x = frequencyToPixel(freq, width);
             waterfallCtx.fillRect(x, height - 25, 1, 7);
@@ -2557,7 +2661,6 @@ function drawWaterfallFilterOverlay() {
         const displayLow = cwOffset + currentBandwidthLow;
         const displayHigh = cwOffset + currentBandwidthHigh;
         
-        console.log(`Waterfall bandpass viz: sliderCenter=${sliderCenter}, displayCenter=${displayCenter}, displayLow=${displayLow}, displayHigh=${displayHigh}`);
         
         // Only draw if within visible range
         if (displayCenter >= displayLow && displayCenter <= displayHigh) {
@@ -2655,6 +2758,32 @@ function drawWaterfallFilterOverlay() {
                     waterfallOverlayCtx.stroke();
                     waterfallOverlayCtx.setLineDash([]);
                 }
+            }
+        }
+        
+        // Draw CW decoder frequency indicator if enabled
+        if (cwDecoder && cwDecoder.enabled) {
+            const cwFreq = cwDecoder.centerFrequency;
+            
+            // Get display range (accounts for CW offset)
+            const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
+            const displayLow = cwOffset + currentBandwidthLow;
+            const displayHigh = cwOffset + currentBandwidthHigh;
+            
+            // Only draw if within visible range
+            if (cwFreq >= displayLow && cwFreq <= displayHigh) {
+                // CRITICAL: Account for CSS scale(0.75) on .audio-visualization-section
+                const cssScale = 0.75;
+                const scaledWidth = waterfallOverlayCanvas.width / cssScale;
+                
+                // Draw center line (dark orange solid) on overlay - full height
+                const centerX = frequencyToPixel(cwFreq, scaledWidth);
+                waterfallOverlayCtx.strokeStyle = 'rgba(255, 140, 0, 0.9)'; // Dark orange
+                waterfallOverlayCtx.lineWidth = 2 / cssScale;
+                waterfallOverlayCtx.beginPath();
+                waterfallOverlayCtx.moveTo(centerX, 0);
+                waterfallOverlayCtx.lineTo(centerX, waterfallOverlayCanvas.height);
+                waterfallOverlayCtx.stroke();
             }
         }
     }
@@ -3132,35 +3261,32 @@ function addNotchFilter(centerFreq) {
         return;
     }
     
-    // Default bandwidth and gain for new notch
-    const defaultWidth = 100; // Hz
-    const defaultGain = -80; // dB (negative = attenuation)
+    // Default bandwidth for new notch (narrower for CW signals)
+    const defaultWidth = 50; // Hz (reduced from 100 for better CW performance)
     
     // centerFreq comes from click handler and may be negative in LSB mode
     // Store it as-is for display purposes
-    // Create notch filter object with peaking filter for adjustable gain
+    // Create notch filter object with TRUE notch filters (infinite attenuation at center)
     const notch = {
         center: centerFreq,  // Store display value (negative for LSB)
         width: defaultWidth,
-        gain: defaultGain,
         filters: []
     };
     
     console.log(`addNotchFilter: centerFreq=${centerFreq}, abs=${Math.abs(centerFreq)}`);
     
-    // Create 4 cascaded peaking filters with negative gain for adjustable notch depth
-    // Peaking filters allow gain control, unlike pure notch filters
-    // For peaking filters, higher Q = narrower bandwidth
-    // Q = center_freq / bandwidth gives the correct relationship
-    // 4 stages match the bandpass filter for consistency
-    for (let i = 0; i < 4; i++) {
+    // Create 6 cascaded TRUE notch filters for VERY deep attenuation
+    // Web Audio API notch filters provide ~20-30 dB attenuation per stage at center
+    // 6 stages = 120-180 dB total attenuation (essentially complete elimination)
+    // Q controls the bandwidth: higher Q = narrower notch
+    for (let i = 0; i < 6; i++) {
         const filter = audioContext.createBiquadFilter();
-        filter.type = 'peaking';
+        filter.type = 'notch';  // TRUE notch filter (not peaking)
         // Web Audio API uses absolute frequencies
         filter.frequency.value = Math.abs(centerFreq);
-        // Use higher Q for narrower, more effective notch
-        filter.Q.value = Math.max(1.0, Math.abs(centerFreq) / defaultWidth);
-        filter.gain.value = defaultGain / 4; // Split gain across 4 stages
+        // Very high Q for extremely narrow notch - critical for CW signals
+        // Use even higher Q for sharper notch (Q = center / (width / 4))
+        filter.Q.value = Math.max(20, Math.abs(centerFreq) / (defaultWidth / 4));
         notch.filters.push(filter);
     }
     
@@ -3178,7 +3304,7 @@ function addNotchFilter(centerFreq) {
     // Update UI to show the new notch
     updateNotchFilterUI();
     
-    log(`Notch filter added at ${centerFreq} Hz (±${defaultWidth/2} Hz, ${defaultGain} dB, 4-stage cascade)`);
+    log(`True notch filter added at ${centerFreq} Hz (±${defaultWidth/2} Hz, 6-stage cascade for 120-180 dB attenuation)`);
 }
 
 function removeNotchFilter(index) {
@@ -3207,23 +3333,21 @@ function updateNotchFilterParams(index) {
     const notch = notchFilters[index];
     const centerInput = document.getElementById(`notch-center-${index}`);
     const widthInput = document.getElementById(`notch-width-${index}`);
-    const gainInput = document.getElementById(`notch-gain-${index}`);
     
-    if (centerInput && widthInput && gainInput) {
+    if (centerInput && widthInput) {
         const sliderCenter = parseInt(centerInput.value);
         const width = parseInt(widthInput.value);
-        const gain = parseInt(gainInput.value);
         
         // Slider shows positive values (50-2700)
         // For LSB mode, convert back to negative for display coordinates
         const displayCenter = (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
         
-        // Higher Q = narrower bandwidth for peaking filters
-        const Q = Math.max(1.0, Math.abs(displayCenter) / width);
+        // Very high Q for extremely narrow notch - critical for CW signals
+        // Use even higher Q for sharper notch (Q = center / (width / 4))
+        const Q = Math.max(20, Math.abs(displayCenter) / (width / 4));
         
         notch.center = displayCenter; // Store display value (negative for LSB)
         notch.width = width;
-        notch.gain = gain;
         
         console.log(`updateNotchFilterParams[${index}]: sliderCenter=${sliderCenter}, displayCenter=${displayCenter}, width=${width}, Q=${Q.toFixed(2)}`);
         
@@ -3232,13 +3356,12 @@ function updateNotchFilterParams(index) {
         for (let filter of notch.filters) {
             filter.frequency.value = Math.abs(displayCenter);
             filter.Q.value = Q;
-            filter.gain.value = gain / 4; // Split gain across 4 stages
+            // True notch filters provide ~20-30 dB per stage, 6 stages = 120-180 dB total
         }
         
         // Update display values (show positive)
         document.getElementById(`notch-center-value-${index}`).textContent = sliderCenter + ' Hz';
         document.getElementById(`notch-width-value-${index}`).textContent = width + ' Hz';
-        document.getElementById(`notch-gain-value-${index}`).textContent = gain + ' dB';
     }
 }
 
@@ -3301,7 +3424,7 @@ function updateNotchFilterUI() {
         notchDiv.className = 'notch-filter-item';
         notchDiv.innerHTML = `
             <div class="notch-filter-header">
-                <span class="notch-filter-title">Notch ${index + 1}</span>
+                <span class="notch-filter-title">Notch ${index + 1} (True Notch)</span>
                 <button onclick="removeNotchFilter(${index})" class="notch-remove-btn">✕</button>
             </div>
             <div class="control-group">
@@ -3310,11 +3433,10 @@ function updateNotchFilterUI() {
             </div>
             <div class="control-group">
                 <label for="notch-width-${index}">Width: <span id="notch-width-value-${index}">${notch.width} Hz</span></label>
-                <input type="range" id="notch-width-${index}" min="20" max="500" value="${notch.width}" step="10" oninput="updateNotchFilterParams(${index})">
+                <input type="range" id="notch-width-${index}" min="10" max="200" value="${notch.width}" step="5" oninput="updateNotchFilterParams(${index})">
             </div>
-            <div class="control-group">
-                <label for="notch-gain-${index}">Reduction: <span id="notch-gain-value-${index}">${notch.gain} dB</span></label>
-                <input type="range" id="notch-gain-${index}" min="-100" max="0" value="${notch.gain}" step="1" oninput="updateNotchFilterParams(${index})">
+            <div class="info-text" style="color: #888; font-size: 0.9em; margin-top: 5px;">
+                120-180 dB attenuation (6-stage cascade)
             </div>
         `;
         container.appendChild(notchDiv);
@@ -3375,13 +3497,102 @@ function clearAllNotches() {
     function updateCWDecoderWPM() {
         const wpm = parseInt(document.getElementById('cw-wpm').value);
         document.getElementById('cw-wpm-value').textContent = wpm;
-        updateCWDecoderWPM(wpm);
+        if (cwDecoder) {
+            cwDecoder.setWPM(wpm);
+        }
     }
     
     function updateCWDecoderThreshold() {
         const threshold = parseFloat(document.getElementById('cw-threshold').value);
-        document.getElementById('cw-threshold-value').textContent = threshold.toFixed(2);
-        updateCWDecoderThreshold(threshold);
+        document.getElementById('cw-threshold-value').textContent = threshold.toFixed(4);
+        if (cwDecoder) {
+            cwDecoder.setThreshold(threshold);
+        }
+    }
+    
+    function updateCWDecoderFrequency() {
+        const freq = parseInt(document.getElementById('cw-frequency').value);
+        document.getElementById('cw-frequency-value').textContent = freq;
+        if (cwDecoder) {
+            cwDecoder.setCenterFrequency(freq);
+        }
+    }
+    
+    function resetCWDecoderWPM() {
+        if (cwDecoder) {
+            cwDecoder.resetWPM();
+        }
+    }
+    
+    // Hunt for CW signals - finds strongest peaks in the audio spectrum
+    let huntIndex = 0; // Track which peak we're on for cycling
+    
+    function huntCWSignal() {
+        if (!analyser) {
+            log('Audio not initialized', 'error');
+            return;
+        }
+        
+        // Get frequency data
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(dataArray);
+        
+        const sampleRate = audioContext.sampleRate;
+        const nyquist = sampleRate / 2;
+        
+        // Get display range (accounts for CW offset)
+        const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
+        const displayLow = cwOffset + currentBandwidthLow;
+        const displayHigh = cwOffset + currentBandwidthHigh;
+        
+        // Find peaks in the audio spectrum within our bandwidth
+        const peaks = [];
+        const minPeakHeight = 100; // Minimum magnitude to consider (0-255 scale)
+        const minPeakSeparation = 50; // Minimum Hz between peaks
+        
+        for (let i = 1; i < dataArray.length - 1; i++) {
+            const freq = (i / dataArray.length) * nyquist;
+            
+            // Only look within our audio bandwidth
+            if (freq < displayLow || freq > displayHigh) continue;
+            
+            const magnitude = dataArray[i];
+            
+            // Check if this is a local peak
+            if (magnitude > minPeakHeight &&
+                magnitude > dataArray[i - 1] &&
+                magnitude > dataArray[i + 1]) {
+                
+                // Check if it's far enough from existing peaks
+                const tooClose = peaks.some(p => Math.abs(p.freq - freq) < minPeakSeparation);
+                if (!tooClose) {
+                    peaks.push({ freq: freq, magnitude: magnitude });
+                }
+            }
+        }
+        
+        // Sort peaks by magnitude (strongest first)
+        peaks.sort((a, b) => b.magnitude - a.magnitude);
+        
+        if (peaks.length === 0) {
+            log('No CW signals found - try adjusting threshold or check audio', 'error');
+            return;
+        }
+        
+        // Cycle through peaks on each click
+        const peak = peaks[huntIndex % peaks.length];
+        huntIndex = (huntIndex + 1) % peaks.length;
+        
+        // Update frequency slider
+        const freqSlider = document.getElementById('cw-frequency');
+        const targetFreq = Math.round(peak.freq);
+        
+        if (freqSlider) {
+            freqSlider.value = targetFreq;
+            updateCWDecoderFrequency();
+        }
+        
+        log(`Hunt: Found signal at ${targetFreq} Hz (${huntIndex}/${peaks.length} peaks, strength: ${peak.magnitude}/255)`);
     }
 
 // Initialize compressor
@@ -3658,6 +3869,7 @@ function showStereoClipIndicator() {
 function toggleNoiseReduction() {
     const checkbox = document.getElementById('noise-reduction-enable');
     const statusBadge = document.getElementById('noise-reduction-status-badge');
+    const quickToggleBtn = document.getElementById('nr2-quick-toggle');
     
     if (!checkbox) {
         console.error('Noise reduction checkbox not found');
@@ -3692,6 +3904,12 @@ function toggleNoiseReduction() {
             statusBadge.textContent = 'ENABLED';
             statusBadge.className = 'filter-status-badge filter-enabled';
         }
+        
+        // Update quick toggle button appearance
+        if (quickToggleBtn) {
+            quickToggleBtn.style.backgroundColor = '#28a745'; // Green when enabled
+        }
+        
         log('✅ NR2 Noise Reduction ENABLED');
         log('Using FFT-based spectral subtraction with overlap-add processing');
     } else {
@@ -3703,6 +3921,11 @@ function toggleNoiseReduction() {
         if (statusBadge) {
             statusBadge.textContent = 'DISABLED';
             statusBadge.className = 'filter-status-badge filter-disabled';
+        }
+        
+        // Update quick toggle button appearance
+        if (quickToggleBtn) {
+            quickToggleBtn.style.backgroundColor = '#dc3545'; // Red when disabled
         }
         
         log('❌ NR2 Noise Reduction DISABLED');
@@ -3903,6 +4126,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // Update cursor immediately
                 updateSpectrumCursor();
+                
+                // Update URL with new frequency
+                updateURL();
                 
                 // Connect if not already connected
                 if (!ws || ws.readyState !== WebSocket.OPEN) {

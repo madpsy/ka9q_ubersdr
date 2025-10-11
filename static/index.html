@@ -128,11 +128,12 @@
         <div class="audio-controls">
             <div class="control-group">
                 <label for="volume">Volume</label>
-                <input type="range" id="volume" min="0" max="100" value="100">
-                <span id="volume-value">100%</span>
+                <input type="range" id="volume" min="0" max="100" value="70">
+                <span id="volume-value">70%</span>
             </div>
             <div class="control-group">
                 <button id="mute-btn" onclick="toggleMute()">🔊 Mute</button>
+                <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #dc3545; margin-left: 10px;">NR2</button>
             </div>
             <div class="control-group vu-meter-compact-container" id="vu-meter-compact">
                 <div class="vu-meter">
@@ -247,12 +248,19 @@
                 </div>
                 <div id="cw-decoder-controls" style="display: none;">
                     <div class="control-group">
-                        <label for="cw-wpm">WPM: <span id="cw-wpm-value">20</span></label>
-                        <input type="range" id="cw-wpm" min="5" max="60" value="20" step="1" oninput="updateCWDecoderWPM()">
+                        <label for="cw-frequency">CW Tone Frequency: <span id="cw-frequency-value">400</span> Hz</label>
+                        <input type="range" id="cw-frequency" min="300" max="1500" value="400" step="10" oninput="updateCWDecoderFrequency()">
                     </div>
-                    <div class="control-group">
-                        <label for="cw-threshold">Threshold: <span id="cw-threshold-value">0.01</span></label>
-                        <input type="range" id="cw-threshold" min="0.001" max="0.1" value="0.01" step="0.001" oninput="updateCWDecoderThreshold()">
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0;">
+                        <button onclick="huntCWSignal()" class="cw-btn" style="width: auto; padding: 5px 15px;">Hunt</button>
+                        <span style="color: #888; font-size: 0.9em;">Find signals</span>
+                        <span style="margin-left: 10px;">WPM: <span id="cw-wpm-value">-- (auto)</span></span>
+                        <button onclick="resetCWDecoderWPM()" class="cw-btn" style="width: auto; padding: 5px 15px;">Reset</button>
+                        <span style="margin-left: 20px;">Threshold: <span id="cw-threshold-value">0.0005</span></span>
+                        <input type="range" id="cw-threshold" min="0.0001" max="0.01" value="0.0005" step="0.0001" oninput="updateCWDecoderThreshold()" style="width: 150px;">
+                    </div>
+                    <div class="control-group" style="display: none;">
+                        <label for="cw-threshold-hidden">Hidden</label>
                     </div>
                     
                     <div class="cw-decoder-display">
@@ -282,40 +290,26 @@
             </div>
         </div>
 
-        <!-- Filters: 2x3 Grid for Squelch, Bandpass, NR2, Notch, Compressor, (empty) -->
+        <!-- Filters: 2x3 Grid for Notch, Bandpass, NR2, Squelch, Compressor, Stereo Virtualizer -->
         <div class="filters-grid filters-grid-2x3">
-            <!-- Row 1, Column 1: Squelch -->
-            <div class="squelch-panel">
-                <div class="squelch-container" style="position: relative;">
-                    <span id="squelch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+            <!-- Row 1, Column 1: Notch -->
+            <div class="notch-panel">
+                <div class="notch-container" style="position: relative;">
+                    <span id="notch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <div class="control-group">
                         <label>
-                            <input type="checkbox" id="squelch-enable" onchange="toggleSquelch()">
-                            Squelch (Audio Gate)
+                            <input type="checkbox" id="notch-enable" onchange="toggleNotchFilter()">
+                            Notch Filters <span id="notch-count" style="color: #888;">(0/5)</span>
                         </label>
                     </div>
-                    <div id="squelch-controls">
-                        <div class="control-group">
-                            <label for="squelch-threshold">Threshold: <span id="squelch-threshold-value">-35 dB</span></label>
-                            <input type="range" id="squelch-threshold" min="-80" max="-10" value="-35" step="1" oninput="updateSquelch()">
+                    <div id="notch-controls">
+                        <div style="margin-bottom: 15px;">
+                            <button onclick="addManualNotch()" class="notch-add-btn">+ Add Notch Filter</button>
                         </div>
-                        <div class="control-group">
-                            <label for="squelch-hysteresis">Hysteresis: <span id="squelch-hysteresis-value">3 dB</span></label>
-                            <input type="range" id="squelch-hysteresis" min="1" max="10" value="3" step="0.5" oninput="updateSquelch()">
+                        <div id="notch-list">
+                            <p style="color: #888; font-style: italic; margin: 10px 0;">No notch filters added yet</p>
                         </div>
-                        <div class="control-group">
-                            <label for="squelch-attack">Attack (Open): <span id="squelch-attack-value">20 ms</span></label>
-                            <input type="range" id="squelch-attack" min="5" max="200" value="20" step="5" oninput="updateSquelch()">
-                        </div>
-                        <div class="control-group">
-                            <label for="squelch-release">Release (Close): <span id="squelch-release-value">500 ms</span></label>
-                            <input type="range" id="squelch-release" min="10" max="1000" value="500" step="10" oninput="updateSquelch()">
-                        </div>
-                        <div class="squelch-status">
-                            <label>Status:</label>
-                            <span id="squelch-status" style="font-weight: bold; color: #28a745;">OPEN</span>
-                            <span id="squelch-level" style="margin-left: 15px; color: #888;">Level: -- dB</span>
-                        </div>
+                        <button onclick="clearAllNotches()" class="eq-reset-btn" style="margin-top: 10px;">Clear All Notches</button>
                     </div>
                 </div>
             </div>
@@ -390,24 +384,38 @@
                 </div>
             </div>
 
-            <!-- Row 2, Column 1: Notch -->
-            <div class="notch-panel">
-                <div class="notch-container" style="position: relative;">
-                    <span id="notch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+            <!-- Row 2, Column 1: Squelch -->
+            <div class="squelch-panel">
+                <div class="squelch-container" style="position: relative;">
+                    <span id="squelch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <div class="control-group">
                         <label>
-                            <input type="checkbox" id="notch-enable" onchange="toggleNotchFilter()">
-                            Notch Filters <span id="notch-count" style="color: #888;">(0/5)</span>
+                            <input type="checkbox" id="squelch-enable" onchange="toggleSquelch()">
+                            Squelch (Audio Gate)
                         </label>
                     </div>
-                    <div id="notch-controls">
-                        <div style="margin-bottom: 15px;">
-                            <button onclick="addManualNotch()" class="notch-add-btn">+ Add Notch Filter</button>
+                    <div id="squelch-controls">
+                        <div class="control-group">
+                            <label for="squelch-threshold">Threshold: <span id="squelch-threshold-value">-35 dB</span></label>
+                            <input type="range" id="squelch-threshold" min="-80" max="-10" value="-35" step="1" oninput="updateSquelch()">
                         </div>
-                        <div id="notch-list">
-                            <p style="color: #888; font-style: italic; margin: 10px 0;">No notch filters added yet</p>
+                        <div class="control-group">
+                            <label for="squelch-hysteresis">Hysteresis: <span id="squelch-hysteresis-value">3 dB</span></label>
+                            <input type="range" id="squelch-hysteresis" min="1" max="10" value="3" step="0.5" oninput="updateSquelch()">
                         </div>
-                        <button onclick="clearAllNotches()" class="eq-reset-btn" style="margin-top: 10px;">Clear All Notches</button>
+                        <div class="control-group">
+                            <label for="squelch-attack">Attack (Open): <span id="squelch-attack-value">20 ms</span></label>
+                            <input type="range" id="squelch-attack" min="5" max="200" value="20" step="5" oninput="updateSquelch()">
+                        </div>
+                        <div class="control-group">
+                            <label for="squelch-release">Release (Close): <span id="squelch-release-value">500 ms</span></label>
+                            <input type="range" id="squelch-release" min="10" max="1000" value="500" step="10" oninput="updateSquelch()">
+                        </div>
+                        <div class="squelch-status">
+                            <label>Status:</label>
+                            <span id="squelch-status" style="font-weight: bold; color: #28a745;">OPEN</span>
+                            <span id="squelch-level" style="margin-left: 15px; color: #888;">Level: -- dB</span>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -250,6 +250,21 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		mode = m
 	}
 
+	// Get bandwidth parameters from query string (optional)
+	var bandwidthLow, bandwidthHigh *int
+	if bwl := query.Get("bandwidthLow"); bwl != "" {
+		var val int
+		if _, err := fmt.Sscanf(bwl, "%d", &val); err == nil {
+			bandwidthLow = &val
+		}
+	}
+	if bwh := query.Get("bandwidthHigh"); bwh != "" {
+		var val int
+		if _, err := fmt.Sscanf(bwh, "%d", &val); err == nil {
+			bandwidthHigh = &val
+		}
+	}
+
 	// Validate mode - "spectrum" is reserved for the spectrum manager
 	if mode == "spectrum" {
 		log.Printf("Rejected WebSocket connection: mode 'spectrum' is reserved")
@@ -263,6 +278,29 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		log.Printf("Failed to create session: %v", err)
 		wsh.sendError(conn, "Failed to create session: "+err.Error())
 		return
+	}
+
+	// If bandwidth parameters were provided in URL, update the session immediately
+	if bandwidthLow != nil || bandwidthHigh != nil {
+		// Use provided values or fall back to session defaults
+		bwl := session.BandwidthLow
+		bwh := session.BandwidthHigh
+		if bandwidthLow != nil {
+			bwl = *bandwidthLow
+		}
+		if bandwidthHigh != nil {
+			bwh = *bandwidthHigh
+		}
+		
+		log.Printf("Applying URL bandwidth parameters: %d to %d Hz", bwl, bwh)
+		
+		// Update session with custom bandwidth
+		if err := wsh.sessions.UpdateSessionWithEdges(session.ID, 0, "", bwl, bwh, true); err != nil {
+			log.Printf("Failed to apply URL bandwidth: %v", err)
+			wsh.sendError(conn, "Failed to apply bandwidth: "+err.Error())
+			wsh.sessions.DestroySession(session.ID)
+			return
+		}
 	}
 
 	log.Printf("WebSocket connected: session %s", session.ID)

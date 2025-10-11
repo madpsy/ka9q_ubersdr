@@ -35,13 +35,13 @@ func main() {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
-	// Load bookmarks from bookmarks.conf if it exists
-	bookmarksConfig, err := LoadConfig("bookmarks.conf")
+	// Load bookmarks from bookmarks.yaml if it exists
+	bookmarksConfig, err := LoadConfig("bookmarks.yaml")
 	if err == nil {
 		config.Bookmarks = bookmarksConfig.Bookmarks
-		log.Printf("Loaded %d bookmarks from bookmarks.conf", len(config.Bookmarks))
+		log.Printf("Loaded %d bookmarks from bookmarks.yaml", len(config.Bookmarks))
 	} else {
-		log.Printf("No bookmarks.conf found or error loading: %v", err)
+		log.Printf("No bookmarks.yaml found or error loading: %v", err)
 	}
 
 	log.Printf("Starting ka9q_ubersdr server...")
@@ -91,6 +91,9 @@ func main() {
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
 	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions) // New per-user spectrum
 
+	// Initialize admin handler
+	adminHandler := NewAdminHandler(config, *configFile)
+
 	// Setup HTTP routes
 	http.HandleFunc("/ws", wsHandler.HandleWebSocket)
 	// http.HandleFunc("/ws/spectrum", spectrumWsHandler.HandleWebSocket) // Old endpoint - DISABLED
@@ -105,6 +108,11 @@ func main() {
 	http.HandleFunc("/api/bookmarks", func(w http.ResponseWriter, r *http.Request) {
 		handleBookmarks(w, r, config)
 	})
+
+	// Admin endpoints (password protected)
+	http.HandleFunc("/admin/config", adminHandler.AuthMiddleware(adminHandler.HandleConfig))
+	http.HandleFunc("/admin/config/schema", adminHandler.AuthMiddleware(adminHandler.HandleConfigSchema))
+	http.HandleFunc("/admin/bookmarks", adminHandler.AuthMiddleware(adminHandler.HandleBookmarks))
 
 	// Serve static files
 	fs := http.FileServer(http.Dir("static"))

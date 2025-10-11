@@ -1,5 +1,10 @@
 # ka9q_ubersdr Configuration
 
+# Admin settings
+admin:
+  # Admin password for configuration access
+  password: "mypassword"
+
 # Radiod connection settings
 radiod:
   # Multicast group for status/control messages

@@ -1,0 +1,118 @@
+# ka9q_ubersdr Configuration
+
+# Admin settings
+admin:
+  # Admin password for configuration access
+  password: "mypassword"
+
+# Radiod connection settings
+radiod:
+  # Multicast group for status/control messages
+  status_group: "hf-status.local:5006"
+  # Multicast group for PCM audio data
+  data_group: "pcm.local:5004"
+  # Network interface to use (empty = auto-detect)
+  interface: ""
+
+# Web server settings
+server:
+  # Listen address and port
+  listen: ":8080"
+  # Maximum concurrent sessions
+  max_sessions: 50
+  # Session timeout in seconds (0 = no timeout)
+  session_timeout: 300
+  # Enable CORS
+  enable_cors: false
+
+# Audio settings
+audio:
+  # Audio buffer size in samples
+  buffer_size: 4096
+  # Default sample rate in Hz
+  default_sample_rate: 12000
+  # Sample rates per mode (must match radiod preset sample rates)
+  mode_sample_rates:
+    usb: 12000
+    lsb: 12000
+    cwu: 12000  # CW Upper (for USB bands) preset in radiod uses 12 kHz
+    cwl: 12000  # CW Lower (for LSB bands) preset in radiod uses 12 kHz
+    am: 12000   # AM preset in radiod uses 12 kHz
+    sam: 12000  # SAM (Synchronous AM) preset in radiod uses 12 kHz
+    fm: 24000   # FM preset in radiod uses 24 kHz
+    nfm: 24000  # NFM (Narrow FM) preset in radiod uses 24 kHz
+    iq: 192000
+  # Opus compression settings
+  opus:
+    # Enable Opus compression for audio streaming (reduces bandwidth significantly)
+    enabled: false
+    # Opus bitrate in bits per second (6000-510000, typical: 24000-64000)
+    # Lower = more compression but lower quality, Higher = better quality but more bandwidth
+    # 24000 = good for voice, 48000 = excellent for voice, 64000 = near-transparent
+    bitrate: 48000
+    # Opus complexity (0-10, higher = better quality but more CPU)
+    # 0 = fastest/lowest quality, 10 = slowest/highest quality
+    complexity: 5
+
+# Spectrum analyzer settings - per-user dynamic channels
+spectrum:
+  # Enable per-user spectrum channels
+  enabled: true
+  # Default parameters for new spectrum channels (users can zoom/pan)
+  default:
+    # Default center frequency (Hz) - 15 MHz for 0-30 MHz coverage
+    center_frequency: 15000000
+    # Default number of bins - kept constant for consistent display
+    bin_count: 1024
+    # Default bandwidth per bin (Hz) - calculated for exact 0-30 MHz coverage
+    # 30,000,000 Hz / 1024 bins = 29,296.875 Hz per bin
+    # Users can adjust this to zoom in/out:
+    #   29.3 kHz = 0-30 MHz (full HF band)
+    #   10 kHz = ~10 MHz view
+    #    1 kHz = ~1 MHz detailed view
+    bin_bandwidth: 29296.875
+  # Poll period in milliseconds (how often to request spectrum data)
+  # Lower values = faster updates but more CPU/network usage
+  poll_period_ms: 100
+  # Maximum spectrum sessions per user (to prevent abuse)
+  max_sessions_per_user: 2
+  # Gain adjustment in dB applied to all spectrum data
+  # Positive values increase displayed signal levels (brighten)
+  # Negative values decrease displayed signal levels (darken)
+  # Default: 0 (no adjustment)
+  # Example: 20 adds 20 dB to all spectrum values
+  gain_db: 15
+  
+  # Smoothing settings for waterfall display
+  # Reduces fuzziness and noise in the spectrum display
+  smoothing:
+    # Enable/disable smoothing (set to false to disable all smoothing)
+    enabled: true
+    
+    # Temporal smoothing (time domain) - Exponential Moving Average (EMA)
+    # Controls smoothing between consecutive waterfall frames
+    # Range: 0.0 to 1.0
+    #   0.1 = heavy smoothing (90% old data, 10% new) - very smooth but slower response
+    #   0.3 = moderate smoothing (70% old, 30% new) - good balance (recommended)
+    #   0.5 = light smoothing (50% old, 50% new) - faster response
+    #   1.0 = no temporal smoothing (100% new data)
+    # Default: 0.3
+    temporal_alpha: 0.3
+    
+    # Spatial smoothing (frequency domain) - Gaussian filter
+    # Controls smoothing across adjacent frequency bins
+    # Range: 0.0 to 5.0 (0 = disabled)
+    #   0.0 = no spatial smoothing
+    #   1.0 = light smoothing - subtle, preserves detail
+    #   1.5 = moderate smoothing - good balance (recommended)
+    #   2.0 = medium smoothing - smoother appearance
+    #   3.0+ = heavy smoothing - very smooth but may blur signals
+    # Default: 1.5
+    spatial_sigma: 1.5
+
+# Logging settings
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+  # Log format: text, json
+  format: "text"

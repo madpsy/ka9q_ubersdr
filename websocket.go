@@ -74,18 +74,26 @@ func startStatsLogger() {
 			defer ticker.Stop()
 
 			for range ticker.C {
-				// Log Audio stats
-				bytes, _, conns, elapsed := globalStatsAudio.getAndResetStats()
-				if elapsed > 0 && (bytes > 0 || conns > 0) {
-					kbps := float64(bytes) / 1024 / elapsed.Seconds()
-					log.Printf("Audio stats: %.1f KB/s (%d connections)", kbps, conns)
+				// Get Audio stats
+				audioBytes, _, audioConns, audioElapsed := globalStatsAudio.getAndResetStats()
+				audioKbps := float64(0)
+				if audioElapsed > 0 {
+					audioKbps = float64(audioBytes) / 1024 / audioElapsed.Seconds()
 				}
 
-				// Log Spectrum stats
-				bytes, _, conns, elapsed = globalStatsSpectrum.getAndResetStats()
-				if elapsed > 0 && (bytes > 0 || conns > 0) {
-					kbps := float64(bytes) / 1024 / elapsed.Seconds()
-					log.Printf("Spectrum stats: %.1f KB/s (%d connections)", kbps, conns)
+				// Get Spectrum stats
+				spectrumBytes, _, spectrumConns, spectrumElapsed := globalStatsSpectrum.getAndResetStats()
+				spectrumKbps := float64(0)
+				if spectrumElapsed > 0 {
+					spectrumKbps = float64(spectrumBytes) / 1024 / spectrumElapsed.Seconds()
+				}
+
+				// Log combined stats if there's any activity
+				totalConns := audioConns + spectrumConns
+				totalKbps := audioKbps + spectrumKbps
+				if totalConns > 0 || totalKbps > 0 {
+					log.Printf("WebSocket stats - Audio: %.1f KB/s (%d conns), Spectrum: %.1f KB/s (%d conns), Total: %.1f KB/s (%d conns)",
+						audioKbps, audioConns, spectrumKbps, spectrumConns, totalKbps, totalConns)
 				}
 			}
 		}()

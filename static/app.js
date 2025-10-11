@@ -746,7 +746,8 @@ function connect() {
         stopStatsUpdates();
 
         // Schedule reconnection if we have saved parameters AND user didn't explicitly disconnect
-        if (lastConnectionParams && !audioUserDisconnected) {
+        // Check window.audioUserDisconnected (set by idle detector) as well as local variable
+        if (lastConnectionParams && !audioUserDisconnected && !window.audioUserDisconnected) {
             scheduleReconnect();
         }
     };

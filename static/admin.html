@@ -303,6 +303,7 @@
                     <button class="tab" onclick="switchTab('yaml')">YAML Editor</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
                     <button class="tab" onclick="switchTab('sessions')">Active Sessions</button>
+                    <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
                 </div>
 
                 <!-- Visual Editor Tab -->
@@ -360,6 +361,14 @@
                     </div>
                 </div>
 
+                <!-- Banned IPs Tab -->
+                <div id="bannedTab" class="tab-content">
+                    <div id="bannedIPsList" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading banned IPs...</p>
+                    </div>
+                </div>
+
                 <div class="button-group" id="configButtons">
                     <button class="btn" onclick="saveConfig()">Save Configuration</button>
                     <button class="btn btn-secondary" onclick="loadConfig()">Reload</button>
@@ -375,6 +384,9 @@
                 </div>
                 <div class="button-group" id="sessionButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
+                </div>
+                <div class="button-group" id="bannedButtons" style="display: none;">
+                    <button class="btn btn-secondary" onclick="loadBannedIPs()">Refresh Banned IPs</button>
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
@@ -466,6 +478,7 @@
             document.getElementById('configButtons').style.display = 'none';
             document.getElementById('bookmarkButtons').style.display = 'none';
             document.getElementById('sessionButtons').style.display = 'none';
+            document.getElementById('bannedButtons').style.display = 'none';
 
             // Stop sessions auto-refresh when leaving sessions tab
             if (tab !== 'sessions') {
@@ -492,6 +505,11 @@
                 document.getElementById('sessionButtons').style.display = 'flex';
                 loadSessions();
                 startSessionsAutoRefresh();
+            } else if (tab === 'banned') {
+                document.querySelector('.tab:nth-child(5)').classList.add('active');
+                document.getElementById('bannedTab').classList.add('active');
+                document.getElementById('bannedButtons').style.display = 'flex';
+                loadBannedIPs();
             }
         }
 
@@ -1084,6 +1102,7 @@
                         <th style="padding: 12px; text-align: center;">Audio</th>
                         <th style="padding: 12px; text-align: center;">Spectrum</th>
                         <th style="padding: 12px; text-align: left;">Details</th>
+                        <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="sessionsTableBody"></tbody>
@@ -1118,12 +1137,22 @@
                     details += `Session: ${spectrumSession.id.substring(0, 8)}...<br>`;
                 }
 
+                // Create action buttons
+                let actionButtons = '';
+                if (userSessionID !== 'N/A') {
+                    actionButtons += `<button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="kickUser('${userSessionID}')">Kick</button>`;
+                }
+                if (clientIP !== 'N/A') {
+                    actionButtons += `<button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="banUser('${clientIP}')">Ban IP</button>`;
+                }
+
                 row.innerHTML = `
                     <td style="padding: 12px; font-family: monospace; font-size: 11px; word-break: break-all; max-width: 150px;">${userSessionID === 'N/A' ? '<em style="color: #999;">N/A</em>' : userSessionID}</td>
                     <td style="padding: 12px; font-family: monospace;">${ipDisplay}</td>
                     <td style="padding: 12px; text-align: center;">${sessions.audio.length > 0 ? '✓' : '—'}</td>
                     <td style="padding: 12px; text-align: center;">${sessions.spectrum.length > 0 ? '✓' : '—'}</td>
                     <td style="padding: 12px; font-size: 12px;">${details}</td>
+                    <td style="padding: 12px; text-align: center;">${actionButtons}</td>
                 `;
                 tbody.appendChild(row);
             }
@@ -1140,6 +1169,137 @@
                 ${currentSessions.filter(s => s.is_spectrum).length} spectrum connection(s)
             `;
             container.appendChild(summary);
+        }
+
+        // Banned IPs management
+        let currentBannedIPs = [];
+
+        async function loadBannedIPs() {
+            try {
+                const response = await fetch('/admin/banned-ips');
+                if (!response.ok) throw new Error('Failed to load banned IPs');
+
+                const data = await response.json();
+                currentBannedIPs = data.banned_ips || [];
+                renderBannedIPs();
+            } catch (error) {
+                showAlert('Error loading banned IPs: ' + error.message, 'error');
+            }
+        }
+
+        function renderBannedIPs() {
+            const container = document.getElementById('bannedIPsList');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            if (currentBannedIPs.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No banned IPs</p>';
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.innerHTML = `
+                <thead>
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: left;">IP Address</th>
+                        <th style="padding: 12px; text-align: left;">Reason</th>
+                        <th style="padding: 12px; text-align: left;">Banned At</th>
+                        <th style="padding: 12px; text-align: left;">Banned By</th>
+                        <th style="padding: 12px; text-align: center;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="bannedIPsTableBody"></tbody>
+            `;
+            container.appendChild(table);
+
+            const tbody = document.getElementById('bannedIPsTableBody');
+            currentBannedIPs.forEach(ban => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+
+                const bannedDate = new Date(ban.banned_at).toLocaleString();
+
+                row.innerHTML = `
+                    <td style="padding: 12px; font-family: monospace;">${ban.ip}</td>
+                    <td style="padding: 12px;">${ban.reason || 'No reason provided'}</td>
+                    <td style="padding: 12px;">${bannedDate}</td>
+                    <td style="padding: 12px;">${ban.banned_by || 'Unknown'}</td>
+                    <td style="padding: 12px; text-align: center;">
+                        <button class="btn" style="padding: 6px 12px; font-size: 12px;" onclick="unbanIP('${ban.ip}')">Unban</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        async function kickUser(userSessionID) {
+            if (!confirm('Kick this user? They will need to refresh to reconnect with a new session ID.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/kick', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_session_id: userSessionID })
+                });
+
+                if (!response.ok) throw new Error('Failed to kick user');
+
+                const result = await response.json();
+                showAlert(result.message, 'success');
+                loadSessions(); // Refresh the sessions list
+            } catch (error) {
+                showAlert('Error kicking user: ' + error.message, 'error');
+            }
+        }
+
+        async function banUser(ip, reason) {
+            const banReason = reason || prompt('Enter ban reason (optional):') || 'Banned by admin';
+
+            if (!confirm(`Ban IP ${ip}? This will kick all sessions from this IP and prevent future connections.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/ban', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ip, reason: banReason })
+                });
+
+                if (!response.ok) throw new Error('Failed to ban IP');
+
+                const result = await response.json();
+                showAlert(result.message, 'success');
+                loadSessions(); // Refresh the sessions list
+            } catch (error) {
+                showAlert('Error banning IP: ' + error.message, 'error');
+            }
+        }
+
+        async function unbanIP(ip) {
+            if (!confirm(`Unban IP ${ip}? This will allow connections from this IP again.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/unban', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ip })
+                });
+
+                if (!response.ok) throw new Error('Failed to unban IP');
+
+                const result = await response.json();
+                showAlert(result.message, 'success');
+                loadBannedIPs(); // Refresh the banned IPs list
+            } catch (error) {
+                showAlert('Error unbanning IP: ' + error.message, 'error');
+            }
         }
     </script>
 </body>

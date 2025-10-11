@@ -238,6 +238,7 @@ class SpectrumDisplay {
         this.reconnectTimer = null;
         this.reconnectDelay = 1000;
         this.pingInterval = null;
+        this.userDisconnected = false; // Flag to prevent reconnection after user disconnect
         
         // Animation
         this.animationFrame = null;

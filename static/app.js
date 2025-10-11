@@ -4,6 +4,7 @@ let audioContext = null;
 let reconnectTimer = null;
 let reconnectDelay = 1000;
 let lastConnectionParams = null; // Store connection parameters for reconnection
+let audioUserDisconnected = false; // Flag to prevent reconnection after user disconnect
 // Expose audioContext globally for recorder
 window.audioContext = null;
 let audioQueue = [];
@@ -728,8 +729,8 @@ function connect() {
         // Stop stats updates
         stopStatsUpdates();
 
-        // Schedule reconnection if we have saved parameters
-        if (lastConnectionParams) {
+        // Schedule reconnection if we have saved parameters AND user didn't explicitly disconnect
+        if (lastConnectionParams && !audioUserDisconnected) {
             scheduleReconnect();
         }
     };

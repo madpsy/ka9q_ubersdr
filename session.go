@@ -28,6 +28,10 @@ type Session struct {
 	Done          chan struct{}
 	mu            sync.RWMutex
 
+	// Connection info
+	SourceIP string // Direct connection IP (RemoteAddr)
+	ClientIP string // True client IP (from X-Forwarded-For if present)
+
 	// Spectrum-specific fields (only used when Mode == "spectrum")
 	IsSpectrum   bool
 	BinCount     int
@@ -76,11 +80,16 @@ func translateModeForRadiod(mode string) string {
 
 // CreateSession creates a new session with a unique channel (default bandwidth)
 func (sm *SessionManager) CreateSession(frequency uint64, mode string) (*Session, error) {
-	return sm.CreateSessionWithBandwidth(frequency, mode, 3000) // Default 3000 Hz bandwidth
+	return sm.CreateSessionWithBandwidth(frequency, mode, 3000, "", "") // Default 3000 Hz bandwidth
+}
+
+// CreateSessionWithIP creates a new session with IP tracking
+func (sm *SessionManager) CreateSessionWithIP(frequency uint64, mode string, sourceIP, clientIP string) (*Session, error) {
+	return sm.CreateSessionWithBandwidth(frequency, mode, 3000, sourceIP, clientIP)
 }
 
 // CreateSessionWithBandwidth creates a new session with a unique channel and specified bandwidth
-func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode string, bandwidth int) (*Session, error) {
+func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode string, bandwidth int, sourceIP, clientIP string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -136,6 +145,8 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 		LastActive:    time.Now(),
 		AudioChan:     make(chan []byte, 100), // Buffer 100 audio packets
 		Done:          make(chan struct{}),
+		SourceIP:      sourceIP,
+		ClientIP:      clientIP,
 	}
 
 	// Translate mode for radiod (e.g., "fm" -> "pm")
@@ -163,6 +174,11 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 // CreateSpectrumSession creates a new spectrum session with default parameters
 // Users can only adjust frequency (pan) and bin_bw (zoom), bin_count is fixed
 func (sm *SessionManager) CreateSpectrumSession() (*Session, error) {
+	return sm.CreateSpectrumSessionWithIP("", "")
+}
+
+// CreateSpectrumSessionWithIP creates a new spectrum session with IP tracking
+func (sm *SessionManager) CreateSpectrumSessionWithIP(sourceIP, clientIP string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -216,6 +232,8 @@ func (sm *SessionManager) CreateSpectrumSession() (*Session, error) {
 		LastActive:   time.Now(),
 		SpectrumChan: make(chan []float32, 10), // Buffer spectrum updates
 		Done:         make(chan struct{}),
+		SourceIP:     sourceIP,
+		ClientIP:     clientIP,
 	}
 
 	// Create radiod spectrum channel
@@ -564,6 +582,44 @@ func (sm *SessionManager) GetSessionBySSRC(ssrc uint32) (*Session, bool) {
 	defer sm.mu.RUnlock()
 	session, ok := sm.ssrcToSession[ssrc]
 	return session, ok
+}
+
+// GetAllSessionsInfo returns information about all active sessions
+func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	sessions := make([]map[string]interface{}, 0, len(sm.sessions))
+	for _, session := range sm.sessions {
+		session.mu.RLock()
+		info := map[string]interface{}{
+			"id":          session.ID,
+			"channel":     session.ChannelName,
+			"ssrc":        fmt.Sprintf("0x%08x", session.SSRC),
+			"frequency":   session.Frequency,
+			"mode":        session.Mode,
+			"is_spectrum": session.IsSpectrum,
+			"source_ip":   session.SourceIP,
+			"client_ip":   session.ClientIP,
+			"created_at":  session.CreatedAt.Format(time.RFC3339),
+			"last_active": session.LastActive.Format(time.RFC3339),
+		}
+
+		// Add type-specific info
+		if session.IsSpectrum {
+			info["bin_count"] = session.BinCount
+			info["bin_bandwidth"] = session.BinBandwidth
+		} else {
+			info["sample_rate"] = session.SampleRate
+			info["bandwidth_low"] = session.BandwidthLow
+			info["bandwidth_high"] = session.BandwidthHigh
+		}
+		session.mu.RUnlock()
+
+		sessions = append(sessions, info)
+	}
+
+	return sessions
 }
 
 // Shutdown cleanly destroys all active sessions

@@ -99,7 +99,7 @@ func main() {
 	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions) // New per-user spectrum
 
 	// Initialize admin handler
-	adminHandler := NewAdminHandler(config, *configFile)
+	adminHandler := NewAdminHandler(config, *configFile, sessions)
 
 	// Setup HTTP routes
 	http.HandleFunc("/ws", wsHandler.HandleWebSocket)
@@ -123,6 +123,7 @@ func main() {
 	http.HandleFunc("/admin/config", adminHandler.AuthMiddleware(adminHandler.HandleConfig))
 	http.HandleFunc("/admin/config/schema", adminHandler.AuthMiddleware(adminHandler.HandleConfigSchema))
 	http.HandleFunc("/admin/bookmarks", adminHandler.AuthMiddleware(adminHandler.HandleBookmarks))
+	http.HandleFunc("/admin/sessions", adminHandler.AuthMiddleware(adminHandler.HandleSessions))
 
 	// Serve static files
 	fs := http.FileServer(http.Dir("static"))

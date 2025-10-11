@@ -302,6 +302,7 @@
                     <button class="tab active" onclick="switchTab('visual')">Visual Editor</button>
                     <button class="tab" onclick="switchTab('yaml')">YAML Editor</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
+                    <button class="tab" onclick="switchTab('sessions')">Active Sessions</button>
                 </div>
 
                 <!-- Visual Editor Tab -->
@@ -351,6 +352,14 @@
                     </div>
                 </div>
 
+                <!-- Sessions Tab -->
+                <div id="sessionsTab" class="tab-content">
+                    <div id="sessionsList" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading sessions...</p>
+                    </div>
+                </div>
+
                 <div class="button-group" id="configButtons">
                     <button class="btn" onclick="saveConfig()">Save Configuration</button>
                     <button class="btn btn-secondary" onclick="loadConfig()">Reload</button>
@@ -363,6 +372,9 @@
                     <button class="btn btn-secondary" onclick="loadBookmarks()">Reload Bookmarks</button>
                     <button class="btn btn-secondary" onclick="exportBookmarks()">Export Bookmarks</button>
                     <button class="btn btn-secondary" onclick="importBookmarks()">Import Bookmarks</button>
+                </div>
+                <div class="button-group" id="sessionButtons" style="display: none;">
+                    <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
@@ -416,6 +428,7 @@
             // Hide all button groups
             document.getElementById('configButtons').style.display = 'none';
             document.getElementById('bookmarkButtons').style.display = 'none';
+            document.getElementById('sessionButtons').style.display = 'none';
             
             if (tab === 'visual') {
                 document.querySelector('.tab:nth-child(1)').classList.add('active');
@@ -431,6 +444,11 @@
                 document.getElementById('bookmarksTab').classList.add('active');
                 document.getElementById('bookmarkButtons').style.display = 'flex';
                 loadBookmarks();
+            } else if (tab === 'sessions') {
+                document.querySelector('.tab:nth-child(4)').classList.add('active');
+                document.getElementById('sessionsTab').classList.add('active');
+                document.getElementById('sessionButtons').style.display = 'flex';
+                loadSessions();
             }
         }
 
@@ -936,6 +954,109 @@
 
             // Reset file input
             event.target.value = '';
+        }
+
+        // Sessions management
+        let currentSessions = [];
+
+        async function loadSessions() {
+            try {
+                const response = await fetch('/admin/sessions?password=' + encodeURIComponent(adminPassword));
+                if (!response.ok) throw new Error('Failed to load sessions');
+                
+                const data = await response.json();
+                currentSessions = data.sessions || [];
+                renderSessions();
+                showAlert(`Loaded ${currentSessions.length} active session(s)`, 'success');
+            } catch (error) {
+                showAlert('Error loading sessions: ' + error.message, 'error');
+            }
+        }
+
+        function renderSessions() {
+            const container = document.getElementById('sessionsList');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            if (currentSessions.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No active sessions</p>';
+                return;
+            }
+
+            // Group sessions by client IP
+            const sessionsByIP = {};
+            currentSessions.forEach(session => {
+                const ip = session.client_ip || session.source_ip;
+                if (!sessionsByIP[ip]) {
+                    sessionsByIP[ip] = { audio: [], spectrum: [] };
+                }
+                if (session.is_spectrum) {
+                    sessionsByIP[ip].spectrum.push(session);
+                } else {
+                    sessionsByIP[ip].audio.push(session);
+                }
+            });
+
+            // Create table
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.innerHTML = `
+                <thead>
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: left;">Client IP</th>
+                        <th style="padding: 12px; text-align: left;">Source IP</th>
+                        <th style="padding: 12px; text-align: center;">Audio</th>
+                        <th style="padding: 12px; text-align: center;">Spectrum</th>
+                        <th style="padding: 12px; text-align: left;">Details</th>
+                    </tr>
+                </thead>
+                <tbody id="sessionsTableBody"></tbody>
+            `;
+            container.appendChild(table);
+
+            const tbody = document.getElementById('sessionsTableBody');
+            
+            for (const [ip, sessions] of Object.entries(sessionsByIP)) {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+                
+                const audioSession = sessions.audio[0];
+                const spectrumSession = sessions.spectrum[0];
+                const sourceIP = audioSession?.source_ip || spectrumSession?.source_ip || 'N/A';
+                
+                let details = '';
+                if (audioSession) {
+                    details += `<strong>Audio:</strong> ${(audioSession.frequency / 1e6).toFixed(3)} MHz, ${audioSession.mode.toUpperCase()}<br>`;
+                    details += `Session: ${audioSession.id.substring(0, 8)}...<br>`;
+                }
+                if (spectrumSession) {
+                    details += `<strong>Spectrum:</strong> ${(spectrumSession.frequency / 1e6).toFixed(3)} MHz<br>`;
+                    details += `Session: ${spectrumSession.id.substring(0, 8)}...<br>`;
+                }
+                
+                row.innerHTML = `
+                    <td style="padding: 12px; font-family: monospace;">${ip}</td>
+                    <td style="padding: 12px; font-family: monospace;">${sourceIP}</td>
+                    <td style="padding: 12px; text-align: center;">${sessions.audio.length > 0 ? '✓' : '—'}</td>
+                    <td style="padding: 12px; text-align: center;">${sessions.spectrum.length > 0 ? '✓' : '—'}</td>
+                    <td style="padding: 12px; font-size: 12px;">${details}</td>
+                `;
+                tbody.appendChild(row);
+            }
+
+            // Add summary
+            const summary = document.createElement('div');
+            summary.style.marginTop = '20px';
+            summary.style.padding = '15px';
+            summary.style.background = '#f8f9fa';
+            summary.style.borderRadius = '5px';
+            summary.innerHTML = `
+                <strong>Summary:</strong> ${Object.keys(sessionsByIP).length} unique client(s),
+                ${currentSessions.filter(s => !s.is_spectrum).length} audio session(s),
+                ${currentSessions.filter(s => s.is_spectrum).length} spectrum session(s)
+            `;
+            container.appendChild(summary);
         }
     </script>
 </body>

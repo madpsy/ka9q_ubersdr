@@ -75,6 +75,29 @@ type UserSpectrumServerMessage struct {
 
 // HandleSpectrumWebSocket handles spectrum WebSocket connections
 func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.ResponseWriter, r *http.Request) {
+	// Get source IP address
+	sourceIP := r.RemoteAddr
+	clientIP := sourceIP
+
+	// Check X-Forwarded-For header for true source IP (first IP in the list)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+		// We want the first one (the true client)
+		if idx := len(xff); idx > 0 {
+			// Find first comma or use entire string
+			for i, c := range xff {
+				if c == ',' {
+					clientIP = xff[:i]
+					break
+				}
+			}
+			if clientIP == sourceIP {
+				// No comma found, use entire xff
+				clientIP = xff
+			}
+		}
+	}
+
 	// Upgrade HTTP connection to WebSocket
 	rawConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -82,7 +105,7 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 		return
 	}
 
-	log.Printf("Spectrum WebSocket connected - Using manual gzip compression")
+	log.Printf("Spectrum WebSocket connected - Using manual gzip compression, source IP: %s, client IP: %s", sourceIP, clientIP)
 
 	conn := &wsConn{conn: rawConn, aggregator: globalStatsSpectrum}
 	globalStatsSpectrum.addConnection()
@@ -94,15 +117,15 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	// Start stats logger if not already running
 	startStatsLogger()
 
-	// Create spectrum session with default parameters
-	session, err := swsh.sessions.CreateSpectrumSession()
+	// Create spectrum session with IP tracking
+	session, err := swsh.sessions.CreateSpectrumSessionWithIP(sourceIP, clientIP)
 	if err != nil {
 		log.Printf("Failed to create spectrum session: %v", err)
 		swsh.sendError(conn, "Failed to create spectrum session: "+err.Error())
 		return
 	}
 
-	log.Printf("Spectrum WebSocket connected: session %s", session.ID)
+	log.Printf("Spectrum WebSocket session created: %s, source IP: %s, client IP: %s", session.ID, sourceIP, clientIP)
 
 	// Send initial status
 	swsh.sendStatus(conn, session)

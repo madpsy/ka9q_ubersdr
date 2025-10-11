@@ -275,6 +275,9 @@ class IdleDetector {
     closeConnections() {
         // Close main audio WebSocket
         if (window.ws) {
+            // Set user disconnect flag to prevent auto-reconnect
+            window.audioUserDisconnected = true;
+            
             // Clear reconnection parameters to prevent auto-reconnect
             window.lastConnectionParams = null;
             

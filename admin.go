@@ -17,13 +17,15 @@ import (
 type AdminHandler struct {
 	config     *Config
 	configFile string
+	sessions   *SessionManager
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, sessions *SessionManager) *AdminHandler {
 	return &AdminHandler{
 		config:     config,
 		configFile: configFile,
+		sessions:   sessions,
 	}
 }
 
@@ -519,4 +521,26 @@ func (ah *AdminHandler) handleDeleteBookmark(w http.ResponseWriter, r *http.Requ
 		"status":  "success",
 		"message": "Bookmark deleted successfully",
 	})
+}
+
+// HandleSessions returns information about all active sessions
+func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	sessions := ah.sessions.GetAllSessionsInfo()
+
+	response := map[string]interface{}{
+		"sessions": sessions,
+		"count":    len(sessions),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding sessions: %v", err)
+	}
 }

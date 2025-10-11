@@ -244,6 +244,29 @@ type ServerMessage struct {
 
 // HandleWebSocket handles WebSocket connections
 func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	// Get source IP address
+	sourceIP := r.RemoteAddr
+	clientIP := sourceIP
+
+	// Check X-Forwarded-For header for true source IP (first IP in the list)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+		// We want the first one (the true client)
+		if idx := len(xff); idx > 0 {
+			// Find first comma or use entire string
+			for i, c := range xff {
+				if c == ',' {
+					clientIP = xff[:i]
+					break
+				}
+			}
+			if clientIP == sourceIP {
+				// No comma found, use entire xff
+				clientIP = xff
+			}
+		}
+	}
+
 	// Upgrade HTTP connection to WebSocket
 	rawConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -307,8 +330,8 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Create initial session
-	session, err := wsh.sessions.CreateSession(frequency, mode)
+	// Create initial session with IP tracking
+	session, err := wsh.sessions.CreateSessionWithIP(frequency, mode, sourceIP, clientIP)
 	if err != nil {
 		log.Printf("Failed to create session: %v", err)
 		wsh.sendError(conn, "Failed to create session: "+err.Error())
@@ -326,9 +349,9 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		if bandwidthHigh != nil {
 			bwh = *bandwidthHigh
 		}
-		
+
 		log.Printf("Applying URL bandwidth parameters: %d to %d Hz", bwl, bwh)
-		
+
 		// Update session with custom bandwidth
 		if err := wsh.sessions.UpdateSessionWithEdges(session.ID, 0, "", bwl, bwh, true); err != nil {
 			log.Printf("Failed to apply URL bandwidth: %v", err)
@@ -338,7 +361,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	log.Printf("WebSocket connected: session %s", session.ID)
+	log.Printf("Audio WebSocket connected: session %s, source IP: %s, client IP: %s", session.ID, sourceIP, clientIP)
 
 	// Subscribe to audio
 	wsh.audioReceiver.GetChannelAudio(session)

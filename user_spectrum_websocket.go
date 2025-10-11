@@ -11,13 +11,15 @@ import (
 
 // UserSpectrumWebSocketHandler handles per-user spectrum WebSocket connections
 type UserSpectrumWebSocketHandler struct {
-	sessions *SessionManager
+	sessions     *SessionManager
+	ipBanManager *IPBanManager
 }
 
 // NewUserSpectrumWebSocketHandler creates a new per-user spectrum WebSocket handler
-func NewUserSpectrumWebSocketHandler(sessions *SessionManager) *UserSpectrumWebSocketHandler {
+func NewUserSpectrumWebSocketHandler(sessions *SessionManager, ipBanManager *IPBanManager) *UserSpectrumWebSocketHandler {
 	return &UserSpectrumWebSocketHandler{
-		sessions: sessions,
+		sessions:     sessions,
+		ipBanManager: ipBanManager,
 	}
 }
 
@@ -96,6 +98,13 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 				clientIP = xff
 			}
 		}
+	}
+
+	// Check if IP is banned
+	if swsh.ipBanManager.IsBanned(clientIP) {
+		log.Printf("Rejected Spectrum WebSocket connection from banned IP: %s (client IP: %s)", sourceIP, clientIP)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
 	}
 
 	// Get user session ID from query string (required)

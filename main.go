@@ -71,6 +71,9 @@ func main() {
 	// Initialize session manager
 	sessions := NewSessionManager(config, radiod)
 
+	// Initialize IP ban manager
+	ipBanManager := NewIPBanManager("banned_ips.yaml")
+
 	// Initialize audio receiver
 	audioReceiver, err := NewAudioReceiver(
 		radiod.GetDataAddr(),
@@ -94,12 +97,12 @@ func main() {
 	defer userSpectrumManager.Stop()
 
 	// Initialize WebSocket handlers
-	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config)
+	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config, ipBanManager)
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
-	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions) // New per-user spectrum
+	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager) // New per-user spectrum
 
 	// Initialize admin handler
-	adminHandler := NewAdminHandler(config, *configFile, sessions)
+	adminHandler := NewAdminHandler(config, *configFile, sessions, ipBanManager)
 
 	// Setup HTTP routes
 	http.HandleFunc("/ws", wsHandler.HandleWebSocket)
@@ -119,11 +122,19 @@ func main() {
 		handleDescription(w, r, config)
 	})
 
-	// Admin endpoints (password protected)
+	// Admin authentication endpoints (no auth required)
+	http.HandleFunc("/admin/login", adminHandler.HandleLogin)
+	http.HandleFunc("/admin/logout", adminHandler.HandleLogout)
+
+	// Admin endpoints (session protected)
 	http.HandleFunc("/admin/config", adminHandler.AuthMiddleware(adminHandler.HandleConfig))
 	http.HandleFunc("/admin/config/schema", adminHandler.AuthMiddleware(adminHandler.HandleConfigSchema))
 	http.HandleFunc("/admin/bookmarks", adminHandler.AuthMiddleware(adminHandler.HandleBookmarks))
 	http.HandleFunc("/admin/sessions", adminHandler.AuthMiddleware(adminHandler.HandleSessions))
+	http.HandleFunc("/admin/kick", adminHandler.AuthMiddleware(adminHandler.HandleKickUser))
+	http.HandleFunc("/admin/ban", adminHandler.AuthMiddleware(adminHandler.HandleBanUser))
+	http.HandleFunc("/admin/unban", adminHandler.AuthMiddleware(adminHandler.HandleUnbanIP))
+	http.HandleFunc("/admin/banned-ips", adminHandler.AuthMiddleware(adminHandler.HandleBannedIPs))
 
 	// Serve static files
 	fs := http.FileServer(http.Dir("static"))

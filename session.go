@@ -660,3 +660,61 @@ func (sm *SessionManager) Shutdown() {
 
 	log.Println("All sessions destroyed")
 }
+
+// KickUserBySessionID destroys all sessions with the given user_session_id
+// This forces the user to refresh and generate a new UUID
+func (sm *SessionManager) KickUserBySessionID(userSessionID string) (int, error) {
+	if userSessionID == "" {
+		return 0, fmt.Errorf("user_session_id cannot be empty")
+	}
+
+	sm.mu.RLock()
+	var sessionsToKick []string
+	for _, session := range sm.sessions {
+		session.mu.RLock()
+		if session.UserSessionID == userSessionID {
+			sessionsToKick = append(sessionsToKick, session.ID)
+		}
+		session.mu.RUnlock()
+	}
+	sm.mu.RUnlock()
+
+	// Destroy all matching sessions
+	for _, sessionID := range sessionsToKick {
+		if err := sm.DestroySession(sessionID); err != nil {
+			log.Printf("Error kicking session %s: %v", sessionID, err)
+		}
+	}
+
+	log.Printf("Kicked user with session ID %s (%d session(s) destroyed)", userSessionID, len(sessionsToKick))
+	return len(sessionsToKick), nil
+}
+
+// KickUserByIP destroys all sessions from the given IP address
+func (sm *SessionManager) KickUserByIP(ip string) (int, error) {
+	if ip == "" {
+		return 0, fmt.Errorf("IP address cannot be empty")
+	}
+
+	sm.mu.RLock()
+	var sessionsToKick []string
+	for _, session := range sm.sessions {
+		session.mu.RLock()
+		// Check both client IP and source IP
+		if session.ClientIP == ip || session.SourceIP == ip {
+			sessionsToKick = append(sessionsToKick, session.ID)
+		}
+		session.mu.RUnlock()
+	}
+	sm.mu.RUnlock()
+
+	// Destroy all matching sessions
+	for _, sessionID := range sessionsToKick {
+		if err := sm.DestroySession(sessionID); err != nil {
+			log.Printf("Error kicking session %s: %v", sessionID, err)
+		}
+	}
+
+	log.Printf("Kicked user from IP %s (%d session(s) destroyed)", ip, len(sessionsToKick))
+	return len(sessionsToKick), nil
+}

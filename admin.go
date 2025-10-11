@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,42 +11,215 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-// AdminHandler handles admin configuration endpoints
-type AdminHandler struct {
-	config     *Config
-	configFile string
-	sessions   *SessionManager
+// AdminSession represents an authenticated admin session
+type AdminSession struct {
+	Token     string
+	CreatedAt time.Time
+	ExpiresAt time.Time
 }
 
-// NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, sessions *SessionManager) *AdminHandler {
-	return &AdminHandler{
-		config:     config,
-		configFile: configFile,
-		sessions:   sessions,
+// AdminSessionStore manages admin sessions
+type AdminSessionStore struct {
+	sessions map[string]*AdminSession
+	mu       sync.RWMutex
+}
+
+// NewAdminSessionStore creates a new session store
+func NewAdminSessionStore() *AdminSessionStore {
+	store := &AdminSessionStore{
+		sessions: make(map[string]*AdminSession),
+	}
+	// Start cleanup goroutine
+	go store.cleanupExpiredSessions()
+	return store
+}
+
+// CreateSession creates a new admin session
+func (s *AdminSessionStore) CreateSession() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Generate secure random token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		log.Printf("Failed to generate session token: %v", err)
+		return ""
+	}
+	token := base64.URLEncoding.EncodeToString(tokenBytes)
+
+	// Create session with 24 hour expiry
+	session := &AdminSession{
+		Token:     token,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+
+	s.sessions[token] = session
+	return token
+}
+
+// ValidateSession checks if a session token is valid
+func (s *AdminSessionStore) ValidateSession(token string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	session, exists := s.sessions[token]
+	if !exists {
+		return false
+	}
+
+	// Check if expired
+	if time.Now().After(session.ExpiresAt) {
+		return false
+	}
+
+	return true
+}
+
+// DeleteSession removes a session
+func (s *AdminSessionStore) DeleteSession(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, token)
+}
+
+// cleanupExpiredSessions periodically removes expired sessions
+func (s *AdminSessionStore) cleanupExpiredSessions() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		s.mu.Lock()
+		now := time.Now()
+		for token, session := range s.sessions {
+			if now.After(session.ExpiresAt) {
+				delete(s.sessions, token)
+			}
+		}
+		s.mu.Unlock()
 	}
 }
 
-// AuthMiddleware checks for admin password
+// AdminHandler handles admin configuration endpoints
+type AdminHandler struct {
+	config        *Config
+	configFile    string
+	sessions      *SessionManager
+	adminSessions *AdminSessionStore
+	ipBanManager  *IPBanManager
+}
+
+// NewAdminHandler creates a new admin handler
+func NewAdminHandler(config *Config, configFile string, sessions *SessionManager, ipBanManager *IPBanManager) *AdminHandler {
+	return &AdminHandler{
+		config:        config,
+		configFile:    configFile,
+		sessions:      sessions,
+		adminSessions: NewAdminSessionStore(),
+		ipBanManager:  ipBanManager,
+	}
+}
+
+// HandleLogin handles admin login and creates a session
+func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var loginReq struct {
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&loginReq); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate password
+	if loginReq.Password != ah.config.Admin.Password {
+		http.Error(w, "Invalid password", http.StatusUnauthorized)
+		return
+	}
+
+	// Create session
+	token := ah.adminSessions.CreateSession()
+	if token == "" {
+		http.Error(w, "Failed to create session", http.StatusInternalServerError)
+		return
+	}
+
+	// Set HTTP-only cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "admin_session",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false, // Set to true if using HTTPS
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   86400, // 24 hours
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Login successful",
+	}); err != nil {
+		log.Printf("Error encoding login response: %v", err)
+	}
+}
+
+// HandleLogout handles admin logout
+func (ah *AdminHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get session token from cookie
+	cookie, err := r.Cookie("admin_session")
+	if err == nil {
+		// Delete session
+		ah.adminSessions.DeleteSession(cookie.Value)
+	}
+
+	// Clear cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "admin_session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1, // Delete cookie
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Logout successful",
+	}); err != nil {
+		log.Printf("Error encoding logout response: %v", err)
+	}
+}
+
+// AuthMiddleware checks for valid admin session
 func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Get password from Authorization header (Basic auth) or query parameter
-		password := r.Header.Get("X-Admin-Password")
-		if password == "" {
-			password = r.URL.Query().Get("password")
-		}
-
-		if password == "" {
-			http.Error(w, "Missing admin password", http.StatusUnauthorized)
+		// Get session token from cookie
+		cookie, err := r.Cookie("admin_session")
+		if err != nil {
+			http.Error(w, "Unauthorized - no session", http.StatusUnauthorized)
 			return
 		}
 
-		if password != ah.config.Admin.Password {
-			http.Error(w, "Invalid admin password", http.StatusForbidden)
+		// Validate session
+		if !ah.adminSessions.ValidateSession(cookie.Value) {
+			http.Error(w, "Unauthorized - invalid or expired session", http.StatusUnauthorized)
 			return
 		}
 
@@ -542,5 +717,145 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding sessions: %v", err)
+	}
+}
+
+// HandleKickUser kicks a user by invalidating their user_session_id
+func (ah *AdminHandler) HandleKickUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserSessionID string `json:"user_session_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserSessionID == "" {
+		http.Error(w, "user_session_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Kick all sessions with this user_session_id
+	count, err := ah.sessions.KickUserBySessionID(req.UserSessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":           "success",
+		"message":          fmt.Sprintf("Kicked user (destroyed %d session(s))", count),
+		"sessions_removed": count,
+	}); err != nil {
+		log.Printf("Error encoding kick response: %v", err)
+	}
+}
+
+// HandleBanUser bans a user by IP address and kicks all their sessions
+func (ah *AdminHandler) HandleBanUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		IP     string `json:"ip"`
+		Reason string `json:"reason"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.IP == "" {
+		http.Error(w, "IP address is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Reason == "" {
+		req.Reason = "Banned by admin"
+	}
+
+	// Ban the IP
+	if err := ah.ipBanManager.BanIP(req.IP, req.Reason, "admin"); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to ban IP: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Kick all sessions from this IP
+	count, err := ah.sessions.KickUserByIP(req.IP)
+	if err != nil {
+		log.Printf("Error kicking sessions for banned IP %s: %v", req.IP, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":           "success",
+		"message":          fmt.Sprintf("Banned IP %s and kicked %d session(s)", req.IP, count),
+		"sessions_removed": count,
+	}); err != nil {
+		log.Printf("Error encoding ban response: %v", err)
+	}
+}
+
+// HandleUnbanIP unbans an IP address
+func (ah *AdminHandler) HandleUnbanIP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		IP string `json:"ip"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.IP == "" {
+		http.Error(w, "IP address is required", http.StatusBadRequest)
+		return
+	}
+
+	// Unban the IP
+	if err := ah.ipBanManager.UnbanIP(req.IP); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to unban IP: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": fmt.Sprintf("Unbanned IP %s", req.IP),
+	}); err != nil {
+		log.Printf("Error encoding unban response: %v", err)
+	}
+}
+
+// HandleBannedIPs returns the list of banned IPs
+func (ah *AdminHandler) HandleBannedIPs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	bannedIPs := ah.ipBanManager.GetBannedIPs()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"banned_ips": bannedIPs,
+		"count":      len(bannedIPs),
+	}); err != nil {
+		log.Printf("Error encoding banned IPs: %v", err)
 	}
 }

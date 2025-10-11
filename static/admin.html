@@ -383,24 +383,51 @@
     </div>
 
     <script>
-        let adminPassword = '';
         let currentConfig = {};
         let currentTab = 'visual';
+
+        // Check for existing session on page load
+        async function checkSession() {
+            try {
+                const response = await fetch('/admin/config');
+                if (response.ok) {
+                    // Valid session exists, skip login
+                    document.getElementById('loginBox').style.display = 'none';
+                    document.getElementById('configEditor').classList.add('active');
+                    await loadConfig();
+                    return true;
+                }
+            } catch (error) {
+                console.log('No existing session');
+            }
+            return false;
+        }
+
+        // Check session on page load
+        checkSession();
 
         // Login handling
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const password = document.getElementById('password').value;
-            
+
             try {
-                const response = await fetch('/admin/config?password=' + encodeURIComponent(password));
+                const response = await fetch('/admin/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ password: password })
+                });
+
                 if (response.ok) {
-                    adminPassword = password;
+                    // Session cookie is set automatically by the browser
                     document.getElementById('loginBox').style.display = 'none';
                     document.getElementById('configEditor').classList.add('active');
                     await loadConfig();
                 } else {
-                    showLoginError('Invalid password');
+                    const errorText = await response.text();
+                    showLoginError(errorText || 'Invalid password');
                 }
             } catch (error) {
                 showLoginError('Connection error: ' + error.message);
@@ -413,9 +440,18 @@
             errorDiv.style.display = 'block';
         }
 
-        function logout() {
-            adminPassword = '';
+        async function logout() {
             stopSessionsAutoRefresh();
+
+            try {
+                await fetch('/admin/logout', {
+                    method: 'POST'
+                });
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+
+            // Clear UI regardless of logout API result
             document.getElementById('loginBox').style.display = 'block';
             document.getElementById('configEditor').classList.remove('active');
             document.getElementById('password').value = '';
@@ -461,9 +497,17 @@
 
         async function loadConfig() {
             try {
-                const response = await fetch('/admin/config?password=' + encodeURIComponent(adminPassword));
-                if (!response.ok) throw new Error('Failed to load config');
-                
+                const response = await fetch('/admin/config');
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // Session expired, redirect to login
+                        logout();
+                        showAlert('Session expired. Please login again.', 'error');
+                        return;
+                    }
+                    throw new Error('Failed to load config');
+                }
+
                 currentConfig = await response.json();
                 renderVisualEditor();
                 updateYamlEditor();
@@ -607,7 +651,7 @@
                     return;
                 }
 
-                const response = await fetch('/admin/config?password=' + encodeURIComponent(adminPassword), {
+                const response = await fetch('/admin/config', {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -643,7 +687,7 @@
 
         async function loadBookmarks() {
             try {
-                const response = await fetch('/admin/bookmarks?password=' + encodeURIComponent(adminPassword));
+                const response = await fetch('/admin/bookmarks');
                 if (!response.ok) throw new Error('Failed to load bookmarks');
                 
                 const data = await response.json();
@@ -739,7 +783,7 @@
             try {
                 if (editIndex >= 0) {
                     // Update existing bookmark
-                    const response = await fetch('/admin/bookmarks?password=' + encodeURIComponent(adminPassword) + '&index=' + editIndex, {
+                    const response = await fetch('/admin/bookmarks?index=' + editIndex, {
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
@@ -753,7 +797,7 @@
                     showAlert(result.message, 'success');
                 } else {
                     // Add new bookmark
-                    const response = await fetch('/admin/bookmarks?password=' + encodeURIComponent(adminPassword), {
+                    const response = await fetch('/admin/bookmarks', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -780,7 +824,7 @@
             }
 
             try {
-                const response = await fetch('/admin/bookmarks?password=' + encodeURIComponent(adminPassword) + '&index=' + index, {
+                const response = await fetch('/admin/bookmarks?index=' + index, {
                     method: 'DELETE'
                 });
 
@@ -943,7 +987,7 @@
                 }
 
                 // Save to server
-                const response = await fetch('/admin/bookmarks?password=' + encodeURIComponent(adminPassword), {
+                const response = await fetch('/admin/bookmarks', {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -969,7 +1013,7 @@
 
         async function loadSessions() {
             try {
-                const response = await fetch('/admin/sessions?password=' + encodeURIComponent(adminPassword));
+                const response = await fetch('/admin/sessions');
                 if (!response.ok) throw new Error('Failed to load sessions');
                 
                 const data = await response.json();

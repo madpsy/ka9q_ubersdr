@@ -220,14 +220,16 @@ type WebSocketHandler struct {
 	sessions      *SessionManager
 	audioReceiver *AudioReceiver
 	config        *Config
+	ipBanManager  *IPBanManager
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
-func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config) *WebSocketHandler {
+func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config, ipBanManager *IPBanManager) *WebSocketHandler {
 	return &WebSocketHandler{
 		sessions:      sessions,
 		audioReceiver: audioReceiver,
 		config:        config,
+		ipBanManager:  ipBanManager,
 	}
 }
 
@@ -277,6 +279,13 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 				clientIP = xff
 			}
 		}
+	}
+
+	// Check if IP is banned
+	if wsh.ipBanManager.IsBanned(clientIP) {
+		log.Printf("Rejected WebSocket connection from banned IP: %s (client IP: %s)", sourceIP, clientIP)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
 	}
 
 	// Upgrade HTTP connection to WebSocket

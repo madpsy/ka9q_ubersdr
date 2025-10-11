@@ -497,7 +497,7 @@ func (usm *UserSpectrumManager) checkSpectrumParameterMismatch(ssrc uint32, radi
 }
 
 // checkAudioParameterMismatch compares radiod's actual audio channel parameters with our session state
-// and logs informational messages if they don't match (rate-limited to avoid spam)
+// and automatically retries the update if they don't match (rate-limited to avoid spam)
 func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodFreq uint64, radiodLowEdge, radiodHighEdge float32) {
 	session, ok := usm.sessions.GetSessionBySSRC(ssrc)
 	if !ok {
@@ -510,6 +510,7 @@ func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodF
 
 	session.mu.RLock()
 	sessionFreq := session.Frequency
+	sessionMode := session.Mode
 	sessionLowEdge := float32(session.BandwidthLow)
 	sessionHighEdge := float32(session.BandwidthHigh)
 	session.mu.RUnlock()
@@ -525,18 +526,36 @@ func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodF
 		
 		mismatchMutex.Lock()
 		lastLog, logExists := lastMismatchLog[ssrc]
+		lastRetry, retryExists := lastRetryTime[ssrc]
 		
 		// Determine if we should log
 		shouldLog := !logExists || now.Sub(lastLog) > mismatchLogPeriod
 		
+		// Determine if we should retry (once per second)
+		shouldRetry := !retryExists || now.Sub(lastRetry) > retryPeriod
+		
 		if shouldLog {
 			lastMismatchLog[ssrc] = now
+		}
+		if shouldRetry {
+			lastRetryTime[ssrc] = now
 		}
 		mismatchMutex.Unlock()
 
 		if shouldLog {
 			log.Printf("INFO: Audio parameter mismatch for SSRC 0x%08x - Session: freq=%d Hz edges=%.1f-%.1f Hz, Radiod: freq=%d Hz edges=%.1f-%.1f Hz",
 				ssrc, sessionFreq, sessionLowEdge, sessionHighEdge, radiodFreq, radiodLowEdge, radiodHighEdge)
+		}
+
+		// Automatically retry sending the update command
+		if shouldRetry {
+			log.Printf("INFO: Retrying audio channel update for SSRC 0x%08x to correct mismatch", ssrc)
+			
+			// Send update command with all parameters to ensure they're synchronized
+			// Always send bandwidth edges since that's what we're correcting
+			if err := usm.radiod.UpdateChannel(ssrc, sessionFreq, sessionMode, int(sessionLowEdge), int(sessionHighEdge), true); err != nil {
+				log.Printf("ERROR: Failed to retry audio channel update for SSRC 0x%08x: %v", ssrc, err)
+			}
 		}
 	}
 }

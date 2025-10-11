@@ -84,8 +84,15 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 
 	log.Printf("Spectrum WebSocket connected - Using manual gzip compression")
 
-	conn := &wsConn{conn: rawConn, label: "Spectrum"}
-	defer conn.close()
+	conn := &wsConn{conn: rawConn, aggregator: globalStatsSpectrum}
+	globalStatsSpectrum.addConnection()
+	defer func() {
+		globalStatsSpectrum.removeConnection()
+		conn.close()
+	}()
+
+	// Start stats logger if not already running
+	startStatsLogger()
 
 	// Create spectrum session with default parameters
 	session, err := swsh.sessions.CreateSpectrumSession()

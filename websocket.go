@@ -8,10 +8,89 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// Global stats aggregator
+var (
+	globalStatsAudio    = &statsAggregator{label: "Audio"}
+	globalStatsSpectrum = &statsAggregator{label: "Spectrum"}
+	statsLoggerOnce     sync.Once
+)
+
+// statsAggregator aggregates stats from multiple connections
+type statsAggregator struct {
+	label           string
+	bytesWritten    int64
+	messagesWritten int64
+	connectionCount int64
+	mu              sync.Mutex
+	lastLogTime     time.Time
+}
+
+func (sa *statsAggregator) addConnection() {
+	atomic.AddInt64(&sa.connectionCount, 1)
+}
+
+func (sa *statsAggregator) removeConnection() {
+	atomic.AddInt64(&sa.connectionCount, -1)
+}
+
+func (sa *statsAggregator) addBytes(bytes int64) {
+	atomic.AddInt64(&sa.bytesWritten, bytes)
+}
+
+func (sa *statsAggregator) addMessage() {
+	atomic.AddInt64(&sa.messagesWritten, 1)
+}
+
+func (sa *statsAggregator) getAndResetStats() (bytes, messages, connections int64, elapsed time.Duration) {
+	sa.mu.Lock()
+	defer sa.mu.Unlock()
+
+	now := time.Now()
+	if sa.lastLogTime.IsZero() {
+		sa.lastLogTime = now
+		return 0, 0, 0, 0
+	}
+
+	elapsed = now.Sub(sa.lastLogTime)
+	bytes = atomic.SwapInt64(&sa.bytesWritten, 0)
+	messages = atomic.SwapInt64(&sa.messagesWritten, 0)
+	connections = atomic.LoadInt64(&sa.connectionCount)
+	sa.lastLogTime = now
+
+	return bytes, messages, connections, elapsed
+}
+
+// startStatsLogger starts a goroutine that logs aggregated stats every 5 seconds
+func startStatsLogger() {
+	statsLoggerOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				// Log Audio stats
+				bytes, _, conns, elapsed := globalStatsAudio.getAndResetStats()
+				if elapsed > 0 && (bytes > 0 || conns > 0) {
+					kbps := float64(bytes) / 1024 / elapsed.Seconds()
+					log.Printf("Audio stats: %.1f KB/s (%d connections)", kbps, conns)
+				}
+
+				// Log Spectrum stats
+				bytes, _, conns, elapsed = globalStatsSpectrum.getAndResetStats()
+				if elapsed > 0 && (bytes > 0 || conns > 0) {
+					kbps := float64(bytes) / 1024 / elapsed.Seconds()
+					log.Printf("Spectrum stats: %.1f KB/s (%d connections)", kbps, conns)
+				}
+			}
+		}()
+	})
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -44,13 +123,9 @@ func (sh *sessionHolder) setSession(s *Session) {
 
 // wsConn wraps a WebSocket connection with a write mutex to prevent concurrent writes
 type wsConn struct {
-	conn            *websocket.Conn
-	writeMu         sync.Mutex
-	bytesWritten    int64
-	messagesWritten int64
-	statsStartTime  time.Time
-	lastStatsLog    time.Time
-	label           string // "Audio" or "Spectrum"
+	conn       *websocket.Conn
+	writeMu    sync.Mutex
+	aggregator *statsAggregator
 }
 
 func (wc *wsConn) writeJSON(v interface{}) error {
@@ -63,41 +138,15 @@ func (wc *wsConn) writeJSON(v interface{}) error {
 		return err
 	}
 
-	// Track bytes for statistics
-	wc.bytesWritten += int64(len(jsonData))
-	wc.messagesWritten++
+	// Track bytes for aggregated statistics
+	if wc.aggregator != nil {
+		wc.aggregator.addBytes(int64(len(jsonData)))
+		wc.aggregator.addMessage()
+	}
 
 	// Write as text message (uncompressed)
 	wc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	if err := wc.conn.WriteMessage(websocket.TextMessage, jsonData); err != nil {
-		return err
-	}
-
-	// Log stats every 5 seconds
-	now := time.Now()
-	if wc.statsStartTime.IsZero() {
-		wc.statsStartTime = now
-		wc.lastStatsLog = now
-	}
-
-	if now.Sub(wc.lastStatsLog) >= 5*time.Second {
-		elapsed := now.Sub(wc.lastStatsLog).Seconds()
-		kbps := float64(wc.bytesWritten) / 1024 / elapsed
-
-		label := wc.label
-		if label == "" {
-			label = "WebSocket"
-		}
-		log.Printf("%s stats: %.1f KB/s (%d msgs)",
-			label, kbps, wc.messagesWritten)
-
-		// Reset counters for next interval
-		wc.bytesWritten = 0
-		wc.messagesWritten = 0
-		wc.lastStatsLog = now
-	}
-
-	return nil
+	return wc.conn.WriteMessage(websocket.TextMessage, jsonData)
 }
 
 func (wc *wsConn) writeJSONCompressed(v interface{}) error {
@@ -109,7 +158,6 @@ func (wc *wsConn) writeJSONCompressed(v interface{}) error {
 	if err != nil {
 		return err
 	}
-	uncompressedSize := len(jsonData)
 
 	// Compress with gzip
 	var compressedBuf bytes.Buffer
@@ -121,44 +169,16 @@ func (wc *wsConn) writeJSONCompressed(v interface{}) error {
 		return err
 	}
 	compressedData := compressedBuf.Bytes()
-	compressedSize := len(compressedData)
 
-	// Track compressed bytes for statistics
-	wc.bytesWritten += int64(compressedSize)
-	wc.messagesWritten++
+	// Track compressed bytes for aggregated statistics
+	if wc.aggregator != nil {
+		wc.aggregator.addBytes(int64(len(compressedData)))
+		wc.aggregator.addMessage()
+	}
 
 	// Write compressed message as binary
 	wc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	if err := wc.conn.WriteMessage(websocket.BinaryMessage, compressedData); err != nil {
-		return err
-	}
-
-	// Log stats every 5 seconds
-	now := time.Now()
-	if wc.statsStartTime.IsZero() {
-		wc.statsStartTime = now
-		wc.lastStatsLog = now
-	}
-
-	if now.Sub(wc.lastStatsLog) >= 5*time.Second {
-		elapsed := now.Sub(wc.lastStatsLog).Seconds()
-		kbps := float64(wc.bytesWritten) / 1024 / elapsed
-		compressionRatio := float64(uncompressedSize) / float64(compressedSize)
-
-		label := wc.label
-		if label == "" {
-			label = "WebSocket"
-		}
-		log.Printf("%s stats: %.1f KB/s (%d msgs, compression: %.1fx, uncompressed would be: %.1f KB/s)",
-			label, kbps, wc.messagesWritten, compressionRatio, kbps*compressionRatio)
-
-		// Reset counters for next interval
-		wc.bytesWritten = 0
-		wc.messagesWritten = 0
-		wc.lastStatsLog = now
-	}
-
-	return nil
+	return wc.conn.WriteMessage(websocket.BinaryMessage, compressedData)
 }
 
 func (wc *wsConn) setWriteDeadline(t time.Time) error {
@@ -223,9 +243,16 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Wrap connection with write mutex and label it as Audio
-	conn := &wsConn{conn: rawConn, label: "Audio"}
-	defer conn.close()
+	// Wrap connection with write mutex and aggregator
+	conn := &wsConn{conn: rawConn, aggregator: globalStatsAudio}
+	globalStatsAudio.addConnection()
+	defer func() {
+		globalStatsAudio.removeConnection()
+		conn.close()
+	}()
+
+	// Start stats logger if not already running
+	startStatsLogger()
 
 	// Get initial parameters from query string
 	query := r.URL.Query()

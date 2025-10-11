@@ -366,15 +366,86 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleUpdateBookmarks replaces all bookmarks
+// handleUpdateBookmarks updates a single bookmark by index or replaces all bookmarks
 func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Request) {
-	var bookmarksConfig map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&bookmarksConfig); err != nil {
+	indexStr := r.URL.Query().Get("index")
+
+	// If no index provided, replace all bookmarks (for import functionality)
+	if indexStr == "" {
+		var bookmarksConfig map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&bookmarksConfig); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Convert to YAML and write to file
+		yamlData, err := yaml.Marshal(bookmarksConfig)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to marshal bookmarks: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		if err := os.WriteFile("bookmarks.yaml", yamlData, 0644); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to write bookmarks file: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "success",
+			"message": "Bookmarks updated successfully",
+		})
+		return
+	}
+
+	// Update single bookmark by index
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		http.Error(w, "Invalid index", http.StatusBadRequest)
+		return
+	}
+
+	var updatedBookmark Bookmark
+	if err := json.NewDecoder(r.Body).Decode(&updatedBookmark); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	// Convert to YAML and write to file
+	// Validate bookmark
+	if updatedBookmark.Name == "" || updatedBookmark.Frequency == 0 || updatedBookmark.Mode == "" {
+		http.Error(w, "Name, frequency, and mode are required", http.StatusBadRequest)
+		return
+	}
+
+	// Read existing bookmarks
+	data, err := os.ReadFile("bookmarks.yaml")
+	if err != nil {
+		http.Error(w, "Failed to read bookmarks file", http.StatusInternalServerError)
+		return
+	}
+
+	var bookmarksConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &bookmarksConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse bookmarks: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get bookmarks array
+	bookmarks, ok := bookmarksConfig["bookmarks"].([]interface{})
+	if !ok || index < 0 || index >= len(bookmarks) {
+		http.Error(w, "Invalid bookmark index", http.StatusBadRequest)
+		return
+	}
+
+	// Update bookmark at index
+	bookmarks[index] = map[string]interface{}{
+		"name":      updatedBookmark.Name,
+		"frequency": updatedBookmark.Frequency,
+		"mode":      updatedBookmark.Mode,
+	}
+	bookmarksConfig["bookmarks"] = bookmarks
+
+	// Write back to file
 	yamlData, err := yaml.Marshal(bookmarksConfig)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal bookmarks: %v", err), http.StatusInternalServerError)
@@ -389,7 +460,7 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
-		"message": "Bookmarks updated successfully",
+		"message": "Bookmark updated successfully",
 	})
 }
 

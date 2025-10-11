@@ -324,7 +324,8 @@
                         <p>Loading bookmarks...</p>
                     </div>
                     <div id="addBookmarkForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
-                        <h3>Add New Bookmark</h3>
+                        <h3 id="bookmarkFormTitle">Add New Bookmark</h3>
+                        <input type="hidden" id="editBookmarkIndex" value="-1">
                         <div class="config-field">
                             <label>Name</label>
                             <input type="text" id="newBookmarkName" placeholder="e.g., WWV 10 MHz">
@@ -345,20 +346,26 @@
                                 <option value="nfm">NFM</option>
                             </select>
                         </div>
-                        <button class="btn" onclick="addBookmark()">Add Bookmark</button>
-                        <button class="btn btn-secondary" onclick="cancelAddBookmark()">Cancel</button>
+                        <button class="btn" onclick="saveBookmark()">Save Bookmark</button>
+                        <button class="btn btn-secondary" onclick="cancelBookmarkForm()">Cancel</button>
                     </div>
                 </div>
 
                 <div class="button-group" id="configButtons">
                     <button class="btn" onclick="saveConfig()">Save Configuration</button>
                     <button class="btn btn-secondary" onclick="loadConfig()">Reload</button>
+                    <button class="btn btn-secondary" onclick="exportConfig()">Export Config</button>
+                    <button class="btn btn-secondary" onclick="importConfig()">Import Config</button>
                     <button class="btn btn-danger" onclick="resetConfig()">Reset to Default</button>
                 </div>
                 <div class="button-group" id="bookmarkButtons" style="display: none;">
                     <button class="btn" onclick="showAddBookmarkForm()">Add New Bookmark</button>
                     <button class="btn btn-secondary" onclick="loadBookmarks()">Reload Bookmarks</button>
+                    <button class="btn btn-secondary" onclick="exportBookmarks()">Export Bookmarks</button>
+                    <button class="btn btn-secondary" onclick="importBookmarks()">Import Bookmarks</button>
                 </div>
+                <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
+                <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
             </div>
         </div>
     </div>
@@ -658,6 +665,7 @@
                     <td style="padding: 12px;">${bookmark.frequency.toLocaleString()}</td>
                     <td style="padding: 12px;">${bookmark.mode.toUpperCase()}</td>
                     <td style="padding: 12px; text-align: center;">
+                        <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBookmark(${index})">Edit</button>
                         <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBookmark(${index})">Delete</button>
                     </td>
                 `;
@@ -666,20 +674,37 @@
         }
 
         function showAddBookmarkForm() {
+            document.getElementById('bookmarkFormTitle').textContent = 'Add New Bookmark';
+            document.getElementById('editBookmarkIndex').value = '-1';
             document.getElementById('addBookmarkForm').style.display = 'block';
             document.getElementById('newBookmarkName').value = '';
             document.getElementById('newBookmarkFreq').value = '';
             document.getElementById('newBookmarkMode').value = 'usb';
         }
 
-        function cancelAddBookmark() {
-            document.getElementById('addBookmarkForm').style.display = 'none';
+        function editBookmark(index) {
+            const bookmark = currentBookmarks[index];
+            document.getElementById('bookmarkFormTitle').textContent = 'Edit Bookmark';
+            document.getElementById('editBookmarkIndex').value = index;
+            document.getElementById('addBookmarkForm').style.display = 'block';
+            document.getElementById('newBookmarkName').value = bookmark.name;
+            document.getElementById('newBookmarkFreq').value = bookmark.frequency;
+            document.getElementById('newBookmarkMode').value = bookmark.mode;
+            
+            // Scroll the form into view
+            document.getElementById('addBookmarkForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
-        async function addBookmark() {
+        function cancelBookmarkForm() {
+            document.getElementById('addBookmarkForm').style.display = 'none';
+            document.getElementById('editBookmarkIndex').value = '-1';
+        }
+
+        async function saveBookmark() {
             const name = document.getElementById('newBookmarkName').value.trim();
             const frequency = parseInt(document.getElementById('newBookmarkFreq').value);
             const mode = document.getElementById('newBookmarkMode').value;
+            const editIndex = parseInt(document.getElementById('editBookmarkIndex').value);
 
             if (!name || !frequency || !mode) {
                 showAlert('Please fill in all fields', 'error');
@@ -687,22 +712,40 @@
             }
 
             try {
-                const response = await fetch('/admin/bookmarks?password=' + encodeURIComponent(adminPassword), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ name, frequency, mode })
-                });
+                if (editIndex >= 0) {
+                    // Update existing bookmark
+                    const response = await fetch('/admin/bookmarks?password=' + encodeURIComponent(adminPassword) + '&index=' + editIndex, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ name, frequency, mode })
+                    });
 
-                if (!response.ok) throw new Error('Failed to add bookmark');
+                    if (!response.ok) throw new Error('Failed to update bookmark');
+                    
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                } else {
+                    // Add new bookmark
+                    const response = await fetch('/admin/bookmarks?password=' + encodeURIComponent(adminPassword), {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ name, frequency, mode })
+                    });
+
+                    if (!response.ok) throw new Error('Failed to add bookmark');
+                    
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                }
                 
-                const result = await response.json();
-                showAlert(result.message, 'success');
-                cancelAddBookmark();
+                cancelBookmarkForm();
                 await loadBookmarks();
             } catch (error) {
-                showAlert('Error adding bookmark: ' + error.message, 'error');
+                showAlert('Error saving bookmark: ' + error.message, 'error');
             }
         }
 
@@ -717,13 +760,182 @@
                 });
 
                 if (!response.ok) throw new Error('Failed to delete bookmark');
-                
+
                 const result = await response.json();
                 showAlert(result.message, 'success');
                 await loadBookmarks();
             } catch (error) {
                 showAlert('Error deleting bookmark: ' + error.message, 'error');
             }
+        }
+
+        // Config Import/Export functions
+        function exportConfig() {
+            const yamlContent = document.getElementById('yamlEditor').value;
+            const blob = new Blob([yamlContent], { type: 'text/yaml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'config.yaml';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showAlert('Configuration exported successfully', 'success');
+        }
+
+        function importConfig() {
+            document.getElementById('configFileInput').click();
+        }
+
+        async function handleConfigImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+
+                // Try to parse as YAML/JSON to validate
+                let parsedConfig;
+                if (file.name.endsWith('.json')) {
+                    parsedConfig = JSON.parse(text);
+                } else {
+                    // For YAML, we'll just update the editor and let the user save
+                    document.getElementById('yamlEditor').value = text;
+                    showAlert('Configuration imported. Please review and click Save to apply.', 'info');
+                    switchTab('yaml');
+                    return;
+                }
+
+                // If JSON, convert to our config format and update
+                currentConfig = parsedConfig;
+                renderVisualEditor();
+                updateYamlEditor();
+                showAlert('Configuration imported. Please review and click Save to apply.', 'info');
+            } catch (error) {
+                showAlert('Error importing configuration: ' + error.message, 'error');
+            }
+
+            // Reset file input
+            event.target.value = '';
+        }
+
+        // Bookmarks Import/Export functions
+        function exportBookmarks() {
+            if (currentBookmarks.length === 0) {
+                showAlert('No bookmarks to export', 'info');
+                return;
+            }
+
+            const bookmarksData = {
+                bookmarks: currentBookmarks
+            };
+
+            // Convert to YAML format (simple implementation)
+            let yamlContent = 'bookmarks:\n';
+            currentBookmarks.forEach(bookmark => {
+                yamlContent += `  - name: "${bookmark.name}"\n`;
+                yamlContent += `    frequency: ${bookmark.frequency}\n`;
+                yamlContent += `    mode: ${bookmark.mode}\n`;
+            });
+
+            const blob = new Blob([yamlContent], { type: 'text/yaml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'bookmarks.yaml';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showAlert('Bookmarks exported successfully', 'success');
+        }
+
+        function importBookmarks() {
+            document.getElementById('bookmarksFileInput').click();
+        }
+
+        async function handleBookmarksImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                let importedBookmarks;
+
+                if (file.name.endsWith('.json')) {
+                    const data = JSON.parse(text);
+                    importedBookmarks = data.bookmarks || [];
+                } else {
+                    // Simple YAML parsing for bookmarks
+                    // This is a basic implementation - in production use a proper YAML parser
+                    const lines = text.split('\n');
+                    importedBookmarks = [];
+                    let currentBookmark = null;
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (trimmed.startsWith('- name:')) {
+                            if (currentBookmark) {
+                                importedBookmarks.push(currentBookmark);
+                            }
+                            currentBookmark = {
+                                name: trimmed.substring(7).trim().replace(/^["']|["']$/g, ''),
+                                frequency: 0,
+                                mode: 'usb'
+                            };
+                        } else if (currentBookmark) {
+                            if (trimmed.startsWith('frequency:')) {
+                                currentBookmark.frequency = parseInt(trimmed.substring(10).trim());
+                            } else if (trimmed.startsWith('mode:')) {
+                                currentBookmark.mode = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
+                            }
+                        }
+                    }
+                    if (currentBookmark) {
+                        importedBookmarks.push(currentBookmark);
+                    }
+                }
+
+                if (importedBookmarks.length === 0) {
+                    showAlert('No valid bookmarks found in file', 'error');
+                    return;
+                }
+
+                // Ask user if they want to replace or merge
+                const action = confirm(
+                    `Found ${importedBookmarks.length} bookmark(s).\n\n` +
+                    'Click OK to REPLACE all existing bookmarks.\n' +
+                    'Click Cancel to MERGE with existing bookmarks.'
+                );
+
+                if (action) {
+                    // Replace all bookmarks
+                    currentBookmarks = importedBookmarks;
+                } else {
+                    // Merge bookmarks
+                    currentBookmarks = [...currentBookmarks, ...importedBookmarks];
+                }
+
+                // Save to server
+                const response = await fetch('/admin/bookmarks?password=' + encodeURIComponent(adminPassword), {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ bookmarks: currentBookmarks })
+                });
+
+                if (!response.ok) throw new Error('Failed to save imported bookmarks');
+
+                await loadBookmarks();
+                showAlert(`Successfully imported ${importedBookmarks.length} bookmark(s)`, 'success');
+            } catch (error) {
+                showAlert('Error importing bookmarks: ' + error.message, 'error');
+            }
+
+            // Reset file input
+            event.target.value = '';
         }
     </script>
 </body>

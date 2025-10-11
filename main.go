@@ -35,6 +35,13 @@ func main() {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
+	// Check for default admin password
+	if config.Admin.Password == "mypassword" {
+		log.Fatalf("SECURITY ERROR: Default admin password detected!\n" +
+			"Please change the admin password in config.yaml before starting the server.\n" +
+			"The default password 'mypassword' is insecure and must be changed.")
+	}
+
 	// Load bookmarks from bookmarks.yaml if it exists
 	bookmarksConfig, err := LoadConfig("bookmarks.yaml")
 	if err == nil {
@@ -162,9 +169,54 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	count := sessions.GetSessionCount()
+	// Get optional session_id parameter to prioritize current user
+	currentSessionID := r.URL.Query().Get("session_id")
+
+	// Get all active sessions
+	sessions.mu.RLock()
+	var currentUserSession map[string]interface{}
+	otherSessions := make([]map[string]interface{}, 0, len(sessions.sessions))
+
+	for _, session := range sessions.sessions {
+		// Skip spectrum sessions, only include audio channels
+		if !session.IsSpectrum {
+			session.mu.RLock()
+			sessionInfo := map[string]interface{}{
+				"frequency":      session.Frequency,
+				"mode":           session.Mode,
+				"bandwidth":      session.Bandwidth,
+				"bandwidth_low":  session.BandwidthLow,
+				"bandwidth_high": session.BandwidthHigh,
+				"created_at":     session.CreatedAt,
+				"last_active":    session.LastActive,
+			}
+			session.mu.RUnlock()
+
+			// If this is the current user's session, save it separately
+			if currentSessionID != "" && session.ID == currentSessionID {
+				currentUserSession = sessionInfo
+			} else {
+				otherSessions = append(otherSessions, sessionInfo)
+			}
+		}
+	}
+	sessions.mu.RUnlock()
+
+	// Build final list with current user first
+	sessionList := make([]map[string]interface{}, 0, len(otherSessions)+1)
+	if currentUserSession != nil {
+		sessionList = append(sessionList, currentUserSession)
+	}
+	sessionList = append(sessionList, otherSessions...)
+
+	// Add index numbers
+	for i := range sessionList {
+		sessionList[i]["index"] = i
+	}
+
 	response := map[string]interface{}{
-		"active_sessions": count,
+		"active_sessions": len(sessionList),
+		"channels":        sessionList,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

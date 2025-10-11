@@ -13,6 +13,10 @@ let currentMode = 'usb';
 let currentBandwidthLow = 50;
 let currentBandwidthHigh = 3000;
 
+// Active Channels Display
+let statsUpdateInterval = null;
+let currentSessionId = null;
+
 // Expose mode and bandwidth globally for recorder
 window.currentMode = currentMode;
 window.currentBandwidthLow = currentBandwidthLow;
@@ -577,7 +581,10 @@ function connect() {
     ws.onopen = () => {
         log('Connected!');
         updateConnectionStatus('connected');
-        
+
+        // Start stats updates
+        startStatsUpdates();
+
         // Initialize audio context
         if (!audioContext) {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -652,6 +659,9 @@ function connect() {
         log('Disconnected');
         updateConnectionStatus('disconnected');
         ws = null;
+
+        // Stop stats updates
+        stopStatsUpdates();
     };
 }
 
@@ -706,10 +716,194 @@ function disconnect() {
     }
 }
 
+// Active Channels Stats Functions
+function startStatsUpdates() {
+    // Clear any existing interval
+    if (statsUpdateInterval) {
+        clearInterval(statsUpdateInterval);
+    }
+
+    // Fetch immediately
+    fetchAndDisplayStats();
+
+    // Then fetch every 10 seconds
+    statsUpdateInterval = setInterval(fetchAndDisplayStats, 10000);
+}
+
+function stopStatsUpdates() {
+    if (statsUpdateInterval) {
+        clearInterval(statsUpdateInterval);
+        statsUpdateInterval = null;
+    }
+
+    // Clear the display
+    const listEl = document.getElementById('active-channels-list');
+    if (listEl) {
+        listEl.innerHTML = '<p style="color: #888; font-style: italic;">Not connected</p>';
+    }
+}
+
+async function fetchAndDisplayStats() {
+    try {
+        // Build URL with session_id if we have one
+        let url = '/stats';
+        if (currentSessionId) {
+            url += `?session_id=${currentSessionId}`;
+        }
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Store session_id if we got one back
+        if (data.session_id) {
+            currentSessionId = data.session_id;
+        }
+
+        // Display the channels
+        displayActiveChannels(data.channels || []);
+
+    } catch (err) {
+        console.error('Failed to fetch stats:', err);
+        const listEl = document.getElementById('active-channels-list');
+        if (listEl) {
+            listEl.innerHTML = `<p style="color: #dc3545;">Error: ${err.message}</p>`;
+        }
+    }
+}
+
+function displayActiveChannels(channels) {
+    const listEl = document.getElementById('active-channels-list');
+    if (!listEl) return;
+
+    if (channels.length === 0) {
+        listEl.innerHTML = '<p style="color: #888; font-style: italic;">No active channels</p>';
+        return;
+    }
+
+    // Build table HTML
+    let html = '<table style="width: 100%; border-collapse: collapse;">';
+    html += '<thead><tr>';
+    html += '<th style="text-align: left; padding: 8px; border-bottom: 2px solid #444;">#</th>';
+    html += '<th style="text-align: left; padding: 8px; border-bottom: 2px solid #444;">Frequency</th>';
+    html += '<th style="text-align: left; padding: 8px; border-bottom: 2px solid #444;">Mode</th>';
+    html += '<th style="text-align: left; padding: 8px; border-bottom: 2px solid #444;">Bandwidth</th>';
+    html += '<th style="text-align: left; padding: 8px; border-bottom: 2px solid #444;">Active</th>';
+    html += '<th style="text-align: center; padding: 8px; border-bottom: 2px solid #444;">Action</th>';
+    html += '</tr></thead><tbody>';
+
+    channels.forEach((channel, idx) => {
+        // Highlight current user (index 0)
+        const isCurrentUser = idx === 0;
+        const rowStyle = isCurrentUser
+            ? 'background-color: rgba(40, 167, 69, 0.2); font-weight: bold;'
+            : '';
+
+        html += `<tr style="${rowStyle}">`;
+        html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${channel.index}</td>`;
+        html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${formatFrequency(channel.frequency)}</td>`;
+        html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${channel.mode.toUpperCase()}</td>`;
+        html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${channel.bandwidth_low} to ${channel.bandwidth_high} Hz</td>`;
+
+        // Calculate time since last active
+        const lastActive = new Date(channel.last_active);
+        const now = new Date();
+        const secondsAgo = Math.floor((now - lastActive) / 1000);
+        let activeText;
+        if (secondsAgo < 60) {
+            activeText = `${secondsAgo}s ago`;
+        } else if (secondsAgo < 3600) {
+            activeText = `${Math.floor(secondsAgo / 60)}m ago`;
+        } else {
+            activeText = `${Math.floor(secondsAgo / 3600)}h ago`;
+        }
+
+        html += `<td style="padding: 8px; border-bottom: 1px solid #333;">${activeText}</td>`;
+
+        // Add "Go" button for other users' channels (not for current user)
+        if (isCurrentUser) {
+            html += `<td style="padding: 8px; border-bottom: 1px solid #333; text-align: center;">
+                <span style="color: #888; font-style: italic;">You</span>
+            </td>`;
+        } else {
+            html += `<td style="padding: 8px; border-bottom: 1px solid #333; text-align: center;">
+                <button onclick="tuneToChannel(${channel.frequency}, '${channel.mode}', ${channel.bandwidth_low}, ${channel.bandwidth_high})"
+                    style="background: #007bff; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;">
+                    Go
+                </button>
+            </td>`;
+        }
+
+        html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+
+    listEl.innerHTML = html;
+}
+
+// Tune to a channel from the active channels list
+function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
+    // Update frequency input
+    document.getElementById('frequency').value = frequency;
+    updateBandButtons(frequency);
+
+    // Update mode
+    currentMode = mode;
+    window.currentMode = mode;
+
+    // Update mode button states
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activeBtn = document.getElementById(`mode-${mode}`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
+
+    // Update bandwidth sliders
+    currentBandwidthLow = bandwidthLow;
+    currentBandwidthHigh = bandwidthHigh;
+    window.currentBandwidthLow = bandwidthLow;
+    window.currentBandwidthHigh = bandwidthHigh;
+
+    const bandwidthLowSlider = document.getElementById('bandwidth-low');
+    const bandwidthHighSlider = document.getElementById('bandwidth-high');
+
+    if (bandwidthLowSlider) {
+        bandwidthLowSlider.value = bandwidthLow;
+        document.getElementById('bandwidth-low-value').textContent = bandwidthLow;
+    }
+
+    if (bandwidthHighSlider) {
+        bandwidthHighSlider.value = bandwidthHigh;
+        document.getElementById('bandwidth-high-value').textContent = bandwidthHigh;
+    }
+
+    // Update URL
+    updateURL();
+
+    // Tune to the new settings
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        autoTune();
+        log(`Tuned to channel: ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)`);
+    } else {
+        connect();
+        log(`Connecting to channel: ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)`);
+    }
+}
+
 // Handle incoming messages
 function handleMessage(msg) {
     switch (msg.type) {
         case 'status':
+            // Store session ID if provided
+            if (msg.sessionId) {
+                currentSessionId = msg.sessionId;
+            }
             updateStatus(msg);
             break;
         case 'audio':
@@ -5476,4 +5670,6 @@ function updateSquelchStatus() {
     } else {
         levelEl.textContent = `Level: ${squelchCurrentLevel.toFixed(1)} dB`;
     }
+
+
 }

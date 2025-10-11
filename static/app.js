@@ -3170,10 +3170,11 @@ function updateWaterfall() {
         const timestamp = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         
         // Draw timestamp on left with background
-        waterfallCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        waterfallCtx.fillRect(0, 0, 50, 16);
-        
         waterfallCtx.font = 'bold 11px monospace';
+        const textWidth = waterfallCtx.measureText(timestamp).width;
+        waterfallCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        waterfallCtx.fillRect(0, 0, textWidth + 6, 16);
+        
         waterfallCtx.fillStyle = '#ffffff';
         waterfallCtx.strokeStyle = '#000000';
         waterfallCtx.lineWidth = 2;

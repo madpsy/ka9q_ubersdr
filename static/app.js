@@ -149,6 +149,18 @@ function updateBandButtons(frequency) {
     });
 }
 
+// Update page title with current frequency and mode
+function updatePageTitle() {
+    const freqInput = document.getElementById('frequency');
+    if (freqInput && currentMode) {
+        const freq = parseInt(freqInput.value);
+        if (!isNaN(freq)) {
+            const freqMHz = (freq / 1000000).toFixed(3);
+            document.title = `UberSDR - ${freqMHz} MHz ${currentMode.toUpperCase()}`;
+        }
+    }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     // Load settings from URL parameters first
@@ -156,6 +168,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Fetch and display site description
     fetchSiteDescription();
+
+    // Update page title with initial frequency and mode
+    updatePageTitle();
     
     // Setup audio start overlay
     const audioStartButton = document.getElementById('audio-start-button');
@@ -1104,11 +1119,8 @@ function updateStatus(msg) {
         document.getElementById('current-mode').textContent = msg.mode.toUpperCase();
     }
 
-    // Update page title with frequency and mode
-    if (msg.frequency && msg.mode) {
-        const freqMHz = (msg.frequency / 1000000).toFixed(3);
-        document.title = `UberSDR - ${freqMHz} MHz ${msg.mode.toUpperCase()}`;
-    }
+    // Update page title
+    updatePageTitle();
 
     // Sample rate display removed - no longer shown in UI
     log(`Status: ${formatFrequency(msg.frequency)} ${msg.mode.toUpperCase()}`);
@@ -1549,6 +1561,9 @@ function validateFrequencyInput(input) {
 function handleFrequencyChange() {
     const freqInput = document.getElementById('frequency');
     let frequency = parseInt(freqInput.value);
+
+    // Update page title
+    updatePageTitle();
     
     // Validate frequency range: 100 kHz to 30 MHz (in Hz)
     const MIN_FREQ = 100000;   // 100 kHz
@@ -1794,6 +1809,9 @@ function updateURL() {
 function setMode(mode, preserveBandwidth = false) {
     currentMode = mode;
     window.currentMode = mode; // Update global reference
+
+    // Update page title
+    updatePageTitle();
     
     // Update button states
     document.querySelectorAll('.mode-btn').forEach(btn => {

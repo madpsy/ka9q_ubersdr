@@ -1103,6 +1103,13 @@ function updateStatus(msg) {
     if (msg.mode) {
         document.getElementById('current-mode').textContent = msg.mode.toUpperCase();
     }
+
+    // Update page title with frequency and mode
+    if (msg.frequency && msg.mode) {
+        const freqMHz = (msg.frequency / 1000000).toFixed(3);
+        document.title = `UberSDR - ${freqMHz} MHz ${msg.mode.toUpperCase()}`;
+    }
+
     // Sample rate display removed - no longer shown in UI
     log(`Status: ${formatFrequency(msg.frequency)} ${msg.mode.toUpperCase()}`);
 }

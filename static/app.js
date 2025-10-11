@@ -159,6 +159,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const audioStartOverlay = document.getElementById('audio-start-overlay');
     
     if (audioStartButton && audioStartOverlay) {
+        // Disable button for 2 seconds on page load
+        const originalHTML = audioStartButton.innerHTML;
+        audioStartButton.disabled = true;
+        audioStartButton.innerHTML = '<span>Please wait...</span>';
+        setTimeout(() => {
+            audioStartButton.disabled = false;
+            audioStartButton.innerHTML = originalHTML;
+        }, 2000);
+
         audioStartButton.addEventListener('click', () => {
             // Hide overlay
             audioStartOverlay.classList.add('hidden');

@@ -4,6 +4,9 @@
 admin:
   # Admin password for configuration access
   password: "mypassword"
+  # Description HTML to display in the top right of the page
+  # This can include HTML tags like links
+  description: 'Welcome! This SDR is running <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a>'
 
 # Radiod connection settings
 radiod:

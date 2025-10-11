@@ -290,10 +290,28 @@ class IdleDetector {
             console.log('Closed audio WebSocket');
         }
         
-        // Close spectrum display WebSocket
-        if (window.spectrumDisplay && window.spectrumDisplay.ws) {
-            window.spectrumDisplay.disconnect();
-            console.log('Closed spectrum WebSocket');
+        // Close spectrum display WebSocket and prevent reconnection
+        if (window.spectrumDisplay) {
+            // Mark as disconnected by user to prevent auto-reconnect
+            window.spectrumDisplay.userDisconnected = true;
+
+            // Clear spectrum reconnect timer BEFORE disconnecting
+            if (window.spectrumDisplay.reconnectTimer) {
+                clearTimeout(window.spectrumDisplay.reconnectTimer);
+                window.spectrumDisplay.reconnectTimer = null;
+            }
+
+            // Disconnect the WebSocket
+            if (window.spectrumDisplay.ws) {
+                window.spectrumDisplay.disconnect();
+                console.log('Closed spectrum WebSocket');
+            }
+
+            // Clear reconnect timer again after disconnect (in case onclose created a new one)
+            if (window.spectrumDisplay.reconnectTimer) {
+                clearTimeout(window.spectrumDisplay.reconnectTimer);
+                window.spectrumDisplay.reconnectTimer = null;
+            }
         }
         
         // Stop audio context

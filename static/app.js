@@ -153,6 +153,9 @@ function updateBandButtons(frequency) {
 document.addEventListener('DOMContentLoaded', () => {
     // Load settings from URL parameters first
     loadSettingsFromURL();
+
+    // Fetch and display site description
+    fetchSiteDescription();
     
     // Setup audio start overlay
     const audioStartButton = document.getElementById('audio-start-button');
@@ -567,6 +570,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 250); // Debounce resize events
     });
 });
+
+// Fetch and display site description
+async function fetchSiteDescription() {
+    try {
+        const response = await fetch('/api/description');
+        if (response.ok) {
+            const data = await response.json();
+            const descriptionEl = document.getElementById('site-description');
+            if (descriptionEl && data.description) {
+                descriptionEl.innerHTML = data.description;
+            }
+        } else {
+            console.error('Failed to fetch site description:', response.status);
+        }
+    } catch (err) {
+        console.error('Error fetching site description:', err);
+    }
+}
 
 // Toggle connection
 function toggleConnection() {

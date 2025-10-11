@@ -77,6 +77,33 @@ body {
     margin: 0;
     background: #adb5bd;
     overflow: hidden;
+    position: relative;
+}
+
+/* Site Description in top left */
+.site-description {
+    position: absolute;
+    top: -2px;
+    left: 0;
+    padding: 0px 15px 2px 15px;
+    background: rgba(44, 62, 80, 0.9);
+    border-radius: 0 0 6px 0;
+    color: #ecf0f1;
+    font-size: 0.9em;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.site-description a {
+    color: #3498db;
+    text-decoration: none;
+    font-weight: bold;
+    transition: color 0.3s;
+}
+
+.site-description a:hover {
+    color: #5dade2;
+    text-decoration: underline;
 }
 
 .status-bar {

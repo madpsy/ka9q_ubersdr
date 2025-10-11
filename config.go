@@ -20,7 +20,8 @@ type Config struct {
 
 // AdminConfig contains admin authentication settings
 type AdminConfig struct {
-	Password string `yaml:"password"`
+	Password    string `yaml:"password"`
+	Description string `yaml:"description"`
 }
 
 // Bookmark represents a frequency bookmark
@@ -127,6 +128,11 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Logging.Format == "" {
 		config.Logging.Format = "text"
+	}
+
+	// Set admin description default if not specified
+	if config.Admin.Description == "" {
+		config.Admin.Description = `Welcome! This SDR is running <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a>`
 	}
 
 	// Set spectrum defaults if not specified

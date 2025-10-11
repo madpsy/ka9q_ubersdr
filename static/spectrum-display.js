@@ -431,10 +431,16 @@ class SpectrumDisplay {
     
     // Schedule reconnection attempt
     scheduleReconnect() {
+        // Don't reconnect if user explicitly disconnected (e.g., idle timeout)
+        if (this.userDisconnected) {
+            console.log('Skipping reconnect - user disconnected');
+            return;
+        }
+
         if (this.reconnectTimer) {
             return;
         }
-        
+
         console.log(`Reconnecting in ${this.reconnectDelay}ms...`);
         this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;

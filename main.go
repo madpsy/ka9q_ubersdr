@@ -115,6 +115,9 @@ func main() {
 	http.HandleFunc("/api/bookmarks", func(w http.ResponseWriter, r *http.Request) {
 		handleBookmarks(w, r, config)
 	})
+	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
+		handleDescription(w, r, config)
+	})
 
 	// Admin endpoints (password protected)
 	http.HandleFunc("/admin/config", adminHandler.AuthMiddleware(adminHandler.HandleConfig))
@@ -252,5 +255,19 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config) {
 
 	if err := json.NewEncoder(w).Encode(config.Bookmarks); err != nil {
 		log.Printf("Error encoding bookmarks: %v", err)
+	}
+}
+
+// handleDescription serves the description HTML from config
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	response := map[string]string{
+		"description": config.Admin.Description,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding description: %v", err)
 	}
 }

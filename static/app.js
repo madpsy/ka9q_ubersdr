@@ -67,7 +67,7 @@ let oscilloscopeZoom = 200; // Oscilloscope zoom level (1-200, affects timebase,
 let oscilloscopeTriggerEnabled = false; // Enable continuous trigger tracking
 let oscilloscopeTriggerFreq = 0; // Target frequency for trigger
 let oscilloscopeYScale = 1.0; // Y-axis scale factor (1.0 = normal, >1 = zoomed in, <1 = zoomed out)
-let oscilloscopeAutoScaleEnabled = false; // Enable continuous auto-scaling
+let oscilloscopeAutoScaleEnabled = true; // Enable continuous auto-scaling
 let bandpassFilters = []; // Array of cascaded bandpass filters for steep rolloff (4 stages = 48 dB/octave)
 let bandpassEnabled = false;
 let notchFilters = []; // Array of notch filter objects, each with {filters: [], center: Hz, width: Hz}
@@ -161,6 +161,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // Preserve bandwidth values loaded from URL
             setMode(currentMode, true);
         });
+    }
+    
+    // Set oscilloscope auto-scale button to enabled state by default
+    const autoScaleBtn = document.getElementById('auto-scale-btn');
+    if (autoScaleBtn) {
+        autoScaleBtn.style.backgroundColor = '#28a745'; // Green when enabled
+        autoScaleBtn.textContent = 'Auto Scale: ON';
     }
     
     // Setup volume control

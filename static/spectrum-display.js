@@ -1258,8 +1258,12 @@ class SpectrumDisplay {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.fillRect(0, 35, this.width, 30);
         
-        // Calculate appropriate frequency step
-        const targetStep = this.totalBandwidth / 7;
+        // Calculate appropriate frequency step based on available width
+        // On narrow screens (mobile), show fewer markers to prevent overlap
+        const minLabelSpacing = 80; // Minimum pixels between labels
+        const calculatedMarkers = Math.floor(this.width / minLabelSpacing);
+        const maxMarkers = Math.min(10, Math.max(3, calculatedMarkers)); // Cap at 10, minimum 3
+        const targetStep = this.totalBandwidth / maxMarkers;
         let freqStep;
         if (targetStep >= 5e6) freqStep = 5e6;
         else if (targetStep >= 2e6) freqStep = 2e6;
@@ -1656,9 +1660,12 @@ class SpectrumDisplay {
         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         this.ctx.fillRect(0, 0, this.width, 30);
         
-        // Calculate appropriate frequency step to ensure 5-10 markers visible
-        // Target: bandwidth / 7 markers, rounded to nice values
-        const targetStep = this.totalBandwidth / 7;
+        // Calculate appropriate frequency step based on available width
+        // On narrow screens (mobile), show fewer markers to prevent overlap
+        const minLabelSpacing = 80; // Minimum pixels between labels
+        const calculatedMarkers = Math.floor(this.width / minLabelSpacing);
+        const maxMarkers = Math.min(10, Math.max(3, calculatedMarkers)); // Cap at 10, minimum 3
+        const targetStep = this.totalBandwidth / maxMarkers;
         
         let freqStep;
         if (targetStep >= 5e6) {
@@ -2053,24 +2060,11 @@ class SpectrumDisplay {
 
     // Format frequency for scale markers (lower precision for cleaner display)
     formatFrequencyScale(freq) {
+        // Always display in MHz format for consistency
         // Use 3 decimal places when zoomed in (zoom level > 1)
         const decimals = this.zoomLevel > 1 ? 3 : 2;
-        
-        if (freq >= 1e9) {
-            // GHz: show 2 or 3 decimals based on zoom
-            const ghz = freq / 1e9;
-            return `${ghz.toFixed(decimals)} GHz`;
-        } else if (freq >= 1e6) {
-            // MHz: show 2 or 3 decimals based on zoom
-            const mhz = freq / 1e6;
-            return `${mhz.toFixed(decimals)} MHz`;
-        } else if (freq >= 1e3) {
-            // kHz: show 1 or 2 decimals based on zoom
-            const khz = freq / 1e3;
-            return `${khz.toFixed(decimals - 1)} kHz`;
-        } else {
-            return `${freq.toFixed(0)} Hz`;
-        }
+        const mhz = freq / 1e6;
+        return `${mhz.toFixed(decimals)}`;
     }
     
     // Create color gradient for spectrum display

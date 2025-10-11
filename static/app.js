@@ -4603,7 +4603,7 @@ function initNoiseReduction() {
         
         // Create makeup gain node
         noiseReductionMakeupGain = audioContext.createGain();
-        noiseReductionMakeupGain.gain.value = Math.pow(10, 2 / 20); // Default +2 dB
+        noiseReductionMakeupGain.gain.value = Math.pow(10, -3 / 20); // Default -3 dB
         
         // Create analyser to monitor NR2 output for clipping detection
         noiseReductionAnalyser = audioContext.createAnalyser();
@@ -4647,7 +4647,7 @@ function updateNoiseReduction() {
     if (makeupGainSlider && noiseReductionMakeupGain) {
         const makeupGainDb = parseFloat(makeupGainSlider.value);
         noiseReductionMakeupGain.gain.value = Math.pow(10, makeupGainDb / 20);
-        document.getElementById('noise-reduction-makeup-gain-value').textContent = '+' + makeupGainDb + ' dB';
+        document.getElementById('noise-reduction-makeup-gain-value').textContent = (makeupGainDb >= 0 ? '+' : '') + makeupGainDb + ' dB';
     }
     
     // Update NR2 processor parameters

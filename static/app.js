@@ -1,4 +1,20 @@
 // ka9q UberSDR Web Client
+
+// Generate a unique session ID for this browser session
+// This links audio and spectrum WebSocket connections together
+function generateUserSessionID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+// Generate and store user session ID globally (exposed on window for spectrum-display.js)
+const userSessionID = generateUserSessionID();
+window.userSessionID = userSessionID;
+console.log('User session ID:', userSessionID);
+
 let ws = null;
 let audioContext = null;
 let reconnectTimer = null;
@@ -634,8 +650,8 @@ function connect() {
     };
     
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Include bandwidth parameters in WebSocket URL so backend creates session with correct bandwidth
-    const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${frequency}&mode=${mode}&bandwidthLow=${currentBandwidthLow}&bandwidthHigh=${currentBandwidthHigh}`;
+    // Include bandwidth parameters and user session ID in WebSocket URL
+    const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${frequency}&mode=${mode}&bandwidthLow=${currentBandwidthLow}&bandwidthHigh=${currentBandwidthHigh}&user_session_id=${encodeURIComponent(userSessionID)}`;
     
     log(`Connecting to ${wsUrl}...`);
     

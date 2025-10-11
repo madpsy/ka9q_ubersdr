@@ -29,8 +29,9 @@ type Session struct {
 	mu            sync.RWMutex
 
 	// Connection info
-	SourceIP string // Direct connection IP (RemoteAddr)
-	ClientIP string // True client IP (from X-Forwarded-For if present)
+	SourceIP      string // Direct connection IP (RemoteAddr)
+	ClientIP      string // True client IP (from X-Forwarded-For if present)
+	UserSessionID string // Client-generated UUID to link audio and spectrum sessions
 
 	// Spectrum-specific fields (only used when Mode == "spectrum")
 	IsSpectrum   bool
@@ -80,16 +81,21 @@ func translateModeForRadiod(mode string) string {
 
 // CreateSession creates a new session with a unique channel (default bandwidth)
 func (sm *SessionManager) CreateSession(frequency uint64, mode string) (*Session, error) {
-	return sm.CreateSessionWithBandwidth(frequency, mode, 3000, "", "") // Default 3000 Hz bandwidth
+	return sm.CreateSessionWithBandwidth(frequency, mode, 3000, "", "", "") // Default 3000 Hz bandwidth
 }
 
 // CreateSessionWithIP creates a new session with IP tracking
 func (sm *SessionManager) CreateSessionWithIP(frequency uint64, mode string, sourceIP, clientIP string) (*Session, error) {
-	return sm.CreateSessionWithBandwidth(frequency, mode, 3000, sourceIP, clientIP)
+	return sm.CreateSessionWithBandwidth(frequency, mode, 3000, sourceIP, clientIP, "")
+}
+
+// CreateSessionWithUserID creates a new session with IP tracking and user session ID
+func (sm *SessionManager) CreateSessionWithUserID(frequency uint64, mode string, sourceIP, clientIP, userSessionID string) (*Session, error) {
+	return sm.CreateSessionWithBandwidth(frequency, mode, 3000, sourceIP, clientIP, userSessionID)
 }
 
 // CreateSessionWithBandwidth creates a new session with a unique channel and specified bandwidth
-func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode string, bandwidth int, sourceIP, clientIP string) (*Session, error) {
+func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode string, bandwidth int, sourceIP, clientIP, userSessionID string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -147,6 +153,7 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 		Done:          make(chan struct{}),
 		SourceIP:      sourceIP,
 		ClientIP:      clientIP,
+		UserSessionID: userSessionID,
 	}
 
 	// Translate mode for radiod (e.g., "fm" -> "pm")
@@ -179,6 +186,16 @@ func (sm *SessionManager) CreateSpectrumSession() (*Session, error) {
 
 // CreateSpectrumSessionWithIP creates a new spectrum session with IP tracking
 func (sm *SessionManager) CreateSpectrumSessionWithIP(sourceIP, clientIP string) (*Session, error) {
+	return sm.createSpectrumSessionWithUserID(sourceIP, clientIP, "")
+}
+
+// CreateSpectrumSessionWithUserID creates a new spectrum session with IP tracking and user session ID
+func (sm *SessionManager) CreateSpectrumSessionWithUserID(sourceIP, clientIP, userSessionID string) (*Session, error) {
+	return sm.createSpectrumSessionWithUserID(sourceIP, clientIP, userSessionID)
+}
+
+// createSpectrumSessionWithUserID is the internal implementation
+func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, userSessionID string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -220,20 +237,21 @@ func (sm *SessionManager) CreateSpectrumSessionWithIP(sourceIP, clientIP string)
 
 	// Create spectrum session
 	session := &Session{
-		ID:           sessionID,
-		ChannelName:  channelName,
-		SSRC:         ssrc,
-		Frequency:    frequency,
-		Mode:         "spectrum",
-		IsSpectrum:   true,
-		BinCount:     binCount,
-		BinBandwidth: binBandwidth,
-		CreatedAt:    time.Now(),
-		LastActive:   time.Now(),
-		SpectrumChan: make(chan []float32, 10), // Buffer spectrum updates
-		Done:         make(chan struct{}),
-		SourceIP:     sourceIP,
-		ClientIP:     clientIP,
+		ID:            sessionID,
+		ChannelName:   channelName,
+		SSRC:          ssrc,
+		Frequency:     frequency,
+		Mode:          "spectrum",
+		IsSpectrum:    true,
+		BinCount:      binCount,
+		BinBandwidth:  binBandwidth,
+		CreatedAt:     time.Now(),
+		LastActive:    time.Now(),
+		SpectrumChan:  make(chan []float32, 10), // Buffer spectrum updates
+		Done:          make(chan struct{}),
+		SourceIP:      sourceIP,
+		ClientIP:      clientIP,
+		UserSessionID: userSessionID,
 	}
 
 	// Create radiod spectrum channel
@@ -593,16 +611,17 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 	for _, session := range sm.sessions {
 		session.mu.RLock()
 		info := map[string]interface{}{
-			"id":          session.ID,
-			"channel":     session.ChannelName,
-			"ssrc":        fmt.Sprintf("0x%08x", session.SSRC),
-			"frequency":   session.Frequency,
-			"mode":        session.Mode,
-			"is_spectrum": session.IsSpectrum,
-			"source_ip":   session.SourceIP,
-			"client_ip":   session.ClientIP,
-			"created_at":  session.CreatedAt.Format(time.RFC3339),
-			"last_active": session.LastActive.Format(time.RFC3339),
+			"id":              session.ID,
+			"channel":         session.ChannelName,
+			"ssrc":            fmt.Sprintf("0x%08x", session.SSRC),
+			"frequency":       session.Frequency,
+			"mode":            session.Mode,
+			"is_spectrum":     session.IsSpectrum,
+			"source_ip":       session.SourceIP,
+			"client_ip":       session.ClientIP,
+			"user_session_id": session.UserSessionID,
+			"created_at":      session.CreatedAt.Format(time.RFC3339),
+			"last_active":     session.LastActive.Format(time.RFC3339),
 		}
 
 		// Add type-specific info

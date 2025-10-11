@@ -98,6 +98,17 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 		}
 	}
 
+	// Get user session ID from query string (required)
+	userSessionID := r.URL.Query().Get("user_session_id")
+
+	// Validate user session ID - must be a valid UUID
+	if !isValidUUID(userSessionID) {
+		log.Printf("Rejected Spectrum WebSocket connection: invalid or missing user_session_id from %s (client IP: %s)", sourceIP, clientIP)
+		// Send error response before upgrading
+		http.Error(w, "Invalid or missing user_session_id. Please refresh the page.", http.StatusBadRequest)
+		return
+	}
+
 	// Upgrade HTTP connection to WebSocket
 	rawConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -105,7 +116,7 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 		return
 	}
 
-	log.Printf("Spectrum WebSocket connected - Using manual gzip compression, source IP: %s, client IP: %s", sourceIP, clientIP)
+	log.Printf("Spectrum WebSocket connected - Using manual gzip compression, user_session_id: %s, source IP: %s, client IP: %s", userSessionID, sourceIP, clientIP)
 
 	conn := &wsConn{conn: rawConn, aggregator: globalStatsSpectrum}
 	globalStatsSpectrum.addConnection()
@@ -117,15 +128,19 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	// Start stats logger if not already running
 	startStatsLogger()
 
-	// Create spectrum session with IP tracking
-	session, err := swsh.sessions.CreateSpectrumSessionWithIP(sourceIP, clientIP)
+	// Create spectrum session with IP tracking and user session ID
+	session, err := swsh.sessions.CreateSpectrumSessionWithUserID(sourceIP, clientIP, userSessionID)
 	if err != nil {
 		log.Printf("Failed to create spectrum session: %v", err)
 		swsh.sendError(conn, "Failed to create spectrum session: "+err.Error())
 		return
 	}
 
-	log.Printf("Spectrum WebSocket session created: %s, source IP: %s, client IP: %s", session.ID, sourceIP, clientIP)
+	if userSessionID != "" {
+		log.Printf("Spectrum WebSocket session created: %s, user_session_id: %s, source IP: %s, client IP: %s", session.ID, userSessionID, sourceIP, clientIP)
+	} else {
+		log.Printf("Spectrum WebSocket session created: %s, source IP: %s, client IP: %s", session.ID, sourceIP, clientIP)
+	}
 
 	// Send initial status
 	swsh.sendStatus(conn, session)

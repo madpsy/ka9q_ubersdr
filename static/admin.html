@@ -415,6 +415,7 @@
 
         function logout() {
             adminPassword = '';
+            stopSessionsAutoRefresh();
             document.getElementById('loginBox').style.display = 'block';
             document.getElementById('configEditor').classList.remove('active');
             document.getElementById('password').value = '';
@@ -424,12 +425,17 @@
             currentTab = tab;
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            
+
             // Hide all button groups
             document.getElementById('configButtons').style.display = 'none';
             document.getElementById('bookmarkButtons').style.display = 'none';
             document.getElementById('sessionButtons').style.display = 'none';
-            
+
+            // Stop sessions auto-refresh when leaving sessions tab
+            if (tab !== 'sessions') {
+                stopSessionsAutoRefresh();
+            }
+
             if (tab === 'visual') {
                 document.querySelector('.tab:nth-child(1)').classList.add('active');
                 document.getElementById('visualTab').classList.add('active');
@@ -449,6 +455,7 @@
                 document.getElementById('sessionsTab').classList.add('active');
                 document.getElementById('sessionButtons').style.display = 'flex';
                 loadSessions();
+                startSessionsAutoRefresh();
             }
         }
 
@@ -958,6 +965,7 @@
 
         // Sessions management
         let currentSessions = [];
+        let sessionsRefreshInterval = null;
 
         async function loadSessions() {
             try {
@@ -967,9 +975,32 @@
                 const data = await response.json();
                 currentSessions = data.sessions || [];
                 renderSessions();
-                showAlert(`Loaded ${currentSessions.length} active session(s)`, 'success');
+                
+                // Only show alert on manual refresh, not on auto-refresh
+                if (!sessionsRefreshInterval) {
+                    showAlert(`Loaded ${currentSessions.length} active session(s)`, 'success');
+                }
             } catch (error) {
                 showAlert('Error loading sessions: ' + error.message, 'error');
+            }
+        }
+
+        function startSessionsAutoRefresh() {
+            // Clear any existing interval
+            if (sessionsRefreshInterval) {
+                clearInterval(sessionsRefreshInterval);
+            }
+            
+            // Start auto-refresh every 5 seconds
+            sessionsRefreshInterval = setInterval(() => {
+                loadSessions();
+            }, 5000);
+        }
+
+        function stopSessionsAutoRefresh() {
+            if (sessionsRefreshInterval) {
+                clearInterval(sessionsRefreshInterval);
+                sessionsRefreshInterval = null;
             }
         }
 
@@ -983,17 +1014,17 @@
                 return;
             }
 
-            // Group sessions by client IP
-            const sessionsByIP = {};
+            // Group sessions by user_session_id (or fall back to client IP)
+            const sessionsByUser = {};
             currentSessions.forEach(session => {
-                const ip = session.client_ip || session.source_ip;
-                if (!sessionsByIP[ip]) {
-                    sessionsByIP[ip] = { audio: [], spectrum: [] };
+                const key = session.user_session_id || session.client_ip || session.source_ip;
+                if (!sessionsByUser[key]) {
+                    sessionsByUser[key] = { audio: [], spectrum: [], hasUUID: !!session.user_session_id };
                 }
                 if (session.is_spectrum) {
-                    sessionsByIP[ip].spectrum.push(session);
+                    sessionsByUser[key].spectrum.push(session);
                 } else {
-                    sessionsByIP[ip].audio.push(session);
+                    sessionsByUser[key].audio.push(session);
                 }
             });
 
@@ -1004,6 +1035,7 @@
             table.innerHTML = `
                 <thead>
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: left;">User Session ID</th>
                         <th style="padding: 12px; text-align: left;">Client IP</th>
                         <th style="padding: 12px; text-align: left;">Source IP</th>
                         <th style="padding: 12px; text-align: center;">Audio</th>
@@ -1017,13 +1049,15 @@
 
             const tbody = document.getElementById('sessionsTableBody');
             
-            for (const [ip, sessions] of Object.entries(sessionsByIP)) {
+            for (const [key, sessions] of Object.entries(sessionsByUser)) {
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
                 
                 const audioSession = sessions.audio[0];
                 const spectrumSession = sessions.spectrum[0];
+                const clientIP = audioSession?.client_ip || spectrumSession?.client_ip || 'N/A';
                 const sourceIP = audioSession?.source_ip || spectrumSession?.source_ip || 'N/A';
+                const userSessionID = sessions.hasUUID ? key : 'N/A';
                 
                 let details = '';
                 if (audioSession) {
@@ -1036,7 +1070,8 @@
                 }
                 
                 row.innerHTML = `
-                    <td style="padding: 12px; font-family: monospace;">${ip}</td>
+                    <td style="padding: 12px; font-family: monospace; font-size: 11px; word-break: break-all; max-width: 150px;">${userSessionID === 'N/A' ? '<em style="color: #999;">N/A</em>' : userSessionID}</td>
+                    <td style="padding: 12px; font-family: monospace;">${clientIP}</td>
                     <td style="padding: 12px; font-family: monospace;">${sourceIP}</td>
                     <td style="padding: 12px; text-align: center;">${sessions.audio.length > 0 ? '✓' : '—'}</td>
                     <td style="padding: 12px; text-align: center;">${sessions.spectrum.length > 0 ? '✓' : '—'}</td>
@@ -1051,10 +1086,11 @@
             summary.style.padding = '15px';
             summary.style.background = '#f8f9fa';
             summary.style.borderRadius = '5px';
+            const withUUID = Object.values(sessionsByUser).filter(s => s.hasUUID).length;
             summary.innerHTML = `
-                <strong>Summary:</strong> ${Object.keys(sessionsByIP).length} unique client(s),
-                ${currentSessions.filter(s => !s.is_spectrum).length} audio session(s),
-                ${currentSessions.filter(s => s.is_spectrum).length} spectrum session(s)
+                <strong>Summary:</strong> ${Object.keys(sessionsByUser).length} unique session(s) (${withUUID} with UUID),
+                ${currentSessions.filter(s => !s.is_spectrum).length} audio connection(s),
+                ${currentSessions.filter(s => s.is_spectrum).length} spectrum connection(s)
             `;
             container.appendChild(summary);
         }

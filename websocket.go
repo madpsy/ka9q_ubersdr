@@ -7,12 +7,24 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// UUID validation regex (RFC 4122 compliant)
+var uuidRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+// isValidUUID checks if a string is a valid UUID v4
+func isValidUUID(uuid string) bool {
+	if uuid == "" {
+		return false
+	}
+	return uuidRegex.MatchString(uuid)
+}
 
 // Global stats aggregator
 var (
@@ -308,6 +320,18 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		mode = m
 	}
 
+	// Get user session ID from query string (required)
+	userSessionID := query.Get("user_session_id")
+
+	// Validate user session ID - must be a valid UUID
+	if !isValidUUID(userSessionID) {
+		log.Printf("Rejected WebSocket connection: invalid or missing user_session_id from %s (client IP: %s)", sourceIP, clientIP)
+		if err := wsh.sendError(conn, "Invalid or missing user_session_id. Please refresh the page."); err != nil {
+			log.Printf("Failed to send error message: %v", err)
+		}
+		return
+	}
+
 	// Get bandwidth parameters from query string (optional)
 	var bandwidthLow, bandwidthHigh *int
 	if bwl := query.Get("bandwidthLow"); bwl != "" {
@@ -330,8 +354,8 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Create initial session with IP tracking
-	session, err := wsh.sessions.CreateSessionWithIP(frequency, mode, sourceIP, clientIP)
+	// Create initial session with IP tracking and user session ID
+	session, err := wsh.sessions.CreateSessionWithUserID(frequency, mode, sourceIP, clientIP, userSessionID)
 	if err != nil {
 		log.Printf("Failed to create session: %v", err)
 		wsh.sendError(conn, "Failed to create session: "+err.Error())
@@ -361,7 +385,11 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	log.Printf("Audio WebSocket connected: session %s, source IP: %s, client IP: %s", session.ID, sourceIP, clientIP)
+	if userSessionID != "" {
+		log.Printf("Audio WebSocket connected: session %s, user_session_id: %s, source IP: %s, client IP: %s", session.ID, userSessionID, sourceIP, clientIP)
+	} else {
+		log.Printf("Audio WebSocket connected: session %s, source IP: %s, client IP: %s", session.ID, sourceIP, clientIP)
+	}
 
 	// Subscribe to audio
 	wsh.audioReceiver.GetChannelAudio(session)

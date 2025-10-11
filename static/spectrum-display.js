@@ -184,8 +184,13 @@ class SpectrumDisplay {
         });
         
         // Configuration
+        // Get user session ID from app.js (generated on page load)
+        const userSessionID = window.userSessionID || (typeof userSessionID !== 'undefined' ? userSessionID : '');
+        const wsUrlBase = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/user-spectrum`;
+        const wsUrlWithSession = userSessionID ? `${wsUrlBase}?user_session_id=${encodeURIComponent(userSessionID)}` : wsUrlBase;
+
         this.config = {
-            wsUrl: config.wsUrl || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/user-spectrum`,
+            wsUrl: config.wsUrl || wsUrlWithSession,
             minDb: config.minDb !== undefined ? config.minDb : -100,
             maxDb: config.maxDb !== undefined ? config.maxDb : 0,
             autoRange: config.autoRange === true, // Disable auto-ranging by default

@@ -1,6 +1,19 @@
 // Old Radio JavaScript - Simple AM Receiver
 // Frequency range: 600 kHz to 2000 kHz (AM broadcast band)
 
+// Generate a unique user session ID for linking connections
+function generateUserSessionID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+// Generate UUID once when page loads
+const userSessionID = generateUserSessionID();
+console.log('User Session ID:', userSessionID);
+
 // Configuration
 const MIN_FREQ = 600000;  // 600 kHz in Hz
 const MAX_FREQ = 2000000; // 2000 kHz in Hz
@@ -374,7 +387,7 @@ function updatePowerIndicator(level) {
 // WebSocket Connection
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${currentFrequency}&mode=${MODE}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${currentFrequency}&mode=${MODE}&user_session_id=${encodeURIComponent(userSessionID)}`;
     
     console.log('Connecting to WebSocket:', wsUrl);
     ws = new WebSocket(wsUrl);

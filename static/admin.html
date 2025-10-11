@@ -648,15 +648,39 @@
                             yaml += `${spaces}  -\n`;
                             yaml += objectToYaml(item, indent + 2);
                         } else {
-                            yaml += `${spaces}  - ${item}\n`;
+                            yaml += `${spaces}  - ${escapeYamlString(item)}\n`;
                         }
                     });
                 } else {
-                    yaml += `${spaces}${key}: ${value}\n`;
+                    yaml += `${spaces}${key}: ${escapeYamlString(value)}\n`;
                 }
             }
             
             return yaml;
+        }
+
+        function escapeYamlString(value) {
+            // Handle non-string values
+            if (typeof value === 'boolean' || typeof value === 'number') {
+                return value;
+            }
+
+            // Convert to string
+            const str = String(value);
+
+            // Check if string needs quoting (contains special YAML characters)
+            const needsQuoting = /[:'"\n\r\t#\[\]{}|>@`!%&*]/.test(str) ||
+                                 str.trim() !== str ||
+                                 str === '' ||
+                                 /^(true|false|null|yes|no|on|off)$/i.test(str);
+
+            if (!needsQuoting) {
+                return str;
+            }
+
+            // Use single quotes and escape any single quotes in the string
+            const escaped = str.replace(/'/g, "''");
+            return `'${escaped}'`;
         }
 
         async function saveConfig() {

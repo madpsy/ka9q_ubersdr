@@ -1,6 +1,9 @@
 // ka9q UberSDR Web Client
 let ws = null;
 let audioContext = null;
+let reconnectTimer = null;
+let reconnectDelay = 1000;
+let lastConnectionParams = null; // Store connection parameters for reconnection
 // Expose audioContext globally for recorder
 window.audioContext = null;
 let audioQueue = [];
@@ -567,8 +570,22 @@ function toggleConnection() {
 
 // Connect to WebSocket
 function connect() {
+    // Clear any pending reconnection timer
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+
     const frequency = document.getElementById('frequency').value;
     const mode = currentMode;
+
+    // Store connection parameters for reconnection
+    lastConnectionParams = {
+        frequency: frequency,
+        mode: mode,
+        bandwidthLow: currentBandwidthLow,
+        bandwidthHigh: currentBandwidthHigh
+    };
     
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Include bandwidth parameters in WebSocket URL so backend creates session with correct bandwidth
@@ -581,6 +598,9 @@ function connect() {
     ws.onopen = () => {
         log('Connected!');
         updateConnectionStatus('connected');
+
+        // Reset reconnect delay on successful connection
+        reconnectDelay = 1000;
 
         // Start stats updates
         startStatsUpdates();
@@ -662,11 +682,76 @@ function connect() {
 
         // Stop stats updates
         stopStatsUpdates();
+
+        // Schedule reconnection if we have saved parameters
+        if (lastConnectionParams) {
+            scheduleReconnect();
+        }
     };
+}
+
+// Schedule reconnection attempt
+function scheduleReconnect() {
+    if (reconnectTimer) {
+        return;
+    }
+
+    console.log(`Reconnecting in ${reconnectDelay}ms...`);
+    log(`Reconnecting in ${reconnectDelay/1000}s...`);
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000); // Max 30 seconds
+        reconnect();
+    }, reconnectDelay);
+}
+
+// Reconnect with saved parameters
+function reconnect() {
+    if (!lastConnectionParams) {
+        log('No saved connection parameters, cannot reconnect', 'error');
+        return;
+    }
+
+    // Restore saved parameters
+    document.getElementById('frequency').value = lastConnectionParams.frequency;
+    currentMode = lastConnectionParams.mode;
+    currentBandwidthLow = lastConnectionParams.bandwidthLow;
+    currentBandwidthHigh = lastConnectionParams.bandwidthHigh;
+
+    // Update UI to reflect restored parameters
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activeBtn = document.getElementById(`mode-${currentMode}`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
+
+    const bandwidthLowSlider = document.getElementById('bandwidth-low');
+    const bandwidthHighSlider = document.getElementById('bandwidth-high');
+    if (bandwidthLowSlider) {
+        bandwidthLowSlider.value = currentBandwidthLow;
+        document.getElementById('bandwidth-low-value').textContent = currentBandwidthLow;
+    }
+    if (bandwidthHighSlider) {
+        bandwidthHighSlider.value = currentBandwidthHigh;
+        document.getElementById('bandwidth-high-value').textContent = currentBandwidthHigh;
+    }
+
+    log(`Reconnecting to ${formatFrequency(lastConnectionParams.frequency)} ${lastConnectionParams.mode.toUpperCase()} (BW: ${lastConnectionParams.bandwidthLow} to ${lastConnectionParams.bandwidthHigh} Hz)`);
+
+    // Attempt to reconnect
+    connect();
 }
 
 // Disconnect from WebSocket
 function disconnect() {
+    // Clear reconnection timer when manually disconnecting
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+
     if (ws) {
         ws.close();
         ws = null;

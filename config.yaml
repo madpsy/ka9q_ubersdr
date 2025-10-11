@@ -68,7 +68,7 @@ spectrum:
     bin_bandwidth: 29296.875
   # Poll period in milliseconds (how often to request spectrum data)
   # Lower values = faster updates but more CPU/network usage
-  poll_period_ms: 50
+  poll_period_ms: 100
   # Maximum spectrum sessions per user (to prevent abuse)
   max_sessions_per_user: 2
   # Gain adjustment in dB applied to all spectrum data

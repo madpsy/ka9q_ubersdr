@@ -1665,6 +1665,14 @@ function log(message, type = 'info') {
 let lastWaterfallUpdate = 0;
 let waterfallUpdateInterval = 33; // Update waterfall every 33ms (30fps) - default fast rate
 
+// Oscilloscope throttling
+let lastOscilloscopeUpdate = 0;
+const oscilloscopeUpdateInterval = 33; // 30 fps (1000ms / 30 = 33ms)
+
+// Spectrum throttling
+let lastSpectrumUpdate = 0;
+const spectrumUpdateInterval = 33; // 30 fps (1000ms / 30 = 33ms)
+
 // Shared frequency mapping helpers for consistent spectrum/waterfall alignment
 function getFrequencyBinMapping() {
     if (!analyser || !audioContext) return null;
@@ -1773,13 +1781,19 @@ function startVisualization() {
         // Only update other visualizations if the section is expanded (performance optimization)
         if (audioVisualizationEnabled) {
             
-            // Update oscilloscope (60fps)
-            updateOscilloscope();
+            // Update oscilloscope (throttled to 30fps)
+            if (now - lastOscilloscopeUpdate >= oscilloscopeUpdateInterval) {
+                updateOscilloscope();
+                lastOscilloscopeUpdate = now;
+            }
             
-            // Update spectrum (60fps)
-            updateSpectrum();
+            // Update spectrum (throttled to 30fps)
+            if (now - lastSpectrumUpdate >= spectrumUpdateInterval) {
+                updateSpectrum();
+                lastSpectrumUpdate = now;
+            }
             
-            // Update waterfall (throttled to 20fps for performance)
+            // Update waterfall (throttled to 30fps for performance)
             if (now - lastWaterfallUpdate >= waterfallUpdateInterval) {
                 updateWaterfall();
                 lastWaterfallUpdate = now;
@@ -2464,14 +2478,8 @@ function updateWaterfall() {
         waterfallLineCount = 0;
     }
     
-    // Scroll existing waterfall down by 1 pixel (simple approach - no overlays on this canvas)
-    if (width > 0 && height > 1) {
-        try {
-            waterfallCtx.drawImage(waterfallCanvas, 0, 0, width, height - 1, 0, 1, width, height - 1);
-        } catch (e) {
-            console.log('Skipping waterfall scroll (canvas empty after resize)');
-        }
-    }
+    // Scroll the entire waterfall down by 1 pixel
+    waterfallCtx.drawImage(waterfallCanvas, 0, 0, width, height - 1, 0, 1, width, height - 1);
     
     // Increment line counter
     waterfallLineCount++;
@@ -2535,11 +2543,6 @@ function updateWaterfall() {
     
     // Draw the new line at the top
     waterfallCtx.putImageData(waterfallImageData, 0, 0);
-    
-    // Draw semi-transparent black bar at bottom for frequency labels
-    // This must be drawn BEFORE filter indicators so they appear on top
-    waterfallCtx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-    waterfallCtx.fillRect(0, height - 30, width, 30);
     
     // Draw timestamps on left side frequently (about 4 visible on 400px canvas)
     // With 400px height, we want timestamps every ~100 pixels
@@ -2791,53 +2794,69 @@ function drawWaterfallFilterOverlay() {
 
 
 
-// Convert magnitude (0-255) to heat map color
+// Pre-computed color lookup table for waterfall (256 entries)
+// Heat map: black -> blue -> cyan -> green -> yellow -> red -> white
+let colorLookupTable = null;
+
+function initializeColorLookupTable() {
+    colorLookupTable = new Array(256);
+    
+    for (let magnitude = 0; magnitude < 256; magnitude++) {
+        const normalized = magnitude / 255;
+        let r, g, b;
+        
+        if (normalized < 0.2) {
+            // Black to blue
+            const t = normalized / 0.2;
+            r = 0;
+            g = 0;
+            b = Math.floor(t * 255);
+        } else if (normalized < 0.4) {
+            // Blue to cyan
+            const t = (normalized - 0.2) / 0.2;
+            r = 0;
+            g = Math.floor(t * 255);
+            b = 255;
+        } else if (normalized < 0.6) {
+            // Cyan to green
+            const t = (normalized - 0.4) / 0.2;
+            r = 0;
+            g = 255;
+            b = Math.floor((1 - t) * 255);
+        } else if (normalized < 0.8) {
+            // Green to yellow
+            const t = (normalized - 0.6) / 0.2;
+            r = Math.floor(t * 255);
+            g = 255;
+            b = 0;
+        } else if (normalized < 0.95) {
+            // Yellow to red
+            const t = (normalized - 0.8) / 0.15;
+            r = 255;
+            g = Math.floor((1 - t) * 255);
+            b = 0;
+        } else {
+            // Red to white (very strong signals)
+            const t = (normalized - 0.95) / 0.05;
+            r = 255;
+            g = Math.floor(t * 255);
+            b = Math.floor(t * 255);
+        }
+        
+        colorLookupTable[magnitude] = { r, g, b };
+    }
+}
+
+// Convert magnitude (0-255) to heat map color using lookup table
 function magnitudeToColor(magnitude) {
-    // Normalize to 0-1
-    const normalized = magnitude / 255;
-    
-    // Heat map: black -> blue -> cyan -> green -> yellow -> red -> white
-    let r, g, b;
-    
-    if (normalized < 0.2) {
-        // Black to blue
-        const t = normalized / 0.2;
-        r = 0;
-        g = 0;
-        b = Math.floor(t * 255);
-    } else if (normalized < 0.4) {
-        // Blue to cyan
-        const t = (normalized - 0.2) / 0.2;
-        r = 0;
-        g = Math.floor(t * 255);
-        b = 255;
-    } else if (normalized < 0.6) {
-        // Cyan to green
-        const t = (normalized - 0.4) / 0.2;
-        r = 0;
-        g = 255;
-        b = Math.floor((1 - t) * 255);
-    } else if (normalized < 0.8) {
-        // Green to yellow
-        const t = (normalized - 0.6) / 0.2;
-        r = Math.floor(t * 255);
-        g = 255;
-        b = 0;
-    } else if (normalized < 0.95) {
-        // Yellow to red
-        const t = (normalized - 0.8) / 0.15;
-        r = 255;
-        g = Math.floor((1 - t) * 255);
-        b = 0;
-    } else {
-        // Red to white (very strong signals)
-        const t = (normalized - 0.95) / 0.05;
-        r = 255;
-        g = Math.floor(t * 255);
-        b = Math.floor(t * 255);
+    // Initialize lookup table on first use
+    if (!colorLookupTable) {
+        initializeColorLookupTable();
     }
     
-    return { r, g, b };
+    // Clamp magnitude to valid range and use lookup table
+    const index = Math.max(0, Math.min(255, Math.floor(magnitude)));
+    return colorLookupTable[index];
 }
 
 // Send periodic keepalive

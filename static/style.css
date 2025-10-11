@@ -1,3 +1,69 @@
+/* Notification Toast */
+.notification-toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    min-width: 300px;
+    max-width: 500px;
+    padding: 16px 20px;
+    background-color: #dc3545;
+    color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 10000;
+    display: none;
+    font-size: 14px;
+    line-height: 1.5;
+    animation: slideIn 0.3s ease-out;
+}
+
+.notification-toast.show {
+    display: block;
+}
+
+.notification-toast.error {
+    background-color: #dc3545;
+}
+
+.notification-toast.warning {
+    background-color: #ffc107;
+    color: #000;
+}
+
+.notification-toast.info {
+    background-color: #17a2b8;
+}
+
+.notification-toast.success {
+    background-color: #28a745;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+}
+
+.notification-toast.hiding {
+    animation: slideOut 0.3s ease-in;
+}
+
 /* ka9q UberSDR Styles */
 
 * {

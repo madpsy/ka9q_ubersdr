@@ -118,6 +118,13 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 		return
 	}
 
+	// Check if this UUID has been kicked
+	if swsh.sessions.IsUUIDKicked(userSessionID) {
+		log.Printf("Rejected Spectrum WebSocket connection: kicked user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
+		http.Error(w, "Your session has been terminated. Please refresh the page.", http.StatusForbidden)
+		return
+	}
+
 	// Upgrade HTTP connection to WebSocket
 	rawConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -144,6 +151,9 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 		swsh.sendError(conn, "Failed to create spectrum session: "+err.Error())
 		return
 	}
+
+	// Store WebSocket connection reference in session for kick functionality
+	session.WSConn = conn
 
 	if userSessionID != "" {
 		log.Printf("Spectrum WebSocket session created: %s, user_session_id: %s, source IP: %s, client IP: %s", session.ID, userSessionID, sourceIP, clientIP)

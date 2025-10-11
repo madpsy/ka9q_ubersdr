@@ -1,3 +1,21 @@
+// Notification system
+function showNotification(message, type = 'error', duration = 5000) {
+    const toast = document.getElementById('notification-toast');
+    if (!toast) return;
+
+    // Set message and type
+    toast.textContent = message;
+    toast.className = 'notification-toast show ' + type;
+
+    // Auto-hide after duration
+    setTimeout(() => {
+        toast.classList.add('hiding');
+        setTimeout(() => {
+            toast.classList.remove('show', 'hiding', type);
+        }, 300); // Match animation duration
+    }, duration);
+}
+
 // ka9q UberSDR Web Client
 
 // Generate a unique session ID for this browser session
@@ -19,6 +37,8 @@ let ws = null;
 let audioContext = null;
 let reconnectTimer = null;
 let reconnectDelay = 1000;
+let reconnectAttempts = 0; // Track number of reconnection attempts
+const maxReconnectAttempts = 10; // Give up after 10 attempts
 let lastConnectionParams = null; // Store connection parameters for reconnection
 let audioUserDisconnected = false; // Flag to prevent reconnection after user disconnect
 // Expose audioContext globally for recorder
@@ -655,14 +675,22 @@ function connect() {
     
     log(`Connecting to ${wsUrl}...`);
     
-    ws = new WebSocket(wsUrl);
+    try {
+        ws = new WebSocket(wsUrl);
+    } catch (error) {
+        console.error('Failed to create WebSocket:', error);
+        showNotification('Failed to connect. Please refresh the page.', 'error');
+        updateConnectionStatus('disconnected');
+        return;
+    }
     
     ws.onopen = () => {
         log('Connected!');
         updateConnectionStatus('connected');
 
-        // Reset reconnect delay on successful connection
+        // Reset reconnect delay and attempts on successful connection
         reconnectDelay = 1000;
+        reconnectAttempts = 0;
 
         // Start stats updates
         startStatsUpdates();
@@ -735,15 +763,31 @@ function connect() {
     ws.onerror = (error) => {
         log('WebSocket error: ' + error);
         console.error('WebSocket error:', error);
+        showNotification('Connection error occurred. Attempting to reconnect...', 'error');
     };
     
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+        console.log('WebSocket closed - Code:', event.code, 'Reason:', event.reason, 'Clean:', event.wasClean);
         log('Disconnected');
         updateConnectionStatus('disconnected');
         ws = null;
 
         // Stop stats updates
         stopStatsUpdates();
+
+        // Show notification for abnormal closures
+        // Code 1000 = normal closure (user initiated)
+        // Code 1001 = going away (page navigation)
+        // Any other code or unclean close = show notification
+        if (event.code !== 1000 && event.code !== 1001) {
+            // Check if this was during initial connection (never opened)
+            if (!event.wasClean || event.code === 1006) {
+                // 1006 = abnormal closure (no close frame received)
+                showNotification('Connection failed. You may have been disconnected by an administrator. Please refresh the page.', 'error');
+            } else {
+                showNotification('Connection lost. Please refresh the page if it does not reconnect automatically.', 'error');
+            }
+        }
 
         // Schedule reconnection if we have saved parameters AND user didn't explicitly disconnect
         // Check window.audioUserDisconnected (set by idle detector) as well as local variable
@@ -753,19 +797,33 @@ function connect() {
     };
 }
 
-// Schedule reconnection attempt
+// Schedule reconnection attempt with exponential backoff
 function scheduleReconnect() {
     if (reconnectTimer) {
         return;
     }
 
-    console.log(`Reconnecting in ${reconnectDelay}ms...`);
-    log(`Reconnecting in ${reconnectDelay/1000}s...`);
+    // Check if we've exceeded max attempts
+    if (reconnectAttempts >= maxReconnectAttempts) {
+        log('Maximum reconnection attempts reached. Please refresh the page.', 'error');
+        showNotification('Unable to reconnect after multiple attempts. You may have been disconnected by an administrator. Please refresh the page.', 'error', 10000);
+        return;
+    }
+
+    reconnectAttempts++;
+    
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped at 60s)
+    // This spreads 10 attempts over approximately 1 minute
+    const delay = Math.min(reconnectDelay, 60000); // Cap at 60 seconds
+    
+    console.log(`Reconnection attempt ${reconnectAttempts}/${maxReconnectAttempts} in ${delay}ms...`);
+    log(`Reconnecting (${reconnectAttempts}/${maxReconnectAttempts}) in ${delay/1000}s...`);
+    
     reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
-        reconnectDelay = Math.min(reconnectDelay * 2, 30000); // Max 30 seconds
+        reconnectDelay = Math.min(reconnectDelay * 2, 60000); // Exponential backoff, max 60 seconds
         reconnect();
-    }, reconnectDelay);
+    }, delay);
 }
 
 // Reconnect with saved parameters

@@ -341,6 +341,15 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Check if this UUID has been kicked
+	if wsh.sessions.IsUUIDKicked(userSessionID) {
+		log.Printf("Rejected WebSocket connection: kicked user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
+		if err := wsh.sendError(conn, "Your session has been terminated. Please refresh the page."); err != nil {
+			log.Printf("Failed to send error message: %v", err)
+		}
+		return
+	}
+
 	// Get bandwidth parameters from query string (optional)
 	var bandwidthLow, bandwidthHigh *int
 	if bwl := query.Get("bandwidthLow"); bwl != "" {
@@ -370,6 +379,9 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		wsh.sendError(conn, "Failed to create session: "+err.Error())
 		return
 	}
+
+	// Store WebSocket connection reference in session for kick functionality
+	session.WSConn = conn
 
 	// If bandwidth parameters were provided in URL, update the session immediately
 	if bandwidthLow != nil || bandwidthHigh != nil {

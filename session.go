@@ -33,6 +33,9 @@ type Session struct {
 	ClientIP      string // True client IP (from X-Forwarded-For if present)
 	UserSessionID string // Client-generated UUID to link audio and spectrum sessions
 
+	// WebSocket connection (for closing when kicked)
+	WSConn interface{} // *wsConn, stored as interface{} to avoid import cycle
+
 	// Spectrum-specific fields (only used when Mode == "spectrum")
 	IsSpectrum   bool
 	BinCount     int
@@ -43,12 +46,14 @@ type Session struct {
 // SessionManager manages all active sessions
 type SessionManager struct {
 	sessions      map[string]*Session
-	ssrcToSession map[uint32]*Session // Map SSRC to session for audio routing
+	ssrcToSession map[uint32]*Session  // Map SSRC to session for audio routing
+	kickedUUIDs   map[string]time.Time // Map of kicked user_session_ids with expiry time
 	mu            sync.RWMutex
 	config        *Config
 	radiod        *RadiodController
 	maxSessions   int
 	timeout       time.Duration
+	kickedUUIDTTL time.Duration // How long to remember kicked UUIDs (default 1 hour)
 }
 
 // NewSessionManager creates a new session manager
@@ -56,10 +61,12 @@ func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager
 	sm := &SessionManager{
 		sessions:      make(map[string]*Session),
 		ssrcToSession: make(map[uint32]*Session),
+		kickedUUIDs:   make(map[string]time.Time),
 		config:        config,
 		radiod:        radiod,
 		maxSessions:   config.Server.MaxSessions,
 		timeout:       time.Duration(config.Server.SessionTimeout) * time.Second,
+		kickedUUIDTTL: 1 * time.Hour, // Remember kicked UUIDs for 1 hour
 	}
 
 	// Start cleanup goroutine
@@ -504,6 +511,16 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	}
 	sm.mu.Unlock()
 
+	// Close WebSocket connection if present (forces immediate disconnect)
+	if session.WSConn != nil {
+		if wsConn, ok := session.WSConn.(interface{ close() error }); ok {
+			log.Printf("DEBUG: Closing WebSocket connection for session %s", sessionID)
+			if err := wsConn.close(); err != nil {
+				log.Printf("Warning: failed to close WebSocket for session %s: %v", sessionID, err)
+			}
+		}
+	}
+
 	// Signal session is done
 	close(session.Done)
 
@@ -529,13 +546,37 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	return nil
 }
 
-// cleanupLoop periodically checks for and removes inactive sessions
+// cleanupLoop periodically checks for and removes inactive sessions and expired kicked UUIDs
 func (sm *SessionManager) cleanupLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		sm.cleanupInactiveSessions()
+		sm.cleanupExpiredKickedUUIDs()
+	}
+}
+
+// cleanupExpiredKickedUUIDs removes expired entries from the kicked UUIDs list
+func (sm *SessionManager) cleanupExpiredKickedUUIDs() {
+	now := time.Now()
+	var toRemove []string
+
+	sm.mu.RLock()
+	for uuid, expiry := range sm.kickedUUIDs {
+		if now.After(expiry) {
+			toRemove = append(toRemove, uuid)
+		}
+	}
+	sm.mu.RUnlock()
+
+	if len(toRemove) > 0 {
+		sm.mu.Lock()
+		for _, uuid := range toRemove {
+			delete(sm.kickedUUIDs, uuid)
+		}
+		sm.mu.Unlock()
+		log.Printf("Cleaned up %d expired kicked UUID(s)", len(toRemove))
 	}
 }
 
@@ -661,12 +702,48 @@ func (sm *SessionManager) Shutdown() {
 	log.Println("All sessions destroyed")
 }
 
+// IsUUIDKicked checks if a user_session_id has been kicked
+func (sm *SessionManager) IsUUIDKicked(userSessionID string) bool {
+	if userSessionID == "" {
+		log.Printf("DEBUG: IsUUIDKicked called with empty UUID")
+		return false
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	expiry, exists := sm.kickedUUIDs[userSessionID]
+	log.Printf("DEBUG: IsUUIDKicked(%s) - exists: %v, kickedUUIDs count: %d", userSessionID, exists, len(sm.kickedUUIDs))
+
+	if !exists {
+		return false
+	}
+
+	// Check if the kick has expired
+	if time.Now().After(expiry) {
+		// Expired, will be cleaned up by cleanup loop
+		log.Printf("DEBUG: UUID %s kick has expired", userSessionID)
+		return false
+	}
+
+	log.Printf("DEBUG: UUID %s is kicked (expires: %v)", userSessionID, expiry)
+	return true
+}
+
 // KickUserBySessionID destroys all sessions with the given user_session_id
-// This forces the user to refresh and generate a new UUID
+// and adds the UUID to the kicked list to prevent reconnection
 func (sm *SessionManager) KickUserBySessionID(userSessionID string) (int, error) {
 	if userSessionID == "" {
 		return 0, fmt.Errorf("user_session_id cannot be empty")
 	}
+
+	log.Printf("DEBUG: Kicking user_session_id: %s", userSessionID)
+
+	sm.mu.Lock()
+	// Add UUID to kicked list with expiry time
+	sm.kickedUUIDs[userSessionID] = time.Now().Add(sm.kickedUUIDTTL)
+	log.Printf("DEBUG: Added %s to kickedUUIDs map (size now: %d)", userSessionID, len(sm.kickedUUIDs))
+	sm.mu.Unlock()
 
 	sm.mu.RLock()
 	var sessionsToKick []string
@@ -674,19 +751,26 @@ func (sm *SessionManager) KickUserBySessionID(userSessionID string) (int, error)
 		session.mu.RLock()
 		if session.UserSessionID == userSessionID {
 			sessionsToKick = append(sessionsToKick, session.ID)
+			log.Printf("DEBUG: Found session to kick: %s (type: %s)", session.ID, func() string {
+				if session.IsSpectrum {
+					return "spectrum"
+				}
+				return "audio"
+			}())
 		}
 		session.mu.RUnlock()
 	}
 	sm.mu.RUnlock()
 
-	// Destroy all matching sessions
+	// Destroy all matching sessions (this closes the WebSocket connections)
 	for _, sessionID := range sessionsToKick {
 		if err := sm.DestroySession(sessionID); err != nil {
 			log.Printf("Error kicking session %s: %v", sessionID, err)
 		}
 	}
 
-	log.Printf("Kicked user with session ID %s (%d session(s) destroyed)", userSessionID, len(sessionsToKick))
+	log.Printf("Kicked user with session ID %s (%d session(s) destroyed, UUID blacklisted for %v)",
+		userSessionID, len(sessionsToKick), sm.kickedUUIDTTL)
 	return len(sessionsToKick), nil
 }
 

@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="style.css">
     <!-- Opus decoder for handling Opus-compressed audio -->
     <script src="https://unpkg.com/@wasm-audio-decoders/opus@0.1.12/dist/opus-decoder.min.js"></script>
+    <!-- JSZip for creating ZIP files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- FFT and NR2 libraries for noise reduction -->
     <script src="fft.js"></script>
     <script src="nr2.js"></script>
@@ -133,7 +135,8 @@
             </div>
             <div class="control-group">
                 <button id="mute-btn" onclick="toggleMute()">🔊 Mute</button>
-                <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #dc3545; margin-left: 10px;">NR2</button>
+                <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 10px;">NR2</button>
+                <button id="rec-btn" onclick="openRecorderModal()" style="margin-left: 10px;">⏺ Rec</button>
             </div>
             <div class="control-group vu-meter-compact-container" id="vu-meter-compact">
                 <div class="vu-meter">
@@ -154,7 +157,7 @@
         <!-- Audio Visualization Section (Collapsible) -->
         <div class="audio-visualization-section">
             <div class="audio-visualization-header" onclick="toggleAudioVisualization()">
-                <h3>📊 Audio Visualisation</h3>
+                <h3>Audio Visualisation</h3>
                 <span id="audio-viz-toggle" class="toggle-icon">▼</span>
             </div>
             <div id="audio-visualization-content" class="audio-visualization-content" style="display: block;">
@@ -186,10 +189,17 @@
                 </div>
                 <div class="oscilloscope-container">
                     <canvas id="oscilloscope-canvas" width="400" height="140"></canvas>
-                    <div class="oscilloscope-controls">
-                        <label for="oscilloscope-zoom">Timebase:</label>
-                        <input type="range" id="oscilloscope-zoom" min="1" max="100" value="100" step="1" oninput="updateOscilloscopeZoom()">
-                        <span id="oscilloscope-zoom-value">-- ms</span>
+                    <div class="oscilloscope-controls" style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label for="oscilloscope-zoom">Timebase:</label>
+                            <input type="range" id="oscilloscope-zoom" min="1" max="200" value="200" step="1" oninput="updateOscilloscopeZoom()">
+                            <span id="oscilloscope-zoom-value">-- ms</span>
+                        </div>
+                        <div style="display: flex; gap: 5px;">
+                            <button id="auto-sync-btn" onclick="autoSyncOscilloscope()" style="padding: 4px 12px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" title="Toggle trigger lock for stable waveform">Auto Sync</button>
+                            <button id="auto-scale-btn" onclick="autoScaleOscilloscope()" style="padding: 4px 12px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" title="Toggle continuous auto-scaling of Y-axis">Auto Scale</button>
+                            <button id="set-1khz-btn" onclick="shiftFrequencyTo1kHz()" style="padding: 4px 12px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;" title="Shift detected signal to 1 kHz">Set 1 kHz</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -209,7 +219,8 @@
                             <option value="4096">4096 (Fast)</option>
                             <option value="8192">8192 (Balanced)</option>
                             <option value="16384" selected>16384 (High Detail)</option>
-                            <option value="32768">32768 (Maximum Detail)</option>
+                            <option value="32768">32768 (Very High Detail)</option>
+                            <option value="65536">65536 (Ultra Detail - CW)</option>
                         </select>
                     </div>
                     <div class="waterfall-control-group">
@@ -253,7 +264,8 @@
                     </div>
                     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0;">
                         <button onclick="huntCWSignal()" class="cw-btn" style="width: auto; padding: 5px 15px;">Hunt</button>
-                        <span style="color: #888; font-size: 0.9em;">Find signals</span>
+                        <button onclick="shiftCWSignalTo700Hz()" class="cw-btn" style="width: auto; padding: 5px 15px; background-color: #17a2b8;">Shift to 500 Hz</button>
+                        <span style="color: #888; font-size: 0.9em;">Find & shift signals</span>
                         <span style="margin-left: 10px;">WPM: <span id="cw-wpm-value">-- (auto)</span></span>
                         <button onclick="resetCWDecoderWPM()" class="cw-btn" style="width: auto; padding: 5px 15px;">Reset</button>
                         <span style="margin-left: 20px;">Threshold: <span id="cw-threshold-value">0.0005</span></span>
@@ -580,8 +592,48 @@
 
     </div>
 
+    <!-- Audio Recorder Modal -->
+    <div id="recorder-modal" class="modal" style="display: none;">
+        <div class="modal-content recorder-modal-content">
+            <div class="modal-header">
+                <h2>Audio Recorder</h2>
+                <button class="modal-close" onclick="closeRecorderModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="recorder-status">
+                    <div class="recorder-status-indicator" id="recorder-status-indicator"></div>
+                    <span id="recorder-status-text">Stopped</span>
+                </div>
+                <div class="recorder-time">
+                    <span id="recording-time">00:00</span>
+                </div>
+                <div class="recorder-controls">
+                    <button id="recorder-start-btn" onclick="startRecording()" class="recorder-btn recorder-start-btn">
+                        <span>⏺</span> Start Recording
+                    </button>
+                    <button id="recorder-stop-btn" onclick="stopRecording()" class="recorder-btn recorder-stop-btn" disabled>
+                        <span>⏹</span> Stop Recording
+                    </button>
+                </div>
+                <div class="recorder-actions">
+                    <button id="recorder-download-btn" onclick="downloadRecording()" class="recorder-btn recorder-download-btn" disabled>
+                        <span>⬇</span> Download Recording
+                    </button>
+                    <button id="recorder-clear-btn" onclick="clearRecording()" class="recorder-btn recorder-clear-btn" disabled>
+                        <span>🗑</span> Clear Recording
+                    </button>
+                </div>
+                <div class="recorder-info">
+                    <p><strong>Note:</strong> Recording captures the processed audio output including all active filters and effects.</p>
+                    <p>Recordings are saved in WebM format with Opus codec.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="spectrum-display.js"></script>
     <script src="cw-decoder.js"></script>
+    <script src="recorder.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

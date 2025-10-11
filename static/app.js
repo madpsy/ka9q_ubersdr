@@ -1,6 +1,8 @@
 // ka9q UberSDR Web Client
 let ws = null;
 let audioContext = null;
+// Expose audioContext globally for recorder
+window.audioContext = null;
 let audioQueue = [];
 let isPlaying = false;
 let isMuted = false;
@@ -11,6 +13,11 @@ let currentMode = 'usb';
 let currentBandwidthLow = 50;
 let currentBandwidthHigh = 3000;
 
+// Expose mode and bandwidth globally for recorder
+window.currentMode = currentMode;
+window.currentBandwidthLow = currentBandwidthLow;
+window.currentBandwidthHigh = currentBandwidthHigh;
+
 // Audio analysis
 let analyser = null; // Analyser for spectrum/waterfall (taps signal before processing)
 let vuAnalyser = null; // Dedicated analyser for VU meter (after all processing)
@@ -18,6 +25,17 @@ let spectrumCanvas = null;
 let spectrumCtx = null;
 let spectrumPeaks = null; // Array to store peak values for each bar
 let spectrumLabelsCache = null; // Cached canvas for dB scale labels
+let audioSpectrumTooltip = null; // Tooltip element for audio spectrum/waterfall
+let audioSpectrumMouseX = -1; // Mouse X position on audio spectrum
+let audioSpectrumMouseY = -1; // Mouse Y position on audio spectrum
+let audioSpectrumLastData = null; // Store last spectrum data for tooltip
+let audioSpectrumActiveCanvas = null; // Track which canvas the mouse is over
+
+// Audio spectrum autoranging - temporal smoothing like main graph mode
+let audioSpectrumMinHistory = []; // Track minimum values over time for stable noise floor
+let audioSpectrumMaxHistory = []; // Track maximum values over time for stable ceiling
+const audioSpectrumMinHistoryMaxAge = 2000; // 2 second window for noise floor
+const audioSpectrumMaxHistoryMaxAge = 20000; // 20 second window for maximum (handles FT8 cycles)
 let waterfallCanvas = null;
 let waterfallCtx = null;
 let waterfallOverlayCanvas = null;
@@ -41,9 +59,15 @@ let vuPeakDecayRate = 0.1; // Percentage points per frame (slower decay for visi
 let oscilloscopeCanvas = null;
 let oscilloscopeCtx = null;
 let animationFrameId = null;
+let oscilloscopeFreqHistory = []; // Store recent frequency measurements for averaging
+let oscilloscopeFreqHistoryMaxSize = 60; // Average over last 60 samples (~2 seconds at 30fps)
 let waterfallIntensity = 0.0; // Intensity adjustment for waterfall (-1.0 to +1.0, 0 = normal)
 let waterfallContrast = 50; // Contrast threshold for waterfall (0-100, suppresses noise floor)
-let oscilloscopeZoom = 100; // Oscilloscope zoom level (1-100, affects timebase, default to max/slowest)
+let oscilloscopeZoom = 200; // Oscilloscope zoom level (1-200, affects timebase, default to max/slowest)
+let oscilloscopeTriggerEnabled = false; // Enable continuous trigger tracking
+let oscilloscopeTriggerFreq = 0; // Target frequency for trigger
+let oscilloscopeYScale = 1.0; // Y-axis scale factor (1.0 = normal, >1 = zoomed in, <1 = zoomed out)
+let oscilloscopeAutoScaleEnabled = false; // Enable continuous auto-scaling
 let bandpassFilters = []; // Array of cascaded bandpass filters for steep rolloff (4 stages = 48 dB/octave)
 let bandpassEnabled = false;
 let notchFilters = []; // Array of notch filter objects, each with {filters: [], center: Hz, width: Hz}
@@ -172,22 +196,78 @@ document.addEventListener('DOMContentLoaded', () => {
     vuMeterBarCompact = document.getElementById('vu-meter-bar-compact');
     vuMeterPeakCompact = document.getElementById('vu-meter-peak-compact');
     
-    // Set audio visualization as disabled by default (collapsed for better performance)
-    audioVisualizationEnabled = false;
+    // Set audio visualization as enabled by default (expanded)
+    audioVisualizationEnabled = true;
     
-    // Show compact VU meter since full visualization is hidden
+    // Hide compact VU meter since full visualization is shown
     const compactVU = document.getElementById('vu-meter-compact');
-    if (compactVU) compactVU.style.display = 'flex';
+    if (compactVU) compactVU.style.display = 'none';
     
-    // Hide the full visualization content
+    // Show the full visualization content
     const content = document.getElementById('audio-visualization-content');
-    if (content) content.style.display = 'none';
+    if (content) content.style.display = 'block';
     
-    // Remove expanded class from toggle
+    // Add expanded class to toggle
     const toggle = document.getElementById('audio-viz-toggle');
-    if (toggle) toggle.classList.remove('expanded');
+    if (toggle) toggle.classList.add('expanded');
     
-    // Initialize canvas sizes for visible audio visualization
+    // Create tooltip for audio spectrum/waterfall immediately (before canvas initialization)
+    audioSpectrumTooltip = document.createElement('div');
+    audioSpectrumTooltip.style.position = 'fixed';
+    audioSpectrumTooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+    audioSpectrumTooltip.style.color = '#fff';
+    audioSpectrumTooltip.style.padding = '8px 12px';
+    audioSpectrumTooltip.style.borderRadius = '4px';
+    audioSpectrumTooltip.style.fontSize = '12px';
+    audioSpectrumTooltip.style.fontFamily = 'monospace';
+    audioSpectrumTooltip.style.pointerEvents = 'none';
+    audioSpectrumTooltip.style.zIndex = '10000';
+    audioSpectrumTooltip.style.display = 'none';
+    audioSpectrumTooltip.style.whiteSpace = 'nowrap';
+    audioSpectrumTooltip.style.border = '1px solid #fff';
+    document.body.appendChild(audioSpectrumTooltip);
+    
+    // Add mouse tracking for spectrum canvas
+    if (spectrumCanvas) {
+        spectrumCanvas.addEventListener('mousemove', (e) => {
+            const rect = spectrumCanvas.getBoundingClientRect();
+            audioSpectrumMouseX = e.clientX - rect.left;
+            audioSpectrumMouseY = e.clientY - rect.top;
+            audioSpectrumActiveCanvas = spectrumCanvas;
+            updateAudioSpectrumTooltip(e.clientX, e.clientY);
+        });
+        
+        spectrumCanvas.addEventListener('mouseleave', () => {
+            audioSpectrumMouseX = -1;
+            audioSpectrumMouseY = -1;
+            audioSpectrumActiveCanvas = null;
+            if (audioSpectrumTooltip) {
+                audioSpectrumTooltip.style.display = 'none';
+            }
+        });
+    }
+    
+    // Add mouse tracking for waterfall canvas
+    if (waterfallCanvas) {
+        waterfallCanvas.addEventListener('mousemove', (e) => {
+            const rect = waterfallCanvas.getBoundingClientRect();
+            audioSpectrumMouseX = e.clientX - rect.left;
+            audioSpectrumMouseY = e.clientY - rect.top;
+            audioSpectrumActiveCanvas = waterfallCanvas;
+            updateAudioSpectrumTooltip(e.clientX, e.clientY);
+        });
+        
+        waterfallCanvas.addEventListener('mouseleave', () => {
+            audioSpectrumMouseX = -1;
+            audioSpectrumMouseY = -1;
+            audioSpectrumActiveCanvas = null;
+            if (audioSpectrumTooltip) {
+                audioSpectrumTooltip.style.display = 'none';
+            }
+        });
+    }
+    
+    // Initialize canvas sizes
     setTimeout(() => {
         if (spectrumCanvas && spectrumCtx) {
             const rect = spectrumCanvas.getBoundingClientRect();
@@ -494,14 +574,18 @@ function connect() {
         // Initialize audio context
         if (!audioContext) {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            window.audioContext = audioContext; // Expose globally for recorder
             nextPlayTime = audioContext.currentTime;
             audioStartTime = audioContext.currentTime;
             log(`Audio context initialized (sample rate: ${audioContext.sampleRate} Hz)`);
             
             // Create analyser for spectrum/waterfall (taps signal before processing)
             analyser = audioContext.createAnalyser();
-            analyser.fftSize = 16384; // High resolution: 16384 bins for detailed frequency analysis
+            analyser.fftSize = getOptimalFFTSize(); // Dynamic FFT size based on bandwidth
             analyser.smoothingTimeConstant = 0; // No smoothing - instant response, no fade
+            
+            // Update FFT size dropdown to reflect the chosen size
+            updateFFTSizeDropdown();
             
             // Create dedicated analyser for VU meter (will be connected after all processing)
             vuAnalyser = audioContext.createAnalyser();
@@ -1062,8 +1146,14 @@ function playAudioBuffer(buffer) {
         outputNode = stereoMakeupGain;
     }
     
-    // Step 9: Final output to destination
-    outputNode.connect(audioContext.destination);
+    // Step 9: Final output to destination (or recorder gain node if recording)
+    if (window.recorderGainNode) {
+        // If recorder is active, route through recorder gain node
+        outputNode.connect(window.recorderGainNode);
+    } else {
+        // Otherwise connect directly to destination
+        outputNode.connect(audioContext.destination);
+    }
     
     // Schedule playback to maintain continuous audio
     const currentTime = audioContext.currentTime;
@@ -1379,6 +1469,7 @@ function updateURL() {
 // Set mode from buttons
 function setMode(mode, preserveBandwidth = false) {
     currentMode = mode;
+    window.currentMode = mode; // Update global reference
     
     // Update button states
     document.querySelectorAll('.mode-btn').forEach(btn => {
@@ -1477,6 +1568,18 @@ function setMode(mode, preserveBandwidth = false) {
         log(`Mode changed to ${mode.toUpperCase()} (BW: ${currentBandwidthLow} to ${currentBandwidthHigh} Hz)`);
     }
     
+    // Update FFT size based on new bandwidth
+    if (analyser) {
+        const oldFFTSize = analyser.fftSize;
+        const newFFTSize = getOptimalFFTSize();
+        
+        if (oldFFTSize !== newFFTSize) {
+            analyser.fftSize = newFFTSize;
+            updateFFTSizeDropdown();
+            log(`FFT size auto-adjusted to ${newFFTSize} for ${Math.abs(currentBandwidthHigh - currentBandwidthLow)} Hz bandwidth`);
+        }
+    }
+    
     // Update URL with new mode
     updateURL();
     
@@ -1490,26 +1593,6 @@ function setMode(mode, preserveBandwidth = false) {
     if (cwDecoderPanel) {
         if (mode === 'cwu' || mode === 'cwl') {
             cwDecoderPanel.style.display = 'block';
-            
-            // Auto-enable bandpass filter for CW modes with 500 Hz offset
-            if (!bandpassEnabled && audioContext) {
-                const checkbox = document.getElementById('bandpass-enable');
-                if (checkbox) {
-                    checkbox.checked = true;
-                    toggleBandpassFilter();
-                    
-                    // Set bandpass to 500 Hz center with 400 Hz width
-                    const centerSlider = document.getElementById('bandpass-center');
-                    const widthSlider = document.getElementById('bandpass-width');
-                    if (centerSlider && widthSlider) {
-                        centerSlider.value = 500;
-                        widthSlider.value = 400;
-                        updateBandpassFilter();
-                    }
-                    
-                    log('Bandpass filter auto-enabled for CW mode at 500 Hz');
-                }
-            }
         } else {
             cwDecoderPanel.style.display = 'none';
             // Disable CW decoder if it was enabled
@@ -1528,6 +1611,16 @@ function setMode(mode, preserveBandwidth = false) {
                     log('Bandpass filter disabled when switching from CW mode');
                 }
             }
+        }
+    }
+    
+    // Show/hide "Set 1 kHz" button based on mode
+    const set1kHzBtn = document.getElementById('set-1khz-btn');
+    if (set1kHzBtn) {
+        if (['usb', 'lsb', 'cwu', 'cwl'].includes(mode)) {
+            set1kHzBtn.style.display = 'inline-block';
+        } else {
+            set1kHzBtn.style.display = 'none';
         }
     }
     
@@ -1553,8 +1646,23 @@ function updateBandwidth() {
     const bandwidthHigh = parseInt(document.getElementById('bandwidth-high').value);
     currentBandwidthLow = bandwidthLow;
     currentBandwidthHigh = bandwidthHigh;
+    // Update global references
+    window.currentBandwidthLow = bandwidthLow;
+    window.currentBandwidthHigh = bandwidthHigh;
     document.getElementById('bandwidth-low-value').textContent = bandwidthLow;
     document.getElementById('bandwidth-high-value').textContent = bandwidthHigh;
+    
+    // Update FFT size based on new bandwidth
+    if (analyser) {
+        const oldFFTSize = analyser.fftSize;
+        const newFFTSize = getOptimalFFTSize();
+        
+        if (oldFFTSize !== newFFTSize) {
+            analyser.fftSize = newFFTSize;
+            updateFFTSizeDropdown();
+            log(`FFT size auto-adjusted to ${newFFTSize} for ${Math.abs(bandwidthHigh - bandwidthLow)} Hz bandwidth`);
+        }
+    }
     
     // Clear waterfall when bandwidth changes to avoid misaligned old data
     if (waterfallCtx) {
@@ -1618,7 +1726,7 @@ function toggleNR2Quick() {
         btn.style.backgroundColor = '#28a745'; // Green when enabled
         log('NR2 enabled via quick toggle');
     } else {
-        btn.style.backgroundColor = '#dc3545'; // Red when disabled
+        btn.style.backgroundColor = '#fd7e14'; // Orange when disabled
         log('NR2 disabled via quick toggle');
     }
 }
@@ -2083,37 +2191,176 @@ function updateOscilloscope() {
     const width = oscilloscopeCanvas.width;
     const height = oscilloscopeCanvas.height;
     
+    // Calculate frequency using zero-crossing detection
+    const detectedFreq = detectFrequencyFromWaveform(dataArray, audioContext.sampleRate);
+    
+    // Add to frequency history for averaging
+    if (detectedFreq > 0) {
+        oscilloscopeFreqHistory.push(detectedFreq);
+        // Keep only last N samples
+        if (oscilloscopeFreqHistory.length > oscilloscopeFreqHistoryMaxSize) {
+            oscilloscopeFreqHistory.shift();
+        }
+    }
+    
+    // Calculate averaged frequency
+    const avgFreq = oscilloscopeFreqHistory.length > 0
+        ? oscilloscopeFreqHistory.reduce((sum, f) => sum + f, 0) / oscilloscopeFreqHistory.length
+        : detectedFreq;
+    
+    // Debug logging (remove after testing)
+    if (Math.random() < 0.01) { // Log 1% of frames to avoid spam
+        console.log(`Oscilloscope freq: detected=${detectedFreq.toFixed(1)}, history size=${oscilloscopeFreqHistory.length}, avg=${avgFreq.toFixed(1)}`);
+    }
+    
+    // Auto scale if enabled
+    if (oscilloscopeAutoScaleEnabled) {
+        // Find peak-to-peak amplitude
+        let min = 255;
+        let max = 0;
+        
+        for (let i = 0; i < dataArray.length; i++) {
+            min = Math.min(min, dataArray[i]);
+            max = Math.max(max, dataArray[i]);
+        }
+        
+        // Convert to normalized amplitude (-1.0 to +1.0)
+        const minNorm = (min - 128) / 128;
+        const maxNorm = (max - 128) / 128;
+        const peakToPeak = maxNorm - minNorm;
+        
+        if (peakToPeak > 0.01) {
+            // Calculate scale factor to fit signal with 10% padding (use 80% of display height)
+            const targetRange = 1.6;
+            const newScale = targetRange / peakToPeak;
+            
+            // Clamp to reasonable range (0.1x to 10x) and apply smoothing
+            const clampedScale = Math.max(0.1, Math.min(10, newScale));
+            // Smooth the scale changes to avoid jitter (exponential moving average)
+            oscilloscopeYScale = oscilloscopeYScale * 0.9 + clampedScale * 0.1;
+        }
+    }
+    
     // Calculate how many samples to display based on zoom level
     // Invert zoom so higher slider value = slower timebase (more samples displayed)
-    // Slider 1 = fast (1/100 of buffer), Slider 100 = slow (full buffer)
-    const invertedZoom = 101 - oscilloscopeZoom; // Invert: 1->100, 100->1
+    // Slider 1 = fast (1/200 of buffer), Slider 200 = slow (full buffer)
+    const invertedZoom = 201 - oscilloscopeZoom; // Invert: 1->200, 200->1
     const samplesToDisplay = Math.floor(bufferLength / invertedZoom);
-    const startSample = Math.floor((bufferLength - samplesToDisplay) / 2); // Center the view
+    
+    // Find trigger point if trigger is enabled
+    let startSample;
+    if (oscilloscopeTriggerEnabled && oscilloscopeTriggerFreq > 0) {
+        // Find rising edge zero crossing for stable trigger
+        const threshold = 128; // Midpoint
+        let triggerPoint = -1;
+        
+        // Search for rising edge in first half of buffer
+        for (let i = 1; i < bufferLength / 2; i++) {
+            if (dataArray[i - 1] < threshold && dataArray[i] >= threshold) {
+                triggerPoint = i;
+                break;
+            }
+        }
+        
+        // If found trigger, start from there; otherwise center the view
+        if (triggerPoint >= 0 && triggerPoint + samplesToDisplay < bufferLength) {
+            startSample = triggerPoint;
+        } else {
+            startSample = Math.floor((bufferLength - samplesToDisplay) / 2);
+        }
+    } else {
+        startSample = Math.floor((bufferLength - samplesToDisplay) / 2); // Center the view
+    }
     
     // Clear canvas
     oscilloscopeCtx.fillStyle = '#2c3e50';
     oscilloscopeCtx.fillRect(0, 0, width, height);
     
-    // Draw grid lines
+    // Draw grid lines with labels
     oscilloscopeCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
     oscilloscopeCtx.lineWidth = 1;
     
-    // Horizontal grid lines
+    // Horizontal grid lines (amplitude divisions)
+    // Range is -1.0 to +1.0 (normalized audio amplitude), 5 divisions = 0.5 per division
+    oscilloscopeCtx.font = 'bold 10px monospace';
+    oscilloscopeCtx.textAlign = 'left';
+    oscilloscopeCtx.textBaseline = 'middle';
+    oscilloscopeCtx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    
     for (let i = 0; i <= 4; i++) {
         const y = (i / 4) * height;
         oscilloscopeCtx.beginPath();
         oscilloscopeCtx.moveTo(0, y);
         oscilloscopeCtx.lineTo(width, y);
         oscilloscopeCtx.stroke();
+        
+        // Y-axis labels (normalized amplitude, adjusted for scale)
+        // Top = +1.0/scale, Center = 0.0, Bottom = -1.0/scale
+        const baseAmplitude = 1.0 - (i / 4) * 2.0;
+        const scaledAmplitude = baseAmplitude / oscilloscopeYScale;
+        const label = scaledAmplitude.toFixed(2); // Use 2 decimals for scaled values
+        
+        // Draw label with background for visibility
+        const labelText = label;
+        const textWidth = oscilloscopeCtx.measureText(labelText).width;
+        oscilloscopeCtx.fillStyle = 'rgba(44, 62, 80, 0.8)';
+        oscilloscopeCtx.fillRect(2, y - 6, textWidth + 4, 12);
+        
+        oscilloscopeCtx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        oscilloscopeCtx.fillText(labelText, 4, y);
     }
     
-    // Vertical grid lines
-    for (let i = 0; i <= 8; i++) {
-        const x = (i / 8) * width;
-        oscilloscopeCtx.beginPath();
-        oscilloscopeCtx.moveTo(x, 0);
-        oscilloscopeCtx.lineTo(x, height);
-        oscilloscopeCtx.stroke();
+    // Vertical grid lines (time divisions)
+    oscilloscopeCtx.textAlign = 'center';
+    oscilloscopeCtx.textBaseline = 'top';
+    
+    // Calculate time per division based on oscilloscope zoom
+    if (analyser && audioContext) {
+        const bufferLength = analyser.fftSize;
+        const sampleRate = audioContext.sampleRate;
+        const totalTimeMs = (bufferLength / sampleRate) * 1000;
+        const invertedZoom = 201 - oscilloscopeZoom;
+        const displayedTimeMs = totalTimeMs / invertedZoom;
+        const timePerDivision = displayedTimeMs / 8; // 8 divisions
+        
+        for (let i = 0; i <= 8; i++) {
+            const x = (i / 8) * width;
+            oscilloscopeCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            oscilloscopeCtx.lineWidth = 1;
+            oscilloscopeCtx.beginPath();
+            oscilloscopeCtx.moveTo(x, 0);
+            oscilloscopeCtx.lineTo(x, height);
+            oscilloscopeCtx.stroke();
+            
+            // X-axis labels (time) - only on bottom divisions to avoid clutter
+            if (i > 0 && i < 8) {
+                const timeValue = i * timePerDivision;
+                let timeLabel;
+                
+                if (timeValue >= 1) {
+                    timeLabel = timeValue.toFixed(1) + 'ms';
+                } else {
+                    timeLabel = (timeValue * 1000).toFixed(0) + 'µs';
+                }
+                
+                // Draw label with background at bottom
+                const textWidth = oscilloscopeCtx.measureText(timeLabel).width;
+                oscilloscopeCtx.fillStyle = 'rgba(44, 62, 80, 0.8)';
+                oscilloscopeCtx.fillRect(x - textWidth / 2 - 2, height - 14, textWidth + 4, 12);
+                
+                oscilloscopeCtx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                oscilloscopeCtx.fillText(timeLabel, x, height - 12);
+            }
+        }
+    } else {
+        // Fallback if audio context not available
+        for (let i = 0; i <= 8; i++) {
+            const x = (i / 8) * width;
+            oscilloscopeCtx.beginPath();
+            oscilloscopeCtx.moveTo(x, 0);
+            oscilloscopeCtx.lineTo(x, height);
+            oscilloscopeCtx.stroke();
+        }
     }
     
     // Draw center line (zero crossing)
@@ -2135,7 +2382,9 @@ function updateOscilloscope() {
     for (let i = 0; i < samplesToDisplay; i++) {
         const sampleIndex = startSample + i;
         const v = dataArray[sampleIndex] / 128.0; // Normalize to 0-2
-        const y = (v * height) / 2;
+        // Apply Y-axis scaling
+        const scaledV = ((v - 1.0) * oscilloscopeYScale) + 1.0; // Scale around center (1.0)
+        const y = (scaledV * height) / 2;
         
         if (i === 0) {
             oscilloscopeCtx.moveTo(x, y);
@@ -2147,10 +2396,196 @@ function updateOscilloscope() {
     }
     
     oscilloscopeCtx.stroke();
+    
+    // Draw detected frequency in top right corner (using averaged value)
+    if (avgFreq > 0) {
+        oscilloscopeCtx.font = 'bold 14px monospace';
+        oscilloscopeCtx.textAlign = 'right';
+        oscilloscopeCtx.textBaseline = 'top';
+        
+        const freqText = avgFreq >= 1000
+            ? `${(avgFreq / 1000).toFixed(2)} kHz`
+            : `${avgFreq.toFixed(1)} Hz`;
+        
+        // Background for text
+        const textWidth = oscilloscopeCtx.measureText(freqText).width;
+        oscilloscopeCtx.fillStyle = 'rgba(44, 62, 80, 0.9)';
+        oscilloscopeCtx.fillRect(width - textWidth - 12, 4, textWidth + 8, 20);
+        
+        // Text with outline
+        oscilloscopeCtx.strokeStyle = '#000000';
+        oscilloscopeCtx.lineWidth = 3;
+        oscilloscopeCtx.strokeText(freqText, width - 6, 6);
+        
+        oscilloscopeCtx.fillStyle = '#00ff00';
+        oscilloscopeCtx.fillText(freqText, width - 6, 6);
+    }
 }
 
-// Create cached canvas for dB scale labels (only when size changes)
-function createSpectrumLabelsCache(width, height) {
+// Shift detected frequency to 1 kHz by adjusting dial frequency
+function shiftFrequencyTo1kHz() {
+    // Only works in USB, LSB, CWU, CWL modes
+    if (!['usb', 'lsb', 'cwu', 'cwl'].includes(currentMode)) {
+        log('Set 1 kHz only works in USB, LSB, CWU, or CWL modes', 'error');
+        return;
+    }
+    
+    if (!analyser || !audioContext) {
+        log('Audio not initialized', 'error');
+        return;
+    }
+    
+    // Get current detected frequency from oscilloscope
+    const bufferLength = analyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+    analyser.getByteTimeDomainData(dataArray);
+    
+    const detectedFreq = detectFrequencyFromWaveform(dataArray, audioContext.sampleRate);
+    
+    if (detectedFreq <= 0 || detectedFreq < 20 || detectedFreq > 20000) {
+        log('No valid signal detected for frequency shift', 'error');
+        return;
+    }
+    
+    const targetFreq = 1000; // Target audio frequency (1 kHz)
+    const shiftAmount = targetFreq - detectedFreq;
+    
+    // Get current dial frequency
+    const freqInput = document.getElementById('frequency');
+    const currentDialFreq = parseInt(freqInput.value);
+    
+    // Calculate new dial frequency based on mode
+    // USB/CWU: Audio freq = RF signal - RF carrier, so to decrease audio, increase dial
+    // LSB/CWL: Audio freq = RF carrier - RF signal, so to decrease audio, decrease dial
+    let newDialFreq;
+    if (currentMode === 'usb' || currentMode === 'cwu') {
+        // USB/CWU: Inverse relationship (increase dial to decrease audio freq)
+        newDialFreq = currentDialFreq - shiftAmount;
+    } else if (currentMode === 'lsb' || currentMode === 'cwl') {
+        // LSB/CWL: Same relationship (decrease dial to decrease audio freq)
+        newDialFreq = currentDialFreq + shiftAmount;
+    }
+    
+    // Clamp to valid range (100 kHz to 30 MHz)
+    const MIN_FREQ = 100000;
+    const MAX_FREQ = 30000000;
+    newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
+    
+    // Update frequency input
+    freqInput.value = newDialFreq;
+    updateBandButtons(newDialFreq);
+    
+    // Update URL
+    updateURL();
+    
+    // Tune to new frequency
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        autoTune();
+    }
+    
+    log(`Shifted ${currentMode.toUpperCase()} signal from ${detectedFreq.toFixed(1)} Hz to ${targetFreq} Hz (dial: ${formatFrequency(currentDialFreq)} → ${formatFrequency(newDialFreq)})`);
+}
+
+// Update audio spectrum tooltip with frequency and dB
+function updateAudioSpectrumTooltip(clientX, clientY) {
+    // Don't show tooltip if audio visualization is not enabled
+    if (!audioVisualizationEnabled) {
+        if (audioSpectrumTooltip) {
+            audioSpectrumTooltip.style.display = 'none';
+        }
+        return;
+    }
+    
+    if (!audioSpectrumTooltip || !audioSpectrumLastData || audioSpectrumMouseX < 0) {
+        if (audioSpectrumTooltip) {
+            audioSpectrumTooltip.style.display = 'none';
+        }
+        return;
+    }
+    
+    const canvas = spectrumCanvas || waterfallCanvas;
+    if (!canvas) return;
+    
+    const width = canvas.width;
+    const x = audioSpectrumMouseX;
+    
+    // Calculate frequency from x position using shared mapping
+    const freq = Math.round(pixelToFrequency(x, width));
+    
+    // Get magnitude at this x position from stored data
+    const binMapping = getFrequencyBinMapping();
+    if (!binMapping) return;
+    
+    const { startBinIndex, binsForBandwidth } = binMapping;
+    const binsPerPixel = binsForBandwidth / width;
+    const startBin = startBinIndex + (x * binsPerPixel);
+    const endBin = startBin + binsPerPixel;
+    
+    // Average bins for this pixel
+    let sum = 0;
+    let count = 0;
+    for (let binIndex = Math.floor(startBin); binIndex < Math.ceil(endBin) && binIndex < audioSpectrumLastData.dataArray.length; binIndex++) {
+        sum += audioSpectrumLastData.dataArray[binIndex] || 0;
+        count++;
+    }
+    const magnitude = count > 0 ? sum / count : 0;
+    
+    // Convert magnitude to dB (same as display scale)
+    const db = magnitude > 0 ? 20 * Math.log10(magnitude / 255) : -Infinity;
+    const dbText = db === -Infinity ? '-∞ dB' : db.toFixed(1) + ' dB';
+    
+    // Format frequency
+    const freqText = freq >= 1000 ? `${(freq / 1000).toFixed(2)} kHz` : `${freq} Hz`;
+    
+    // Update tooltip
+    audioSpectrumTooltip.textContent = `${freqText} | ${dbText}`;
+    audioSpectrumTooltip.style.left = (clientX + 15) + 'px';
+    audioSpectrumTooltip.style.top = (clientY - 10) + 'px';
+    audioSpectrumTooltip.style.display = 'block';
+}
+
+// Detect frequency from waveform using zero-crossing detection
+function detectFrequencyFromWaveform(dataArray, sampleRate) {
+    if (!dataArray || dataArray.length < 2) return 0;
+    
+    // Find zero crossings (where signal crosses 128, the midpoint)
+    const zeroCrossings = [];
+    const threshold = 128;
+    
+    for (let i = 1; i < dataArray.length; i++) {
+        const prev = dataArray[i - 1];
+        const curr = dataArray[i];
+        
+        // Detect upward zero crossing (from below to above threshold)
+        if (prev < threshold && curr >= threshold) {
+            // Interpolate exact crossing point for better accuracy
+            const fraction = (threshold - prev) / (curr - prev);
+            const crossingIndex = (i - 1) + fraction;
+            zeroCrossings.push(crossingIndex);
+        }
+    }
+    
+    // Need at least 2 crossings to measure a period
+    if (zeroCrossings.length < 2) return 0;
+    
+    // Calculate average period between crossings
+    let totalPeriod = 0;
+    for (let i = 1; i < zeroCrossings.length; i++) {
+        totalPeriod += zeroCrossings[i] - zeroCrossings[i - 1];
+    }
+    const avgPeriod = totalPeriod / (zeroCrossings.length - 1);
+    
+    // Convert period (in samples) to frequency
+    const frequency = sampleRate / avgPeriod;
+    
+    // Sanity check: only return frequencies in audible range (20 Hz - 20 kHz)
+    if (frequency < 20 || frequency > 20000) return 0;
+    
+    return frequency;
+}
+
+// Create cached canvas for dB scale labels (dynamic based on actual data range)
+function createSpectrumLabelsCache(width, height, minDb, maxDb) {
     // Create offscreen canvas for labels
     const cache = document.createElement('canvas');
     cache.width = width;
@@ -2162,11 +2597,23 @@ function createSpectrumLabelsCache(width, height) {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     
-    const dbLevels = [0, -10, -20, -30, -40, -50, -60];
+    const dbRange = maxDb - minDb;
+    if (dbRange === 0 || !isFinite(dbRange)) return cache;
     
-    for (let i = 0; i < dbLevels.length; i++) {
-        const db = dbLevels[i];
-        const y = ((Math.abs(db) / 60) * height);
+    // Calculate appropriate dB step (aim for 5-8 major ticks)
+    const targetStep = dbRange / 6;
+    let dbStep;
+    if (targetStep >= 20) dbStep = 20;
+    else if (targetStep >= 10) dbStep = 10;
+    else if (targetStep >= 5) dbStep = 5;
+    else if (targetStep >= 2) dbStep = 2;
+    else dbStep = 1;
+    
+    // Draw major ticks with labels
+    const firstDb = Math.ceil(minDb / dbStep) * dbStep;
+    for (let db = firstDb; db <= maxDb; db += dbStep) {
+        // Calculate y position
+        const y = ((maxDb - db) / dbRange) * height;
         
         // Draw horizontal grid line
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
@@ -2176,8 +2623,8 @@ function createSpectrumLabelsCache(width, height) {
         ctx.lineTo(width, y);
         ctx.stroke();
         
-        // Draw dB label with background
-        const label = db + ' dB';
+        // Draw dB label with background (no "dB" text to save space)
+        const label = db.toFixed(0);
         const labelWidth = ctx.measureText(label).width + 6;
         
         ctx.fillStyle = 'rgba(44, 62, 80, 0.8)';
@@ -2207,15 +2654,64 @@ function updateSpectrum() {
     spectrumCtx.fillStyle = '#2c3e50';
     spectrumCtx.fillRect(0, 0, width, height);
     
-    // Create or use cached labels if size changed
-    if (!spectrumLabelsCache ||
-        spectrumLabelsCache.width !== width ||
-        spectrumLabelsCache.height !== height) {
-        spectrumLabelsCache = createSpectrumLabelsCache(width, height);
+    // Find min and max values in current frame (original simple approach)
+    let currentMinMagnitude = 255;
+    let currentMaxMagnitude = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+        const magnitude = dataArray[i];
+        if (magnitude > 0) { // Ignore zero values
+            currentMinMagnitude = Math.min(currentMinMagnitude, magnitude);
+            currentMaxMagnitude = Math.max(currentMaxMagnitude, magnitude);
+        }
     }
     
-    // Draw cached labels (much faster than redrawing text)
-    spectrumCtx.drawImage(spectrumLabelsCache, 0, 0);
+    // Temporal smoothing for stable display (like main graph mode)
+    const now = Date.now();
+    
+    // Track minimum values over time for stable noise floor (2 second window)
+    audioSpectrumMinHistory.push({ value: currentMinMagnitude, timestamp: now });
+    audioSpectrumMinHistory = audioSpectrumMinHistory.filter(m => now - m.timestamp <= audioSpectrumMinHistoryMaxAge);
+    const avgMinMagnitude = audioSpectrumMinHistory.length > 0
+        ? audioSpectrumMinHistory.reduce((sum, m) => sum + m.value, 0) / audioSpectrumMinHistory.length
+        : currentMinMagnitude;
+    
+    // Track maximum values over time for stable ceiling (20 second window)
+    audioSpectrumMaxHistory.push({ value: currentMaxMagnitude, timestamp: now });
+    audioSpectrumMaxHistory = audioSpectrumMaxHistory.filter(m => now - m.timestamp <= audioSpectrumMaxHistoryMaxAge);
+    const avgMaxMagnitude = audioSpectrumMaxHistory.length > 0
+        ? audioSpectrumMaxHistory.reduce((sum, m) => sum + m.value, 0) / audioSpectrumMaxHistory.length
+        : currentMaxMagnitude;
+    
+    // Use smoothed minimum as floor, smoothed maximum as ceiling
+    // This matches the main graph mode behavior exactly (spectrum-display.js lines 913-916)
+    let minMagnitude = avgMinMagnitude;
+    let maxMagnitude = avgMaxMagnitude;
+    let magnitudeRange = maxMagnitude - minMagnitude;
+    
+    // Fallback to reasonable range if no valid data
+    if (magnitudeRange <= 0 || !isFinite(magnitudeRange)) {
+        minMagnitude = 0;
+        maxMagnitude = 255;
+        magnitudeRange = 255;
+    }
+    
+    // Calculate dB scale from actual signal range - like main graph mode
+    // Convert from magnitude (0-255) to approximate dBFS
+    // dBFS = 20 * log10(magnitude / 255), where 255 = 0 dBFS
+    const displayMinDb = minMagnitude > 0 ? 20 * Math.log10(minMagnitude / 255) : -60;
+    const displayMaxDb = maxMagnitude > 0 ? 20 * Math.log10(maxMagnitude / 255) : -10;
+    
+    // Create or use cached labels if size changed OR range changed significantly (>1 dB)
+    const cacheKey = `${width}x${height}_${Math.round(displayMinDb)}_${Math.round(displayMaxDb)}`;
+    if (!spectrumLabelsCache || spectrumLabelsCache.cacheKey !== cacheKey) {
+        spectrumLabelsCache = createSpectrumLabelsCache(width, height, displayMinDb, displayMaxDb);
+        spectrumLabelsCache.cacheKey = cacheKey;
+    }
+    
+    // Draw cached labels (much faster than redrawing text) - only if cache is valid
+    if (spectrumLabelsCache && spectrumLabelsCache.width > 0 && spectrumLabelsCache.height > 0) {
+        spectrumCtx.drawImage(spectrumLabelsCache, 0, 0);
+    }
     
     // Get frequency bin mapping using shared helper
     const binMapping = getFrequencyBinMapping();
@@ -2223,29 +2719,40 @@ function updateSpectrum() {
     
     const { startBinIndex, binsForBandwidth } = binMapping;
     
-    // Use canvas width for bars to match waterfall pixel-for-pixel
-    // This ensures perfect alignment between spectrum and waterfall
-    const numBars = width;
-    const binsPerBar = binsForBandwidth / numBars;
-    const barWidth = 1; // Each bar is 1 pixel wide for perfect alignment
+    // Draw as line graph (like main spectrum display)
+    const numPoints = width;
+    const binsPerPoint = binsForBandwidth / numPoints;
     
-    // Initialize peaks array if needed
-    if (!spectrumPeaks || spectrumPeaks.length !== numBars) {
-        spectrumPeaks = new Array(numBars).fill(0);
+    // Create gradient for filled area using waterfall heat map colors
+    // Black -> Blue -> Cyan -> Green -> Yellow -> Red -> White
+    const gradient = spectrumCtx.createLinearGradient(0, height, 0, 0);
+    gradient.addColorStop(0, 'rgba(0, 0, 143, 0.8)');      // Dark blue at bottom
+    gradient.addColorStop(0.2, 'rgba(0, 0, 255, 0.8)');    // Blue
+    gradient.addColorStop(0.4, 'rgba(0, 255, 255, 0.8)');  // Cyan
+    gradient.addColorStop(0.6, 'rgba(255, 255, 0, 0.8)');  // Yellow
+    gradient.addColorStop(0.8, 'rgba(255, 0, 0, 0.8)');    // Red
+    gradient.addColorStop(1, 'rgba(128, 0, 0, 0.8)');      // Dark red at top
+    
+    // Initialize peak hold array if needed
+    if (!spectrumPeaks || spectrumPeaks.length !== numPoints) {
+        spectrumPeaks = new Array(numPoints).fill(0);
     }
     
-    const peakDecayRate = 0.3; // Pixels per frame to decay (slower = longer hold)
+    const peakDecayRate = 0.5; // Pixels per frame to decay
     
-    for (let i = 0; i < numBars; i++) {
-        // Average the bins for this bar, starting from the correct offset
-        // Use floating point for precise bin mapping
-        const startBin = startBinIndex + (i * binsPerBar);
-        const endBin = startBin + binsPerBar;
+    // Draw filled area
+    spectrumCtx.fillStyle = gradient;
+    spectrumCtx.beginPath();
+    spectrumCtx.moveTo(0, height); // Start at bottom left
+    
+    for (let i = 0; i < numPoints; i++) {
+        // Average the bins for this point
+        const startBin = startBinIndex + (i * binsPerPoint);
+        const endBin = startBin + binsPerPoint;
         
         let sum = 0;
         let count = 0;
         
-        // Average all bins that contribute to this pixel
         for (let binIndex = Math.floor(startBin); binIndex < Math.ceil(endBin) && binIndex < dataArray.length; binIndex++) {
             sum += dataArray[binIndex] || 0;
             count++;
@@ -2253,46 +2760,50 @@ function updateSpectrum() {
         
         const average = count > 0 ? sum / count : 0;
         
-        // Calculate bar height (0-255 -> 0-height)
-        const barHeight = (average / 255) * height;
+        // Normalize magnitude for autoranging
+        let normalizedMagnitude;
+        if (magnitudeRange > 0) {
+            normalizedMagnitude = (average - minMagnitude) / magnitudeRange;
+        } else {
+            normalizedMagnitude = average / 255;
+        }
+        
+        // Calculate y position (inverted - higher magnitude at top)
+        const y = height - (normalizedMagnitude * height);
         
         // Update peak hold
-        if (barHeight > spectrumPeaks[i]) {
-            spectrumPeaks[i] = barHeight; // New peak
+        if (y < spectrumPeaks[i]) {
+            spectrumPeaks[i] = y; // New peak (lower y = higher on screen)
         } else {
-            spectrumPeaks[i] = Math.max(0, spectrumPeaks[i] - peakDecayRate); // Decay
+            spectrumPeaks[i] = Math.min(height, spectrumPeaks[i] + peakDecayRate); // Decay
         }
         
-        // Color gradient based on signal level (amplitude)
-        // Weak signal = green, strong signal = red
-        // Use direct RGB instead of HSL for better performance
-        const levelPercent = average / 255; // 0 to 1
-        
-        // Interpolate from green (0,255,0) to yellow (255,255,0) to red (255,0,0)
-        let r, g;
-        if (levelPercent < 0.5) {
-            // Green to yellow: increase red, keep green at max
-            r = Math.floor(levelPercent * 2 * 255);
-            g = 255;
-        } else {
-            // Yellow to red: keep red at max, decrease green
-            r = 255;
-            g = Math.floor((1 - levelPercent) * 2 * 255);
-        }
-        spectrumCtx.fillStyle = `rgb(${r}, ${g}, 0)`;
-        
-        // Draw bar (1 pixel wide, no gaps)
-        const x = i;
-        const y = height - barHeight;
-        spectrumCtx.fillRect(x, y, barWidth, barHeight);
-        
-        // Draw peak hold line (1 pixel wide)
-        if (spectrumPeaks[i] > 0) {
-            const peakY = height - spectrumPeaks[i];
-            spectrumCtx.fillStyle = '#ffffff'; // White peak line
-            spectrumCtx.fillRect(x, peakY - 1, barWidth, 2); // 2px tall line
+        spectrumCtx.lineTo(i, y);
+    }
+    
+    // Close the path at bottom right
+    spectrumCtx.lineTo(width, height);
+    spectrumCtx.closePath();
+    spectrumCtx.fill();
+    
+    // Draw peak hold line (light yellow, semi-transparent like main graph)
+    spectrumCtx.strokeStyle = 'rgba(255, 255, 200, 0.5)';
+    spectrumCtx.lineWidth = 1;
+    spectrumCtx.beginPath();
+    
+    let firstPeak = true;
+    for (let i = 0; i < numPoints; i++) {
+        if (spectrumPeaks[i] < height) {
+            if (firstPeak) {
+                spectrumCtx.moveTo(i, spectrumPeaks[i]);
+                firstPeak = false;
+            } else {
+                spectrumCtx.lineTo(i, spectrumPeaks[i]);
+            }
         }
     }
+    
+    spectrumCtx.stroke();
     
     // Draw bandpass filter indicators if enabled
     if (bandpassEnabled && bandpassFilters.length > 0) {
@@ -2446,11 +2957,58 @@ function updateSpectrum() {
         }
     }
     
+    // Draw debug info at top right (peak signal and noise floor)
+    spectrumCtx.font = 'bold 11px monospace';
+    spectrumCtx.textAlign = 'right';
+    spectrumCtx.textBaseline = 'top';
+
+    // Convert to dB for display
+    const peakDb = maxMagnitude > 0 ? (20 * Math.log10(maxMagnitude / 255)).toFixed(1) : '-∞';
+    const noiseDb = minMagnitude > 0 ? (20 * Math.log10(minMagnitude / 255)).toFixed(1) : '-∞';
+
+    // Background for debug info
+    const debugText1 = `Peak: ${peakDb} dB`;
+    const debugText2 = `Floor: ${noiseDb} dB`;
+    const debugWidth = Math.max(
+        spectrumCtx.measureText(debugText1).width,
+        spectrumCtx.measureText(debugText2).width
+    ) + 8;
+
+    spectrumCtx.fillStyle = 'rgba(44, 62, 80, 0.9)';
+    spectrumCtx.fillRect(width - debugWidth - 4, 2, debugWidth, 28);
+
+    // Draw text with outline for visibility
+    spectrumCtx.strokeStyle = '#000000';
+    spectrumCtx.lineWidth = 3;
+    spectrumCtx.fillStyle = '#ffffff';
+
+    spectrumCtx.strokeText(debugText1, width - 6, 4);
+    spectrumCtx.fillText(debugText1, width - 6, 4);
+
+    spectrumCtx.strokeText(debugText2, width - 6, 16);
+    spectrumCtx.fillText(debugText2, width - 6, 16);
+
+    // Store spectrum data for tooltip usage
+    audioSpectrumLastData = {
+        dataArray: new Uint8Array(dataArray),
+        timestamp: Date.now()
+    };
+    
+    // Update tooltip content with new data if mouse is over THIS canvas
+    if (audioSpectrumMouseX >= 0 && audioSpectrumMouseY >= 0 &&
+        audioVisualizationEnabled && audioSpectrumActiveCanvas === spectrumCanvas) {
+        // Get the rect to calculate client coordinates
+        const rect = spectrumCanvas.getBoundingClientRect();
+        const clientX = rect.left + audioSpectrumMouseX;
+        const clientY = rect.top + audioSpectrumMouseY;
+        updateAudioSpectrumTooltip(clientX, clientY);
+    }
+    
     // Draw frequency labels in Hz
     spectrumCtx.fillStyle = '#000000';
     spectrumCtx.font = '10px monospace';
     spectrumCtx.textAlign = 'center';
-    
+
     // Calculate appropriate label spacing based on bandwidth
     // Dynamically adjust to ensure we always show labels
     const audioBandwidth = Math.abs(currentBandwidthHigh - currentBandwidthLow);
@@ -2480,9 +3038,8 @@ function updateSpectrum() {
     const startFreq = Math.ceil(displayLow / labelStep) * labelStep;
     for (let freq = startFreq; freq <= displayHigh; freq += labelStep) {
         const x = frequencyToPixel(freq, width);
-        // Show the actual frequency value (subtract CW offset for display)
-        const labelFreq = freq - cwOffset;
-        spectrumCtx.fillText(labelFreq + ' Hz', x, height - 5);
+        // Show the actual audio frequency (freq already includes CW offset)
+        spectrumCtx.fillText(freq + ' Hz', x, height - 5);
     }
     
     // Redraw waterfall overlay to ensure filter lines persist
@@ -2576,6 +3133,22 @@ function updateWaterfall() {
     // Draw the new line at the top
     waterfallCtx.putImageData(waterfallImageData, 0, 0);
     
+    // Store spectrum data for tooltip usage (waterfall uses same data)
+    audioSpectrumLastData = {
+        dataArray: new Uint8Array(dataArray),
+        timestamp: Date.now()
+    };
+    
+    // Update tooltip content with new data if mouse is over THIS canvas
+    if (audioSpectrumMouseX >= 0 && audioSpectrumMouseY >= 0 &&
+        audioVisualizationEnabled && audioSpectrumActiveCanvas === waterfallCanvas) {
+        // Get the rect to calculate client coordinates
+        const rect = waterfallCanvas.getBoundingClientRect();
+        const clientX = rect.left + audioSpectrumMouseX;
+        const clientY = rect.top + audioSpectrumMouseY;
+        updateAudioSpectrumTooltip(clientX, clientY);
+    }
+    
     // Draw timestamps on left side frequently (about 4 visible on 400px canvas)
     // With 400px height, we want timestamps every ~100 pixels
     // At 60 fps, that's every ~100 frames = ~1.67 seconds
@@ -2648,9 +3221,8 @@ function updateWaterfall() {
         waterfallCtx.strokeStyle = '#000000';
         waterfallCtx.lineWidth = 3;
         
-        // Show the actual frequency value (subtract CW offset for display)
-        const labelFreq = freq - cwOffset;
-        const label = labelFreq + ' Hz';
+        // Show the actual audio frequency (freq already includes CW offset)
+        const label = freq + ' Hz';
         waterfallCtx.strokeText(label, x, height - 10);
         waterfallCtx.fillText(label, x, height - 10);
     }
@@ -2898,14 +3470,50 @@ setInterval(() => {
     }
 }, 30000); // Every 30 seconds
 
-// Update FFT size
+// Get optimal FFT size based on current bandwidth
+function getOptimalFFTSize() {
+    const bandwidth = Math.abs(currentBandwidthHigh - currentBandwidthLow);
+    
+    // Target: maintain good bin density across all bandwidths
+    // At 48kHz sample rate, each FFT size gives:
+    // 2048  -> 11.72 Hz/bin (very coarse)
+    // 4096  -> 5.86 Hz/bin (coarse)
+    // 8192  -> 2.93 Hz/bin (medium)
+    // 16384 -> 1.46 Hz/bin (fine)
+    // 32768 -> 0.73 Hz/bin (very fine)
+    // 65536 -> 0.37 Hz/bin (ultra fine)
+    
+    if (bandwidth < 300) {
+        return 65536;  // Very narrow CW: ultra fine resolution (0.37 Hz/bin)
+    } else if (bandwidth < 600) {
+        return 32768;  // CW modes: very fine resolution (0.73 Hz/bin)
+    } else if (bandwidth < 1500) {
+        return 16384;  // Narrow modes: fine resolution (1.46 Hz/bin)
+    } else if (bandwidth < 4000) {
+        return 16384;  // Medium modes: fine resolution (1.46 Hz/bin)
+    } else {
+        return 8192;   // Wide modes: medium resolution (2.93 Hz/bin)
+    }
+}
+
+// Update FFT size dropdown to match current analyser setting
+function updateFFTSizeDropdown() {
+    if (!analyser) return;
+    
+    const dropdown = document.getElementById('fft-size');
+    if (dropdown) {
+        dropdown.value = analyser.fftSize.toString();
+    }
+}
+
+// Update FFT size (called when user manually changes dropdown)
 function updateFFTSize() {
     if (!analyser) return;
     
     const fftSize = parseInt(document.getElementById('fft-size').value);
     analyser.fftSize = fftSize;
     
-    log(`FFT size changed to ${fftSize} (${(fftSize / 2).toLocaleString()} frequency bins)`);
+    log(`FFT size manually changed to ${fftSize} (${(fftSize / 2).toLocaleString()} frequency bins)`);
 }
 
 // Update scroll rate
@@ -2945,14 +3553,14 @@ function updateOscilloscopeZoom() {
     
     // Calculate actual time window being displayed
     // Invert slider so higher value = slower timebase (more time displayed)
-    // Slider 1 = fast (zoomed in), Slider 100 = slow (full buffer)
+    // Slider 1 = fast (zoomed in), Slider 200 = slow (full buffer)
     if (analyser && audioContext) {
         const bufferLength = analyser.fftSize;
         const sampleRate = audioContext.sampleRate;
         const totalTimeMs = (bufferLength / sampleRate) * 1000;
         
-        // Invert the zoom: slider 1 -> divide by 100, slider 100 -> divide by 1
-        const invertedZoom = 101 - sliderValue;
+        // Invert the zoom: slider 1 -> divide by 200, slider 200 -> divide by 1
+        const invertedZoom = 201 - sliderValue;
         const displayedTimeMs = totalTimeMs / invertedZoom;
         
         // Format as ms or µs depending on size
@@ -2969,6 +3577,128 @@ function updateOscilloscopeZoom() {
         document.getElementById('oscilloscope-zoom-value').textContent = sliderValue + 'x';
     }
 }
+
+// Toggle auto sync oscilloscope (trigger lock on/off)
+function autoSyncOscilloscope() {
+    const button = document.getElementById('auto-sync-btn');
+    
+    // If already enabled, disable it
+    if (oscilloscopeTriggerEnabled) {
+        oscilloscopeTriggerEnabled = false;
+        oscilloscopeTriggerFreq = 0;
+        if (button) {
+            button.style.backgroundColor = '#17a2b8'; // Cyan when off
+            button.textContent = 'Auto Sync';
+        }
+        log('Oscilloscope trigger disabled (free run)');
+        return;
+    }
+    
+    // Otherwise, enable trigger and adjust timebase
+    if (!analyser || !audioContext) {
+        log('Audio not initialized', 'error');
+        return;
+    }
+    
+    // Use FFT to find the strongest frequency component (more robust than zero-crossing with noise)
+    const bufferLength = analyser.fftSize;
+    const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(frequencyData);
+    
+    const sampleRate = audioContext.sampleRate;
+    const nyquist = sampleRate / 2;
+    
+    // Find the bin with maximum magnitude
+    let maxMagnitude = 0;
+    let maxBinIndex = 0;
+    
+    for (let i = 0; i < frequencyData.length; i++) {
+        if (frequencyData[i] > maxMagnitude) {
+            maxMagnitude = frequencyData[i];
+            maxBinIndex = i;
+        }
+    }
+    
+    // Check if we have a strong enough signal
+    if (maxMagnitude < 50) {
+        log('No strong signal detected for auto sync (signal too weak)', 'error');
+        return;
+    }
+    
+    // Convert bin index to frequency
+    const detectedFreq = (maxBinIndex / frequencyData.length) * nyquist;
+    
+    if (detectedFreq < 20 || detectedFreq > 20000) {
+        log('Detected frequency out of range for auto sync', 'error');
+        return;
+    }
+    
+    // Calculate period of the signal
+    const periodSeconds = 1 / detectedFreq;
+    const periodMs = periodSeconds * 1000;
+    
+    // We want to show 2-3 complete cycles on screen
+    // The oscilloscope has 8 horizontal divisions
+    // So we want each division to show about 1/3 of a cycle
+    const targetCycles = 2.5; // Show 2.5 cycles across the screen
+    const targetTimeMs = periodMs * targetCycles;
+    
+    // Calculate what zoom level gives us this time window
+    // Total buffer time in ms
+    const totalBufferTimeMs = (bufferLength / audioContext.sampleRate) * 1000;
+    
+    // Zoom formula: displayedTime = totalTime / invertedZoom
+    // where invertedZoom = 201 - sliderValue
+    // So: sliderValue = 201 - (totalTime / displayedTime)
+    const targetSliderValue = Math.round(201 - (totalBufferTimeMs / targetTimeMs));
+    
+    // Clamp to valid range (1-200)
+    const clampedValue = Math.max(1, Math.min(200, targetSliderValue));
+    
+    // Update the slider
+    const slider = document.getElementById('oscilloscope-zoom');
+    if (slider) {
+        slider.value = clampedValue;
+        oscilloscopeZoom = clampedValue;
+        updateOscilloscopeZoom();
+    }
+    
+    // Enable continuous trigger tracking
+    oscilloscopeTriggerEnabled = true;
+    oscilloscopeTriggerFreq = detectedFreq;
+    
+    // Update button appearance
+    if (button) {
+        button.style.backgroundColor = '#28a745'; // Green when locked
+        button.textContent = 'Trigger: ON';
+    }
+    
+    log(`Auto sync: ${detectedFreq.toFixed(1)} Hz signal, timebase adjusted to show ${targetCycles} cycles (trigger locked)`);
+}
+// Toggle auto scale oscilloscope Y-axis (continuous adjustment on/off)
+function autoScaleOscilloscope() {
+    const button = document.getElementById('auto-scale-btn');
+    
+    // Toggle the state
+    oscilloscopeAutoScaleEnabled = !oscilloscopeAutoScaleEnabled;
+    
+    if (oscilloscopeAutoScaleEnabled) {
+        if (button) {
+            button.style.backgroundColor = '#28a745'; // Green when enabled
+            button.textContent = 'Auto Scale: ON';
+        }
+        log('Oscilloscope auto scale enabled (continuous adjustment)');
+    } else {
+        // Reset to 1:1 when disabled
+        oscilloscopeYScale = 1.0;
+        if (button) {
+            button.style.backgroundColor = '#17a2b8'; // Cyan when off
+            button.textContent = 'Auto Scale';
+        }
+        log('Oscilloscope auto scale disabled (reset to 1:1)');
+    }
+}
+
 
 // Send periodic keepalive
 setInterval(() => {
@@ -3575,9 +4305,7 @@ function clearAllNotches() {
         }
     }
     
-    // Hunt for CW signals - finds strongest peaks in the audio spectrum
-    let huntIndex = 0; // Track which peak we're on for cycling
-    
+    // Hunt for CW signals - always finds the strongest bin in the audio spectrum
     function huntCWSignal() {
         if (!analyser) {
             log('Audio not initialized', 'error');
@@ -3596,12 +4324,12 @@ function clearAllNotches() {
         const displayLow = cwOffset + currentBandwidthLow;
         const displayHigh = cwOffset + currentBandwidthHigh;
         
-        // Find peaks in the audio spectrum within our bandwidth
-        const peaks = [];
-        const minPeakHeight = 100; // Minimum magnitude to consider (0-255 scale)
-        const minPeakSeparation = 50; // Minimum Hz between peaks
+        // Find the strongest bin within our bandwidth
+        let maxMagnitude = 0;
+        let maxFreq = 0;
+        let maxBinIndex = -1;
         
-        for (let i = 1; i < dataArray.length - 1; i++) {
+        for (let i = 0; i < dataArray.length; i++) {
             const freq = (i / dataArray.length) * nyquist;
             
             // Only look within our audio bandwidth
@@ -3609,41 +4337,88 @@ function clearAllNotches() {
             
             const magnitude = dataArray[i];
             
-            // Check if this is a local peak
-            if (magnitude > minPeakHeight &&
-                magnitude > dataArray[i - 1] &&
-                magnitude > dataArray[i + 1]) {
-                
-                // Check if it's far enough from existing peaks
-                const tooClose = peaks.some(p => Math.abs(p.freq - freq) < minPeakSeparation);
-                if (!tooClose) {
-                    peaks.push({ freq: freq, magnitude: magnitude });
-                }
+            // Track the strongest bin
+            if (magnitude > maxMagnitude) {
+                maxMagnitude = magnitude;
+                maxFreq = freq;
+                maxBinIndex = i;
             }
         }
         
-        // Sort peaks by magnitude (strongest first)
-        peaks.sort((a, b) => b.magnitude - a.magnitude);
-        
-        if (peaks.length === 0) {
+        if (maxBinIndex === -1 || maxMagnitude < 50) {
             log('No CW signals found - try adjusting threshold or check audio', 'error');
             return;
         }
         
-        // Cycle through peaks on each click
-        const peak = peaks[huntIndex % peaks.length];
-        huntIndex = (huntIndex + 1) % peaks.length;
-        
-        // Update frequency slider
+        // Update frequency slider to the strongest bin
         const freqSlider = document.getElementById('cw-frequency');
-        const targetFreq = Math.round(peak.freq);
+        const targetFreq = Math.round(maxFreq);
         
         if (freqSlider) {
             freqSlider.value = targetFreq;
             updateCWDecoderFrequency();
         }
         
-        log(`Hunt: Found signal at ${targetFreq} Hz (${huntIndex}/${peaks.length} peaks, strength: ${peak.magnitude}/255)`);
+        log(`Hunt: Found strongest signal at ${targetFreq} Hz (strength: ${maxMagnitude}/255)`);
+    }
+    
+    // Shift CW signal to 500 Hz by adjusting dial frequency
+    function shiftCWSignalTo700Hz() {
+        if (!cwDecoder || !cwDecoder.enabled) {
+            log('CW Decoder not enabled', 'error');
+            return;
+        }
+        
+        // Get current locked frequency
+        const lockedFreq = cwDecoder.centerFrequency;
+        const targetFreq = 500; // Target audio frequency (CW offset center)
+        const shiftAmount = targetFreq - lockedFreq;
+        
+        // Get current dial frequency
+        const freqInput = document.getElementById('frequency');
+        const currentDialFreq = parseInt(freqInput.value);
+        
+        // Calculate new dial frequency based on mode
+        // In CW modes, the dial frequency is the RF carrier
+        // Audio frequency = RF signal - RF carrier (for CWU) or RF carrier - RF signal (for CWL)
+        // To move a signal DOWN in audio, we move the dial UP (and vice versa)
+        let newDialFreq;
+        if (currentMode === 'cwu') {
+            // CWU: To decrease audio freq, increase dial freq (inverse relationship)
+            newDialFreq = currentDialFreq - shiftAmount;
+        } else if (currentMode === 'cwl') {
+            // CWL: To decrease audio freq, decrease dial freq (same relationship due to inversion)
+            newDialFreq = currentDialFreq + shiftAmount;
+        } else {
+            log('Not in CW mode', 'error');
+            return;
+        }
+        
+        // Clamp to valid range (100 kHz to 30 MHz)
+        const MIN_FREQ = 100000;
+        const MAX_FREQ = 30000000;
+        newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
+        
+        // Update frequency input
+        freqInput.value = newDialFreq;
+        updateBandButtons(newDialFreq);
+        
+        // Update CW decoder frequency to 500 Hz
+        const cwFreqSlider = document.getElementById('cw-frequency');
+        if (cwFreqSlider) {
+            cwFreqSlider.value = targetFreq;
+            updateCWDecoderFrequency();
+        }
+        
+        // Update URL
+        updateURL();
+        
+        // Tune to new frequency
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            autoTune();
+        }
+        
+        log(`Shifted ${currentMode.toUpperCase()} signal from ${lockedFreq} Hz to ${targetFreq} Hz (dial: ${formatFrequency(currentDialFreq)} → ${formatFrequency(newDialFreq)})`);
     }
 
 // Initialize compressor
@@ -3976,7 +4751,7 @@ function toggleNoiseReduction() {
         
         // Update quick toggle button appearance
         if (quickToggleBtn) {
-            quickToggleBtn.style.backgroundColor = '#dc3545'; // Red when disabled
+            quickToggleBtn.style.backgroundColor = '#fd7e14'; // Orange when disabled
         }
         
         log('❌ NR2 Noise Reduction DISABLED');

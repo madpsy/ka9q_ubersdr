@@ -3,14 +3,17 @@
 
 class IdleDetector {
     constructor() {
-        this.INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes in milliseconds
-        this.CONFIRMATION_TIMEOUT = 30 * 1000; // 30 seconds in milliseconds
+        // These will be set dynamically from server config
+        this.INACTIVITY_TIMEOUT = null; // Will be (session_timeout - 30) seconds
+        this.CONFIRMATION_TIMEOUT = 30 * 1000; // 30 seconds in milliseconds (fixed)
+        this.sessionTimeout = null; // Server's session_timeout value in seconds
         
         this.inactivityTimer = null;
         this.confirmationTimer = null;
         this.isShowingConfirmation = false;
         this.isTimedOut = false;
         this.lastActivityTime = Date.now();
+        this.lastHeartbeatTime = 0; // Track when last heartbeat was sent
         this.inactivityLogTimer = null;
         
         // Events to monitor for user activity
@@ -27,7 +30,10 @@ class IdleDetector {
         this.init();
     }
     
-    init() {
+    async init() {
+        // Fetch session timeout from server
+        await this.fetchSessionTimeout();
+        
         // Bind activity handlers to all monitored events
         this.activityEvents.forEach(event => {
             document.addEventListener(event, () => this.handleActivity(), true);
@@ -49,7 +55,54 @@ class IdleDetector {
         // Start periodic inactivity logging
         this.startInactivityLogging();
         
-        console.log('Idle detector initialized: 10 min inactivity → 30 sec confirmation');
+        const warningMinutes = Math.floor(this.INACTIVITY_TIMEOUT / 60000);
+        const warningSeconds = Math.floor((this.INACTIVITY_TIMEOUT % 60000) / 1000);
+        console.log(`Idle detector initialized: ${warningMinutes}m ${warningSeconds}s inactivity → 30s confirmation (server timeout: ${this.sessionTimeout}s)`);
+    }
+    
+    async fetchSessionTimeout() {
+        try {
+            // Fetch session timeout from /connection endpoint
+            const response = await fetch('/connection', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_session_id: window.userSessionID || 'unknown'
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                this.sessionTimeout = data.session_timeout || 300; // Default to 5 minutes if not provided
+                
+                // Calculate inactivity timeout: show warning 30 seconds before server timeout
+                // If session_timeout is 0 (no timeout), disable idle detection
+                if (this.sessionTimeout === 0) {
+                    console.log('Server session timeout disabled (0) - idle detection disabled');
+                    this.INACTIVITY_TIMEOUT = null;
+                } else if (this.sessionTimeout <= 30) {
+                    // If timeout is 30 seconds or less, show warning immediately
+                    console.warn(`Server session timeout (${this.sessionTimeout}s) is too short for idle detection`);
+                    this.INACTIVITY_TIMEOUT = 1000; // 1 second
+                } else {
+                    // Normal case: warn 30 seconds before timeout
+                    this.INACTIVITY_TIMEOUT = (this.sessionTimeout - 30) * 1000;
+                }
+                
+                console.log(`Fetched session timeout from server: ${this.sessionTimeout}s, warning at: ${this.INACTIVITY_TIMEOUT}ms`);
+            } else {
+                console.error('Failed to fetch session timeout, using default 5 minutes');
+                this.sessionTimeout = 300;
+                this.INACTIVITY_TIMEOUT = 270 * 1000; // 4.5 minutes
+            }
+        } catch (err) {
+            console.error('Error fetching session timeout:', err);
+            // Default to 5 minutes if fetch fails
+            this.sessionTimeout = 300;
+            this.INACTIVITY_TIMEOUT = 270 * 1000; // 4.5 minutes
+        }
     }
     
     createConfirmationOverlay() {
@@ -159,12 +212,52 @@ class IdleDetector {
             return;
         }
         
-        // Check if we've been inactive for more than 30 seconds
+        // Calculate time since last activity
         const now = Date.now();
-        if (this.lastActivityTime && (now - this.lastActivityTime) > 30000) {
-            console.log('Activity detected after 30+ seconds of inactivity');
+        const timeSinceLastActivity = this.lastActivityTime ? (now - this.lastActivityTime) : 0;
+        const timeSinceLastHeartbeat = now - this.lastHeartbeatTime;
+
+        // Send heartbeat to server when:
+        // 1. User is active AND at least 10 seconds since last heartbeat
+        // 2. User returns after being idle (>= 30 seconds since last activity)
+        // This keeps connection alive when user is present (max once per 10s), and notifies server when user returns
+        const shouldSendHeartbeat = (timeSinceLastHeartbeat >= 10000 || timeSinceLastActivity >= 30000);
+
+        if (shouldSendHeartbeat) {
+            let heartbeatsSent = 0;
+
+            // Send heartbeat to audio WebSocket
+            if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+                window.ws.send(JSON.stringify({ type: 'ping' }));
+                heartbeatsSent++;
+            } else if (window.ws) {
+                console.log(`Audio WebSocket not open (state: ${window.ws.readyState})`);
+            }
+
+            // Send heartbeat to spectrum WebSocket
+            if (window.spectrumDisplay && window.spectrumDisplay.ws && window.spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+                window.spectrumDisplay.ws.send(JSON.stringify({ type: 'ping' }));
+                heartbeatsSent++;
+            } else {
+                if (!window.spectrumDisplay) {
+                    console.log('Spectrum display not initialized');
+                } else if (!window.spectrumDisplay.ws) {
+                    console.log('Spectrum WebSocket not created');
+                } else {
+                    console.log(`Spectrum WebSocket not open (state: ${window.spectrumDisplay.ws.readyState})`);
+                }
+            }
+
+            if (heartbeatsSent > 0) {
+                this.lastHeartbeatTime = now;
+                if (timeSinceLastActivity >= 30000) {
+                    console.log(`Heartbeat sent to ${heartbeatsSent} channel(s) - user returned after ${Math.floor(timeSinceLastActivity/1000)}s idle`);
+                } else {
+                    console.log(`Heartbeat sent to ${heartbeatsSent} channel(s) - user active`);
+                }
+            }
         }
-        
+
         // Update last activity time
         this.lastActivityTime = now;
         
@@ -173,6 +266,11 @@ class IdleDetector {
     }
     
     resetInactivityTimer() {
+        // Don't start timer if idle detection is disabled (session_timeout = 0)
+        if (this.INACTIVITY_TIMEOUT === null) {
+            return;
+        }
+        
         // Clear existing timer
         if (this.inactivityTimer) {
             clearTimeout(this.inactivityTimer);

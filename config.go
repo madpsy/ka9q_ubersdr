@@ -57,6 +57,7 @@ type ServerConfig struct {
 	MaxSessionsIP  int    `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
 	SessionTimeout int    `yaml:"session_timeout"`
 	MaxSessionTime int    `yaml:"max_session_time"` // Maximum time a session can exist in seconds (0 = unlimited)
+	MaxIdleTime    int    `yaml:"max_idle_time"`    // Maximum time a user can be idle in seconds (0 = unlimited)
 	EnableCORS     bool   `yaml:"enable_cors"`
 	LogFile        string `yaml:"logfile"` // HTTP request log file path
 }

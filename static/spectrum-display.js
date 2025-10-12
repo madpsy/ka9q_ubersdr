@@ -381,8 +381,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 // This prevents resetting the counter when server immediately kicks us
                 // The counter will be reset when we receive our first config message
 
-                // Start keepalive ping every 15 seconds
-                this.startPing();
+                // Keepalive ping is now handled by idle detector based on user activity
                 
                 if (this.config.onConnect) {
                     this.config.onConnect();
@@ -444,8 +443,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 console.log('Spectrum WebSocket closed');
                 this.connected = false;
 
-                // Stop keepalive ping
-                this.stopPing();
+                // Keepalive ping is now handled by idle detector
 
                 if (this.config.onDisconnect) {
                     this.config.onDisconnect();
@@ -469,8 +467,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.reconnectTimer = null;
         }
         
-        // Stop keepalive ping
-        this.stopPing();
+        // Keepalive ping is now handled by idle detector
         
         if (this.ws) {
             this.ws.close();
@@ -518,27 +515,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         }, delay);
     }
     
-    // Start sending keepalive pings
+    // Keepalive ping is now handled by idle detector based on user activity
+    // These methods are kept for compatibility but do nothing
     startPing() {
-        // Clear any existing ping interval
-        this.stopPing();
-        
-        // Send ping every 15 seconds to keep session alive
-        this.pingInterval = setInterval(() => {
-            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                this.ws.send(JSON.stringify({ type: 'ping' }));
-            }
-        }, 15000);
-        
-        console.log('Keepalive ping started (15s interval)');
+        // No-op: ping handled by idle detector
     }
-    
-    // Stop sending keepalive pings
+
     stopPing() {
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-            this.pingInterval = null;
-        }
+        // No-op: ping handled by idle detector
     }
     
     // Handle incoming WebSocket messages

@@ -34,6 +34,7 @@ window.userSessionID = userSessionID;
 console.log('User session ID:', userSessionID);
 
 let ws = null;
+window.ws = ws; // Expose for idle detector
 let audioContext = null;
 let reconnectTimer = null;
 let reconnectAttempts = 0; // Track number of reconnection attempts
@@ -827,6 +828,7 @@ async function connect() {
     
     try {
         ws = new WebSocket(wsUrl);
+        window.ws = ws; // Expose for idle detector
     } catch (error) {
         console.error('Failed to create WebSocket:', error);
         showNotification('Failed to connect. Please refresh the page.', 'error');
@@ -921,6 +923,7 @@ async function connect() {
         log('Disconnected');
         updateConnectionStatus('disconnected');
         ws = null;
+        window.ws = null; // Update exposed reference
 
         // Stop stats updates
         stopStatsUpdates();
@@ -1087,6 +1090,7 @@ function disconnect() {
     if (ws) {
         ws.close();
         ws = null;
+        window.ws = null; // Update exposed reference
     }
     if (audioContext) {
         audioContext.close();
@@ -4099,13 +4103,6 @@ function magnitudeToColor(magnitude) {
     return colorLookupTable[index];
 }
 
-// Send periodic keepalive
-setInterval(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping' }));
-    }
-}, 30000); // Every 30 seconds
-
 // Get optimal FFT size based on current bandwidth
 function getOptimalFFTSize() {
     const bandwidth = Math.abs(currentBandwidthHigh - currentBandwidthLow);
@@ -4336,12 +4333,8 @@ function autoScaleOscilloscope() {
 }
 
 
-// Send periodic keepalive
-setInterval(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping' }));
-    }
-}, 30000); // Every 30 seconds
+// Keepalive is now handled by idle-detector.js (activity-based heartbeats)
+// Fixed 30-second interval removed to allow proper idle detection
 
 // Equalizer enabled state
 let equalizerEnabled = false;
@@ -5603,6 +5596,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
+        // Expose for idle detector
+        window.spectrumDisplay = spectrumDisplay;
+
         // Connect to spectrum WebSocket
         spectrumDisplay.connect();
         

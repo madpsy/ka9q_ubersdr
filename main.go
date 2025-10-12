@@ -286,9 +286,11 @@ type ConnectionCheckRequest struct {
 
 // ConnectionCheckResponse represents the response for connection check
 type ConnectionCheckResponse struct {
-	ClientIP string `json:"client_ip"`
-	Allowed  bool   `json:"allowed"`
-	Reason   string `json:"reason,omitempty"`
+	ClientIP       string `json:"client_ip"`
+	Allowed        bool   `json:"allowed"`
+	Reason         string `json:"reason,omitempty"`
+	SessionTimeout int    `json:"session_timeout"`  // Session inactivity timeout in seconds (0 = no timeout)
+	MaxSessionTime int    `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
 }
 
 // handleConnectionCheck checks if a connection will be allowed before WebSocket upgrade
@@ -339,8 +341,10 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	}
 
 	response := ConnectionCheckResponse{
-		ClientIP: clientIP,
-		Allowed:  true,
+		ClientIP:       clientIP,
+		Allowed:        true,
+		SessionTimeout: sessions.config.Server.SessionTimeout,
+		MaxSessionTime: sessions.config.Server.MaxSessionTime,
 	}
 
 	// Check if IP is banned

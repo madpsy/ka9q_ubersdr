@@ -817,31 +817,42 @@ func (sm *SessionManager) cleanupExpiredKickedUUIDs() {
 }
 
 // cleanupInactiveSessions removes sessions that have exceeded the timeout
+// Uses kick logic to prevent reconnection
 func (sm *SessionManager) cleanupInactiveSessions() {
 	if sm.timeout == 0 {
 		return // No timeout configured
 	}
 
 	now := time.Now()
-	var toRemove []string
+	var toKick []string // UUIDs to kick
 
 	sm.mu.RLock()
-	for id, session := range sm.sessions {
+	// Track which UUIDs have inactive sessions
+	inactiveUUIDs := make(map[string]bool)
+	for _, session := range sm.sessions {
 		session.mu.RLock()
 		inactive := now.Sub(session.LastActive)
+		userSessionID := session.UserSessionID
 		session.mu.RUnlock()
 
-		if inactive > sm.timeout {
-			toRemove = append(toRemove, id)
+		if inactive > sm.timeout && userSessionID != "" {
+			inactiveUUIDs[userSessionID] = true
 		}
 	}
 	sm.mu.RUnlock()
 
-	// Remove inactive sessions
-	for _, id := range toRemove {
-		log.Printf("Cleaning up inactive session: %s", id)
-		if err := sm.DestroySession(id); err != nil {
-			log.Printf("Error cleaning up session %s: %v", id, err)
+	// Collect UUIDs to kick (only kick each UUID once)
+	for uuid := range inactiveUUIDs {
+		toKick = append(toKick, uuid)
+	}
+
+	// Kick users that exceeded the inactivity timeout
+	for _, userSessionID := range toKick {
+		log.Printf("Session timeout reached for user %s (inactive for %v) - kicking",
+			userSessionID, sm.timeout)
+
+		if _, err := sm.KickUserBySessionID(userSessionID); err != nil {
+			log.Printf("Error kicking user %s for inactivity: %v", userSessionID, err)
 		}
 	}
 }

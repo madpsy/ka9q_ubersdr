@@ -1,0 +1,93 @@
+# Complete HF band configuration for ka9q-multidecoder with dynamic channel creation
+# Covers 160m through 10m including 60m band
+# FT8, FT4, and WSPR frequencies where available
+
+[receiver]
+callsign = MM3NDH
+locator = IO86ha
+antenna = Loop
+program_name = MM3NDH
+program_version = 1.0
+
+[pskreporter]
+enabled = true
+
+[wsprnet]
+enabled = true
+
+[recording]
+# Record entire cycle including dead time (default: false, only records transmission time)
+# When true: FT8 records full 15s, FT4 records full 7.5s, WSPR records full 120s
+# When false: FT8 records 12.64s, FT4 records 4.48s, WSPR records 114s
+include_dead_time = true
+
+# Radiod connection
+[radiod]
+# Multicast group for status/control
+status = hf-status.local
+# Default data multicast group (can be overridden per band)
+data = pcm.local
+
+# FT8 frequencies - all HF bands 160m through 10m
+[FT8]
+# 160m
+1840000
+# 80m
+3573000
+# 60m (5 MHz band)
+5357000
+# 40m
+7074000
+# 30m
+10136000
+# 20m
+14074000
+# 17m
+18100000
+# 15m
+21074000
+# 12m
+24915000
+# 10m
+28074000
+
+
+# FT4 frequencies
+[FT4]
+# 40m
+7047500
+# 30m
+10140000
+# 20m
+14080000
+
+# WSPR frequencies - all HF bands including LF/MF and 60m
+[WSPR]
+# 2200m (136 kHz)
+136000
+# 630m (472 kHz)
+474200
+# 160m
+1836600
+# 80m (EU)
+3592600
+# 80m (US)
+3568600
+# 60m (5 MHz band - EU allocation)
+5287200
+# 60m (5 MHz band - alternative)
+5364700
+# 40m
+7038600
+# 30m
+10138700
+# 20m
+14095600
+# 17m
+18104600
+# 15m
+21094600
+# 12m
+24924600
+# 10m
+28124600

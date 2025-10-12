@@ -1688,8 +1688,21 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             const startFreq = this.centerFreq - this.totalBandwidth / 2;
             const freq = startFreq + (x / this.width) * this.totalBandwidth;
 
-            // Update tooltip content
-            this.tooltip.textContent = `${this.formatFrequency(freq)} | ${db.toFixed(1)} dB`;
+            // Find strongest signal in spectrum
+            let maxDb = -Infinity;
+            let maxBinIndex = 0;
+            for (let i = 0; i < this.spectrumData.length; i++) {
+                if (this.spectrumData[i] > maxDb) {
+                    maxDb = this.spectrumData[i];
+                    maxBinIndex = i;
+                }
+            }
+
+            // Calculate frequency of strongest signal
+            const maxFreq = startFreq + (maxBinIndex / this.spectrumData.length) * this.totalBandwidth;
+
+            // Update tooltip content with cursor position and strongest signal (use innerHTML for line breaks)
+            this.tooltip.innerHTML = `Cursor: ${this.formatFrequency(freq)} | ${db.toFixed(1)} dB<br>Peak: ${this.formatFrequency(maxFreq)} | ${maxDb.toFixed(1)} dB`;
 
             // Position tooltip near cursor
             const rect = this.lineGraphCanvas.getBoundingClientRect();
@@ -2454,8 +2467,21 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const freq = startFreq + (this.mouseX / this.width) * this.totalBandwidth;
 
-        // Update tooltip content
-        this.tooltip.textContent = `${this.formatFrequency(freq)} | ${db.toFixed(1)} dB`;
+        // Find strongest signal in spectrum
+        let maxDb = -Infinity;
+        let maxBinIndex = 0;
+        for (let i = 0; i < this.spectrumData.length; i++) {
+            if (this.spectrumData[i] > maxDb) {
+                maxDb = this.spectrumData[i];
+                maxBinIndex = i;
+            }
+        }
+
+        // Calculate frequency of strongest signal
+        const maxFreq = startFreq + (maxBinIndex / this.spectrumData.length) * this.totalBandwidth;
+
+        // Update tooltip content with cursor position and strongest signal (use innerHTML for line breaks)
+        this.tooltip.innerHTML = `Cursor: ${this.formatFrequency(freq)} | ${db.toFixed(1)} dB<br>Peak: ${this.formatFrequency(maxFreq)} | ${maxDb.toFixed(1)} dB`;
 
         // Position tooltip near cursor
         const rect = this.canvas.getBoundingClientRect();

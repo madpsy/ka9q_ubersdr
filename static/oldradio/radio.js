@@ -384,42 +384,140 @@ function updatePowerIndicator(level) {
     indicator.style.boxShadow = `0 0 ${shadowIntensity}px #ff6b35`;
 }
 
+// Show error overlay (similar to main UI)
+function showErrorOverlay(message, isTerminated = false) {
+    // Create overlay if it doesn't exist
+    let overlay = document.getElementById('error-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'error-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.95)';
+        overlay.style.zIndex = '99999';
+        overlay.style.display = 'flex';
+        overlay.style.flexDirection = 'column';
+        overlay.style.justifyContent = 'center';
+        overlay.style.alignItems = 'center';
+        overlay.style.color = '#fff';
+        overlay.style.fontFamily = 'Arial, sans-serif';
+        overlay.style.textAlign = 'center';
+        overlay.style.padding = '20px';
+        document.body.appendChild(overlay);
+    }
+
+    const icon = isTerminated ? '❌' : '🚫';
+    const title = isTerminated ? 'Session Terminated' : 'Connection Not Allowed';
+
+    overlay.innerHTML = `
+        <div style="max-width: 600px;">
+            <div style="font-size: 80px; margin-bottom: 20px;">${icon}</div>
+            <h1 style="font-size: 32px; margin-bottom: 20px; color: #dc3545;">${title}</h1>
+            <p style="font-size: 20px; margin-bottom: 30px; line-height: 1.5;">${message}</p>
+            <button onclick="location.reload()" style="
+                background: #007bff;
+                color: white;
+                border: none;
+                padding: 15px 40px;
+                font-size: 18px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-weight: bold;
+            ">Refresh Page</button>
+        </div>
+    `;
+
+    overlay.style.display = 'flex';
+}
+
 // WebSocket Connection
-function connectWebSocket() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${currentFrequency}&mode=${MODE}&user_session_id=${encodeURIComponent(userSessionID)}`;
-    
-    console.log('Connecting to WebSocket:', wsUrl);
-    ws = new WebSocket(wsUrl);
-    
-    ws.onopen = () => {
-        console.log('WebSocket connected');
-    };
-    
-    ws.onmessage = (event) => {
-        try {
-            const message = JSON.parse(event.data);
-            handleWebSocketMessage(message);
-        } catch (error) {
-            console.error('Failed to parse WebSocket message:', error);
-        }
-    };
-    
-    ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-    };
-    
-    ws.onclose = () => {
-        console.log('WebSocket closed');
-        updatePowerIndicator(0);
-        
-        // Attempt to reconnect after 3 seconds
-        setTimeout(() => {
-            if (audioContext) {
-                connectWebSocket();
+async function connectWebSocket() {
+    try {
+        // First, check if connection is allowed via /connection endpoint
+        const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+        const connectionUrl = `${httpProtocol}//${window.location.host}/connection`;
+
+        console.log('Checking connection permission:', connectionUrl);
+
+        const response = await fetch(connectionUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                user_session_id: userSessionID
+            })
+        });
+
+        if (!response.ok) {
+            let errorData;
+            try {
+                errorData = await response.json();
+            } catch (e) {
+                errorData = { reason: 'Server rejected connection' };
             }
-        }, 3000);
-    };
+
+            console.error('Connection not allowed:', response.status, errorData);
+
+            // Check if this is a terminated session (410 Gone status)
+            if (response.status === 410) {
+                showErrorOverlay(errorData.reason || 'Your session has been terminated', true);
+            } else {
+                // Show error overlay for other connection rejections
+                showErrorOverlay(errorData.reason || 'Server rejected connection', false);
+            }
+
+            updatePowerIndicator(0);
+            return;
+        }
+
+        const result = await response.json();
+        console.log('Connection check result:', result);
+
+        // Now proceed with WebSocket connection
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${currentFrequency}&mode=${MODE}&user_session_id=${encodeURIComponent(userSessionID)}`;
+
+        console.log('Connecting to WebSocket:', wsUrl);
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            console.log('WebSocket connected');
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                handleWebSocketMessage(message);
+            } catch (error) {
+                console.error('Failed to parse WebSocket message:', error);
+            }
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        ws.onclose = () => {
+            console.log('WebSocket closed');
+            updatePowerIndicator(0);
+
+            // Attempt to reconnect after 3 seconds
+            setTimeout(() => {
+                if (audioContext) {
+                    connectWebSocket();
+                }
+            }, 3000);
+        };
+
+    } catch (error) {
+        console.error('Failed to check connection permission:', error);
+        showErrorOverlay(`Failed to connect: ${error.message}`, false);
+        updatePowerIndicator(0);
+    }
 }
 
 // Send periodic keepalive to prevent connection timeout

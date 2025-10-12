@@ -396,27 +396,48 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	// Store WebSocket connection reference in session for kick functionality
 	session.WSConn = conn
 
-	// If bandwidth parameters were provided in URL, update the session immediately
-	if bandwidthLow != nil || bandwidthHigh != nil {
-		// Use provided values or fall back to session defaults
-		bwl := session.BandwidthLow
-		bwh := session.BandwidthHigh
-		if bandwidthLow != nil {
-			bwl = *bandwidthLow
-		}
-		if bandwidthHigh != nil {
-			bwh = *bandwidthHigh
-		}
-
+	// Apply bandwidth parameters (either from URL or mode-specific defaults)
+	var bwl, bwh int
+	if bandwidthLow != nil && bandwidthHigh != nil {
+		// Both bandwidth parameters provided in URL - use them
+		bwl = *bandwidthLow
+		bwh = *bandwidthHigh
 		log.Printf("Applying URL bandwidth parameters: %d to %d Hz", bwl, bwh)
-
-		// Update session with custom bandwidth
-		if err := wsh.sessions.UpdateSessionWithEdges(session.ID, 0, "", bwl, bwh, true); err != nil {
-			log.Printf("Failed to apply URL bandwidth: %v", err)
-			wsh.sendError(conn, "Failed to apply bandwidth: "+err.Error())
-			wsh.sessions.DestroySession(session.ID)
-			return
+	} else {
+		// No bandwidth parameters in URL - apply mode-specific defaults
+		// These match the defaults in app.js setMode() function
+		switch mode {
+		case "usb":
+			bwl = 50
+			bwh = 2700
+		case "lsb":
+			bwl = -2700
+			bwh = -50
+		case "am", "sam":
+			bwl = -5000
+			bwh = 5000
+		case "cwu", "cwl":
+			bwl = -200
+			bwh = 200
+		case "fm":
+			bwl = -5000
+			bwh = 5000
+		case "nfm":
+			bwl = -6250
+			bwh = 6250
+		default:
+			bwl = 50
+			bwh = 3000
 		}
+		log.Printf("Applying mode-specific bandwidth defaults for %s: %d to %d Hz", mode, bwl, bwh)
+	}
+
+	// Update session with bandwidth
+	if err := wsh.sessions.UpdateSessionWithEdges(session.ID, 0, "", bwl, bwh, true); err != nil {
+		log.Printf("Failed to apply bandwidth: %v", err)
+		wsh.sendError(conn, "Failed to apply bandwidth: "+err.Error())
+		wsh.sessions.DestroySession(session.ID)
+		return
 	}
 
 	if userSessionID != "" {
@@ -562,8 +583,8 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 						defaultLow = -200
 						defaultHigh = 200
 					case "fm":
-						defaultLow = -8000
-						defaultHigh = 8000
+						defaultLow = -5000
+						defaultHigh = 5000
 					case "nfm":
 						defaultLow = -6250
 						defaultHigh = 6250

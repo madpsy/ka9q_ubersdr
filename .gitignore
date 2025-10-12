@@ -3,3 +3,5 @@ config.yaml
 bookmarks.yaml
 banned_ips.yaml
 web.log
+clients/go/radio_client
+clients/go/go.sum

@@ -152,18 +152,21 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	}
 
 	// Check if we've reached the maximum unique UUIDs per IP (if configured)
+	// Skip this check if the IP is in the bypass list
 	if sm.config.Server.MaxSessionsIP > 0 && clientIP != "" && userSessionID != "" {
-		// Check if this is a new UUID for this IP
-		if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
-			// IP exists, check if UUID is new
-			if !uuidSet[userSessionID] {
-				// New UUID for this IP, check limit
-				if len(uuidSet) >= sm.config.Server.MaxSessionsIP {
-					return nil, fmt.Errorf("maximum unique users per IP reached (%d)", sm.config.Server.MaxSessionsIP)
+		if !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+			// Check if this is a new UUID for this IP
+			if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
+				// IP exists, check if UUID is new
+				if !uuidSet[userSessionID] {
+					// New UUID for this IP, check limit
+					if len(uuidSet) >= sm.config.Server.MaxSessionsIP {
+						return nil, fmt.Errorf("maximum unique users per IP reached (%d)", sm.config.Server.MaxSessionsIP)
+					}
 				}
 			}
+			// If IP doesn't exist yet or UUID already exists for this IP, allow it
 		}
-		// If IP doesn't exist yet or UUID already exists for this IP, allow it
 	}
 
 	// Check if this UUID already has an audio session (enforce 1 audio per UUID)
@@ -310,18 +313,21 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 	}
 
 	// Check if we've reached the maximum unique UUIDs per IP (if configured)
+	// Skip this check if the IP is in the bypass list
 	if sm.config.Server.MaxSessionsIP > 0 && clientIP != "" && userSessionID != "" {
-		// Check if this is a new UUID for this IP
-		if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
-			// IP exists, check if UUID is new
-			if !uuidSet[userSessionID] {
-				// New UUID for this IP, check limit
-				if len(uuidSet) >= sm.config.Server.MaxSessionsIP {
-					return nil, fmt.Errorf("maximum unique users per IP reached (%d)", sm.config.Server.MaxSessionsIP)
+		if !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+			// Check if this is a new UUID for this IP
+			if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
+				// IP exists, check if UUID is new
+				if !uuidSet[userSessionID] {
+					// New UUID for this IP, check limit
+					if len(uuidSet) >= sm.config.Server.MaxSessionsIP {
+						return nil, fmt.Errorf("maximum unique users per IP reached (%d)", sm.config.Server.MaxSessionsIP)
+					}
 				}
 			}
+			// If IP doesn't exist yet or UUID already exists for this IP, allow it
 		}
-		// If IP doesn't exist yet or UUID already exists for this IP, allow it
 	}
 
 	// Check if this UUID already has a spectrum session (enforce 1 spectrum per UUID)
@@ -765,6 +771,20 @@ func (sm *SessionManager) enforceMaxSessionTime() {
 			continue
 		}
 
+		// Check if any session with this UUID has a bypassed IP
+		bypassed := false
+		for _, session := range sm.sessions {
+			if session.UserSessionID == userSessionID {
+				if sm.config.Server.IsIPTimeoutBypassed(session.ClientIP) {
+					bypassed = true
+					break
+				}
+			}
+		}
+		if bypassed {
+			continue
+		}
+
 		sessionAge := now.Sub(firstSeen)
 		if sessionAge > sm.maxSessionTime {
 			toKick = append(toKick, userSessionID)
@@ -829,21 +849,33 @@ func (sm *SessionManager) cleanupInactiveSessions() {
 	sm.mu.RLock()
 	// Track which UUIDs have inactive sessions
 	inactiveUUIDs := make(map[string]bool)
+	bypassedUUIDs := make(map[string]bool)
+
 	for _, session := range sm.sessions {
 		session.mu.RLock()
 		inactive := now.Sub(session.LastActive)
 		userSessionID := session.UserSessionID
+		clientIP := session.ClientIP
 		session.mu.RUnlock()
 
-		if inactive > sm.timeout && userSessionID != "" {
-			inactiveUUIDs[userSessionID] = true
+		if userSessionID != "" {
+			// Check if this session's IP is bypassed
+			if sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+				bypassedUUIDs[userSessionID] = true
+			}
+
+			if inactive > sm.timeout {
+				inactiveUUIDs[userSessionID] = true
+			}
 		}
 	}
 	sm.mu.RUnlock()
 
-	// Collect UUIDs to kick (only kick each UUID once)
+	// Collect UUIDs to kick (only kick each UUID once, excluding bypassed ones)
 	for uuid := range inactiveUUIDs {
-		toKick = append(toKick, uuid)
+		if !bypassedUUIDs[uuid] {
+			toKick = append(toKick, uuid)
+		}
 	}
 
 	// Kick users that exceeded the inactivity timeout

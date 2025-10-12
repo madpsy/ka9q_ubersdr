@@ -575,6 +575,44 @@
                     
                     renderFields(subSection, value, fullPath);
                     container.appendChild(subSection);
+                } else if (Array.isArray(value)) {
+                    // Handle arrays (like timeout_bypass_ips)
+                    const field = document.createElement('div');
+                    field.className = 'config-field';
+                    
+                    const label = document.createElement('label');
+                    label.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    field.appendChild(label);
+
+                    const textarea = document.createElement('textarea');
+                    textarea.style.width = '100%';
+                    textarea.style.minHeight = '80px';
+                    textarea.style.fontFamily = 'monospace';
+                    textarea.style.fontSize = '13px';
+                    textarea.style.padding = '8px';
+                    textarea.style.border = '1px solid #ddd';
+                    textarea.style.borderRadius = '5px';
+                    textarea.style.resize = 'vertical';
+                    // Display array items one per line
+                    textarea.value = value.join('\n');
+                    textarea.dataset.path = fullPath;
+                    textarea.addEventListener('change', (e) => {
+                        // Split by newlines and filter out empty lines
+                        const arrayValue = e.target.value.split('\n')
+                            .map(line => line.trim())
+                            .filter(line => line.length > 0);
+                        updateConfigValue(e.target.dataset.path, arrayValue);
+                    });
+                    field.appendChild(textarea);
+
+                    const small = document.createElement('small');
+                    small.textContent = 'Enter one item per line';
+                    small.style.display = 'block';
+                    small.style.marginTop = '5px';
+                    small.style.color = '#666';
+                    field.appendChild(small);
+                    
+                    container.appendChild(field);
                 } else {
                     const field = document.createElement('div');
                     field.className = 'config-field';

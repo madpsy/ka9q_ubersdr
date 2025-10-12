@@ -340,11 +340,20 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		}
 	}
 
+	// Check if this IP is in the timeout bypass list
+	sessionTimeout := sessions.config.Server.SessionTimeout
+	maxSessionTime := sessions.config.Server.MaxSessionTime
+	if sessions.config.Server.IsIPTimeoutBypassed(clientIP) {
+		// Bypassed IPs get 0 for both timeouts (unlimited)
+		sessionTimeout = 0
+		maxSessionTime = 0
+	}
+
 	response := ConnectionCheckResponse{
 		ClientIP:       clientIP,
 		Allowed:        true,
-		SessionTimeout: sessions.config.Server.SessionTimeout,
-		MaxSessionTime: sessions.config.Server.MaxSessionTime,
+		SessionTimeout: sessionTimeout,
+		MaxSessionTime: maxSessionTime,
 	}
 
 	// Check if IP is banned
@@ -386,13 +395,16 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	}
 
 	// Check if max unique users per IP limit would be exceeded
-	if !sessions.CanAcceptNewIP(clientIP, req.UserSessionID) {
-		maxSessionsIP := sessions.config.Server.MaxSessionsIP
-		response.Allowed = false
-		response.Reason = fmt.Sprintf("Maximum unique users per IP reached (%d)", maxSessionsIP)
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(response)
-		return
+	// Skip this check if the IP is in the bypass list
+	if !sessions.config.Server.IsIPTimeoutBypassed(clientIP) {
+		if !sessions.CanAcceptNewIP(clientIP, req.UserSessionID) {
+			maxSessionsIP := sessions.config.Server.MaxSessionsIP
+			response.Allowed = false
+			response.Reason = fmt.Sprintf("Maximum unique users per IP reached (%d)", maxSessionsIP)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
 	}
 
 	// Connection is allowed - store User-Agent for this session

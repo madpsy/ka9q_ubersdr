@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -52,14 +53,16 @@ type RadiodConfig struct {
 
 // ServerConfig contains web server settings
 type ServerConfig struct {
-	Listen         string `yaml:"listen"`
-	MaxSessions    int    `yaml:"max_sessions"`
-	MaxSessionsIP  int    `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
-	SessionTimeout int    `yaml:"session_timeout"`
-	MaxSessionTime int    `yaml:"max_session_time"` // Maximum time a session can exist in seconds (0 = unlimited)
-	MaxIdleTime    int    `yaml:"max_idle_time"`    // Maximum time a user can be idle in seconds (0 = unlimited)
-	EnableCORS     bool   `yaml:"enable_cors"`
-	LogFile        string `yaml:"logfile"` // HTTP request log file path
+	Listen            string       `yaml:"listen"`
+	MaxSessions       int          `yaml:"max_sessions"`
+	MaxSessionsIP     int          `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
+	SessionTimeout    int          `yaml:"session_timeout"`
+	MaxSessionTime    int          `yaml:"max_session_time"`   // Maximum time a session can exist in seconds (0 = unlimited)
+	MaxIdleTime       int          `yaml:"max_idle_time"`      // Maximum time a user can be idle in seconds (0 = unlimited)
+	TimeoutBypassIPs  []string     `yaml:"timeout_bypass_ips"` // List of IPs/CIDRs that bypass idle and max session time limits
+	EnableCORS        bool         `yaml:"enable_cors"`
+	LogFile           string       `yaml:"logfile"` // HTTP request log file path
+	timeoutBypassNets []*net.IPNet // Parsed CIDR networks (internal use)
 }
 
 // AudioConfig contains audio processing settings
@@ -117,6 +120,11 @@ func LoadConfig(filename string) (*Config, error) {
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Parse timeout bypass IPs/CIDRs
+	if err := config.Server.parseTimeoutBypassIPs(); err != nil {
+		return nil, fmt.Errorf("failed to parse timeout_bypass_ips: %w", err)
 	}
 
 	// Set defaults if not specified
@@ -232,4 +240,52 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("audio.default_sample_rate must be at least 8000")
 	}
 	return nil
+}
+
+// parseTimeoutBypassIPs parses the timeout_bypass_ips list into CIDR networks
+func (sc *ServerConfig) parseTimeoutBypassIPs() error {
+	sc.timeoutBypassNets = make([]*net.IPNet, 0, len(sc.TimeoutBypassIPs))
+
+	for _, ipStr := range sc.TimeoutBypassIPs {
+		// Check if it's a CIDR notation
+		if _, ipNet, err := net.ParseCIDR(ipStr); err == nil {
+			sc.timeoutBypassNets = append(sc.timeoutBypassNets, ipNet)
+		} else {
+			// Try parsing as a single IP address
+			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				return fmt.Errorf("invalid IP or CIDR: %s", ipStr)
+			}
+			// Convert single IP to CIDR (/32 for IPv4, /128 for IPv6)
+			var ipNet *net.IPNet
+			if ip.To4() != nil {
+				_, ipNet, _ = net.ParseCIDR(ipStr + "/32")
+			} else {
+				_, ipNet, _ = net.ParseCIDR(ipStr + "/128")
+			}
+			sc.timeoutBypassNets = append(sc.timeoutBypassNets, ipNet)
+		}
+	}
+
+	return nil
+}
+
+// IsIPTimeoutBypassed checks if an IP address is in the timeout bypass list
+func (sc *ServerConfig) IsIPTimeoutBypassed(ipStr string) bool {
+	if len(sc.timeoutBypassNets) == 0 {
+		return false
+	}
+
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+
+	for _, ipNet := range sc.timeoutBypassNets {
+		if ipNet.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
 }

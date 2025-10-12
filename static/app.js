@@ -3267,11 +3267,17 @@ function enableFrequencyTracking() {
             return;
         }
 
-        // Adaptive damping: use stronger correction when close to target
-        // This allows it to converge precisely without stopping early
-        const dampingFactor = Math.abs(smoothedError) > TRACKING_COARSE_THRESHOLD
-            ? TRACKING_DAMPING_COARSE  // 30% for large errors (gentle approach)
-            : TRACKING_DAMPING_FINE;    // 50% for small errors (more aggressive to nail it)
+        // Adaptive damping with three tiers to handle the final 1 Hz adjustment
+        // When error is 1 Hz with 50% damping, it calculates 0.5 Hz which rounds unpredictably
+        // Solution: use 100% correction for very small errors (≤2 Hz)
+        let dampingFactor;
+        if (Math.abs(smoothedError) > TRACKING_COARSE_THRESHOLD) {
+            dampingFactor = TRACKING_DAMPING_COARSE;  // 30% for large errors (>10 Hz)
+        } else if (Math.abs(smoothedError) > 2) {
+            dampingFactor = TRACKING_DAMPING_FINE;     // 50% for medium errors (2-10 Hz)
+        } else {
+            dampingFactor = 1.0;                        // 100% for tiny errors (≤2 Hz) - nail it!
+        }
 
         // Apply damping factor to prevent overshoot
         const shiftAmount = smoothedError * dampingFactor;

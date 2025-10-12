@@ -327,12 +327,49 @@ class SpectrumDisplay {
     }
     
     // Connect to spectrum WebSocket
-    connect() {
+    async connect() {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             return;
         }
         
-        console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
+        // Check if connection will be allowed before attempting WebSocket connection
+        try {
+            const userSessionID = window.userSessionID || '';
+            const checkResponse = await fetch('/connection', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_session_id: userSessionID
+                })
+            });
+
+            const checkData = await checkResponse.json();
+
+            if (!checkData.allowed) {
+                // Connection not allowed - don't attempt WebSocket connection
+                console.log(`Spectrum connection rejected: ${checkData.reason}`);
+
+                // Don't attempt reconnection if banned, kicked, or max sessions reached
+                if (checkData.reason.includes('banned') ||
+                    checkData.reason.includes('terminated') ||
+                    checkData.reason.includes('Maximum')) {
+                    this.userDisconnected = true;
+                    return;
+                }
+
+                // CRITICAL: Return here to prevent WebSocket creation
+                return;
+            }
+console.log('Spectrum connection check passed');
+} catch (err) {
+console.error('Spectrum connection check failed:', err);
+// Continue with connection attempt even if check fails
+}
+
+console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
+
         
         try {
             this.ws = new WebSocket(this.config.wsUrl);

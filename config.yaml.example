@@ -7,6 +7,20 @@ admin:
   # Description HTML to display in the top right of the page
   # This can include HTML tags like links
   description: 'Welcome! This SDR is running <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a>'
+  # Name - similar to description without any HTML
+  name: 'My SDR operated by myself!'
+  # Admin email address
+  email: "me@example.com"
+  # GPS coordinates
+  gps:
+    lat: 51.507  # Latitude (London default)
+    lon: -0.128  # Longitude (London default)
+  # Height above sea level (meters)
+  asl: 30
+  # Location description
+  location: "Dalgety Bay, Scotland, UK"
+  # Software version
+  version: "v1.2.40"
 
 # Radiod connection settings
 radiod:
@@ -21,8 +35,18 @@ radiod:
 server:
   # Listen address and port
   listen: ":8080"
-  # Maximum concurrent sessions
+  # Maximum concurrent unique users (by user_session_id UUID)
+  # Each unique user can have multiple sessions (e.g., audio + spectrum)
+  # but they all count as one user toward this limit
   max_sessions: 50
+  # Maximum concurrent unique users (UUIDs) per IP address (0 = unlimited)
+  # This limits the number of unique user_session_ids from a single IP
+  # Each unique user can have multiple sessions (e.g., audio + spectrum)
+  # For example, if set to 1, only one UUID can connect from an IP, but that
+  # UUID can establish both audio and spectrum channels
+  # Useful for preventing abuse from a single source
+  # Set to 0 to disable IP-based limiting
+  max_sessions_ip: 0
   # Session timeout in seconds (0 = no timeout)
   session_timeout: 300
   # Enable CORS

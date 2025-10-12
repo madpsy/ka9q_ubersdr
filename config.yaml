@@ -7,6 +7,20 @@ admin:
   # Description HTML to display in the top right of the page
   # This can include HTML tags like links
   description: 'Dalgety Bay SDR operated by <a href="https://qrz.com/db/mm3ndh" target="_blank">MM3NDH</a>'
+  # Name - similar to description without any HTML
+  name: 'Dalgety Bay SDR operated by MM3NDH'
+  # Admin email address
+  email: "mm3ndh@nsamail.uk"
+  # GPS coordinates
+  gps:
+    lat: 51.507  # Latitude (London default)
+    lon: -0.128  # Longitude (London default)
+  # Height above sea level (meters)
+  asl: 30
+  # Location description
+  location: "Dalgety Bay, Scotland, UK"
+  # Software version
+  version: "v1.2.40"
 
 # Radiod connection settings
 radiod:
@@ -22,7 +36,15 @@ server:
   # Listen address and port
   listen: ":8080"
   # Maximum concurrent sessions
-  max_sessions: 50
+  max_sessions: 20
+  # Maximum concurrent unique users (UUIDs) per IP address (0 = unlimited)
+  # This limits the number of unique user_session_ids from a single IP
+  # Each unique user can have multiple sessions (e.g., audio + spectrum)
+  # For example, if set to 1, only one UUID can connect from an IP, but that
+  # UUID can establish both audio and spectrum channels
+  # Useful for preventing abuse from a single source
+  # Set to 0 to disable IP-based limiting
+  max_sessions_ip: 1
   # Session timeout in seconds (0 = no timeout)
   session_timeout: 300
   # Enable CORS

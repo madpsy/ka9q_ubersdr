@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -77,8 +79,11 @@ type UserSpectrumServerMessage struct {
 
 // HandleSpectrumWebSocket handles spectrum WebSocket connections
 func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Get source IP address
+	// Get source IP address and strip port
 	sourceIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
+		sourceIP = host
+	}
 	clientIP := sourceIP
 
 	// Check X-Forwarded-For header for true source IP (first IP in the list)
@@ -89,14 +94,18 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 			// Find first comma or use entire string
 			for i, c := range xff {
 				if c == ',' {
-					clientIP = xff[:i]
+					clientIP = strings.TrimSpace(xff[:i])
 					break
 				}
 			}
 			if clientIP == sourceIP {
 				// No comma found, use entire xff
-				clientIP = xff
+				clientIP = strings.TrimSpace(xff)
 			}
+		}
+		// Strip port from X-Forwarded-For IP if present
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
 		}
 	}
 

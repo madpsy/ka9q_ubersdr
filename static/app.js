@@ -41,6 +41,7 @@ const maxReconnectAttempts = 10; // Give up after 10 attempts
 let lastConnectionParams = null; // Store connection parameters for reconnection
 let audioUserDisconnected = false; // Flag to prevent reconnection after user disconnect
 let connectionFailureNotified = false; // Track if we've already shown the connection failure notification
+let lastServerError = null; // Store last error message from server
 // Expose audioContext globally for recorder
 window.audioContext = null;
 let audioQueue = [];
@@ -214,14 +215,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const audioStartOverlay = document.getElementById('audio-start-overlay');
     
     if (audioStartButton && audioStartOverlay) {
-        // Disable button for 2 seconds on page load
+        // Disable button and show "Please wait..." while checking connection
         const originalHTML = audioStartButton.innerHTML;
         audioStartButton.disabled = true;
         audioStartButton.innerHTML = '<span>Please wait...</span>';
-        setTimeout(() => {
-            audioStartButton.disabled = false;
-            audioStartButton.innerHTML = originalHTML;
-        }, 2000);
+
+        // Check if connection will be allowed
+        checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML);
 
         audioStartButton.addEventListener('click', () => {
             // Hide overlay
@@ -623,6 +623,56 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// Check connection status on page load
+async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML) {
+    try {
+        const checkResponse = await fetch('/connection', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                user_session_id: userSessionID
+            })
+        });
+
+        const checkData = await checkResponse.json();
+
+        if (!checkData.allowed) {
+            // Connection not allowed - show error instead of play button
+            audioStartButton.disabled = true;
+            audioStartButton.style.backgroundColor = '#dc3545'; // Red
+            audioStartButton.style.cursor = 'not-allowed';
+
+            // Show error message in button
+            let errorIcon = '🚫';
+            if (checkData.reason.includes('banned')) {
+                errorIcon = '⛔';
+            } else if (checkData.reason.includes('Maximum')) {
+                errorIcon = '👥';
+            }
+
+            audioStartButton.innerHTML = `<span>${errorIcon} ${checkData.reason}</span>`;
+
+            // Also log the error
+            log(`Connection not allowed: ${checkData.reason}`, 'error');
+        } else {
+            // Connection allowed - enable the play button after 2 second delay
+            setTimeout(() => {
+                audioStartButton.disabled = false;
+                audioStartButton.innerHTML = originalHTML;
+            }, 2000);
+        }
+    } catch (err) {
+        console.error('Connection check failed:', err);
+        // On error, enable button after delay anyway
+        setTimeout(() => {
+            audioStartButton.disabled = false;
+            audioStartButton.innerHTML = originalHTML;
+        }, 2000);
+    }
+}
+
 // Fetch and display site description
 async function fetchSiteDescription() {
     try {
@@ -651,7 +701,7 @@ function toggleConnection() {
 }
 
 // Connect to WebSocket
-function connect() {
+async function connect() {
     // Clear any pending reconnection timer
     if (reconnectTimer) {
         clearTimeout(reconnectTimer);
@@ -668,6 +718,52 @@ function connect() {
         bandwidthLow: currentBandwidthLow,
         bandwidthHigh: currentBandwidthHigh
     };
+    // Check if connection will be allowed before attempting WebSocket connection
+    try {
+        const checkResponse = await fetch('/connection', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                user_session_id: userSessionID
+            })
+        });
+
+        const checkData = await checkResponse.json();
+
+        if (!checkData.allowed) {
+            // Connection not allowed - show specific error
+            log(`Connection rejected: ${checkData.reason}`, 'error');
+            showNotification(`Connection rejected: ${checkData.reason}`, 'error', 10000);
+            updateConnectionStatus('disconnected');
+
+            // Store the error for potential reconnection attempts
+            lastServerError = checkData.reason;
+
+            // Don't attempt reconnection if banned or kicked
+            if (checkData.reason.includes('banned') || checkData.reason.includes('terminated')) {
+                // Clear reconnection parameters to prevent any retry
+                lastConnectionParams = null;
+                return;
+            }
+
+            // For max sessions, schedule reconnection (but don't create WebSocket)
+            if (checkData.reason.includes('Maximum')) {
+                scheduleReconnect();
+            }
+
+            // CRITICAL: Return here to prevent WebSocket creation
+            return;
+        }
+
+        log(`Connection check passed (client IP: ${checkData.client_ip})`);
+    } catch (err) {
+        console.error('Connection check failed:', err);
+        log('Connection check failed, attempting connection anyway...', 'error');
+        // Continue with connection attempt even if check fails
+    }
+
     
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Include bandwidth parameters and user session ID in WebSocket URL
@@ -782,13 +878,21 @@ function connect() {
         if (event.code !== 1000 && event.code !== 1001 && !connectionFailureNotified) {
             connectionFailureNotified = true; // Set flag so we don't show again
 
-            // Check if this was during initial connection (never opened)
-            if (!event.wasClean || event.code === 1006) {
+            // Use specific error message if we received one from the server
+            let errorMessage;
+            if (lastServerError) {
+                errorMessage = `Connection failed: ${lastServerError}. Attempting to reconnect...`;
+            } else if (!event.wasClean || event.code === 1006) {
                 // 1006 = abnormal closure (no close frame received)
-                showNotification('Connection failed. You may have been disconnected by an administrator. Attempting to reconnect...', 'error', 10000);
+                errorMessage = 'Connection failed. You may have been disconnected by an administrator. Attempting to reconnect...';
             } else {
-                showNotification('Connection lost. Attempting to reconnect...', 'error', 10000);
+                errorMessage = 'Connection lost. Attempting to reconnect...';
             }
+
+            showNotification(errorMessage, 'error', 10000);
+
+            // Clear the stored error after using it
+            lastServerError = null;
         }
 
         // Schedule reconnection if we have saved parameters AND user didn't explicitly disconnect

@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -258,8 +260,11 @@ type ServerMessage struct {
 
 // HandleWebSocket handles WebSocket connections
 func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Get source IP address
+	// Get source IP address and strip port
 	sourceIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
+		sourceIP = host
+	}
 	clientIP := sourceIP
 
 	// Check X-Forwarded-For header for true source IP (first IP in the list)
@@ -270,14 +275,18 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 			// Find first comma or use entire string
 			for i, c := range xff {
 				if c == ',' {
-					clientIP = xff[:i]
+					clientIP = strings.TrimSpace(xff[:i])
 					break
 				}
 			}
 			if clientIP == sourceIP {
 				// No comma found, use entire xff
-				clientIP = xff
+				clientIP = strings.TrimSpace(xff)
 			}
+		}
+		// Strip port from X-Forwarded-For IP if present
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
 		}
 	}
 
@@ -376,7 +385,11 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	session, err := wsh.sessions.CreateSessionWithUserID(frequency, mode, sourceIP, clientIP, userSessionID)
 	if err != nil {
 		log.Printf("Failed to create session: %v", err)
-		wsh.sendError(conn, "Failed to create session: "+err.Error())
+		if sendErr := wsh.sendError(conn, err.Error()); sendErr != nil {
+			log.Printf("Failed to send error message: %v", sendErr)
+		}
+		// Give client time to receive the error message before closing
+		time.Sleep(100 * time.Millisecond)
 		return
 	}
 

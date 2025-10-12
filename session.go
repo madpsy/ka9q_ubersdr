@@ -32,6 +32,7 @@ type Session struct {
 	SourceIP      string // Direct connection IP (RemoteAddr)
 	ClientIP      string // True client IP (from X-Forwarded-For if present)
 	UserSessionID string // Client-generated UUID to link audio and spectrum sessions
+	UserAgent     string // User-Agent string from the client
 
 	// WebSocket connection (for closing when kicked)
 	WSConn interface{} // *wsConn, stored as interface{} to avoid import cycle
@@ -46,9 +47,12 @@ type Session struct {
 // SessionManager manages all active sessions
 type SessionManager struct {
 	sessions         map[string]*Session
-	ssrcToSession    map[uint32]*Session  // Map SSRC to session for audio routing
-	kickedUUIDs      map[string]time.Time // Map of kicked user_session_ids with expiry time
-	userSessionFirst map[string]time.Time // Map of user_session_id to first seen time
+	ssrcToSession    map[uint32]*Session        // Map SSRC to session for audio routing
+	kickedUUIDs      map[string]time.Time       // Map of kicked user_session_ids with expiry time
+	userSessionFirst map[string]time.Time       // Map of user_session_id to first seen time
+	userSessionUUIDs map[string]int             // Map of user_session_id to count of sessions (for limiting unique users)
+	ipToUUIDs        map[string]map[string]bool // Map of IP address to set of UUIDs (for limiting unique UUIDs per IP)
+	userAgents       map[string]string          // Map of user_session_id to User-Agent string
 	mu               sync.RWMutex
 	config           *Config
 	radiod           *RadiodController
@@ -64,6 +68,9 @@ func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager
 		ssrcToSession:    make(map[uint32]*Session),
 		kickedUUIDs:      make(map[string]time.Time),
 		userSessionFirst: make(map[string]time.Time),
+		userSessionUUIDs: make(map[string]int),
+		ipToUUIDs:        make(map[string]map[string]bool),
+		userAgents:       make(map[string]string),
 		config:           config,
 		radiod:           radiod,
 		maxSessions:      config.Server.MaxSessions,
@@ -115,9 +122,37 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 		}
 	}
 
-	// Check session limit
-	if len(sm.sessions) >= sm.maxSessions {
-		return nil, fmt.Errorf("maximum sessions reached (%d)", sm.maxSessions)
+	// Check session limit based on unique user_session_ids
+	// If userSessionID is empty, treat as a unique user for each session
+	if userSessionID == "" {
+		// No UUID provided - count as unique user per session (legacy behavior)
+		if len(sm.sessions) >= sm.maxSessions {
+			return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
+		}
+	} else {
+		// UUID provided - check if this is a new unique user
+		if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
+			// New unique user - check if we've reached the limit
+			if len(sm.userSessionUUIDs) >= sm.maxSessions {
+				return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
+			}
+		}
+		// Existing user can create additional sessions (audio + spectrum)
+	}
+
+	// Check if we've reached the maximum unique UUIDs per IP (if configured)
+	if sm.config.Server.MaxSessionsIP > 0 && clientIP != "" && userSessionID != "" {
+		// Check if this is a new UUID for this IP
+		if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
+			// IP exists, check if UUID is new
+			if !uuidSet[userSessionID] {
+				// New UUID for this IP, check limit
+				if len(uuidSet) >= sm.config.Server.MaxSessionsIP {
+					return nil, fmt.Errorf("maximum unique users per IP reached (%d)", sm.config.Server.MaxSessionsIP)
+				}
+			}
+		}
+		// If IP doesn't exist yet or UUID already exists for this IP, allow it
 	}
 
 	// Generate unique session ID and channel name
@@ -183,13 +218,27 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	sm.sessions[sessionID] = session
 	sm.ssrcToSession[ssrc] = session
 
-	if DebugMode {
-		log.Printf("DEBUG: Session registered in ssrcToSession map: SSRC 0x%08x -> Session %s", ssrc, sessionID)
-		log.Printf("DEBUG: Total sessions: %d, Total SSRC mappings: %d", len(sm.sessions), len(sm.ssrcToSession))
+	// Track user_session_id count
+	if userSessionID != "" {
+		sm.userSessionUUIDs[userSessionID]++
 	}
 
-	log.Printf("Session created: %s (channel: %s, SSRC: 0x%08x, freq: %d Hz, mode: %s, bandwidth: %d Hz)",
-		sessionID, channelName, ssrc, frequency, mode, bandwidth)
+	// Track IP to UUID mapping
+	if clientIP != "" && userSessionID != "" {
+		if sm.ipToUUIDs[clientIP] == nil {
+			sm.ipToUUIDs[clientIP] = make(map[string]bool)
+		}
+		sm.ipToUUIDs[clientIP][userSessionID] = true
+	}
+
+	if DebugMode {
+		log.Printf("DEBUG: Session registered in ssrcToSession map: SSRC 0x%08x -> Session %s", ssrc, sessionID)
+		log.Printf("DEBUG: Total sessions: %d, Total SSRC mappings: %d, Unique users: %d",
+			len(sm.sessions), len(sm.ssrcToSession), len(sm.userSessionUUIDs))
+	}
+
+	log.Printf("Session created: %s (channel: %s, SSRC: 0x%08x, freq: %d Hz, mode: %s, bandwidth: %d Hz, user: %s)",
+		sessionID, channelName, ssrc, frequency, mode, bandwidth, userSessionID)
 
 	return session, nil
 }
@@ -222,9 +271,37 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 		}
 	}
 
-	// Check session limit
-	if len(sm.sessions) >= sm.maxSessions {
-		return nil, fmt.Errorf("maximum sessions reached (%d)", sm.maxSessions)
+	// Check session limit based on unique user_session_ids
+	// If userSessionID is empty, treat as a unique user for each session
+	if userSessionID == "" {
+		// No UUID provided - count as unique user per session (legacy behavior)
+		if len(sm.sessions) >= sm.maxSessions {
+			return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
+		}
+	} else {
+		// UUID provided - check if this is a new unique user
+		if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
+			// New unique user - check if we've reached the limit
+			if len(sm.userSessionUUIDs) >= sm.maxSessions {
+				return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
+			}
+		}
+		// Existing user can create additional sessions (audio + spectrum)
+	}
+
+	// Check if we've reached the maximum unique UUIDs per IP (if configured)
+	if sm.config.Server.MaxSessionsIP > 0 && clientIP != "" && userSessionID != "" {
+		// Check if this is a new UUID for this IP
+		if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
+			// IP exists, check if UUID is new
+			if !uuidSet[userSessionID] {
+				// New UUID for this IP, check limit
+				if len(uuidSet) >= sm.config.Server.MaxSessionsIP {
+					return nil, fmt.Errorf("maximum unique users per IP reached (%d)", sm.config.Server.MaxSessionsIP)
+				}
+			}
+		}
+		// If IP doesn't exist yet or UUID already exists for this IP, allow it
 	}
 
 	// Generate unique session ID and channel name
@@ -285,8 +362,21 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 	sm.sessions[sessionID] = session
 	sm.ssrcToSession[ssrc] = session
 
-	log.Printf("Spectrum session created: %s (SSRC: 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz)",
-		sessionID, ssrc, frequency, binCount, binBandwidth)
+	// Track user_session_id count
+	if userSessionID != "" {
+		sm.userSessionUUIDs[userSessionID]++
+	}
+
+	// Track IP to UUID mapping
+	if clientIP != "" && userSessionID != "" {
+		if sm.ipToUUIDs[clientIP] == nil {
+			sm.ipToUUIDs[clientIP] = make(map[string]bool)
+		}
+		sm.ipToUUIDs[clientIP][userSessionID] = true
+	}
+
+	log.Printf("Spectrum session created: %s (SSRC: 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz, user: %s)",
+		sessionID, ssrc, frequency, binCount, binBandwidth, userSessionID)
 
 	return session, nil
 }
@@ -521,9 +611,44 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	delete(sm.sessions, sessionID)
 	delete(sm.ssrcToSession, session.SSRC)
 
+	// Decrement user_session_id count and remove if zero
+	if session.UserSessionID != "" {
+		if count, exists := sm.userSessionUUIDs[session.UserSessionID]; exists {
+			if count <= 1 {
+				delete(sm.userSessionUUIDs, session.UserSessionID)
+			} else {
+				sm.userSessionUUIDs[session.UserSessionID]--
+			}
+		}
+	}
+
+	// Clean up IP to UUID mapping if this was the last session for this UUID from this IP
+	if session.ClientIP != "" && session.UserSessionID != "" {
+		// Check if there are any other sessions with this UUID from this IP
+		hasOtherSessions := false
+		for _, s := range sm.sessions {
+			if s.ClientIP == session.ClientIP && s.UserSessionID == session.UserSessionID && s.ID != sessionID {
+				hasOtherSessions = true
+				break
+			}
+		}
+
+		// If no other sessions with this UUID from this IP, remove the UUID from the IP's set
+		if !hasOtherSessions {
+			if uuidSet, exists := sm.ipToUUIDs[session.ClientIP]; exists {
+				delete(uuidSet, session.UserSessionID)
+				// If this was the last UUID for this IP, remove the IP entry
+				if len(uuidSet) == 0 {
+					delete(sm.ipToUUIDs, session.ClientIP)
+				}
+			}
+		}
+	}
+
 	if DebugMode {
 		log.Printf("DEBUG: Session removed from ssrcToSession map: SSRC 0x%08x", session.SSRC)
-		log.Printf("DEBUG: Remaining sessions: %d, Remaining SSRC mappings: %d", len(sm.sessions), len(sm.ssrcToSession))
+		log.Printf("DEBUG: Remaining sessions: %d, Remaining SSRC mappings: %d, Unique users: %d",
+			len(sm.sessions), len(sm.ssrcToSession), len(sm.userSessionUUIDs))
 	}
 	sm.mu.Unlock()
 
@@ -633,6 +758,82 @@ func (sm *SessionManager) GetSessionCount() int {
 	return len(sm.sessions)
 }
 
+// GetUniqueUserCount returns the current number of unique users (by user_session_id)
+func (sm *SessionManager) GetUniqueUserCount() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return len(sm.userSessionUUIDs)
+}
+
+// CanAcceptNewUUID checks if a new UUID can be accepted without exceeding max_sessions
+// Returns true if the UUID already exists OR if there's room for a new UUID
+func (sm *SessionManager) CanAcceptNewUUID(userSessionID string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	// If this UUID already has sessions, it's always allowed
+	if _, exists := sm.userSessionUUIDs[userSessionID]; exists {
+		return true
+	}
+
+	// Check if we have room for a new UUID
+	return len(sm.userSessionUUIDs) < sm.config.Server.MaxSessions
+}
+
+// CanAcceptNewIP checks if a new UUID from an IP can be accepted without exceeding max_sessions_ip
+// Returns true if max_sessions_ip is 0 (unlimited), if the UUID already exists for this IP,
+// or if the IP has fewer unique UUIDs than the limit. Note: This limits unique UUIDs per IP, not total sessions.
+func (sm *SessionManager) CanAcceptNewIP(clientIP, userSessionID string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	// If max_sessions_ip is 0 or not configured, allow unlimited
+	if sm.config.Server.MaxSessionsIP <= 0 {
+		return true
+	}
+
+	// If IP or UUID is empty, can't enforce limit properly
+	if clientIP == "" || userSessionID == "" {
+		return true
+	}
+
+	// Check if this UUID already exists for this IP
+	if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
+		// If UUID already exists for this IP, always allow (same user, multiple sessions)
+		if uuidSet[userSessionID] {
+			return true
+		}
+		// New UUID for this IP, check if we've reached the limit
+		return len(uuidSet) < sm.config.Server.MaxSessionsIP
+	}
+	// IP doesn't exist yet, so it's allowed
+	return true
+}
+
+// SetUserAgent stores the User-Agent string for a user_session_id
+func (sm *SessionManager) SetUserAgent(userSessionID, userAgent string) {
+	if userSessionID == "" {
+		return
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sm.userAgents[userSessionID] = userAgent
+}
+
+// GetUserAgent retrieves the User-Agent string for a user_session_id
+func (sm *SessionManager) GetUserAgent(userSessionID string) string {
+	if userSessionID == "" {
+		return ""
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	return sm.userAgents[userSessionID]
+}
+
 // GetSessionInfo returns information about a session
 func (s *Session) GetInfo() map[string]interface{} {
 	s.mu.RLock()
@@ -695,6 +896,10 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			if firstSeen, exists := sm.userSessionFirst[session.UserSessionID]; exists {
 				info["user_session_first_seen"] = firstSeen.Format(time.RFC3339)
 			}
+			// Add user_agent if available
+			if userAgent, exists := sm.userAgents[session.UserSessionID]; exists {
+				info["user_agent"] = userAgent
+			}
 		}
 
 		session.mu.RUnlock()
@@ -728,7 +933,6 @@ func (sm *SessionManager) Shutdown() {
 // IsUUIDKicked checks if a user_session_id has been kicked
 func (sm *SessionManager) IsUUIDKicked(userSessionID string) bool {
 	if userSessionID == "" {
-		log.Printf("DEBUG: IsUUIDKicked called with empty UUID")
 		return false
 	}
 
@@ -736,7 +940,6 @@ func (sm *SessionManager) IsUUIDKicked(userSessionID string) bool {
 	defer sm.mu.RUnlock()
 
 	expiry, exists := sm.kickedUUIDs[userSessionID]
-	log.Printf("DEBUG: IsUUIDKicked(%s) - exists: %v, kickedUUIDs count: %d", userSessionID, exists, len(sm.kickedUUIDs))
 
 	if !exists {
 		return false

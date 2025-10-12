@@ -1144,8 +1144,8 @@
             table.innerHTML = `
                 <thead>
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
-                        <th style="padding: 12px; text-align: left;">User Session ID</th>
                         <th style="padding: 12px; text-align: left;">IP Address</th>
+                        <th style="padding: 12px; text-align: left;">User Agent</th>
                         <th style="padding: 12px; text-align: left;">First Seen</th>
                         <th style="padding: 12px; text-align: center;">Audio</th>
                         <th style="padding: 12px; text-align: center;">Spectrum</th>
@@ -1168,6 +1168,7 @@
                 const clientIP = audioSession?.client_ip || spectrumSession?.client_ip || 'N/A';
                 const sourceIP = audioSession?.source_ip || spectrumSession?.source_ip || 'N/A';
                 const userSessionID = sessions.hasUUID ? key : 'N/A';
+                const userAgent = audioSession?.user_agent || spectrumSession?.user_agent || 'N/A';
 
                 // Get first seen timestamp and calculate duration
                 const firstSeen = audioSession?.user_session_first_seen || spectrumSession?.user_session_first_seen;
@@ -1205,8 +1206,8 @@
                 }
 
                 row.innerHTML = `
-                    <td style="padding: 12px; font-family: monospace; font-size: 11px; word-break: break-all; max-width: 150px;">${userSessionID === 'N/A' ? '<em style="color: #999;">N/A</em>' : userSessionID}</td>
                     <td style="padding: 12px; font-family: monospace; font-size: 12px; max-width: 140px; word-wrap: break-word;">${ipDisplay}</td>
+                    <td style="padding: 12px; font-size: 11px; word-break: break-all; max-width: 200px;" title="${userAgent}">${userAgent === 'N/A' ? '<em style="color: #999;">N/A</em>' : userAgent}</td>
                     <td style="padding: 12px; font-size: 12px; white-space: nowrap;">${firstSeenDisplay}</td>
                     <td style="padding: 12px; text-align: center;">${sessions.audio.length > 0 ? '✓' : '—'}</td>
                     <td style="padding: 12px; text-align: center;">${sessions.spectrum.length > 0 ? '✓' : '—'}</td>
@@ -1216,14 +1217,15 @@
                 tbody.appendChild(row);
             }
 
-            // Add summary
+            // Add summary with max_sessions from config
             const summary = document.createElement('div');
             summary.style.marginTop = '20px';
             summary.style.padding = '15px';
             summary.style.background = '#f8f9fa';
             summary.style.borderRadius = '5px';
+            const maxSessions = currentConfig?.server?.max_sessions || '?';
             summary.innerHTML = `
-                <strong>Summary:</strong> ${Object.keys(sessionsByUser).length} unique session(s),
+                <strong>Summary:</strong> ${Object.keys(sessionsByUser).length} of ${maxSessions} maximum unique user(s),
                 ${currentSessions.filter(s => !s.is_spectrum).length} audio connection(s),
                 ${currentSessions.filter(s => s.is_spectrum).length} spectrum connection(s)
             `;

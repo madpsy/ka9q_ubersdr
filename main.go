@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -192,6 +194,9 @@ func main() {
 	adminHandler := NewAdminHandler(config, *configFile, sessions, ipBanManager)
 
 	// Setup HTTP routes
+	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
+		handleConnectionCheck(w, r, sessions, ipBanManager)
+	})
 	http.HandleFunc("/ws", wsHandler.HandleWebSocket)
 	// http.HandleFunc("/ws/spectrum", spectrumWsHandler.HandleWebSocket) // Old endpoint - DISABLED
 	http.HandleFunc("/ws/user-spectrum", userSpectrumWsHandler.HandleSpectrumWebSocket) // New endpoint
@@ -207,6 +212,9 @@ func main() {
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
 		handleDescription(w, r, config)
+	})
+	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
+		handleStatus(w, r, config)
 	})
 
 	// Admin authentication endpoints (no auth required)
@@ -271,11 +279,133 @@ func main() {
 	log.Println("Server stopped")
 }
 
+// ConnectionCheckRequest represents the request body for connection check
+type ConnectionCheckRequest struct {
+	UserSessionID string `json:"user_session_id"`
+}
+
+// ConnectionCheckResponse represents the response for connection check
+type ConnectionCheckResponse struct {
+	ClientIP string `json:"client_ip"`
+	Allowed  bool   `json:"allowed"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// handleConnectionCheck checks if a connection will be allowed before WebSocket upgrade
+func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *SessionManager, ipBanManager *IPBanManager) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Only accept POST requests
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(ConnectionCheckResponse{
+			Allowed: false,
+			Reason:  "Method not allowed, use POST",
+		})
+		return
+	}
+
+	// Parse request body
+	var req ConnectionCheckRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ConnectionCheckResponse{
+			Allowed: false,
+			Reason:  "Invalid request body",
+		})
+		return
+	}
+
+	// Get source IP address and strip port number
+	sourceIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
+		sourceIP = host
+	}
+
+	clientIP := sourceIP
+
+	// Check X-Forwarded-For header for true source IP (first IP in the list)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+		// We want the first one (the true client)
+		clientIP = strings.TrimSpace(xff)
+		if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
+			clientIP = strings.TrimSpace(clientIP[:commaIdx])
+		}
+		// Strip port if present in X-Forwarded-For
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
+		}
+	}
+
+	response := ConnectionCheckResponse{
+		ClientIP: clientIP,
+		Allowed:  true,
+	}
+
+	// Check if IP is banned
+	if ipBanManager.IsBanned(clientIP) {
+		response.Allowed = false
+		response.Reason = "Your IP address has been banned"
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Validate user session ID - must be a valid UUID
+	if !isValidUUID(req.UserSessionID) {
+		response.Allowed = false
+		response.Reason = "Invalid or missing user_session_id"
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Check if this UUID has been kicked
+	if sessions.IsUUIDKicked(req.UserSessionID) {
+		response.Allowed = false
+		response.Reason = "Your session has been terminated"
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Check if max sessions limit would be exceeded
+	if !sessions.CanAcceptNewUUID(req.UserSessionID) {
+		uniqueCount := sessions.GetUniqueUserCount()
+		maxSessions := sessions.config.Server.MaxSessions
+		response.Allowed = false
+		response.Reason = fmt.Sprintf("Maximum unique users reached (%d of %d)", uniqueCount, maxSessions)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Check if max unique users per IP limit would be exceeded
+	if !sessions.CanAcceptNewIP(clientIP, req.UserSessionID) {
+		maxSessionsIP := sessions.config.Server.MaxSessionsIP
+		response.Allowed = false
+		response.Reason = fmt.Sprintf("Maximum unique users per IP reached (%d)", maxSessionsIP)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Connection is allowed - store User-Agent for this session
+	userAgent := r.Header.Get("User-Agent")
+	if userAgent != "" {
+		sessions.SetUserAgent(req.UserSessionID, userAgent)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
 // handleHealth handles health check requests
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 // handleStats handles statistics requests
@@ -380,5 +510,44 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding description: %v", err)
+	}
+}
+
+// handleStatus serves the status.json endpoint with receiver and SDR information
+func handleStatus(w http.ResponseWriter, r *http.Request, config *Config) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Build the status response
+	response := map[string]interface{}{
+		"receiver": map[string]interface{}{
+			"name":  config.Admin.Name,
+			"admin": config.Admin.Email,
+			"gps": map[string]interface{}{
+				"lat": config.Admin.GPS.Lat,
+				"lon": config.Admin.GPS.Lon,
+			},
+			"asl":      config.Admin.ASL,
+			"location": config.Admin.Location,
+		},
+		"max_clients": config.Server.MaxSessions,
+		"version":     config.Admin.Version,
+		"sdrs": []map[string]interface{}{
+			{
+				"name": "UberSDR",
+				"type": "SDR",
+				"profiles": []map[string]interface{}{
+					{
+						"name":        "0-30 MHz",
+						"center_freq": 15000000, // 15 MHz in Hz
+						"sample_rate": 64000000, // 64 MHz in Hz
+					},
+				},
+			},
+		},
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding status: %v", err)
 	}
 }

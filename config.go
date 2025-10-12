@@ -20,8 +20,20 @@ type Config struct {
 
 // AdminConfig contains admin authentication settings
 type AdminConfig struct {
-	Password    string `yaml:"password"`
-	Description string `yaml:"description"`
+	Password    string    `yaml:"password"`
+	Description string    `yaml:"description"`
+	Name        string    `yaml:"name"`
+	Email       string    `yaml:"email"`
+	GPS         GPSConfig `yaml:"gps"`
+	ASL         int       `yaml:"asl"` // Altitude above sea level in meters
+	Location    string    `yaml:"location"`
+	Version     string    `yaml:"version"`
+}
+
+// GPSConfig contains GPS coordinates
+type GPSConfig struct {
+	Lat float64 `yaml:"lat"`
+	Lon float64 `yaml:"lon"`
 }
 
 // Bookmark represents a frequency bookmark
@@ -42,6 +54,7 @@ type RadiodConfig struct {
 type ServerConfig struct {
 	Listen         string `yaml:"listen"`
 	MaxSessions    int    `yaml:"max_sessions"`
+	MaxSessionsIP  int    `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
 	SessionTimeout int    `yaml:"session_timeout"`
 	EnableCORS     bool   `yaml:"enable_cors"`
 	LogFile        string `yaml:"logfile"` // HTTP request log file path
@@ -134,9 +147,29 @@ func LoadConfig(filename string) (*Config, error) {
 		config.Logging.Format = "text"
 	}
 
-	// Set admin description default if not specified
+	// Set admin defaults if not specified
 	if config.Admin.Description == "" {
 		config.Admin.Description = `Welcome! This SDR is running <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a>`
+	}
+	if config.Admin.Name == "" {
+		config.Admin.Name = "My SDR operated by myself!"
+	}
+	if config.Admin.Email == "" {
+		config.Admin.Email = "me@example.com"
+	}
+	if config.Admin.GPS.Lat == 0 && config.Admin.GPS.Lon == 0 {
+		// Default to London coordinates
+		config.Admin.GPS.Lat = 51.507
+		config.Admin.GPS.Lon = -0.128
+	}
+	if config.Admin.ASL == 0 {
+		config.Admin.ASL = 30 // Default altitude in meters
+	}
+	if config.Admin.Location == "" {
+		config.Admin.Location = "Dalgety Bay, Scotland, UK"
+	}
+	if config.Admin.Version == "" {
+		config.Admin.Version = "v1.00.00"
 	}
 
 	// Set spectrum defaults if not specified

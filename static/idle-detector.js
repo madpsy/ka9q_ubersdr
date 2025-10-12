@@ -151,15 +151,14 @@ class IdleDetector {
         `;
         title.textContent = 'Are You Still There?';
         
-        // Message
-        const message = document.createElement('p');
-        message.style.cssText = `
+        // Message (will be updated with actual idle time)
+        this.idleTimeDisplay = document.createElement('p');
+        this.idleTimeDisplay.style.cssText = `
             color: #ecf0f1;
             font-size: 16px;
             margin: 0 0 10px 0;
             line-height: 1.5;
         `;
-        message.textContent = 'You\'ve been inactive for 10 minutes.';
         
         // Countdown display
         this.countdownDisplay = document.createElement('p');
@@ -192,7 +191,7 @@ class IdleDetector {
         // Assemble dialog
         dialog.appendChild(icon);
         dialog.appendChild(title);
-        dialog.appendChild(message);
+        dialog.appendChild(this.idleTimeDisplay);
         dialog.appendChild(this.countdownDisplay);
         dialog.appendChild(confirmButton);
         
@@ -325,8 +324,23 @@ class IdleDetector {
     }
     
     updateCountdown(seconds) {
+        // Update idle time display (how long user has been idle)
+        if (this.idleTimeDisplay) {
+            const now = Date.now();
+            const idleSeconds = Math.floor((now - this.lastActivityTime) / 1000);
+            const idleMinutes = Math.floor(idleSeconds / 60);
+            const idleSecondsRemainder = idleSeconds % 60;
+
+            if (idleMinutes > 0) {
+                this.idleTimeDisplay.textContent = `You've been inactive for ${idleMinutes} minute${idleMinutes !== 1 ? 's' : ''} and ${idleSecondsRemainder} second${idleSecondsRemainder !== 1 ? 's' : ''}.`;
+            } else {
+                this.idleTimeDisplay.textContent = `You've been inactive for ${idleSeconds} second${idleSeconds !== 1 ? 's' : ''}.`;
+            }
+        }
+
+        // Update countdown display (time until disconnect)
         if (this.countdownDisplay) {
-            this.countdownDisplay.textContent = `Disconnecting in ${seconds} seconds...`;
+            this.countdownDisplay.textContent = `Disconnecting in ${seconds} second${seconds !== 1 ? 's' : ''}...`;
         }
     }
     

@@ -3089,6 +3089,8 @@ let frequencyTrackingInterval = null;
 let frequencyTrackingStartFreq = null;
 let frequencyTrackingHistory = []; // History of detected frequencies for smoothing
 let frequencyTrackingStableCount = 0; // Count of consecutive stable readings
+let frequencyTrackingLocked = false; // Track if we're locked on target
+const TRACKING_LOCK_THRESHOLD = 2; // Hz - consider locked if within this range
 const TRACKING_UPDATE_RATE = 1000; // ms - much slower updates (1 second)
 const TRACKING_DRIFT_LIMIT = 1000; // Hz
 const TRACKING_HISTORY_SIZE = 3; // Fewer samples, but require consistency
@@ -3217,6 +3219,21 @@ function enableFrequencyTracking() {
         const targetFreq = 1000;
         const currentError = targetFreq - detectedFreq;
 
+        // Update lock status and button color
+        const button = document.getElementById('set-1khz-btn');
+        const wasLocked = frequencyTrackingLocked;
+        frequencyTrackingLocked = Math.abs(currentError) <= TRACKING_LOCK_THRESHOLD;
+
+        if (button) {
+            if (frequencyTrackingLocked) {
+                button.style.backgroundColor = '#28a745'; // Green when locked
+                button.textContent = 'Tracking: LOCKED';
+            } else {
+                button.style.backgroundColor = '#fd7e14'; // Orange when adjusting
+                button.textContent = 'Tracking: ADJUSTING';
+            }
+        }
+
         // Only adjust if error is above minimum threshold (0.5 Hz)
         if (Math.abs(currentError) < TRACKING_MIN_ERROR) {
             return;
@@ -3303,6 +3320,7 @@ function disableFrequencyTracking() {
     frequencyTrackingEnabled = false;
     frequencyTrackingHistory = []; // Clear history
     frequencyTrackingStableCount = 0; // Reset stability counter
+    frequencyTrackingLocked = false; // Reset lock status
 
     if (frequencyTrackingInterval) {
         clearInterval(frequencyTrackingInterval);

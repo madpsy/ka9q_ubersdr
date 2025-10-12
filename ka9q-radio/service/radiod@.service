@@ -1,0 +1,24 @@
+# $Id: radiod@.service,v 1.3 2023/01/15 05:07:27 karn Exp $
+# systemd unit for radio receiver
+# Phil Karn, KA9Q, May 2022
+
+[Unit]
+Description=%i radio receiver
+Requires=network-online.target
+
+[Service]
+Type=simple
+User=radio
+Group=radio
+SupplementaryGroups=plugdev radio users
+AmbientCapabilities=CAP_SYS_NICE CAP_NET_ADMIN
+ReadWritePaths=/etc/fftw /var/lib/ka9q-radio
+UMask=002
+ExecStart=/usr/local/sbin/radiod -N %i /etc/radio/radiod@%i.conf
+Restart=always
+RestartSec=5
+TimeoutStopSec=5
+SyslogIdentifier=radiod@%i
+
+[Install]
+WantedBy=multi-user.target

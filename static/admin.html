@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Configuration - ka9q_ubersdr</title>
+    <title>Admin Configuration - UberSDR</title>
     <style>
         * {
             margin: 0;
@@ -290,7 +290,7 @@
             <div class="header">
                 <div class="header-content">
                     <h1>Configuration Editor</h1>
-                    <p>Edit ka9q_ubersdr configuration. Changes require server restart to take effect.</p>
+                    <p>Edit UberSDR configuration. Changes require server restart to take effect.</p>
                 </div>
                 <button class="btn btn-secondary" onclick="logout()">Logout</button>
             </div>
@@ -321,6 +321,9 @@
 
                 <!-- Bookmarks Tab -->
                 <div id="bookmarksTab" class="tab-content">
+                    <div class="alert alert-info" style="margin-bottom: 20px;">
+                        ℹ️ <strong>Note:</strong> Bookmark changes take effect immediately and are visible to all users without requiring a server restart.
+                    </div>
                     <div id="bookmarksList" class="loading">
                         <div class="spinner"></div>
                         <p>Loading bookmarks...</p>

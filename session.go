@@ -46,40 +46,51 @@ type Session struct {
 
 // SessionManager manages all active sessions
 type SessionManager struct {
-	sessions         map[string]*Session
-	ssrcToSession    map[uint32]*Session        // Map SSRC to session for audio routing
-	kickedUUIDs      map[string]time.Time       // Map of kicked user_session_ids with expiry time
-	userSessionFirst map[string]time.Time       // Map of user_session_id to first seen time
-	userSessionUUIDs map[string]int             // Map of user_session_id to count of sessions (for limiting unique users)
-	ipToUUIDs        map[string]map[string]bool // Map of IP address to set of UUIDs (for limiting unique UUIDs per IP)
-	userAgents       map[string]string          // Map of user_session_id to User-Agent string
-	mu               sync.RWMutex
-	config           *Config
-	radiod           *RadiodController
-	maxSessions      int
-	timeout          time.Duration
-	kickedUUIDTTL    time.Duration // How long to remember kicked UUIDs (default 1 hour)
+	sessions             map[string]*Session
+	ssrcToSession        map[uint32]*Session        // Map SSRC to session for audio routing
+	kickedUUIDs          map[string]time.Time       // Map of kicked user_session_ids with expiry time
+	userSessionFirst     map[string]time.Time       // Map of user_session_id to first seen time
+	userSessionUUIDs     map[string]int             // Map of user_session_id to count of sessions (for limiting unique users)
+	ipToUUIDs            map[string]map[string]bool // Map of IP address to set of UUIDs (for limiting unique UUIDs per IP)
+	userAgents           map[string]string          // Map of user_session_id to User-Agent string
+	uuidAudioSessions    map[string]string          // Map of user_session_id to audio session ID (enforces 1 audio per UUID)
+	uuidSpectrumSessions map[string]string          // Map of user_session_id to spectrum session ID (enforces 1 spectrum per UUID)
+	mu                   sync.RWMutex
+	config               *Config
+	radiod               *RadiodController
+	maxSessions          int
+	timeout              time.Duration
+	maxSessionTime       time.Duration // Maximum time a session can exist (0 = unlimited)
+	kickedUUIDTTL        time.Duration // How long to remember kicked UUIDs (default 1 hour)
 }
 
 // NewSessionManager creates a new session manager
 func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager {
 	sm := &SessionManager{
-		sessions:         make(map[string]*Session),
-		ssrcToSession:    make(map[uint32]*Session),
-		kickedUUIDs:      make(map[string]time.Time),
-		userSessionFirst: make(map[string]time.Time),
-		userSessionUUIDs: make(map[string]int),
-		ipToUUIDs:        make(map[string]map[string]bool),
-		userAgents:       make(map[string]string),
-		config:           config,
-		radiod:           radiod,
-		maxSessions:      config.Server.MaxSessions,
-		timeout:          time.Duration(config.Server.SessionTimeout) * time.Second,
-		kickedUUIDTTL:    1 * time.Hour, // Remember kicked UUIDs for 1 hour
+		sessions:             make(map[string]*Session),
+		ssrcToSession:        make(map[uint32]*Session),
+		kickedUUIDs:          make(map[string]time.Time),
+		userSessionFirst:     make(map[string]time.Time),
+		userSessionUUIDs:     make(map[string]int),
+		ipToUUIDs:            make(map[string]map[string]bool),
+		userAgents:           make(map[string]string),
+		uuidAudioSessions:    make(map[string]string),
+		uuidSpectrumSessions: make(map[string]string),
+		config:               config,
+		radiod:               radiod,
+		maxSessions:          config.Server.MaxSessions,
+		timeout:              time.Duration(config.Server.SessionTimeout) * time.Second,
+		maxSessionTime:       time.Duration(config.Server.MaxSessionTime) * time.Second,
+		kickedUUIDTTL:        1 * time.Hour, // Remember kicked UUIDs for 1 hour
 	}
 
 	// Start cleanup goroutine
 	go sm.cleanupLoop()
+
+	// Start max session time enforcement goroutine if configured
+	if sm.maxSessionTime > 0 {
+		go sm.maxSessionTimeLoop()
+	}
 
 	return sm
 }
@@ -155,6 +166,13 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 		// If IP doesn't exist yet or UUID already exists for this IP, allow it
 	}
 
+	// Check if this UUID already has an audio session (enforce 1 audio per UUID)
+	if userSessionID != "" {
+		if existingSessionID, exists := sm.uuidAudioSessions[userSessionID]; exists {
+			return nil, fmt.Errorf("user already has an active audio session (session: %s)", existingSessionID)
+		}
+	}
+
 	// Generate unique session ID and channel name
 	sessionID := uuid.New().String()
 	channelName := fmt.Sprintf("ubersdr-%s", sessionID[:8])
@@ -221,6 +239,8 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	// Track user_session_id count
 	if userSessionID != "" {
 		sm.userSessionUUIDs[userSessionID]++
+		// Track audio session for this UUID
+		sm.uuidAudioSessions[userSessionID] = sessionID
 	}
 
 	// Track IP to UUID mapping
@@ -304,6 +324,13 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 		// If IP doesn't exist yet or UUID already exists for this IP, allow it
 	}
 
+	// Check if this UUID already has a spectrum session (enforce 1 spectrum per UUID)
+	if userSessionID != "" {
+		if existingSessionID, exists := sm.uuidSpectrumSessions[userSessionID]; exists {
+			return nil, fmt.Errorf("user already has an active spectrum session (session: %s)", existingSessionID)
+		}
+	}
+
 	// Generate unique session ID and channel name
 	sessionID := uuid.New().String()
 	channelName := fmt.Sprintf("spectrum-%s", sessionID[:8])
@@ -365,6 +392,8 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 	// Track user_session_id count
 	if userSessionID != "" {
 		sm.userSessionUUIDs[userSessionID]++
+		// Track spectrum session for this UUID
+		sm.uuidSpectrumSessions[userSessionID] = sessionID
 	}
 
 	// Track IP to UUID mapping
@@ -620,6 +649,17 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 				sm.userSessionUUIDs[session.UserSessionID]--
 			}
 		}
+
+		// Remove from audio/spectrum session tracking
+		if session.IsSpectrum {
+			if sm.uuidSpectrumSessions[session.UserSessionID] == sessionID {
+				delete(sm.uuidSpectrumSessions, session.UserSessionID)
+			}
+		} else {
+			if sm.uuidAudioSessions[session.UserSessionID] == sessionID {
+				delete(sm.uuidAudioSessions, session.UserSessionID)
+			}
+		}
 	}
 
 	// Clean up IP to UUID mapping if this was the last session for this UUID from this IP
@@ -695,6 +735,61 @@ func (sm *SessionManager) cleanupLoop() {
 	for range ticker.C {
 		sm.cleanupInactiveSessions()
 		sm.cleanupExpiredKickedUUIDs()
+	}
+}
+
+// maxSessionTimeLoop checks every second for sessions that have exceeded max_session_time
+func (sm *SessionManager) maxSessionTimeLoop() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		sm.enforceMaxSessionTime()
+	}
+}
+
+// enforceMaxSessionTime kicks users whose sessions have exceeded max_session_time
+func (sm *SessionManager) enforceMaxSessionTime() {
+	if sm.maxSessionTime == 0 {
+		return // No limit configured
+	}
+
+	now := time.Now()
+	var toKick []string // UUIDs to kick
+
+	sm.mu.RLock()
+	// Check each UUID's first seen time
+	for userSessionID, firstSeen := range sm.userSessionFirst {
+		// Skip if already kicked
+		if _, kicked := sm.kickedUUIDs[userSessionID]; kicked {
+			continue
+		}
+
+		sessionAge := now.Sub(firstSeen)
+		if sessionAge > sm.maxSessionTime {
+			toKick = append(toKick, userSessionID)
+		}
+	}
+	sm.mu.RUnlock()
+
+	// Kick users that exceeded the time limit
+	for _, userSessionID := range toKick {
+		// Get the first seen time again (safely) for logging
+		sm.mu.RLock()
+		firstSeen := sm.userSessionFirst[userSessionID]
+		sm.mu.RUnlock()
+
+		log.Printf("Session time limit exceeded for user %s (age: %v, limit: %v) - kicking",
+			userSessionID, now.Sub(firstSeen), sm.maxSessionTime)
+
+		if _, err := sm.KickUserBySessionID(userSessionID); err != nil {
+			log.Printf("Error kicking user %s for time limit: %v", userSessionID, err)
+		}
+
+		// Remove from userSessionFirst to prevent repeated kicks
+		sm.mu.Lock()
+		delete(sm.userSessionFirst, userSessionID)
+		sm.mu.Unlock()
 	}
 }
 

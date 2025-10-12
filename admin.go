@@ -536,6 +536,11 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Reload bookmarks into memory
+	if err := ah.reloadBookmarks(); err != nil {
+		log.Printf("Warning: Failed to reload bookmarks after add: %v", err)
+	}
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
@@ -565,6 +570,11 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		if err := os.WriteFile("bookmarks.yaml", yamlData, 0644); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to write bookmarks file: %v", err), http.StatusInternalServerError)
 			return
+		}
+
+		// Reload bookmarks into memory
+		if err := ah.reloadBookmarks(); err != nil {
+			log.Printf("Warning: Failed to reload bookmarks after update: %v", err)
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -634,6 +644,11 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Reload bookmarks into memory
+	if err := ah.reloadBookmarks(); err != nil {
+		log.Printf("Warning: Failed to reload bookmarks after update: %v", err)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
@@ -691,11 +706,27 @@ func (ah *AdminHandler) handleDeleteBookmark(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Reload bookmarks into memory
+	if err := ah.reloadBookmarks(); err != nil {
+		log.Printf("Warning: Failed to reload bookmarks after delete: %v", err)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Bookmark deleted successfully",
 	})
+}
+
+// reloadBookmarks reloads bookmarks from bookmarks.yaml into memory
+func (ah *AdminHandler) reloadBookmarks() error {
+	bookmarksConfig, err := LoadConfig("bookmarks.yaml")
+	if err != nil {
+		return fmt.Errorf("failed to reload bookmarks: %w", err)
+	}
+	ah.config.Bookmarks = bookmarksConfig.Bookmarks
+	log.Printf("Reloaded %d bookmarks from bookmarks.yaml", len(ah.config.Bookmarks))
+	return nil
 }
 
 // HandleSessions returns information about all active sessions

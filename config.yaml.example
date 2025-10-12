@@ -48,7 +48,14 @@ server:
   # Set to 0 to disable IP-based limiting
   max_sessions_ip: 0
   # Session timeout in seconds (0 = no timeout)
+  # This is inactivity timeout - sessions are removed if inactive for this long
   session_timeout: 300
+  # Maximum session time in seconds (0 = unlimited)
+  # This is the maximum total time a user session can exist, regardless of activity
+  # After this time, the user will be automatically kicked and must reconnect
+  # Useful for ensuring fair access and preventing long-term monopolisation
+  # Set to 0 to disable time-based limiting
+  max_session_time: 0
   # Enable CORS
   enable_cors: false
   # HTTP request log file (Apache combined log format)

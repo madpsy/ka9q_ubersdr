@@ -639,23 +639,29 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
         const checkData = await checkResponse.json();
 
         if (!checkData.allowed) {
-            // Connection not allowed - show error instead of play button
-            audioStartButton.disabled = true;
-            audioStartButton.style.backgroundColor = '#dc3545'; // Red
-            audioStartButton.style.cursor = 'not-allowed';
+            // Check if this is a terminated session (410 Gone status)
+            if (checkResponse.status === 410) {
+                // Show full-screen overlay for terminated sessions
+                showTerminatedOverlay(checkData.reason);
+            } else {
+                // Connection not allowed - show error instead of play button
+                audioStartButton.disabled = true;
+                audioStartButton.style.backgroundColor = '#dc3545'; // Red
+                audioStartButton.style.cursor = 'not-allowed';
 
-            // Show error message in button
-            let errorIcon = '🚫';
-            if (checkData.reason.includes('banned')) {
-                errorIcon = '⛔';
-            } else if (checkData.reason.includes('Maximum')) {
-                errorIcon = '👥';
+                // Show error message in button
+                let errorIcon = '🚫';
+                if (checkData.reason.includes('banned')) {
+                    errorIcon = '⛔';
+                } else if (checkData.reason.includes('Maximum')) {
+                    errorIcon = '👥';
+                }
+
+                audioStartButton.innerHTML = `<span>${errorIcon} ${checkData.reason}</span>`;
+
+                // Also log the error
+                log(`Connection not allowed: ${checkData.reason}`, 'error');
             }
-
-            audioStartButton.innerHTML = `<span>${errorIcon} ${checkData.reason}</span>`;
-
-            // Also log the error
-            log(`Connection not allowed: ${checkData.reason}`, 'error');
         } else {
             // Connection allowed - enable the play button after 2 second delay
             setTimeout(() => {
@@ -671,6 +677,54 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
             audioStartButton.innerHTML = originalHTML;
         }, 2000);
     }
+}
+
+// Show full-screen overlay for terminated sessions
+function showTerminatedOverlay(message) {
+    // Create overlay if it doesn't exist
+    let overlay = document.getElementById('terminated-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'terminated-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.95)';
+        overlay.style.zIndex = '99999';
+        overlay.style.display = 'flex';
+        overlay.style.flexDirection = 'column';
+        overlay.style.justifyContent = 'center';
+        overlay.style.alignItems = 'center';
+        overlay.style.color = '#fff';
+        overlay.style.fontFamily = 'Arial, sans-serif';
+        overlay.style.textAlign = 'center';
+        overlay.style.padding = '20px';
+
+        overlay.innerHTML = `
+            <div style="max-width: 600px;">
+                <div style="font-size: 80px; margin-bottom: 20px;">❌</div>
+                <h1 style="font-size: 32px; margin-bottom: 20px; color: #dc3545;">Session Terminated</h1>
+                <p style="font-size: 20px; margin-bottom: 30px; line-height: 1.5;">${message}</p>
+                <button onclick="location.reload()" style="
+                    background: #007bff;
+                    color: white;
+                    border: none;
+                    padding: 15px 40px;
+                    font-size: 18px;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    font-weight: bold;
+                ">Refresh Page</button>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+    }
+
+    // Show the overlay
+    overlay.style.display = 'flex';
 }
 
 // Fetch and display site description
@@ -928,9 +982,58 @@ function scheduleReconnect() {
     console.log(`Reconnection attempt ${reconnectAttempts}/${maxReconnectAttempts} in ${delay}ms...`);
     log(`Reconnecting (${reconnectAttempts}/${maxReconnectAttempts}) in ${(delay/1000).toFixed(1)}s...`);
 
-    reconnectTimer = setTimeout(() => {
+    reconnectTimer = setTimeout(async () => {
         reconnectTimer = null;
-        reconnect();
+
+        // CRITICAL: Check /connection before attempting to reconnect
+        try {
+            const checkResponse = await fetch('/connection', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_session_id: userSessionID
+                })
+            });
+
+            const checkData = await checkResponse.json();
+
+            if (!checkData.allowed) {
+                // Connection not allowed - stop reconnecting
+                log(`Reconnection blocked: ${checkData.reason}`, 'error');
+
+                // Check if this is a terminated session (410 Gone status)
+                if (checkResponse.status === 410) {
+                    // Show full-screen overlay for terminated sessions
+                    showTerminatedOverlay(checkData.reason);
+                } else {
+                    // Show notification with appropriate icon based on reason
+                    let errorIcon = '🚫';
+                    if (checkData.reason.includes('banned')) {
+                        errorIcon = '⛔';
+                    } else if (checkData.reason.includes('Maximum')) {
+                        errorIcon = '👥';
+                    }
+
+                    showNotification(`${errorIcon} ${checkData.reason}`, 'error', 15000);
+                }
+
+                // Clear reconnection parameters to prevent further attempts
+                lastConnectionParams = null;
+                reconnectAttempts = 0;
+                return;
+            }
+
+            // Connection allowed - proceed with reconnect
+            log(`Connection check passed, proceeding with reconnect`);
+            reconnect();
+        } catch (err) {
+            console.error('Connection check failed during reconnect:', err);
+            log('Connection check failed, will retry...', 'error');
+            // Schedule another attempt
+            scheduleReconnect();
+        }
     }, delay);
 }
 
@@ -969,7 +1072,7 @@ function reconnect() {
 
     log(`Reconnecting to ${formatFrequency(lastConnectionParams.frequency)} ${lastConnectionParams.mode.toUpperCase()} (BW: ${lastConnectionParams.bandwidthLow} to ${lastConnectionParams.bandwidthHigh} Hz)`);
 
-    // Attempt to reconnect
+    // Attempt to reconnect (connect() will do another /connection check, but that's okay for safety)
     connect();
 }
 

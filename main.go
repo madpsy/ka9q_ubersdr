@@ -364,8 +364,8 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	// Check if this UUID has been kicked
 	if sessions.IsUUIDKicked(req.UserSessionID) {
 		response.Allowed = false
-		response.Reason = "Your session has been terminated"
-		w.WriteHeader(http.StatusForbidden)
+		response.Reason = "Your session has been terminated. Please refresh the page."
+		w.WriteHeader(http.StatusGone) // 410 Gone - resource permanently unavailable
 		json.NewEncoder(w).Encode(response)
 		return
 	}

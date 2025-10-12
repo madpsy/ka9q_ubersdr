@@ -5585,13 +5585,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Update URL with new frequency
                 updateURL();
                 
-                // Connect if not already connected
-                if (!ws || ws.readyState !== WebSocket.OPEN) {
-                    connect();
-                    log(`Connecting and tuning to ${formatFrequency(freq)} from spectrum click`);
+                // Check if fully zoomed out (zoom level = 1.0)
+                if (spectrumDisplay && spectrumDisplay.zoomLevel <= 1.0) {
+                    // Fully zoomed out - perform max zoom at clicked frequency
+                    if (spectrumDisplay.ws && spectrumDisplay.ws.readyState === WebSocket.OPEN) {
+                        spectrumDisplay.ws.send(JSON.stringify({
+                            type: 'zoom',
+                            frequency: Math.round(freq),
+                            binBandwidth: 1.0  // Maximum zoom (1 Hz/bin)
+                        }));
+                        log(`Tuned to ${formatFrequency(freq)} and zoomed to max from spectrum click`);
+                    }
+
+                    // Connect if not already connected
+                    if (!ws || ws.readyState !== WebSocket.OPEN) {
+                        connect();
+                    } else {
+                        autoTune();
+                    }
                 } else {
-                    autoTune();
-                    log(`Tuned to ${formatFrequency(freq)} from spectrum click`);
+                    // Already zoomed in - just tune
+                    if (!ws || ws.readyState !== WebSocket.OPEN) {
+                        connect();
+                        log(`Connecting and tuning to ${formatFrequency(freq)} from spectrum click`);
+                    } else {
+                        autoTune();
+                        log(`Tuned to ${formatFrequency(freq)} from spectrum click`);
+                    }
                 }
             }
         });

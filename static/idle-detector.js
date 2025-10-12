@@ -75,12 +75,14 @@ class IdleDetector {
             
             if (response.ok) {
                 const data = await response.json();
-                this.sessionTimeout = data.session_timeout || 300; // Default to 5 minutes if not provided
+                console.log('Fetched connection data:', data);
+                // Use nullish coalescing to properly handle 0 value (0 is valid, means no timeout)
+                this.sessionTimeout = data.session_timeout !== undefined ? data.session_timeout : 300;
                 
                 // Calculate inactivity timeout: show warning 30 seconds before server timeout
                 // If session_timeout is 0 (no timeout), disable idle detection
                 if (this.sessionTimeout === 0) {
-                    console.log('Server session timeout disabled (0) - idle detection disabled');
+                    console.log('✓ Server session timeout disabled (0) - idle detection DISABLED for this IP');
                     this.INACTIVITY_TIMEOUT = null;
                 } else if (this.sessionTimeout <= 30) {
                     // If timeout is 30 seconds or less, show warning immediately

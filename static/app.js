@@ -3065,9 +3065,8 @@ function updateOscilloscope() {
         oscilloscopeCtx.textAlign = 'right';
         oscilloscopeCtx.textBaseline = 'top';
 
-        const freqText = avgFreq >= 1000
-            ? `${(avgFreq / 1000).toFixed(2)} kHz`
-            : `${avgFreq.toFixed(1)} Hz`;
+        // Always show in Hz with no decimal places (frequencies are whole numbers)
+        const freqText = `${Math.round(avgFreq)} Hz`;
 
         // Background for text
         const textWidth = oscilloscopeCtx.measureText(freqText).width;

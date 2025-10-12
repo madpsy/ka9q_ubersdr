@@ -2127,17 +2127,17 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     // Format frequency for display (used by tooltips and cursor - high precision)
     formatFrequency(freq) {
         if (freq >= 1e9) {
-            // GHz: show 5 decimals
+            // GHz: show 6 decimals for 1 Hz accuracy
             const ghz = freq / 1e9;
-            return `${ghz.toFixed(5)} GHz`;
+            return `${ghz.toFixed(6)} GHz`;
         } else if (freq >= 1e6) {
-            // MHz: show 5 decimals
+            // MHz: show 6 decimals for 1 Hz accuracy
             const mhz = freq / 1e6;
-            return `${mhz.toFixed(5)} MHz`;
+            return `${mhz.toFixed(6)} MHz`;
         } else if (freq >= 1e3) {
-            // kHz: show 2 decimals
+            // kHz: show 3 decimals for 1 Hz accuracy
             const khz = freq / 1e3;
-            return `${khz.toFixed(2)} kHz`;
+            return `${khz.toFixed(3)} kHz`;
         } else {
             return `${freq.toFixed(0)} Hz`;
         }
@@ -2790,9 +2790,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         e.preventDefault();
         e.stopPropagation();
 
-        // Only show in AM or SAM modes
+        // Check for supported modes
         const currentMode = window.currentMode ? window.currentMode.toLowerCase() : '';
-        if (currentMode !== 'am' && currentMode !== 'sam') {
+        if (currentMode !== 'am' && currentMode !== 'sam' && currentMode !== 'usb' && currentMode !== 'lsb') {
             return;
         }
 
@@ -2800,80 +2800,77 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             return;
         }
 
+        // Initialize carrier detector if not already done
+        if (!this.carrierDetector) {
+            this.carrierDetector = new CarrierDetector();
+        }
+
         const rect = e.target.getBoundingClientRect();
         const x = e.clientX - rect.left;
 
-            // Calculate frequency range
-            const startFreq = this.centerFreq - this.totalBandwidth / 2;
+        // Calculate frequency range
+        const startFreq = this.centerFreq - this.totalBandwidth / 2;
 
-            // Calculate bandwidth edges in absolute frequencies
-            const lowFreq = this.currentTunedFreq + this.currentBandwidthLow;
-            const highFreq = this.currentTunedFreq + this.currentBandwidthHigh;
+        // Use CarrierDetector to find carrier/edge
+        const result = this.carrierDetector.detectCarrier(
+            currentMode,
+            this.spectrumData,
+            this.currentTunedFreq,
+            this.currentBandwidthLow,
+            this.currentBandwidthHigh,
+            startFreq,
+            this.totalBandwidth
+        );
 
-            // Convert to bin indices
-            const lowBinFloat = ((lowFreq - startFreq) / this.totalBandwidth) * this.spectrumData.length;
-            const highBinFloat = ((highFreq - startFreq) / this.totalBandwidth) * this.spectrumData.length;
-            const lowBin = Math.max(0, Math.floor(lowBinFloat));
-            const highBin = Math.min(this.spectrumData.length - 1, Math.ceil(highBinFloat));
+        if (!result) {
+            return;
+        }
 
-            // Find strongest signal (peak dB) within bandwidth
-            let peakDb = -Infinity;
-            let peakBin = -1;
-            for (let i = lowBin; i <= highBin; i++) {
-                if (i >= 0 && i < this.spectrumData.length && this.spectrumData[i] > peakDb) {
-                    peakDb = this.spectrumData[i];
-                    peakBin = i;
-                }
-            }
+        // Calculate new dial frequency
+        const offset = result.frequency - this.currentTunedFreq;
+        const currentDialFreq = window.getCurrentDialFrequency ? window.getCurrentDialFrequency() : this.currentTunedFreq;
+        const newDialFreq = Math.round(currentDialFreq + offset);
 
-            if (peakBin === -1 || !isFinite(peakDb)) {
-                return;
-            }
+        // Create menu text based on mode
+        let menuText;
+        if (currentMode === 'am' || currentMode === 'sam') {
+            menuText = `Center Carrier at ${this.formatFrequency(newDialFreq)}`;
+        } else {
+            menuText = `Center ${currentMode.toUpperCase()} Edge at ${this.formatFrequency(newDialFreq)}`;
+        }
 
-            // Calculate carrier frequency
-            const carrierFreq = startFreq + (peakBin / this.spectrumData.length) * this.totalBandwidth;
+        // Create context menu content
+        this.contextMenu.innerHTML = '';
+        const menuItem = document.createElement('div');
+        menuItem.style.padding = '8px 16px';
+        menuItem.style.cursor = 'pointer';
+        menuItem.style.fontFamily = 'monospace';
+        menuItem.style.fontSize = '13px';
+        menuItem.textContent = menuText;
 
-            // Calculate offset from current tuned frequency
-            const offset = carrierFreq - this.currentTunedFreq;
+        // Hover effect
+        menuItem.addEventListener('mouseenter', () => {
+            menuItem.style.backgroundColor = '#007bff';
+            menuItem.style.color = '#fff';
+        });
+        menuItem.addEventListener('mouseleave', () => {
+            menuItem.style.backgroundColor = '';
+            menuItem.style.color = '';
+        });
 
-            // Get current dial frequency from app.js
-            const currentDialFreq = window.getCurrentDialFrequency ? window.getCurrentDialFrequency() : this.currentTunedFreq;
+        // Click handler
+        menuItem.addEventListener('click', (clickEvent) => {
+            clickEvent.stopPropagation();
+            this.centerCarrier(newDialFreq);
+            this.contextMenu.style.display = 'none';
+        });
 
-            // Calculate new dial frequency (round to whole number)
-            const newDialFreq = Math.round(currentDialFreq + offset);
+        this.contextMenu.appendChild(menuItem);
 
-            // Create context menu content
-            this.contextMenu.innerHTML = '';
-            const menuItem = document.createElement('div');
-            menuItem.style.padding = '8px 16px';
-            menuItem.style.cursor = 'pointer';
-            menuItem.style.fontFamily = 'monospace';
-            menuItem.style.fontSize = '13px';
-            menuItem.textContent = `Center Carrier at ${this.formatFrequency(newDialFreq)}`;
-
-            // Hover effect
-            menuItem.addEventListener('mouseenter', () => {
-                menuItem.style.backgroundColor = '#007bff';
-                menuItem.style.color = '#fff';
-            });
-            menuItem.addEventListener('mouseleave', () => {
-                menuItem.style.backgroundColor = '';
-                menuItem.style.color = '';
-            });
-
-            // Click handler
-            menuItem.addEventListener('click', (clickEvent) => {
-                clickEvent.stopPropagation();
-                this.centerCarrier(newDialFreq);
-                this.contextMenu.style.display = 'none';
-            });
-
-            this.contextMenu.appendChild(menuItem);
-
-            // Position context menu at cursor
-            this.contextMenu.style.left = e.clientX + 'px';
-            this.contextMenu.style.top = e.clientY + 'px';
-            this.contextMenu.style.display = 'block';
+        // Position context menu at cursor
+        this.contextMenu.style.left = e.clientX + 'px';
+        this.contextMenu.style.top = e.clientY + 'px';
+        this.contextMenu.style.display = 'block';
     }
 
     // Center carrier by adjusting dial frequency

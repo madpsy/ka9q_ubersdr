@@ -55,7 +55,7 @@ server:
   # After this time, the user will be automatically kicked and must reconnect
   # Useful for ensuring fair access and preventing long-term monopolization
   # Set to 0 to disable time-based limiting
-  max_session_time: 3600
+  max_session_time: 0
   # Enable CORS
   enable_cors: false
   # HTTP request log file (Apache combined log format)

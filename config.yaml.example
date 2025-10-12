@@ -58,11 +58,12 @@ server:
   # Useful for ensuring fair access and preventing long-term monopolisation
   # Set to 0 to disable time-based limiting
   max_session_time: 0
-  # List of IP addresses or CIDR ranges that bypass session_timeout, max_session_time, and max_sessions_ip limits
+  # List of IP addresses or CIDR ranges that bypass all session limits
   # Useful for trusted IPs like localhost, admin networks, or specific users
   # Bypassed IPs are exempt from:
   #   - session_timeout (idle timeout)
   #   - max_session_time (maximum session duration)
+  #   - max_sessions (maximum unique users globally)
   #   - max_sessions_ip (maximum unique users per IP)
   # Supports both IPv4 and IPv6 addresses with CIDR notation
   # Examples:

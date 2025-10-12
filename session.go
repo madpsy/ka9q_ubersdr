@@ -134,21 +134,24 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	}
 
 	// Check session limit based on unique user_session_ids
-	// If userSessionID is empty, treat as a unique user for each session
-	if userSessionID == "" {
-		// No UUID provided - count as unique user per session (legacy behavior)
-		if len(sm.sessions) >= sm.maxSessions {
-			return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
-		}
-	} else {
-		// UUID provided - check if this is a new unique user
-		if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
-			// New unique user - check if we've reached the limit
-			if len(sm.userSessionUUIDs) >= sm.maxSessions {
+	// Skip this check if the IP is in the bypass list
+	if !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+		// If userSessionID is empty, treat as a unique user for each session
+		if userSessionID == "" {
+			// No UUID provided - count as unique user per session (legacy behavior)
+			if len(sm.sessions) >= sm.maxSessions {
 				return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
 			}
+		} else {
+			// UUID provided - check if this is a new unique user
+			if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
+				// New unique user - check if we've reached the limit
+				if len(sm.userSessionUUIDs) >= sm.maxSessions {
+					return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
+				}
+			}
+			// Existing user can create additional sessions (audio + spectrum)
 		}
-		// Existing user can create additional sessions (audio + spectrum)
 	}
 
 	// Check if we've reached the maximum unique UUIDs per IP (if configured)
@@ -295,21 +298,24 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 	}
 
 	// Check session limit based on unique user_session_ids
-	// If userSessionID is empty, treat as a unique user for each session
-	if userSessionID == "" {
-		// No UUID provided - count as unique user per session (legacy behavior)
-		if len(sm.sessions) >= sm.maxSessions {
-			return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
-		}
-	} else {
-		// UUID provided - check if this is a new unique user
-		if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
-			// New unique user - check if we've reached the limit
-			if len(sm.userSessionUUIDs) >= sm.maxSessions {
+	// Skip this check if the IP is in the bypass list
+	if !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+		// If userSessionID is empty, treat as a unique user for each session
+		if userSessionID == "" {
+			// No UUID provided - count as unique user per session (legacy behavior)
+			if len(sm.sessions) >= sm.maxSessions {
 				return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
 			}
+		} else {
+			// UUID provided - check if this is a new unique user
+			if _, exists := sm.userSessionUUIDs[userSessionID]; !exists {
+				// New unique user - check if we've reached the limit
+				if len(sm.userSessionUUIDs) >= sm.maxSessions {
+					return nil, fmt.Errorf("maximum unique users reached (%d)", sm.maxSessions)
+				}
+			}
+			// Existing user can create additional sessions (audio + spectrum)
 		}
-		// Existing user can create additional sessions (audio + spectrum)
 	}
 
 	// Check if we've reached the maximum unique UUIDs per IP (if configured)

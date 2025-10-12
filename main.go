@@ -384,14 +384,17 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	}
 
 	// Check if max sessions limit would be exceeded
-	if !sessions.CanAcceptNewUUID(req.UserSessionID) {
-		uniqueCount := sessions.GetUniqueUserCount()
-		maxSessions := sessions.config.Server.MaxSessions
-		response.Allowed = false
-		response.Reason = fmt.Sprintf("Maximum unique users reached (%d of %d)", uniqueCount, maxSessions)
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(response)
-		return
+	// Skip this check if the IP is in the bypass list
+	if !sessions.config.Server.IsIPTimeoutBypassed(clientIP) {
+		if !sessions.CanAcceptNewUUID(req.UserSessionID) {
+			uniqueCount := sessions.GetUniqueUserCount()
+			maxSessions := sessions.config.Server.MaxSessions
+			response.Allowed = false
+			response.Reason = fmt.Sprintf("Maximum unique users reached (%d of %d)", uniqueCount, maxSessions)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
 	}
 
 	// Check if max unique users per IP limit would be exceeded

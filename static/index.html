@@ -646,6 +646,28 @@
         </div>
     </div>
 
+    <!-- Frequency Offset Modal -->
+    <div id="offset-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2>Set Frequency Offset</h2>
+                <button class="modal-close" onclick="closeOffsetModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: #fff;">What frequency do you expect the tone to be at?</p>
+                <p style="font-size: 0.9em; color: #888; margin-bottom: 15px;">
+                    Enter the expected frequency in Hz (e.g., 0 for DC, 1000 for 1 kHz tone).<br>
+                    The system will adjust the dial so this signal appears at 1 kHz.
+                </p>
+                <input type="number" id="offset-input" value="1000" min="0" step="1" style="width: 100%; padding: 8px; font-size: 16px; border: 1px solid #444; background: #2c3e50; color: #ecf0f1; border-radius: 4px;">
+                <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+                    <button onclick="closeOffsetModal()" style="padding: 8px 20px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+                    <button onclick="applyOffset()" style="padding: 8px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer class="site-footer">
         <p>Download UberSDR from <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">Github</a>. Powered by ka9q-radio.</p>

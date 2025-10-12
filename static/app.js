@@ -114,6 +114,7 @@ let oscilloscopeTriggerEnabled = false; // Enable continuous trigger tracking
 let oscilloscopeTriggerFreq = 0; // Target frequency for trigger
 let oscilloscopeYScale = 1.0; // Y-axis scale factor (1.0 = normal, >1 = zoomed in, <1 = zoomed out)
 let oscilloscopeAutoScaleEnabled = true; // Enable continuous auto-scaling
+let oscilloscopeFrequencyOffset = 0; // Frequency offset in Hz for adjusted dial frequency display
 let bandpassFilters = []; // Array of cascaded bandpass filters for steep rolloff (4 stages = 48 dB/octave)
 let bandpassEnabled = false;
 let notchFilters = []; // Array of notch filter objects, each with {filters: [], center: Hz, width: Hz}
@@ -3068,18 +3069,53 @@ function updateOscilloscope() {
         // Always show in Hz with no decimal places (frequencies are whole numbers)
         const freqText = `${Math.round(avgFreq)} Hz`;
 
-        // Background for text
-        const textWidth = oscilloscopeCtx.measureText(freqText).width;
-        oscilloscopeCtx.fillStyle = 'rgba(44, 62, 80, 0.9)';
-        oscilloscopeCtx.fillRect(width - textWidth - 12, 4, textWidth + 8, 20);
+        // Calculate adjusted dial frequency if tracking is enabled
+        let adjustedFreqText = '';
+        let totalHeight = 20;
+        if (frequencyTrackingEnabled) {
+            const freqInput = document.getElementById('frequency');
+            if (freqInput) {
+                const currentDialFreq = parseInt(freqInput.value);
+                if (!isNaN(currentDialFreq)) {
+                    // The offset represents the dial frequency adjustment needed
+                    // For USB/CWU: positive offset means dial should go UP (add offset)
+                    // For LSB/CWL: positive offset means dial should go DOWN (subtract offset, but offset is already inverted)
+                    // Since offset is already mode-corrected in applyOffset(), we always ADD it here
+                    const adjustedDialFreq = currentDialFreq + oscilloscopeFrequencyOffset;
+                    // Always display adjusted frequency when tracking is enabled, even if offset is 0
+                    // This provides visual feedback that tracking is active
+                    adjustedFreqText = `${adjustedDialFreq.toLocaleString()} Hz`;
+                    totalHeight = 40; // Increase height for two lines
+                }
+            }
+        }
 
-        // Text with outline
+        // Background for text
+        const textWidth = Math.max(
+            oscilloscopeCtx.measureText(freqText).width,
+            adjustedFreqText ? oscilloscopeCtx.measureText(adjustedFreqText).width : 0
+        );
+        oscilloscopeCtx.fillStyle = 'rgba(44, 62, 80, 0.9)';
+        oscilloscopeCtx.fillRect(width - textWidth - 12, 4, textWidth + 8, totalHeight);
+
+        // Text with outline - detected frequency
         oscilloscopeCtx.strokeStyle = '#000000';
         oscilloscopeCtx.lineWidth = 3;
         oscilloscopeCtx.strokeText(freqText, width - 6, 6);
 
         oscilloscopeCtx.fillStyle = '#00ff00';
         oscilloscopeCtx.fillText(freqText, width - 6, 6);
+
+        // Draw adjusted frequency underneath if offset is set
+        if (adjustedFreqText) {
+            oscilloscopeCtx.font = 'bold 12px monospace';
+            oscilloscopeCtx.strokeStyle = '#000000';
+            oscilloscopeCtx.lineWidth = 3;
+            oscilloscopeCtx.strokeText(adjustedFreqText, width - 6, 24);
+
+            oscilloscopeCtx.fillStyle = '#ffaa00'; // Orange color for adjusted frequency
+            oscilloscopeCtx.fillText(adjustedFreqText, width - 6, 24);
+        }
     }
 }
 
@@ -3099,6 +3135,76 @@ const TRACKING_COARSE_THRESHOLD = 10; // Hz - use stronger correction above this
 const TRACKING_DAMPING_COARSE = 0.3; // Apply 30% correction for large errors
 const TRACKING_DAMPING_FINE = 0.5; // Apply 50% correction for small errors (more aggressive when close)
 
+// Modal dialog functions for frequency offset
+function showOffsetModal() {
+    const modal = document.getElementById('offset-modal');
+    const input = document.getElementById('offset-input');
+
+    if (modal && input) {
+        input.value = '1000'; // Default to 1 kHz
+        modal.style.display = 'flex';
+
+        input.focus();
+        input.select();
+
+        // Add keyboard event listener for Enter and Escape
+        const handleKeyPress = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                applyOffset();
+                input.removeEventListener('keydown', handleKeyPress);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closeOffsetModal();
+                input.removeEventListener('keydown', handleKeyPress);
+            }
+        };
+        input.addEventListener('keydown', handleKeyPress);
+    }
+}
+
+function closeOffsetModal() {
+    const modal = document.getElementById('offset-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function applyOffset() {
+    const input = document.getElementById('offset-input');
+    if (!input) return;
+
+    const expectedFreq = parseFloat(input.value);
+    if (isNaN(expectedFreq) || expectedFreq < 0) {
+        log('Invalid frequency. Please enter a positive number.', 'error');
+        return;
+    }
+
+    // Calculate offset: we're moving the signal TO 1 kHz, so offset = 1000 - expectedFreq
+    // If they expect it at 0 Hz, offset = 1000 (we're moving it up by 1 kHz)
+    // If they expect it at 1000 Hz, offset = 0 (it's already there)
+    // If they expect it at 2000 Hz, offset = -1000 (we're moving it down by 1 kHz)
+    const targetFreq = 1000; // We're always adjusting TO 1 kHz
+    let offset = targetFreq - expectedFreq;
+
+    // Apply correct sign based on mode
+    // USB/CWU: negative offset means dial goes down
+    // LSB/CWL: negative offset means dial goes up (inverted)
+    if (currentMode === 'lsb' || currentMode === 'cwl') {
+        offset = -offset;
+    }
+
+    // Store the offset with correct sign
+    oscilloscopeFrequencyOffset = offset;
+    log(`Expected signal at ${expectedFreq} Hz, adjusting to 1000 Hz (offset: ${offset} Hz, ${currentMode.toUpperCase()} mode)`);
+
+    // Close modal
+    closeOffsetModal();
+
+    // Continue with frequency shift
+    performFrequencyShift();
+}
+
 // Shift detected frequency to 1 kHz by adjusting dial frequency
 function shiftFrequencyTo1kHz() {
     // Only works in USB, LSB, CWU, CWL modes
@@ -3117,6 +3223,7 @@ function shiftFrequencyTo1kHz() {
     // If tracking is already enabled, disable it
     if (frequencyTrackingEnabled) {
         disableFrequencyTracking();
+        oscilloscopeFrequencyOffset = 0; // Reset offset when disabling
         if (button) {
             button.style.backgroundColor = '#6c757d'; // Gray
             button.textContent = 'Set 1 kHz';
@@ -3124,6 +3231,19 @@ function shiftFrequencyTo1kHz() {
         log('Frequency tracking disabled');
         return;
     }
+
+    // Show modal dialog for offset input (non-blocking)
+    showOffsetModal();
+}
+
+// Perform the actual frequency shift (called after offset is set)
+function performFrequencyShift() {
+    if (!analyser || !audioContext) {
+        log('Audio not initialized', 'error');
+        return;
+    }
+
+    const button = document.getElementById('set-1khz-btn');
 
     // Get current detected frequency from oscilloscope
     const bufferLength = analyser.fftSize;
@@ -3169,7 +3289,13 @@ function shiftFrequencyTo1kHz() {
         autoTune();
     }
 
+    // Calculate adjusted dial frequency for display
+    const adjustedDialFreq = newDialFreq - oscilloscopeFrequencyOffset;
+
     log(`Shifted ${currentMode.toUpperCase()} signal from ${detectedFreq.toFixed(1)} Hz to ${targetFreq} Hz (dial: ${formatFrequency(currentDialFreq)} → ${formatFrequency(newDialFreq)})`);
+    if (oscilloscopeFrequencyOffset !== 0) {
+        log(`Adjusted dial frequency (with ${oscilloscopeFrequencyOffset} Hz offset): ${formatFrequency(adjustedDialFreq)}`);
+    }
 
     // Enable tracking mode
     frequencyTrackingStartFreq = newDialFreq;

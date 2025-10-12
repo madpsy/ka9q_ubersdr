@@ -3110,6 +3110,9 @@ function shiftFrequencyTo1kHz() {
     const MAX_FREQ = 30000000;
     newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
     
+    // Round to nearest Hz (whole number)
+    newDialFreq = Math.round(newDialFreq);
+    
     // Update frequency input
     freqInput.value = newDialFreq;
     updateBandButtons(newDialFreq);

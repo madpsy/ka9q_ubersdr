@@ -2592,16 +2592,23 @@ function frequencyToPixel(freq, canvasWidth) {
 }
 
 function pixelToFrequency(pixel, canvasWidth) {
-    // Get CW offset if in CW mode
-    const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
+    // Get frequency bin mapping to understand the actual FFT frequency range
+    const binMapping = getFrequencyBinMapping();
+    if (!binMapping) return 0;
 
-    // For CW mode, return actual audio Hz (e.g., 500)
-    // For other modes, return frequency relative to bandwidth
-    const displayLow = cwOffset + currentBandwidthLow;
-    const displayHigh = cwOffset + currentBandwidthHigh;
-    const displayBandwidth = displayHigh - displayLow;
+    const { binStartFreq, binEndFreq } = binMapping;
+    const bandwidth = binEndFreq - binStartFreq;
 
-    return displayLow + (pixel / canvasWidth) * displayBandwidth;
+    // Map pixel to FFT bin frequency (always positive)
+    const fftFreq = binStartFreq + (pixel / canvasWidth) * bandwidth;
+
+    // For LSB mode, return negative frequency for display
+    // For USB/other modes, return positive frequency
+    if (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) {
+        return -fftFreq;
+    } else {
+        return fftFreq;
+    }
 }
 
 // VU meter throttling
@@ -3603,7 +3610,7 @@ function updateAudioSpectrumTooltip(clientX, clientY) {
     const startBin = startBinIndex + (x * binsPerPixel);
     const endBin = startBin + binsPerPixel;
 
-    // Average bins for this pixel
+    // Average bins for this pixel (cursor position)
     let sum = 0;
     let count = 0;
     for (let binIndex = Math.floor(startBin); binIndex < Math.ceil(endBin) && binIndex < audioSpectrumLastData.dataArray.length; binIndex++) {
@@ -3614,13 +3621,40 @@ function updateAudioSpectrumTooltip(clientX, clientY) {
 
     // Convert magnitude to dB (same as display scale)
     const db = magnitude > 0 ? 20 * Math.log10(magnitude / 255) : -Infinity;
-    const dbText = db === -Infinity ? '-∞ dB' : db.toFixed(1) + ' dB';
 
-    // Format frequency
-    const freqText = freq >= 1000 ? `${(freq / 1000).toFixed(2)} kHz` : `${freq} Hz`;
+    // Find peak signal across entire spectrum
+    let maxMagnitude = 0;
+    let maxBinIndex = startBinIndex;
+    for (let binIndex = startBinIndex; binIndex < startBinIndex + binsForBandwidth && binIndex < audioSpectrumLastData.dataArray.length; binIndex++) {
+        const mag = audioSpectrumLastData.dataArray[binIndex] || 0;
+        if (mag > maxMagnitude) {
+            maxMagnitude = mag;
+            maxBinIndex = binIndex;
+        }
+    }
 
-    // Update tooltip
-    audioSpectrumTooltip.textContent = `${freqText} | ${dbText}`;
+    // Calculate peak frequency using the same mapping as cursor
+    // Convert bin index to pixel position, then to frequency for consistency
+    const peakPixel = ((maxBinIndex - startBinIndex) / binsForBandwidth) * width;
+    const peakFreq = Math.round(pixelToFrequency(peakPixel, width));
+
+    // Convert peak magnitude to dB
+    const peakDb = maxMagnitude > 0 ? 20 * Math.log10(maxMagnitude / 255) : -Infinity;
+
+    // freq and peakFreq are already in the correct coordinate system from pixelToFrequency()
+    // For LSB they're negative, for USB they're positive
+    // Just display them with absolute values and proper formatting
+    const displayFreq = Math.abs(freq);
+    const displayPeakFreq = Math.abs(peakFreq);
+
+    // Format frequencies (helper function)
+    const formatFreq = (f) => f >= 1000 ? `${(f / 1000).toFixed(2)} kHz` : `${Math.round(f)} Hz`;
+
+    // Update tooltip with cursor and peak info (use innerHTML for line break, matching main waterfall)
+    const cursorText = `Cursor: ${formatFreq(displayFreq)} | ${db === -Infinity ? '-∞' : db.toFixed(1)} dB`;
+    const peakText = `Peak: ${formatFreq(displayPeakFreq)} | ${peakDb === -Infinity ? '-∞' : peakDb.toFixed(1)} dB`;
+    audioSpectrumTooltip.innerHTML = `${cursorText}<br>${peakText}`;
+
     audioSpectrumTooltip.style.left = (clientX + 15) + 'px';
     audioSpectrumTooltip.style.top = (clientY - 10) + 'px';
     audioSpectrumTooltip.style.display = 'block';
@@ -4120,8 +4154,17 @@ function updateSpectrum() {
     const startFreq = Math.ceil(displayLow / labelStep) * labelStep;
     for (let freq = startFreq; freq <= displayHigh; freq += labelStep) {
         const x = frequencyToPixel(freq, width);
-        // Show the actual audio frequency (freq already includes CW offset)
-        spectrumCtx.fillText(freq + ' Hz', x, height - 5);
+        // For LSB/CWL modes, invert the frequency display (0 Hz on left, max on right)
+        // LSB: -2700 to -50 displays as 2700 to 0 (reversed)
+        // For other modes, show the actual audio frequency (freq already includes CW offset)
+        let displayFreq;
+        if (currentMode === 'lsb' || currentMode === 'cwl') {
+            // Invert: most negative freq (-2700) shows as highest (2700), least negative (-50) shows as lowest (0)
+            displayFreq = Math.abs(displayLow) - Math.abs(freq);
+        } else {
+            displayFreq = freq;
+        }
+        spectrumCtx.fillText(displayFreq + ' Hz', x, height - 5);
     }
 
     // Redraw waterfall overlay to ensure filter lines persist
@@ -4304,8 +4347,17 @@ function updateWaterfall() {
         waterfallCtx.strokeStyle = '#000000';
         waterfallCtx.lineWidth = 3;
 
-        // Show the actual audio frequency (freq already includes CW offset)
-        const label = freq + ' Hz';
+        // For LSB/CWL modes, invert the frequency display (0 Hz on left, max on right)
+        // LSB: -2700 to -50 displays as 2700 to 0 (reversed)
+        // For other modes, show the actual audio frequency (freq already includes CW offset)
+        let displayFreq;
+        if (currentMode === 'lsb' || currentMode === 'cwl') {
+            // Invert: most negative freq (-2700) shows as highest (2700), least negative (-50) shows as lowest (0)
+            displayFreq = Math.abs(displayLow) - Math.abs(freq);
+        } else {
+            displayFreq = freq;
+        }
+        const label = displayFreq + ' Hz';
         waterfallCtx.strokeText(label, x, height - 10);
         waterfallCtx.fillText(label, x, height - 10);
     }

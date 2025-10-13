@@ -1188,3 +1188,24 @@ func (ah *AdminHandler) HandleBannedIPs(w http.ResponseWriter, r *http.Request) 
 		log.Printf("Error encoding banned IPs: %v", err)
 	}
 }
+
+// HandleExtensions returns the list of available decoder extensions
+func (ah *AdminHandler) HandleExtensions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Read the extensions directory to find available extensions
+	extensions := []map[string]string{
+		{"slug": "stats", "displayName": "Stats Monitor"},
+		// Add more extensions here as they are created
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"extensions": extensions,
+	}); err != nil {
+		log.Printf("Error encoding extensions: %v", err)
+	}
+}

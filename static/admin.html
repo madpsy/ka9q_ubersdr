@@ -354,8 +354,10 @@
                         </div>
                         <div class="config-field">
                             <label>Extension (Optional)</label>
-                            <input type="text" id="newBookmarkExtension" placeholder="e.g., stats">
-                            <small>Name of decoder extension to open automatically (leave empty for none)</small>
+                            <select id="newBookmarkExtension">
+                                <option value="">None</option>
+                            </select>
+                            <small>Decoder extension to open automatically when bookmark is clicked</small>
                         </div>
                         <button class="btn" onclick="saveBookmark()">Save Bookmark</button>
                         <button class="btn btn-secondary" onclick="cancelBookmarkForm()">Cancel</button>
@@ -816,17 +818,67 @@
         // Bookmarks management
         let currentBookmarks = [];
 
+        // Populate extension dropdown with available extensions from API
+        async function populateExtensionDropdown() {
+            const select = document.getElementById('newBookmarkExtension');
+            if (!select) return;
+
+            // Clear existing options except "None"
+            select.innerHTML = '<option value="">None</option>';
+
+            try {
+                const response = await fetch('/admin/extensions');
+                if (!response.ok) throw new Error('Failed to load extensions');
+
+                const data = await response.json();
+                const extensions = data.extensions || [];
+
+                extensions.forEach(ext => {
+                    const option = document.createElement('option');
+                    option.value = ext.slug;
+                    option.textContent = ext.displayName;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading extensions:', error);
+                // Add a note if extensions couldn't be loaded
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = '(Failed to load extensions)';
+                option.disabled = true;
+                select.appendChild(option);
+            }
+        }
+
         async function loadBookmarks() {
             try {
+                // Load extensions first to cache them
+                await loadExtensions();
+
                 const response = await fetch('/admin/bookmarks');
                 if (!response.ok) throw new Error('Failed to load bookmarks');
-                
+
                 const data = await response.json();
                 currentBookmarks = data.bookmarks || [];
                 renderBookmarks();
+                await populateExtensionDropdown(); // Populate dropdown when bookmarks are loaded
                 showAlert('Bookmarks loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading bookmarks: ' + error.message, 'error');
+            }
+        }
+
+        // Load and cache extensions
+        async function loadExtensions() {
+            try {
+                const response = await fetch('/admin/extensions');
+                if (!response.ok) throw new Error('Failed to load extensions');
+
+                const data = await response.json();
+                window.cachedExtensions = data.extensions || [];
+            } catch (error) {
+                console.error('Error loading extensions:', error);
+                window.cachedExtensions = [];
             }
         }
 
@@ -861,7 +913,21 @@
             currentBookmarks.forEach((bookmark, index) => {
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
-                const extensionDisplay = bookmark.extension ? `<span style="color: #667eea; font-weight: bold;">${bookmark.extension}</span>` : '<em style="color: #999;">—</em>';
+
+                // Get display name for extension from cached data
+                let extensionDisplay = '<em style="color: #999;">—</em>';
+                if (bookmark.extension) {
+                    // Try to find display name from cached extensions
+                    let displayName = bookmark.extension;
+                    if (window.cachedExtensions) {
+                        const ext = window.cachedExtensions.find(e => e.slug === bookmark.extension);
+                        if (ext) {
+                            displayName = ext.displayName;
+                        }
+                    }
+                    extensionDisplay = `<span style="color: #667eea; font-weight: bold;">${displayName}</span>`;
+                }
+
                 row.innerHTML = `
                     <td style="padding: 12px;">${bookmark.name}</td>
                     <td style="padding: 12px;">${bookmark.frequency.toLocaleString()}</td>
@@ -876,7 +942,8 @@
             });
         }
 
-        function showAddBookmarkForm() {
+        async function showAddBookmarkForm() {
+            await populateExtensionDropdown(); // Ensure dropdown is populated
             document.getElementById('bookmarkFormTitle').textContent = 'Add New Bookmark';
             document.getElementById('editBookmarkIndex').value = '-1';
             document.getElementById('addBookmarkForm').style.display = 'block';
@@ -886,7 +953,8 @@
             document.getElementById('newBookmarkExtension').value = '';
         }
 
-        function editBookmark(index) {
+        async function editBookmark(index) {
+            await populateExtensionDropdown(); // Ensure dropdown is populated
             const bookmark = currentBookmarks[index];
             document.getElementById('bookmarkFormTitle').textContent = 'Edit Bookmark';
             document.getElementById('editBookmarkIndex').value = index;
@@ -895,7 +963,7 @@
             document.getElementById('newBookmarkFreq').value = bookmark.frequency;
             document.getElementById('newBookmarkMode').value = bookmark.mode;
             document.getElementById('newBookmarkExtension').value = bookmark.extension || '';
-            
+
             // Scroll the form into view
             document.getElementById('addBookmarkForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }

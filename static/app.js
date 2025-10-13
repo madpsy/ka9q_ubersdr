@@ -1865,6 +1865,9 @@ function handleFrequencyChange() {
     // Update band button highlighting
     updateBandButtons(frequency);
 
+    // Update band selector dropdown
+    updateBandSelector();
+
     // Update URL with new frequency
     updateURL();
 
@@ -1886,6 +1889,7 @@ function setFrequency(freq) {
 
     document.getElementById('frequency').value = clampedFreq;
     updateBandButtons(clampedFreq);
+    updateBandSelector();
     log(`Frequency preset: ${formatFrequency(clampedFreq)}`);
 
     // Update URL with new frequency
@@ -1980,6 +1984,7 @@ function adjustFrequency(deltaHz) {
 
     freqInput.value = roundedFreq;
     updateBandButtons(roundedFreq);
+    updateBandSelector();
 
     // Log with appropriate precision based on step size
     let stepDesc;
@@ -4820,10 +4825,15 @@ const ZOOM_THROTTLE_MS = 250;
 // Initialize spectrum display on page load
 document.addEventListener('DOMContentLoaded', () => {
     // Load amateur radio bands
-    loadBands();
-
-    // Load bookmarks
-    loadBookmarks();
+        loadBands();
+    
+        // Load bookmarks
+        loadBookmarks();
+    
+        // Populate band selector dropdown after bands are loaded
+        setTimeout(() => {
+            populateBandSelector();
+        }, 500);
 
     // Initialize spectrum display
     try {
@@ -5311,4 +5321,180 @@ function toggleExtension(extensionName) {
     // Reset dropdown
     dropdown.value = '';
 }
+
+// Populate band selector dropdown with grouped bands
+function populateBandSelector() {
+    const selector = document.getElementById('band-selector');
+    if (!selector || !window.amateurBands || window.amateurBands.length === 0) {
+        return;
+    }
+
+    // Clear existing options except the first one
+    selector.innerHTML = '<option value="">Select Band...</option>';
+
+    // Group bands by their group field
+    const grouped = {};
+    const ungrouped = [];
+
+    window.amateurBands.forEach(band => {
+        if (band.group && band.group.trim() !== '') {
+            if (!grouped[band.group]) {
+                grouped[band.group] = [];
+            }
+            grouped[band.group].push(band);
+        } else {
+            ungrouped.push(band);
+        }
+    });
+
+    // Add grouped bands with optgroup
+    const groupNames = Object.keys(grouped).sort();
+    groupNames.forEach(groupName => {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = groupName;
+        
+        grouped[groupName].forEach(band => {
+            const option = document.createElement('option');
+            option.value = JSON.stringify({
+                label: band.label,
+                start: band.start,
+                end: band.end
+            });
+            option.textContent = band.label;
+            optgroup.appendChild(option);
+        });
+        
+        selector.appendChild(optgroup);
+    });
+
+    // Add ungrouped bands under "Other" if any exist
+    if (ungrouped.length > 0) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = 'Other';
+        
+        ungrouped.forEach(band => {
+            const option = document.createElement('option');
+            option.value = JSON.stringify({
+                label: band.label,
+                start: band.start,
+                end: band.end
+            });
+            option.textContent = band.label;
+            optgroup.appendChild(option);
+        });
+        
+        selector.appendChild(optgroup);
+    }
+
+    log('Band selector populated with grouped bands');
+}
+
+// Handle band selection from dropdown
+function selectBandFromDropdown(value) {
+    const selector = document.getElementById('band-selector');
+
+    if (!value) {
+        return;
+    }
+
+    try {
+        const bandData = JSON.parse(value);
+
+        // Calculate band center frequency
+        const centerFreq = Math.round((bandData.start + bandData.end) / 2);
+
+        // Calculate band width
+        const bandWidth = bandData.end - bandData.start;
+
+        // Set frequency to band center
+        document.getElementById('frequency').value = centerFreq;
+        updateBandButtons(centerFreq);
+
+        // Set mode based on frequency: LSB below 10 MHz, USB at 10 MHz and above
+        const mode = centerFreq < 10000000 ? 'lsb' : 'usb';
+        setMode(mode);
+
+        // Update URL with new frequency and mode
+        updateURL();
+
+        // Auto-connect if not connected
+        if (!wsManager.isConnected()) {
+            connect();
+        } else {
+            autoTune();
+        }
+
+        // Zoom spectrum to show band with focused view (0.6x band width)
+        if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
+            const focusedBandwidth = bandWidth * 0.6;
+            const binCount = spectrumDisplay.binCount || 2048;
+            const binBandwidth = focusedBandwidth / binCount;
+
+            spectrumDisplay.ws.send(JSON.stringify({
+                type: 'zoom',
+                frequency: centerFreq,
+                binBandwidth: binBandwidth
+            }));
+
+            log(`Tuned to ${bandData.label}: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - focusedBandwidth/2)} - ${formatFrequency(centerFreq + focusedBandwidth/2)})`);
+        } else {
+            log(`Tuned to ${bandData.label}: ${formatFrequency(centerFreq)} ${mode.toUpperCase()}`);
+        }
+
+    } catch (e) {
+        console.error('Error parsing band data:', e);
+        log('Error selecting band', 'error');
+    }
+
+    // Keep the selection visible (don't reset)
+    // selector.value remains as the selected band
+}
+
+// Update band selector to match current frequency
+function updateBandSelector() {
+    const selector = document.getElementById('band-selector');
+    if (!selector || !window.amateurBands || window.amateurBands.length === 0) {
+        return;
+    }
+
+    const freqInput = document.getElementById('frequency');
+    if (!freqInput) {
+        return;
+    }
+
+    const currentFreq = parseInt(freqInput.value);
+    if (isNaN(currentFreq)) {
+        selector.value = '';
+        return;
+    }
+
+    // Find which band contains the current frequency
+    let matchingBand = null;
+    for (let band of window.amateurBands) {
+        if (currentFreq >= band.start && currentFreq <= band.end) {
+            matchingBand = band;
+            break;
+        }
+    }
+
+    if (matchingBand) {
+        // Find the option with this band's data and select it
+        const bandValue = JSON.stringify({
+            label: matchingBand.label,
+            start: matchingBand.start,
+            end: matchingBand.end
+        });
+
+        // Set the dropdown to this value
+        selector.value = bandValue;
+    } else {
+        // No matching band, reset to default
+        selector.value = '';
+    }
+}
+
+// Expose functions to global scope
+window.populateBandSelector = populateBandSelector;
+window.selectBandFromDropdown = selectBandFromDropdown;
+window.updateBandSelector = updateBandSelector;
 

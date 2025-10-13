@@ -51,6 +51,7 @@ type Band struct {
 	Label string `yaml:"label" json:"label"`
 	Start uint64 `yaml:"start" json:"start"`
 	End   uint64 `yaml:"end" json:"end"`
+	Group string `yaml:"group,omitempty" json:"group,omitempty"`
 }
 
 // RadiodConfig contains radiod connection settings

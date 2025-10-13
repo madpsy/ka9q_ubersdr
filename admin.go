@@ -810,11 +810,15 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add new band
-	bands = append(bands, map[string]interface{}{
+	bandMap := map[string]interface{}{
 		"label": newBand.Label,
 		"start": newBand.Start,
 		"end":   newBand.End,
-	})
+	}
+	if newBand.Group != "" {
+		bandMap["group"] = newBand.Group
+	}
+	bands = append(bands, bandMap)
 	bandsConfig["bands"] = bands
 
 	// Write back to file
@@ -923,11 +927,15 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 	}
 
 	// Update band at index
-	bands[index] = map[string]interface{}{
+	bandMap := map[string]interface{}{
 		"label": updatedBand.Label,
 		"start": updatedBand.Start,
 		"end":   updatedBand.End,
 	}
+	if updatedBand.Group != "" {
+		bandMap["group"] = updatedBand.Group
+	}
+	bands[index] = bandMap
 	bandsConfig["bands"] = bands
 
 	// Write back to file

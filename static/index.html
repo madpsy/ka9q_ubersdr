@@ -115,6 +115,9 @@
                     <button onclick="setBand('12m')" class="band-btn" data-band="12m" title="12 meter band (7 key)">12m</button>
                     <button onclick="setBand('10m')" class="band-btn" data-band="10m" title="10 meter band (8 key)">10m</button>
                 </div>
+                <select id="band-selector" onchange="selectBandFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
+                    <option value="">Select Band...</option>
+                </select>
             </div>
 
             <div class="control-group">

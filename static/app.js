@@ -88,6 +88,19 @@ const wsManager = new WebSocketManager({
                     : 800;
                 initializeCWDecoder(audioContext, analyser, centerFreq);
             }
+
+            // Open extensions from URL parameter if specified
+            if (window.extensionsToOpen && window.extensionsToOpen.length > 0) {
+                setTimeout(() => {
+                    window.extensionsToOpen.forEach(extName => {
+                        if (window.toggleExtension) {
+                            window.toggleExtension(extName);
+                            log(`Opened extension from URL: ${extName}`);
+                        }
+                    });
+                    delete window.extensionsToOpen;
+                }, 100);
+            }
         }
     },
     onDisconnect: () => {
@@ -1832,6 +1845,15 @@ function loadSettingsFromURL() {
         }
     }
 
+    // Load extensions (will be opened after audio context is initialized)
+    if (params.has('ext')) {
+        const extensions = params.get('ext').split(',').filter(e => e.trim());
+        if (extensions.length > 0) {
+            // Store for later application when audio context is ready
+            window.extensionsToOpen = extensions;
+        }
+    }
+
     // Load spectrum zoom parameters (will be applied when spectrum display initializes)
     if (params.has('zoom_freq') && params.has('zoom_bw')) {
         const zoomFreq = parseInt(params.get('zoom_freq'));
@@ -1861,6 +1883,14 @@ function updateURL() {
     // Add bandwidth
     params.set('bwl', currentBandwidthLow);
     params.set('bwh', currentBandwidthHigh);
+
+    // Add currently open extensions
+    if (window.decoderManager) {
+        const activeExtensions = window.decoderManager.getActiveDecoders();
+        if (activeExtensions.length > 0) {
+            params.set('ext', activeExtensions.join(','));
+        }
+    }
 
     // Add spectrum zoom parameters if zoomed
     // Check if spectrum display exists, has valid zoom data, AND is connected
@@ -5023,6 +5053,8 @@ function toggleExtension(extensionName) {
                 }
             }
         });
+        // Update URL to remove extension parameter
+        updateURL();
         return;
     }
     
@@ -5080,6 +5112,9 @@ function toggleExtension(extensionName) {
         log(`${extensionName} extension disabled`);
     }
     
+    // Update URL with new extension state
+    updateURL();
+
     // Reset dropdown
     dropdown.value = '';
 }

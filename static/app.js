@@ -287,6 +287,17 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // F key: Focus on frequency input (works even when not in an input field)
+        if (e.key === 'f' || e.key === 'F') {
+            e.preventDefault();
+            const freqInput = document.getElementById('frequency');
+            if (freqInput) {
+                freqInput.focus();
+                freqInput.select(); // Select all text for easy replacement
+            }
+            return;
+        }
+
         // Only handle shortcuts when not typing in an input field
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
             return;

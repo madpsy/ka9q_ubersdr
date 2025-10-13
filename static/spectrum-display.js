@@ -161,6 +161,47 @@ class SpectrumDisplay {
         // Insert bandwidth lines canvas after main canvas (so it overlays it)
         this.canvas.parentElement.insertBefore(this.bandwidthLinesCanvas, this.canvas.nextSibling);
 
+        // Add mousemove handler for bookmark tooltips on overlay canvas
+        this.overlayCanvas.addEventListener('mousemove', (e) => {
+            const rect = this.overlayCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Check if mouse is over a bookmark
+            if (window.bookmarkPositions && window.bookmarkPositions.length > 0) {
+                for (let pos of window.bookmarkPositions) {
+                    // Check if mouse is within bookmark bounds
+                    if (x >= pos.x - pos.width / 2 &&
+                        x <= pos.x + pos.width / 2 &&
+                        y >= pos.y &&
+                        y <= pos.y + pos.height) {
+
+                        // Show bookmark info
+                        const freqStr = this.formatFrequency(pos.bookmark.frequency);
+                        const modeStr = pos.bookmark.mode.toUpperCase();
+                        this.tooltip.innerHTML = `${pos.bookmark.name}: ${freqStr} ${modeStr}`;
+
+                        // Position tooltip near cursor
+                        const tooltipX = e.clientX + 15;
+                        const tooltipY = e.clientY - 10;
+
+                        this.tooltip.style.left = tooltipX + 'px';
+                        this.tooltip.style.top = tooltipY + 'px';
+                        this.tooltip.style.display = 'block';
+                        return;
+                    }
+                }
+            }
+
+            // No bookmark under mouse, hide tooltip
+            this.hideTooltip();
+        });
+
+        // Add mouseleave handler to hide tooltip when leaving overlay
+        this.overlayCanvas.addEventListener('mouseleave', () => {
+            this.hideTooltip();
+        });
+
         // Add click handler for bookmarks on overlay canvas
         this.overlayCanvas.addEventListener('click', (e) => {
             const rect = this.overlayCanvas.getBoundingClientRect();

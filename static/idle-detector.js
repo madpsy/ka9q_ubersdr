@@ -21,6 +21,7 @@ class IdleDetector {
             'mousedown',
             'mousemove',
             'keypress',
+            'keydown',
             'scroll',
             'touchstart',
             'click',

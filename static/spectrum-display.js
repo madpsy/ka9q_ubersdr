@@ -533,6 +533,16 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     // Handle incoming WebSocket messages
     handleMessage(msg) {
         switch (msg.type) {
+            case 'error':
+                // Handle rate limit errors (status 429)
+                if (msg.status === 429) {
+                    console.warn('⚠️ Spectrum rate limit exceeded:', msg.error);
+                    return; // Don't show error to user, just log it
+                }
+                // Handle other errors normally
+                console.error('Spectrum error:', msg.error);
+                break;
+
             case 'config':
                 // CRITICAL: Clear peak hold FIRST before updating any config values
                 // This prevents NaN values when spectrum data arrives with old peak hold data
@@ -2467,6 +2477,10 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
     // Setup mouse wheel scroll handler
     setupScrollHandler() {
+        // Throttle variables for scroll wheel (250ms like zoom buttons)
+        let lastScrollTime = 0;
+        const SCROLL_THROTTLE_MS = 250;
+
         // Setup checkbox handler
         const scrollCheckbox = document.getElementById('spectrum-scroll-enable');
         if (scrollCheckbox) {
@@ -2481,6 +2495,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             if (!this.scrollEnabled || !this.spectrumData) return;
             
             e.preventDefault();
+
+            // Throttle scroll events to prevent rate limiting (250ms like zoom buttons)
+            const now = Date.now();
+            const timeSinceLastScroll = now - lastScrollTime;
+            if (timeSinceLastScroll < SCROLL_THROTTLE_MS) {
+                return; // Ignore this scroll event
+            }
+            lastScrollTime = now;
             
             // Get current frequency from input
             const freqInput = document.getElementById('frequency');

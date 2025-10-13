@@ -59,6 +59,7 @@ type ServerConfig struct {
 	SessionTimeout    int          `yaml:"session_timeout"`
 	MaxSessionTime    int          `yaml:"max_session_time"`   // Maximum time a session can exist in seconds (0 = unlimited)
 	MaxIdleTime       int          `yaml:"max_idle_time"`      // Maximum time a user can be idle in seconds (0 = unlimited)
+	CmdRateLimit      int          `yaml:"cmd_rate_limit"`     // Commands per second per UUID per channel (0 = unlimited)
 	TimeoutBypassIPs  []string     `yaml:"timeout_bypass_ips"` // List of IPs/CIDRs that bypass idle and max session time limits
 	EnableCORS        bool         `yaml:"enable_cors"`
 	LogFile           string       `yaml:"logfile"` // HTTP request log file path
@@ -133,6 +134,9 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Server.SessionTimeout == 0 {
 		config.Server.SessionTimeout = 300
+	}
+	if config.Server.CmdRateLimit == 0 {
+		config.Server.CmdRateLimit = 10 // Default 10 commands/sec per channel
 	}
 	if config.Server.LogFile == "" {
 		config.Server.LogFile = "web.log"

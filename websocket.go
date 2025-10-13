@@ -219,19 +219,21 @@ func (wc *wsConn) close() error {
 
 // WebSocketHandler handles WebSocket connections
 type WebSocketHandler struct {
-	sessions      *SessionManager
-	audioReceiver *AudioReceiver
-	config        *Config
-	ipBanManager  *IPBanManager
+	sessions           *SessionManager
+	audioReceiver      *AudioReceiver
+	config             *Config
+	ipBanManager       *IPBanManager
+	rateLimiterManager *RateLimiterManager
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
-func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config, ipBanManager *IPBanManager) *WebSocketHandler {
+func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager) *WebSocketHandler {
 	return &WebSocketHandler{
-		sessions:      sessions,
-		audioReceiver: audioReceiver,
-		config:        config,
-		ipBanManager:  ipBanManager,
+		sessions:           sessions,
+		audioReceiver:      audioReceiver,
+		config:             config,
+		ipBanManager:       ipBanManager,
+		rateLimiterManager: rateLimiterManager,
 	}
 }
 
@@ -254,6 +256,7 @@ type ServerMessage struct {
 	Mode        string      `json:"mode,omitempty"`
 	SessionID   string      `json:"sessionId,omitempty"`
 	Error       string      `json:"error,omitempty"`
+	Status      int         `json:"status,omitempty"` // HTTP-style status code (e.g., 429 for rate limit)
 	Info        interface{} `json:"info,omitempty"`
 	AudioFormat string      `json:"audioFormat,omitempty"` // "pcm" or "opus"
 }
@@ -487,6 +490,13 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 		// Update last active time
 		wsh.sessions.TouchSession(currentSession.ID)
 
+		// Check rate limit for this UUID (skip ping messages)
+		if msg.Type != "ping" && !wsh.rateLimiterManager.AllowAudio(currentSession.UserSessionID) {
+			log.Printf("Rate limit exceeded for audio command from user %s (type: %s)", currentSession.UserSessionID, msg.Type)
+			wsh.sendErrorWithStatus(conn, "Rate limit exceeded. Please slow down.", 429)
+			continue // Don't close connection, just reject this command
+		}
+
 		// Handle message based on type
 		switch msg.Type {
 		case "tune":
@@ -704,9 +714,15 @@ func (wsh *WebSocketHandler) sendStatus(conn *wsConn, session *Session) error {
 
 // sendError sends an error message to the client
 func (wsh *WebSocketHandler) sendError(conn *wsConn, errMsg string) error {
+	return wsh.sendErrorWithStatus(conn, errMsg, 0)
+}
+
+// sendErrorWithStatus sends an error message with a status code to the client
+func (wsh *WebSocketHandler) sendErrorWithStatus(conn *wsConn, errMsg string, status int) error {
 	msg := ServerMessage{
-		Type:  "error",
-		Error: errMsg,
+		Type:   "error",
+		Error:  errMsg,
+		Status: status,
 	}
 	return wsh.sendMessage(conn, msg)
 }

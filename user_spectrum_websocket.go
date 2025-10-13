@@ -13,15 +13,17 @@ import (
 
 // UserSpectrumWebSocketHandler handles per-user spectrum WebSocket connections
 type UserSpectrumWebSocketHandler struct {
-	sessions     *SessionManager
-	ipBanManager *IPBanManager
+	sessions           *SessionManager
+	ipBanManager       *IPBanManager
+	rateLimiterManager *RateLimiterManager
 }
 
 // NewUserSpectrumWebSocketHandler creates a new per-user spectrum WebSocket handler
-func NewUserSpectrumWebSocketHandler(sessions *SessionManager, ipBanManager *IPBanManager) *UserSpectrumWebSocketHandler {
+func NewUserSpectrumWebSocketHandler(sessions *SessionManager, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager) *UserSpectrumWebSocketHandler {
 	return &UserSpectrumWebSocketHandler{
-		sessions:     sessions,
-		ipBanManager: ipBanManager,
+		sessions:           sessions,
+		ipBanManager:       ipBanManager,
+		rateLimiterManager: rateLimiterManager,
 	}
 }
 
@@ -74,6 +76,7 @@ type UserSpectrumServerMessage struct {
 	BinBandwidth float64     `json:"binBandwidth,omitempty"` // Bandwidth per bin
 	SessionID    string      `json:"sessionId,omitempty"`
 	Error        string      `json:"error,omitempty"`
+	Status       int         `json:"status,omitempty"` // HTTP-style status code (e.g., 429 for rate limit)
 	Info         interface{} `json:"info,omitempty"`
 }
 
@@ -203,6 +206,13 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 
 		// Update last active time
 		swsh.sessions.TouchSession(session.ID)
+
+		// Check rate limit for this UUID (skip ping messages)
+		if msg.Type != "ping" && !swsh.rateLimiterManager.AllowSpectrum(session.UserSessionID) {
+			log.Printf("Rate limit exceeded for spectrum command from user %s (type: %s)", session.UserSessionID, msg.Type)
+			swsh.sendErrorWithStatus(conn, "Rate limit exceeded. Please slow down.", 429)
+			continue // Don't close connection, just reject this command
+		}
 
 		// Handle message based on type
 		switch msg.Type {
@@ -420,9 +430,15 @@ func (swsh *UserSpectrumWebSocketHandler) sendStatus(conn *wsConn, session *Sess
 
 // sendError sends an error message to the client
 func (swsh *UserSpectrumWebSocketHandler) sendError(conn *wsConn, errMsg string) error {
+	return swsh.sendErrorWithStatus(conn, errMsg, 0)
+}
+
+// sendErrorWithStatus sends an error message with a status code to the client
+func (swsh *UserSpectrumWebSocketHandler) sendErrorWithStatus(conn *wsConn, errMsg string, status int) error {
 	msg := UserSpectrumServerMessage{
-		Type:  "error",
-		Error: errMsg,
+		Type:   "error",
+		Error:  errMsg,
+		Status: status,
 	}
 	return swsh.sendMessage(conn, msg)
 }

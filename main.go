@@ -185,10 +185,14 @@ func main() {
 	}
 	defer userSpectrumManager.Stop()
 
+	// Initialize rate limiter manager
+	rateLimiterManager := NewRateLimiterManager(config.Server.CmdRateLimit)
+	log.Printf("Command rate limiting: %d commands/sec per channel (0 = unlimited)", config.Server.CmdRateLimit)
+
 	// Initialize WebSocket handlers
-	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config, ipBanManager)
+	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager)
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
-	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager) // New per-user spectrum
+	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager) // New per-user spectrum
 
 	// Initialize admin handler
 	adminHandler := NewAdminHandler(config, *configFile, sessions, ipBanManager)

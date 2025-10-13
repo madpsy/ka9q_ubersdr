@@ -58,6 +58,12 @@ server:
   # Useful for ensuring fair access and preventing long-term monopolisation
   # Set to 0 to disable time-based limiting
   max_session_time: 0
+  # Command rate limit per UUID (commands per second per channel)
+  # This limits how many commands (tune, zoom, pan, etc.) a user can send per second
+  # Applies separately to audio and spectrum channels (e.g., 10 means 10 audio commands/sec + 10 spectrum commands/sec)
+  # Set to 0 to disable rate limiting
+  # Recommended: 10 (allows responsive UI while preventing abuse)
+  cmd_rate_limit: 10
   # List of IP addresses or CIDR ranges that bypass all session limits
   # Useful for trusted IPs like localhost, admin networks, or specific users
   # Bypassed IPs are exempt from:

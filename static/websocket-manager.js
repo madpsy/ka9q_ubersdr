@@ -140,6 +140,13 @@ export class WebSocketManager {
         try {
             const msg = JSON.parse(event.data);
             
+            // Handle rate limit errors (status 429)
+            if (msg.type === 'error' && msg.status === 429) {
+                console.warn('⚠️ Audio rate limit exceeded:', msg.error);
+                // Don't pass to onMessage, just log it
+                return;
+            }
+            
             // Reset reconnection attempts on first successful message
             if (msg.type === 'status') {
                 this.reconnectAttempts = 0;

@@ -3502,6 +3502,11 @@ function updateSpectrum() {
         if (currentMode === 'lsb' || currentMode === 'cwl') {
             // Invert: most negative freq (-2700) shows as highest (2700), least negative (-50) shows as lowest (0)
             displayFreq = Math.abs(displayLow) - Math.abs(freq);
+        } else if (currentMode === 'am' || currentMode === 'sam' || currentMode === 'fm' || currentMode === 'nfm') {
+            // AM/SAM/FM/NFM: Show audio frequency from 0 Hz (left) to max (right)
+            // freq ranges from -bandwidth to +bandwidth, map to 0 to bandwidth
+            // Left edge -> 0 Hz, Center -> bandwidth/2, Right edge -> bandwidth
+            displayFreq = (freq + Math.abs(currentBandwidthLow)) / 2;
         } else {
             displayFreq = freq;
         }
@@ -3679,6 +3684,22 @@ function updateWaterfall() {
     for (let freq = startFreq; freq <= displayHigh; freq += labelStep) {
         const x = frequencyToPixel(freq, width);
 
+        // For LSB/CWL modes, invert the frequency display (0 Hz on left, max on right)
+        // LSB: -2700 to -50 displays as 2700 to 0 (reversed)
+        // For other modes, show the actual audio frequency (freq already includes CW offset)
+        let displayFreq;
+        if (currentMode === 'lsb' || currentMode === 'cwl') {
+            // Invert: most negative freq (-2700) shows as highest (2700), least negative (-50) shows as lowest (0)
+            displayFreq = Math.abs(displayLow) - Math.abs(freq);
+        } else if (currentMode === 'am' || currentMode === 'sam' || currentMode === 'fm' || currentMode === 'nfm') {
+            // AM/SAM/FM/NFM: Show audio frequency from 0 Hz (left) to max (right)
+            // freq ranges from -bandwidth to +bandwidth, map to 0 to bandwidth
+            // Left edge -> 0 Hz, Center -> bandwidth/2, Right edge -> bandwidth
+            displayFreq = (freq + Math.abs(currentBandwidthLow)) / 2;
+        } else {
+            displayFreq = freq;
+        }
+
         // Draw major tick mark (white)
         waterfallCtx.fillStyle = 'rgba(255, 255, 255, 0.9)';
         waterfallCtx.fillRect(x - 1, height - 30, 2, 12);
@@ -3688,16 +3709,6 @@ function updateWaterfall() {
         waterfallCtx.strokeStyle = '#000000';
         waterfallCtx.lineWidth = 3;
 
-        // For LSB/CWL modes, invert the frequency display (0 Hz on left, max on right)
-        // LSB: -2700 to -50 displays as 2700 to 0 (reversed)
-        // For other modes, show the actual audio frequency (freq already includes CW offset)
-        let displayFreq;
-        if (currentMode === 'lsb' || currentMode === 'cwl') {
-            // Invert: most negative freq (-2700) shows as highest (2700), least negative (-50) shows as lowest (0)
-            displayFreq = Math.abs(displayLow) - Math.abs(freq);
-        } else {
-            displayFreq = freq;
-        }
         const label = displayFreq + ' Hz';
         waterfallCtx.strokeText(label, x, height - 10);
         waterfallCtx.fillText(label, x, height - 10);

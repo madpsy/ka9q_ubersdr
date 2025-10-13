@@ -129,11 +129,14 @@ class SpectrumDisplay {
         this.overlayDiv.style.height = '35px'; // Height for label and arrow
         this.overlayDiv.style.pointerEvents = 'auto'; // Enable pointer events for bookmark clicks
         this.overlayDiv.style.cursor = 'pointer'; // Show pointer cursor over bookmarks
+        this.overlayDiv.style.zIndex = '200'; // Higher than site-description and audio-buffer-display (z-index: 100)
 
         // Create canvas inside overlay div
         this.overlayCanvas = document.createElement('canvas');
         this.overlayCanvas.width = this.width;
         this.overlayCanvas.height = 35;
+        this.overlayCanvas.style.position = 'relative';
+        this.overlayCanvas.style.zIndex = '200'; // Higher than site-description and audio-buffer-display
         this.overlayDiv.appendChild(this.overlayCanvas);
 
         // Insert overlay div before the main canvas

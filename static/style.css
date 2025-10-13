@@ -1842,7 +1842,7 @@ input[type="range"]::-moz-range-thumb {
 .spectrum-control-group {
     display: flex;
     align-items: center;
-    gap: 6px; /* Scaled down */
+    gap: 3px; /* Reduced for tighter spacing */
 }
 
 .spectrum-control-group button {
@@ -1935,8 +1935,8 @@ input[type="range"]::-moz-range-thumb {
     color: #ecf0f1;
     font-weight: bold;
     font-size: 0.9em;
-    min-width: 45px;
-    text-align: center;
+    min-width: unset;
+    text-align: left;
 }
 
 .spectrum-status {

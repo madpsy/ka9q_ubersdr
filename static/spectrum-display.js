@@ -267,6 +267,7 @@ class SpectrumDisplay {
         this.lastPanTime = 0;
         this.panThrottleMs = 150; // Throttle pan requests to avoid backend rounding issues
         this.scrollEnabled = false; // Mouse scroll wheel disabled by default
+        this.zoomScrollEnabled = false; // Zoom scroll wheel disabled by default
         this.setupMouseHandlers();
         this.setupScrollHandler();
 
@@ -2481,9 +2482,30 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         let lastScrollTime = 0;
         const SCROLL_THROTTLE_MS = 250;
 
-        // Setup checkbox handler
+        // Setup checkbox handlers
         const scrollCheckbox = document.getElementById('spectrum-scroll-enable');
-        if (scrollCheckbox) {
+        const zoomScrollCheckbox = document.getElementById('spectrum-zoom-scroll-enable');
+        
+        // Make checkboxes mutually exclusive
+        if (scrollCheckbox && zoomScrollCheckbox) {
+            scrollCheckbox.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    zoomScrollCheckbox.checked = false;
+                    this.zoomScrollEnabled = false;
+                }
+                this.scrollEnabled = e.target.checked;
+                console.log(`Spectrum scroll ${this.scrollEnabled ? 'enabled' : 'disabled'}`);
+            });
+            
+            zoomScrollCheckbox.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    scrollCheckbox.checked = false;
+                    this.scrollEnabled = false;
+                }
+                this.zoomScrollEnabled = e.target.checked;
+                console.log(`Spectrum zoom scroll ${this.zoomScrollEnabled ? 'enabled' : 'disabled'}`);
+            });
+        } else if (scrollCheckbox) {
             scrollCheckbox.addEventListener('change', (e) => {
                 this.scrollEnabled = e.target.checked;
                 console.log(`Spectrum scroll ${this.scrollEnabled ? 'enabled' : 'disabled'}`);
@@ -2492,7 +2514,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
         // Add wheel event listener to both main canvas and line graph canvas
         const handleWheel = (e) => {
-            if (!this.scrollEnabled || !this.spectrumData) return;
+            if (!this.scrollEnabled && !this.zoomScrollEnabled) return;
+            if (!this.spectrumData) return;
             
             e.preventDefault();
 
@@ -2504,42 +2527,51 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             }
             lastScrollTime = now;
             
-            // Get current frequency from input
-            const freqInput = document.getElementById('frequency');
-            if (!freqInput) return;
-            
-            const currentFreq = parseInt(freqInput.value);
-            if (isNaN(currentFreq)) return;
-            
-            // Scroll up = increase frequency by 100 Hz
-            // Scroll down = decrease frequency by 100 Hz
-            const delta = e.deltaY < 0 ? 100 : -100;
-            let newFreq = currentFreq + delta;
-            
-            // Round to nearest 100 Hz
-            newFreq = Math.round(newFreq / 100) * 100;
-            
-            // Clamp to valid range (100 kHz to 30 MHz)
-            const MIN_FREQ = 100000;
-            const MAX_FREQ = 30000000;
-            newFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
-            
-            // Update frequency input
-            freqInput.value = newFreq;
-            
-            // Update band buttons if function exists
-            if (typeof window.updateBandButtons === 'function') {
-                window.updateBandButtons(newFreq);
-            }
-            
-            // Update URL if function exists
-            if (typeof window.updateURL === 'function') {
-                window.updateURL();
-            }
-            
-            // Trigger tune
-            if (typeof window.autoTune === 'function') {
-                window.autoTune();
+            if (this.zoomScrollEnabled) {
+                // Zoom mode: scroll up = zoom in, scroll down = zoom out
+                if (e.deltaY < 0) {
+                    this.zoomIn();
+                } else {
+                    this.zoomOut();
+                }
+            } else if (this.scrollEnabled) {
+                // Frequency scroll mode: scroll up = increase frequency, scroll down = decrease frequency
+                const freqInput = document.getElementById('frequency');
+                if (!freqInput) return;
+                
+                const currentFreq = parseInt(freqInput.value);
+                if (isNaN(currentFreq)) return;
+                
+                // Scroll up = increase frequency by 100 Hz
+                // Scroll down = decrease frequency by 100 Hz
+                const delta = e.deltaY < 0 ? 100 : -100;
+                let newFreq = currentFreq + delta;
+                
+                // Round to nearest 100 Hz
+                newFreq = Math.round(newFreq / 100) * 100;
+                
+                // Clamp to valid range (100 kHz to 30 MHz)
+                const MIN_FREQ = 100000;
+                const MAX_FREQ = 30000000;
+                newFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
+                
+                // Update frequency input
+                freqInput.value = newFreq;
+                
+                // Update band buttons if function exists
+                if (typeof window.updateBandButtons === 'function') {
+                    window.updateBandButtons(newFreq);
+                }
+                
+                // Update URL if function exists
+                if (typeof window.updateURL === 'function') {
+                    window.updateURL();
+                }
+                
+                // Trigger tune
+                if (typeof window.autoTune === 'function') {
+                    window.autoTune();
+                }
             }
         };
         
@@ -2695,10 +2727,18 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         }
 
         // Center on current tuned frequency, or spectrum center if not tuned
-        const newCenterFreq = this.currentTunedFreq || this.centerFreq;
+        let newCenterFreq = this.currentTunedFreq || this.centerFreq;
+
+        // Calculate new total bandwidth
+        const newTotalBW = newBinBandwidth * this.binCount;
+        const halfBandwidth = newTotalBW / 2;
+
+        // Constrain center frequency to keep view within 0-30 MHz
+        const minCenterFreq = 0 + halfBandwidth;
+        const maxCenterFreq = 30e6 - halfBandwidth;
+        newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
         const currentTotalBW = this.binBandwidth * this.binCount;
-        const newTotalBW = newBinBandwidth * this.binCount;
 
         console.log(`Zoom in: ${(currentTotalBW/1e6).toFixed(3)} MHz -> ${(newTotalBW/1e6).toFixed(3)} MHz ` +
                     `(${this.binBandwidth.toFixed(1)} -> ${newBinBandwidth.toFixed(1)} Hz/bin, ${this.binCount} bins)`);
@@ -2709,7 +2749,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         // Send zoom request to server - backend handles bin_count adjustment automatically
         this.ws.send(JSON.stringify({
             type: 'zoom',
-            frequency: newCenterFreq,
+            frequency: Math.round(newCenterFreq),
             binBandwidth: newBinBandwidth
         }));
     }
@@ -2733,10 +2773,18 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         }
 
         // Center on current tuned frequency, or spectrum center if not tuned
-        const newCenterFreq = this.currentTunedFreq || this.centerFreq;
+        let newCenterFreq = this.currentTunedFreq || this.centerFreq;
+
+        // Calculate new total bandwidth
+        const newTotalBW = newBinBandwidth * this.binCount;
+        const halfBandwidth = newTotalBW / 2;
+
+        // Constrain center frequency to keep view within 0-30 MHz
+        const minCenterFreq = 0 + halfBandwidth;
+        const maxCenterFreq = 30e6 - halfBandwidth;
+        newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
         const currentTotalBW = this.binBandwidth * this.binCount;
-        const newTotalBW = newBinBandwidth * this.binCount;
 
         console.log(`Zoom out: ${(currentTotalBW/1e6).toFixed(3)} MHz -> ${(newTotalBW/1e6).toFixed(3)} MHz ` +
                     `(${this.binBandwidth.toFixed(1)} -> ${newBinBandwidth.toFixed(1)} Hz/bin)`);
@@ -2747,7 +2795,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         // Send zoom request to server
         this.ws.send(JSON.stringify({
             type: 'zoom',
-            frequency: newCenterFreq,
+            frequency: Math.round(newCenterFreq),
             binBandwidth: newBinBandwidth
         }));
     }

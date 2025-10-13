@@ -285,6 +285,7 @@ body {
     position: relative;
     display: flex;
     align-items: center;
+    margin-top: 10px;
 }
 
 .frequency-input-wrapper input[type="number"] {
@@ -365,7 +366,7 @@ body {
     justify-content: center;
     gap: 5px;
     margin-top: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 5px;
 }
 
 .tuning-buttons button {

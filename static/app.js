@@ -1183,6 +1183,7 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
     // Update frequency input
     document.getElementById('frequency').value = frequency;
     updateBandButtons(frequency);
+    updateBandSelector();
 
     // Update mode
     currentMode = mode;
@@ -1920,6 +1921,7 @@ function setBand(bandName) {
     // Set frequency to band center
     document.getElementById('frequency').value = centerFreq;
     updateBandButtons(centerFreq);
+    updateBandSelector();
 
     // Set mode based on frequency: LSB below 10 MHz (80m, 40m), USB at 10 MHz and above (30m+)
     // This follows amateur radio convention where LSB is used on lower HF bands
@@ -4869,6 +4871,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Update cursor immediately
                 updateSpectrumCursor();
 
+                // Update band selector
+                updateBandSelector();
+
                 // Update URL with new frequency
                 updateURL();
 
@@ -4929,11 +4934,17 @@ document.addEventListener('DOMContentLoaded', () => {
         // Set initial cursor position
         updateSpectrumCursor();
 
-        // Update cursor when frequency input changes
+        // Update cursor and band selector when frequency input changes
         const freqInput = document.getElementById('frequency');
         if (freqInput) {
-            freqInput.addEventListener('input', updateSpectrumCursor);
-            freqInput.addEventListener('change', updateSpectrumCursor);
+            freqInput.addEventListener('input', () => {
+                updateSpectrumCursor();
+                updateBandSelector();
+            });
+            freqInput.addEventListener('change', () => {
+                updateSpectrumCursor();
+                updateBandSelector();
+            });
         }
     } catch (err) {
         console.error('Failed to initialize spectrum display:', err);
@@ -5454,41 +5465,66 @@ function selectBandFromDropdown(value) {
 function updateBandSelector() {
     const selector = document.getElementById('band-selector');
     if (!selector || !window.amateurBands || window.amateurBands.length === 0) {
+        console.log('updateBandSelector: selector or bands not available');
         return;
     }
 
     const freqInput = document.getElementById('frequency');
     if (!freqInput) {
+        console.log('updateBandSelector: frequency input not found');
         return;
     }
 
     const currentFreq = parseInt(freqInput.value);
     if (isNaN(currentFreq)) {
+        console.log('updateBandSelector: invalid frequency');
         selector.value = '';
         return;
     }
+
+    console.log('updateBandSelector: checking frequency', currentFreq);
 
     // Find which band contains the current frequency
     let matchingBand = null;
     for (let band of window.amateurBands) {
         if (currentFreq >= band.start && currentFreq <= band.end) {
             matchingBand = band;
+            console.log('updateBandSelector: found matching band', band.label);
             break;
         }
     }
 
     if (matchingBand) {
         // Find the option with this band's data and select it
-        const bandValue = JSON.stringify({
-            label: matchingBand.label,
-            start: matchingBand.start,
-            end: matchingBand.end
-        });
+        // We need to iterate through options to find the matching one
+        // because JSON.stringify order might differ
+        let foundOption = false;
+        for (let i = 0; i < selector.options.length; i++) {
+            const option = selector.options[i];
+            if (option.value) {
+                try {
+                    const optionData = JSON.parse(option.value);
+                    if (optionData.label === matchingBand.label &&
+                        optionData.start === matchingBand.start &&
+                        optionData.end === matchingBand.end) {
+                        console.log('updateBandSelector: setting selector to', optionData.label);
+                        selector.value = option.value;
+                        foundOption = true;
+                        break;
+                    }
+                } catch (e) {
+                    // Skip invalid options
+                }
+            }
+        }
 
-        // Set the dropdown to this value
-        selector.value = bandValue;
+        if (!foundOption) {
+            console.log('updateBandSelector: no matching option found in dropdown');
+            selector.value = '';
+        }
     } else {
         // No matching band, reset to default
+        console.log('updateBandSelector: no matching band for frequency', currentFreq);
         selector.value = '';
     }
 }

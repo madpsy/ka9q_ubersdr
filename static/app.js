@@ -2305,10 +2305,10 @@ function setMode(mode, preserveBandwidth = false) {
         }
     }
 
-    // Show/hide "Set 1 kHz" button based on mode
+    // Show/hide "Set 1 kHz" button based on mode (only for USB/LSB)
     const set1kHzBtn = document.getElementById('set-1khz-btn');
     if (set1kHzBtn) {
-        if (['usb', 'lsb', 'cwu', 'cwl'].includes(mode)) {
+        if (['usb', 'lsb'].includes(mode)) {
             set1kHzBtn.style.display = 'inline-block';
         } else {
             set1kHzBtn.style.display = 'none';

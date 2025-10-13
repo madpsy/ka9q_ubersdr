@@ -156,8 +156,9 @@ body {
     border-radius: 0 0 6px 0;
     color: #ecf0f1;
     font-size: 0.9em;
-    z-index: 50;
+    z-index: 10001;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    pointer-events: auto;
 }
 
 .site-description a {
@@ -182,10 +183,11 @@ body {
     border-radius: 0 0 0 6px;
     color: #ecf0f1;
     font-size: 0.9em;
-    z-index: 50;
+    z-index: 10001;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     font-family: 'Courier New', monospace;
     font-weight: bold;
+    pointer-events: auto;
 }
 
 /* Site Footer */

@@ -1,3 +1,6 @@
+// Import WebSocket Manager
+import { WebSocketManager } from './websocket-manager.js';
+
 // Notification system
 function showNotification(message, type = 'error', duration = 5000) {
     const toast = document.getElementById('notification-toast');
@@ -33,18 +36,90 @@ const userSessionID = generateUserSessionID();
 window.userSessionID = userSessionID;
 console.log('User session ID:', userSessionID);
 
-let ws = null;
-window.ws = ws; // Expose for idle detector
+// Initialize WebSocket Manager immediately after userSessionID is generated
+const wsManager = new WebSocketManager({
+    userSessionID: userSessionID,
+    onMessage: handleMessage,
+    onConnect: () => {
+        log('Connected!');
+        updateConnectionStatus('connected');
+        startStatsUpdates();
+
+        // Initialize audio context if not already done
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            window.audioContext = audioContext;
+            nextPlayTime = audioContext.currentTime;
+            audioStartTime = audioContext.currentTime;
+            log(`Audio context initialized (sample rate: ${audioContext.sampleRate} Hz)`);
+
+            // Create analyser for spectrum/waterfall
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = getOptimalFFTSize();
+            analyser.smoothingTimeConstant = 0;
+            updateFFTSizeDropdown();
+
+            // Create dedicated analyser for VU meter
+            vuAnalyser = audioContext.createAnalyser();
+            vuAnalyser.fftSize = 2048;
+            vuAnalyser.smoothingTimeConstant = 0;
+
+            // Initialize stereo channel routing
+            initializeStereoChannels();
+            initializeSquelch();
+            initializeCompressor();
+            initializeLowpassFilter();
+            initializeEqualizer();
+
+            // Initialize waterfall timestamp
+            waterfallStartTime = Date.now();
+            waterfallLineCount = 0;
+
+            updateOscilloscopeZoom();
+            startVisualization();
+
+            // Initialize CW decoder if in CW mode
+            if (currentMode === 'cwu' || currentMode === 'cwl') {
+                const centerFreq = bandpassEnabled && bandpassFilters.length > 0
+                    ? bandpassFilters[0].frequency.value
+                    : 800;
+                initializeCWDecoder(audioContext, analyser, centerFreq);
+            }
+        }
+    },
+    onDisconnect: () => {
+        log('Disconnected');
+        updateConnectionStatus('disconnected');
+        stopStatsUpdates();
+    },
+    onError: (error) => {
+        if (error.type === 'connection_rejected' || error.type === 'reconnection_blocked') {
+            showNotification(error.reason, 'error', 10000);
+
+            // Show terminated overlay for 410 status
+            if (error.status === 410) {
+                showTerminatedOverlay(error.reason);
+            }
+        } else if (error.type === 'connection_closed') {
+            showNotification(error.message, 'error', 10000);
+        } else if (error.type === 'max_reconnect_attempts') {
+            showNotification(error.message, 'error', 10000);
+        } else if (error.type === 'websocket_error') {
+            showNotification('Connection error occurred. Attempting to reconnect...', 'error');
+        } else if (error.type === 'websocket_creation_failed') {
+            showNotification('Failed to connect. Please refresh the page.', 'error');
+            updateConnectionStatus('disconnected');
+        }
+    },
+    log: log
+});
+
 let audioContext = null;
-let reconnectTimer = null;
-let reconnectAttempts = 0; // Track number of reconnection attempts
-const maxReconnectAttempts = 10; // Give up after 10 attempts
-let lastConnectionParams = null; // Store connection parameters for reconnection
 let audioUserDisconnected = false; // Flag to prevent reconnection after user disconnect
-let connectionFailureNotified = false; // Track if we've already shown the connection failure notification
-let lastServerError = null; // Store last error message from server
 // Expose audioContext globally for recorder
 window.audioContext = null;
+// Expose ws globally for compatibility (will be set by wsManager)
+window.ws = null;
 let audioQueue = [];
 let isPlaying = false;
 let isMuted = false;
@@ -703,7 +778,7 @@ async function fetchSiteDescription() {
 
 // Toggle connection
 function toggleConnection() {
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (wsManager.isConnected()) {
         disconnect();
     } else {
         connect();
@@ -712,344 +787,22 @@ function toggleConnection() {
 
 // Connect to WebSocket
 async function connect() {
-    // Clear any pending reconnection timer
-    if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-    }
-
     const frequency = document.getElementById('frequency').value;
     const mode = currentMode;
 
-    // Store connection parameters for reconnection
-    lastConnectionParams = {
+    await wsManager.connect({
         frequency: frequency,
         mode: mode,
         bandwidthLow: currentBandwidthLow,
         bandwidthHigh: currentBandwidthHigh
-    };
-    // Check if connection will be allowed before attempting WebSocket connection
-    try {
-        const checkResponse = await fetch('/connection', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                user_session_id: userSessionID
-            })
-        });
-
-        const checkData = await checkResponse.json();
-
-        if (!checkData.allowed) {
-            // Connection not allowed - show specific error
-            log(`Connection rejected: ${checkData.reason}`, 'error');
-            showNotification(`Connection rejected: ${checkData.reason}`, 'error', 10000);
-            updateConnectionStatus('disconnected');
-
-            // Store the error for potential reconnection attempts
-            lastServerError = checkData.reason;
-
-            // Don't attempt reconnection if banned or kicked
-            if (checkData.reason.includes('banned') || checkData.reason.includes('terminated')) {
-                // Clear reconnection parameters to prevent any retry
-                lastConnectionParams = null;
-                return;
-            }
-
-            // For max sessions, schedule reconnection (but don't create WebSocket)
-            if (checkData.reason.includes('Maximum')) {
-                scheduleReconnect();
-            }
-
-            // CRITICAL: Return here to prevent WebSocket creation
-            return;
-        }
-
-        log(`Connection check passed (client IP: ${checkData.client_ip})`);
-    } catch (err) {
-        console.error('Connection check failed:', err);
-        log('Connection check failed, attempting connection anyway...', 'error');
-        // Continue with connection attempt even if check fails
-    }
-
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Include bandwidth parameters and user session ID in WebSocket URL
-    const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${frequency}&mode=${mode}&bandwidthLow=${currentBandwidthLow}&bandwidthHigh=${currentBandwidthHigh}&user_session_id=${encodeURIComponent(userSessionID)}`;
-
-    log(`Connecting to ${wsUrl}...`);
-
-    try {
-        ws = new WebSocket(wsUrl);
-        window.ws = ws; // Expose for idle detector
-    } catch (error) {
-        console.error('Failed to create WebSocket:', error);
-        showNotification('Failed to connect. Please refresh the page.', 'error');
-        updateConnectionStatus('disconnected');
-        return;
-    }
-
-    ws.onopen = () => {
-        log('Connected!');
-        updateConnectionStatus('connected');
-
-        // Don't reset reconnection attempts immediately - wait for first successful message
-        // This prevents resetting the counter when server immediately kicks us
-        // The counter will be reset when we receive our first status message
-
-        // Start stats updates
-        startStatsUpdates();
-
-        // Initialize audio context
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            window.audioContext = audioContext; // Expose globally for recorder
-            nextPlayTime = audioContext.currentTime;
-            audioStartTime = audioContext.currentTime;
-            log(`Audio context initialized (sample rate: ${audioContext.sampleRate} Hz)`);
-
-            // Create analyser for spectrum/waterfall (taps signal before processing)
-            analyser = audioContext.createAnalyser();
-            analyser.fftSize = getOptimalFFTSize(); // Dynamic FFT size based on bandwidth
-            analyser.smoothingTimeConstant = 0; // No smoothing - instant response, no fade
-
-            // Update FFT size dropdown to reflect the chosen size
-            updateFFTSizeDropdown();
-
-            // Create dedicated analyser for VU meter (will be connected after all processing)
-            vuAnalyser = audioContext.createAnalyser();
-            vuAnalyser.fftSize = 2048; // Smaller FFT for VU meter (we only need time domain data)
-            vuAnalyser.smoothingTimeConstant = 0; // No smoothing
-
-            // Initialize stereo channel routing
-            initializeStereoChannels();
-
-            // Initialize squelch (must be first in chain)
-            initializeSquelch();
-
-            // Initialize compressor
-            initializeCompressor();
-
-            // Initialize low-pass filter
-            initializeLowpassFilter();
-
-            // Initialize equalizer
-            initializeEqualizer();
-
-            // Note: EQ filters will be chained per-buffer in playAudioBuffer()
-            // Do NOT chain them permanently here to avoid signal accumulation
-
-            // Initialize waterfall timestamp
-            waterfallStartTime = Date.now();
-            waterfallLineCount = 0;
-
-            // Update oscilloscope zoom display now that audio context exists
-            updateOscilloscopeZoom();
-
-            // Start visualization loop
-            startVisualization();
-
-            // Initialize CW decoder if in CW mode
-            if (currentMode === 'cwu' || currentMode === 'cwl') {
-                const centerFreq = bandpassEnabled && bandpassFilters.length > 0
-                    ? bandpassFilters[0].frequency.value
-                    : 800;
-                initializeCWDecoder(audioContext, analyser, centerFreq);
-            }
-        }
-    };
-
-    ws.onmessage = (event) => {
-        try {
-            const msg = JSON.parse(event.data);
-            handleMessage(msg);
-        } catch (e) {
-            console.error('Failed to parse message:', e);
-        }
-    };
-
-    ws.onerror = (error) => {
-        log('WebSocket error: ' + error);
-        console.error('WebSocket error:', error);
-        showNotification('Connection error occurred. Attempting to reconnect...', 'error');
-    };
-
-    ws.onclose = (event) => {
-        console.log('WebSocket closed - Code:', event.code, 'Reason:', event.reason, 'Clean:', event.wasClean);
-        log('Disconnected');
-        updateConnectionStatus('disconnected');
-        ws = null;
-        window.ws = null; // Update exposed reference
-
-        // Stop stats updates
-        stopStatsUpdates();
-
-        // Show notification for abnormal closures ONLY ONCE (not on every reconnection attempt)
-        // Code 1000 = normal closure (user initiated)
-        // Code 1001 = going away (page navigation)
-        // Any other code or unclean close = show notification (but only the first time)
-        if (event.code !== 1000 && event.code !== 1001 && !connectionFailureNotified) {
-            connectionFailureNotified = true; // Set flag so we don't show again
-
-            // Use specific error message if we received one from the server
-            let errorMessage;
-            if (lastServerError) {
-                errorMessage = `Connection failed: ${lastServerError}. Attempting to reconnect...`;
-            } else if (!event.wasClean || event.code === 1006) {
-                // 1006 = abnormal closure (no close frame received)
-                errorMessage = 'Connection failed. You may have been disconnected by an administrator. Attempting to reconnect...';
-            } else {
-                errorMessage = 'Connection lost. Attempting to reconnect...';
-            }
-
-            showNotification(errorMessage, 'error', 10000);
-
-            // Clear the stored error after using it
-            lastServerError = null;
-        }
-
-        // Schedule reconnection if we have saved parameters AND user didn't explicitly disconnect
-        // Check window.audioUserDisconnected (set by idle detector) as well as local variable
-        // Only schedule if we don't already have a reconnect pending
-        if (lastConnectionParams && !audioUserDisconnected && !window.audioUserDisconnected && !reconnectTimer) {
-            scheduleReconnect();
-        }
-    };
-}
-
-// Schedule reconnection attempt with exponential backoff
-function scheduleReconnect() {
-    // Check if we've exceeded max attempts FIRST
-    if (reconnectAttempts >= maxReconnectAttempts) {
-        log('Maximum reconnection attempts reached. Please refresh the page.', 'error');
-        showNotification('Unable to reconnect after multiple attempts. You may have been disconnected by an administrator. Please refresh the page.', 'error', 10000);
-        return;
-    }
-
-    // Don't schedule if we already have a timer pending OR if we're already attempting to reconnect
-    if (reconnectTimer) {
-        console.log('Reconnect already scheduled, skipping');
-        return;
-    }
-
-    reconnectAttempts++;
-
-    // Calculate delay for THIS attempt using exponential backoff
-    // Attempt 1: 1s, 2: 2s, 3: 4s, 4: 8s, 5: 16s, 6: 32s, 7-10: 60s
-    const delay = Math.min(Math.pow(2, reconnectAttempts - 1) * 1000, 60000);
-
-    console.log(`Reconnection attempt ${reconnectAttempts}/${maxReconnectAttempts} in ${delay}ms...`);
-    log(`Reconnecting (${reconnectAttempts}/${maxReconnectAttempts}) in ${(delay/1000).toFixed(1)}s...`);
-
-    reconnectTimer = setTimeout(async () => {
-        reconnectTimer = null;
-
-        // CRITICAL: Check /connection before attempting to reconnect
-        try {
-            const checkResponse = await fetch('/connection', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    user_session_id: userSessionID
-                })
-            });
-
-            const checkData = await checkResponse.json();
-
-            if (!checkData.allowed) {
-                // Connection not allowed - stop reconnecting
-                log(`Reconnection blocked: ${checkData.reason}`, 'error');
-
-                // Check if this is a terminated session (410 Gone status)
-                if (checkResponse.status === 410) {
-                    // Show full-screen overlay for terminated sessions
-                    showTerminatedOverlay(checkData.reason);
-                } else {
-                    // Show notification with appropriate icon based on reason
-                    let errorIcon = '🚫';
-                    if (checkData.reason.includes('banned')) {
-                        errorIcon = '⛔';
-                    } else if (checkData.reason.includes('Maximum')) {
-                        errorIcon = '👥';
-                    }
-
-                    showNotification(`${errorIcon} ${checkData.reason}`, 'error', 15000);
-                }
-
-                // Clear reconnection parameters to prevent further attempts
-                lastConnectionParams = null;
-                reconnectAttempts = 0;
-                return;
-            }
-
-            // Connection allowed - proceed with reconnect
-            log(`Connection check passed, proceeding with reconnect`);
-            reconnect();
-        } catch (err) {
-            console.error('Connection check failed during reconnect:', err);
-            log('Connection check failed, will retry...', 'error');
-            // Schedule another attempt
-            scheduleReconnect();
-        }
-    }, delay);
-}
-
-// Reconnect with saved parameters
-function reconnect() {
-    if (!lastConnectionParams) {
-        log('No saved connection parameters, cannot reconnect', 'error');
-        return;
-    }
-
-    // Restore saved parameters
-    document.getElementById('frequency').value = lastConnectionParams.frequency;
-    currentMode = lastConnectionParams.mode;
-    currentBandwidthLow = lastConnectionParams.bandwidthLow;
-    currentBandwidthHigh = lastConnectionParams.bandwidthHigh;
-
-    // Update UI to reflect restored parameters
-    document.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.classList.remove('active');
     });
-    const activeBtn = document.getElementById(`mode-${currentMode}`);
-    if (activeBtn) {
-        activeBtn.classList.add('active');
-    }
-
-    const bandwidthLowSlider = document.getElementById('bandwidth-low');
-    const bandwidthHighSlider = document.getElementById('bandwidth-high');
-    if (bandwidthLowSlider) {
-        bandwidthLowSlider.value = currentBandwidthLow;
-        document.getElementById('bandwidth-low-value').textContent = currentBandwidthLow;
-    }
-    if (bandwidthHighSlider) {
-        bandwidthHighSlider.value = currentBandwidthHigh;
-        document.getElementById('bandwidth-high-value').textContent = currentBandwidthHigh;
-    }
-
-    log(`Reconnecting to ${formatFrequency(lastConnectionParams.frequency)} ${lastConnectionParams.mode.toUpperCase()} (BW: ${lastConnectionParams.bandwidthLow} to ${lastConnectionParams.bandwidthHigh} Hz)`);
-
-    // Attempt to reconnect (connect() will do another /connection check, but that's okay for safety)
-    connect();
 }
+
 
 // Disconnect from WebSocket
 function disconnect() {
-    // Clear reconnection timer when manually disconnecting
-    if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-    }
+    wsManager.disconnect();
 
-    if (ws) {
-        ws.close();
-        ws = null;
-        window.ws = null; // Update exposed reference
-    }
     if (audioContext) {
         audioContext.close();
         audioContext = null;
@@ -1271,7 +1024,7 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
     updateURL();
 
     // Tune to the new settings
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (wsManager.isConnected()) {
         autoTune();
         log(`Tuned to channel: ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)`);
     } else {
@@ -1288,11 +1041,6 @@ function handleMessage(msg) {
             if (msg.sessionId) {
                 currentSessionId = msg.sessionId;
             }
-
-            // Reset reconnection attempts and notification flag on first successful message
-            // This indicates a stable connection (not immediately kicked)
-            reconnectAttempts = 0;
-            connectionFailureNotified = false;
 
             updateStatus(msg);
             break;
@@ -1809,7 +1557,7 @@ function playAudioBuffer(buffer) {
 
 // Tune to new frequency/mode/bandwidth
 function tune() {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!wsManager.isConnected()) {
         log('Not connected', 'error');
         return;
     }
@@ -1827,7 +1575,7 @@ function tune() {
         bandwidthHigh: bandwidthHigh
     };
 
-    ws.send(JSON.stringify(msg));
+    wsManager.send(msg);
     log(`Tuning to ${formatFrequency(frequency)} ${mode.toUpperCase()} (BW: ${bandwidthLow} to ${bandwidthHigh} Hz)...`);
 
     // Re-learn noise profile when frequency changes (if NR2 is enabled)
@@ -1883,7 +1631,7 @@ function handleFrequencyChange() {
     updateURL();
 
     // Auto-connect if not connected
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!wsManager.isConnected()) {
         connect();
     } else {
         autoTune();
@@ -1906,7 +1654,7 @@ function setFrequency(freq) {
     updateURL();
 
     // Auto-connect if not connected
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!wsManager.isConnected()) {
         connect();
     } else {
         autoTune();
@@ -1940,7 +1688,7 @@ function setBand(bandName) {
     updateURL();
 
     // Auto-connect if not connected
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!wsManager.isConnected()) {
         connect();
     } else {
         autoTune();
@@ -2261,7 +2009,7 @@ function setMode(mode, preserveBandwidth = false) {
     }
 
     // Auto-connect if not connected
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!wsManager.isConnected()) {
         connect();
     } else {
         autoTune();
@@ -2331,7 +2079,7 @@ function updateBandwidth() {
 
 // Auto-tune when frequency or mode changes
 function autoTune() {
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (wsManager.isConnected()) {
         tune();
     }
 }
@@ -3025,7 +2773,7 @@ function performFrequencyShift() {
     updateURL();
 
     // Tune to new frequency
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (wsManager.isConnected()) {
         autoTune();
     }
 
@@ -3180,7 +2928,7 @@ function enableFrequencyTracking() {
         updateURL();
 
         // Tune to new frequency
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (wsManager.isConnected()) {
             autoTune();
         }
 
@@ -4541,7 +4289,7 @@ function autoScaleOscilloscope() {
         updateURL();
 
         // Tune to new frequency
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (wsManager.isConnected()) {
             autoTune();
         }
 
@@ -4886,7 +4634,7 @@ function handleBookmarkClick(frequency, mode) {
     updateURL();
 
     // Connect if not connected, otherwise tune
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!wsManager.isConnected()) {
         connect();
     } else {
         autoTune();
@@ -4962,14 +4710,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     // Connect if not already connected
-                    if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    if (!wsManager.isConnected()) {
                         connect();
                     } else {
                         autoTune();
                     }
                 } else {
                     // Already zoomed in - just tune
-                    if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    if (!wsManager.isConnected()) {
                         connect();
                         log(`Connecting and tuning to ${formatFrequency(freq)} from spectrum click`);
                     } else {
@@ -5203,4 +4951,92 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 100);
 });
+
+// Expose functions to global scope for HTML onclick/onchange handlers
+// (Required because ES6 modules don't automatically expose functions globally)
+
+// Spectrum controls
+window.toggleSpectrumLineGraph = toggleSpectrumLineGraph;
+window.spectrumResetZoom = spectrumResetZoom;
+window.spectrumZoomOut = spectrumZoomOut;
+window.spectrumZoomIn = spectrumZoomIn;
+window.spectrumMaxZoom = spectrumMaxZoom;
+window.updateSpectrumColorScheme = updateSpectrumColorScheme;
+window.updateSpectrumRange = updateSpectrumRange;
+window.updateSpectrumGrid = updateSpectrumGrid;
+window.updateSpectrumIntensity = updateSpectrumIntensity;
+window.updateSpectrumContrast = updateSpectrumContrast;
+
+// Audio controls
+window.toggleMute = toggleMute;
+window.toggleNR2Quick = toggleNR2Quick;
+window.updateChannelSelection = updateChannelSelection;
+
+// Frequency/Mode controls
+window.validateFrequencyInput = validateFrequencyInput;
+window.handleFrequencyChange = handleFrequencyChange;
+window.setFrequency = setFrequency;
+window.setBand = setBand;
+window.adjustFrequency = adjustFrequency;
+window.setMode = setMode;
+window.updateBandwidthDisplay = updateBandwidthDisplay;
+window.updateBandwidth = updateBandwidth;
+
+// Visualization controls
+window.openRecorderModal = openRecorderModal;
+window.toggleAudioVisualization = toggleAudioVisualization;
+window.updateFFTSize = updateFFTSize;
+window.updateScrollRate = updateScrollRate;
+window.updateWaterfallIntensity = updateWaterfallIntensity;
+window.updateWaterfallContrast = updateWaterfallContrast;
+window.updateOscilloscopeZoom = updateOscilloscopeZoom;
+
+// Oscilloscope controls
+window.autoSyncOscilloscope = autoSyncOscilloscope;
+window.autoScaleOscilloscope = autoScaleOscilloscope;
+window.shiftFrequencyTo1kHz = shiftFrequencyTo1kHz;
+
+// CW decoder controls
+window.toggleCWDecoder = toggleCWDecoder;
+window.updateCWDecoderWPM = updateCWDecoderWPM;
+window.updateCWDecoderThreshold = updateCWDecoderThreshold;
+window.updateCWDecoderFrequency = updateCWDecoderFrequency;
+window.huntCWSignal = huntCWSignal;
+window.shiftCWSignalTo700Hz = shiftCWSignalTo700Hz;
+window.resetCWDecoderWPM = resetCWDecoderWPM;
+window.clearCWText = clearCWText;
+window.copyCWText = copyCWText;
+
+// Filter controls
+window.toggleNotchFilter = toggleNotchFilter;
+window.addManualNotch = addManualNotch;
+window.clearAllNotches = clearAllNotches;
+window.toggleBandpassFilter = toggleBandpassFilter;
+window.updateBandpassFilter = updateBandpassFilter;
+window.toggleNoiseReduction = toggleNoiseReduction;
+window.updateNoiseReduction = updateNoiseReduction;
+window.toggleSquelch = toggleSquelch;
+window.updateSquelch = updateSquelch;
+window.toggleCompressor = toggleCompressor;
+window.updateCompressor = updateCompressor;
+window.resetCompressor = resetCompressor;
+window.toggleStereoVirtualizer = toggleStereoVirtualizer;
+window.updateStereoVirtualizer = updateStereoVirtualizer;
+window.toggleEqualizer = toggleEqualizer;
+window.updateEqualizer = updateEqualizer;
+window.resetEqualizer = resetEqualizer;
+
+// Recorder controls
+window.closeRecorderModal = closeRecorderModal;
+window.startRecording = startRecording;
+window.stopRecording = stopRecording;
+window.downloadRecording = downloadRecording;
+window.clearRecording = clearRecording;
+
+// Modal controls
+window.closeOffsetModal = closeOffsetModal;
+window.applyOffset = applyOffset;
+
+// Channel controls
+window.tuneToChannel = tuneToChannel;
 

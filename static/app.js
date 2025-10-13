@@ -3500,8 +3500,10 @@ function updateSpectrum() {
         // For other modes, show the actual audio frequency (freq already includes CW offset)
         let displayFreq;
         if (currentMode === 'lsb' || currentMode === 'cwl') {
-            // Invert: most negative freq (-2700) shows as highest (2700), least negative (-50) shows as lowest (0)
-            displayFreq = Math.abs(displayLow) - Math.abs(freq);
+            // Invert: most negative freq shows as highest, least negative shows as lowest
+            // For LSB: -2700 to -50 displays as 2700 to 50
+            // For CWL: -200 to 200 (with 500 Hz offset) displays as 700 to 300
+            displayFreq = Math.abs(freq);
         } else if (currentMode === 'am' || currentMode === 'sam' || currentMode === 'fm' || currentMode === 'nfm') {
             // AM/SAM/FM/NFM: Show audio frequency from 0 Hz (left) to max (right)
             // freq ranges from -bandwidth to +bandwidth, map to 0 to bandwidth
@@ -3689,8 +3691,10 @@ function updateWaterfall() {
         // For other modes, show the actual audio frequency (freq already includes CW offset)
         let displayFreq;
         if (currentMode === 'lsb' || currentMode === 'cwl') {
-            // Invert: most negative freq (-2700) shows as highest (2700), least negative (-50) shows as lowest (0)
-            displayFreq = Math.abs(displayLow) - Math.abs(freq);
+            // Invert: most negative freq shows as highest, least negative shows as lowest
+            // For LSB: -2700 to -50 displays as 2700 to 50
+            // For CWL: -200 to 200 (with 500 Hz offset) displays as 700 to 300
+            displayFreq = Math.abs(freq);
         } else if (currentMode === 'am' || currentMode === 'sam' || currentMode === 'fm' || currentMode === 'nfm') {
             // AM/SAM/FM/NFM: Show audio frequency from 0 Hz (left) to max (right)
             // freq ranges from -bandwidth to +bandwidth, map to 0 to bandwidth

@@ -124,23 +124,24 @@ class SpectrumDisplay {
 
         // Create overlay div for cursor indicator (positioned above canvas)
         this.overlayDiv = document.createElement('div');
-        this.overlayDiv.style.position = 'relative';
-        this.overlayDiv.style.width = this.width + 'px';
-        this.overlayDiv.style.height = '35px'; // Height for label and arrow
-        this.overlayDiv.style.pointerEvents = 'auto'; // Enable pointer events for bookmark clicks
-        this.overlayDiv.style.cursor = 'pointer'; // Show pointer cursor over bookmarks
-        this.overlayDiv.style.zIndex = '200'; // Higher than site-description and audio-buffer-display (z-index: 100)
+        this.overlayDiv.className = 'spectrum-frequency-overlay';
+        this.overlayDiv.style.position = 'fixed';
+        this.overlayDiv.style.pointerEvents = 'none'; // Let clicks pass through to elements below
+        // Position and size will be set dynamically based on canvas position
 
         // Create canvas inside overlay div
         this.overlayCanvas = document.createElement('canvas');
         this.overlayCanvas.width = this.width;
         this.overlayCanvas.height = 35;
-        this.overlayCanvas.style.position = 'relative';
-        this.overlayCanvas.style.zIndex = '200'; // Higher than site-description and audio-buffer-display
+        this.overlayCanvas.style.pointerEvents = 'auto'; // Enable pointer events on canvas for bookmark clicks
+        this.overlayCanvas.style.cursor = 'pointer';
         this.overlayDiv.appendChild(this.overlayCanvas);
 
-        // Insert overlay div before the main canvas
-        this.canvas.parentElement.insertBefore(this.overlayDiv, this.canvas);
+        // Append overlay div to body (not to canvas parent) so it's in root stacking context
+        document.body.appendChild(this.overlayDiv);
+        
+        // Update overlay position to match canvas
+        this.updateOverlayPosition();
 
         this.overlayCtx = this.overlayCanvas.getContext('2d', { alpha: true });
 
@@ -1889,8 +1890,20 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         }
     }
 
+    // Update overlay div position to match canvas position
+    updateOverlayPosition() {
+        const rect = this.canvas.getBoundingClientRect();
+        this.overlayDiv.style.top = rect.top + 'px';
+        this.overlayDiv.style.left = rect.left + 'px';
+        this.overlayDiv.style.width = rect.width + 'px';
+        this.overlayDiv.style.height = '35px';
+    }
+
     // Draw cursor showing currently tuned frequency and bandwidth on overlay canvas
     drawTunedFrequencyCursor() {
+        // Update overlay position in case canvas moved
+        this.updateOverlayPosition();
+        
         // Clear overlay canvas
         this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
 

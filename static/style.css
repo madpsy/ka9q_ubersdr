@@ -156,7 +156,7 @@ body {
     border-radius: 0 0 6px 0;
     color: #ecf0f1;
     font-size: 0.9em;
-    z-index: 100;
+    z-index: 50;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
@@ -182,7 +182,7 @@ body {
     border-radius: 0 0 0 6px;
     color: #ecf0f1;
     font-size: 0.9em;
-    z-index: 100;
+    z-index: 50;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     font-family: 'Courier New', monospace;
     font-weight: bold;
@@ -1765,6 +1765,13 @@ input[type="range"]::-moz-range-thumb {
 
 .spectrum-display-container {
     position: relative; /* For absolute positioning of controls overlay and line graph */
+    z-index: 1; /* Base stacking context */
+}
+
+/* Spectrum frequency overlay - must be on top of everything */
+.spectrum-frequency-overlay {
+    z-index: 10000 !important;
+    background: transparent !important;
 }
 
 /* In split view, container needs to be tall enough for both line graph and waterfall */

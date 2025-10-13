@@ -55,6 +55,15 @@ let currentMode = 'usb';
 let currentBandwidthLow = 50;
 let currentBandwidthHigh = 3000;
 
+// Stereo channel selection
+let channelLeftEnabled = true;
+let channelRightEnabled = true;
+let channelSplitter = null;
+let channelMerger = null;
+let channelLeftGain = null;
+let channelRightGain = null;
+let monoMerger = null; // Converts stereo to mono for recorder
+
 // Active Channels Display
 let statsUpdateInterval = null;
 let currentSessionId = null;
@@ -869,6 +878,9 @@ async function connect() {
             vuAnalyser.fftSize = 2048; // Smaller FFT for VU meter (we only need time domain data)
             vuAnalyser.smoothingTimeConstant = 0; // No smoothing
 
+            // Initialize stereo channel routing
+            initializeStereoChannels();
+
             // Initialize squelch (must be first in chain)
             initializeSquelch();
 
@@ -1111,6 +1123,10 @@ function disconnect() {
     squelchAnalyser = null;
     noiseReductionProcessor = null;
     noiseReductionEnabled = false;
+    channelSplitter = null;
+    channelMerger = null;
+    channelLeftGain = null;
+    channelRightGain = null;
     isPlaying = false;
     audioQueue = [];
     nextPlayTime = 0;
@@ -1471,9 +1487,10 @@ function handlePCMAudio(msg) {
         floatData[i] = sample / 32767.0;
     }
 
-    // Create audio buffer
-    const audioBuffer = audioContext.createBuffer(1, floatData.length, msg.sampleRate);
-    audioBuffer.getChannelData(0).set(floatData);
+    // Create stereo audio buffer (duplicate mono to both channels)
+    const audioBuffer = audioContext.createBuffer(2, floatData.length, msg.sampleRate);
+    audioBuffer.getChannelData(0).set(floatData); // Left channel
+    audioBuffer.getChannelData(1).set(floatData); // Right channel (duplicate)
 
     // Play audio
     playAudioBuffer(audioBuffer);
@@ -1517,16 +1534,24 @@ async function handleOpusAudio(msg) {
 
         console.log('Decoded channels:', decoded.channelData.length, 'samples:', decoded.channelData[0].length);
 
-        // Create audio buffer from decoded PCM data
+        // Create stereo audio buffer from decoded PCM data
+        const numChannels = Math.max(2, decoded.channelData.length); // Always at least 2 channels
         const audioBuffer = audioContext.createBuffer(
-            decoded.channelData.length,
+            numChannels,
             decoded.channelData[0].length,
             decoded.sampleRate
         );
 
         // Copy decoded data to audio buffer
-        for (let channel = 0; channel < decoded.channelData.length; channel++) {
-            audioBuffer.getChannelData(channel).set(decoded.channelData[channel]);
+        if (decoded.channelData.length === 1) {
+            // Mono source - duplicate to both channels
+            audioBuffer.getChannelData(0).set(decoded.channelData[0]);
+            audioBuffer.getChannelData(1).set(decoded.channelData[0]);
+        } else {
+            // Stereo or multi-channel source
+            for (let channel = 0; channel < decoded.channelData.length && channel < 2; channel++) {
+                audioBuffer.getChannelData(channel).set(decoded.channelData[channel]);
+            }
         }
 
         console.log('Playing decoded audio buffer');
@@ -1780,14 +1805,40 @@ function playAudioBuffer(buffer) {
         outputNode = stereoMakeupGain;
     }
 
-    // Step 9: Final output to destination (or recorder gain node if recording)
+    // Step 9: Recorder tap (BEFORE stereo conversion so it records full processed audio)
     if (window.recorderGainNode) {
-        // If recorder is active, route through recorder gain node
+        // If recorder is active, tap the signal before stereo conversion
         outputNode.connect(window.recorderGainNode);
-    } else {
-        // Otherwise connect directly to destination
-        outputNode.connect(audioContext.destination);
     }
+
+    // Step 10: Stereo channel routing (L/R selection for output only)
+    if (channelSplitter && channelMerger && channelLeftGain && channelRightGain) {
+        // Disconnect nodes to clear old connections
+        try {
+            channelSplitter.disconnect();
+            channelLeftGain.disconnect();
+            channelRightGain.disconnect();
+            channelMerger.disconnect();
+        } catch (e) {
+            // Ignore if already disconnected
+        }
+
+        // Connect stereo routing chain
+        outputNode.connect(channelSplitter);
+
+        // Split to L and R gain nodes
+        channelSplitter.connect(channelLeftGain, 0);  // Left channel
+        channelSplitter.connect(channelRightGain, 1); // Right channel
+
+        // Merge back to stereo
+        channelLeftGain.connect(channelMerger, 0, 0);  // Left to left
+        channelRightGain.connect(channelMerger, 0, 1); // Right to right
+
+        outputNode = channelMerger;
+    }
+
+    // Step 11: Final output to destination
+    outputNode.connect(audioContext.destination);
 
     // Schedule playback to maintain continuous audio
     const currentTime = audioContext.currentTime;
@@ -2346,6 +2397,57 @@ function toggleMute() {
     const btn = document.getElementById('mute-btn');
     btn.textContent = isMuted ? '🔇 Unmute' : '🔊 Mute';
     log(isMuted ? 'Muted' : 'Unmuted');
+}
+
+// Update channel selection (L/R checkboxes)
+function updateChannelSelection() {
+    const leftCheckbox = document.getElementById('channel-left');
+    const rightCheckbox = document.getElementById('channel-right');
+
+    if (leftCheckbox) {
+        channelLeftEnabled = leftCheckbox.checked;
+    }
+    if (rightCheckbox) {
+        channelRightEnabled = rightCheckbox.checked;
+    }
+
+    // Update gain nodes if they exist
+    if (channelLeftGain) {
+        channelLeftGain.gain.value = channelLeftEnabled ? 1.0 : 0.0;
+    }
+    if (channelRightGain) {
+        channelRightGain.gain.value = channelRightEnabled ? 1.0 : 0.0;
+    }
+
+    // Log the change
+    const status = [];
+    if (channelLeftEnabled) status.push('L');
+    if (channelRightEnabled) status.push('R');
+    log(`Channel output: ${status.length > 0 ? status.join('+') : 'Muted'}`);
+}
+
+// Initialize stereo channel nodes
+function initializeStereoChannels() {
+    if (!audioContext) return;
+
+    // Create mono merger for recorder (converts stereo to mono)
+    monoMerger = audioContext.createChannelMerger(1);
+
+    // Create channel splitter (2 channels)
+    channelSplitter = audioContext.createChannelSplitter(2);
+
+    // Create gain nodes for L and R
+    channelLeftGain = audioContext.createGain();
+    channelRightGain = audioContext.createGain();
+
+    // Set initial gain values based on checkbox state
+    channelLeftGain.gain.value = channelLeftEnabled ? 1.0 : 0.0;
+    channelRightGain.gain.value = channelRightEnabled ? 1.0 : 0.0;
+
+    // Create channel merger (2 channels)
+    channelMerger = audioContext.createChannelMerger(2);
+
+    log('Stereo channel routing initialized (L/R selection enabled, mono recording)');
 }
 
 // Quick toggle for NR2 filter

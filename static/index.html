@@ -139,6 +139,16 @@
                 <input type="range" id="volume" min="0" max="100" value="70">
                 <span id="volume-value">70%</span>
             </div>
+            <div class="control-group" style="display: flex; flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="margin: 0;">
+                    <input type="checkbox" id="channel-left" checked onchange="updateChannelSelection()">
+                    Left
+                </label>
+                <label style="margin: 0;">
+                    <input type="checkbox" id="channel-right" checked onchange="updateChannelSelection()">
+                    Right
+                </label>
+            </div>
             <div class="control-group">
                 <button id="mute-btn" onclick="toggleMute()">🔊 Mute</button>
                 <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 10px;">NR2</button>

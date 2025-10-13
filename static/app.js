@@ -265,6 +265,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // Update page title with initial frequency and mode
     updatePageTitle();
 
+    // Add keyboard shortcuts for frequency adjustment
+    document.addEventListener('keydown', (e) => {
+        // Only handle arrow keys when not typing in an input field
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+            return;
+        }
+
+        // Left arrow: -100 Hz
+        if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            adjustFrequency(-100);
+        }
+        // Right arrow: +100 Hz
+        else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            adjustFrequency(100);
+        }
+    });
+
     // Setup audio start overlay
     const audioStartButton = document.getElementById('audio-start-button');
     const audioStartOverlay = document.getElementById('audio-start-overlay');
@@ -1782,8 +1801,17 @@ function adjustFrequency(deltaHz) {
     const MAX_FREQ = 30000000; // 30 MHz
     const clampedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
 
-    // Round down to nearest 10 Hz (set last digit to 0)
-    const roundedFreq = Math.floor(clampedFreq / 10) * 10;
+    // Apply rounding based on step size
+    // For ±100 Hz steps (buttons/arrows): round to nearest 100 Hz (matching scroll wheel)
+    // For ±10 Hz steps: round to nearest 10 Hz
+    let roundedFreq;
+    if (Math.abs(deltaHz) === 100) {
+        // Round to nearest 100 Hz for 100 Hz steps
+        roundedFreq = Math.round(clampedFreq / 100) * 100;
+    } else {
+        // Round to nearest 10 Hz for other steps (like 10 Hz buttons)
+        roundedFreq = Math.round(clampedFreq / 10) * 10;
+    }
 
     freqInput.value = roundedFreq;
     updateBandButtons(roundedFreq);

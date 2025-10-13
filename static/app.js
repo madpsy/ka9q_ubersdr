@@ -312,8 +312,32 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Up arrow: Increase volume
+        if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            const volumeSlider = document.getElementById('volume');
+            if (volumeSlider) {
+                let newVolume = parseInt(volumeSlider.value) + 5;
+                if (newVolume > 100) newVolume = 100;
+                volumeSlider.value = newVolume;
+                // Trigger the input event to update volume
+                volumeSlider.dispatchEvent(new Event('input'));
+            }
+        }
+        // Down arrow: Decrease volume
+        else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const volumeSlider = document.getElementById('volume');
+            if (volumeSlider) {
+                let newVolume = parseInt(volumeSlider.value) - 5;
+                if (newVolume < 0) newVolume = 0;
+                volumeSlider.value = newVolume;
+                // Trigger the input event to update volume
+                volumeSlider.dispatchEvent(new Event('input'));
+            }
+        }
         // Left arrow: -1 kHz
-        if (e.key === 'ArrowLeft') {
+        else if (e.key === 'ArrowLeft') {
             e.preventDefault();
             adjustFrequency(-1000);
         }

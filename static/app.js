@@ -127,6 +127,7 @@ let audioQueue = [];
 let isPlaying = false;
 let isMuted = false;
 let currentVolume = 0.7;
+let lastBufferDisplayUpdate = 0;
 let nextPlayTime = 0;
 let audioStartTime = 0;
 let currentMode = 'usb';
@@ -1545,10 +1546,22 @@ function playAudioBuffer(buffer) {
     // Update next play time based on buffer duration
     nextPlayTime += buffer.duration;
 
-    // Log timing info occasionally for debugging
+    // Update buffer display and log timing info occasionally for debugging
     const timeSinceStart = currentTime - audioStartTime;
+    const bufferAhead = nextPlayTime - currentTime;
+
+    // Update buffer display element (throttled to ~2 updates per second)
+    const now = performance.now();
+    if (now - lastBufferDisplayUpdate >= 500) {
+        const bufferDisplay = document.getElementById('audio-buffer-display');
+        if (bufferDisplay) {
+            bufferDisplay.textContent = `Buffer: ${(bufferAhead * 1000).toFixed(0)}ms`;
+        }
+        lastBufferDisplayUpdate = now;
+    }
+
+    // Log timing info occasionally for debugging
     if (Math.floor(timeSinceStart) % 10 === 0 && Math.floor(timeSinceStart) !== Math.floor(timeSinceStart - buffer.duration)) {
-        const bufferAhead = nextPlayTime - currentTime;
         console.log(`Audio timing: ${bufferAhead.toFixed(3)}s buffered`);
     }
 }

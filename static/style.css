@@ -172,6 +172,22 @@ body {
     text-decoration: underline;
 }
 
+/* Audio Buffer Display in top right */
+.audio-buffer-display {
+    position: absolute;
+    top: -2px;
+    right: 0;
+    padding: 0px 6px 2px 6px;
+    background: rgba(44, 62, 80, 0.9);
+    border-radius: 0 0 0 6px;
+    color: #ecf0f1;
+    font-size: 0.9em;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+}
+
 /* Site Footer */
 .site-footer {
     text-align: center;

@@ -3084,7 +3084,7 @@ function updateOscilloscope() {
                     const adjustedDialFreq = currentDialFreq + oscilloscopeFrequencyOffset;
                     // Always display adjusted frequency when tracking is enabled, even if offset is 0
                     // This provides visual feedback that tracking is active
-                    adjustedFreqText = `${adjustedDialFreq.toLocaleString()} Hz`;
+                    adjustedFreqText = `${(adjustedDialFreq / 1000).toFixed(2)} kHz`;
                     totalHeight = 40; // Increase height for two lines
                 }
             }

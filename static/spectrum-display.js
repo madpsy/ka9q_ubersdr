@@ -2127,17 +2127,17 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     // Format frequency for display (used by tooltips and cursor - high precision)
     formatFrequency(freq) {
         if (freq >= 1e9) {
-            // GHz: show 6 decimals for 1 Hz accuracy
+            // GHz: show 5 decimals
             const ghz = freq / 1e9;
-            return `${ghz.toFixed(6)} GHz`;
+            return `${ghz.toFixed(5)} GHz`;
         } else if (freq >= 1e6) {
-            // MHz: show 6 decimals for 1 Hz accuracy
+            // MHz: show 5 decimals
             const mhz = freq / 1e6;
-            return `${mhz.toFixed(6)} MHz`;
+            return `${mhz.toFixed(5)} MHz`;
         } else if (freq >= 1e3) {
-            // kHz: show 3 decimals for 1 Hz accuracy
+            // kHz: show 2 decimals
             const khz = freq / 1e3;
-            return `${khz.toFixed(3)} kHz`;
+            return `${khz.toFixed(2)} kHz`;
         } else {
             return `${freq.toFixed(0)} Hz`;
         }

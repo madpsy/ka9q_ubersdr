@@ -265,22 +265,143 @@ document.addEventListener('DOMContentLoaded', () => {
     // Update page title with initial frequency and mode
     updatePageTitle();
 
-    // Add keyboard shortcuts for frequency adjustment
+    // Add keyboard shortcuts for frequency adjustment and spectrum zoom
     document.addEventListener('keydown', (e) => {
-        // Only handle arrow keys when not typing in an input field
+        // Check if recorder modal is open
+        const recorderModal = document.getElementById('recorder-modal');
+        const isRecorderModalOpen = recorderModal && recorderModal.style.display === 'flex';
+
+        // If recorder modal is open and spacebar is pressed, toggle recording
+        if (isRecorderModalOpen && e.key === ' ') {
+            e.preventDefault();
+            // Check the actual recording state from the UI
+            const startBtn = document.getElementById('recorder-start-btn');
+            const stopBtn = document.getElementById('recorder-stop-btn');
+            if (stopBtn && !stopBtn.disabled) {
+                // Recording is active, stop it
+                stopRecording();
+            } else if (startBtn && !startBtn.disabled) {
+                // Recording is not active, start it
+                startRecording();
+            }
+            return;
+        }
+
+        // Only handle shortcuts when not typing in an input field
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
             return;
         }
 
-        // Left arrow: -100 Hz
+        // Left arrow: -1 kHz
         if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            adjustFrequency(-1000);
+        }
+        // Right arrow: +1 kHz
+        else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            adjustFrequency(1000);
+        }
+        // A key: -100 Hz
+        else if (e.key === 'a' || e.key === 'A') {
             e.preventDefault();
             adjustFrequency(-100);
         }
-        // Right arrow: +100 Hz
-        else if (e.key === 'ArrowRight') {
+        // D key: +100 Hz
+        else if (e.key === 'd' || e.key === 'D') {
             e.preventDefault();
             adjustFrequency(100);
+        }
+        // W key: Zoom in
+        else if (e.key === 'w' || e.key === 'W') {
+            e.preventDefault();
+            spectrumZoomIn();
+        }
+        // S key: Zoom out
+        else if (e.key === 's' || e.key === 'S') {
+            e.preventDefault();
+            spectrumZoomOut();
+        }
+        // Q key: Reset zoom
+        else if (e.key === 'q' || e.key === 'Q') {
+            e.preventDefault();
+            spectrumResetZoom();
+        }
+        // E key: Max zoom
+        else if (e.key === 'e' || e.key === 'E') {
+            e.preventDefault();
+            spectrumMaxZoom();
+        }
+        // M key: Toggle mute
+        else if (e.key === 'm' || e.key === 'M') {
+            e.preventDefault();
+            toggleMute();
+        }
+        // R key: Open recorder modal
+        else if (e.key === 'r' || e.key === 'R') {
+            e.preventDefault();
+            openRecorderModal();
+        }
+        // N key: Toggle NR2
+        else if (e.key === 'n' || e.key === 'N') {
+            e.preventDefault();
+            toggleNR2Quick();
+        }
+        // U key: Set USB mode
+        else if (e.key === 'u' || e.key === 'U') {
+            e.preventDefault();
+            setMode('usb');
+        }
+        // L key: Set LSB mode
+        else if (e.key === 'l' || e.key === 'L') {
+            e.preventDefault();
+            setMode('lsb');
+        }
+        // C key: Toggle between CWU and CWL
+        else if (e.key === 'c' || e.key === 'C') {
+            e.preventDefault();
+            // Check current mode and toggle
+            if (window.currentMode === 'cwu') {
+                setMode('cwl');
+            } else if (window.currentMode === 'cwl') {
+                setMode('cwu');
+            } else {
+                // If not in CW mode, default to CWU
+                setMode('cwu');
+            }
+        }
+        // Number keys 1-8: Set band
+        else if (e.key === '1') {
+            e.preventDefault();
+            setBand('80m');
+        }
+        else if (e.key === '2') {
+            e.preventDefault();
+            setBand('40m');
+        }
+        else if (e.key === '3') {
+            e.preventDefault();
+            setBand('30m');
+        }
+        else if (e.key === '4') {
+            e.preventDefault();
+            setBand('20m');
+        }
+        else if (e.key === '5') {
+            e.preventDefault();
+            setBand('17m');
+        }
+        else if (e.key === '6') {
+            e.preventDefault();
+            setBand('15m');
+        }
+        else if (e.key === '7') {
+            e.preventDefault();
+            setBand('12m');
+        }
+        else if (e.key === '8') {
+            e.preventDefault();
+            setBand('10m');
         }
     });
 

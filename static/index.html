@@ -47,10 +47,10 @@
                         <button onclick="toggleSpectrumLineGraph()" id="spectrum-line-graph-toggle" title="Toggle Display Mode">Split</button>
                     </div>
                     <div class="spectrum-control-group">
-                        <button onclick="spectrumResetZoom()" title="Reset Zoom">Reset</button>
-                        <button onclick="spectrumZoomOut()" title="Zoom Out">−</button>
-                        <button onclick="spectrumZoomIn()" title="Zoom In">+</button>
-                        <button onclick="spectrumMaxZoom()" title="Maximum Zoom">Max</button>
+                        <button onclick="spectrumResetZoom()" title="Reset Zoom (Q key)">Reset</button>
+                        <button onclick="spectrumZoomOut()" title="Zoom Out (S key)">−</button>
+                        <button onclick="spectrumZoomIn()" title="Zoom In (W key)">+</button>
+                        <button onclick="spectrumMaxZoom()" title="Maximum Zoom (E key)">Max</button>
                         <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
                             <input type="checkbox" id="spectrum-zoom-scroll-enable">
                             <span>Scroll</span>
@@ -98,31 +98,31 @@
                     </label>
                 </div>
                 <div class="tuning-buttons">
-                    <button onclick="adjustFrequency(-1000)" title="Down 1 kHz">◄◄</button>
-                    <button onclick="adjustFrequency(-100)" title="Down 100 Hz">◄</button>
+                    <button onclick="adjustFrequency(-1000)" title="Down 1 kHz (Left Arrow ←)">◄◄</button>
+                    <button onclick="adjustFrequency(-100)" title="Down 100 Hz (A key)">◄</button>
                     <button onclick="adjustFrequency(-10)" title="Down 10 Hz">◂</button>
                     <button onclick="adjustFrequency(10)" title="Up 10 Hz">▸</button>
-                    <button onclick="adjustFrequency(100)" title="Up 100 Hz">►</button>
-                    <button onclick="adjustFrequency(1000)" title="Up 1 kHz">►►</button>
+                    <button onclick="adjustFrequency(100)" title="Up 100 Hz (D key)">►</button>
+                    <button onclick="adjustFrequency(1000)" title="Up 1 kHz (Right Arrow →)">►►</button>
                 </div>
                 <div class="preset-buttons">
-                    <button onclick="setBand('80m')" class="band-btn" data-band="80m">80m</button>
-                    <button onclick="setBand('40m')" class="band-btn" data-band="40m">40m</button>
-                    <button onclick="setBand('30m')" class="band-btn" data-band="30m">30m</button>
-                    <button onclick="setBand('20m')" class="band-btn" data-band="20m">20m</button>
-                    <button onclick="setBand('17m')" class="band-btn" data-band="17m">17m</button>
-                    <button onclick="setBand('15m')" class="band-btn" data-band="15m">15m</button>
-                    <button onclick="setBand('12m')" class="band-btn" data-band="12m">12m</button>
-                    <button onclick="setBand('10m')" class="band-btn" data-band="10m">10m</button>
+                    <button onclick="setBand('80m')" class="band-btn" data-band="80m" title="80 meter band (1 key)">80m</button>
+                    <button onclick="setBand('40m')" class="band-btn" data-band="40m" title="40 meter band (2 key)">40m</button>
+                    <button onclick="setBand('30m')" class="band-btn" data-band="30m" title="30 meter band (3 key)">30m</button>
+                    <button onclick="setBand('20m')" class="band-btn" data-band="20m" title="20 meter band (4 key)">20m</button>
+                    <button onclick="setBand('17m')" class="band-btn" data-band="17m" title="17 meter band (5 key)">17m</button>
+                    <button onclick="setBand('15m')" class="band-btn" data-band="15m" title="15 meter band (6 key)">15m</button>
+                    <button onclick="setBand('12m')" class="band-btn" data-band="12m" title="12 meter band (7 key)">12m</button>
+                    <button onclick="setBand('10m')" class="band-btn" data-band="10m" title="10 meter band (8 key)">10m</button>
                 </div>
             </div>
 
             <div class="control-group">
                 <div class="preset-buttons">
-                    <button onclick="setMode('usb')" id="mode-usb" class="mode-btn active">USB</button>
-                    <button onclick="setMode('lsb')" id="mode-lsb" class="mode-btn">LSB</button>
-                    <button onclick="setMode('cwu')" id="mode-cwu" class="mode-btn">CWU</button>
-                    <button onclick="setMode('cwl')" id="mode-cwl" class="mode-btn">CWL</button>
+                    <button onclick="setMode('usb')" id="mode-usb" class="mode-btn active" title="Upper Sideband (U key)">USB</button>
+                    <button onclick="setMode('lsb')" id="mode-lsb" class="mode-btn" title="Lower Sideband (L key)">LSB</button>
+                    <button onclick="setMode('cwu')" id="mode-cwu" class="mode-btn" title="CW Upper (C key to toggle)">CWU</button>
+                    <button onclick="setMode('cwl')" id="mode-cwl" class="mode-btn" title="CW Lower (C key to toggle)">CWL</button>
                     <button onclick="setMode('am')" id="mode-am" class="mode-btn">AM</button>
                     <button onclick="setMode('sam')" id="mode-sam" class="mode-btn" disabled style="opacity: 0.5; cursor: not-allowed;" title="SAM mode temporarily disabled due to known issues">SAM</button>
                     <button onclick="setMode('fm')" id="mode-fm" class="mode-btn">FM</button>
@@ -166,9 +166,9 @@
                 </label>
             </div>
             <div class="control-group">
-                <button id="mute-btn" onclick="toggleMute()">🔊 Mute</button>
-                <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 10px;">NR2</button>
-                <button id="rec-btn" onclick="openRecorderModal()" style="margin-left: 10px;">⏺ Rec</button>
+                <button id="mute-btn" onclick="toggleMute()" title="Toggle Mute (M key)">🔊 Mute</button>
+                <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 10px;" title="Toggle Noise Reduction (N key)">NR2</button>
+                <button id="rec-btn" onclick="openRecorderModal()" style="margin-left: 10px;" title="Open Recorder (R key)">⏺ Rec</button>
             </div>
             <div class="control-group vu-meter-compact-container" id="vu-meter-compact">
                 <div class="vu-meter">
@@ -668,10 +668,10 @@
                     <span id="recording-time">00:00</span>
                 </div>
                 <div class="recorder-controls">
-                    <button id="recorder-start-btn" onclick="startRecording()" class="recorder-btn recorder-start-btn">
+                    <button id="recorder-start-btn" onclick="startRecording()" class="recorder-btn recorder-start-btn" title="Start Recording (Spacebar)">
                         <span>⏺</span> Start Recording
                     </button>
-                    <button id="recorder-stop-btn" onclick="stopRecording()" class="recorder-btn recorder-stop-btn" disabled>
+                    <button id="recorder-stop-btn" onclick="stopRecording()" class="recorder-btn recorder-stop-btn" disabled title="Stop Recording (Spacebar)">
                         <span>⏹</span> Stop Recording
                     </button>
                 </div>

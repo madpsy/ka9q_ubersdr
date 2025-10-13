@@ -106,19 +106,10 @@ let vuMeterBarCompact = null;
 let vuMeterPeakCompact = null;
 let vuPeakHold = 0; // Peak hold value (0-100%)
 let vuPeakDecayRate = 0.1; // Percentage points per frame (slower decay for visibility)
-let oscilloscopeCanvas = null;
-let oscilloscopeCtx = null;
 let animationFrameId = null;
-let oscilloscopeFreqHistory = []; // Store recent frequency measurements for averaging
-let oscilloscopeFreqHistoryMaxSize = 60; // Average over last 60 samples (~2 seconds at 30fps)
 let waterfallIntensity = 0.0; // Intensity adjustment for waterfall (-1.0 to +1.0, 0 = normal)
 let waterfallContrast = 50; // Contrast threshold for waterfall (0-100, suppresses noise floor)
-let oscilloscopeZoom = 200; // Oscilloscope zoom level (1-200, affects timebase, default to max/slowest)
-let oscilloscopeTriggerEnabled = false; // Enable continuous trigger tracking
-let oscilloscopeTriggerFreq = 0; // Target frequency for trigger
-let oscilloscopeYScale = 1.0; // Y-axis scale factor (1.0 = normal, >1 = zoomed in, <1 = zoomed out)
-let oscilloscopeAutoScaleEnabled = true; // Enable continuous auto-scaling
-let oscilloscopeFrequencyOffset = 0; // Frequency offset in Hz for adjusted dial frequency display
+let oscilloscope = null; // Oscilloscope instance
 let lowpassFilters = []; // Array of cascaded low-pass filters for steep rolloff
 let audioVisualizationEnabled = false; // Track if audio visualization is expanded
 let noiseReductionEnabled = false; // Track if noise reduction is enabled
@@ -242,8 +233,8 @@ document.addEventListener('DOMContentLoaded', () => {
     waterfallCtx = waterfallCanvas.getContext('2d');
     waterfallOverlayCanvas = document.getElementById('waterfall-overlay-canvas');
     waterfallOverlayCtx = waterfallOverlayCanvas.getContext('2d');
-    oscilloscopeCanvas = document.getElementById('oscilloscope-canvas');
-    oscilloscopeCtx = oscilloscopeCanvas.getContext('2d');
+    // Initialize oscilloscope
+    oscilloscope = new Oscilloscope('oscilloscope-canvas');
     vuMeterBar = document.getElementById('vu-meter-bar');
     vuMeterPeak = document.getElementById('vu-meter-peak');
     vuRmsValue = document.getElementById('vu-rms-value');
@@ -356,12 +347,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        if (oscilloscopeCanvas && oscilloscopeCtx) {
-            const rect = oscilloscopeCanvas.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-                oscilloscopeCanvas.width = Math.floor(rect.width);
-                oscilloscopeCanvas.height = Math.floor(rect.height);
-            }
+        if (oscilloscope) {
+            oscilloscope.resize();
         }
     }, 100);
 
@@ -585,16 +572,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            if (oscilloscopeCanvas && oscilloscopeCtx) {
-                const rect = oscilloscopeCanvas.getBoundingClientRect();
-                const oldWidth = oscilloscopeCanvas.width;
-                const oldHeight = oscilloscopeCanvas.height;
-
-                // Only resize if dimensions actually changed
-                if (Math.abs(rect.width - oldWidth) > 1 || Math.abs(rect.height - oldHeight) > 1) {
-                    oscilloscopeCanvas.width = rect.width;
-                    oscilloscopeCanvas.height = rect.height;
-                }
+            if (oscilloscope) {
+                oscilloscope.resize();
             }
         }, 250); // Debounce resize events
     });
@@ -2603,9 +2582,8 @@ function startVisualization() {
         if (audioVisualizationEnabled) {
 
             // Update oscilloscope (throttled to 30fps)
-            if (now - lastOscilloscopeUpdate >= oscilloscopeUpdateInterval) {
-                updateOscilloscope();
-                lastOscilloscopeUpdate = now;
+            if (oscilloscope) {
+                oscilloscope.update(analyser, audioContext, currentMode, currentBandwidthLow, currentBandwidthHigh);
             }
 
             // Update spectrum (throttled to 30fps)
@@ -2686,12 +2664,8 @@ function toggleAudioVisualization() {
                 }
             }
 
-            if (oscilloscopeCanvas && oscilloscopeCtx) {
-                const rect = oscilloscopeCanvas.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                    oscilloscopeCanvas.width = Math.floor(rect.width);
-                    oscilloscopeCanvas.height = Math.floor(rect.height);
-                }
+            if (oscilloscope) {
+                oscilloscope.resize();
             }
         }, 50); // Small delay to ensure layout is complete
 
@@ -2893,319 +2867,9 @@ function showEqualizerClipIndicator() {
     }, 2000);
 }
 
-function updateOscilloscope() {
-    if (!analyser || !oscilloscopeCtx) return;
+// Oscilloscope functions moved to oscilloscope.js
 
-    const bufferLength = analyser.fftSize;
-    const dataArray = new Uint8Array(bufferLength);
-    analyser.getByteTimeDomainData(dataArray);
-
-    const width = oscilloscopeCanvas.width;
-    const height = oscilloscopeCanvas.height;
-
-    // Calculate frequency using zero-crossing detection
-    const detectedFreq = detectFrequencyFromWaveform(dataArray, audioContext.sampleRate);
-
-    // Add to frequency history for averaging
-    if (detectedFreq > 0) {
-        oscilloscopeFreqHistory.push(detectedFreq);
-        // Keep only last N samples
-        if (oscilloscopeFreqHistory.length > oscilloscopeFreqHistoryMaxSize) {
-            oscilloscopeFreqHistory.shift();
-        }
-    }
-
-    // Calculate averaged frequency
-    const avgFreq = oscilloscopeFreqHistory.length > 0
-        ? oscilloscopeFreqHistory.reduce((sum, f) => sum + f, 0) / oscilloscopeFreqHistory.length
-        : detectedFreq;
-
-    // Debug logging (remove after testing)
-    if (Math.random() < 0.01) { // Log 1% of frames to avoid spam
-        console.log(`Oscilloscope freq: detected=${detectedFreq.toFixed(1)}, history size=${oscilloscopeFreqHistory.length}, avg=${avgFreq.toFixed(1)}`);
-    }
-
-    // Calculate DC offset for AM/SAM modes (always needed for proper display)
-    let dcOffset = 128; // Default to no offset
-    let sum = 0;
-    for (let i = 0; i < dataArray.length; i++) {
-        sum += dataArray[i];
-    }
-    dcOffset = sum / dataArray.length;
-
-    // Auto scale if enabled
-    if (oscilloscopeAutoScaleEnabled) {
-        // Find peak-to-peak amplitude relative to DC offset
-        let min = 255;
-        let max = 0;
-
-        for (let i = 0; i < dataArray.length; i++) {
-            // Center the signal by removing DC offset
-            const centered = dataArray[i] - dcOffset + 128;
-            min = Math.min(min, centered);
-            max = Math.max(max, centered);
-        }
-
-        // Convert to normalized amplitude (-1.0 to +1.0)
-        const minNorm = (min - 128) / 128;
-        const maxNorm = (max - 128) / 128;
-        const peakToPeak = maxNorm - minNorm;
-
-        if (peakToPeak > 0.01) {
-            // Calculate scale factor to fit signal with 10% padding (use 80% of display height)
-            const targetRange = 1.6;
-            const newScale = targetRange / peakToPeak;
-
-            // Clamp to reasonable range (0.1x to 10x) and apply smoothing
-            const clampedScale = Math.max(0.1, Math.min(10, newScale));
-            // Smooth the scale changes to avoid jitter (exponential moving average)
-            oscilloscopeYScale = oscilloscopeYScale * 0.9 + clampedScale * 0.1;
-        }
-    }
-
-    // Calculate how many samples to display based on zoom level using logarithmic scale
-    // Slider 1 = minimum zoom (0.5% of buffer), Slider 200 = maximum zoom (full buffer)
-    const minFraction = 0.005; // 0.5% of buffer
-    const maxFraction = 1.0;    // Full buffer
-
-    // Logarithmic interpolation
-    const logMin = Math.log10(minFraction);
-    const logMax = Math.log10(maxFraction);
-    const logRange = logMax - logMin;
-
-    // Map slider (1-200) to log range
-    const normalizedSlider = (oscilloscopeZoom - 1) / 199; // 0 to 1
-    const logValue = logMin + (normalizedSlider * logRange);
-    const fraction = Math.pow(10, logValue);
-
-    const samplesToDisplay = Math.floor(bufferLength * fraction);
-
-    // Find trigger point if trigger is enabled
-    let startSample;
-    if (oscilloscopeTriggerEnabled && oscilloscopeTriggerFreq > 0) {
-        // Find rising edge zero crossing for stable trigger
-        const threshold = 128; // Midpoint
-        let triggerPoint = -1;
-
-        // Search for rising edge in first half of buffer
-        for (let i = 1; i < bufferLength / 2; i++) {
-            if (dataArray[i - 1] < threshold && dataArray[i] >= threshold) {
-                triggerPoint = i;
-                break;
-            }
-        }
-
-        // If found trigger, start from there; otherwise center the view
-        if (triggerPoint >= 0 && triggerPoint + samplesToDisplay < bufferLength) {
-            startSample = triggerPoint;
-        } else {
-            startSample = Math.floor((bufferLength - samplesToDisplay) / 2);
-        }
-    } else {
-        startSample = Math.floor((bufferLength - samplesToDisplay) / 2); // Center the view
-    }
-
-    // Clear canvas
-    oscilloscopeCtx.fillStyle = '#2c3e50';
-    oscilloscopeCtx.fillRect(0, 0, width, height);
-
-    // Draw grid lines with labels
-    oscilloscopeCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-    oscilloscopeCtx.lineWidth = 1;
-
-    // Horizontal grid lines (amplitude divisions)
-    // Range is -1.0 to +1.0 (normalized audio amplitude), 5 divisions = 0.5 per division
-    oscilloscopeCtx.font = 'bold 10px monospace';
-    oscilloscopeCtx.textAlign = 'left';
-    oscilloscopeCtx.textBaseline = 'middle';
-    oscilloscopeCtx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-
-    for (let i = 0; i <= 4; i++) {
-        const y = (i / 4) * height;
-        oscilloscopeCtx.beginPath();
-        oscilloscopeCtx.moveTo(0, y);
-        oscilloscopeCtx.lineTo(width, y);
-        oscilloscopeCtx.stroke();
-
-        // Y-axis labels (normalized amplitude, adjusted for scale)
-        // Top = +1.0/scale, Center = 0.0, Bottom = -1.0/scale
-        const baseAmplitude = 1.0 - (i / 4) * 2.0;
-        const scaledAmplitude = baseAmplitude / oscilloscopeYScale;
-        const label = scaledAmplitude.toFixed(2); // Use 2 decimals for scaled values
-
-        // Draw label with background for visibility
-        const labelText = label;
-        const textWidth = oscilloscopeCtx.measureText(labelText).width;
-        oscilloscopeCtx.fillStyle = 'rgba(44, 62, 80, 0.8)';
-        oscilloscopeCtx.fillRect(2, y - 6, textWidth + 4, 12);
-
-        oscilloscopeCtx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        oscilloscopeCtx.fillText(labelText, 4, y);
-    }
-
-    // Vertical grid lines (time divisions)
-    oscilloscopeCtx.textAlign = 'center';
-    oscilloscopeCtx.textBaseline = 'top';
-
-    // Calculate time per division based on oscilloscope zoom
-    if (analyser && audioContext) {
-        const bufferLength = analyser.fftSize;
-        const sampleRate = audioContext.sampleRate;
-        const totalTimeMs = (bufferLength / sampleRate) * 1000;
-        const invertedZoom = 201 - oscilloscopeZoom;
-        const displayedTimeMs = totalTimeMs / invertedZoom;
-        const timePerDivision = displayedTimeMs / 8; // 8 divisions
-
-        for (let i = 0; i <= 8; i++) {
-            const x = (i / 8) * width;
-            oscilloscopeCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            oscilloscopeCtx.lineWidth = 1;
-            oscilloscopeCtx.beginPath();
-            oscilloscopeCtx.moveTo(x, 0);
-            oscilloscopeCtx.lineTo(x, height);
-            oscilloscopeCtx.stroke();
-
-            // X-axis labels (time) - only on bottom divisions to avoid clutter
-            if (i > 0 && i < 8) {
-                const timeValue = i * timePerDivision;
-                let timeLabel;
-
-                if (timeValue >= 1) {
-                    timeLabel = timeValue.toFixed(1) + 'ms';
-                } else {
-                    timeLabel = (timeValue * 1000).toFixed(0) + 'µs';
-                }
-
-                // Draw label with background at bottom
-                const textWidth = oscilloscopeCtx.measureText(timeLabel).width;
-                oscilloscopeCtx.fillStyle = 'rgba(44, 62, 80, 0.8)';
-                oscilloscopeCtx.fillRect(x - textWidth / 2 - 2, height - 14, textWidth + 4, 12);
-
-                oscilloscopeCtx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-                oscilloscopeCtx.fillText(timeLabel, x, height - 12);
-            }
-        }
-    } else {
-        // Fallback if audio context not available
-        for (let i = 0; i <= 8; i++) {
-            const x = (i / 8) * width;
-            oscilloscopeCtx.beginPath();
-            oscilloscopeCtx.moveTo(x, 0);
-            oscilloscopeCtx.lineTo(x, height);
-            oscilloscopeCtx.stroke();
-        }
-    }
-
-    // Draw center line (zero crossing)
-    oscilloscopeCtx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    oscilloscopeCtx.lineWidth = 1;
-    oscilloscopeCtx.beginPath();
-    oscilloscopeCtx.moveTo(0, height / 2);
-    oscilloscopeCtx.lineTo(width, height / 2);
-    oscilloscopeCtx.stroke();
-
-    // Draw waveform
-    oscilloscopeCtx.lineWidth = 2;
-    oscilloscopeCtx.strokeStyle = '#00ff00'; // Classic oscilloscope green
-    oscilloscopeCtx.beginPath();
-
-    const sliceWidth = width / samplesToDisplay;
-    let x = 0;
-
-    for (let i = 0; i < samplesToDisplay; i++) {
-        const sampleIndex = startSample + i;
-        // Remove DC offset before normalizing
-        const centered = dataArray[sampleIndex] - dcOffset + 128;
-        const v = centered / 128.0; // Normalize to 0-2
-        // Apply Y-axis scaling
-        const scaledV = ((v - 1.0) * oscilloscopeYScale) + 1.0; // Scale around center (1.0)
-        const y = (scaledV * height) / 2;
-
-        if (i === 0) {
-            oscilloscopeCtx.moveTo(x, y);
-        } else {
-            oscilloscopeCtx.lineTo(x, y);
-        }
-
-        x += sliceWidth;
-    }
-
-    oscilloscopeCtx.stroke();
-
-    // Draw detected frequency in top right corner (using averaged value)
-    if (avgFreq > 0) {
-        oscilloscopeCtx.font = 'bold 14px monospace';
-        oscilloscopeCtx.textAlign = 'right';
-        oscilloscopeCtx.textBaseline = 'top';
-
-        // Always show in Hz with no decimal places (frequencies are whole numbers)
-        const freqText = `${Math.round(avgFreq)} Hz`;
-
-        // Calculate adjusted dial frequency if tracking is enabled
-        let adjustedFreqText = '';
-        let totalHeight = 20;
-        if (frequencyTrackingEnabled) {
-            const freqInput = document.getElementById('frequency');
-            if (freqInput) {
-                const currentDialFreq = parseInt(freqInput.value);
-                if (!isNaN(currentDialFreq)) {
-                    // The offset represents the dial frequency adjustment needed
-                    // For USB/CWU: positive offset means dial should go UP (add offset)
-                    // For LSB/CWL: positive offset means dial should go DOWN (subtract offset, but offset is already inverted)
-                    // Since offset is already mode-corrected in applyOffset(), we always ADD it here
-                    const adjustedDialFreq = currentDialFreq + oscilloscopeFrequencyOffset;
-                    // Always display adjusted frequency when tracking is enabled, even if offset is 0
-                    // This provides visual feedback that tracking is active
-                    adjustedFreqText = `${(adjustedDialFreq / 1000).toFixed(2)} kHz`;
-                    totalHeight = 40; // Increase height for two lines
-                }
-            }
-        }
-
-        // Background for text
-        const textWidth = Math.max(
-            oscilloscopeCtx.measureText(freqText).width,
-            adjustedFreqText ? oscilloscopeCtx.measureText(adjustedFreqText).width : 0
-        );
-        oscilloscopeCtx.fillStyle = 'rgba(44, 62, 80, 0.9)';
-        oscilloscopeCtx.fillRect(width - textWidth - 12, 4, textWidth + 8, totalHeight);
-
-        // Text with outline - detected frequency
-        oscilloscopeCtx.strokeStyle = '#000000';
-        oscilloscopeCtx.lineWidth = 3;
-        oscilloscopeCtx.strokeText(freqText, width - 6, 6);
-
-        oscilloscopeCtx.fillStyle = '#00ff00';
-        oscilloscopeCtx.fillText(freqText, width - 6, 6);
-
-        // Draw adjusted frequency underneath if offset is set
-        if (adjustedFreqText) {
-            oscilloscopeCtx.font = 'bold 12px monospace';
-            oscilloscopeCtx.strokeStyle = '#000000';
-            oscilloscopeCtx.lineWidth = 3;
-            oscilloscopeCtx.strokeText(adjustedFreqText, width - 6, 24);
-
-            oscilloscopeCtx.fillStyle = '#ffaa00'; // Orange color for adjusted frequency
-            oscilloscopeCtx.fillText(adjustedFreqText, width - 6, 24);
-        }
-    }
-}
-
-// Tracking mode state
-let frequencyTrackingEnabled = false;
-let frequencyTrackingInterval = null;
-let frequencyTrackingStartFreq = null;
-let frequencyTrackingHistory = []; // History of detected frequencies for smoothing
-let frequencyTrackingStableCount = 0; // Count of consecutive stable readings
-let frequencyTrackingLocked = false; // Track if we're locked on target
-const TRACKING_LOCK_THRESHOLD = 2; // Hz - consider locked if within this range
-const TRACKING_UPDATE_RATE = 1000; // ms - much slower updates (1 second)
-const TRACKING_DRIFT_LIMIT = 1000; // Hz
-const TRACKING_HISTORY_SIZE = 3; // Fewer samples, but require consistency
-const TRACKING_MIN_ERROR = 0.5; // Hz - very small threshold for precision (never stop tracking)
-const TRACKING_COARSE_THRESHOLD = 10; // Hz - use stronger correction above this
-const TRACKING_DAMPING_COARSE = 0.3; // Apply 30% correction for large errors
-const TRACKING_DAMPING_FINE = 0.5; // Apply 50% correction for small errors (more aggressive when close)
+// Tracking mode state - now managed by oscilloscope instance
 
 // Modal dialog functions for frequency offset
 function showOffsetModal() {
@@ -3267,7 +2931,9 @@ function applyOffset() {
     }
 
     // Store the offset with correct sign
-    oscilloscopeFrequencyOffset = offset;
+    if (oscilloscope) {
+        oscilloscope.frequencyOffset = offset;
+    }
     log(`Expected signal at ${expectedFreq} Hz, adjusting to 1000 Hz (offset: ${offset} Hz, ${currentMode.toUpperCase()} mode)`);
 
     // Close modal
@@ -3293,9 +2959,11 @@ function shiftFrequencyTo1kHz() {
     const button = document.getElementById('set-1khz-btn');
 
     // If tracking is already enabled, disable it
-    if (frequencyTrackingEnabled) {
+    if (oscilloscope && oscilloscope.trackingEnabled) {
         disableFrequencyTracking();
-        oscilloscopeFrequencyOffset = 0; // Reset offset when disabling
+        if (oscilloscope) {
+            oscilloscope.frequencyOffset = 0; // Reset offset when disabling
+        }
         if (button) {
             button.style.backgroundColor = '#6c757d'; // Gray
             button.textContent = 'Set 1 kHz';
@@ -3310,7 +2978,7 @@ function shiftFrequencyTo1kHz() {
 
 // Perform the actual frequency shift (called after offset is set)
 function performFrequencyShift() {
-    if (!analyser || !audioContext) {
+    if (!analyser || !audioContext || !oscilloscope) {
         log('Audio not initialized', 'error');
         return;
     }
@@ -3322,7 +2990,7 @@ function performFrequencyShift() {
     const dataArray = new Uint8Array(bufferLength);
     analyser.getByteTimeDomainData(dataArray);
 
-    const detectedFreq = detectFrequencyFromWaveform(dataArray, audioContext.sampleRate);
+    const detectedFreq = oscilloscope.detectFrequencyFromWaveform(dataArray, audioContext.sampleRate);
 
     if (detectedFreq <= 0 || detectedFreq < 20 || detectedFreq > 20000) {
         log('No valid signal detected for frequency shift', 'error');
@@ -3362,15 +3030,18 @@ function performFrequencyShift() {
     }
 
     // Calculate adjusted dial frequency for display
-    const adjustedDialFreq = newDialFreq - oscilloscopeFrequencyOffset;
+    const offset = oscilloscope ? oscilloscope.frequencyOffset : 0;
+    const adjustedDialFreq = newDialFreq - offset;
 
     log(`Shifted ${currentMode.toUpperCase()} signal from ${detectedFreq.toFixed(1)} Hz to ${targetFreq} Hz (dial: ${formatFrequency(currentDialFreq)} → ${formatFrequency(newDialFreq)})`);
-    if (oscilloscopeFrequencyOffset !== 0) {
-        log(`Adjusted dial frequency (with ${oscilloscopeFrequencyOffset} Hz offset): ${formatFrequency(adjustedDialFreq)}`);
+    if (offset !== 0) {
+        log(`Adjusted dial frequency (with ${offset} Hz offset): ${formatFrequency(adjustedDialFreq)}`);
     }
 
     // Enable tracking mode
-    frequencyTrackingStartFreq = newDialFreq;
+    if (oscilloscope) {
+        oscilloscope.trackingStartFreq = newDialFreq;
+    }
     enableFrequencyTracking();
 
     if (button) {
@@ -3383,14 +3054,16 @@ function performFrequencyShift() {
 
 // Enable frequency tracking
 function enableFrequencyTracking() {
-    if (frequencyTrackingInterval) {
-        clearInterval(frequencyTrackingInterval);
+    if (!oscilloscope) return;
+
+    if (oscilloscope.trackingInterval) {
+        clearInterval(oscilloscope.trackingInterval);
     }
 
-    frequencyTrackingEnabled = true;
+    oscilloscope.trackingEnabled = true;
 
-    frequencyTrackingInterval = setInterval(() => {
-        if (!frequencyTrackingEnabled || !analyser || !audioContext) {
+    oscilloscope.trackingInterval = setInterval(() => {
+        if (!oscilloscope.trackingEnabled || !analyser || !audioContext) {
             disableFrequencyTracking();
             return;
         }
@@ -3407,7 +3080,7 @@ function enableFrequencyTracking() {
         const dataArray = new Uint8Array(bufferLength);
         analyser.getByteTimeDomainData(dataArray);
 
-        const detectedFreq = detectFrequencyFromWaveform(dataArray, audioContext.sampleRate);
+        const detectedFreq = oscilloscope.detectFrequencyFromWaveform(dataArray, audioContext.sampleRate);
 
         if (detectedFreq <= 0 || detectedFreq < 20 || detectedFreq > 20000) {
             // No valid signal, skip this update
@@ -3419,11 +3092,11 @@ function enableFrequencyTracking() {
 
         // Update lock status and button color
         const button = document.getElementById('set-1khz-btn');
-        const wasLocked = frequencyTrackingLocked;
-        frequencyTrackingLocked = Math.abs(currentError) <= TRACKING_LOCK_THRESHOLD;
+        const wasLocked = oscilloscope.trackingLocked;
+        oscilloscope.trackingLocked = Math.abs(currentError) <= oscilloscope.TRACKING_LOCK_THRESHOLD;
 
         if (button) {
-            if (frequencyTrackingLocked) {
+            if (oscilloscope.trackingLocked) {
                 button.style.backgroundColor = '#28a745'; // Green when locked
                 button.textContent = 'Tracking: LOCKED';
             } else {
@@ -3432,52 +3105,47 @@ function enableFrequencyTracking() {
             }
         }
 
-        // Only adjust if error is above minimum threshold (0.5 Hz)
-        if (Math.abs(currentError) < TRACKING_MIN_ERROR) {
+        // Only adjust if error is above minimum threshold
+        if (Math.abs(currentError) < oscilloscope.TRACKING_MIN_ERROR) {
             return;
         }
 
         // Add to history for smoothing
-        frequencyTrackingHistory.push(currentError);
-        if (frequencyTrackingHistory.length > TRACKING_HISTORY_SIZE) {
-            frequencyTrackingHistory.shift();
+        oscilloscope.trackingHistory.push(currentError);
+        if (oscilloscope.trackingHistory.length > oscilloscope.TRACKING_HISTORY_SIZE) {
+            oscilloscope.trackingHistory.shift();
         }
 
         // Need enough history before adjusting
-        if (frequencyTrackingHistory.length < TRACKING_HISTORY_SIZE) {
+        if (oscilloscope.trackingHistory.length < oscilloscope.TRACKING_HISTORY_SIZE) {
             return;
         }
 
-        // Calculate smoothed error (average of recent errors)
-        const smoothedError = frequencyTrackingHistory.reduce((sum, e) => sum + e, 0) / frequencyTrackingHistory.length;
+        // Calculate smoothed error
+        const smoothedError = oscilloscope.trackingHistory.reduce((sum, e) => sum + e, 0) / oscilloscope.trackingHistory.length;
 
-        // Check if all errors in history have the same sign (all positive or all negative)
-        // This prevents oscillation by only adjusting when error is consistent
-        const allSameSign = frequencyTrackingHistory.every(e => e * smoothedError > 0);
+        // Check if all errors in history have the same sign
+        const allSameSign = oscilloscope.trackingHistory.every(e => e * smoothedError > 0);
         if (!allSameSign) {
-            // Errors are oscillating, clear history and wait for consistency
-            frequencyTrackingHistory = [];
+            oscilloscope.trackingHistory = [];
             return;
         }
 
         // Only adjust if smoothed error is still significant
-        if (Math.abs(smoothedError) < TRACKING_MIN_ERROR) {
+        if (Math.abs(smoothedError) < oscilloscope.TRACKING_MIN_ERROR) {
             return;
         }
 
-        // Adaptive damping with three tiers to handle the final 1 Hz adjustment
-        // When error is 1 Hz with 50% damping, it calculates 0.5 Hz which rounds unpredictably
-        // Solution: use 100% correction for very small errors (≤2 Hz)
+        // Adaptive damping
         let dampingFactor;
-        if (Math.abs(smoothedError) > TRACKING_COARSE_THRESHOLD) {
-            dampingFactor = TRACKING_DAMPING_COARSE;  // 30% for large errors (>10 Hz)
+        if (Math.abs(smoothedError) > oscilloscope.TRACKING_COARSE_THRESHOLD) {
+            dampingFactor = oscilloscope.TRACKING_DAMPING_COARSE;
         } else if (Math.abs(smoothedError) > 2) {
-            dampingFactor = TRACKING_DAMPING_FINE;     // 50% for medium errors (2-10 Hz)
+            dampingFactor = oscilloscope.TRACKING_DAMPING_FINE;
         } else {
-            dampingFactor = 1.0;                        // 100% for tiny errors (≤2 Hz) - nail it!
+            dampingFactor = 1.0;
         }
 
-        // Apply damping factor to prevent overshoot
         const shiftAmount = smoothedError * dampingFactor;
 
         // Get current dial frequency
@@ -3485,8 +3153,8 @@ function enableFrequencyTracking() {
         const currentDialFreq = parseInt(freqInput.value);
 
         // Check drift from start frequency
-        const driftFromStart = Math.abs(currentDialFreq - frequencyTrackingStartFreq);
-        if (driftFromStart > TRACKING_DRIFT_LIMIT) {
+        const driftFromStart = Math.abs(currentDialFreq - oscilloscope.trackingStartFreq);
+        if (driftFromStart > oscilloscope.TRACKING_DRIFT_LIMIT) {
             disableFrequencyTracking();
             log(`Frequency tracking disabled (drifted ${driftFromStart} Hz from start)`, 'error');
             return;
@@ -3516,24 +3184,26 @@ function enableFrequencyTracking() {
             autoTune();
         }
 
-    }, TRACKING_UPDATE_RATE);
+    }, oscilloscope.TRACKING_UPDATE_RATE);
 }
 
 // Disable frequency tracking
 function disableFrequencyTracking() {
-    frequencyTrackingEnabled = false;
-    frequencyTrackingHistory = []; // Clear history
-    frequencyTrackingStableCount = 0; // Reset stability counter
-    frequencyTrackingLocked = false; // Reset lock status
+    if (!oscilloscope) return;
 
-    if (frequencyTrackingInterval) {
-        clearInterval(frequencyTrackingInterval);
-        frequencyTrackingInterval = null;
+    oscilloscope.trackingEnabled = false;
+    oscilloscope.trackingHistory = [];
+    oscilloscope.trackingStableCount = 0;
+    oscilloscope.trackingLocked = false;
+
+    if (oscilloscope.trackingInterval) {
+        clearInterval(oscilloscope.trackingInterval);
+        oscilloscope.trackingInterval = null;
     }
 
     const button = document.getElementById('set-1khz-btn');
     if (button) {
-        button.style.backgroundColor = '#6c757d'; // Gray
+        button.style.backgroundColor = '#6c757d';
         button.textContent = 'Set 1 kHz';
     }
 }
@@ -3623,45 +3293,7 @@ function updateAudioSpectrumTooltip(clientX, clientY) {
     audioSpectrumTooltip.style.display = 'block';
 }
 
-// Detect frequency from waveform using zero-crossing detection
-function detectFrequencyFromWaveform(dataArray, sampleRate) {
-    if (!dataArray || dataArray.length < 2) return 0;
-
-    // Find zero crossings (where signal crosses 128, the midpoint)
-    const zeroCrossings = [];
-    const threshold = 128;
-
-    for (let i = 1; i < dataArray.length; i++) {
-        const prev = dataArray[i - 1];
-        const curr = dataArray[i];
-
-        // Detect upward zero crossing (from below to above threshold)
-        if (prev < threshold && curr >= threshold) {
-            // Interpolate exact crossing point for better accuracy
-            const fraction = (threshold - prev) / (curr - prev);
-            const crossingIndex = (i - 1) + fraction;
-            zeroCrossings.push(crossingIndex);
-        }
-    }
-
-    // Need at least 2 crossings to measure a period
-    if (zeroCrossings.length < 2) return 0;
-
-    // Calculate average period between crossings
-    let totalPeriod = 0;
-    for (let i = 1; i < zeroCrossings.length; i++) {
-        totalPeriod += zeroCrossings[i] - zeroCrossings[i - 1];
-    }
-    const avgPeriod = totalPeriod / (zeroCrossings.length - 1);
-
-    // Convert period (in samples) to frequency
-    const frequency = sampleRate / avgPeriod;
-
-    // Sanity check: only return frequencies in audible range (20 Hz - 20 kHz)
-    if (frequency < 20 || frequency > 20000) return 0;
-
-    return frequency;
-}
+// Frequency detection moved to oscilloscope.js
 
 // Create cached canvas for dB scale labels (dynamic based on actual data range)
 function createSpectrumLabelsCache(width, height, minDb, maxDb) {
@@ -4646,35 +4278,26 @@ function updateWaterfallContrast() {
 // Update oscilloscope zoom/timebase
 function updateOscilloscopeZoom() {
     const sliderValue = parseInt(document.getElementById('oscilloscope-zoom').value);
-    oscilloscopeZoom = sliderValue;
+    if (oscilloscope) {
+        oscilloscope.setZoom(sliderValue);
+    }
 
     // Calculate actual time window being displayed using logarithmic scale
-    // This provides intuitive control across the entire range
     if (analyser && audioContext) {
         const bufferLength = analyser.fftSize;
         const sampleRate = audioContext.sampleRate;
         const totalTimeMs = (bufferLength / sampleRate) * 1000;
 
-        // Use logarithmic scale for smooth, intuitive control
-        // Slider 1 = minimum zoom (1/200 of buffer), Slider 200 = maximum zoom (full buffer)
-        // Formula: displayedTime = totalTime * (10^((slider-1)/100))
-        // This gives us a 100:1 range with smooth transitions
-        const minFraction = 0.005; // Show at least 0.5% of buffer (1/200)
-        const maxFraction = 1.0;    // Show full buffer at max
-
-        // Logarithmic interpolation between min and max
+        const minFraction = 0.005;
+        const maxFraction = 1.0;
         const logMin = Math.log10(minFraction);
         const logMax = Math.log10(maxFraction);
         const logRange = logMax - logMin;
-
-        // Map slider (1-200) to log range
-        const normalizedSlider = (sliderValue - 1) / 199; // 0 to 1
+        const normalizedSlider = (sliderValue - 1) / 199;
         const logValue = logMin + (normalizedSlider * logRange);
         const fraction = Math.pow(10, logValue);
-
         const displayedTimeMs = totalTimeMs * fraction;
 
-        // Format as ms or µs depending on size
         let timeDisplay;
         if (displayedTimeMs >= 1) {
             timeDisplay = displayedTimeMs.toFixed(1) + ' ms';
@@ -4691,133 +4314,56 @@ function updateOscilloscopeZoom() {
 
 // Toggle auto sync oscilloscope (trigger lock on/off)
 function autoSyncOscilloscope() {
-    const button = document.getElementById('auto-sync-btn');
-
-    // If already enabled, disable it
-    if (oscilloscopeTriggerEnabled) {
-        oscilloscopeTriggerEnabled = false;
-        oscilloscopeTriggerFreq = 0;
-        if (button) {
-            button.style.backgroundColor = '#17a2b8'; // Cyan when off
-            button.textContent = 'Auto Sync';
-        }
-        log('Oscilloscope trigger disabled (free run)');
-        return;
-    }
-
-    // Otherwise, enable trigger and adjust timebase
-    if (!analyser || !audioContext) {
+    if (!oscilloscope || !analyser || !audioContext) {
         log('Audio not initialized', 'error');
         return;
     }
 
-    // Use FFT to find the strongest frequency component (more robust than zero-crossing with noise)
-    const bufferLength = analyser.fftSize;
-    const frequencyData = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(frequencyData);
+    const button = document.getElementById('auto-sync-btn');
+    const result = oscilloscope.autoSync(analyser, audioContext);
 
-    const sampleRate = audioContext.sampleRate;
-    const nyquist = sampleRate / 2;
-
-    // Find the bin with maximum magnitude
-    let maxMagnitude = 0;
-    let maxBinIndex = 0;
-
-    for (let i = 0; i < frequencyData.length; i++) {
-        if (frequencyData[i] > maxMagnitude) {
-            maxMagnitude = frequencyData[i];
-            maxBinIndex = i;
+    if (result === false) {
+        // Trigger was disabled
+        if (button) {
+            button.style.backgroundColor = '#17a2b8';
+            button.textContent = 'Auto Sync';
         }
+        log('Oscilloscope trigger disabled (free run)');
+    } else if (!result) {
+        // No signal found
+        log('No strong signal detected for auto sync', 'error');
+    } else {
+        // Trigger enabled successfully
+        const slider = document.getElementById('oscilloscope-zoom');
+        if (slider) {
+            slider.value = result.zoom;
+            updateOscilloscopeZoom();
+        }
+
+        if (button) {
+            button.style.backgroundColor = '#28a745';
+            button.textContent = 'Trigger: ON';
+        }
+
+        log(`Auto sync: ${result.frequency.toFixed(1)} Hz signal, timebase adjusted (trigger locked)`);
     }
-
-    // Check if we have a strong enough signal
-    if (maxMagnitude < 50) {
-        log('No strong signal detected for auto sync (signal too weak)', 'error');
-        return;
-    }
-
-    // Convert bin index to frequency
-    const detectedFreq = (maxBinIndex / frequencyData.length) * nyquist;
-
-    if (detectedFreq < 20 || detectedFreq > 20000) {
-        log('Detected frequency out of range for auto sync', 'error');
-        return;
-    }
-
-    // Calculate period of the signal
-    const periodSeconds = 1 / detectedFreq;
-    const periodMs = periodSeconds * 1000;
-
-    // We want to show 2-3 complete cycles on screen
-    // The oscilloscope has 8 horizontal divisions
-    // So we want each division to show about 1/3 of a cycle
-    const targetCycles = 2.5; // Show 2.5 cycles across the screen
-    const targetTimeMs = periodMs * targetCycles;
-
-    // Calculate what zoom level gives us this time window using logarithmic scale
-    const totalBufferTimeMs = (bufferLength / audioContext.sampleRate) * 1000;
-
-    // Calculate target fraction of buffer to display
-    const targetFraction = targetTimeMs / totalBufferTimeMs;
-
-    // Reverse the logarithmic calculation to find slider value
-    const minFraction = 0.005;
-    const maxFraction = 1.0;
-    const logMin = Math.log10(minFraction);
-    const logMax = Math.log10(maxFraction);
-    const logRange = logMax - logMin;
-
-    // Clamp target fraction to valid range
-    const clampedFraction = Math.max(minFraction, Math.min(maxFraction, targetFraction));
-
-    // Calculate normalized slider position (0 to 1)
-    const logValue = Math.log10(clampedFraction);
-    const normalizedSlider = (logValue - logMin) / logRange;
-
-    // Convert to slider value (1 to 200)
-    const targetSliderValue = Math.round(1 + (normalizedSlider * 199));
-
-    // Clamp to valid range (1-200)
-    const clampedValue = Math.max(1, Math.min(200, targetSliderValue));
-
-    // Update the slider
-    const slider = document.getElementById('oscilloscope-zoom');
-    if (slider) {
-        slider.value = clampedValue;
-        oscilloscopeZoom = clampedValue;
-        updateOscilloscopeZoom();
-    }
-
-    // Enable continuous trigger tracking
-    oscilloscopeTriggerEnabled = true;
-    oscilloscopeTriggerFreq = detectedFreq;
-
-    // Update button appearance
-    if (button) {
-        button.style.backgroundColor = '#28a745'; // Green when locked
-        button.textContent = 'Trigger: ON';
-    }
-
-    log(`Auto sync: ${detectedFreq.toFixed(1)} Hz signal, timebase adjusted to show ${targetCycles} cycles (trigger locked)`);
 }
 // Toggle auto scale oscilloscope Y-axis (continuous adjustment on/off)
 function autoScaleOscilloscope() {
+    if (!oscilloscope) return;
+
     const button = document.getElementById('auto-scale-btn');
+    const enabled = oscilloscope.toggleAutoScale();
 
-    // Toggle the state
-    oscilloscopeAutoScaleEnabled = !oscilloscopeAutoScaleEnabled;
-
-    if (oscilloscopeAutoScaleEnabled) {
+    if (enabled) {
         if (button) {
-            button.style.backgroundColor = '#28a745'; // Green when enabled
+            button.style.backgroundColor = '#28a745';
             button.textContent = 'Auto Scale: ON';
         }
         log('Oscilloscope auto scale enabled (continuous adjustment)');
     } else {
-        // Reset to 1:1 when disabled
-        oscilloscopeYScale = 1.0;
         if (button) {
-            button.style.backgroundColor = '#17a2b8'; // Cyan when off
+            button.style.backgroundColor = '#17a2b8';
             button.textContent = 'Auto Scale';
         }
         log('Oscilloscope auto scale disabled (reset to 1:1)');

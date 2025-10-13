@@ -1107,10 +1107,40 @@ async function initOpusDecoder(sampleRate, channels) {
     }
 }
 
+// Find which amateur band contains a frequency
+function findBandForFrequency(frequency) {
+    if (!window.amateurBands || window.amateurBands.length === 0) {
+        return null;
+    }
+
+    for (let band of window.amateurBands) {
+        if (frequency >= band.start && frequency <= band.end) {
+            return band.name || band.label;
+        }
+    }
+    return null;
+}
+
 // Update status display
 function updateStatus(msg) {
     if (msg.frequency) {
-        document.getElementById('current-freq').textContent = formatFrequency(msg.frequency);
+        const freqText = formatFrequency(msg.frequency);
+        const bandName = findBandForFrequency(msg.frequency);
+
+        // Update frequency display with band name if available
+        document.getElementById('current-freq').textContent = freqText;
+
+        // Update mode display with band name appended if in a band
+        if (msg.mode) {
+            const modeText = msg.mode.toUpperCase();
+            const modeElement = document.getElementById('current-mode');
+            if (bandName) {
+                modeElement.textContent = `${modeText} • ${bandName}`;
+            } else {
+                modeElement.textContent = modeText;
+            }
+        }
+
         updateBandButtons(msg.frequency);
         // Update spectrum display cursor
         if (spectrumDisplay) {
@@ -1120,8 +1150,8 @@ function updateStatus(msg) {
                 bandwidthHigh: currentBandwidthHigh
             });
         }
-    }
-    if (msg.mode) {
+    } else if (msg.mode) {
+        // Mode update without frequency - just update mode text
         document.getElementById('current-mode').textContent = msg.mode.toUpperCase();
     }
 

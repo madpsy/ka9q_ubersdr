@@ -266,7 +266,9 @@ class SpectrumDisplay {
         this.dragStartFreq = 0;
         this.lastPanTime = 0;
         this.panThrottleMs = 150; // Throttle pan requests to avoid backend rounding issues
+        this.scrollEnabled = false; // Mouse scroll wheel disabled by default
         this.setupMouseHandlers();
+        this.setupScrollHandler();
 
         // Color gradient cache
         this.colorGradient = this.createColorGradient();
@@ -2413,6 +2415,71 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         this.tooltip.style.whiteSpace = 'nowrap';
         this.tooltip.style.border = '1px solid #fff';
         document.body.appendChild(this.tooltip);
+    }
+
+    // Setup mouse wheel scroll handler
+    setupScrollHandler() {
+        // Setup checkbox handler
+        const scrollCheckbox = document.getElementById('spectrum-scroll-enable');
+        if (scrollCheckbox) {
+            scrollCheckbox.addEventListener('change', (e) => {
+                this.scrollEnabled = e.target.checked;
+                console.log(`Spectrum scroll ${this.scrollEnabled ? 'enabled' : 'disabled'}`);
+            });
+        }
+
+        // Add wheel event listener to both main canvas and line graph canvas
+        const handleWheel = (e) => {
+            if (!this.scrollEnabled || !this.spectrumData) return;
+            
+            e.preventDefault();
+            
+            // Get current frequency from input
+            const freqInput = document.getElementById('frequency');
+            if (!freqInput) return;
+            
+            const currentFreq = parseInt(freqInput.value);
+            if (isNaN(currentFreq)) return;
+            
+            // Scroll up = increase frequency by 100 Hz
+            // Scroll down = decrease frequency by 100 Hz
+            const delta = e.deltaY < 0 ? 100 : -100;
+            let newFreq = currentFreq + delta;
+            
+            // Round to nearest 100 Hz
+            newFreq = Math.round(newFreq / 100) * 100;
+            
+            // Clamp to valid range (100 kHz to 30 MHz)
+            const MIN_FREQ = 100000;
+            const MAX_FREQ = 30000000;
+            newFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
+            
+            // Update frequency input
+            freqInput.value = newFreq;
+            
+            // Update band buttons if function exists
+            if (typeof window.updateBandButtons === 'function') {
+                window.updateBandButtons(newFreq);
+            }
+            
+            // Update URL if function exists
+            if (typeof window.updateURL === 'function') {
+                window.updateURL();
+            }
+            
+            // Trigger tune
+            if (typeof window.autoTune === 'function') {
+                window.autoTune();
+            }
+        };
+        
+        // Add wheel listener to main canvas
+        this.canvas.addEventListener('wheel', handleWheel, { passive: false });
+        
+        // Add wheel listener to line graph canvas if it exists
+        if (this.lineGraphCanvas) {
+            this.lineGraphCanvas.addEventListener('wheel', handleWheel, { passive: false });
+        }
     }
 
     // Update cursor style based on whether dragging is allowed

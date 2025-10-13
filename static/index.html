@@ -82,9 +82,15 @@
 
         <div class="controls">
             <div class="control-group">
-                <div class="frequency-input-wrapper">
-                    <input type="number" id="frequency" value="14175000" min="100000" max="30000000" step="1000" oninput="validateFrequencyInput(this)" onchange="handleFrequencyChange()">
-                    <span class="frequency-unit">Hz</span>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <div class="frequency-input-wrapper" style="flex: 1; min-width: 200px;">
+                        <input type="number" id="frequency" value="14175000" min="100000" max="30000000" step="1000" oninput="validateFrequencyInput(this)" onchange="handleFrequencyChange()">
+                        <span class="frequency-unit">Hz</span>
+                    </div>
+                    <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
+                        <input type="checkbox" id="spectrum-scroll-enable">
+                        <span>Scroll</span>
+                    </label>
                 </div>
                 <div class="tuning-buttons">
                     <button onclick="adjustFrequency(-1000)" title="Down 1 kHz">◄◄</button>

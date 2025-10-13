@@ -4833,6 +4833,12 @@ window.updateSpectrumGrid = updateSpectrumGrid;
 window.updateSpectrumIntensity = updateSpectrumIntensity;
 window.updateSpectrumContrast = updateSpectrumContrast;
 
+// Helper function for spectrum display to get current dial frequency
+window.getCurrentDialFrequency = function() {
+    const freqInput = document.getElementById('frequency');
+    return freqInput ? parseInt(freqInput.value) : 0;
+};
+
 // Audio controls
 window.toggleMute = toggleMute;
 window.toggleNR2Quick = toggleNR2Quick;

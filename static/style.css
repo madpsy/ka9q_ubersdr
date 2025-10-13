@@ -92,7 +92,10 @@
 }
 
 .audio-start-content {
-    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
 }
 
 .audio-start-button {
@@ -146,19 +149,18 @@ body {
     position: relative;
 }
 
-/* Site Description in top left */
+/* Site Description in audio start overlay */
 .site-description {
-    position: absolute;
-    top: -2px;
-    left: 0;
-    padding: 0px 6px 2px 6px;
+    padding: 12px 24px;
     background: rgba(44, 62, 80, 0.9);
-    border-radius: 0 0 6px 0;
+    border-radius: 8px;
     color: #ecf0f1;
-    font-size: 0.9em;
-    z-index: 10001;
+    font-size: 1.2em;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    pointer-events: auto;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    margin-bottom: 30px;
+    text-align: center;
 }
 
 .site-description a {
@@ -173,16 +175,17 @@ body {
     text-decoration: underline;
 }
 
-/* Audio Buffer Display in top right */
+/* Audio Buffer Display in bottom right */
 .audio-buffer-display {
-    position: absolute;
-    top: 0;
+    position: fixed;
+    bottom: 0;
     right: 0;
-    padding: 0px 6px 2px 6px;
+    padding: 2px 6px 0px 6px;
     background: rgba(44, 62, 80, 0.9);
-    border-radius: 0 0 0 6px;
+    border-radius: 6px 0 0 0;
     color: #ecf0f1;
     font-size: 0.9em;
+    line-height: 1;
     z-index: 10001;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     font-family: 'Courier New', monospace;
@@ -1770,9 +1773,9 @@ input[type="range"]::-moz-range-thumb {
     z-index: 1; /* Base stacking context */
 }
 
-/* Spectrum frequency overlay - must be on top of everything */
+/* Spectrum frequency overlay - below audio start overlay */
 .spectrum-frequency-overlay {
-    z-index: 10000 !important;
+    z-index: 9000 !important;
     background: transparent !important;
 }
 

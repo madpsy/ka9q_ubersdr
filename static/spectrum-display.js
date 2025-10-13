@@ -271,6 +271,9 @@ class SpectrumDisplay {
         // Color gradient cache
         this.colorGradient = this.createColorGradient();
 
+        // Initialize signal meter
+        this.signalMeter = new SignalMeter();
+
         // Initialize split mode if it's the default
         if (this.displayMode === 'split') {
             this.splitModeLogged = false;
@@ -2664,104 +2667,15 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
     // Update signal meter based on peak (highest) dB in tuned bandwidth
     updateSignalMeter() {
-        if (!this.spectrumData || !this.currentTunedFreq || !this.totalBandwidth) {
-            // Reset meter if no data
-            const meterBar = document.getElementById('signal-meter-bar');
-            const meterValue = document.getElementById('signal-meter-value');
-            if (meterBar) meterBar.style.width = '0%';
-            if (meterValue) meterValue.textContent = '-- dB';
-            return;
-        }
-
-        // Calculate frequency range for tuned bandwidth
-        const startFreq = this.centerFreq - this.totalBandwidth / 2;
-        const lowFreq = this.currentTunedFreq + this.currentBandwidthLow;
-        const highFreq = this.currentTunedFreq + this.currentBandwidthHigh;
-
-        // Convert frequencies to bin indices
-        const lowBinFloat = ((lowFreq - startFreq) / this.totalBandwidth) * this.spectrumData.length;
-        const highBinFloat = ((highFreq - startFreq) / this.totalBandwidth) * this.spectrumData.length;
-
-        const lowBin = Math.max(0, Math.floor(lowBinFloat));
-        const highBin = Math.min(this.spectrumData.length - 1, Math.ceil(highBinFloat));
-
-        // Find peak (maximum) dB across the bandwidth
-        let peakDb = -120;
-        for (let i = lowBin; i <= highBin; i++) {
-            if (i >= 0 && i < this.spectrumData.length) {
-                peakDb = Math.max(peakDb, this.spectrumData[i]);
-            }
-        }
-
-        // Initialize peak history array and display throttling if needed
-        if (!this.peakHistory) {
-            this.peakHistory = [];
-            this.peakHistoryMaxAge = 500; // 500ms window
-            this.lastMeterUpdate = 0;
-            this.meterUpdateInterval = 100; // Update display every 100ms
-        }
-
-        // Add current peak to history with timestamp
-        const now = Date.now();
-        this.peakHistory.push({ value: peakDb, timestamp: now });
-
-        // Remove peaks older than 500ms
-        this.peakHistory = this.peakHistory.filter(p => now - p.timestamp <= this.peakHistoryMaxAge);
-
-        // Calculate average of peaks in the window
-        const avgPeakDb = this.peakHistory.reduce((sum, p) => sum + p.value, 0) / this.peakHistory.length;
-
-        // Throttle display updates to every 100ms for smoother appearance
-        if (now - this.lastMeterUpdate < this.meterUpdateInterval) {
-            return;
-        }
-        this.lastMeterUpdate = now;
-
-        // Update meter display using averaged peak
-        const meterBar = document.getElementById('signal-meter-bar');
-        const meterValue = document.getElementById('signal-meter-value');
-
-        if (meterBar && meterValue) {
-            // S-meter style logarithmic scale
-            // Weak signals (-120 to -80 dB) use 0-40% of meter
-            // Medium signals (-80 to -60 dB) use 40-80% of meter
-            // Strong signals (-60 to -20 dB) use 80-100% of meter (highly compressed)
-            let percentage;
-            if (avgPeakDb < -80) {
-                // Weak: -120 to -80 dB maps to 0-40%
-                percentage = ((avgPeakDb + 120) / 40) * 40;
-            } else if (avgPeakDb < -60) {
-                // Medium: -80 to -60 dB maps to 40-80%
-                percentage = 40 + ((avgPeakDb + 80) / 20) * 40;
-            } else {
-                // Strong: -60 to -20 dB maps to 80-100% (highly compressed)
-                percentage = 80 + ((avgPeakDb + 60) / 40) * 20;
-            }
-
-            percentage = Math.max(0, Math.min(100, percentage));
-
-            meterBar.style.width = percentage + '%';
-            meterValue.textContent = avgPeakDb.toFixed(1) + ' dBFS';
-
-            // Color code both bar and text based on signal strength
-            let color;
-            if (avgPeakDb >= -70) {
-                color = '#28a745'; // Green - strong signal
-            } else if (avgPeakDb >= -85) {
-                color = '#ffc107'; // Yellow - moderate signal
-            } else {
-                color = '#dc3545'; // Red - weak signal
-            }
-
-            // Add flashing animation for extremely strong signals (above -30 dB)
-            if (avgPeakDb > -30) {
-                meterValue.classList.add('flashing');
-            } else {
-                meterValue.classList.remove('flashing');
-            }
-
-            meterBar.style.background = color;
-            meterValue.style.color = color;
+        if (this.signalMeter) {
+            this.signalMeter.update(
+                this.spectrumData,
+                this.currentTunedFreq,
+                this.currentBandwidthLow,
+                this.currentBandwidthHigh,
+                this.centerFreq,
+                this.totalBandwidth
+            );
         }
     }
 

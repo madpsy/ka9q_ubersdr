@@ -1343,9 +1343,9 @@ input[type="range"]::-moz-range-thumb {
 #stereo-virtualizer-controls,
 #equalizer-controls,
 #cw-decoder-controls {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 2px solid #34495e;
+    margin-top: 10px;
+    padding-top: 0;
+    border-top: none;
     flex: 1;
 }
 
@@ -1484,8 +1484,8 @@ input[type="range"]::-moz-range-thumb {
 .equalizer-bands {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 15px 20px;
-    padding: 25px;
+    gap: 8px 12px;
+    padding: 15px;
     background: #2c3e50;
     border-radius: 6px;
 }
@@ -1493,7 +1493,7 @@ input[type="range"]::-moz-range-thumb {
 .eq-band {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
 }
 
 .eq-label {

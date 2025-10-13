@@ -44,7 +44,7 @@ server:
   # UUID can establish both audio and spectrum channels
   # Useful for preventing abuse from a single source
   # Set to 0 to disable IP-based limiting
-  max_sessions_ip: 1
+  max_sessions_ip: 2
   # Session idle timeout in seconds (0 = no timeout). This tracks a heartbeat message to websocket
   # connections. The UI sends a ping every 10 seconds if the user is detected as being active.
   # Client will show warning dialog 30 seconds before this timeout. If they do not interact

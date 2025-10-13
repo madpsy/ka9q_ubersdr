@@ -1,12 +1,14 @@
 # Bookmark configuration file for ka9q UberSDR
 # Each bookmark has a name, frequency (in Hz), and mode
 # Supported modes: usb, lsb, cwu, cwl, am, fm, nfm
+# Optional: extension - name of decoder extension to open (e.g., "stats")
 
 bookmarks:
   # Time Standard Stations
   - name: "WWV 5 MHz"
     frequency: 5000000
     mode: "am"
+    extension: "stats"  # Optional: opens Stats Monitor extension
   
   - name: "WWV 10 MHz"
     frequency: 10000000
@@ -36,6 +38,7 @@ bookmarks:
   - name: "FT8 20m"
     frequency: 14074000
     mode: "usb"
+    extension: "stats"  # Opens Stats Monitor extension
   
   - name: "FT8 17m"
     frequency: 18100000

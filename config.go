@@ -43,6 +43,7 @@ type Bookmark struct {
 	Name      string `yaml:"name" json:"name"`
 	Frequency uint64 `yaml:"frequency" json:"frequency"`
 	Mode      string `yaml:"mode" json:"mode"`
+	Extension string `yaml:"extension,omitempty" json:"extension,omitempty"`
 }
 
 // Band represents an amateur radio band

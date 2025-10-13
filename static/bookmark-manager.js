@@ -241,8 +241,22 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
 }
 
 // Handle bookmark click (expose on window for spectrum-display.js access)
-// This function is called with just frequency and mode from spectrum-display.js
-function handleBookmarkClick(frequency, mode) {
+// This function is called with bookmark object from spectrum-display.js
+function handleBookmarkClick(bookmarkOrFrequency, mode) {
+    // Support both old API (frequency, mode) and new API (bookmark object)
+    let frequency, bookmarkMode, extension;
+    
+    if (typeof bookmarkOrFrequency === 'object') {
+        // New API: bookmark object
+        frequency = bookmarkOrFrequency.frequency;
+        bookmarkMode = bookmarkOrFrequency.mode;
+        extension = bookmarkOrFrequency.extension;
+    } else {
+        // Old API: separate frequency and mode parameters
+        frequency = bookmarkOrFrequency;
+        bookmarkMode = mode;
+    }
+    
     // Access required functions from window object
     const wsManager = window.wsManager;
     const setMode = window.setMode;
@@ -253,6 +267,7 @@ function handleBookmarkClick(frequency, mode) {
     const spectrumDisplay = window.spectrumDisplay;
     const formatFrequency = window.formatFrequency;
     const log = window.log;
+    const toggleExtension = window.toggleExtension;
 
     // Set frequency
     const freqInput = document.getElementById('frequency');
@@ -265,8 +280,8 @@ function handleBookmarkClick(frequency, mode) {
     }
 
     // Set mode (mode is already lowercase from JSON)
-    if (setMode) {
-        setMode(mode);
+    if (setMode && bookmarkMode) {
+        setMode(bookmarkMode);
     }
 
     // Update URL
@@ -292,12 +307,23 @@ function handleBookmarkClick(frequency, mode) {
             binBandwidth: 1.0  // Minimum bin bandwidth = maximum zoom
         }));
         if (log && formatFrequency) {
-            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${mode.toUpperCase()} (zoomed to max)`);
+            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()} (zoomed to max)`);
         }
     } else {
         if (log && formatFrequency) {
-            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${mode.toUpperCase()}`);
+            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()}`);
         }
+    }
+    
+    // Open extension if specified
+    if (extension && toggleExtension) {
+        // Small delay to ensure radio is tuned first
+        setTimeout(() => {
+            toggleExtension(extension);
+            if (log) {
+                log(`Opening ${extension} extension`);
+            }
+        }, 100);
     }
 }
 

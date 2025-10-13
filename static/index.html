@@ -128,9 +128,6 @@
                     <button onclick="setMode('fm')" id="mode-fm" class="mode-btn">FM</button>
                     <button onclick="setMode('nfm')" id="mode-nfm" class="mode-btn">NFM</button>
                 </div>
-                <div class="current-settings-text">
-                    <span id="current-freq">-</span> • <span id="current-mode">-</span>
-                </div>
                 <div class="bandwidth-controls">
                     <div class="control-group">
                         <label for="bandwidth-low">Low: <span id="bandwidth-low-value">50</span> Hz</label>
@@ -141,6 +138,13 @@
                         <input type="range" id="bandwidth-high" min="500" max="6000" value="3000" step="100" oninput="updateBandwidthDisplay()" onchange="updateBandwidth()">
                     </div>
                 </div>
+                <div class="current-settings-text">
+                    <span id="current-freq">-</span> • <span id="current-mode">-</span>
+                </div>
+                <select id="extensions-dropdown" onchange="toggleExtension(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px;">
+                    <option value="">Extensions...</option>
+                    <option value="stats">📊 Stats Monitor</option>
+                </select>
             </div>
 
         </div>
@@ -177,6 +181,21 @@
                         <span>-10</span>
                         <span>-5</span>
                         <span>0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Monitor Extension Panel -->
+        <div id="stats-decoder-panel" class="decoder-extension-panel" style="display: none;">
+            <div class="decoder-extension-container">
+                <div class="decoder-extension-header">
+                    <h3>📊 Stats Monitor</h3>
+                    <button onclick="toggleExtension('')" class="decoder-close-btn">&times;</button>
+                </div>
+                <div class="decoder-extension-content">
+                    <div id="stats-decoded-text" style="font-family: monospace; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap;">
+                        Loading stats...
                     </div>
                 </div>
             </div>
@@ -699,6 +718,8 @@
         <p>Download UberSDR from <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">Github</a>. Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a>.</p>
     </footer>
 
+    <script src="extensions.js"></script>
+    <script src="extensions/stats/stats-extension.js"></script>
     <script src="carrier-detector.js"></script>
     <script src="signal-meter.js"></script>
     <script src="spectrum-display.js"></script>

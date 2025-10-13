@@ -352,6 +352,11 @@
                                 <option value="nfm">NFM</option>
                             </select>
                         </div>
+                        <div class="config-field">
+                            <label>Extension (Optional)</label>
+                            <input type="text" id="newBookmarkExtension" placeholder="e.g., stats">
+                            <small>Name of decoder extension to open automatically (leave empty for none)</small>
+                        </div>
                         <button class="btn" onclick="saveBookmark()">Save Bookmark</button>
                         <button class="btn btn-secondary" onclick="cancelBookmarkForm()">Cancel</button>
                     </div>
@@ -844,6 +849,7 @@
                         <th style="padding: 12px; text-align: left;">Name</th>
                         <th style="padding: 12px; text-align: left;">Frequency (Hz)</th>
                         <th style="padding: 12px; text-align: left;">Mode</th>
+                        <th style="padding: 12px; text-align: left;">Extension</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
                 </thead>
@@ -855,10 +861,12 @@
             currentBookmarks.forEach((bookmark, index) => {
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
+                const extensionDisplay = bookmark.extension ? `<span style="color: #667eea; font-weight: bold;">${bookmark.extension}</span>` : '<em style="color: #999;">—</em>';
                 row.innerHTML = `
                     <td style="padding: 12px;">${bookmark.name}</td>
                     <td style="padding: 12px;">${bookmark.frequency.toLocaleString()}</td>
                     <td style="padding: 12px;">${bookmark.mode.toUpperCase()}</td>
+                    <td style="padding: 12px;">${extensionDisplay}</td>
                     <td style="padding: 12px; text-align: center;">
                         <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBookmark(${index})">Edit</button>
                         <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBookmark(${index})">Delete</button>
@@ -875,6 +883,7 @@
             document.getElementById('newBookmarkName').value = '';
             document.getElementById('newBookmarkFreq').value = '';
             document.getElementById('newBookmarkMode').value = 'usb';
+            document.getElementById('newBookmarkExtension').value = '';
         }
 
         function editBookmark(index) {
@@ -885,6 +894,7 @@
             document.getElementById('newBookmarkName').value = bookmark.name;
             document.getElementById('newBookmarkFreq').value = bookmark.frequency;
             document.getElementById('newBookmarkMode').value = bookmark.mode;
+            document.getElementById('newBookmarkExtension').value = bookmark.extension || '';
             
             // Scroll the form into view
             document.getElementById('addBookmarkForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -899,11 +909,18 @@
             const name = document.getElementById('newBookmarkName').value.trim();
             const frequency = parseInt(document.getElementById('newBookmarkFreq').value);
             const mode = document.getElementById('newBookmarkMode').value;
+            const extension = document.getElementById('newBookmarkExtension').value.trim();
             const editIndex = parseInt(document.getElementById('editBookmarkIndex').value);
 
             if (!name || !frequency || !mode) {
-                showAlert('Please fill in all fields', 'error');
+                showAlert('Please fill in all required fields', 'error');
                 return;
+            }
+
+            // Build bookmark object
+            const bookmarkData = { name, frequency, mode };
+            if (extension) {
+                bookmarkData.extension = extension;
             }
 
             try {
@@ -914,7 +931,7 @@
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ name, frequency, mode })
+                        body: JSON.stringify(bookmarkData)
                     });
 
                     if (!response.ok) throw new Error('Failed to update bookmark');
@@ -928,7 +945,7 @@
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ name, frequency, mode })
+                        body: JSON.stringify(bookmarkData)
                     });
 
                     if (!response.ok) throw new Error('Failed to add bookmark');
@@ -1032,6 +1049,9 @@
                 yamlContent += `  - name: "${bookmark.name}"\n`;
                 yamlContent += `    frequency: ${bookmark.frequency}\n`;
                 yamlContent += `    mode: ${bookmark.mode}\n`;
+                if (bookmark.extension) {
+                    yamlContent += `    extension: ${bookmark.extension}\n`;
+                }
             });
 
             const blob = new Blob([yamlContent], { type: 'text/yaml' });
@@ -1084,6 +1104,8 @@
                                 currentBookmark.frequency = parseInt(trimmed.substring(10).trim());
                             } else if (trimmed.startsWith('mode:')) {
                                 currentBookmark.mode = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
+                            } else if (trimmed.startsWith('extension:')) {
+                                currentBookmark.extension = trimmed.substring(10).trim().replace(/^["']|["']$/g, '');
                             }
                         }
                     }

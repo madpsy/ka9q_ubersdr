@@ -517,11 +517,15 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 	}
 
 	// Add new bookmark
-	bookmarks = append(bookmarks, map[string]interface{}{
+	bookmarkMap := map[string]interface{}{
 		"name":      newBookmark.Name,
 		"frequency": newBookmark.Frequency,
 		"mode":      newBookmark.Mode,
-	})
+	}
+	if newBookmark.Extension != "" {
+		bookmarkMap["extension"] = newBookmark.Extension
+	}
+	bookmarks = append(bookmarks, bookmarkMap)
 	bookmarksConfig["bookmarks"] = bookmarks
 
 	// Write back to file
@@ -625,11 +629,15 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 	}
 
 	// Update bookmark at index
-	bookmarks[index] = map[string]interface{}{
+	bookmarkMap := map[string]interface{}{
 		"name":      updatedBookmark.Name,
 		"frequency": updatedBookmark.Frequency,
 		"mode":      updatedBookmark.Mode,
 	}
+	if updatedBookmark.Extension != "" {
+		bookmarkMap["extension"] = updatedBookmark.Extension
+	}
+	bookmarks[index] = bookmarkMap
 	bookmarksConfig["bookmarks"] = bookmarks
 
 	// Write back to file

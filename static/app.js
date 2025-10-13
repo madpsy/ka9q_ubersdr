@@ -2391,6 +2391,11 @@ function startVisualization() {
         // Process CW decoder if enabled (always run, independent of visualization)
         processCWAudio();
 
+        // Process all decoder extensions (always run, independent of visualization)
+        if (window.decoderManager) {
+            window.decoderManager.processAudio();
+        }
+
         // Process squelch gate if enabled (always run, independent of visualization)
         processSquelch();
 
@@ -4995,4 +5000,87 @@ window.applyOffset = applyOffset;
 
 // Channel controls
 window.tuneToChannel = tuneToChannel;
+
+// Extension controls
+window.toggleExtension = toggleExtension;
+
+// Toggle extension from dropdown
+function toggleExtension(extensionName) {
+    const dropdown = document.getElementById('extensions-dropdown');
+    
+    if (!extensionName) {
+        // Close all open extension panels when empty value selected
+        const allPanels = document.querySelectorAll('.decoder-extension-panel');
+        allPanels.forEach(panel => {
+            if (panel.style.display !== 'none') {
+                const panelId = panel.id;
+                const name = panelId.replace('-decoder-panel', '');
+                const decoder = window.decoderManager.getDecoder(name);
+                if (decoder) {
+                    panel.style.display = 'none';
+                    window.decoderManager.disable(name);
+                    log(`${name} extension disabled`);
+                }
+            }
+        });
+        return;
+    }
+    
+    const decoder = window.decoderManager.getDecoder(extensionName);
+    if (!decoder) {
+        log(`Extension not found: ${extensionName}`, 'error');
+        dropdown.value = '';
+        return;
+    }
+    
+    const panel = document.getElementById(`${extensionName}-decoder-panel`);
+    const checkbox = document.getElementById(`${extensionName}-decoder-enable`);
+    
+    if (!panel) {
+        log(`Extension panel not found for: ${extensionName}`, 'error');
+        dropdown.value = '';
+        return;
+    }
+    
+    // Toggle panel visibility
+    if (panel.style.display === 'none' || !panel.style.display) {
+        // Show panel
+        panel.style.display = 'block';
+        
+        // Initialize and enable decoder if not already done
+        if (!decoder.enabled) {
+            if (!audioContext) {
+                log('Please start audio first (click "Click to Start")', 'error');
+                panel.style.display = 'none';
+                dropdown.value = '';
+                return;
+            }
+            
+            const centerFreq = 800; // Default center frequency
+            window.decoderManager.initialize(extensionName, audioContext, analyser, centerFreq);
+            window.decoderManager.enable(extensionName);
+            
+            if (checkbox) {
+                checkbox.checked = true;
+            }
+        }
+        
+        log(`${extensionName} extension enabled`);
+    } else {
+        // Hide panel
+        panel.style.display = 'none';
+        
+        // Disable decoder
+        window.decoderManager.disable(extensionName);
+        
+        if (checkbox) {
+            checkbox.checked = false;
+        }
+        
+        log(`${extensionName} extension disabled`);
+    }
+    
+    // Reset dropdown
+    dropdown.value = '';
+}
 

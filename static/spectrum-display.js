@@ -178,8 +178,16 @@ class SpectrumDisplay {
 
                         // Show bookmark info
                         const freqStr = this.formatFrequency(pos.bookmark.frequency);
-                        const modeStr = pos.bookmark.mode.toUpperCase();
-                        this.tooltip.innerHTML = `${pos.bookmark.name}: ${freqStr} ${modeStr}`;
+                        const modeStr = pos.bookmark.mode ? pos.bookmark.mode.toUpperCase() : 'N/A';
+                        let tooltipText = `${pos.bookmark.name}: ${freqStr} ${modeStr}`;
+                        if (pos.bookmark.extension) {
+                            // Get display name from decoder manager if available
+                            const displayName = window.decoderManager ?
+                                window.decoderManager.getDisplayName(pos.bookmark.extension) :
+                                pos.bookmark.extension;
+                            tooltipText += `<br>Extension: ${displayName}`;
+                        }
+                        this.tooltip.innerHTML = tooltipText;
 
                         // Position tooltip near cursor
                         const tooltipX = e.clientX + 15;
@@ -220,7 +228,7 @@ class SpectrumDisplay {
 
                         // Check if click is within 30 pixels of bookmark (wider hit area)
                         if (Math.abs(x - bookmarkX) <= 30) {
-                            window.handleBookmarkClick(bookmark.frequency, bookmark.mode);
+                            window.handleBookmarkClick(bookmark);
                             return;
                         }
                     }
@@ -2479,7 +2487,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
                             // Check if click is within 20 pixels of bookmark
                             if (Math.abs(x - bookmarkX) <= 20) {
-                                window.handleBookmarkClick(bookmark.frequency, bookmark.mode);
+                                window.handleBookmarkClick(bookmark);
                                 this.isDragging = false;
                                 this.dragDidMove = false;
                                 this.updateCursorStyle();
@@ -2670,8 +2678,16 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
                     // Show bookmark info
                     const freqStr = this.formatFrequency(pos.bookmark.frequency);
-                    const modeStr = pos.bookmark.mode.toUpperCase();
-                    this.tooltip.textContent = `${pos.bookmark.name}: ${freqStr} ${modeStr}`;
+                    const modeStr = pos.bookmark.mode ? pos.bookmark.mode.toUpperCase() : 'N/A';
+                    let tooltipText = `${pos.bookmark.name}: ${freqStr} ${modeStr}`;
+                    if (pos.bookmark.extension) {
+                        // Get display name from decoder manager if available
+                        const displayName = window.decoderManager ?
+                            window.decoderManager.getDisplayName(pos.bookmark.extension) :
+                            pos.bookmark.extension;
+                        tooltipText += `\nExtension: ${displayName}`;
+                    }
+                    this.tooltip.textContent = tooltipText;
 
                     // Position tooltip near cursor
                     const rect = this.canvas.getBoundingClientRect();

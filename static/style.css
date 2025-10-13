@@ -2398,3 +2398,89 @@ input[type="range"]::-moz-range-thumb {
     font-weight: bold;
     font-style: normal;
 }
+
+/* Decoder Extension Panels */
+.decoder-extension-panel {
+    padding: 0 30px;
+    background: #adb5bd;
+    border-top: none;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-top: -20px;
+    margin-bottom: -20px;
+}
+
+.decoder-extension-container {
+    padding: 15px 20px;
+    background: #2c3e50;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+}
+
+.decoder-extension-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #34495e;
+}
+
+.decoder-extension-header h3 {
+    margin: 0;
+    color: #ecf0f1;
+    font-size: 1.2em;
+    font-weight: bold;
+}
+
+.decoder-close-btn {
+    background: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    font-size: 1.5em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s;
+    padding: 0;
+    line-height: 1;
+}
+
+.decoder-close-btn:hover {
+    background: #c0392b;
+    transform: rotate(90deg);
+}
+
+.decoder-extension-content {
+    color: #ecf0f1;
+    background: #34495e;
+    border-radius: 6px;
+    padding: 15px;
+    min-height: 200px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Custom scrollbar for decoder extension content */
+.decoder-extension-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.decoder-extension-content::-webkit-scrollbar-track {
+    background: #2c3e50;
+    border-radius: 4px;
+}
+
+.decoder-extension-content::-webkit-scrollbar-thumb {
+    background: #667eea;
+    border-radius: 4px;
+}
+
+.decoder-extension-content::-webkit-scrollbar-thumb:hover {
+    background: #5568d3;
+}

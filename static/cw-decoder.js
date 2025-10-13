@@ -59,7 +59,7 @@ class CWDecoder {
         // Calculate dot length from WPM (PARIS standard: 50 dot units per word)
         this.updateTimingFromWPM();
         
-        log('CW Decoder initialized at ' + centerFreq + ' Hz, ' + this.wpm + ' WPM');
+        console.log('CW Decoder initialized at ' + centerFreq + ' Hz, ' + this.wpm + ' WPM');
     }
     
     updateGoertzelCoeff() {
@@ -78,19 +78,19 @@ class CWDecoder {
     setWPM(wpm) {
         this.wpm = Math.max(5, Math.min(60, wpm)); // Clamp between 5-60 WPM
         this.updateTimingFromWPM();
-        log('CW Decoder WPM set to ' + this.wpm);
+        console.log('CW Decoder WPM set to ' + this.wpm);
     }
     
     setThreshold(threshold) {
         this.threshold = Math.max(0.1, Math.min(1.0, threshold));
-        log('CW Decoder threshold set to ' + this.threshold.toFixed(2));
+        console.log('CW Decoder threshold set to ' + this.threshold.toFixed(2));
     }
     
     setCenterFrequency(freq) {
         this.centerFrequency = freq;
         this.targetFreq = freq;
         this.updateGoertzelCoeff();
-        log('CW Decoder frequency set to ' + freq + ' Hz');
+        console.log('CW Decoder frequency set to ' + freq + ' Hz');
     }
     
     resetWPM() {
@@ -100,7 +100,7 @@ class CWDecoder {
         if (wpmElement) {
             wpmElement.textContent = '-- (auto-detecting)';
         }
-        log('CW Decoder WPM reset - will auto-detect from signal');
+        console.log('CW Decoder WPM reset - will auto-detect from signal');
     }
     
     enable() {
@@ -113,14 +113,14 @@ class CWDecoder {
         this.goertzelQ2 = 0;
         this.updateDisplay();
         this.addCharacter('[CW DECODER ACTIVE]\n');
-        log('CW Decoder enabled - listening for CW signals');
+        console.log('CW Decoder enabled - listening for CW signals');
     }
     
     disable() {
         if (!this.enabled) return;
         this.enabled = false;
         this.addCharacter('\n[CW DECODER STOPPED]');
-        log('CW Decoder disabled');
+        console.log('CW Decoder disabled');
     }
     
     // Goertzel algorithm - frequency-selective tone detection
@@ -343,7 +343,7 @@ class CWDecoder {
         this.decodedText = '';
         this.currentSymbol = '';
         this.updateDisplay();
-        log('CW Decoder text cleared');
+        console.log('CW Decoder text cleared');
     }
     
     copyText() {

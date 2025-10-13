@@ -1,6 +1,9 @@
 // Import WebSocket Manager
 import { WebSocketManager } from './websocket-manager.js';
 
+// Import Bookmark Manager
+import { loadBookmarks, drawBookmarksOnSpectrum, handleBookmarkClick } from './bookmark-manager.js';
+
 // Notification system
 function showNotification(message, type = 'error', duration = 5000) {
     const toast = document.getElementById('notification-toast');
@@ -209,13 +212,8 @@ const bandRanges = {
     '10m': { min: 28000000, max: 29700000 }  // UK: 28.0-29.7 MHz
 };
 
-// Bookmarks (expose on window for spectrum-display.js access)
-let bookmarks = [];
-window.bookmarks = bookmarks;
-
-// Bookmark positions for hover detection (expose on window for spectrum-display.js access)
-let bookmarkPositions = [];
-window.bookmarkPositions = bookmarkPositions;
+// Bookmarks are now managed by bookmark-manager.js
+// Access via window.bookmarks and window.bookmarkPositions
 
 // Update band button highlighting based on frequency
 function updateBandButtons(frequency) {
@@ -4515,145 +4513,8 @@ let spectrumDisplay = null;
 let lastZoomTime = 0;
 const ZOOM_THROTTLE_MS = 1000;
 
-// Load bookmarks from server
-async function loadBookmarks() {
-    try {
-        const response = await fetch('/api/bookmarks');
-        if (response.ok) {
-            bookmarks = await response.json();
-            window.bookmarks = bookmarks; // Update window reference
-            log(`Loaded ${bookmarks.length} bookmarks`);
-            // Bookmarks will be drawn automatically when spectrum display draws
-        } else {
-            log('No bookmarks available', 'error');
-        }
-    } catch (err) {
-        console.error('Failed to load bookmarks:', err);
-        log('Failed to load bookmarks: ' + err.message, 'error');
-    }
-}
-
-// Draw bookmark flags on the spectrum display (expose on window for spectrum-display.js access)
-function drawBookmarksOnSpectrum() {
-    if (!spectrumDisplay || !bookmarks || bookmarks.length === 0) {
-        bookmarkPositions = [];
-        window.bookmarkPositions = bookmarkPositions;
-        return;
-    }
-
-    const ctx = spectrumDisplay.overlayCtx;
-
-    if (!ctx || !spectrumDisplay.totalBandwidth || !spectrumDisplay.centerFreq) {
-        bookmarkPositions = [];
-        window.bookmarkPositions = bookmarkPositions;
-        return;
-    }
-
-    // Calculate frequency range (same as frequency cursor)
-    const startFreq = spectrumDisplay.centerFreq - spectrumDisplay.totalBandwidth / 2;
-    const endFreq = spectrumDisplay.centerFreq + spectrumDisplay.totalBandwidth / 2;
-
-    // Clear bookmark positions array
-    bookmarkPositions = [];
-
-    // Draw each bookmark that's within the visible range
-    bookmarks.forEach(bookmark => {
-        // Only draw if tuned frequency is within range (same check as cursor)
-        if (bookmark.frequency < startFreq || bookmark.frequency > endFreq) {
-            return;
-        }
-
-        // Calculate x position (same formula as frequency cursor at line 633)
-        const x = ((bookmark.frequency - startFreq) / (endFreq - startFreq)) * spectrumDisplay.width;
-
-        // Draw at same height as bandwidth marker (y=20)
-        const labelY = 20;
-
-        // Draw bookmark label (similar to frequency cursor but gold)
-        ctx.font = 'bold 10px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-
-        // Background for label
-        const labelWidth = ctx.measureText(bookmark.name).width + 8;
-        const labelHeight = 12;
-
-        ctx.fillStyle = 'rgba(255, 215, 0, 0.95)'; // Gold background
-        ctx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
-
-        // Border for label
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
-
-        // Label text
-        ctx.fillStyle = '#000000'; // Black text on gold background
-        ctx.fillText(bookmark.name, x, labelY + 2);
-
-        // Draw downward arrow below label (smaller than frequency cursor)
-        const arrowY = labelY + labelHeight;
-        const arrowLength = 6;
-        ctx.fillStyle = 'rgba(255, 215, 0, 0.95)';
-        ctx.beginPath();
-        ctx.moveTo(x, arrowY + arrowLength); // Arrow tip
-        ctx.lineTo(x - 4, arrowY); // Left point
-        ctx.lineTo(x + 4, arrowY); // Right point
-        ctx.closePath();
-        ctx.fill();
-
-        // Arrow border
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        // Store bookmark position for hover detection
-        bookmarkPositions.push({
-            x: x,
-            y: labelY,
-            width: labelWidth,
-            height: labelHeight + arrowLength,
-            bookmark: bookmark
-        });
-    });
-
-    // Update window reference
-    window.bookmarkPositions = bookmarkPositions;
-}
-window.drawBookmarksOnSpectrum = drawBookmarksOnSpectrum;
-
-// Handle bookmark click (expose on window for spectrum-display.js access)
-function handleBookmarkClick(frequency, mode) {
-    // Set frequency
-    document.getElementById('frequency').value = frequency;
-    updateBandButtons(frequency);
-
-    // Set mode (mode is already lowercase from JSON)
-    setMode(mode);
-
-    // Update URL
-    updateURL();
-
-    // Connect if not connected, otherwise tune
-    if (!wsManager.isConnected()) {
-        connect();
-    } else {
-        autoTune();
-    }
-
-    // Zoom spectrum to maximum (1 Hz/bin)
-    if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
-        // Send zoom request directly to 1 Hz/bin for maximum zoom
-        spectrumDisplay.ws.send(JSON.stringify({
-            type: 'zoom',
-            frequency: frequency,
-            binBandwidth: 1.0  // Minimum bin bandwidth = maximum zoom
-        }));
-        log(`Tuned to bookmark: ${formatFrequency(frequency)} ${mode.toUpperCase()} (zoomed to max)`);
-    } else {
-        log(`Tuned to bookmark: ${formatFrequency(frequency)} ${mode.toUpperCase()}`);
-    }
-}
-window.handleBookmarkClick = handleBookmarkClick;
+// Bookmark functions moved to bookmark-manager.js
+// They are imported at the top of this file and exposed on window by that module
 
 // Initialize spectrum display on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -4971,6 +4832,15 @@ window.updateSpectrumContrast = updateSpectrumContrast;
 window.toggleMute = toggleMute;
 window.toggleNR2Quick = toggleNR2Quick;
 window.updateChannelSelection = updateChannelSelection;
+
+// Expose core functions for bookmark-manager.js
+window.wsManager = wsManager;
+window.updateBandButtons = updateBandButtons;
+window.updateURL = updateURL;
+window.connect = connect;
+window.autoTune = autoTune;
+window.formatFrequency = formatFrequency;
+window.log = log;
 
 // Frequency/Mode controls
 window.validateFrequencyInput = validateFrequencyInput;

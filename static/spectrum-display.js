@@ -1833,7 +1833,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         // Draw bookmarks first (so cursor appears on top)
         // This needs to be redrawn because we just cleared the canvas
         if (typeof window.drawBookmarksOnSpectrum === 'function') {
-            window.drawBookmarksOnSpectrum();
+            window.drawBookmarksOnSpectrum(this, console.log);
         }
 
         if (!this.currentTunedFreq || !this.totalBandwidth) return;

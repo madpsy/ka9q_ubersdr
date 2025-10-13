@@ -140,6 +140,15 @@ func main() {
 		log.Printf("No bookmarks.yaml found or error loading: %v", err)
 	}
 
+	// Load bands from bands.yaml if it exists
+	bandsConfig, err := LoadConfig("bands.yaml")
+	if err == nil {
+		config.Bands = bandsConfig.Bands
+		log.Printf("Loaded %d amateur radio bands from bands.yaml", len(config.Bands))
+	} else {
+		log.Printf("No bands.yaml found or error loading: %v", err)
+	}
+
 	log.Printf("Starting ka9q_ubersdr server...")
 	log.Printf("Radiod status: %s", config.Radiod.StatusGroup)
 	log.Printf("Radiod data: %s", config.Radiod.DataGroup)
@@ -214,6 +223,9 @@ func main() {
 	http.HandleFunc("/api/bookmarks", func(w http.ResponseWriter, r *http.Request) {
 		handleBookmarks(w, r, config)
 	})
+	http.HandleFunc("/api/bands", func(w http.ResponseWriter, r *http.Request) {
+		handleBands(w, r, config)
+	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
 		handleDescription(w, r, config)
 	})
@@ -228,6 +240,7 @@ func main() {
 	// Admin endpoints (session protected)
 	http.HandleFunc("/admin/config", adminHandler.AuthMiddleware(adminHandler.HandleConfig))
 	http.HandleFunc("/admin/config/schema", adminHandler.AuthMiddleware(adminHandler.HandleConfigSchema))
+	http.HandleFunc("/admin/bands", adminHandler.AuthMiddleware(adminHandler.HandleBands))
 	http.HandleFunc("/admin/bookmarks", adminHandler.AuthMiddleware(adminHandler.HandleBookmarks))
 	http.HandleFunc("/admin/sessions", adminHandler.AuthMiddleware(adminHandler.HandleSessions))
 	http.HandleFunc("/admin/kick", adminHandler.AuthMiddleware(adminHandler.HandleKickUser))
@@ -519,6 +532,16 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config) {
 
 	if err := json.NewEncoder(w).Encode(config.Bookmarks); err != nil {
 		log.Printf("Error encoding bookmarks: %v", err)
+	}
+}
+
+// handleBands serves the amateur radio bands configuration
+func handleBands(w http.ResponseWriter, r *http.Request, config *Config) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	if err := json.NewEncoder(w).Encode(config.Bands); err != nil {
+		log.Printf("Error encoding bands: %v", err)
 	}
 }
 

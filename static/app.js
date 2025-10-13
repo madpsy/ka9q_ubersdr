@@ -4561,6 +4561,9 @@ const ZOOM_THROTTLE_MS = 250;
 
 // Initialize spectrum display on page load
 document.addEventListener('DOMContentLoaded', () => {
+    // Load amateur radio bands
+    loadBands();
+
     // Load bookmarks
     loadBookmarks();
 

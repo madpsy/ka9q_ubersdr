@@ -17,6 +17,7 @@ type Config struct {
 	Spectrum  SpectrumConfig `yaml:"spectrum"`
 	Logging   LoggingConfig  `yaml:"logging"`
 	Bookmarks []Bookmark     `yaml:"bookmarks"`
+	Bands     []Band         `yaml:"bands"`
 }
 
 // AdminConfig contains admin authentication settings
@@ -42,6 +43,13 @@ type Bookmark struct {
 	Name      string `yaml:"name" json:"name"`
 	Frequency uint64 `yaml:"frequency" json:"frequency"`
 	Mode      string `yaml:"mode" json:"mode"`
+}
+
+// Band represents an amateur radio band
+type Band struct {
+	Label string `yaml:"label" json:"label"`
+	Start uint64 `yaml:"start" json:"start"`
+	End   uint64 `yaml:"end" json:"end"`
 }
 
 // RadiodConfig contains radiod connection settings

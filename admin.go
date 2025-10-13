@@ -729,6 +729,296 @@ func (ah *AdminHandler) reloadBookmarks() error {
 	return nil
 }
 
+// HandleBands handles GET, POST, PUT, DELETE requests for bands
+func (ah *AdminHandler) HandleBands(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		ah.handleGetBands(w, r)
+	case http.MethodPost:
+		ah.handleAddBand(w, r)
+	case http.MethodPut:
+		ah.handleUpdateBands(w, r)
+	case http.MethodDelete:
+		ah.handleDeleteBand(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetBands returns all bands
+func (ah *AdminHandler) handleGetBands(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile("bands.yaml")
+	if err != nil {
+		// If file doesn't exist, return empty bands
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"bands": []interface{}{}})
+		return
+	}
+
+	var bandsConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &bandsConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse bands: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(bandsConfig)
+}
+
+// handleAddBand adds a new band
+func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
+	var newBand Band
+	if err := json.NewDecoder(r.Body).Decode(&newBand); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate band
+	if newBand.Label == "" || newBand.Start == 0 || newBand.End == 0 {
+		http.Error(w, "Label, start, and end are required", http.StatusBadRequest)
+		return
+	}
+
+	if newBand.Start >= newBand.End {
+		http.Error(w, "Start frequency must be less than end frequency", http.StatusBadRequest)
+		return
+	}
+
+	// Read existing bands
+	var bandsConfig map[string]interface{}
+	data, err := os.ReadFile("bands.yaml")
+	if err == nil {
+		yaml.Unmarshal(data, &bandsConfig)
+	} else {
+		bandsConfig = make(map[string]interface{})
+	}
+
+	// Get bands array
+	var bands []interface{}
+	if existing, ok := bandsConfig["bands"].([]interface{}); ok {
+		bands = existing
+	}
+
+	// Add new band
+	bands = append(bands, map[string]interface{}{
+		"label": newBand.Label,
+		"start": newBand.Start,
+		"end":   newBand.End,
+	})
+	bandsConfig["bands"] = bands
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(bandsConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal bands: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile("bands.yaml", yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write bands file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reload bands into memory
+	if err := ah.reloadBands(); err != nil {
+		log.Printf("Warning: Failed to reload bands after add: %v", err)
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Band added successfully",
+	})
+}
+
+// handleUpdateBands updates a single band by index or replaces all bands
+func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request) {
+	indexStr := r.URL.Query().Get("index")
+
+	// If no index provided, replace all bands (for import functionality)
+	if indexStr == "" {
+		var bandsConfig map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&bandsConfig); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Convert to YAML and write to file
+		yamlData, err := yaml.Marshal(bandsConfig)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to marshal bands: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		if err := os.WriteFile("bands.yaml", yamlData, 0644); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to write bands file: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Reload bands into memory
+		if err := ah.reloadBands(); err != nil {
+			log.Printf("Warning: Failed to reload bands after update: %v", err)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "success",
+			"message": "Bands updated successfully",
+		})
+		return
+	}
+
+	// Update single band by index
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		http.Error(w, "Invalid index", http.StatusBadRequest)
+		return
+	}
+
+	var updatedBand Band
+	if err := json.NewDecoder(r.Body).Decode(&updatedBand); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate band
+	if updatedBand.Label == "" || updatedBand.Start == 0 || updatedBand.End == 0 {
+		http.Error(w, "Label, start, and end are required", http.StatusBadRequest)
+		return
+	}
+
+	if updatedBand.Start >= updatedBand.End {
+		http.Error(w, "Start frequency must be less than end frequency", http.StatusBadRequest)
+		return
+	}
+
+	// Read existing bands
+	data, err := os.ReadFile("bands.yaml")
+	if err != nil {
+		http.Error(w, "Failed to read bands file", http.StatusInternalServerError)
+		return
+	}
+
+	var bandsConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &bandsConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse bands: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get bands array
+	bands, ok := bandsConfig["bands"].([]interface{})
+	if !ok || index < 0 || index >= len(bands) {
+		http.Error(w, "Invalid band index", http.StatusBadRequest)
+		return
+	}
+
+	// Update band at index
+	bands[index] = map[string]interface{}{
+		"label": updatedBand.Label,
+		"start": updatedBand.Start,
+		"end":   updatedBand.End,
+	}
+	bandsConfig["bands"] = bands
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(bandsConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal bands: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile("bands.yaml", yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write bands file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reload bands into memory
+	if err := ah.reloadBands(); err != nil {
+		log.Printf("Warning: Failed to reload bands after update: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Band updated successfully",
+	})
+}
+
+// handleDeleteBand deletes a band by index
+func (ah *AdminHandler) handleDeleteBand(w http.ResponseWriter, r *http.Request) {
+	indexStr := r.URL.Query().Get("index")
+	if indexStr == "" {
+		http.Error(w, "Index parameter required", http.StatusBadRequest)
+		return
+	}
+
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		http.Error(w, "Invalid index", http.StatusBadRequest)
+		return
+	}
+
+	// Read existing bands
+	data, err := os.ReadFile("bands.yaml")
+	if err != nil {
+		http.Error(w, "Failed to read bands file", http.StatusInternalServerError)
+		return
+	}
+
+	var bandsConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &bandsConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse bands: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get bands array
+	bands, ok := bandsConfig["bands"].([]interface{})
+	if !ok || index < 0 || index >= len(bands) {
+		http.Error(w, "Invalid band index", http.StatusBadRequest)
+		return
+	}
+
+	// Remove band at index
+	bands = append(bands[:index], bands[index+1:]...)
+	bandsConfig["bands"] = bands
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(bandsConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal bands: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile("bands.yaml", yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write bands file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reload bands into memory
+	if err := ah.reloadBands(); err != nil {
+		log.Printf("Warning: Failed to reload bands after delete: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Band deleted successfully",
+	})
+}
+
+// reloadBands reloads bands from bands.yaml into memory
+func (ah *AdminHandler) reloadBands() error {
+	bandsConfig, err := LoadConfig("bands.yaml")
+	if err != nil {
+		return fmt.Errorf("failed to reload bands: %w", err)
+	}
+	ah.config.Bands = bandsConfig.Bands
+	log.Printf("Reloaded %d bands from bands.yaml", len(ah.config.Bands))
+	return nil
+}
+
 // HandleSessions returns information about all active sessions
 func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

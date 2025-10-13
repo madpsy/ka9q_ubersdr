@@ -1,6 +1,7 @@
 ka9q_ubersdr
 config.yaml
 bookmarks.yaml
+bands.yaml
 banned_ips.yaml
 web.log
 clients/go/radio_client

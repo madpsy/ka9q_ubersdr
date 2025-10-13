@@ -9,6 +9,130 @@ window.bookmarks = bookmarks;
 let bookmarkPositions = [];
 window.bookmarkPositions = bookmarkPositions;
 
+// Amateur Radio Bands array (loaded from server)
+let amateurBands = [];
+window.amateurBands = amateurBands;
+
+// Color palette for bands (rainbow gradient)
+const bandColors = [
+    'rgba(255, 100, 100, 0.2)',   // Red
+    'rgba(255, 150, 100, 0.2)',   // Orange-red
+    'rgba(255, 200, 100, 0.2)',   // Orange
+    'rgba(255, 255, 100, 0.2)',   // Yellow
+    'rgba(200, 255, 100, 0.2)',   // Yellow-green
+    'rgba(100, 255, 100, 0.2)',   // Green
+    'rgba(100, 255, 200, 0.2)',   // Cyan-green
+    'rgba(100, 200, 255, 0.2)',   // Cyan
+    'rgba(100, 100, 255, 0.2)',   // Blue
+    'rgba(150, 100, 255, 0.2)'    // Purple
+];
+
+// Draw amateur radio band backgrounds on the spectrum overlay
+function drawAmateurBandBackgrounds(spectrumDisplay) {
+    if (!spectrumDisplay || !spectrumDisplay.overlayCtx) {
+        return;
+    }
+
+    const ctx = spectrumDisplay.overlayCtx;
+    
+    if (!spectrumDisplay.totalBandwidth || !spectrumDisplay.centerFreq) {
+        return;
+    }
+
+    // Calculate visible frequency range
+    const startFreq = spectrumDisplay.centerFreq - spectrumDisplay.totalBandwidth / 2;
+    const endFreq = spectrumDisplay.centerFreq + spectrumDisplay.totalBandwidth / 2;
+
+    // Draw band backgrounds for each amateur band that's visible
+    amateurBands.forEach(band => {
+        // Check if band overlaps with visible spectrum
+        if (band.end >= startFreq && band.start <= endFreq) {
+            // Calculate pixel positions
+            const bandStartX = Math.max(0, ((band.start - startFreq) / spectrumDisplay.totalBandwidth) * spectrumDisplay.width);
+            const bandEndX = Math.min(spectrumDisplay.width, ((band.end - startFreq) / spectrumDisplay.totalBandwidth) * spectrumDisplay.width);
+            const bandWidth = bandEndX - bandStartX;
+            
+            if (bandWidth > 0) {
+                // Draw semi-transparent colored rectangle (35px height for bookmark area)
+                ctx.fillStyle = band.color;
+                ctx.fillRect(bandStartX, 0, bandWidth, 35);
+
+                // Prepare label styling
+                ctx.font = 'bold 9px monospace';
+                ctx.textBaseline = 'top';
+                const labelText = band.name;
+                const textWidth = ctx.measureText(labelText).width;
+                const labelY = 2;
+                const padding = 2;
+                const labelWidth = textWidth + padding * 2;
+
+                // Helper function to draw a label at a specific X position
+                const drawLabel = (x) => {
+                    // Ensure label stays within band boundaries
+                    const minX = bandStartX + labelWidth / 2;
+                    const maxX = bandEndX - labelWidth / 2;
+                    const clampedX = Math.max(minX, Math.min(maxX, x));
+
+                    // Background rectangle for text
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                    ctx.fillRect(clampedX - labelWidth / 2, labelY, labelWidth, 10);
+
+                    // Draw text (centered)
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(labelText, clampedX, labelY + 1);
+                };
+
+                // Calculate optimal label spacing based on band width
+                // Aim for labels every 150-200 pixels for cleaner appearance
+                const minLabelSpacing = 150;
+
+                if (bandWidth < 30) {
+                    // Too narrow for any labels
+                    return;
+                } else if (bandWidth < minLabelSpacing) {
+                    // Single label in center
+                    drawLabel(bandStartX + bandWidth / 2);
+                } else {
+                    // Calculate number of labels based on band width
+                    // Space them evenly across the band with wider spacing
+                    const idealSpacing = 180; // pixels between labels (increased from 100)
+                    const numLabels = Math.max(2, Math.floor(bandWidth / idealSpacing) + 1);
+                    const actualSpacing = bandWidth / (numLabels - 1);
+
+                    // Draw labels at regular intervals
+                    for (let i = 0; i < numLabels; i++) {
+                        const x = bandStartX + (i * actualSpacing);
+                        drawLabel(x);
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Load amateur radio bands from server
+async function loadBands() {
+    try {
+        const response = await fetch('/api/bands');
+        if (response.ok) {
+            const bandsData = await response.json();
+            // Add colors to bands
+            amateurBands = bandsData.map((band, index) => ({
+                ...band,
+                name: band.label, // Add 'name' alias for compatibility
+                color: bandColors[index % bandColors.length]
+            }));
+            window.amateurBands = amateurBands; // Update window reference
+            console.log(`Loaded ${amateurBands.length} amateur radio bands`);
+        } else {
+            console.error('No bands available');
+        }
+    } catch (err) {
+        console.error('Failed to load bands:', err);
+    }
+}
+
 // Load bookmarks from server
 async function loadBookmarks() {
     try {
@@ -28,6 +152,9 @@ async function loadBookmarks() {
 
 // Draw bookmark flags on the spectrum display (expose on window for spectrum-display.js access)
 function drawBookmarksOnSpectrum(spectrumDisplay, log) {
+    // Draw amateur band backgrounds first (before bookmarks)
+    drawAmateurBandBackgrounds(spectrumDisplay);
+
     if (!spectrumDisplay || !bookmarks || bookmarks.length === 0) {
         bookmarkPositions = [];
         window.bookmarkPositions = bookmarkPositions;
@@ -178,11 +305,17 @@ function handleBookmarkClick(frequency, mode) {
 export {
     bookmarks,
     bookmarkPositions,
+    amateurBands,
+    loadBands,
     loadBookmarks,
+    drawAmateurBandBackgrounds,
     drawBookmarksOnSpectrum,
     handleBookmarkClick
 };
 
 // Expose functions on window for spectrum-display.js access
+window.amateurBands = amateurBands;
+window.loadBands = loadBands;
+window.drawAmateurBandBackgrounds = drawAmateurBandBackgrounds;
 window.drawBookmarksOnSpectrum = drawBookmarksOnSpectrum;
 window.handleBookmarkClick = handleBookmarkClick;

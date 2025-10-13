@@ -302,6 +302,7 @@
                     <button class="tab active" onclick="switchTab('visual')">Visual Editor</button>
                     <button class="tab" onclick="switchTab('yaml')">YAML Editor</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
+                    <button class="tab" onclick="switchTab('bands')">Bands</button>
                     <button class="tab" onclick="switchTab('sessions')">Active Sessions</button>
                     <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
                 </div>
@@ -356,6 +357,35 @@
                     </div>
                 </div>
 
+                <!-- Bands Tab -->
+                <div id="bandsTab" class="tab-content">
+                    <div class="alert alert-info" style="margin-bottom: 20px;">
+                        ℹ️ <strong>Note:</strong> Band changes take effect immediately and are visible to all users without requiring a server restart.
+                    </div>
+                    <div id="bandsList" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading bands...</p>
+                    </div>
+                    <div id="addBandForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+                        <h3 id="bandFormTitle">Add New Band</h3>
+                        <input type="hidden" id="editBandIndex" value="-1">
+                        <div class="config-field">
+                            <label>Label</label>
+                            <input type="text" id="newBandLabel" placeholder="e.g., 20m">
+                        </div>
+                        <div class="config-field">
+                            <label>Start Frequency (Hz)</label>
+                            <input type="number" id="newBandStart" placeholder="e.g., 14000000">
+                        </div>
+                        <div class="config-field">
+                            <label>End Frequency (Hz)</label>
+                            <input type="number" id="newBandEnd" placeholder="e.g., 14350000">
+                        </div>
+                        <button class="btn" onclick="saveBand()">Save Band</button>
+                        <button class="btn btn-secondary" onclick="cancelBandForm()">Cancel</button>
+                    </div>
+                </div>
+
                 <!-- Sessions Tab -->
                 <div id="sessionsTab" class="tab-content">
                     <div id="sessionsList" class="loading">
@@ -385,6 +415,12 @@
                     <button class="btn btn-secondary" onclick="exportBookmarks()">Export Bookmarks</button>
                     <button class="btn btn-secondary" onclick="importBookmarks()">Import Bookmarks</button>
                 </div>
+                <div class="button-group" id="bandButtons" style="display: none;">
+                    <button class="btn" onclick="showAddBandForm()">Add New Band</button>
+                    <button class="btn btn-secondary" onclick="loadBands()">Reload Bands</button>
+                    <button class="btn btn-secondary" onclick="exportBands()">Export Bands</button>
+                    <button class="btn btn-secondary" onclick="importBands()">Import Bands</button>
+                </div>
                 <div class="button-group" id="sessionButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
                 </div>
@@ -393,6 +429,7 @@
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
+                <input type="file" id="bandsFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBandsImport(event)">
             </div>
         </div>
     </div>
@@ -480,6 +517,7 @@
             // Hide all button groups
             document.getElementById('configButtons').style.display = 'none';
             document.getElementById('bookmarkButtons').style.display = 'none';
+            document.getElementById('bandButtons').style.display = 'none';
             document.getElementById('sessionButtons').style.display = 'none';
             document.getElementById('bannedButtons').style.display = 'none';
 
@@ -502,14 +540,19 @@
                 document.getElementById('bookmarksTab').classList.add('active');
                 document.getElementById('bookmarkButtons').style.display = 'flex';
                 loadBookmarks();
-            } else if (tab === 'sessions') {
+            } else if (tab === 'bands') {
                 document.querySelector('.tab:nth-child(4)').classList.add('active');
+                document.getElementById('bandsTab').classList.add('active');
+                document.getElementById('bandButtons').style.display = 'flex';
+                loadBands();
+            } else if (tab === 'sessions') {
+                document.querySelector('.tab:nth-child(5)').classList.add('active');
                 document.getElementById('sessionsTab').classList.add('active');
                 document.getElementById('sessionButtons').style.display = 'flex';
                 loadSessions();
                 startSessionsAutoRefresh();
             } else if (tab === 'banned') {
-                document.querySelector('.tab:nth-child(5)').classList.add('active');
+                document.querySelector('.tab:nth-child(6)').classList.add('active');
                 document.getElementById('bannedTab').classList.add('active');
                 document.getElementById('bannedButtons').style.display = 'flex';
                 loadBannedIPs();
@@ -1084,6 +1127,288 @@
                 showAlert(`Successfully imported ${importedBookmarks.length} bookmark(s)`, 'success');
             } catch (error) {
                 showAlert('Error importing bookmarks: ' + error.message, 'error');
+            }
+
+            // Reset file input
+            event.target.value = '';
+        }
+
+        // Bands management
+        let currentBands = [];
+
+        async function loadBands() {
+            try {
+                const response = await fetch('/admin/bands');
+                if (!response.ok) throw new Error('Failed to load bands');
+                
+                const data = await response.json();
+                currentBands = data.bands || [];
+                renderBands();
+                showAlert('Bands loaded successfully', 'success');
+            } catch (error) {
+                showAlert('Error loading bands: ' + error.message, 'error');
+            }
+        }
+
+        function renderBands() {
+            const container = document.getElementById('bandsList');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            if (currentBands.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No bands found. Click "Add New Band" to create one.</p>';
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.innerHTML = `
+                <thead>
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: left;">Label</th>
+                        <th style="padding: 12px; text-align: left;">Start Frequency (Hz)</th>
+                        <th style="padding: 12px; text-align: left;">End Frequency (Hz)</th>
+                        <th style="padding: 12px; text-align: left;">Bandwidth</th>
+                        <th style="padding: 12px; text-align: center;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="bandsTableBody"></tbody>
+            `;
+            container.appendChild(table);
+
+            const tbody = document.getElementById('bandsTableBody');
+            currentBands.forEach((band, index) => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+                const bandwidth = band.end - band.start;
+                const bandwidthKHz = (bandwidth / 1000).toFixed(0);
+                row.innerHTML = `
+                    <td style="padding: 12px;"><strong>${band.label}</strong></td>
+                    <td style="padding: 12px;">${band.start.toLocaleString()}</td>
+                    <td style="padding: 12px;">${band.end.toLocaleString()}</td>
+                    <td style="padding: 12px;">${bandwidthKHz} kHz</td>
+                    <td style="padding: 12px; text-align: center;">
+                        <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBand(${index})">Edit</button>
+                        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBand(${index})">Delete</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function showAddBandForm() {
+            document.getElementById('bandFormTitle').textContent = 'Add New Band';
+            document.getElementById('editBandIndex').value = '-1';
+            document.getElementById('addBandForm').style.display = 'block';
+            document.getElementById('newBandLabel').value = '';
+            document.getElementById('newBandStart').value = '';
+            document.getElementById('newBandEnd').value = '';
+        }
+
+        function editBand(index) {
+            const band = currentBands[index];
+            document.getElementById('bandFormTitle').textContent = 'Edit Band';
+            document.getElementById('editBandIndex').value = index;
+            document.getElementById('addBandForm').style.display = 'block';
+            document.getElementById('newBandLabel').value = band.label;
+            document.getElementById('newBandStart').value = band.start;
+            document.getElementById('newBandEnd').value = band.end;
+            
+            // Scroll the form into view
+            document.getElementById('addBandForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function cancelBandForm() {
+            document.getElementById('addBandForm').style.display = 'none';
+            document.getElementById('editBandIndex').value = '-1';
+        }
+
+        async function saveBand() {
+            const label = document.getElementById('newBandLabel').value.trim();
+            const start = parseInt(document.getElementById('newBandStart').value);
+            const end = parseInt(document.getElementById('newBandEnd').value);
+            const editIndex = parseInt(document.getElementById('editBandIndex').value);
+
+            if (!label || !start || !end) {
+                showAlert('Please fill in all fields', 'error');
+                return;
+            }
+
+            if (start >= end) {
+                showAlert('Start frequency must be less than end frequency', 'error');
+                return;
+            }
+
+            try {
+                if (editIndex >= 0) {
+                    // Update existing band
+                    const response = await fetch('/admin/bands?index=' + editIndex, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ label, start, end })
+                    });
+
+                    if (!response.ok) throw new Error('Failed to update band');
+                    
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                } else {
+                    // Add new band
+                    const response = await fetch('/admin/bands', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ label, start, end })
+                    });
+
+                    if (!response.ok) throw new Error('Failed to add band');
+                    
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                }
+                
+                cancelBandForm();
+                await loadBands();
+            } catch (error) {
+                showAlert('Error saving band: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteBand(index) {
+            if (!confirm('Are you sure you want to delete this band?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/bands?index=' + index, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) throw new Error('Failed to delete band');
+
+                const result = await response.json();
+                showAlert(result.message, 'success');
+                await loadBands();
+            } catch (error) {
+                showAlert('Error deleting band: ' + error.message, 'error');
+            }
+        }
+
+        // Bands Import/Export functions
+        function exportBands() {
+            if (currentBands.length === 0) {
+                showAlert('No bands to export', 'info');
+                return;
+            }
+
+            const bandsData = {
+                bands: currentBands
+            };
+
+            // Convert to YAML format (simple implementation)
+            let yamlContent = 'bands:\n';
+            currentBands.forEach(band => {
+                yamlContent += `  - label: "${band.label}"\n`;
+                yamlContent += `    start: ${band.start}\n`;
+                yamlContent += `    end: ${band.end}\n`;
+            });
+
+            const blob = new Blob([yamlContent], { type: 'text/yaml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'bands.yaml';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showAlert('Bands exported successfully', 'success');
+        }
+
+        function importBands() {
+            document.getElementById('bandsFileInput').click();
+        }
+
+        async function handleBandsImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                let importedBands;
+
+                if (file.name.endsWith('.json')) {
+                    const data = JSON.parse(text);
+                    importedBands = data.bands || [];
+                } else {
+                    // Simple YAML parsing for bands
+                    const lines = text.split('\n');
+                    importedBands = [];
+                    let currentBand = null;
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (trimmed.startsWith('- label:')) {
+                            if (currentBand) {
+                                importedBands.push(currentBand);
+                            }
+                            currentBand = {
+                                label: trimmed.substring(8).trim().replace(/^["']|["']$/g, ''),
+                                start: 0,
+                                end: 0
+                            };
+                        } else if (currentBand) {
+                            if (trimmed.startsWith('start:')) {
+                                currentBand.start = parseInt(trimmed.substring(6).trim());
+                            } else if (trimmed.startsWith('end:')) {
+                                currentBand.end = parseInt(trimmed.substring(4).trim());
+                            }
+                        }
+                    }
+                    if (currentBand) {
+                        importedBands.push(currentBand);
+                    }
+                }
+
+                if (importedBands.length === 0) {
+                    showAlert('No valid bands found in file', 'error');
+                    return;
+                }
+
+                // Ask user if they want to replace or merge
+                const action = confirm(
+                    `Found ${importedBands.length} band(s).\n\n` +
+                    'Click OK to REPLACE all existing bands.\n' +
+                    'Click Cancel to MERGE with existing bands.'
+                );
+
+                if (action) {
+                    // Replace all bands
+                    currentBands = importedBands;
+                } else {
+                    // Merge bands
+                    currentBands = [...currentBands, ...importedBands];
+                }
+
+                // Save to server
+                const response = await fetch('/admin/bands', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ bands: currentBands })
+                });
+
+                if (!response.ok) throw new Error('Failed to save imported bands');
+
+                await loadBands();
+                showAlert(`Successfully imported ${importedBands.length} band(s)`, 'success');
+            } catch (error) {
+                showAlert('Error importing bands: ' + error.message, 'error');
             }
 
             // Reset file input

@@ -534,6 +534,20 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     handleMessage(msg) {
         switch (msg.type) {
             case 'config':
+                // CRITICAL: Clear peak hold FIRST before updating any config values
+                // This prevents NaN values when spectrum data arrives with old peak hold data
+                const oldCenterFreq = this.centerFreq;
+                const oldTotalBandwidth = this.totalBandwidth;
+                const oldBinCount = this.binCount;
+
+                // Clear peak hold immediately if frequency range or bin count will change
+                if ((oldCenterFreq !== 0 && oldCenterFreq !== msg.centerFreq) ||
+                    (oldTotalBandwidth !== 0 && oldTotalBandwidth !== msg.totalBandwidth) ||
+                    (oldBinCount !== 0 && oldBinCount !== msg.binCount)) {
+                    this.peakHoldData = null;
+                    console.log('Peak hold cleared BEFORE config update to prevent NaN values');
+                }
+
                 this.centerFreq = msg.centerFreq;
                 this.binCount = msg.binCount;
                 this.binBandwidth = msg.binBandwidth;
@@ -1249,6 +1263,25 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             for (let i = 0; i < currentData.length; i++) {
                 this.peakHoldData[i] = currentData[i];
             }
+            console.log(`Peak hold initialized with ${currentData.length} bins`);
+            return;
+        }
+
+        // Check for NaN values in peak hold data - if found, reinitialize
+        let hasNaN = false;
+        for (let i = 0; i < this.peakHoldData.length; i++) {
+            if (!isFinite(this.peakHoldData[i])) {
+                hasNaN = true;
+                break;
+            }
+        }
+        
+        if (hasNaN) {
+            console.log('Peak hold contains NaN values, reinitializing');
+            this.peakHoldData = new Float32Array(currentData.length);
+            for (let i = 0; i < currentData.length; i++) {
+                this.peakHoldData[i] = currentData[i];
+            }
             return;
         }
 
@@ -1271,12 +1304,20 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         const dbRange = maxDb - minDb;
         if (dbRange === 0 || !isFinite(dbRange)) return;
 
+        // Verify peak hold data matches current spectrum length
+        if (this.peakHoldData.length !== this.spectrumData.length) {
+            console.log(`Peak hold length mismatch: ${this.peakHoldData.length} vs ${this.spectrumData.length}, clearing`);
+            this.peakHoldData = null;
+            return;
+        }
+
         // Draw peak hold line in light yellow color as solid line
         ctx.strokeStyle = 'rgba(255, 255, 200, 0.5)'; // Light yellow, semi-transparent
         ctx.lineWidth = 1;
         ctx.beginPath();
 
         let firstPoint = true;
+        let pointsDrawn = 0;
         for (let x = 0; x < graphWidth; x++) {
             // Map pixel x to exact bin position
             const binPos = (x / graphWidth) * this.peakHoldData.length;
@@ -1295,9 +1336,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 continue;
             }
 
-            // Calculate y position
+            // Skip if dB value is invalid
+            if (!isFinite(db)) {
+                continue;
+            }
+
+            // Calculate y position - use graphTopMargin + graphDrawHeight as base, subtract normalized height
             const normalized = Math.max(0, Math.min(1, (db - minDb) / dbRange));
-            const y = graphHeight - (normalized * graphDrawHeight);
+            const y = graphTopMargin + graphDrawHeight - (normalized * graphDrawHeight);
 
             if (firstPoint) {
                 ctx.moveTo(x, y);
@@ -1305,7 +1351,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             } else {
                 ctx.lineTo(x, y);
             }
+            pointsDrawn++;
         }
+
 
         ctx.stroke();
     }
@@ -2633,6 +2681,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         console.log(`Zoom in: ${(currentTotalBW/1e6).toFixed(3)} MHz -> ${(newTotalBW/1e6).toFixed(3)} MHz ` +
                     `(${this.binBandwidth.toFixed(1)} -> ${newBinBandwidth.toFixed(1)} Hz/bin, ${this.binCount} bins)`);
 
+        // Clear peak hold before zoom to prevent misalignment
+        this.peakHoldData = null;
+
         // Send zoom request to server - backend handles bin_count adjustment automatically
         this.ws.send(JSON.stringify({
             type: 'zoom',
@@ -2668,6 +2719,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         console.log(`Zoom out: ${(currentTotalBW/1e6).toFixed(3)} MHz -> ${(newTotalBW/1e6).toFixed(3)} MHz ` +
                     `(${this.binBandwidth.toFixed(1)} -> ${newBinBandwidth.toFixed(1)} Hz/bin)`);
 
+        // Clear peak hold before zoom to prevent misalignment
+        this.peakHoldData = null;
+
         // Send zoom request to server
         this.ws.send(JSON.stringify({
             type: 'zoom',
@@ -2681,6 +2735,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         if (!this.connected || !this.ws) return;
 
         console.log(`Reset zoom to full bandwidth view`);
+
+        // Clear peak hold before reset to prevent misalignment
+        this.peakHoldData = null;
 
         // Send reset request to server - backend will use default config values
         this.ws.send(JSON.stringify({

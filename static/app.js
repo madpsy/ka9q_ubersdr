@@ -298,6 +298,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Escape or Enter key: Unfocus input fields to allow shortcuts
+        if (e.key === 'Escape' || e.key === 'Enter') {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+                e.preventDefault();
+                e.target.blur(); // Remove focus from the input
+                return;
+            }
+        }
+
         // Only handle shortcuts when not typing in an input field
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
             return;

@@ -4321,16 +4321,21 @@ function initNoiseReduction() {
         nr2 = new NR2Processor(audioContext, 2048, 4);
         nr2.setParameters(noiseReductionStrength, noiseReductionFloor, 1.0);
 
-        // Create script processor
+        // Create script processor: mono input, stereo output (1 in, 2 out)
         const bufferSize = 2048;
-        noiseReductionProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+        noiseReductionProcessor = audioContext.createScriptProcessor(bufferSize, 1, 2);
 
         noiseReductionProcessor.onaudioprocess = (e) => {
+            // Process mono input through NR2
             const input = e.inputBuffer.getChannelData(0);
-            const output = e.outputBuffer.getChannelData(0);
+            const outputL = e.outputBuffer.getChannelData(0);
 
-            // Process through NR2
-            nr2.process(input, output);
+            // Process through NR2 to left channel
+            nr2.process(input, outputL);
+
+            // Duplicate left channel to right channel
+            const outputR = e.outputBuffer.getChannelData(1);
+            outputR.set(outputL);
         };
 
         // Create makeup gain node

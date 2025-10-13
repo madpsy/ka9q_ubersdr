@@ -245,6 +245,17 @@ function updateBandpassFilter() {
     }
 }
 
+function resetBandpassFilter() {
+    const defaults = { center: 800, width: 200, stages: 4, autoQ: true, qMultiplier: 1.0 };
+    document.getElementById('bandpass-center').value = defaults.center;
+    document.getElementById('bandpass-width').value = defaults.width;
+    document.getElementById('bandpass-stages').value = defaults.stages;
+    document.getElementById('bandpass-auto-q').checked = defaults.autoQ;
+    document.getElementById('bandpass-q-multiplier').value = defaults.qMultiplier;
+    updateBandpassFilter();
+    console.log('Bandpass filter reset');
+}
+
 // ============================================================================
 // NOTCH FILTER
 // ============================================================================
@@ -603,6 +614,16 @@ function updateStereoVirtualizer() {
     stereoMakeupGain.gain.value = Math.pow(10, makeupGainDb / 20);
 }
 
+function resetStereoVirtualizer() {
+    const defaults = { width: 50, delay: 16, separation: 40, makeupGain: 0 };
+    document.getElementById('stereo-width').value = defaults.width;
+    document.getElementById('stereo-delay').value = defaults.delay;
+    document.getElementById('stereo-separation').value = defaults.separation;
+    document.getElementById('stereo-makeup-gain').value = defaults.makeupGain;
+    updateStereoVirtualizer();
+    console.log('Stereo virtualizer reset');
+}
+
 function showStereoClipIndicator() {
     const indicator = document.getElementById('stereo-virtualizer-clip-indicator');
     if (!indicator) return;
@@ -686,6 +707,16 @@ function updateSquelch() {
     document.getElementById('squelch-hysteresis-value').textContent = hysteresisDb + ' dB';
     document.getElementById('squelch-attack-value').textContent = attackMs + ' ms';
     document.getElementById('squelch-release-value').textContent = releaseMs + ' ms';
+}
+
+function resetSquelch() {
+    const defaults = { threshold: -35, hysteresis: 3, attack: 20, release: 500 };
+    document.getElementById('squelch-threshold').value = defaults.threshold;
+    document.getElementById('squelch-hysteresis').value = defaults.hysteresis;
+    document.getElementById('squelch-attack').value = defaults.attack;
+    document.getElementById('squelch-release').value = defaults.release;
+    updateSquelch();
+    console.log('Squelch reset');
 }
 
 function processSquelch() {
@@ -772,6 +803,7 @@ window.toggleBandpassFilter = toggleBandpassFilter;
 window.updateBandpassSliderRanges = updateBandpassSliderRanges;
 window.initializeBandpassFilter = initializeBandpassFilter;
 window.updateBandpassFilter = updateBandpassFilter;
+window.resetBandpassFilter = resetBandpassFilter;
 
 window.notchFilters = notchFilters;
 window.notchEnabled = notchEnabled;
@@ -806,6 +838,7 @@ window.stereoAnalyser = stereoAnalyser;
 window.initializeStereoVirtualizer = initializeStereoVirtualizer;
 window.toggleStereoVirtualizer = toggleStereoVirtualizer;
 window.updateStereoVirtualizer = updateStereoVirtualizer;
+window.resetStereoVirtualizer = resetStereoVirtualizer;
 window.showStereoClipIndicator = showStereoClipIndicator;
 
 window.squelchEnabled = squelchEnabled;
@@ -821,6 +854,7 @@ window.squelchTargetGain = squelchTargetGain;
 window.initializeSquelch = initializeSquelch;
 window.toggleSquelch = toggleSquelch;
 window.updateSquelch = updateSquelch;
+window.resetSquelch = resetSquelch;
 window.processSquelch = processSquelch;
 window.updateSquelchStatus = updateSquelchStatus;
 

@@ -4408,6 +4408,16 @@ function updateNoiseReduction() {
     }
 }
 
+function resetNoiseReduction() {
+    const defaults = { strength: 40, floor: 10, adaptRate: 1.0, makeupGain: -3 };
+    document.getElementById('noise-reduction-strength').value = defaults.strength;
+    document.getElementById('noise-reduction-floor').value = defaults.floor;
+    document.getElementById('noise-reduction-adapt-rate').value = defaults.adaptRate;
+    document.getElementById('noise-reduction-makeup-gain').value = defaults.makeupGain;
+    updateNoiseReduction();
+    console.log('Noise reduction reset');
+}
+
 // Show noise reduction clipping indicator
 function showNoiseReductionClipIndicator() {
     const indicator = document.getElementById('noise-reduction-clip-indicator');
@@ -4531,7 +4541,7 @@ function updateLowpassFilter() {
 // Spectrum Display (Full-band FFT from radiod)
 let spectrumDisplay = null;
 let lastZoomTime = 0;
-const ZOOM_THROTTLE_MS = 1000;
+const ZOOM_THROTTLE_MS = 250;
 
 // Bookmark functions moved to bookmark-manager.js
 // They are imported at the top of this file and exposed on window by that module
@@ -4909,15 +4919,19 @@ window.addManualNotch = addManualNotch;
 window.clearAllNotches = clearAllNotches;
 window.toggleBandpassFilter = toggleBandpassFilter;
 window.updateBandpassFilter = updateBandpassFilter;
+window.resetBandpassFilter = resetBandpassFilter;
 window.toggleNoiseReduction = toggleNoiseReduction;
 window.updateNoiseReduction = updateNoiseReduction;
+window.resetNoiseReduction = resetNoiseReduction;
 window.toggleSquelch = toggleSquelch;
 window.updateSquelch = updateSquelch;
+window.resetSquelch = resetSquelch;
 window.toggleCompressor = toggleCompressor;
 window.updateCompressor = updateCompressor;
 window.resetCompressor = resetCompressor;
 window.toggleStereoVirtualizer = toggleStereoVirtualizer;
 window.updateStereoVirtualizer = updateStereoVirtualizer;
+window.resetStereoVirtualizer = resetStereoVirtualizer;
 window.toggleEqualizer = toggleEqualizer;
 window.updateEqualizer = updateEqualizer;
 window.resetEqualizer = resetEqualizer;

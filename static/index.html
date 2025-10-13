@@ -381,6 +381,7 @@
                             <label for="bandpass-q-multiplier">Q Multiplier: <span id="bandpass-q-multiplier-value">1.0x</span></label>
                             <input type="range" id="bandpass-q-multiplier" min="0.5" max="2.0" value="1.0" step="0.1" oninput="updateBandpassFilter()">
                         </div>
+                        <button onclick="resetBandpassFilter()" class="eq-reset-btn">Reset</button>
                     </div>
                 </div>
             </div>
@@ -414,6 +415,7 @@
                             <input type="range" id="noise-reduction-makeup-gain" min="-12" max="12" value="-3" step="0.5" oninput="updateNoiseReduction()">
                         </div>
                         <p class="help-text" style="font-size: 11px; margin-top: 8px;">Auto-learns noise on startup and frequency changes. Continuously adapts to slow variations. Higher strength = more aggressive. Adaptation rate controls how quickly the filter tracks changing noise.</p>
+                        <button onclick="resetNoiseReduction()" class="eq-reset-btn">Reset</button>
                     </div>
                 </div>
             </div>
@@ -450,6 +452,7 @@
                             <span id="squelch-status" style="font-weight: bold; color: #28a745;">OPEN</span>
                             <span id="squelch-level" style="margin-left: 15px; color: #888;">Level: -- dB</span>
                         </div>
+                        <button onclick="resetSquelch()" class="eq-reset-btn">Reset</button>
                     </div>
                 </div>
             </div>
@@ -486,7 +489,7 @@
                             <label for="compressor-makeup-gain">Makeup Gain: <span id="compressor-makeup-gain-value">+0 dB</span></label>
                             <input type="range" id="compressor-makeup-gain" min="0" max="40" value="0" step="1" oninput="updateCompressor()">
                         </div>
-                        <button onclick="resetCompressor()" class="eq-reset-btn">Reset Compressor</button>
+                        <button onclick="resetCompressor()" class="eq-reset-btn">Reset</button>
                     </div>
                 </div>
             </div>
@@ -520,6 +523,7 @@
                             <input type="range" id="stereo-makeup-gain" min="0" max="12" value="0" step="0.5" oninput="updateStereoVirtualizer()">
                         </div>
                         <p class="help-text" style="font-size: 11px; margin-top: 8px;">Creates a wider stereo image from mono audio. Width controls overall effect, Delay adds spatial depth, Separation controls channel independence.</p>
+                        <button onclick="resetStereoVirtualizer()" class="eq-reset-btn">Reset</button>
                     </div>
                 </div>
             </div>
@@ -605,7 +609,7 @@
                     <span class="eq-value" id="eq-8000-value">0 dB</span>
                         </div>
                     </div>
-                    <button onclick="resetEqualizer()" class="eq-reset-btn">Reset EQ</button>
+                    <button onclick="resetEqualizer()" class="eq-reset-btn">Reset</button>
                 </div>
             </div>
             </div>

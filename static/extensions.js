@@ -37,6 +37,17 @@ class RadioAPI {
     getSampleRate() {
         return window.audioContext ? window.audioContext.sampleRate : 48000;
     }
+    getBufferTime() {
+        // Get the current audio buffer time in milliseconds
+        // This is calculated as: (nextPlayTime - currentTime) * 1000
+        if (!window.audioContext || !window.nextPlayTime) {
+            return 0;
+        }
+        const currentTime = window.audioContext.currentTime;
+        const bufferAhead = window.nextPlayTime - currentTime;
+        return bufferAhead * 1000; // Convert to milliseconds
+    }
+
     
     isConnected() {
         return window.wsManager ? window.wsManager.isConnected() : false;

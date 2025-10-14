@@ -446,6 +446,10 @@ class StatsExtension extends DecoderExtension {
                                 <span class="stats-badge active" id="stats-audio-state">-</span>
                             </div>
                             <div class="stats-item">
+                                <span class="stats-label">Buffer Time</span>
+                                <span class="stats-value" id="stats-buffer-time">-</span>
+                            </div>
+                            <div class="stats-item">
                                 <span class="stats-label">Level</span>
                                 <span class="stats-value" id="stats-audio-level">-</span>
                             </div>
@@ -584,6 +588,14 @@ class StatsExtension extends DecoderExtension {
             this.updateElement('stats-sample-rate', `${audioCtx.sampleRate} Hz`);
             this.updateElement('stats-audio-state', audioCtx.state);
 
+            // Update buffer time
+            const bufferTime = this.radio.getBufferTime();
+            if (bufferTime > 0) {
+                this.updateElement('stats-buffer-time', bufferTime.toFixed(0) + ' ms');
+            } else {
+                this.updateElement('stats-buffer-time', 'N/A');
+            }
+
             if (this.currentAudioLevel !== undefined && isFinite(this.currentAudioLevel)) {
                 const levelStr = this.currentAudioLevel.toFixed(1) + ' dB';
                 this.updateElement('stats-audio-level', levelStr);
@@ -606,6 +618,7 @@ class StatsExtension extends DecoderExtension {
             // No audio context yet
             this.updateElement('stats-sample-rate', 'Not started');
             this.updateElement('stats-audio-state', 'Not started');
+            this.updateElement('stats-buffer-time', 'Not started');
             this.updateElement('stats-audio-level', 'Not started');
         }
 

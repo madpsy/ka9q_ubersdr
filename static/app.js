@@ -53,6 +53,7 @@ const wsManager = new WebSocketManager({
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             window.audioContext = audioContext;
             nextPlayTime = audioContext.currentTime;
+            window.nextPlayTime = nextPlayTime;
             audioStartTime = audioContext.currentTime;
             log(`Audio context initialized (sample rate: ${audioContext.sampleRate} Hz)`);
 
@@ -147,6 +148,8 @@ let currentVolume = 0.7;
 let lastBufferDisplayUpdate = 0;
 let nextPlayTime = 0;
 let audioStartTime = 0;
+// Expose nextPlayTime globally for extensions
+window.nextPlayTime = 0;
 let currentMode = 'usb';
 let currentBandwidthLow = 50;
 let currentBandwidthHigh = 3000;
@@ -1845,6 +1848,7 @@ function playAudioBuffer(buffer) {
     // If we're falling behind, reset the schedule
     if (nextPlayTime < currentTime) {
         nextPlayTime = currentTime;
+        window.nextPlayTime = nextPlayTime;
     }
 
     // Schedule this buffer to play at the next available time
@@ -1852,6 +1856,7 @@ function playAudioBuffer(buffer) {
 
     // Update next play time based on buffer duration
     nextPlayTime += buffer.duration;
+    window.nextPlayTime = nextPlayTime;
 
     // Update buffer display and log timing info occasionally for debugging
     const timeSinceStart = currentTime - audioStartTime;
@@ -3501,26 +3506,31 @@ function updateAudioSpectrumTooltip(clientX, clientY) {
     const startBin = startBinIndex + (x * binsPerPixel);
     const endBin = startBin + binsPerPixel;
 
-    // Average bins for this pixel (cursor position)
-    let sum = 0;
-    let count = 0;
-    for (let binIndex = Math.floor(startBin); binIndex < Math.ceil(endBin) && binIndex < audioSpectrumLastData.dataArray.length; binIndex++) {
-        sum += audioSpectrumLastData.dataArray[binIndex] || 0;
-        count++;
-    }
-    const magnitude = count > 0 ? sum / count : 0;
-
-    // Convert magnitude to dB (same as display scale)
-    const db = magnitude > 0 ? 20 * Math.log10(magnitude / 255) : -Infinity;
-
-    // Find peak signal across entire spectrum
-    let maxMagnitude = 0;
+    // Get float frequency data for absolute dBFS values
+    let db = -Infinity;
+    let peakDbFS = -Infinity;
     let maxBinIndex = startBinIndex;
-    for (let binIndex = startBinIndex; binIndex < startBinIndex + binsForBandwidth && binIndex < audioSpectrumLastData.dataArray.length; binIndex++) {
-        const mag = audioSpectrumLastData.dataArray[binIndex] || 0;
-        if (mag > maxMagnitude) {
-            maxMagnitude = mag;
-            maxBinIndex = binIndex;
+
+    if (audioSpectrumLastData.floatDataArray) {
+        // Average bins for this pixel (cursor position) - use float data for dBFS
+        let sumDb = 0;
+        let count = 0;
+        for (let binIndex = Math.floor(startBin); binIndex < Math.ceil(endBin) && binIndex < audioSpectrumLastData.floatDataArray.length; binIndex++) {
+            const dbValue = audioSpectrumLastData.floatDataArray[binIndex];
+            if (isFinite(dbValue)) {
+                sumDb += dbValue;
+                count++;
+            }
+        }
+        db = count > 0 ? sumDb / count : -Infinity;
+
+        // Find peak signal across entire spectrum using float data
+        for (let binIndex = startBinIndex; binIndex < startBinIndex + binsForBandwidth && binIndex < audioSpectrumLastData.floatDataArray.length; binIndex++) {
+            const dbValue = audioSpectrumLastData.floatDataArray[binIndex];
+            if (isFinite(dbValue) && dbValue > peakDbFS) {
+                peakDbFS = dbValue;
+                maxBinIndex = binIndex;
+            }
         }
     }
 
@@ -3529,8 +3539,7 @@ function updateAudioSpectrumTooltip(clientX, clientY) {
     const peakPixel = ((maxBinIndex - startBinIndex) / binsForBandwidth) * width;
     const peakFreq = Math.round(pixelToFrequency(peakPixel, width));
 
-    // Convert peak magnitude to dB
-    const peakDb = maxMagnitude > 0 ? 20 * Math.log10(maxMagnitude / 255) : -Infinity;
+    const peakDb = peakDbFS;
 
     // freq and peakFreq are already in the correct coordinate system from pixelToFrequency()
     // For LSB they're negative, for USB they're positive
@@ -4022,6 +4031,7 @@ function updateSpectrum() {
     // Store spectrum data for tooltip usage
     audioSpectrumLastData = {
         dataArray: new Uint8Array(dataArray),
+        floatDataArray: new Float32Array(floatDataArray),
         timestamp: Date.now()
     };
 
@@ -4098,6 +4108,10 @@ function updateWaterfall() {
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(dataArray);
+
+    // Also get float frequency data for absolute dBFS measurements (for tooltip)
+    const floatDataArray = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(floatDataArray);
 
     const width = waterfallCanvas.width;
     const height = waterfallCanvas.height;
@@ -4183,6 +4197,7 @@ function updateWaterfall() {
     // Store spectrum data for tooltip usage (waterfall uses same data)
     audioSpectrumLastData = {
         dataArray: new Uint8Array(dataArray),
+        floatDataArray: floatDataArray ? new Float32Array(floatDataArray) : null,
         timestamp: Date.now()
     };
 

@@ -3948,16 +3948,28 @@ function updateSpectrum() {
         const sliderCenter = parseInt(document.getElementById('bandpass-center').value);
         const filterBandwidth = parseInt(document.getElementById('bandpass-width').value);
 
-        // For LSB mode, convert positive slider value back to negative for display coordinates
-        const displayCenter = (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
-        const lowFreq = displayCenter - filterBandwidth / 2;
-        const highFreq = displayCenter + filterBandwidth / 2;
-
         // Get display range (accounts for CW offset)
         const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
         const displayLow = cwOffset + currentBandwidthLow;
         const displayHigh = cwOffset + currentBandwidthHigh;
 
+        // For LSB mode, invert the frequency mapping to match the corrected display
+        // LSB: slider 800 Hz should map to display position for 800 Hz (left side)
+        let displayCenter, lowFreq, highFreq;
+        if (currentMode === 'lsb' || currentMode === 'cwl') {
+            // Map positive slider value to inverted display coordinates
+            // For LSB: displayLow=-2700, displayHigh=-50
+            // slider 800 -> display at position where freq label shows 800
+            displayCenter = Math.abs(displayLow) + Math.abs(displayHigh) - sliderCenter;
+            // Make it negative for LSB coordinate system
+            displayCenter = -displayCenter;
+            lowFreq = displayCenter - filterBandwidth / 2;
+            highFreq = displayCenter + filterBandwidth / 2;
+        } else {
+            displayCenter = sliderCenter;
+            lowFreq = displayCenter - filterBandwidth / 2;
+            highFreq = displayCenter + filterBandwidth / 2;
+        }
 
         // Only draw if within visible range
         if (displayCenter >= displayLow && displayCenter <= displayHigh) {
@@ -4003,17 +4015,29 @@ function updateSpectrum() {
     // Draw notch filter indicators if enabled
     if (notchEnabled && notchFilters.length > 0) {
         for (let notch of notchFilters) {
-            // notch.center is stored as display value (negative for LSB)
-            const displayCenter = notch.center;
-            const filterBandwidth = notch.width;
-            const lowFreq = displayCenter - filterBandwidth / 2;
-            const highFreq = displayCenter + filterBandwidth / 2;
-
             // Get display range (accounts for CW offset)
             const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
             const displayLow = cwOffset + currentBandwidthLow;
             const displayHigh = cwOffset + currentBandwidthHigh;
 
+            // notch.center is stored as the actual frequency value from the click
+            // For LSB mode, we need to apply the same inversion as frequency labels
+            let displayCenter, lowFreq, highFreq;
+            if (currentMode === 'lsb' || currentMode === 'cwl') {
+                // notch.center is negative in LSB (e.g., -800)
+                // Map it to the inverted display position
+                displayCenter = Math.abs(displayLow) + Math.abs(displayHigh) - Math.abs(notch.center);
+                // Make it negative for LSB coordinate system
+                displayCenter = -displayCenter;
+                const filterBandwidth = notch.width;
+                lowFreq = displayCenter - filterBandwidth / 2;
+                highFreq = displayCenter + filterBandwidth / 2;
+            } else {
+                displayCenter = notch.center;
+                const filterBandwidth = notch.width;
+                lowFreq = displayCenter - filterBandwidth / 2;
+                highFreq = displayCenter + filterBandwidth / 2;
+            }
 
             // Only draw if within visible range
             if (displayCenter >= displayLow && displayCenter <= displayHigh) {
@@ -4457,16 +4481,25 @@ function drawWaterfallFilterOverlay() {
         const sliderCenter = parseInt(document.getElementById('bandpass-center').value);
         const filterBandwidth = parseInt(document.getElementById('bandpass-width').value);
 
-        // For LSB mode, convert positive slider value back to negative for display coordinates
-        const displayCenter = (currentBandwidthLow < 0 && currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
-        const lowFreq = displayCenter - filterBandwidth / 2;
-        const highFreq = displayCenter + filterBandwidth / 2;
-
         // Get display range (accounts for CW offset)
         const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
         const displayLow = cwOffset + currentBandwidthLow;
         const displayHigh = cwOffset + currentBandwidthHigh;
 
+        // For LSB mode, invert the frequency mapping to match the corrected display
+        let displayCenter, lowFreq, highFreq;
+        if (currentMode === 'lsb' || currentMode === 'cwl') {
+            // Map positive slider value to inverted display coordinates
+            displayCenter = Math.abs(displayLow) + Math.abs(displayHigh) - sliderCenter;
+            // Make it negative for LSB coordinate system
+            displayCenter = -displayCenter;
+            lowFreq = displayCenter - filterBandwidth / 2;
+            highFreq = displayCenter + filterBandwidth / 2;
+        } else {
+            displayCenter = sliderCenter;
+            lowFreq = displayCenter - filterBandwidth / 2;
+            highFreq = displayCenter + filterBandwidth / 2;
+        }
 
         // Only draw if within visible range
         if (displayCenter >= displayLow && displayCenter <= displayHigh) {
@@ -4514,16 +4547,27 @@ function drawWaterfallFilterOverlay() {
     // Draw notch filter indicators
     if (notchEnabled && notchFilters.length > 0) {
         for (let notch of notchFilters) {
-            // notch.center is stored as display value (negative for LSB)
-            const displayCenter = notch.center;
-            const filterBandwidth = notch.width;
-            const lowFreq = displayCenter - filterBandwidth / 2;
-            const highFreq = displayCenter + filterBandwidth / 2;
-
             // Get display range (accounts for CW offset)
             const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
             const displayLow = cwOffset + currentBandwidthLow;
             const displayHigh = cwOffset + currentBandwidthHigh;
+
+            // Apply same inversion as frequency labels for LSB mode
+            let displayCenter, lowFreq, highFreq;
+            if (currentMode === 'lsb' || currentMode === 'cwl') {
+                // notch.center is negative in LSB (e.g., -800)
+                displayCenter = Math.abs(displayLow) + Math.abs(displayHigh) - Math.abs(notch.center);
+                // Make it negative for LSB coordinate system
+                displayCenter = -displayCenter;
+                const filterBandwidth = notch.width;
+                lowFreq = displayCenter - filterBandwidth / 2;
+                highFreq = displayCenter + filterBandwidth / 2;
+            } else {
+                displayCenter = notch.center;
+                const filterBandwidth = notch.width;
+                lowFreq = displayCenter - filterBandwidth / 2;
+                highFreq = displayCenter + filterBandwidth / 2;
+            }
 
             // Only draw if within visible range
             if (displayCenter >= displayLow && displayCenter <= displayHigh) {

@@ -3919,7 +3919,7 @@ function updateSpectrum() {
         }
     }
 
-    // Draw debug info at top right (peak signal and noise floor)
+    // Draw debug info at top right (peak signal, noise floor, and SNR)
     spectrumCtx.font = 'bold 11px monospace';
     spectrumCtx.textAlign = 'right';
     spectrumCtx.textBaseline = 'top';
@@ -3928,16 +3928,25 @@ function updateSpectrum() {
     const peakDb = maxMagnitude > 0 ? (20 * Math.log10(maxMagnitude / 255)).toFixed(1) : '-∞';
     const noiseDb = minMagnitude > 0 ? (20 * Math.log10(minMagnitude / 255)).toFixed(1) : '-∞';
 
+    // Calculate SNR (Signal-to-Noise Ratio) in dB
+    let snrText = 'SNR: N/A';
+    if (maxMagnitude > 0 && minMagnitude > 0) {
+        const snrDb = (20 * Math.log10(maxMagnitude / 255)) - (20 * Math.log10(minMagnitude / 255));
+        snrText = `SNR: ${snrDb.toFixed(1)} dB`;
+    }
+
     // Background for debug info
     const debugText1 = `Peak: ${peakDb} dB`;
     const debugText2 = `Floor: ${noiseDb} dB`;
+    const debugText3 = snrText;
     const debugWidth = Math.max(
         spectrumCtx.measureText(debugText1).width,
-        spectrumCtx.measureText(debugText2).width
+        spectrumCtx.measureText(debugText2).width,
+        spectrumCtx.measureText(debugText3).width
     ) + 8;
 
     spectrumCtx.fillStyle = 'rgba(44, 62, 80, 0.9)';
-    spectrumCtx.fillRect(width - debugWidth - 4, 2, debugWidth, 28);
+    spectrumCtx.fillRect(width - debugWidth - 4, 2, debugWidth, 40);
 
     // Draw text with outline for visibility
     spectrumCtx.strokeStyle = '#000000';
@@ -3949,6 +3958,9 @@ function updateSpectrum() {
 
     spectrumCtx.strokeText(debugText2, width - 6, 16);
     spectrumCtx.fillText(debugText2, width - 6, 16);
+
+    spectrumCtx.strokeText(debugText3, width - 6, 28);
+    spectrumCtx.fillText(debugText3, width - 6, 28);
 
     // Store spectrum data for tooltip usage
     audioSpectrumLastData = {

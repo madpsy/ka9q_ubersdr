@@ -389,7 +389,7 @@ function updateNotchFilterUI() {
             </div>
             <div class="control-group">
                 <label for="notch-width-${index}">Width: <span id="notch-width-value-${index}">${notch.width} Hz</span></label>
-                <input type="range" id="notch-width-${index}" min="10" max="200" value="${notch.width}" step="5" oninput="updateNotchFilterParams(${index})">
+                <input type="range" id="notch-width-${index}" min="10" max="1000" value="${notch.width}" step="10" oninput="updateNotchFilterParams(${index})">
             </div>
         `;
         container.appendChild(notchDiv);

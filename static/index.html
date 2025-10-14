@@ -235,6 +235,16 @@
                             <span class="vu-label">Peak:</span>
                             <span id="vu-peak-value" class="vu-value">-∞ dB</span>
                         </div>
+                        <div class="vu-value-item" style="margin-top: 8px; display: flex; gap: 15px; font-size: 0.9em;">
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="radio" name="viz-tap-point" value="pre" checked onchange="updateVisualizationTapPoint()">
+                                <span>Pre-Filter</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="radio" name="viz-tap-point" value="post" onchange="updateVisualizationTapPoint()">
+                                <span>Post-Filter</span>
+                            </label>
+                        </div>
                     </div>
                 </div>
                 <div class="oscilloscope-container">

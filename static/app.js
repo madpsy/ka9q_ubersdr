@@ -57,11 +57,16 @@ const wsManager = new WebSocketManager({
             audioStartTime = audioContext.currentTime;
             log(`Audio context initialized (sample rate: ${audioContext.sampleRate} Hz)`);
 
-            // Create analyser for spectrum/waterfall
+            // Create analyser for spectrum/waterfall (pre-filter tap)
             analyser = audioContext.createAnalyser();
             analyser.fftSize = getOptimalFFTSize();
             analyser.smoothingTimeConstant = 0;
             updateFFTSizeDropdown();
+
+            // Create post-filter analyser for visualization (same tap point as VU meter)
+            postFilterAnalyser = audioContext.createAnalyser();
+            postFilterAnalyser.fftSize = getOptimalFFTSize();
+            postFilterAnalyser.smoothingTimeConstant = 0;
 
             // Create dedicated analyser for VU meter
             vuAnalyser = audioContext.createAnalyser();
@@ -70,6 +75,7 @@ const wsManager = new WebSocketManager({
 
             // Expose analysers globally for extensions
             window.analyser = analyser;
+            window.postFilterAnalyser = postFilterAnalyser;
             window.vuAnalyser = vuAnalyser;
 
             // Initialize stereo channel routing
@@ -174,7 +180,9 @@ window.currentBandwidthHigh = currentBandwidthHigh;
 
 // Audio analysis
 let analyser = null; // Analyser for spectrum/waterfall (taps signal before processing)
+let postFilterAnalyser = null; // Analyser for post-filter visualization (same tap point as VU meter)
 let vuAnalyser = null; // Dedicated analyser for VU meter (after all processing)
+let visualizationTapPoint = 'pre'; // 'pre' or 'post' - controls which analyser to use for visualization
 let spectrumCanvas = null;
 let spectrumCtx = null;
 let spectrumPeaks = null; // Array to store peak values for each bar
@@ -1754,6 +1762,10 @@ function playAudioBuffer(buffer) {
     if (equalizerEnabled && eqAnalyser) {
         gainNode.connect(eqAnalyser);
     }
+    // Connect post-filter analyser at same point as VU analyser
+    if (postFilterAnalyser) {
+        gainNode.connect(postFilterAnalyser);
+    }
     if (vuAnalyser) {
         gainNode.connect(vuAnalyser);
     }
@@ -2604,6 +2616,11 @@ let peakFloorHistory = { peak: [], floor: [] };
 const peakFloorHistorySize = 5; // Average over 5 samples (1.25 seconds at 250ms intervals)
 let cachedPeakFloor = { minDb: -80, maxDb: -20 }; // Cached peak/floor values for display
 
+// Peak frequency display (updates at same rate as scale labels)
+let lastPeakFreqUpdate = 0;
+const peakFreqUpdateInterval = 500; // Update peak frequency every 500ms (same as scale)
+let cachedPeakFreq = { value: 'N/A', unit: '' }; // Cached peak frequency for display
+
 // Shared frequency mapping helpers for consistent spectrum/waterfall alignment
 function getFrequencyBinMapping() {
     if (!analyser || !audioContext) return null;
@@ -2718,7 +2735,9 @@ function startVisualization() {
 
             // Update oscilloscope (throttled to 30fps)
             if (oscilloscope) {
-                oscilloscope.update(analyser, audioContext, currentMode, currentBandwidthLow, currentBandwidthHigh);
+                // Use the selected analyser based on tap point setting
+                const activeAnalyser = (visualizationTapPoint === 'post' && postFilterAnalyser) ? postFilterAnalyser : analyser;
+                oscilloscope.update(activeAnalyser, audioContext, currentMode, currentBandwidthLow, currentBandwidthHigh);
             }
 
             // Update spectrum (throttled to 30fps)
@@ -3627,14 +3646,16 @@ function createSpectrumLabelsCache(width, height, minDb, maxDb) {
 }
 
 function updateSpectrum() {
-    if (!analyser || !spectrumCtx) return;
+    // Use the selected analyser based on tap point setting
+    const activeAnalyser = (visualizationTapPoint === 'post' && postFilterAnalyser) ? postFilterAnalyser : analyser;
+    if (!activeAnalyser || !spectrumCtx) return;
 
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(dataArray);
+    const dataArray = new Uint8Array(activeAnalyser.frequencyBinCount);
+    activeAnalyser.getByteFrequencyData(dataArray);
 
     // Also get float frequency data for absolute dBFS measurements
-    const floatDataArray = new Float32Array(analyser.frequencyBinCount);
-    analyser.getFloatFrequencyData(floatDataArray);
+    const floatDataArray = new Float32Array(activeAnalyser.frequencyBinCount);
+    activeAnalyser.getFloatFrequencyData(floatDataArray);
 
     const width = spectrumCanvas.width;
     const height = spectrumCanvas.height;
@@ -3762,6 +3783,27 @@ function updateSpectrum() {
         }
 
         lastDbScaleUpdate = scaleNow;
+        
+        // Also update peak frequency at the same 500ms rate
+        if (analyser && audioContext && oscilloscope) {
+            const bufferLength = analyser.fftSize;
+            const timeDataArray = new Uint8Array(bufferLength);
+            analyser.getByteTimeDomainData(timeDataArray);
+            const detectedFreq = oscilloscope.detectFrequencyFromWaveform(timeDataArray, audioContext.sampleRate);
+            
+            if (detectedFreq > 0 && detectedFreq >= 20 && detectedFreq <= 20000) {
+                if (detectedFreq >= 1000) {
+                    cachedPeakFreq.value = (detectedFreq / 1000).toFixed(2);
+                    cachedPeakFreq.unit = ' kHz';
+                } else {
+                    cachedPeakFreq.value = Math.round(detectedFreq).toString();
+                    cachedPeakFreq.unit = ' Hz';
+                }
+            } else {
+                cachedPeakFreq.value = 'N/A';
+                cachedPeakFreq.unit = '';
+            }
+        }
     }
 
     // Use cached/averaged scale values
@@ -3800,20 +3842,20 @@ function updateSpectrum() {
     gradient.addColorStop(0.8, 'rgba(255, 0, 0, 0.8)');    // Red
     gradient.addColorStop(1, 'rgba(128, 0, 0, 0.8)');      // Dark red at top
 
-    // Initialize peak hold array if needed
+    // Initialize peak hold array if needed (store dBFS values, not magnitudes)
     if (!spectrumPeaks || spectrumPeaks.length !== numPoints) {
-        spectrumPeaks = new Array(numPoints).fill(0);
+        spectrumPeaks = new Array(numPoints).fill(-Infinity);
     }
 
-    const peakDecayRate = 0.5; // Pixels per frame to decay
+    const peakDecayRate = 0.5; // dB per frame to decay
 
     // Draw filled area
     spectrumCtx.fillStyle = gradient;
     spectrumCtx.beginPath();
     spectrumCtx.moveTo(0, height); // Start at bottom left
 
-    // Store raw magnitudes for peak hold (before normalization)
-    const rawMagnitudes = new Array(numPoints);
+    // Store dBFS values for peak hold (scale-independent)
+    const dbfsValues = new Array(numPoints);
 
     for (let i = 0; i < numPoints; i++) {
         // Average the bins for this point
@@ -3822,14 +3864,25 @@ function updateSpectrum() {
 
         let sum = 0;
         let count = 0;
+        let sumDbfs = 0;
+        let countDbfs = 0;
 
         for (let binIndex = Math.floor(startBin); binIndex < Math.ceil(endBin) && binIndex < dataArray.length; binIndex++) {
             sum += dataArray[binIndex] || 0;
             count++;
+            
+            // Also average dBFS values for peak hold
+            if (floatDataArray && binIndex < floatDataArray.length) {
+                const dbValue = floatDataArray[binIndex];
+                if (isFinite(dbValue)) {
+                    sumDbfs += dbValue;
+                    countDbfs++;
+                }
+            }
         }
 
         const average = count > 0 ? sum / count : 0;
-        rawMagnitudes[i] = average; // Store raw magnitude for peak hold
+        dbfsValues[i] = countDbfs > 0 ? sumDbfs / countDbfs : -Infinity; // Store dBFS for peak hold
 
         // Normalize magnitude for autoranging
         let normalizedMagnitude;
@@ -3850,17 +3903,16 @@ function updateSpectrum() {
     spectrumCtx.closePath();
     spectrumCtx.fill();
 
-    // Update and draw peak hold line using raw magnitudes (not normalized)
-    // This prevents the peak line from moving when the scale changes
+    // Update and draw peak hold line using dBFS values (scale-independent)
     for (let i = 0; i < numPoints; i++) {
-        const currentMagnitude = rawMagnitudes[i];
+        const currentDbfs = dbfsValues[i];
         
-        // Update peak hold with raw magnitude values
-        if (!spectrumPeaks[i] || currentMagnitude > spectrumPeaks[i]) {
-            spectrumPeaks[i] = currentMagnitude; // New peak (store raw magnitude)
+        // Update peak hold with dBFS values
+        if (!isFinite(spectrumPeaks[i]) || currentDbfs > spectrumPeaks[i]) {
+            spectrumPeaks[i] = currentDbfs; // New peak (store dBFS)
         } else {
-            // Decay the peak magnitude value (not pixel position)
-            spectrumPeaks[i] = Math.max(0, spectrumPeaks[i] - (peakDecayRate * magnitudeRange / height));
+            // Decay the peak dBFS value
+            spectrumPeaks[i] = Math.max(-Infinity, spectrumPeaks[i] - peakDecayRate);
         }
     }
 
@@ -3870,23 +3922,20 @@ function updateSpectrum() {
     spectrumCtx.beginPath();
 
     let firstPeak = true;
+    const dbRange = displayMaxDb - displayMinDb;
     for (let i = 0; i < numPoints; i++) {
-        // Convert stored magnitude to current screen position
-        let normalizedPeak;
-        if (magnitudeRange > 0) {
-            normalizedPeak = (spectrumPeaks[i] - minMagnitude) / magnitudeRange;
-        } else {
-            normalizedPeak = spectrumPeaks[i] / 255;
-        }
-        normalizedPeak = Math.max(0, Math.min(1, normalizedPeak));
-        const peakY = height - (normalizedPeak * height);
-        
-        if (peakY < height && peakY >= 0) {
-            if (firstPeak) {
-                spectrumCtx.moveTo(i, peakY);
-                firstPeak = false;
-            } else {
-                spectrumCtx.lineTo(i, peakY);
+        // Convert stored dBFS to screen position using current dBFS scale
+        if (isFinite(spectrumPeaks[i]) && dbRange > 0) {
+            const normalizedPeak = (spectrumPeaks[i] - displayMinDb) / dbRange;
+            const peakY = height - (normalizedPeak * height);
+            
+            if (peakY < height && peakY >= 0) {
+                if (firstPeak) {
+                    spectrumCtx.moveTo(i, peakY);
+                    firstPeak = false;
+                } else {
+                    spectrumCtx.lineTo(i, peakY);
+                }
             }
         }
     }
@@ -4046,8 +4095,8 @@ function updateSpectrum() {
     }
 
     // Draw debug info at top right (peak signal, noise floor, SNR, and peak frequency)
+    // Use fixed-width layout: labels left-aligned, units right-aligned, values in between
     spectrumCtx.font = 'bold 11px monospace';
-    spectrumCtx.textAlign = 'right';
     spectrumCtx.textBaseline = 'top';
 
     // Use faster-updating peak/floor values (updated every 250ms, twice as fast as scale)
@@ -4055,61 +4104,46 @@ function updateSpectrum() {
     const noiseDb = isFinite(cachedPeakFloor.minDb) ? cachedPeakFloor.minDb.toFixed(1) : '-∞';
 
     // Calculate SNR (Signal-to-Noise Ratio) in dB
-    let snrText = 'SNR: N/A';
+    let snrValue = 'N/A';
     if (isFinite(cachedPeakFloor.maxDb) && isFinite(cachedPeakFloor.minDb)) {
         const snrDb = cachedPeakFloor.maxDb - cachedPeakFloor.minDb;
-        snrText = `SNR: ${snrDb.toFixed(1)} dB`;
+        snrValue = snrDb.toFixed(1);
     }
 
-    // Detect peak frequency using zero-crossing (same method as oscilloscope)
-    let peakFreqText = 'Peak: N/A';
-    if (analyser && audioContext && oscilloscope) {
-        const bufferLength = analyser.fftSize;
-        const timeDataArray = new Uint8Array(bufferLength);
-        analyser.getByteTimeDomainData(timeDataArray);
-        const detectedFreq = oscilloscope.detectFrequencyFromWaveform(timeDataArray, audioContext.sampleRate);
-        
-        if (detectedFreq > 0 && detectedFreq >= 20 && detectedFreq <= 20000) {
-            if (detectedFreq >= 1000) {
-                peakFreqText = `Peak: ${(detectedFreq / 1000).toFixed(2)} kHz`;
-            } else {
-                peakFreqText = `Peak: ${Math.round(detectedFreq)} Hz`;
-            }
-        }
-    }
+    // Use cached peak frequency (updated every 500ms, same as scale labels)
+    const peakFreqValue = cachedPeakFreq.value;
+    const peakFreqUnit = cachedPeakFreq.unit;
 
-    // Background for debug info (now with 5 lines including gap)
-    const debugText1 = `Peak: ${peakDb} dB`;
-    const debugText2 = `Floor: ${noiseDb} dB`;
-    const debugText3 = snrText;
-    const debugText4 = peakFreqText;
-    const debugWidth = Math.max(
-        spectrumCtx.measureText(debugText1).width,
-        spectrumCtx.measureText(debugText2).width,
-        spectrumCtx.measureText(debugText3).width,
-        spectrumCtx.measureText(debugText4).width
-    ) + 8;
-
+    // Fixed width box (120px wide to accommodate all text)
+    const debugWidth = 120;
+    const debugX = width - debugWidth - 4;
     spectrumCtx.fillStyle = 'rgba(44, 62, 80, 0.9)';
-    spectrumCtx.fillRect(width - debugWidth - 4, 2, debugWidth, 64); // Increased height for 4 lines + gap
+    spectrumCtx.fillRect(debugX, 2, debugWidth, 64);
 
     // Draw text with outline for visibility
     spectrumCtx.strokeStyle = '#000000';
     spectrumCtx.lineWidth = 3;
     spectrumCtx.fillStyle = '#ffffff';
 
-    spectrumCtx.strokeText(debugText1, width - 6, 4);
-    spectrumCtx.fillText(debugText1, width - 6, 4);
+    // Helper function to draw a line with label left-aligned and unit right-aligned
+    const drawDebugLine = (label, value, unit, y) => {
+        // Left-align label
+        spectrumCtx.textAlign = 'left';
+        spectrumCtx.strokeText(label, debugX + 4, y);
+        spectrumCtx.fillText(label, debugX + 4, y);
+        
+        // Right-align unit
+        spectrumCtx.textAlign = 'right';
+        const unitText = value + unit;
+        spectrumCtx.strokeText(unitText, debugX + debugWidth - 4, y);
+        spectrumCtx.fillText(unitText, debugX + debugWidth - 4, y);
+    };
 
-    spectrumCtx.strokeText(debugText2, width - 6, 16);
-    spectrumCtx.fillText(debugText2, width - 6, 16);
-
-    spectrumCtx.strokeText(debugText3, width - 6, 28);
-    spectrumCtx.fillText(debugText3, width - 6, 28);
-
+    drawDebugLine('Peak:', peakDb, ' dB', 4);
+    drawDebugLine('Floor:', noiseDb, ' dB', 16);
+    drawDebugLine('SNR:', snrValue, ' dB', 28);
     // One line gap (12px), then peak frequency at 52px
-    spectrumCtx.strokeText(debugText4, width - 6, 52);
-    spectrumCtx.fillText(debugText4, width - 6, 52);
+    drawDebugLine('Peak:', peakFreqValue, peakFreqUnit, 52);
 
     // Store spectrum data for tooltip usage
     audioSpectrumLastData = {
@@ -4187,14 +4221,16 @@ function updateSpectrum() {
 }
 
 function updateWaterfall() {
-    if (!analyser || !waterfallCtx || !waterfallImageData) return;
+    // Use the selected analyser based on tap point setting
+    const activeAnalyser = (visualizationTapPoint === 'post' && postFilterAnalyser) ? postFilterAnalyser : analyser;
+    if (!activeAnalyser || !waterfallCtx || !waterfallImageData) return;
 
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(dataArray);
+    const dataArray = new Uint8Array(activeAnalyser.frequencyBinCount);
+    activeAnalyser.getByteFrequencyData(dataArray);
 
     // Also get float frequency data for absolute dBFS measurements (for tooltip)
-    const floatDataArray = new Float32Array(analyser.frequencyBinCount);
-    analyser.getFloatFrequencyData(floatDataArray);
+    const floatDataArray = new Float32Array(activeAnalyser.frequencyBinCount);
+    activeAnalyser.getFloatFrequencyData(floatDataArray);
 
     const width = waterfallCanvas.width;
     const height = waterfallCanvas.height;
@@ -5532,8 +5568,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 100);
 });
 
+// Update visualization tap point (pre-filter or post-filter)
+function updateVisualizationTapPoint() {
+    const selectedRadio = document.querySelector('input[name="viz-tap-point"]:checked');
+    
+    if (selectedRadio) {
+        visualizationTapPoint = selectedRadio.value;
+        if (visualizationTapPoint === 'pre') {
+            log('Visualization tap point: Pre-Filter (raw signal)');
+        } else {
+            log('Visualization tap point: Post-Filter (processed signal)');
+        }
+    }
+}
+
 // Expose functions to global scope for HTML onclick/onchange handlers
 // (Required because ES6 modules don't automatically expose functions globally)
+
+// Visualization tap point control
+window.updateVisualizationTapPoint = updateVisualizationTapPoint;
 
 // Spectrum controls
 window.toggleSpectrumLineGraph = toggleSpectrumLineGraph;

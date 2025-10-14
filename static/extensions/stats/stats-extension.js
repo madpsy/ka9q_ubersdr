@@ -99,24 +99,10 @@ class StatsExtension extends DecoderExtension {
         }
         this.audioZeroCrossings = zeroCrossings;
 
-        // 3. Dominant Frequency Detection - Use frequency domain data
-        const freqData = new Uint8Array(vuAnalyser.frequencyBinCount);
-        vuAnalyser.getByteFrequencyData(freqData);
-
-        let maxMagnitude = 0;
-        let maxBin = 0;
-        for (let i = 0; i < freqData.length; i++) {
-            if (freqData[i] > maxMagnitude) {
-                maxMagnitude = freqData[i];
-                maxBin = i;
-            }
-        }
-
-        // Calculate frequency from bin number
+        // 3. Dominant Frequency Detection - Use zero-crossing detection (same as oscilloscope)
         const audioCtx = this.radio.getAudioContext();
         if (audioCtx) {
-            const nyquist = audioCtx.sampleRate / 2;
-            this.audioDominantFreq = (maxBin / freqData.length) * nyquist;
+            this.audioDominantFreq = this.detectFrequencyFromWaveform(vuData, audioCtx.sampleRate);
         }
     }
 
@@ -163,6 +149,46 @@ class StatsExtension extends DecoderExtension {
             }
         }
         this.spectrumOccupancy = (occupiedBins / powers.length) * 100;
+    }
+
+    // Detect frequency from waveform using zero-crossing (same method as oscilloscope)
+    detectFrequencyFromWaveform(dataArray, sampleRate) {
+        if (!dataArray || dataArray.length < 2) return 0;
+
+        const zeroCrossings = [];
+        const threshold = 128;
+
+        // Find all zero-crossings with interpolation
+        for (let i = 1; i < dataArray.length; i++) {
+            const prev = dataArray[i - 1];
+            const curr = dataArray[i];
+
+            // Detect positive-going zero crossing
+            if (prev < threshold && curr >= threshold) {
+                // Linear interpolation to find exact crossing point
+                const fraction = (threshold - prev) / (curr - prev);
+                const crossingIndex = (i - 1) + fraction;
+                zeroCrossings.push(crossingIndex);
+            }
+        }
+
+        // Need at least 2 crossings to calculate frequency
+        if (zeroCrossings.length < 2) return 0;
+
+        // Calculate average period between crossings
+        let totalPeriod = 0;
+        for (let i = 1; i < zeroCrossings.length; i++) {
+            totalPeriod += zeroCrossings[i] - zeroCrossings[i - 1];
+        }
+        const avgPeriod = totalPeriod / (zeroCrossings.length - 1);
+
+        // Convert period to frequency
+        const frequency = sampleRate / avgPeriod;
+
+        // Sanity check: audio range
+        if (frequency < 20 || frequency > 20000) return 0;
+
+        return frequency;
     }
 
     renderModernStats() {

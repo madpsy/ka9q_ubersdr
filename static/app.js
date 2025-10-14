@@ -2585,6 +2585,13 @@ const oscilloscopeUpdateInterval = 33; // 30 fps (1000ms / 30 = 33ms)
 let lastSpectrumUpdate = 0;
 const spectrumUpdateInterval = 33; // 30 fps (1000ms / 30 = 33ms)
 
+// dBFS scale averaging and throttling
+let lastDbScaleUpdate = 0;
+const dbScaleUpdateInterval = 500; // Update scale every 500ms
+let dbScaleHistory = { peak: [], floor: [] };
+const dbScaleHistorySize = 10; // Average over 10 samples (5 seconds at 500ms intervals)
+let cachedDbScale = { minDb: -80, maxDb: -20 }; // Cached scale values
+
 // Shared frequency mapping helpers for consistent spectrum/waterfall alignment
 function getFrequencyBinMapping() {
     if (!analyser || !audioContext) return null;
@@ -3609,6 +3616,10 @@ function updateSpectrum() {
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(dataArray);
 
+    // Also get float frequency data for absolute dBFS measurements
+    const floatDataArray = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(floatDataArray);
+
     const width = spectrumCanvas.width;
     const height = spectrumCanvas.height;
 
@@ -3657,11 +3668,56 @@ function updateSpectrum() {
         magnitudeRange = 255;
     }
 
-    // Calculate dB scale from actual signal range - like main graph mode
-    // Convert from magnitude (0-255) to approximate dBFS
-    // dBFS = 20 * log10(magnitude / 255), where 255 = 0 dBFS
-    const displayMinDb = minMagnitude > 0 ? 20 * Math.log10(minMagnitude / 255) : -60;
-    const displayMaxDb = maxMagnitude > 0 ? 20 * Math.log10(maxMagnitude / 255) : -10;
+    // Use absolute dBFS scale from float frequency data with averaging and throttling
+    const scaleNow = performance.now();
+    if (scaleNow - lastDbScaleUpdate >= dbScaleUpdateInterval) {
+        // Find the actual dBFS range in the visible bandwidth
+        let currentMinDb = 0;
+        let currentMaxDb = -Infinity;
+        const scaleBinMapping = getFrequencyBinMapping();
+        if (scaleBinMapping && floatDataArray) {
+            const { startBinIndex, binsForBandwidth } = scaleBinMapping;
+            for (let i = startBinIndex; i < startBinIndex + binsForBandwidth && i < floatDataArray.length; i++) {
+                const dbValue = floatDataArray[i];
+                if (isFinite(dbValue)) {
+                    currentMaxDb = Math.max(currentMaxDb, dbValue);
+                    if (currentMinDb === 0 || dbValue < currentMinDb) {
+                        currentMinDb = dbValue;
+                    }
+                }
+            }
+        }
+
+        // Add to history for averaging
+        if (isFinite(currentMaxDb) && currentMaxDb !== -Infinity) {
+            dbScaleHistory.peak.push(currentMaxDb);
+            if (dbScaleHistory.peak.length > dbScaleHistorySize) {
+                dbScaleHistory.peak.shift();
+            }
+        }
+        if (isFinite(currentMinDb) && currentMinDb !== 0) {
+            dbScaleHistory.floor.push(currentMinDb);
+            if (dbScaleHistory.floor.length > dbScaleHistorySize) {
+                dbScaleHistory.floor.shift();
+            }
+        }
+
+        // Calculate averaged values
+        if (dbScaleHistory.peak.length > 0) {
+            const avgPeak = dbScaleHistory.peak.reduce((sum, v) => sum + v, 0) / dbScaleHistory.peak.length;
+            cachedDbScale.maxDb = avgPeak;
+        }
+        if (dbScaleHistory.floor.length > 0) {
+            const avgFloor = dbScaleHistory.floor.reduce((sum, v) => sum + v, 0) / dbScaleHistory.floor.length;
+            cachedDbScale.minDb = avgFloor;
+        }
+
+        lastDbScaleUpdate = scaleNow;
+    }
+
+    // Use cached/averaged scale values
+    const displayMinDb = cachedDbScale.minDb;
+    const displayMaxDb = cachedDbScale.maxDb;
 
     // Create or use cached labels if size changed OR range changed significantly (>1 dB)
     const cacheKey = `${width}x${height}_${Math.round(displayMinDb)}_${Math.round(displayMaxDb)}`;
@@ -3924,14 +3980,15 @@ function updateSpectrum() {
     spectrumCtx.textAlign = 'right';
     spectrumCtx.textBaseline = 'top';
 
-    // Convert to dB for display
-    const peakDb = maxMagnitude > 0 ? (20 * Math.log10(maxMagnitude / 255)).toFixed(1) : '-∞';
-    const noiseDb = minMagnitude > 0 ? (20 * Math.log10(minMagnitude / 255)).toFixed(1) : '-∞';
+    // Use the same averaged values from the scale calculation (updated every 500ms)
+    // This ensures consistency between the scale and the debug display
+    const peakDb = isFinite(cachedDbScale.maxDb) ? cachedDbScale.maxDb.toFixed(1) : '-∞';
+    const noiseDb = isFinite(cachedDbScale.minDb) ? cachedDbScale.minDb.toFixed(1) : '-∞';
 
     // Calculate SNR (Signal-to-Noise Ratio) in dB
     let snrText = 'SNR: N/A';
-    if (maxMagnitude > 0 && minMagnitude > 0) {
-        const snrDb = (20 * Math.log10(maxMagnitude / 255)) - (20 * Math.log10(minMagnitude / 255));
+    if (isFinite(cachedDbScale.maxDb) && isFinite(cachedDbScale.minDb)) {
+        const snrDb = cachedDbScale.maxDb - cachedDbScale.minDb;
         snrText = `SNR: ${snrDb.toFixed(1)} dB`;
     }
 

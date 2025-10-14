@@ -3772,6 +3772,9 @@ function updateSpectrum() {
     spectrumCtx.beginPath();
     spectrumCtx.moveTo(0, height); // Start at bottom left
 
+    // Store raw magnitudes for peak hold (before normalization)
+    const rawMagnitudes = new Array(numPoints);
+
     for (let i = 0; i < numPoints; i++) {
         // Average the bins for this point
         const startBin = startBinIndex + (i * binsPerPoint);
@@ -3786,6 +3789,7 @@ function updateSpectrum() {
         }
 
         const average = count > 0 ? sum / count : 0;
+        rawMagnitudes[i] = average; // Store raw magnitude for peak hold
 
         // Normalize magnitude for autoranging
         let normalizedMagnitude;
@@ -3798,13 +3802,6 @@ function updateSpectrum() {
         // Calculate y position (inverted - higher magnitude at top)
         const y = height - (normalizedMagnitude * height);
 
-        // Update peak hold
-        if (y < spectrumPeaks[i]) {
-            spectrumPeaks[i] = y; // New peak (lower y = higher on screen)
-        } else {
-            spectrumPeaks[i] = Math.min(height, spectrumPeaks[i] + peakDecayRate); // Decay
-        }
-
         spectrumCtx.lineTo(i, y);
     }
 
@@ -3813,6 +3810,20 @@ function updateSpectrum() {
     spectrumCtx.closePath();
     spectrumCtx.fill();
 
+    // Update and draw peak hold line using raw magnitudes (not normalized)
+    // This prevents the peak line from moving when the scale changes
+    for (let i = 0; i < numPoints; i++) {
+        const currentMagnitude = rawMagnitudes[i];
+        
+        // Update peak hold with raw magnitude values
+        if (!spectrumPeaks[i] || currentMagnitude > spectrumPeaks[i]) {
+            spectrumPeaks[i] = currentMagnitude; // New peak (store raw magnitude)
+        } else {
+            // Decay the peak magnitude value (not pixel position)
+            spectrumPeaks[i] = Math.max(0, spectrumPeaks[i] - (peakDecayRate * magnitudeRange / height));
+        }
+    }
+
     // Draw peak hold line (light yellow, semi-transparent like main graph)
     spectrumCtx.strokeStyle = 'rgba(255, 255, 200, 0.5)';
     spectrumCtx.lineWidth = 1;
@@ -3820,12 +3831,22 @@ function updateSpectrum() {
 
     let firstPeak = true;
     for (let i = 0; i < numPoints; i++) {
-        if (spectrumPeaks[i] < height) {
+        // Convert stored magnitude to current screen position
+        let normalizedPeak;
+        if (magnitudeRange > 0) {
+            normalizedPeak = (spectrumPeaks[i] - minMagnitude) / magnitudeRange;
+        } else {
+            normalizedPeak = spectrumPeaks[i] / 255;
+        }
+        normalizedPeak = Math.max(0, Math.min(1, normalizedPeak));
+        const peakY = height - (normalizedPeak * height);
+        
+        if (peakY < height && peakY >= 0) {
             if (firstPeak) {
-                spectrumCtx.moveTo(i, spectrumPeaks[i]);
+                spectrumCtx.moveTo(i, peakY);
                 firstPeak = false;
             } else {
-                spectrumCtx.lineTo(i, spectrumPeaks[i]);
+                spectrumCtx.lineTo(i, peakY);
             }
         }
     }

@@ -3956,7 +3956,7 @@ function updateSpectrum() {
         // For LSB mode, invert the frequency mapping to match the corrected display
         // LSB: slider 800 Hz should map to display position for 800 Hz (left side)
         let displayCenter, lowFreq, highFreq;
-        if (currentMode === 'lsb' || currentMode === 'cwl') {
+        if (currentMode === 'lsb') {
             // Map positive slider value to inverted display coordinates
             // For LSB: displayLow=-2700, displayHigh=-50
             // slider 800 -> display at position where freq label shows 800
@@ -4023,7 +4023,7 @@ function updateSpectrum() {
             // notch.center is stored as the actual frequency value from the click
             // For LSB mode, we need to apply the same inversion as frequency labels
             let displayCenter, lowFreq, highFreq;
-            if (currentMode === 'lsb' || currentMode === 'cwl') {
+            if (currentMode === 'lsb') {
                 // notch.center is negative in LSB (e.g., -800)
                 // Map it to the inverted display position
                 displayCenter = Math.abs(displayLow) + Math.abs(displayHigh) - Math.abs(notch.center);
@@ -4220,11 +4220,11 @@ function updateSpectrum() {
     const startFreq = Math.ceil(displayLow / labelStep) * labelStep;
     for (let freq = startFreq; freq <= displayHigh; freq += labelStep) {
         const x = frequencyToPixel(freq, width);
-        // For LSB/CWL modes, invert the frequency display (0 Hz on left, max on right)
+        // For LSB mode, invert the frequency display (0 Hz on left, max on right)
         // LSB: -2700 to -50 displays as 50 to 2700 (NOT reversed - lower frequencies on left)
         // For other modes, show the actual audio frequency (freq already includes CW offset)
         let displayFreq;
-        if (currentMode === 'lsb' || currentMode === 'cwl') {
+        if (currentMode === 'lsb') {
             // Map negative frequencies to positive display values in correct order
             // For LSB: freq goes from -2700 (left) to -50 (right)
             // We want to display: 50 (left) to 2700 (right)
@@ -4418,11 +4418,11 @@ function updateWaterfall() {
     for (let freq = startFreq; freq <= displayHigh; freq += labelStep) {
         const x = frequencyToPixel(freq, width);
 
-        // For LSB/CWL modes, invert the frequency display (0 Hz on left, max on right)
+        // For LSB mode, invert the frequency display (0 Hz on left, max on right)
         // LSB: -2700 to -50 displays as 50 to 2700 (NOT reversed - lower frequencies on left)
         // For other modes, show the actual audio frequency (freq already includes CW offset)
         let displayFreq;
-        if (currentMode === 'lsb' || currentMode === 'cwl') {
+        if (currentMode === 'lsb') {
             // Map negative frequencies to positive display values in correct order
             // For LSB: freq goes from -2700 (left) to -50 (right)
             // We want to display: 50 (left) to 2700 (right)
@@ -4488,7 +4488,7 @@ function drawWaterfallFilterOverlay() {
 
         // For LSB mode, invert the frequency mapping to match the corrected display
         let displayCenter, lowFreq, highFreq;
-        if (currentMode === 'lsb' || currentMode === 'cwl') {
+        if (currentMode === 'lsb') {
             // Map positive slider value to inverted display coordinates
             displayCenter = Math.abs(displayLow) + Math.abs(displayHigh) - sliderCenter;
             // Make it negative for LSB coordinate system
@@ -4554,7 +4554,7 @@ function drawWaterfallFilterOverlay() {
 
             // Apply same inversion as frequency labels for LSB mode
             let displayCenter, lowFreq, highFreq;
-            if (currentMode === 'lsb' || currentMode === 'cwl') {
+            if (currentMode === 'lsb') {
                 // notch.center is negative in LSB (e.g., -800)
                 displayCenter = Math.abs(displayLow) + Math.abs(displayHigh) - Math.abs(notch.center);
                 // Make it negative for LSB coordinate system

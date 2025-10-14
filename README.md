@@ -23,6 +23,6 @@ Build ubersdr:
 `cp bands.yaml.example bands.yaml`
 `cp bookmarks.yaml.example bookmarks.yaml`
 
-change admin admin in config.yaml
+change admin password in config.yaml
 
 `./ka9q_ubersdr`

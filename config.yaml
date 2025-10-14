@@ -1,175 +1,59 @@
-# ka9q_ubersdr Configuration
-
-# Admin settings
 admin:
-  # Admin password for configuration access
-  password: "NKj66s5y@Y5fZq2p"
-  # Description HTML to display in the top right of the page
-  # This can include HTML tags like links
-  description: 'Dalgety Bay SDR operated by <a href="https://qrz.com/db/mm3ndh" target="_blank">MM3NDH</a>'
-  # Name - similar to description without any HTML
-  name: 'Dalgety Bay SDR operated by MM3NDH'
-  # Admin email address
-  email: "mm3ndh@nsamail.uk"
-  # GPS coordinates
-  gps:
-    lat: 51.507  # Latitude (London default)
-    lon: -0.128  # Longitude (London default)
-  # Height above sea level (meters)
-  asl: 30
-  # Location description
-  location: "Dalgety Bay, Scotland, UK"
-  # Software version
-  version: "v1.2.40"
-
-# Radiod connection settings
-radiod:
-  # Multicast group for status/control messages
-  status_group: "hf-status.local:5006"
-  # Multicast group for PCM audio data
-  data_group: "pcm.local:5004"
-  # Network interface to use (empty = auto-detect)
-  interface: ""
-
-# Web server settings
-server:
-  # Listen address and port
-  listen: ":8080"
-  # Maximum concurrent sessions
-  max_sessions: 20
-  # Maximum concurrent unique users (UUIDs) per IP address (0 = unlimited)
-  # This limits the number of unique user_session_ids from a single IP
-  # Each unique user can have multiple sessions (e.g., audio + spectrum)
-  # For example, if set to 1, only one UUID can connect from an IP, but that
-  # UUID can establish both audio and spectrum channels
-  # Useful for preventing abuse from a single source
-  # Set to 0 to disable IP-based limiting
-  max_sessions_ip: 2
-  # Session idle timeout in seconds (0 = no timeout). This tracks a heartbeat message to websocket
-  # connections. The UI sends a ping every 10 seconds if the user is detected as being active.
-  # Client will show warning dialog 30 seconds before this timeout. If they do not interact
-  # with the UI within the 30 seconds the session UUID will be kicked.
-  session_timeout: 3600
-  # Command rate limit per UUID (commands per second per channel)
-  # This limits how many commands (tune, zoom, pan, etc.) a user can send per second
-  # Applies separately to audio and spectrum channels (e.g., 10 means 10 audio commands/sec + 10 spectrum commands/sec)
-  # Set to 0 to disable rate limiting
-  # Recommended: 10 (allows responsive UI while preventing abuse)
-  cmd_rate_limit: 10
-  # Maximum session time in seconds (0 = unlimited)
-  # This is the maximum total time a user session can exist, regardless of activity
-  # After this time, the user will be automatically kicked and must reconnect
-  # Useful for ensuring fair access and preventing long-term monopolization
-  # Set to 0 to disable time-based limiting
-  max_session_time: 0
-  # List of IP addresses or CIDR ranges that bypass session_timeout, max_session_time, and max_sessions_ip limits
-  # Useful for trusted IPs like localhost, admin networks, or specific users
-  # Bypassed IPs are exempt from:
-  #   - session_timeout (idle timeout)
-  #   - max_session_time (maximum session duration)
-  #   - max_sessions_ip (maximum unique users per IP)
-  # Supports both IPv4 and IPv6 addresses with CIDR notation
-  # Examples:
-  #   - "127.0.0.1"           # Single IPv4 address
-  #   - "192.168.1.0/24"      # IPv4 CIDR range
-  #   - "::1"                 # Single IPv6 address (localhost)
-  #   - "2001:db8::/32"       # IPv6 CIDR range
-  # By default, localhost is bypassed. Add more IPs/ranges as needed.
-  timeout_bypass_ips:
-    - "127.0.0.1"
-  # Enable CORS
-  enable_cors: false
-  # HTTP request log file (Apache combined log format)
-  logfile: "web.log"
-
-# Audio settings
+    asl: 30
+    description: Dalgety Bay SDR operated by <a href="https://qrz.com/db/mm3ndh" target="_blank">MM3NDH</a>
+    email: mm3ndh@nsamail.uk
+    gps:
+        lat: 56.04035
+        lon: -3.35542
+    location: Dalgety Bay, Scotland, UK
+    name: MM3NDH SDR with 40m Loop
+    password: NKj66s5y@Y5fZq2p
+    version: v1.2.40
 audio:
-  # Audio buffer size in samples
-  buffer_size: 4096
-  # Default sample rate in Hz
-  default_sample_rate: 12000
-  # Sample rates per mode (must match radiod preset sample rates)
-  mode_sample_rates:
-    usb: 12000
-    lsb: 12000
-    cwu: 12000  # CW Upper (for USB bands) preset in radiod uses 12 kHz
-    cwl: 12000  # CW Lower (for LSB bands) preset in radiod uses 12 kHz
-    am: 12000   # AM preset in radiod uses 12 kHz
-    sam: 12000  # SAM (Synchronous AM) preset in radiod uses 12 kHz
-    fm: 24000   # FM preset in radiod uses 24 kHz
-    nfm: 24000  # NFM (Narrow FM) preset in radiod uses 24 kHz
-    iq: 192000
-  # Opus compression settings
-  opus:
-    # Enable Opus compression for audio streaming (reduces bandwidth significantly)
-    enabled: false
-    # Opus bitrate in bits per second (6000-510000, typical: 24000-64000)
-    # Lower = more compression but lower quality, Higher = better quality but more bandwidth
-    # 24000 = good for voice, 48000 = excellent for voice, 64000 = near-transparent
-    bitrate: 48000
-    # Opus complexity (0-10, higher = better quality but more CPU)
-    # 0 = fastest/lowest quality, 10 = slowest/highest quality
-    complexity: 5
-
-# Spectrum analyzer settings - per-user dynamic channels
-spectrum:
-  # Enable per-user spectrum channels
-  enabled: true
-  # Default parameters for new spectrum channels (users can zoom/pan)
-  default:
-    # Default center frequency (Hz) - 15 MHz for 0-30 MHz coverage
-    center_frequency: 15000000
-    # Default number of bins - kept constant for consistent display
-    bin_count: 1024
-    # Default bandwidth per bin (Hz) - calculated for exact 0-30 MHz coverage
-    # 30,000,000 Hz / 1024 bins = 29,296.875 Hz per bin
-    # Users can adjust this to zoom in/out:
-    #   29.3 kHz = 0-30 MHz (full HF band)
-    #   10 kHz = ~10 MHz view
-    #    1 kHz = ~1 MHz detailed view
-    bin_bandwidth: 29296.875
-  # Poll period in milliseconds (how often to request spectrum data)
-  # Lower values = faster updates but more CPU/network usage
-  poll_period_ms: 100
-  # Maximum spectrum sessions per user (to prevent abuse)
-  max_sessions_per_user: 2
-  # Gain adjustment in dB applied to all spectrum data
-  # Positive values increase displayed signal levels (brighten)
-  # Negative values decrease displayed signal levels (darken)
-  # Default: 0 (no adjustment)
-  # Example: 20 adds 20 dB to all spectrum values
-  gain_db: 15
-  
-  # Smoothing settings for waterfall display
-  # Reduces fuzziness and noise in the spectrum display
-  smoothing:
-    # Enable/disable smoothing (set to false to disable all smoothing)
-    enabled: true
-    
-    # Temporal smoothing (time domain) - Exponential Moving Average (EMA)
-    # Controls smoothing between consecutive waterfall frames
-    # Range: 0.0 to 1.0
-    #   0.1 = heavy smoothing (90% old data, 10% new) - very smooth but slower response
-    #   0.3 = moderate smoothing (70% old, 30% new) - good balance (recommended)
-    #   0.5 = light smoothing (50% old, 50% new) - faster response
-    #   1.0 = no temporal smoothing (100% new data)
-    # Default: 0.3
-    temporal_alpha: 0.3
-    
-    # Spatial smoothing (frequency domain) - Gaussian filter
-    # Controls smoothing across adjacent frequency bins
-    # Range: 0.0 to 5.0 (0 = disabled)
-    #   0.0 = no spatial smoothing
-    #   1.0 = light smoothing - subtle, preserves detail
-    #   1.5 = moderate smoothing - good balance (recommended)
-    #   2.0 = medium smoothing - smoother appearance
-    #   3.0+ = heavy smoothing - very smooth but may blur signals
-    # Default: 1.5
-    spatial_sigma: 1.5
-
-# Logging settings
+    buffer_size: 4096
+    default_sample_rate: 12000
+    mode_sample_rates:
+        am: 12000
+        cwl: 12000
+        cwu: 12000
+        fm: 24000
+        iq: 192000
+        lsb: 12000
+        nfm: 24000
+        sam: 12000
+        usb: 12000
+    opus:
+        bitrate: 48000
+        complexity: 5
+        enabled: false
 logging:
-  # Log level: debug, info, warn, error
-  level: "info"
-  # Log format: text, json
-  format: "text"
+    format: text
+    level: info
+radiod:
+    data_group: pcm.local:5004
+    interface: ""
+    status_group: hf-status.local:5006
+server:
+    cmd_rate_limit: 10
+    enable_cors: false
+    listen: :8080
+    logfile: web.log
+    max_session_time: 0
+    max_sessions: 20
+    max_sessions_ip: 2
+    session_timeout: 3600
+    timeout_bypass_ips:
+        - 127.0.0.1
+spectrum:
+    default:
+        bin_bandwidth: 29296.875
+        bin_count: 1024
+        center_frequency: 1.5e+07
+    enabled: true
+    gain_db: 15
+    max_sessions_per_user: 2
+    poll_period_ms: 100
+    smoothing:
+        enabled: true
+        spatial_sigma: 1.5
+        temporal_alpha: 0.3

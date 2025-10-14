@@ -963,6 +963,81 @@ async function fetchSiteDescription() {
             const descriptionEl = document.getElementById('site-description');
             if (descriptionEl && data.description) {
                 descriptionEl.innerHTML = data.description;
+
+                // Add map if GPS coordinates are available
+                if (data.receiver && data.receiver.gps &&
+                    data.receiver.gps.lat !== 0 && data.receiver.gps.lon !== 0) {
+                    const lat = data.receiver.gps.lat;
+                    const lon = data.receiver.gps.lon;
+                    const name = data.receiver.name || 'Receiver';
+                    const location = data.receiver.location || '';
+                    const asl = data.receiver.asl || 0;
+
+                    // Load Leaflet CSS and JS dynamically
+                    if (!document.getElementById('leaflet-css')) {
+                        const leafletCSS = document.createElement('link');
+                        leafletCSS.id = 'leaflet-css';
+                        leafletCSS.rel = 'stylesheet';
+                        leafletCSS.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+                        leafletCSS.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
+                        leafletCSS.crossOrigin = '';
+                        document.head.appendChild(leafletCSS);
+                    }
+
+                    if (!window.L) {
+                        const leafletJS = document.createElement('script');
+                        leafletJS.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+                        leafletJS.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+                        leafletJS.crossOrigin = '';
+                        document.head.appendChild(leafletJS);
+
+                        // Wait for Leaflet to load
+                        await new Promise((resolve) => {
+                            leafletJS.onload = resolve;
+                        });
+                    }
+
+                    // Create map container
+                    const mapContainer = document.createElement('div');
+                    mapContainer.id = 'location-map';
+                    mapContainer.style.marginTop = '15px';
+                    mapContainer.style.width = '100%';
+                    mapContainer.style.height = '200px';
+                    mapContainer.style.border = '2px solid #444';
+                    mapContainer.style.borderRadius = '4px';
+                    mapContainer.style.overflow = 'hidden';
+                    descriptionEl.appendChild(mapContainer);
+
+                    // Initialize map (zoom level 6 for more zoomed out view)
+                    const map = L.map('location-map').setView([lat, lon], 6);
+
+                    // Add OpenStreetMap tiles
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                        maxZoom: 19
+                    }).addTo(map);
+
+                    // Add marker with permanent tooltip
+                    const marker = L.marker([lat, lon]).addTo(map);
+                    let tooltipContent = `<strong>${name}</strong>`;
+                    if (location) {
+                        tooltipContent += `<br>${location}`;
+                    }
+                    tooltipContent += `<br>${asl}m ASL`;
+                    marker.bindTooltip(tooltipContent, {
+                        permanent: true,
+                        direction: 'top',
+                        className: 'receiver-tooltip'
+                    }).openTooltip();
+
+                    // Add link to full map
+                    const mapLink = document.createElement('div');
+                    mapLink.style.marginTop = '5px';
+                    mapLink.style.fontSize = '12px';
+                    mapLink.style.textAlign = 'center';
+                    mapLink.innerHTML = `<a href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=15/${lat}/${lon}" target="_blank" style="color: #007bff;">View larger map</a>`;
+                    descriptionEl.appendChild(mapLink);
+                }
             }
         } else {
             console.error('Failed to fetch site description:', response.status);

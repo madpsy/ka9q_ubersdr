@@ -546,13 +546,39 @@ func handleBands(w http.ResponseWriter, r *http.Request, config *Config) {
 	}
 }
 
-// handleDescription serves the description HTML from config
+// handleDescription serves the description HTML from config plus all status information
 func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	response := map[string]string{
+	// Build the response with description plus all status.json data
+	response := map[string]interface{}{
 		"description": config.Admin.Description,
+		"receiver": map[string]interface{}{
+			"name":  config.Admin.Name,
+			"admin": config.Admin.Email,
+			"gps": map[string]interface{}{
+				"lat": config.Admin.GPS.Lat,
+				"lon": config.Admin.GPS.Lon,
+			},
+			"asl":      config.Admin.ASL,
+			"location": config.Admin.Location,
+		},
+		"max_clients": config.Server.MaxSessions,
+		"version":     config.Admin.Version,
+		"sdrs": []map[string]interface{}{
+			{
+				"name": "UberSDR",
+				"type": "SDR",
+				"profiles": []map[string]interface{}{
+					{
+						"name":        "0-30 MHz",
+						"center_freq": 15000000, // 15 MHz in Hz
+						"sample_rate": 64000000, // 64 MHz in Hz
+					},
+				},
+			},
+		},
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

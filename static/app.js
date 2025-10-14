@@ -67,6 +67,10 @@ const wsManager = new WebSocketManager({
             vuAnalyser.fftSize = 2048;
             vuAnalyser.smoothingTimeConstant = 0;
 
+            // Expose analysers globally for extensions
+            window.analyser = analyser;
+            window.vuAnalyser = vuAnalyser;
+
             // Initialize stereo channel routing
             initializeStereoChannels();
             initializeSquelch();
@@ -1862,11 +1866,6 @@ function playAudioBuffer(buffer) {
         }
         lastBufferDisplayUpdate = now;
     }
-
-    // Log timing info occasionally for debugging
-    if (Math.floor(timeSinceStart) % 10 === 0 && Math.floor(timeSinceStart) !== Math.floor(timeSinceStart - buffer.duration)) {
-        console.log(`Audio timing: ${bufferAhead.toFixed(3)}s buffered`);
-    }
 }
 
 // Tune to new frequency/mode/bandwidth
@@ -2286,6 +2285,15 @@ function setMode(mode, preserveBandwidth = false) {
         currentBandwidthHigh = defaultHigh;
         document.getElementById('bandwidth-high-value').textContent = defaultHigh;
 
+        // Update global references
+        window.currentBandwidthLow = defaultLow;
+        window.currentBandwidthHigh = defaultHigh;
+
+        // Notify extension system of bandwidth change
+        if (window.radioAPI) {
+            window.radioAPI.notifyBandwidthChange(defaultLow, defaultHigh);
+        }
+
         log(`Mode changed to ${mode.toUpperCase()} (BW: ${defaultLow} to ${defaultHigh} Hz)`);
     } else {
         // Preserve existing bandwidth values, just update the display
@@ -2294,6 +2302,15 @@ function setMode(mode, preserveBandwidth = false) {
 
         bandwidthHighSlider.value = currentBandwidthHigh;
         document.getElementById('bandwidth-high-value').textContent = currentBandwidthHigh;
+
+        // Update global references
+        window.currentBandwidthLow = currentBandwidthLow;
+        window.currentBandwidthHigh = currentBandwidthHigh;
+
+        // Notify extension system of bandwidth change
+        if (window.radioAPI) {
+            window.radioAPI.notifyBandwidthChange(currentBandwidthLow, currentBandwidthHigh);
+        }
 
         log(`Mode changed to ${mode.toUpperCase()} (BW: ${currentBandwidthLow} to ${currentBandwidthHigh} Hz)`);
     }
@@ -2381,6 +2398,11 @@ function updateBandwidth() {
     window.currentBandwidthHigh = bandwidthHigh;
     document.getElementById('bandwidth-low-value').textContent = bandwidthLow;
     document.getElementById('bandwidth-high-value').textContent = bandwidthHigh;
+
+    // Notify extension system of bandwidth change
+    if (window.radioAPI) {
+        window.radioAPI.notifyBandwidthChange(bandwidthLow, bandwidthHigh);
+    }
 
     // Update FFT size based on new bandwidth
     if (analyser) {
@@ -4959,7 +4981,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         spectrumDisplay.ws.send(JSON.stringify({
                             type: 'zoom',
                             frequency: Math.round(freq),
-                            binBandwidth: 1.0  // Maximum zoom (1 Hz/bin)
+                            binBandwidth: 400.0
                         }));
                         log(`Tuned to ${formatFrequency(freq)} and zoomed to max from spectrum click`);
                     }

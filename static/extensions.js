@@ -399,12 +399,19 @@ class DecoderExtension {
     
     // Processing method (called in animation loop)
     processAudio() {
-        if (!this.enabled || !this.radio.getAnalyser()) return;
-        
-        const bufferLength = this.radio.getAnalyser().fftSize;
+        if (!this.enabled) return;
+
+        // Get analyser - may not be available yet (before audio starts)
+        const analyser = this.radio.getAnalyser();
+        if (!analyser) {
+            // Don't call onProcessAudio if no analyser - audio hasn't started yet
+            return;
+        }
+
+        const bufferLength = analyser.fftSize;
         const dataArray = new Float32Array(bufferLength);
-        this.radio.getAnalyser().getFloatTimeDomainData(dataArray);
-        
+        analyser.getFloatTimeDomainData(dataArray);
+
         this.onProcessAudio(dataArray);
     }
     
@@ -595,6 +602,15 @@ class DecoderManager {
         this.decoders.forEach(decoder => {
             if (decoder.enabled) {
                 decoder.processAudio();
+            }
+        });
+    }
+
+    processSpectrum(spectrumData) {
+        // Process spectrum data for all enabled decoders
+        this.decoders.forEach(decoder => {
+            if (decoder.enabled && typeof decoder.onProcessSpectrum === 'function') {
+                decoder.onProcessSpectrum(spectrumData);
             }
         });
     }

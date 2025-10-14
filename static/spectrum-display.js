@@ -676,6 +676,18 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 }
                 // Update signal meter with new data
                 this.updateSignalMeter();
+
+                // Process spectrum data for decoder extensions
+                if (window.decoderManager) {
+                    const spectrumDataForExtensions = {
+                        powers: this.spectrumData,
+                        centerFreq: this.centerFreq,
+                        binBandwidth: this.binBandwidth,
+                        binCount: this.binCount,
+                        totalBandwidth: this.totalBandwidth
+                    };
+                    window.decoderManager.processSpectrum(spectrumDataForExtensions);
+                }
                 break;
 
             case 'pong':

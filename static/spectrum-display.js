@@ -767,8 +767,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
         // Calculate waterfall start position based on display mode
         // In split mode (300px height), start at y=150 (halfway down)
-        // In waterfall-only mode (600px height), start at y=30 (below frequency scale)
-        const waterfallStartY = this.displayMode === 'split' ? 150 : 30;
+        // In waterfall-only mode (600px height), start at y=65 (below bookmarks overlay 35px + frequency scale 30px)
+        const waterfallStartY = this.displayMode === 'split' ? 150 : 65;
         const waterfallHeight = this.height - waterfallStartY - 1;
 
         // Log only first time in split mode
@@ -895,8 +895,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.ctx.restore();
         }
 
-        // Always draw frequency scale at top (y=0)
-        this.drawFrequencyScale();
+        // Draw frequency scale at appropriate position based on display mode
+        // In waterfall mode, draw at y=35 (below bookmarks overlay)
+        // In split mode, draw at y=0 (bookmarks are in separate line graph canvas)
+        const freqScaleY = this.displayMode === 'waterfall' ? 35 : 0;
+        this.drawFrequencyScaleAtPosition(freqScaleY);
     }
 
     // Draw frequency scale at a specific Y position
@@ -1627,12 +1630,13 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.bandwidthLinesCanvas.height = 600;
             this.bandwidthLinesCanvas.style.height = '600px';
 
-            // Restore overlay div to original relative positioning
-            this.overlayDiv.style.position = 'relative';
-            this.overlayDiv.style.top = 'auto';
-            this.overlayDiv.style.left = 'auto';
-            this.overlayDiv.style.zIndex = 'auto';
-            this.overlayDiv.style.backgroundColor = ''; // Remove background color
+            // Restore overlay div to fixed positioning (consistent with initial setup)
+            this.overlayDiv.style.position = 'fixed';
+            this.overlayDiv.style.zIndex = '20';
+            this.overlayDiv.style.backgroundColor = '#adb5bd'; // Grey background to match page
+
+            // Update overlay position to match canvas position
+            this.updateOverlayPosition();
 
             // Clear the waterfall canvas
             this.ctx.fillStyle = '#000';
@@ -1967,6 +1971,12 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         
         // Clear overlay canvas
         this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+
+        // Fill with grey background in waterfall mode (in split/graph modes, line graph canvas provides background)
+        if (this.displayMode === 'waterfall') {
+            this.overlayCtx.fillStyle = '#adb5bd';
+            this.overlayCtx.fillRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+        }
 
         // Draw bookmarks first (so cursor appears on top)
         // This needs to be redrawn because we just cleared the canvas

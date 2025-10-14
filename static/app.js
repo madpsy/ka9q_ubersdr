@@ -4045,7 +4045,7 @@ function updateSpectrum() {
         }
     }
 
-    // Draw debug info at top right (peak signal, noise floor, and SNR)
+    // Draw debug info at top right (peak signal, noise floor, SNR, and peak frequency)
     spectrumCtx.font = 'bold 11px monospace';
     spectrumCtx.textAlign = 'right';
     spectrumCtx.textBaseline = 'top';
@@ -4061,18 +4061,37 @@ function updateSpectrum() {
         snrText = `SNR: ${snrDb.toFixed(1)} dB`;
     }
 
-    // Background for debug info
+    // Detect peak frequency using zero-crossing (same method as oscilloscope)
+    let peakFreqText = 'Peak: N/A';
+    if (analyser && audioContext && oscilloscope) {
+        const bufferLength = analyser.fftSize;
+        const timeDataArray = new Uint8Array(bufferLength);
+        analyser.getByteTimeDomainData(timeDataArray);
+        const detectedFreq = oscilloscope.detectFrequencyFromWaveform(timeDataArray, audioContext.sampleRate);
+        
+        if (detectedFreq > 0 && detectedFreq >= 20 && detectedFreq <= 20000) {
+            if (detectedFreq >= 1000) {
+                peakFreqText = `Peak: ${(detectedFreq / 1000).toFixed(2)} kHz`;
+            } else {
+                peakFreqText = `Peak: ${Math.round(detectedFreq)} Hz`;
+            }
+        }
+    }
+
+    // Background for debug info (now with 5 lines including gap)
     const debugText1 = `Peak: ${peakDb} dB`;
     const debugText2 = `Floor: ${noiseDb} dB`;
     const debugText3 = snrText;
+    const debugText4 = peakFreqText;
     const debugWidth = Math.max(
         spectrumCtx.measureText(debugText1).width,
         spectrumCtx.measureText(debugText2).width,
-        spectrumCtx.measureText(debugText3).width
+        spectrumCtx.measureText(debugText3).width,
+        spectrumCtx.measureText(debugText4).width
     ) + 8;
 
     spectrumCtx.fillStyle = 'rgba(44, 62, 80, 0.9)';
-    spectrumCtx.fillRect(width - debugWidth - 4, 2, debugWidth, 40);
+    spectrumCtx.fillRect(width - debugWidth - 4, 2, debugWidth, 64); // Increased height for 4 lines + gap
 
     // Draw text with outline for visibility
     spectrumCtx.strokeStyle = '#000000';
@@ -4087,6 +4106,10 @@ function updateSpectrum() {
 
     spectrumCtx.strokeText(debugText3, width - 6, 28);
     spectrumCtx.fillText(debugText3, width - 6, 28);
+
+    // One line gap (12px), then peak frequency at 52px
+    spectrumCtx.strokeText(debugText4, width - 6, 52);
+    spectrumCtx.fillText(debugText4, width - 6, 52);
 
     // Store spectrum data for tooltip usage
     audioSpectrumLastData = {

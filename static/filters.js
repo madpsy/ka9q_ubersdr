@@ -181,9 +181,11 @@ function initializeBandpassFilter() {
     const qMultiplier = parseFloat(document.getElementById('bandpass-q-multiplier').value);
     let Q;
     if (autoQ) {
-        Q = Math.max(0.7, center / (width * stages));
+        // For bandpass: Q = center_freq / bandwidth
+        // Multiply by stages/2 for more gradual control
+        Q = Math.max(0.7, (center / width) * (stages / 2));
     } else {
-        const baseQ = Math.max(0.7, center / (width * stages));
+        const baseQ = Math.max(0.7, (center / width) * (stages / 2));
         Q = baseQ * qMultiplier;
     }
     for (let i = 0; i < stages; i++) {
@@ -231,9 +233,11 @@ function updateBandpassFilter() {
     const actualCenter = (window.currentBandwidthLow < 0 && window.currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
     let Q;
     if (autoQ) {
-        Q = Math.max(0.7, Math.abs(actualCenter) / (width * stages));
+        // For bandpass: Q = center_freq / bandwidth
+        // Multiply by stages/2 for more gradual control
+        Q = Math.max(0.7, (Math.abs(actualCenter) / width) * (stages / 2));
     } else {
-        const baseQ = Math.max(0.7, Math.abs(actualCenter) / (width * stages));
+        const baseQ = Math.max(0.7, (Math.abs(actualCenter) / width) * (stages / 2));
         Q = baseQ * qMultiplier;
     }
     for (let filter of bandpassFilters) {
@@ -288,7 +292,11 @@ function addNotchFilter(centerFreq) {
         const filter = window.audioContext.createBiquadFilter();
         filter.type = 'notch';
         filter.frequency.value = Math.abs(centerFreq);
-        filter.Q.value = Math.max(20, Math.abs(centerFreq) / (defaultWidth / 4));
+        // For notch filters: Q = center_freq / bandwidth
+        // With 6 cascaded stages, use a divisor of 3 for more gradual width control
+        // Higher width value = lower Q = wider notch
+        const effectiveQ = Math.max(0.7, Math.abs(centerFreq) / (defaultWidth * 3));
+        filter.Q.value = effectiveQ;
         notch.filters.push(filter);
     }
     notchFilters.push(notch);
@@ -323,7 +331,10 @@ function updateNotchFilterParams(index) {
         const sliderCenter = parseInt(centerInput.value);
         const width = parseInt(widthInput.value);
         const displayCenter = (window.currentBandwidthLow < 0 && window.currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
-        const Q = Math.max(20, Math.abs(displayCenter) / (width / 4));
+        // For notch filters: Q = center_freq / bandwidth
+        // With 6 cascaded stages, use a divisor of 3 for more gradual width control
+        // Higher width value = lower Q = wider notch
+        const Q = Math.max(0.7, Math.abs(displayCenter) / (width * 3));
         notch.center = displayCenter;
         notch.width = width;
         for (let filter of notch.filters) {

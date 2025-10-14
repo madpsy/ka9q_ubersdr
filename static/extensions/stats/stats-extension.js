@@ -402,55 +402,35 @@ class StatsExtension extends DecoderExtension {
 
             <div class="stats-modern-container">
                 <div class="stats-grid">
-                    <!-- Frequency Card -->
+                    <!-- Radio Card -->
                     <div class="stats-card frequency">
                         <div class="stats-card-header">
                             <div class="stats-card-icon">📡</div>
-                            <div class="stats-card-title">Frequency</div>
+                            <div class="stats-card-title">Radio</div>
                         </div>
                         <div class="stats-card-content">
                             <div class="stats-item">
-                                <span class="stats-label">Dial</span>
+                                <span class="stats-label">Frequency</span>
                                 <span class="stats-value highlight" id="stats-frequency">-</span>
                             </div>
                             <div class="stats-item">
                                 <span class="stats-label">Band</span>
                                 <span class="stats-value" id="stats-band">-</span>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- Mode Card -->
-                    <div class="stats-card mode">
-                        <div class="stats-card-header">
-                            <div class="stats-card-icon">🎚️</div>
-                            <div class="stats-card-title">Mode</div>
-                        </div>
-                        <div class="stats-card-content">
                             <div class="stats-item">
-                                <span class="stats-label">Current</span>
+                                <span class="stats-label">Mode</span>
                                 <span class="stats-badge active" id="stats-mode">-</span>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- Bandwidth Card -->
-                    <div class="stats-card bandwidth">
-                        <div class="stats-card-header">
-                            <div class="stats-card-icon">📶</div>
-                            <div class="stats-card-title">Bandwidth</div>
-                        </div>
-                        <div class="stats-card-content">
                             <div class="stats-item">
-                                <span class="stats-label">Low</span>
+                                <span class="stats-label">BW Low</span>
                                 <span class="stats-value" id="stats-bw-low">-</span>
                             </div>
                             <div class="stats-item">
-                                <span class="stats-label">High</span>
+                                <span class="stats-label">BW High</span>
                                 <span class="stats-value" id="stats-bw-high">-</span>
                             </div>
                             <div class="stats-item">
-                                <span class="stats-label">Width</span>
+                                <span class="stats-label">BW Width</span>
                                 <span class="stats-value" id="stats-bw-width">-</span>
                             </div>
                         </div>
@@ -502,24 +482,6 @@ class StatsExtension extends DecoderExtension {
                         </div>
                     </div>
 
-                    <!-- Connection Card -->
-                    <div class="stats-card connection">
-                        <div class="stats-card-header">
-                            <div class="stats-card-icon">🔗</div>
-                            <div class="stats-card-title">Connection</div>
-                        </div>
-                        <div class="stats-card-content">
-                            <div class="stats-item">
-                                <span class="stats-label">Status</span>
-                                <span class="stats-badge" id="stats-connection-status">-</span>
-                            </div>
-                            <div class="stats-item">
-                                <span class="stats-label">Session</span>
-                                <span class="stats-value" id="stats-session">-</span>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- Spectrum Card -->
                     <div class="stats-card spectrum">
                         <div class="stats-card-header">
@@ -566,13 +528,31 @@ class StatsExtension extends DecoderExtension {
                             </div>
                         </div>
                     </div>
+
+                    <!-- Connection Card -->
+                    <div class="stats-card connection">
+                        <div class="stats-card-header">
+                            <div class="stats-card-icon">🔗</div>
+                            <div class="stats-card-title">Connection</div>
+                        </div>
+                        <div class="stats-card-content">
+                            <div class="stats-item">
+                                <span class="stats-label">Status</span>
+                                <span class="stats-badge" id="stats-connection-status">-</span>
+                            </div>
+                            <div class="stats-item">
+                                <span class="stats-label">Session</span>
+                                <span class="stats-value" id="stats-session">-</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Bands List -->
                 <div class="stats-list-card" id="stats-bands-card" style="display: none;">
                     <div class="stats-list-header">
                         <div class="stats-card-icon">📻</div>
-                        <div class="stats-card-title">Amateur Bands</div>
+                        <div class="stats-card-title">Bands</div>
                         <span class="stats-badge active" id="stats-bands-count">0</span>
                     </div>
                     <div class="stats-list-content" id="stats-bands-list"></div>
@@ -717,25 +697,36 @@ class StatsExtension extends DecoderExtension {
             if (bandsCount) bandsCount.textContent = bands.length;
 
             if (bandsList) {
-                const displayBands = bands.slice(0, 10);
-                bandsList.innerHTML = displayBands.map(band => {
-                    const start = this.radio.formatFrequency(band.start);
-                    const end = this.radio.formatFrequency(band.end);
-                    return `
-                        <div class="stats-list-item">
-                            <span class="stats-list-item-name">${band.name || band.label}</span>
-                            <span class="stats-list-item-value">${start} - ${end}</span>
-                        </div>
-                    `;
-                }).join('');
+                // Group bands by their 'group' property
+                const groupedBands = {};
+                bands.forEach(band => {
+                    const group = band.group || 'Other';
+                    if (!groupedBands[group]) {
+                        groupedBands[group] = [];
+                    }
+                    groupedBands[group].push(band);
+                });
 
-                if (bands.length > 10) {
-                    bandsList.innerHTML += `
-                        <div class="stats-list-item" style="opacity: 0.6;">
-                            <span class="stats-list-item-name">... and ${bands.length - 10} more</span>
+                // Build HTML with groups
+                let html = '';
+                Object.keys(groupedBands).sort().forEach(group => {
+                    html += `
+                        <div style="margin-top: 12px; margin-bottom: 8px; padding: 4px 8px; background: rgba(255,255,255,0.1); border-radius: 4px; font-weight: 600; font-size: 0.9em; color: #3498db;">
+                            ${group}
                         </div>
                     `;
-                }
+                    groupedBands[group].forEach(band => {
+                        const start = this.radio.formatFrequency(band.start);
+                        const end = this.radio.formatFrequency(band.end);
+                        html += `
+                            <div class="stats-list-item">
+                                <span class="stats-list-item-name">${band.name || band.label}</span>
+                                <span class="stats-list-item-value">${start} - ${end}</span>
+                            </div>
+                        `;
+                    });
+                });
+                bandsList.innerHTML = html;
             }
         }
 
@@ -750,8 +741,7 @@ class StatsExtension extends DecoderExtension {
             if (bookmarksCount) bookmarksCount.textContent = bookmarks.length;
 
             if (bookmarksList) {
-                const displayBookmarks = bookmarks.slice(0, 10);
-                bookmarksList.innerHTML = displayBookmarks.map(bookmark => {
+                bookmarksList.innerHTML = bookmarks.map(bookmark => {
                     const freqStr = this.radio.formatFrequency(bookmark.frequency);
                     return `
                         <div class="stats-list-item">
@@ -760,14 +750,6 @@ class StatsExtension extends DecoderExtension {
                         </div>
                     `;
                 }).join('');
-
-                if (bookmarks.length > 10) {
-                    bookmarksList.innerHTML += `
-                        <div class="stats-list-item" style="opacity: 0.6;">
-                            <span class="stats-list-item-name">... and ${bookmarks.length - 10} more</span>
-                        </div>
-                    `;
-                }
             }
         }
     }

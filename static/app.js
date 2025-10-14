@@ -3196,6 +3196,137 @@ function enableFrequencyTracking() {
             return;
         }
 
+        // BUFFER COMPENSATION: Account for audio buffer when taking measurements
+        // Schedule measurement to happen after buffered audio has played
+        const currentTime = audioContext.currentTime;
+        const bufferAhead = nextPlayTime - currentTime;
+        const BUFFER_MARGIN = 0.05; // 50ms safety margin
+
+        // If there's significant buffer, delay the measurement
+        if (bufferAhead > BUFFER_MARGIN) {
+            const delayMs = (bufferAhead + BUFFER_MARGIN) * 1000;
+            console.log(`Tracking: Delaying measurement by ${delayMs.toFixed(0)}ms to account for buffer (${(bufferAhead * 1000).toFixed(0)}ms buffered + ${(BUFFER_MARGIN * 1000).toFixed(0)}ms margin)`);
+
+            // Schedule measurement after buffer time + margin
+            setTimeout(() => {
+                if (!oscilloscope.trackingEnabled || !analyser || !audioContext) {
+                    return;
+                }
+
+                // Now take the measurement after buffer has played
+                const bufferLength = analyser.fftSize;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteTimeDomainData(dataArray);
+
+                const detectedFreq = oscilloscope.detectFrequencyFromWaveform(dataArray, audioContext.sampleRate);
+
+                if (detectedFreq <= 0 || detectedFreq < 20 || detectedFreq > 20000) {
+                    // No valid signal, skip this update
+                    return;
+                }
+
+                const targetFreq = 1000;
+                const currentError = targetFreq - detectedFreq;
+
+                // Update lock status and button color
+                const button = document.getElementById('set-1khz-btn');
+                oscilloscope.trackingLocked = Math.abs(currentError) <= oscilloscope.TRACKING_LOCK_THRESHOLD;
+
+                if (button) {
+                    if (oscilloscope.trackingLocked) {
+                        button.style.backgroundColor = '#28a745'; // Green when locked
+                        button.textContent = 'Tracking: LOCKED';
+                    } else {
+                        button.style.backgroundColor = '#fd7e14'; // Orange when adjusting
+                        button.textContent = 'Tracking: ADJUSTING';
+                    }
+                }
+
+                // Continue with rest of tracking logic (smoothing, adjustment, etc.)
+                // Only adjust if error is above minimum threshold
+                if (Math.abs(currentError) < oscilloscope.TRACKING_MIN_ERROR) {
+                    return;
+                }
+
+                // Add to history for smoothing
+                oscilloscope.trackingHistory.push(currentError);
+                if (oscilloscope.trackingHistory.length > oscilloscope.TRACKING_HISTORY_SIZE) {
+                    oscilloscope.trackingHistory.shift();
+                }
+
+                // Need enough history before adjusting
+                if (oscilloscope.trackingHistory.length < oscilloscope.TRACKING_HISTORY_SIZE) {
+                    return;
+                }
+
+                // Calculate smoothed error
+                const smoothedError = oscilloscope.trackingHistory.reduce((sum, e) => sum + e, 0) / oscilloscope.trackingHistory.length;
+
+                // Check if all errors in history have the same sign
+                const allSameSign = oscilloscope.trackingHistory.every(e => e * smoothedError > 0);
+                if (!allSameSign) {
+                    oscilloscope.trackingHistory = [];
+                    return;
+                }
+
+                // Only adjust if smoothed error is still significant
+                if (Math.abs(smoothedError) < oscilloscope.TRACKING_MIN_ERROR) {
+                    return;
+                }
+
+                // Adaptive damping
+                let dampingFactor;
+                if (Math.abs(smoothedError) > oscilloscope.TRACKING_COARSE_THRESHOLD) {
+                    dampingFactor = oscilloscope.TRACKING_DAMPING_COARSE;
+                } else if (Math.abs(smoothedError) > 2) {
+                    dampingFactor = oscilloscope.TRACKING_DAMPING_FINE;
+                } else {
+                    dampingFactor = 1.0;
+                }
+
+                const shiftAmount = smoothedError * dampingFactor;
+
+                // Get current dial frequency
+                const freqInput = document.getElementById('frequency');
+                const currentDialFreq = parseInt(freqInput.value);
+
+                // Check drift from start frequency
+                const driftFromStart = Math.abs(currentDialFreq - oscilloscope.trackingStartFreq);
+                if (driftFromStart > oscilloscope.TRACKING_DRIFT_LIMIT) {
+                    disableFrequencyTracking();
+                    log(`Frequency tracking disabled (drifted ${driftFromStart} Hz from start)`, 'error');
+                    return;
+                }
+
+                // Calculate new dial frequency
+                let newDialFreq;
+                if (currentMode === 'usb' || currentMode === 'cwu') {
+                    newDialFreq = currentDialFreq - shiftAmount;
+                } else if (currentMode === 'lsb' || currentMode === 'cwl') {
+                    newDialFreq = currentDialFreq + shiftAmount;
+                }
+
+                // Clamp to valid range
+                const MIN_FREQ = 100000;
+                const MAX_FREQ = 30000000;
+                newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
+                newDialFreq = Math.round(newDialFreq);
+
+                // Update frequency input
+                freqInput.value = newDialFreq;
+                updateBandButtons(newDialFreq);
+                updateURL();
+
+                // Tune to new frequency
+                if (wsManager.isConnected()) {
+                    autoTune();
+                }
+            }, delayMs);
+
+            return; // Exit this interval cycle, measurement scheduled
+        }
+
+        // Buffer is small, proceed with immediate measurement
         // Get current detected frequency
         const bufferLength = analyser.fftSize;
         const dataArray = new Uint8Array(bufferLength);

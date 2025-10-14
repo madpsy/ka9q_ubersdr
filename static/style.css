@@ -2407,7 +2407,7 @@ input[type="range"]::-moz-range-thumb {
     border-top: none;
     transform: scale(0.75);
     transform-origin: top center;
-    margin-top: -20px;
+    margin-top: 20px;
     margin-bottom: -20px;
 }
 

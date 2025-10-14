@@ -2597,6 +2597,13 @@ let dbScaleHistory = { peak: [], floor: [] };
 const dbScaleHistorySize = 10; // Average over 10 samples (5 seconds at 500ms intervals)
 let cachedDbScale = { minDb: -80, maxDb: -20 }; // Cached scale values
 
+// Peak/Floor/SNR display (updates twice as fast as scale)
+let lastPeakFloorUpdate = 0;
+const peakFloorUpdateInterval = 250; // Update peak/floor/SNR every 250ms (twice as fast)
+let peakFloorHistory = { peak: [], floor: [] };
+const peakFloorHistorySize = 5; // Average over 5 samples (1.25 seconds at 250ms intervals)
+let cachedPeakFloor = { minDb: -80, maxDb: -20 }; // Cached peak/floor values for display
+
 // Shared frequency mapping helpers for consistent spectrum/waterfall alignment
 function getFrequencyBinMapping() {
     if (!analyser || !audioContext) return null;
@@ -3679,7 +3686,9 @@ function updateSpectrum() {
 
     // Use absolute dBFS scale from float frequency data with averaging and throttling
     const scaleNow = performance.now();
-    if (scaleNow - lastDbScaleUpdate >= dbScaleUpdateInterval) {
+    
+    // Update peak/floor/SNR values twice as fast (250ms)
+    if (scaleNow - lastPeakFloorUpdate >= peakFloorUpdateInterval) {
         // Find the actual dBFS range in the visible bandwidth
         let currentMinDb = 0;
         let currentMaxDb = -Infinity;
@@ -3697,21 +3706,52 @@ function updateSpectrum() {
             }
         }
 
-        // Add to history for averaging
+        // Add to peak/floor history for faster updates
         if (isFinite(currentMaxDb) && currentMaxDb !== -Infinity) {
-            dbScaleHistory.peak.push(currentMaxDb);
+            peakFloorHistory.peak.push(currentMaxDb);
+            if (peakFloorHistory.peak.length > peakFloorHistorySize) {
+                peakFloorHistory.peak.shift();
+            }
+        }
+        if (isFinite(currentMinDb) && currentMinDb !== 0) {
+            peakFloorHistory.floor.push(currentMinDb);
+            if (peakFloorHistory.floor.length > peakFloorHistorySize) {
+                peakFloorHistory.floor.shift();
+            }
+        }
+
+        // Calculate averaged values for peak/floor display
+        if (peakFloorHistory.peak.length > 0) {
+            const avgPeak = peakFloorHistory.peak.reduce((sum, v) => sum + v, 0) / peakFloorHistory.peak.length;
+            cachedPeakFloor.maxDb = avgPeak;
+        }
+        if (peakFloorHistory.floor.length > 0) {
+            const avgFloor = peakFloorHistory.floor.reduce((sum, v) => sum + v, 0) / peakFloorHistory.floor.length;
+            cachedPeakFloor.minDb = avgFloor;
+        }
+
+        lastPeakFloorUpdate = scaleNow;
+    }
+    
+    // Update scale labels at slower rate (500ms)
+    if (scaleNow - lastDbScaleUpdate >= dbScaleUpdateInterval) {
+        // Add to scale history for slower updates
+        if (peakFloorHistory.peak.length > 0) {
+            const avgPeak = peakFloorHistory.peak.reduce((sum, v) => sum + v, 0) / peakFloorHistory.peak.length;
+            dbScaleHistory.peak.push(avgPeak);
             if (dbScaleHistory.peak.length > dbScaleHistorySize) {
                 dbScaleHistory.peak.shift();
             }
         }
-        if (isFinite(currentMinDb) && currentMinDb !== 0) {
-            dbScaleHistory.floor.push(currentMinDb);
+        if (peakFloorHistory.floor.length > 0) {
+            const avgFloor = peakFloorHistory.floor.reduce((sum, v) => sum + v, 0) / peakFloorHistory.floor.length;
+            dbScaleHistory.floor.push(avgFloor);
             if (dbScaleHistory.floor.length > dbScaleHistorySize) {
                 dbScaleHistory.floor.shift();
             }
         }
 
-        // Calculate averaged values
+        // Calculate averaged values for scale labels
         if (dbScaleHistory.peak.length > 0) {
             const avgPeak = dbScaleHistory.peak.reduce((sum, v) => sum + v, 0) / dbScaleHistory.peak.length;
             cachedDbScale.maxDb = avgPeak;
@@ -4010,15 +4050,14 @@ function updateSpectrum() {
     spectrumCtx.textAlign = 'right';
     spectrumCtx.textBaseline = 'top';
 
-    // Use the same averaged values from the scale calculation (updated every 500ms)
-    // This ensures consistency between the scale and the debug display
-    const peakDb = isFinite(cachedDbScale.maxDb) ? cachedDbScale.maxDb.toFixed(1) : '-∞';
-    const noiseDb = isFinite(cachedDbScale.minDb) ? cachedDbScale.minDb.toFixed(1) : '-∞';
+    // Use faster-updating peak/floor values (updated every 250ms, twice as fast as scale)
+    const peakDb = isFinite(cachedPeakFloor.maxDb) ? cachedPeakFloor.maxDb.toFixed(1) : '-∞';
+    const noiseDb = isFinite(cachedPeakFloor.minDb) ? cachedPeakFloor.minDb.toFixed(1) : '-∞';
 
     // Calculate SNR (Signal-to-Noise Ratio) in dB
     let snrText = 'SNR: N/A';
-    if (isFinite(cachedDbScale.maxDb) && isFinite(cachedDbScale.minDb)) {
-        const snrDb = cachedDbScale.maxDb - cachedDbScale.minDb;
+    if (isFinite(cachedPeakFloor.maxDb) && isFinite(cachedPeakFloor.minDb)) {
+        const snrDb = cachedPeakFloor.maxDb - cachedPeakFloor.minDb;
         snrText = `SNR: ${snrDb.toFixed(1)} dB`;
     }
 

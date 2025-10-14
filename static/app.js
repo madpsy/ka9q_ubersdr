@@ -1878,8 +1878,39 @@ function playAudioBuffer(buffer) {
     const now = performance.now();
     if (now - lastBufferDisplayUpdate >= 500) {
         const bufferDisplay = document.getElementById('audio-buffer-display');
-        if (bufferDisplay) {
-            bufferDisplay.textContent = `Buffer: ${(bufferAhead * 1000).toFixed(0)}ms`;
+        const bufferBar = document.getElementById('audio-buffer-bar');
+        const bufferText = document.getElementById('audio-buffer-text');
+        if (bufferDisplay && bufferBar && bufferText) {
+            const bufferMs = bufferAhead * 1000;
+            const tooltipText = `Buffer: ${bufferMs.toFixed(0)}ms`;
+            bufferDisplay.title = tooltipText;
+
+            // Update text display
+            bufferText.textContent = `${bufferMs.toFixed(0)}ms`;
+
+            // Calculate bar width (0-200ms range, max at 200ms)
+            const maxBuffer = 200;
+            const widthPercent = Math.min((bufferMs / maxBuffer) * 100, 100);
+            bufferBar.style.width = `${widthPercent}%`;
+
+            // Calculate color based on buffer value
+            // Green: 0-125ms, Orange: 125-175ms, Red: 175-200ms
+            let color;
+            if (bufferMs <= 125) {
+                // Green zone
+                color = '#28a745';
+            } else if (bufferMs <= 175) {
+                // Orange zone - gradient from green to orange
+                const ratio = (bufferMs - 125) / (175 - 125);
+                const r = Math.round(40 + (255 - 40) * ratio);
+                const g = Math.round(167 + (193 - 167) * ratio);
+                const b = Math.round(69 + (193 - 69) * ratio);
+                color = `rgb(${r}, ${g}, ${b})`;
+            } else {
+                // Red zone
+                color = '#dc3545';
+            }
+            bufferBar.style.backgroundColor = color;
         }
         lastBufferDisplayUpdate = now;
     }

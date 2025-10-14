@@ -1989,8 +1989,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         // Calculate x positions for bandwidth edges
         const lowFreq = this.currentTunedFreq + this.currentBandwidthLow;
         const highFreq = this.currentTunedFreq + this.currentBandwidthHigh;
-        const xLow = ((lowFreq - startFreq) / (endFreq - startFreq)) * this.width;
-        const xHigh = ((highFreq - startFreq) / (endFreq - startFreq)) * this.width;
+        let xLow = ((lowFreq - startFreq) / (endFreq - startFreq)) * this.width;
+        let xHigh = ((highFreq - startFreq) / (endFreq - startFreq)) * this.width;
+
+        // For LSB mode (both bandwidth values negative), swap the positions
+        // because the frequency scale is inverted
+        if (this.currentBandwidthLow < 0 && this.currentBandwidthHigh < 0) {
+            [xLow, xHigh] = [xHigh, xLow];
+        }
 
         // Draw frequency label at top
         const freqLabel = this.formatFrequency(this.currentTunedFreq);

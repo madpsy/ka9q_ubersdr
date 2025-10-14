@@ -551,7 +551,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	// Build the response with description plus all status.json data
+	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
 		"description": config.Admin.Description,
 		"receiver": map[string]interface{}{
@@ -566,19 +566,6 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
 		},
 		"max_clients": config.Server.MaxSessions,
 		"version":     config.Admin.Version,
-		"sdrs": []map[string]interface{}{
-			{
-				"name": "UberSDR",
-				"type": "SDR",
-				"profiles": []map[string]interface{}{
-					{
-						"name":        "0-30 MHz",
-						"center_freq": 15000000, // 15 MHz in Hz
-						"sample_rate": 64000000, // 64 MHz in Hz
-					},
-				},
-			},
-		},
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

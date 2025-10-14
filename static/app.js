@@ -3205,7 +3205,6 @@ function enableFrequencyTracking() {
         // If there's significant buffer, delay the measurement
         if (bufferAhead > BUFFER_MARGIN) {
             const delayMs = (bufferAhead + BUFFER_MARGIN) * 1000;
-            console.log(`Tracking: Delaying measurement by ${delayMs.toFixed(0)}ms to account for buffer (${(bufferAhead * 1000).toFixed(0)}ms buffered + ${(BUFFER_MARGIN * 1000).toFixed(0)}ms margin)`);
 
             // Schedule measurement after buffer time + margin
             setTimeout(() => {

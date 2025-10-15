@@ -8,6 +8,9 @@
         
         console.log(`🔌 Loading ${config.enabled.length} extension(s)...`);
         
+        // Array to store extension info for dropdown
+        const extensionsList = [];
+        
         // Load each enabled extension
         for (const extName of config.enabled) {
             try {
@@ -50,11 +53,20 @@
                     document.body.appendChild(script);
                 });
                 
+                // Store extension info for dropdown
+                extensionsList.push({
+                    slug: manifest.name || extName,
+                    displayName: manifest.displayName || extName
+                });
+                
                 console.log(`✅ Successfully loaded extension: ${manifest.displayName || extName}`);
             } catch (err) {
                 console.error(`❌ Failed to load extension "${extName}":`, err);
             }
         }
+        
+        // Populate extensions dropdown
+        populateExtensionsDropdown(extensionsList);
         
         console.log('🎉 Extension loading complete');
     } catch (err) {
@@ -62,3 +74,27 @@
         console.error('Make sure /extensions/extensions.json exists and is valid JSON');
     }
 })();
+
+// Populate the extensions dropdown menu
+function populateExtensionsDropdown(extensions) {
+    const dropdown = document.getElementById('extensions-dropdown');
+    if (!dropdown) {
+        console.warn('Extensions dropdown not found in DOM');
+        return;
+    }
+    
+    // Clear existing options except the first one (placeholder)
+    while (dropdown.options.length > 1) {
+        dropdown.remove(1);
+    }
+    
+    // Add option for each extension
+    extensions.forEach(ext => {
+        const option = document.createElement('option');
+        option.value = ext.slug;
+        option.textContent = `📊 ${ext.displayName}`;
+        dropdown.appendChild(option);
+    });
+    
+    console.log(`📋 Populated dropdown with ${extensions.length} extension(s)`);
+}

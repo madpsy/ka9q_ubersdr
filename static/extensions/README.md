@@ -1,6 +1,6 @@
 # UberSDR Extension System
 
-This directory contains the extension system for UberSDR, which allows you to add custom decoders and features without modifying core files.
+This directory contains the fully dynamic extension system for UberSDR, which allows you to add custom decoders and features without modifying core files.
 
 ## Directory Structure
 

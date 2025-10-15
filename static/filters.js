@@ -52,6 +52,7 @@ function toggleEqualizer() {
         }
         console.log('Equalizer disabled');
     }
+    saveFilterSettings();
 }
 
 function updateEqualizer() {
@@ -72,6 +73,7 @@ function updateEqualizer() {
         eqMakeupGain.gain.value = Math.pow(10, makeupGainDb / 20);
         makeupGainDisplay.textContent = `${makeupGainDb > 0 ? '+' : ''}${makeupGainDb.toFixed(1)} dB`;
     }
+    saveFilterSettings();
 }
 
 function resetEqualizer() {
@@ -141,6 +143,7 @@ function toggleBandpassFilter() {
         }
         console.log('Bandpass disabled');
     }
+    saveFilterSettings();
 }
 
 function updateBandpassSliderRanges() {
@@ -247,6 +250,7 @@ function updateBandpassFilter() {
     if (window.cwDecoder && window.cwDecoder.enabled) {
         window.updateCWDecoderFrequency(Math.abs(actualCenter));
     }
+    saveFilterSettings();
 }
 
 function resetBandpassFilter() {
@@ -308,6 +312,7 @@ function addNotchFilter(centerFreq) {
         }
     }
     updateNotchFilterUI();
+    saveFilterSettings();
     console.log(`Notch filter added at ${centerFreq} Hz`);
 }
 
@@ -319,6 +324,7 @@ function removeNotchFilter(index) {
     }
     notchFilters.splice(index, 1);
     updateNotchFilterUI();
+    saveFilterSettings();
     console.log(`Notch filter removed`);
 }
 
@@ -343,6 +349,7 @@ function updateNotchFilterParams(index) {
         }
         document.getElementById(`notch-center-value-${index}`).textContent = sliderCenter + ' Hz';
         document.getElementById(`notch-width-value-${index}`).textContent = width + ' Hz';
+        saveFilterSettings();
     }
 }
 
@@ -366,6 +373,7 @@ function toggleNotchFilter() {
         }
         console.log('Notch filters disabled');
     }
+    saveFilterSettings();
 }
 
 function updateNotchFilterUI() {
@@ -471,6 +479,7 @@ function toggleCompressor() {
         }
         console.log('Compressor disabled');
     }
+    saveFilterSettings();
 }
 
 function updateCompressor() {
@@ -497,6 +506,7 @@ function updateCompressor() {
     document.getElementById('compressor-attack-value').textContent = attack.toFixed(3) + ' s';
     document.getElementById('compressor-release-value').textContent = release.toFixed(2) + ' s';
     document.getElementById('compressor-makeup-gain-value').textContent = '+' + makeupGainDb + ' dB';
+    saveFilterSettings();
 }
 
 function resetCompressor() {
@@ -600,6 +610,7 @@ function toggleStereoVirtualizer() {
         }
         console.log('Stereo virtualizer disabled');
     }
+    saveFilterSettings();
 }
 
 function updateStereoVirtualizer() {
@@ -623,6 +634,7 @@ function updateStereoVirtualizer() {
     stereoGainRight.gain.value = 1.0;
     stereoWidthGain.gain.value = width / 100;
     stereoMakeupGain.gain.value = Math.pow(10, makeupGainDb / 20);
+    saveFilterSettings();
 }
 
 function resetStereoVirtualizer() {
@@ -703,6 +715,7 @@ function toggleSquelch() {
         }
         console.log('Squelch disabled');
     }
+    saveFilterSettings();
 }
 
 function updateSquelch() {
@@ -718,6 +731,7 @@ function updateSquelch() {
     document.getElementById('squelch-hysteresis-value').textContent = hysteresisDb + ' dB';
     document.getElementById('squelch-attack-value').textContent = attackMs + ' ms';
     document.getElementById('squelch-release-value').textContent = releaseMs + ' ms';
+    saveFilterSettings();
 }
 
 function resetSquelch() {
@@ -795,8 +809,249 @@ function updateSquelchStatus() {
 }
 
 // ============================================================================
+// LOCAL STORAGE PERSISTENCE
+// ============================================================================
+
+const STORAGE_KEY_PREFIX = 'ka9q_filter_';
+let isRestoringSettings = false;
+
+function saveFilterSettings() {
+    // Don't save while we're restoring settings
+    if (isRestoringSettings) return;
+
+    try {
+        // Equalizer
+        const eqSettings = {
+            enabled: equalizerEnabled,
+            bands: {},
+            makeupGain: document.getElementById('equalizer-makeup-gain')?.value || 0
+        };
+        const frequencies = [60, 170, 310, 600, 1000, 1500, 2000, 2500, 3000, 4000, 6000, 8000];
+        frequencies.forEach(freq => {
+            const slider = document.getElementById(`eq-${freq}`);
+            if (slider) eqSettings.bands[freq] = parseFloat(slider.value);
+        });
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'equalizer', JSON.stringify(eqSettings));
+
+        // Bandpass
+        const bandpassSettings = {
+            enabled: bandpassEnabled,
+            center: document.getElementById('bandpass-center')?.value || 800,
+            width: document.getElementById('bandpass-width')?.value || 200,
+            stages: document.getElementById('bandpass-stages')?.value || 4,
+            autoQ: document.getElementById('bandpass-auto-q')?.checked || true,
+            qMultiplier: document.getElementById('bandpass-q-multiplier')?.value || 1.0
+        };
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'bandpass', JSON.stringify(bandpassSettings));
+
+        // Notch
+        const notchSettings = {
+            enabled: notchEnabled,
+            filters: notchFilters.map(n => ({ center: n.center, width: n.width }))
+        };
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'notch', JSON.stringify(notchSettings));
+
+        // Compressor
+        const compressorSettings = {
+            enabled: compressorEnabled,
+            threshold: document.getElementById('compressor-threshold')?.value || -24,
+            ratio: document.getElementById('compressor-ratio')?.value || 12,
+            attack: document.getElementById('compressor-attack')?.value || 0.003,
+            release: document.getElementById('compressor-release')?.value || 0.25,
+            makeupGain: document.getElementById('compressor-makeup-gain')?.value || 0
+        };
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'compressor', JSON.stringify(compressorSettings));
+
+        // Stereo Virtualizer
+        const stereoSettings = {
+            enabled: stereoVirtualizerEnabled,
+            width: document.getElementById('stereo-width')?.value || 50,
+            delay: document.getElementById('stereo-delay')?.value || 16,
+            separation: document.getElementById('stereo-separation')?.value || 40,
+            makeupGain: document.getElementById('stereo-makeup-gain')?.value || 0
+        };
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'stereo', JSON.stringify(stereoSettings));
+
+        // Squelch
+        const squelchSettings = {
+            enabled: squelchEnabled,
+            threshold: document.getElementById('squelch-threshold')?.value || -35,
+            hysteresis: document.getElementById('squelch-hysteresis')?.value || 3,
+            attack: document.getElementById('squelch-attack')?.value || 20,
+            release: document.getElementById('squelch-release')?.value || 500
+        };
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'squelch', JSON.stringify(squelchSettings));
+
+        // Noise Reduction (NR2) - from app.js
+        const nr2Checkbox = document.getElementById('noise-reduction-enable');
+        const nr2Settings = {
+            enabled: nr2Checkbox ? nr2Checkbox.checked : false,
+            strength: document.getElementById('noise-reduction-strength')?.value || 40,
+            floor: document.getElementById('noise-reduction-floor')?.value || 10,
+            adaptRate: document.getElementById('noise-reduction-adapt-rate')?.value || 1.0,
+            makeupGain: document.getElementById('noise-reduction-makeup-gain')?.value || -3
+        };
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'nr2', JSON.stringify(nr2Settings));
+
+        console.log('✅ Filter settings saved to localStorage');
+    } catch (e) {
+        console.error('Failed to save filter settings:', e);
+    }
+}
+
+function restoreFilterSettings() {
+    // Set flag to prevent saves during restoration
+    isRestoringSettings = true;
+
+    try {
+        // Equalizer
+        const eqSettings = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'equalizer'));
+        if (eqSettings) {
+            const checkbox = document.getElementById('equalizer-enable');
+            if (checkbox) {
+                checkbox.checked = eqSettings.enabled;
+                toggleEqualizer();
+            }
+            const frequencies = [60, 170, 310, 600, 1000, 1500, 2000, 2500, 3000, 4000, 6000, 8000];
+            frequencies.forEach(freq => {
+                const slider = document.getElementById(`eq-${freq}`);
+                if (slider && eqSettings.bands[freq] !== undefined) {
+                    slider.value = eqSettings.bands[freq];
+                }
+            });
+            const makeupGainSlider = document.getElementById('equalizer-makeup-gain');
+            if (makeupGainSlider && eqSettings.makeupGain !== undefined) {
+                makeupGainSlider.value = eqSettings.makeupGain;
+            }
+            updateEqualizer();
+        }
+
+        // Bandpass
+        const bandpassSettings = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'bandpass'));
+        if (bandpassSettings) {
+            const checkbox = document.getElementById('bandpass-enable');
+            if (checkbox) {
+                checkbox.checked = bandpassSettings.enabled;
+                toggleBandpassFilter();
+            }
+            if (bandpassSettings.center) document.getElementById('bandpass-center').value = bandpassSettings.center;
+            if (bandpassSettings.width) document.getElementById('bandpass-width').value = bandpassSettings.width;
+            if (bandpassSettings.stages) document.getElementById('bandpass-stages').value = bandpassSettings.stages;
+            if (bandpassSettings.autoQ !== undefined) document.getElementById('bandpass-auto-q').checked = bandpassSettings.autoQ;
+            if (bandpassSettings.qMultiplier) document.getElementById('bandpass-q-multiplier').value = bandpassSettings.qMultiplier;
+            updateBandpassFilter();
+        }
+
+        // Notch
+        const notchSettings = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'notch'));
+        if (notchSettings) {
+            // Clear existing notches first
+            clearAllNotches();
+            // Restore notch filters
+            if (notchSettings.filters && notchSettings.filters.length > 0) {
+                notchSettings.filters.forEach(n => {
+                    addNotchFilter(n.center);
+                    // Update width after adding
+                    const index = notchFilters.length - 1;
+                    if (index >= 0) {
+                        notchFilters[index].width = n.width;
+                    }
+                });
+                updateNotchFilterUI();
+            }
+            const checkbox = document.getElementById('notch-enable');
+            if (checkbox) {
+                checkbox.checked = notchSettings.enabled;
+                toggleNotchFilter();
+            }
+        }
+
+        // Compressor
+        const compressorSettings = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'compressor'));
+        if (compressorSettings) {
+            const checkbox = document.getElementById('compressor-enable');
+            if (checkbox) {
+                checkbox.checked = compressorSettings.enabled;
+                toggleCompressor();
+            }
+            if (compressorSettings.threshold) document.getElementById('compressor-threshold').value = compressorSettings.threshold;
+            if (compressorSettings.ratio) document.getElementById('compressor-ratio').value = compressorSettings.ratio;
+            if (compressorSettings.attack) document.getElementById('compressor-attack').value = compressorSettings.attack;
+            if (compressorSettings.release) document.getElementById('compressor-release').value = compressorSettings.release;
+            if (compressorSettings.makeupGain !== undefined) document.getElementById('compressor-makeup-gain').value = compressorSettings.makeupGain;
+            updateCompressor();
+        }
+
+        // Stereo Virtualizer
+        const stereoSettings = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'stereo'));
+        if (stereoSettings) {
+            const checkbox = document.getElementById('stereo-virtualizer-enable');
+            if (checkbox) {
+                checkbox.checked = stereoSettings.enabled;
+                toggleStereoVirtualizer();
+            }
+            if (stereoSettings.width) document.getElementById('stereo-width').value = stereoSettings.width;
+            if (stereoSettings.delay) document.getElementById('stereo-delay').value = stereoSettings.delay;
+            if (stereoSettings.separation) document.getElementById('stereo-separation').value = stereoSettings.separation;
+            if (stereoSettings.makeupGain !== undefined) document.getElementById('stereo-makeup-gain').value = stereoSettings.makeupGain;
+            updateStereoVirtualizer();
+        }
+
+        // Squelch
+        const squelchSettings = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'squelch'));
+        if (squelchSettings) {
+            const checkbox = document.getElementById('squelch-enable');
+            if (checkbox) {
+                checkbox.checked = squelchSettings.enabled;
+                toggleSquelch();
+            }
+            if (squelchSettings.threshold) document.getElementById('squelch-threshold').value = squelchSettings.threshold;
+            if (squelchSettings.hysteresis) document.getElementById('squelch-hysteresis').value = squelchSettings.hysteresis;
+            if (squelchSettings.attack) document.getElementById('squelch-attack').value = squelchSettings.attack;
+            if (squelchSettings.release) document.getElementById('squelch-release').value = squelchSettings.release;
+            updateSquelch();
+        }
+
+        // Noise Reduction (NR2) - from app.js
+        const nr2Settings = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'nr2'));
+        if (nr2Settings) {
+            // Set slider values first
+            if (nr2Settings.strength) document.getElementById('noise-reduction-strength').value = nr2Settings.strength;
+            if (nr2Settings.floor) document.getElementById('noise-reduction-floor').value = nr2Settings.floor;
+            if (nr2Settings.adaptRate) document.getElementById('noise-reduction-adapt-rate').value = nr2Settings.adaptRate;
+            if (nr2Settings.makeupGain !== undefined) document.getElementById('noise-reduction-makeup-gain').value = nr2Settings.makeupGain;
+
+            // Set checkbox state
+            const checkbox = document.getElementById('noise-reduction-enable');
+            if (checkbox) {
+                checkbox.checked = nr2Settings.enabled;
+            }
+
+            // Update the parameters (this will update the display values)
+            // This is safe to call even without audio context
+            if (window.updateNoiseReduction) {
+                window.updateNoiseReduction();
+            }
+
+            // Note: toggleNoiseReduction will be called automatically when audio context
+            // is initialized if the checkbox is checked
+        }
+
+        console.log('✅ Filter settings restored from localStorage');
+    } catch (e) {
+        console.error('Failed to restore filter settings:', e);
+    } finally {
+        // Always clear the flag, even if there was an error
+        isRestoringSettings = false;
+    }
+}
+
+// ============================================================================
 // EXPOSE ALL TO WINDOW
 // ============================================================================
+
+window.saveFilterSettings = saveFilterSettings;
+window.restoreFilterSettings = restoreFilterSettings;
 
 window.equalizerEnabled = equalizerEnabled;
 window.eqFilters = eqFilters;

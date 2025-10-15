@@ -88,6 +88,18 @@ const wsManager = new WebSocketManager({
             initializeLowpassFilter();
             initializeEqualizer();
 
+            // Restore filter settings from localStorage
+            if (window.restoreFilterSettings) {
+                window.restoreFilterSettings();
+            }
+
+            // Check if NR2 should be enabled after restoration
+            const nr2Checkbox = document.getElementById('noise-reduction-enable');
+            if (nr2Checkbox && nr2Checkbox.checked) {
+                // Checkbox was restored as checked, now enable NR2
+                toggleNoiseReduction();
+            }
+
             // Initialize waterfall timestamp
             waterfallStartTime = Date.now();
             waterfallLineCount = 0;
@@ -5213,6 +5225,11 @@ function updateNoiseReduction() {
     if (nr2) {
         nr2.setParameters(noiseReductionStrength, noiseReductionFloor, adaptRate);
     }
+
+    // Save settings to localStorage
+    if (window.saveFilterSettings) {
+        window.saveFilterSettings();
+    }
 }
 
 function resetNoiseReduction() {
@@ -5331,6 +5348,11 @@ function toggleNoiseReduction() {
         }
 
         log('❌ NR2 Noise Reduction DISABLED');
+    }
+
+    // Save settings to localStorage
+    if (window.saveFilterSettings) {
+        window.saveFilterSettings();
     }
 }
 

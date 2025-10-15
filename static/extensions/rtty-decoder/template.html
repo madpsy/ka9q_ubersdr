@@ -74,7 +74,11 @@
 
     <div class="rtty-debug">
         <details>
-            <summary>Debug Info</summary>
+            <summary>Debug Info (last 200 lines)</summary>
+            <div class="debug-controls">
+                <button id="rtty-copy-debug" class="control-button">Copy Debug Log</button>
+                <button id="rtty-clear-debug" class="control-button">Clear Debug</button>
+            </div>
             <div id="rtty-debug-output" class="debug-output"></div>
         </details>
     </div>

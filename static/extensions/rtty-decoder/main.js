@@ -32,13 +32,20 @@ class RTTYDecoder extends DecoderExtension {
         this.spaceFreq = 1955;  // Space frequency (default center - shift/2)
         this.centerFreq = 2040; // Center frequency
         
-        // Bit detection
+        // Bit detection - state machine approach
         this.samplesPerBit = 0;
-        this.bitPhase = 0;
+        this.sampleCounter = 0;  // Counts down samples within current bit/state
         this.lastBit = 1;  // Start in mark (idle) state
         this.bitBuffer = 0;
         this.bitCount = 0;
-        this.idleCount = 0;  // Count consecutive mark bits for idle detection
+        
+        // State machine states (matching C++ implementation)
+        this.STATE_IDLE = 0;
+        this.STATE_START = 1;
+        this.STATE_DATA = 2;
+        this.STATE_STOP = 3;
+        this.STATE_STOP2 = 4;
+        this.state = this.STATE_IDLE;
         
         // Baudot state machine
         this.baudotMode = 'letters'; // 'letters' or 'figures'
@@ -72,12 +79,15 @@ class RTTYDecoder extends DecoderExtension {
         // Debug
         this.debugEnabled = true;
         this.lastDebugTime = 0;
+        this.debugLines = [];
+        this.maxDebugLines = 200;
     }
 
     onInitialize() {
         this.radio.log('RTTY Decoder initialized', 'info');
         this.updateFrequencies();
         this.calculateGoertzelCoefficients();
+        this.logDebug(`Initialized: sampleRate=${this.sampleRate}, baudRate=${this.baudRate}, samplesPerBit=${this.samplesPerBit.toFixed(2)}`);
     }
 
     onEnable() {
@@ -122,11 +132,36 @@ class RTTYDecoder extends DecoderExtension {
                 e.preventDefault();
                 e.stopPropagation();
             }
-            
+
             // Auto tune button
             if (e.target.id === 'rtty-auto-tune' || e.target.closest('#rtty-auto-tune')) {
                 console.log('RTTY: Auto tune button clicked');
                 this.autoTune();
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            // Copy debug button
+            if (e.target.id === 'rtty-copy-debug' || e.target.closest('#rtty-copy-debug')) {
+                console.log('RTTY: Copy debug button clicked');
+                const debugText = this.debugLines.join('');
+                navigator.clipboard.writeText(debugText).then(() => {
+                    this.logDebug('Debug log copied to clipboard');
+                }).catch(err => {
+                    console.error('Failed to copy debug log:', err);
+                    this.logDebug('Failed to copy debug log');
+                });
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            // Clear debug button
+            if (e.target.id === 'rtty-clear-debug' || e.target.closest('#rtty-clear-debug')) {
+                console.log('RTTY: Clear debug button clicked');
+                this.debugLines = [];
+                this.updateElementById('rtty-debug-output', (el) => {
+                    el.textContent = '';
+                });
                 e.preventDefault();
                 e.stopPropagation();
             }
@@ -139,7 +174,11 @@ class RTTYDecoder extends DecoderExtension {
                 this.baudRate = parseFloat(e.target.value);
                 this.updateFrequencies();
                 this.calculateGoertzelCoefficients();
-                this.logDebug(`Baud rate changed to ${this.baudRate}`);
+                // Reset decoder state when changing baud rate
+                this.bitCount = 0;
+                this.bitPhase = 0;
+                this.bitBuffer = 0;
+                this.logDebug(`Baud rate changed to ${this.baudRate}, samplesPerBit=${this.samplesPerBit.toFixed(2)}`);
             }
 
             // Shift selector
@@ -147,7 +186,7 @@ class RTTYDecoder extends DecoderExtension {
                 this.shift = parseInt(e.target.value);
                 this.updateFrequencies();
                 this.calculateGoertzelCoefficients();
-                this.logDebug(`Shift changed to ${this.shift} Hz`);
+                this.logDebug(`Shift changed to ${this.shift} Hz, mark=${this.markFreq.toFixed(1)}, space=${this.spaceFreq.toFixed(1)}`);
             }
 
             // Encoding selector
@@ -159,7 +198,7 @@ class RTTYDecoder extends DecoderExtension {
             // Polarity selector
             if (e.target.id === 'rtty-polarity') {
                 this.polarity = e.target.value;
-                this.logDebug(`Polarity changed to ${this.polarity}`);
+                this.logDebug(`Polarity changed to ${this.polarity} (mark=${this.polarity === 'normal' ? '1' : '0'}, space=${this.polarity === 'normal' ? '0' : '1'})`);
             }
         });
 
@@ -326,21 +365,18 @@ class RTTYDecoder extends DecoderExtension {
 
         // Only process bits if signal is present
         if (this.signalPresent) {
-            // Advance bit timing by the number of samples in this block
-            this.bitPhase += samples.length;
-
-            // Check if we've accumulated enough samples for a bit decision
-            while (this.bitPhase >= this.samplesPerBit) {
-                this.bitPhase -= this.samplesPerBit;
-                this.decodeBit(bit);
-            }
+            // Process this block's bit decision through the state machine
+            // We decrement the counter by the number of samples in this block
+            // and make bit decisions when counter reaches zero
+            this.processBitStateMachine(bit, samples.length);
         } else {
             // No signal - reset decoder state
-            if (this.bitCount > 0) {
+            if (this.state !== this.STATE_IDLE) {
+                this.state = this.STATE_IDLE;
                 this.bitCount = 0;
                 this.bitBuffer = 0;
-                this.lastBit = 1;  // Reset to idle (mark)
-                this.idleCount = 0;
+                this.lastBit = 1;
+                this.sampleCounter = 0;
             }
         }
 
@@ -354,46 +390,96 @@ class RTTYDecoder extends DecoderExtension {
         }
     }
 
-    decodeBit(bit) {
-        // Called when we have a bit decision (once per bit period)
-
-        // Track idle state (consecutive marks)
-        if (bit === 1) {
-            this.idleCount++;
-        } else {
-            this.idleCount = 0;
-        }
-
-        // Detect start bit (transition from mark to space)
-        // Require at least 2 consecutive marks before accepting a start bit
-        if (this.bitCount === 0 && bit === 0 && this.lastBit === 1 && this.idleCount >= 2) {
-            // Start bit detected - resync timing to sample in middle of bits
-            this.bitPhase = this.samplesPerBit / 2;
-            this.bitCount = 1;
-            this.bitBuffer = 0;
-            if (Math.random() < 0.02) {  // 2% logging
-                this.logDebug(`Start bit detected`);
-            }
-        } else if (this.bitCount > 0 && this.bitCount <= 5) {
-            // Data bits (5 bits for Baudot)
-            this.bitBuffer |= (bit << (this.bitCount - 1));
-            this.bitCount++;
-        } else if (this.bitCount > 5) {
-            // Stop bit(s) - should be mark (1)
-            if (bit === 1) {
-                // Valid character received
-                const char = this.decodeBaudotCode(this.bitBuffer);
-                if (char) {  // Only output if we got a valid character
-                    this.decodeCharacter(this.bitBuffer);
+    processBitStateMachine(bit, sampleCount) {
+        // State machine that processes blocks of samples
+        // Matches C++ implementation logic exactly
+        
+        switch (this.state) {
+            case this.STATE_IDLE:
+                // Wait for start bit (space detected)
+                if (bit === 0) {
+                    // Start bit detected - move to START state
+                    // Set counter to half symbol length to sample in middle of bits
+                    this.sampleCounter = Math.floor(this.samplesPerBit / 2);
+                    this.state = this.STATE_START;
+                    this.logDebug(`✓ Start bit detected, counter=${this.sampleCounter}`);
                 }
-            } else {
-                // Framing error - reset and wait for idle
-                if (Math.random() < 0.02) {  // 2% logging
-                    this.logDebug(`Framing error`);
+                break;
+
+            case this.STATE_START:
+                // Verify start bit is still space after half symbol
+                this.sampleCounter -= sampleCount;
+                if (this.sampleCounter <= 0) {
+                    if (bit === 0) {
+                        // Valid start bit - begin collecting data
+                        this.sampleCounter = Math.floor(this.samplesPerBit);
+                        this.bitCount = 0;
+                        this.bitBuffer = 0;
+                        this.state = this.STATE_DATA;
+                        this.logDebug(`✓ Start bit confirmed, collecting data`);
+                    } else {
+                        // False start - back to idle
+                        this.state = this.STATE_IDLE;
+                        this.logDebug(`✗ False start bit`);
+                    }
                 }
-            }
-            this.bitCount = 0;
-            this.bitBuffer = 0;
+                break;
+
+            case this.STATE_DATA:
+                // Collect data bits
+                this.sampleCounter -= sampleCount;
+                if (this.sampleCounter <= 0) {
+                    // Sample the bit (LSB first for RTTY)
+                    this.bitBuffer |= (bit << this.bitCount);
+                    this.bitCount++;
+                    this.sampleCounter = Math.floor(this.samplesPerBit);
+
+                    const binaryStr = this.bitBuffer.toString(2).padStart(5, '0');
+                    this.logDebug(`  Bit ${this.bitCount}: bit=${bit}, buffer=0b${binaryStr}, mark=${this.markMagnitude.toFixed(6)}, space=${this.spaceMagnitude.toFixed(6)}`);
+                }
+
+                // Check if we have all data bits (separate from counter check, like C++)
+                if (this.bitCount >= 5) {
+                    this.state = this.STATE_STOP;
+                }
+                break;
+
+            case this.STATE_STOP:
+                // Check stop bit
+                this.sampleCounter -= sampleCount;
+                if (this.sampleCounter <= 0) {
+                    if (bit === 1) {
+                        // Valid stop bit - decode character
+                        const binaryStr = this.bitBuffer.toString(2).padStart(5, '0');
+                        const char = this.decodeBaudot(this.bitBuffer);
+                        this.logDebug(`✓ FINAL: 0b${binaryStr} (0x${this.bitBuffer.toString(16)}) = '${char}'`);
+
+                        if (char) {
+                            this.decodedText += char;
+                            this.charCount++;
+                            this.updateDisplay();
+                        }
+                    } else {
+                        // Framing error
+                        const binaryStr = this.bitBuffer.toString(2).padStart(5, '0');
+                        this.logDebug(`✗ Framing error: stop bit=${bit}, buffer=0b${binaryStr}`);
+                    }
+
+                    // Move to STOP2 state (like C++)
+                    this.state = this.STATE_STOP2;
+                    this.sampleCounter = Math.floor(this.samplesPerBit / 2);
+                    this.bitBuffer = 0;
+                    this.bitCount = 0;
+                }
+                break;
+
+            case this.STATE_STOP2:
+                // Wait another half symbol before returning to idle (like C++)
+                this.sampleCounter -= sampleCount;
+                if (this.sampleCounter <= 0) {
+                    this.state = this.STATE_IDLE;
+                }
+                break;
         }
 
         this.lastBit = bit;
@@ -441,7 +527,7 @@ class RTTYDecoder extends DecoderExtension {
             0x19: 'B', 0x1A: 'G', 0x1B: 'FIGS', 0x1C: 'M', 0x1D: 'X',
             0x1E: 'V', 0x1F: 'LTRS'
         };
-        
+
         const figuresTable = {
             0x00: '\0', 0x01: '3', 0x02: '\n', 0x03: '-', 0x04: ' ',
             0x05: "'", 0x06: '8', 0x07: '7', 0x08: '\r', 0x09: '$',
@@ -451,16 +537,23 @@ class RTTYDecoder extends DecoderExtension {
             0x19: '?', 0x1A: '&', 0x1B: 'FIGS', 0x1C: '.', 0x1D: '/',
             0x1E: ';', 0x1F: 'LTRS'
         };
-        
+
         // Check for mode shift characters
         if (code === 0x1F) {
+            // Letters shift
             this.baudotMode = 'letters';
             return '';
         } else if (code === 0x1B) {
+            // Figures shift
             this.baudotMode = 'figures';
             return '';
+        } else if (code === 0x04) {
+            // Unshift-on-space (C++ line 466-468)
+            // Space character automatically shifts back to letters mode
+            this.baudotMode = 'letters';
+            return ' ';
         }
-        
+
         // Decode based on current mode
         const table = this.baudotMode === 'letters' ? lettersTable : figuresTable;
         return table[code] || '';
@@ -615,15 +708,21 @@ class RTTYDecoder extends DecoderExtension {
 
     logDebug(message) {
         if (!this.debugEnabled) return;
-        
+
         const timestamp = new Date().toLocaleTimeString();
         const debugLine = `[${timestamp}] ${message}\n`;
-        
+
         console.log('RTTY Debug:', message);
-        
+
+        // Add to debug lines array and limit to maxDebugLines
+        this.debugLines.push(debugLine);
+        if (this.debugLines.length > this.maxDebugLines) {
+            this.debugLines.shift();
+        }
+
         // Use updateElementById for automatic modal support
         this.updateElementById('rtty-debug-output', (el) => {
-            el.textContent += debugLine;
+            el.textContent = this.debugLines.join('');
             el.scrollTop = el.scrollHeight;
         });
     }

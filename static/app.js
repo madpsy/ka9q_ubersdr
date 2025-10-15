@@ -112,13 +112,6 @@ const wsManager = new WebSocketManager({
             updateOscilloscopeZoom();
             startVisualization();
 
-            // Initialize CW decoder if in CW mode
-            if (currentMode === 'cwu' || currentMode === 'cwl') {
-                const centerFreq = bandpassEnabled && bandpassFilters.length > 0
-                    ? bandpassFilters[0].frequency.value
-                    : 800;
-                initializeCWDecoder(audioContext, analyser, centerFreq);
-            }
 
             // Open extensions from URL parameter if specified
             if (window.extensionsToOpen && window.extensionsToOpen.length > 0) {
@@ -2421,31 +2414,6 @@ function setMode(mode, preserveBandwidth = false) {
         updateBandpassSliderRanges();
     }
 
-    // Show/hide CW decoder panel based on mode
-    const cwDecoderPanel = document.getElementById('cw-decoder-panel');
-    if (cwDecoderPanel) {
-        if (mode === 'cwu' || mode === 'cwl') {
-            cwDecoderPanel.style.display = 'block';
-        } else {
-            cwDecoderPanel.style.display = 'none';
-            // Disable CW decoder if it was enabled
-            const cwCheckbox = document.getElementById('cw-decoder-enable');
-            if (cwCheckbox && cwCheckbox.checked) {
-                cwCheckbox.checked = false;
-                toggleCWDecoder();
-            }
-
-            // Disable bandpass filter when switching away from CW modes
-            if (bandpassEnabled) {
-                const bandpassCheckbox = document.getElementById('bandpass-enable');
-                if (bandpassCheckbox) {
-                    bandpassCheckbox.checked = false;
-                    toggleBandpassFilter();
-                    log('Bandpass filter disabled when switching from CW mode');
-                }
-            }
-        }
-    }
 
     // Show/hide "Set 1 kHz" button based on mode (only for USB/LSB)
     const set1kHzBtn = document.getElementById('set-1khz-btn');
@@ -2825,8 +2793,6 @@ function startVisualization() {
             }
         }
 
-        // Process CW decoder if enabled (always run, independent of visualization)
-        processCWAudio();
 
         // Process all decoder extensions (always run, independent of visualization)
         if (window.decoderManager) {
@@ -4154,41 +4120,6 @@ function updateSpectrum() {
         }
     }
 
-    // Draw CW decoder frequency indicator if enabled
-    if (cwDecoder && cwDecoder.enabled) {
-        const cwFreq = cwDecoder.centerFrequency;
-
-        // Get display range (accounts for CW offset)
-        const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
-        const displayLow = cwOffset + currentBandwidthLow;
-        const displayHigh = cwOffset + currentBandwidthHigh;
-
-        // Only draw if within visible range
-        if (cwFreq >= displayLow && cwFreq <= displayHigh) {
-            // Draw center line (dark orange)
-            const centerX = frequencyToPixel(cwFreq, width);
-            spectrumCtx.strokeStyle = 'rgba(255, 140, 0, 0.9)'; // Dark orange
-            spectrumCtx.lineWidth = 2;
-            spectrumCtx.beginPath();
-            spectrumCtx.moveTo(centerX, 0);
-            spectrumCtx.lineTo(centerX, height);
-            spectrumCtx.stroke();
-
-            // Add label at top
-            spectrumCtx.font = 'bold 10px monospace';
-            spectrumCtx.textAlign = 'center';
-            spectrumCtx.textBaseline = 'top';
-
-            const label = 'CW';
-            const labelWidth = spectrumCtx.measureText(label).width + 6;
-
-            spectrumCtx.fillStyle = 'rgba(255, 140, 0, 0.95)';
-            spectrumCtx.fillRect(centerX - labelWidth / 2, 2, labelWidth, 12);
-
-            spectrumCtx.fillStyle = '#000000';
-            spectrumCtx.fillText(label, centerX, 4);
-        }
-    }
 
     // Draw debug info at top right (peak signal, noise floor, SNR, and peak frequency)
     // Use fixed-width layout: labels left-aligned, units right-aligned, values in between
@@ -4683,31 +4614,6 @@ function drawWaterfallFilterOverlay() {
             }
         }
 
-        // Draw CW decoder frequency indicator if enabled
-        if (cwDecoder && cwDecoder.enabled) {
-            const cwFreq = cwDecoder.centerFrequency;
-
-            // Get display range (accounts for CW offset)
-            const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
-            const displayLow = cwOffset + currentBandwidthLow;
-            const displayHigh = cwOffset + currentBandwidthHigh;
-
-            // Only draw if within visible range
-            if (cwFreq >= displayLow && cwFreq <= displayHigh) {
-                // CRITICAL: Account for CSS scale(0.75) on .audio-visualization-section
-                const cssScale = 0.75;
-                const scaledWidth = waterfallOverlayCanvas.width / cssScale;
-
-                // Draw center line (dark orange solid) on overlay - full height
-                const centerX = frequencyToPixel(cwFreq, scaledWidth);
-                waterfallOverlayCtx.strokeStyle = 'rgba(255, 140, 0, 0.9)'; // Dark orange
-                waterfallOverlayCtx.lineWidth = 2 / cssScale;
-                waterfallOverlayCtx.beginPath();
-                waterfallOverlayCtx.moveTo(centerX, 0);
-                waterfallOverlayCtx.lineTo(centerX, waterfallOverlayCanvas.height);
-                waterfallOverlayCtx.stroke();
-            }
-        }
     }
 }
 
@@ -4958,180 +4864,6 @@ function autoScaleOscilloscope() {
 
 // Keepalive is now handled by idle-detector.js (activity-based heartbeats)
 // Fixed 30-second interval removed to allow proper idle detection
-
-    // CW Decoder control functions
-    function toggleCWDecoder() {
-        const checkbox = document.getElementById('cw-decoder-enable');
-        const controls = document.getElementById('cw-decoder-controls');
-
-        if (checkbox.checked) {
-            controls.style.display = 'block';
-
-            // Initialize decoder if not already done
-            if (!cwDecoder && audioContext && analyser) {
-                const centerFreq = bandpassEnabled && bandpassFilters.length > 0
-                    ? bandpassFilters[0].frequency.value
-                    : 800;
-                initializeCWDecoder(audioContext, analyser, centerFreq);
-            }
-
-            // Enable decoder
-            startCWDecoding();
-            log('CW Decoder enabled');
-        } else {
-            controls.style.display = 'none';
-
-            // Disable decoder
-            stopCWDecoding();
-            log('CW Decoder disabled');
-        }
-    }
-
-    function updateCWDecoderWPM() {
-        const wpm = parseInt(document.getElementById('cw-wpm').value);
-        document.getElementById('cw-wpm-value').textContent = wpm;
-        if (cwDecoder) {
-            cwDecoder.setWPM(wpm);
-        }
-    }
-
-    function updateCWDecoderThreshold() {
-        const threshold = parseFloat(document.getElementById('cw-threshold').value);
-        document.getElementById('cw-threshold-value').textContent = threshold.toFixed(4);
-        if (cwDecoder) {
-            cwDecoder.setThreshold(threshold);
-        }
-    }
-
-    function updateCWDecoderFrequency() {
-        const freq = parseInt(document.getElementById('cw-frequency').value);
-        document.getElementById('cw-frequency-value').textContent = freq;
-        if (cwDecoder) {
-            cwDecoder.setCenterFrequency(freq);
-        }
-    }
-
-    function resetCWDecoderWPM() {
-        if (cwDecoder) {
-            cwDecoder.resetWPM();
-        }
-    }
-
-    // Hunt for CW signals - always finds the strongest bin in the audio spectrum
-    function huntCWSignal() {
-        if (!analyser) {
-            log('Audio not initialized', 'error');
-            return;
-        }
-
-        // Get frequency data
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        analyser.getByteFrequencyData(dataArray);
-
-        const sampleRate = audioContext.sampleRate;
-        const nyquist = sampleRate / 2;
-
-        // Get display range (accounts for CW offset)
-        const cwOffset = (Math.abs(currentBandwidthLow) < 500 && Math.abs(currentBandwidthHigh) < 500) ? 500 : 0;
-        const displayLow = cwOffset + currentBandwidthLow;
-        const displayHigh = cwOffset + currentBandwidthHigh;
-
-        // Find the strongest bin within our bandwidth
-        let maxMagnitude = 0;
-        let maxFreq = 0;
-        let maxBinIndex = -1;
-
-        for (let i = 0; i < dataArray.length; i++) {
-            const freq = (i / dataArray.length) * nyquist;
-
-            // Only look within our audio bandwidth
-            if (freq < displayLow || freq > displayHigh) continue;
-
-            const magnitude = dataArray[i];
-
-            // Track the strongest bin
-            if (magnitude > maxMagnitude) {
-                maxMagnitude = magnitude;
-                maxFreq = freq;
-                maxBinIndex = i;
-            }
-        }
-
-        if (maxBinIndex === -1 || maxMagnitude < 50) {
-            log('No CW signals found - try adjusting threshold or check audio', 'error');
-            return;
-        }
-
-        // Update frequency slider to the strongest bin
-        const freqSlider = document.getElementById('cw-frequency');
-        const targetFreq = Math.round(maxFreq);
-
-        if (freqSlider) {
-            freqSlider.value = targetFreq;
-            updateCWDecoderFrequency();
-        }
-
-        log(`Hunt: Found strongest signal at ${targetFreq} Hz (strength: ${maxMagnitude}/255)`);
-    }
-
-    // Shift CW signal to 500 Hz by adjusting dial frequency
-    function shiftCWSignalTo700Hz() {
-        if (!cwDecoder || !cwDecoder.enabled) {
-            log('CW Decoder not enabled', 'error');
-            return;
-        }
-
-        // Get current locked frequency
-        const lockedFreq = cwDecoder.centerFrequency;
-        const targetFreq = 500; // Target audio frequency (CW offset center)
-        const shiftAmount = targetFreq - lockedFreq;
-
-        // Get current dial frequency
-        const freqInput = document.getElementById('frequency');
-        const currentDialFreq = parseInt(freqInput.value);
-
-        // Calculate new dial frequency based on mode
-        // In CW modes, the dial frequency is the RF carrier
-        // Audio frequency = RF signal - RF carrier (for CWU) or RF carrier - RF signal (for CWL)
-        // To move a signal DOWN in audio, we move the dial UP (and vice versa)
-        let newDialFreq;
-        if (currentMode === 'cwu') {
-            // CWU: To decrease audio freq, increase dial freq (inverse relationship)
-            newDialFreq = currentDialFreq - shiftAmount;
-        } else if (currentMode === 'cwl') {
-            // CWL: To decrease audio freq, decrease dial freq (same relationship due to inversion)
-            newDialFreq = currentDialFreq + shiftAmount;
-        } else {
-            log('Not in CW mode', 'error');
-            return;
-        }
-
-        // Clamp to valid range (100 kHz to 30 MHz)
-        const MIN_FREQ = 100000;
-        const MAX_FREQ = 30000000;
-        newDialFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newDialFreq));
-
-        // Update frequency input
-        freqInput.value = newDialFreq;
-        updateBandButtons(newDialFreq);
-
-        // Update CW decoder frequency to 500 Hz
-        const cwFreqSlider = document.getElementById('cw-frequency');
-        if (cwFreqSlider) {
-            cwFreqSlider.value = targetFreq;
-            updateCWDecoderFrequency();
-        }
-
-        // Update URL
-        updateURL();
-
-        // Tune to new frequency
-        if (wsManager.isConnected()) {
-            autoTune();
-        }
-
-        log(`Shifted ${currentMode.toUpperCase()} signal from ${lockedFreq} Hz to ${targetFreq} Hz (dial: ${formatFrequency(currentDialFreq)} → ${formatFrequency(newDialFreq)})`);
-    }
 
 
 // Noise Reduction Functions (NR2 Spectral Subtraction with Overlap-Add)
@@ -5770,16 +5502,6 @@ window.autoSyncOscilloscope = autoSyncOscilloscope;
 window.autoScaleOscilloscope = autoScaleOscilloscope;
 window.shiftFrequencyTo1kHz = shiftFrequencyTo1kHz;
 
-// CW decoder controls
-window.toggleCWDecoder = toggleCWDecoder;
-window.updateCWDecoderWPM = updateCWDecoderWPM;
-window.updateCWDecoderThreshold = updateCWDecoderThreshold;
-window.updateCWDecoderFrequency = updateCWDecoderFrequency;
-window.huntCWSignal = huntCWSignal;
-window.shiftCWSignalTo700Hz = shiftCWSignalTo700Hz;
-window.resetCWDecoderWPM = resetCWDecoderWPM;
-window.clearCWText = clearCWText;
-window.copyCWText = copyCWText;
 
 // Filter controls
 window.toggleNotchFilter = toggleNotchFilter;

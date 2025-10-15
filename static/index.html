@@ -320,60 +320,6 @@
             </div>
         </div>
 
-        <!-- CW Decoder (shown only in CWU/CWL modes) -->
-        <div class="cw-decoder-panel" id="cw-decoder-panel" style="display: none;">
-            <div class="cw-decoder-container">
-                <div class="control-group">
-                    <label>
-                        <input type="checkbox" id="cw-decoder-enable" onchange="toggleCWDecoder()">
-                        Enable CW Decoder
-                    </label>
-                </div>
-                <div id="cw-decoder-controls" style="display: none;">
-                    <div class="control-group">
-                        <label for="cw-frequency">CW Tone Frequency: <span id="cw-frequency-value">400</span> Hz</label>
-                        <input type="range" id="cw-frequency" min="300" max="1500" value="400" step="10" oninput="updateCWDecoderFrequency()">
-                    </div>
-                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0;">
-                        <button onclick="huntCWSignal()" class="cw-btn" style="width: auto; padding: 5px 15px;">Hunt</button>
-                        <button onclick="shiftCWSignalTo700Hz()" class="cw-btn" style="width: auto; padding: 5px 15px; background-color: #17a2b8;">Shift to 500 Hz</button>
-                        <span style="color: #888; font-size: 0.9em;">Find & shift signals</span>
-                        <span style="margin-left: 10px;">WPM: <span id="cw-wpm-value">-- (auto)</span></span>
-                        <button onclick="resetCWDecoderWPM()" class="cw-btn" style="width: auto; padding: 5px 15px;">Reset</button>
-                        <span style="margin-left: 20px;">Threshold: <span id="cw-threshold-value">0.0005</span></span>
-                        <input type="range" id="cw-threshold" min="0.0001" max="0.01" value="0.0005" step="0.0001" oninput="updateCWDecoderThreshold()" style="width: 150px;">
-                    </div>
-                    <div class="control-group" style="display: none;">
-                        <label for="cw-threshold-hidden">Hidden</label>
-                    </div>
-                    
-                    <div class="cw-decoder-display">
-                        <div class="cw-status-bar">
-                            <div class="cw-signal-indicator">
-                                <label>Signal:</label>
-                                <div class="cw-signal-meter">
-                                    <div id="cw-signal-bar" class="cw-signal-bar"></div>
-                                </div>
-                                <span id="cw-signal-value">0%</span>
-                            </div>
-                            <div class="cw-current-symbol">
-                                <label>Symbol:</label>
-                                <span id="cw-current-symbol">—</span>
-                            </div>
-                        </div>
-                        <div class="cw-decoded-text-container">
-                            <label>Decoded Text:</label>
-                            <div id="cw-decoded-text" class="cw-decoded-text"></div>
-                        </div>
-                        <div class="cw-decoder-buttons">
-                            <button onclick="clearCWText()" class="cw-btn">Clear</button>
-                            <button onclick="copyCWText()" class="cw-btn">Copy</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Filters: 2x3 Grid for Notch, Bandpass, NR2, Squelch, Compressor, Stereo Virtualizer -->
         <div class="filters-grid filters-grid-2x3">
             <!-- Row 1, Column 1: Notch -->
@@ -770,7 +716,6 @@
     <script src="signal-meter.js"></script>
     <script src="spectrum-display.js"></script>
     <script src="oscilloscope.js"></script>
-    <script src="cw-decoder.js"></script>
     <script src="recorder.js"></script>
     <script src="idle-detector.js"></script>
     <script type="module" src="app.js"></script>

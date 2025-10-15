@@ -1,0 +1,209 @@
+<div class="stats-modern-container">
+    <div class="stats-grid">
+        <!-- Radio Card -->
+        <div class="stats-card frequency">
+            <div class="stats-card-header">
+                <div class="stats-card-icon">📡</div>
+                <div class="stats-card-title">Radio</div>
+            </div>
+            <div class="stats-card-content">
+                <div class="stats-item">
+                    <span class="stats-label">Frequency</span>
+                    <span class="stats-value highlight" id="stats-frequency">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Band</span>
+                    <span class="stats-value" id="stats-band">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Mode</span>
+                    <span class="stats-badge active" id="stats-mode">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">BW Low</span>
+                    <span class="stats-value" id="stats-bw-low">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">BW High</span>
+                    <span class="stats-value" id="stats-bw-high">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">BW Width</span>
+                    <span class="stats-value" id="stats-bw-width">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Card -->
+        <div class="stats-card audio">
+            <div class="stats-card-header">
+                <div class="stats-card-icon">🔊</div>
+                <div class="stats-card-title">Audio</div>
+            </div>
+            <div class="stats-card-content">
+                <div class="stats-item">
+                    <span class="stats-label">Sample Rate</span>
+                    <span class="stats-value" id="stats-sample-rate">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">State</span>
+                    <span class="stats-badge active" id="stats-audio-state">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Buffer Time</span>
+                    <span class="stats-value" id="stats-buffer-time">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Level</span>
+                    <span class="stats-value" id="stats-audio-level">-</span>
+                </div>
+                <div class="stats-meter">
+                    <div class="stats-meter-fill" id="stats-audio-meter" style="width: 0%"></div>
+                </div>
+                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+                    <div style="font-size: 0.85em; color: #95a5a6; margin-bottom: 8px; font-weight: 600;">
+                        📊 AUDIO PROCESSING DEMO
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">Peak Amplitude</span>
+                        <span class="stats-value" id="stats-audio-peak">-</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">Zero Crossings</span>
+                        <span class="stats-value" id="stats-audio-zcr">-</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">Dominant Freq</span>
+                        <span class="stats-value" id="stats-audio-domfreq">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Spectrum Card -->
+        <div class="stats-card spectrum">
+            <div class="stats-card-header">
+                <div class="stats-card-icon">📈</div>
+                <div class="stats-card-title">Spectrum</div>
+            </div>
+            <div class="stats-card-content">
+                <div class="stats-item">
+                    <span class="stats-label">Center</span>
+                    <span class="stats-value" id="stats-spectrum-center">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Bin BW</span>
+                    <span class="stats-value" id="stats-spectrum-binbw">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Bins</span>
+                    <span class="stats-value" id="stats-spectrum-bins">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Zoom</span>
+                    <span class="stats-value" id="stats-spectrum-zoom">-</span>
+                </div>
+                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+                    <div style="font-size: 0.85em; color: #95a5a6; margin-bottom: 8px; font-weight: 600;">
+                        📊 SPECTRUM PROCESSING DEMO
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">Peak Frequency</span>
+                        <span class="stats-value" id="stats-spectrum-peakfreq">-</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">Peak Power</span>
+                        <span class="stats-value" id="stats-spectrum-peakpower">-</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">Avg Power</span>
+                        <span class="stats-value" id="stats-spectrum-avgpower">-</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">Occupancy</span>
+                        <span class="stats-value" id="stats-spectrum-occupancy">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connection Card -->
+        <div class="stats-card connection">
+            <div class="stats-card-header">
+                <div class="stats-card-icon">🔗</div>
+                <div class="stats-card-title">Connection</div>
+            </div>
+            <div class="stats-card-content">
+                <div class="stats-item">
+                    <span class="stats-label">Status</span>
+                    <span class="stats-badge" id="stats-connection-status">-</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Session</span>
+                    <span class="stats-value" id="stats-session">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signal Strength Indicators -->
+    <div class="stats-grid" style="margin-bottom: 15px;">
+        <!-- Audio Peak Signal Card -->
+        <div class="stats-card audio">
+            <div class="stats-card-header">
+                <div class="stats-card-icon">🎵</div>
+                <div class="stats-card-title">Audio Spectrum</div>
+            </div>
+            <div class="stats-card-content">
+                <div class="stats-item">
+                    <span class="stats-label">Peak Frequency</span>
+                    <span class="stats-value highlight" id="stats-audio-peak-freq">-</span>
+                </div>
+                <div class="vertical-spectrum" id="audio-spectrum-display"></div>
+                <div class="spectrum-label">
+                    <span id="audio-spectrum-low">-</span>
+                    <span id="audio-spectrum-high">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Spectrum Peak Signal Card -->
+        <div class="stats-card spectrum">
+            <div class="stats-card-header">
+                <div class="stats-card-icon">📡</div>
+                <div class="stats-card-title">RF Spectrum</div>
+            </div>
+            <div class="stats-card-content">
+                <div class="stats-item">
+                    <span class="stats-label">Peak Frequency</span>
+                    <span class="stats-value highlight" id="stats-spectrum-peak-freq-display">-</span>
+                </div>
+                <div class="vertical-spectrum" id="rf-spectrum-display"></div>
+                <div class="spectrum-label">
+                    <span id="rf-spectrum-low">-</span>
+                    <span id="rf-spectrum-high">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bands List -->
+    <div class="stats-list-card" id="stats-bands-card" style="display: none;">
+        <div class="stats-list-header">
+            <div class="stats-card-icon">📻</div>
+            <div class="stats-card-title">Bands</div>
+            <span class="stats-badge active" id="stats-bands-count">0</span>
+        </div>
+        <div class="stats-list-content" id="stats-bands-list"></div>
+    </div>
+
+    <!-- Bookmarks List -->
+    <div class="stats-list-card" id="stats-bookmarks-card" style="display: none; margin-top: 15px;">
+        <div class="stats-list-header">
+            <div class="stats-card-icon">🔖</div>
+            <div class="stats-card-title">Bookmarks</div>
+            <span class="stats-badge active" id="stats-bookmarks-count">0</span>
+        </div>
+        <div class="stats-list-content" id="stats-bookmarks-list"></div>
+    </div>
+</div>

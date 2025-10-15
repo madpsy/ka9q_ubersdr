@@ -1,0 +1,17 @@
+{
+  "name": "stats",
+  "displayName": "Stats Monitor",
+  "version": "1.0.0",
+  "description": "Shows current radio state information and demonstrates the decoder extension API",
+  "author": "UberSDR",
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "config": {
+    "autoTune": false,
+    "requiresMode": null,
+    "preferredBandwidth": null
+  }
+}

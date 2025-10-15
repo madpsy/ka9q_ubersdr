@@ -1204,10 +1204,59 @@ func (ah *AdminHandler) HandleExtensions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Read the extensions directory to find available extensions
-	extensions := []map[string]string{
-		{"slug": "stats", "displayName": "Stats Monitor"},
-		// Add more extensions here as they are created
+	// Read extensions.json to get enabled extensions
+	extensionsConfigPath := "static/extensions/extensions.json"
+	data, err := os.ReadFile(extensionsConfigPath)
+	if err != nil {
+		log.Printf("Failed to read extensions config: %v", err)
+		// Return empty list if config doesn't exist
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"extensions": []map[string]string{},
+		})
+		return
+	}
+
+	var extensionsConfig struct {
+		Enabled []string `json:"enabled"`
+	}
+	if err := json.Unmarshal(data, &extensionsConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse extensions config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Read manifest for each enabled extension
+	extensions := []map[string]string{}
+	for _, extName := range extensionsConfig.Enabled {
+		manifestPath := fmt.Sprintf("static/extensions/%s/manifest.json", extName)
+		manifestData, err := os.ReadFile(manifestPath)
+		if err != nil {
+			log.Printf("Warning: Failed to read manifest for extension '%s': %v", extName, err)
+			// Include extension with slug only if manifest is missing
+			extensions = append(extensions, map[string]string{
+				"slug":        extName,
+				"displayName": extName,
+			})
+			continue
+		}
+
+		var manifest struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"displayName"`
+		}
+		if err := json.Unmarshal(manifestData, &manifest); err != nil {
+			log.Printf("Warning: Failed to parse manifest for extension '%s': %v", extName, err)
+			extensions = append(extensions, map[string]string{
+				"slug":        extName,
+				"displayName": extName,
+			})
+			continue
+		}
+
+		extensions = append(extensions, map[string]string{
+			"slug":        manifest.Name,
+			"displayName": manifest.DisplayName,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

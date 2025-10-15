@@ -32,24 +32,24 @@ class CWDecoderExtension extends DecoderExtension {
         this.decodedText = '';
         this.currentSymbol = '';
         this.lastUpdateTime = 0;
-        
+
         // Signal detection
         this.signalPresent = false;
         this.signalStartTime = 0;
         this.signalEndTime = 0;
         this.silenceStartTime = 0;
-        
+
         // Timing parameters (adaptive)
         this.dotLength = 100; // ms, will be auto-adjusted
         this.dashLength = 300; // ms, typically 3x dot length
         this.symbolGap = 100; // ms, gap between dots/dashes
         this.letterGap = 300; // ms, gap between letters
         this.wordGap = 700; // ms, gap between words
-        
+
         // Timing history for adaptive speed detection
         this.timingHistory = [];
         this.maxTimingHistory = 10;
-        
+
         // Tone detection
         this.targetFrequency = 700; // Hz, typical CW tone
         this.frequencyTolerance = 100; // Hz
@@ -59,17 +59,21 @@ class CWDecoderExtension extends DecoderExtension {
         this.thresholdAboveNoise = 6; // dB above noise floor for adaptive threshold (lower = more sensitive)
         this.hysteresis = 3; // dB hysteresis for key up/down (prevents flutter)
         this.noiseFloor = -120; // Calculated noise floor
-        
+
         // Noise floor smoothing (like app.js lines 3717-3792)
         this.noiseFloorHistory = [];
         this.noiseFloorHistoryMaxAge = 2000; // 2 second window for stable noise floor
-        
+
+        // Track frequency and mode for change detection
+        this.lastFrequency = null;
+        this.lastMode = null;
+
         // Auto-tune training
         this.autoTuneHistory = []; // Store frequency measurements for averaging
         this.autoTuneTrainingPeriod = 3000; // 3 seconds of training
         this.autoTuneUpdateInterval = 1000; // Update target frequency every 1 second
         this.lastAutoTuneUpdate = 0;
-        
+
         // Statistics
         this.wpm = 0;
         this.signalStrength = 0;
@@ -77,7 +81,7 @@ class CWDecoderExtension extends DecoderExtension {
         this.zeroCrossingFrequency = 0;
         this.characterCount = 0;
         this.wordCount = 0;
-        
+
         // Processing
         this.updateInterval = null;
         this.lastProcessTime = 0;
@@ -104,6 +108,9 @@ class CWDecoderExtension extends DecoderExtension {
         this.autoTuneHistory = [];
         this.lastAutoTuneUpdate = 0;
 
+        // Attach button event listeners now that extension is enabled and DOM is ready
+        this.attachButtonListeners();
+
         // Start processing
         this.lastProcessTime = Date.now();
         this.updateInterval = setInterval(() => {
@@ -116,12 +123,12 @@ class CWDecoderExtension extends DecoderExtension {
 
     onDisable() {
         this.radio.log('CW Decoder disabled');
-        
+
         if (this.updateInterval) {
             clearInterval(this.updateInterval);
             this.updateInterval = null;
         }
-        
+
         this.updateStatusBadge('DISABLED', 'decoder-disabled');
     }
 
@@ -133,6 +140,20 @@ class CWDecoderExtension extends DecoderExtension {
             return;
         }
         this.lastProcessTime = now;
+
+        // Check for frequency or mode changes and reset if needed
+        const currentFreq = this.radio.getFrequency();
+        const currentMode = this.radio.getMode();
+
+        if (this.lastFrequency !== null && this.lastFrequency !== currentFreq) {
+            this.resetDecoder('Frequency changed');
+        }
+        if (this.lastMode !== null && this.lastMode !== currentMode) {
+            this.resetDecoder('Mode changed');
+        }
+
+        this.lastFrequency = currentFreq;
+        this.lastMode = currentMode;
 
         // Get audio analyser for frequency detection
         const analyser = this.radio.getVUAnalyser();
@@ -146,19 +167,19 @@ class CWDecoderExtension extends DecoderExtension {
         // Get frequency spectrum data using FLOAT data for actual dBFS values (like app.js does)
         const floatFreqData = new Float32Array(analyser.frequencyBinCount);
         analyser.getFloatFrequencyData(floatFreqData);
-        
-        let nyquist = sampleRate / 2;
-        let targetBin = Math.floor((this.targetFrequency / nyquist) * floatFreqData.length);
-        let binRange = Math.floor((this.frequencyTolerance / nyquist) * floatFreqData.length);
-        
+
+        const nyquistFreq = sampleRate / 2;
+        let targetBin = Math.floor((this.targetFrequency / nyquistFreq) * floatFreqData.length);
+        let binRange = Math.floor((this.frequencyTolerance / nyquistFreq) * floatFreqData.length);
+
         // Get amplitude at the EXACT target frequency bin (not the peak in range)
         // This is more sensitive to the presence/absence of the CW tone
         const amplitudeDb = floatFreqData[targetBin];
-        
+
         // Also find peak for display purposes
         let peakDb = -Infinity;
         let peakBin = targetBin;
-        
+
         for (let i = Math.max(0, targetBin - binRange);
              i < Math.min(floatFreqData.length, targetBin + binRange);
              i++) {
@@ -168,55 +189,84 @@ class CWDecoderExtension extends DecoderExtension {
                 peakBin = i;
             }
         }
-        
+
         this.signalStrength = amplitudeDb;
-        this.detectedFrequency = (peakBin / floatFreqData.length) * nyquist;
-        
-        // Debug: show both target and peak
-        console.log(`[DEBUG] Target bin ${targetBin} (${this.targetFrequency} Hz): ${amplitudeDb.toFixed(1)} dB, Peak bin ${peakBin}: ${peakDb.toFixed(1)} dB`);
+        this.detectedFrequency = (peakBin / floatFreqData.length) * nyquistFreq;
 
         // Also get zero-crossing frequency for display
         const zcFreq = this.detectFrequencyZeroCrossing(dataArray);
         this.zeroCrossingFrequency = zcFreq;
-        
-        // Calculate noise floor using EXACT same approach as app.js (lines 3750-3792)
-        // Scan the full audio FFT spectrum (0 to Nyquist) for minimum dB value
-        // CRITICAL: Must exclude -Infinity bins which appear as very low values
+
+        // Calculate noise floor from audio bandwidth only (like app.js getFrequencyBinMapping)
+        // Determine the actual audio frequency range based on mode and bandwidth
+        const nyquist = sampleRate / 2;
+        const bufferLength = floatFreqData.length;
+
+        let binStartFreq, binEndFreq;
+        const bandwidth = this.radio.getBandwidth();
+
+        // Use the same logic as app.js getFrequencyBinMapping (lines 2665-2715)
+        if (Math.abs(bandwidth.low) < 500 && Math.abs(bandwidth.high) < 500) {
+            // CW mode: center on 500 Hz offset
+            const cwOffset = 500;
+            const halfBW = Math.max(Math.abs(bandwidth.low), Math.abs(bandwidth.high));
+            binStartFreq = Math.max(0, cwOffset - halfBW);
+            binEndFreq = cwOffset + halfBW;
+        } else if (bandwidth.low < 0 && bandwidth.high > 0) {
+            // AM/SAM/FM: spans zero
+            binStartFreq = 0;
+            binEndFreq = Math.max(Math.abs(bandwidth.low), Math.abs(bandwidth.high));
+        } else if (bandwidth.low < 0 && bandwidth.high <= 0) {
+            // LSB: convert negative to positive
+            binStartFreq = Math.abs(bandwidth.high);
+            binEndFreq = Math.abs(bandwidth.low);
+        } else {
+            // USB: use as-is
+            binStartFreq = Math.max(0, bandwidth.low);
+            binEndFreq = bandwidth.high;
+        }
+
+        // Calculate bin indices for this frequency range
+        const startBinIndex = Math.floor((binStartFreq / nyquist) * bufferLength);
+        const endBinIndex = Math.floor((binEndFreq / nyquist) * bufferLength);
+
         let currentMinDb = 0;
         let validBins = 0;
-        for (let i = 0; i < floatFreqData.length; i++) {
+
+        // Scan only the audio bandwidth bins, excluding non-finite values
+        for (let i = startBinIndex; i < endBinIndex && i < floatFreqData.length; i++) {
             const dbValue = floatFreqData[i];
-            // Only consider finite values above -140 dB (exclude -Infinity bins)
-            // -Infinity bins can appear as values around -150 dB or lower
-            if (isFinite(dbValue) && dbValue > -140) {
-                if (currentMinDb === 0 || dbValue < currentMinDb) {
-                    currentMinDb = dbValue;
-                }
-                validBins++;
+
+            // Skip non-finite values (this is the key - no fixed threshold!)
+            if (!isFinite(dbValue)) {
+                continue;
             }
+
+            // Valid bin with actual signal
+            if (currentMinDb === 0 || dbValue < currentMinDb) {
+                currentMinDb = dbValue;
+            }
+            validBins++;
         }
-        
-        // If no valid bins found, noise floor calculation failed
-        if (validBins === 0) {
-            console.log('[CW] No valid FFT bins found for noise floor calculation');
-            return;
+
+
+        // If no valid bins found, use a default
+        if (validBins === 0 || currentMinDb === 0) {
+            console.log('[CW] WARNING: No valid audio bins found, using default noise floor');
+            currentMinDb = -100; // Default noise floor
         }
-        
-        console.log(`[CW] Noise floor from ${validBins} valid bins out of ${floatFreqData.length} total`);
-        
+
         // Apply temporal smoothing (2 second window like app.js)
         this.noiseFloorHistory.push({ value: currentMinDb, timestamp: now });
         this.noiseFloorHistory = this.noiseFloorHistory.filter(h => now - h.timestamp <= this.noiseFloorHistoryMaxAge);
         const avgNoiseFloor = this.noiseFloorHistory.length > 0
             ? this.noiseFloorHistory.reduce((sum, h) => sum + h.value, 0) / this.noiseFloorHistory.length
             : currentMinDb;
-        
+
         this.noiseFloor = avgNoiseFloor;
-        
+
         // Use adaptive threshold: noise floor + offset
         const effectiveThreshold = this.noiseFloor + this.thresholdAboveNoise;
-        
-        console.log(`[CW] Signal: ${amplitudeDb.toFixed(1)} dB, Noise: ${this.noiseFloor.toFixed(1)} dB, Threshold: ${effectiveThreshold.toFixed(1)} dB`);
 
         // Auto-tune target frequency if enabled and signal is strong
         if (this.autoTuneFrequency && amplitudeDb > effectiveThreshold && zcFreq > 100 && zcFreq < 3000) {
@@ -225,27 +275,27 @@ class CWDecoderExtension extends DecoderExtension {
                 frequency: zcFreq,
                 time: now
             });
-            
+
             // Remove old measurements (keep last 3 seconds)
             this.autoTuneHistory = this.autoTuneHistory.filter(h => now - h.time < this.autoTuneTrainingPeriod);
-            
+
             // Only update target frequency every 1 second and after training period
             if (now - this.lastAutoTuneUpdate >= this.autoTuneUpdateInterval &&
                 this.autoTuneHistory.length > 0) {
-                
+
                 // Calculate average frequency from history
                 const avgFreq = this.autoTuneHistory.reduce((sum, h) => sum + h.frequency, 0) / this.autoTuneHistory.length;
-                
+
                 // Use exponential moving average for smooth tracking
                 const alpha = 0.2; // Smoothing factor (higher = faster response)
                 this.targetFrequency = alpha * avgFreq + (1 - alpha) * this.targetFrequency;
-                
+
                 // Update the input field
                 const freqInput = document.getElementById('cw-freq-input');
                 if (freqInput) {
                     freqInput.value = Math.round(this.targetFrequency);
                 }
-                
+
                 this.lastAutoTuneUpdate = now;
                 console.log(`Auto-tune: ${this.autoTuneHistory.length} samples, avg: ${avgFreq.toFixed(1)} Hz, target: ${this.targetFrequency.toFixed(1)} Hz`);
             }
@@ -265,42 +315,32 @@ class CWDecoderExtension extends DecoderExtension {
             signalDetected = amplitudeDb > keyDownThreshold;
         }
 
-        // Log signal strength periodically (every 500ms)
-        if (!this.lastSignalLog || now - this.lastSignalLog > 500) {
-            console.log(`Signal: ${amplitudeDb.toFixed(1)} dB | Threshold: ${keyDownThreshold.toFixed(1)}/${keyUpThreshold.toFixed(1)} dB | State: ${this.signalPresent ? 'KEYED' : 'released'}`);
-            this.lastSignalLog = now;
-        }
-        
         if (signalDetected && !this.signalPresent) {
             // Signal started (key down)
-            console.log(`KEY DOWN - Signal: ${amplitudeDb.toFixed(1)} dB, Threshold: ${keyDownThreshold.toFixed(1)} dB`);
             this.signalPresent = true;
             this.signalStartTime = now;
-            
+
             // Check silence duration before this signal
             if (this.silenceStartTime > 0) {
                 const silenceDuration = now - this.silenceStartTime;
-                console.log(`  Silence before: ${silenceDuration}ms`);
                 this.processSilence(silenceDuration);
             }
-            
+
             this.updateStatusBadge('DECODING', 'decoder-active');
-            
+
         } else if (!signalDetected && this.signalPresent) {
             // Signal ended (key up)
-            console.log(`KEY UP - Signal: ${amplitudeDb.toFixed(1)} dB, Threshold: ${keyUpThreshold.toFixed(1)} dB`);
             this.signalPresent = false;
             this.signalEndTime = now;
             this.silenceStartTime = now;
-            
+
             // Process the signal duration
             const signalDuration = now - this.signalStartTime;
-            console.log(`  Signal duration: ${signalDuration}ms`);
             this.processSignal(signalDuration);
-            
+
             this.updateStatusBadge('LISTENING', 'decoder-listening');
         }
-        
+
         // Update signal strength meter (map -60 to 0 dB range to 0-100%)
         const strength = Math.max(0, Math.min(100, ((amplitudeDb + 60) / 60) * 100));
         this.updateSignalStrength(strength / 100);
@@ -309,30 +349,25 @@ class CWDecoderExtension extends DecoderExtension {
     processSignal(duration) {
         // Determine if this is a dot or dash
         // Use adaptive timing based on history
-        
+
         const threshold = (this.dotLength + this.dashLength) / 2;
-        
-        console.log(`Signal detected: ${duration}ms (threshold: ${threshold}ms)`);
-        
+
         if (duration < threshold) {
             // Dot
             this.currentSymbol += '.';
-            console.log('  -> DOT');
             this.updateTimingHistory(duration, 'dot');
         } else {
             // Dash
             this.currentSymbol += '-';
-            console.log('  -> DASH');
             this.updateTimingHistory(duration, 'dash');
         }
-        
-        console.log(`Current symbol: ${this.currentSymbol}`);
+
         this.lastUpdateTime = Date.now();
     }
 
     processSilence(duration) {
         // Determine what the silence means
-        
+
         if (duration > this.wordGap) {
             // Word gap - decode current symbol and add space
             this.decodeCurrentSymbol();
@@ -350,9 +385,9 @@ class CWDecoderExtension extends DecoderExtension {
 
     decodeCurrentSymbol() {
         if (this.currentSymbol.length === 0) return;
-        
+
         const character = this.morseTable[this.currentSymbol];
-        
+
         if (character) {
             this.decodedText += character;
             this.characterCount++;
@@ -362,76 +397,79 @@ class CWDecoderExtension extends DecoderExtension {
             this.decodedText += '[?]';
             this.updateDisplay();
         }
-        
+
         this.currentSymbol = '';
     }
 
     updateTimingHistory(duration, type) {
         this.timingHistory.push({ duration, type, time: Date.now() });
-        
+
         // Keep only recent history
         if (this.timingHistory.length > this.maxTimingHistory) {
             this.timingHistory.shift();
         }
-        
+
         // Adapt timing parameters based on history
         this.adaptTiming();
     }
 
     adaptTiming() {
         if (this.timingHistory.length < 3) {
-            console.log(`Timing: Need more samples (have ${this.timingHistory.length}, need 3)`);
             return;
         }
-        
+
         // Calculate average dot and dash lengths
         const dots = this.timingHistory.filter(t => t.type === 'dot');
         const dashes = this.timingHistory.filter(t => t.type === 'dash');
-        
-        console.log(`Timing history: ${dots.length} dots, ${dashes.length} dashes`);
-        
+
         if (dots.length > 0) {
-            const dotDurations = dots.map(t => t.duration);
             const avgDot = dots.reduce((sum, t) => sum + t.duration, 0) / dots.length;
-            console.log(`  Dot durations: ${dotDurations.join(', ')} ms`);
-            console.log(`  Average dot: ${avgDot.toFixed(1)} ms`);
             this.dotLength = avgDot;
         }
-        
+
         if (dashes.length > 0) {
-            const dashDurations = dashes.map(t => t.duration);
             const avgDash = dashes.reduce((sum, t) => sum + t.duration, 0) / dashes.length;
-            console.log(`  Dash durations: ${dashDurations.join(', ')} ms`);
-            console.log(`  Average dash: ${avgDash.toFixed(1)} ms`);
             this.dashLength = avgDash;
         }
-        
+
         // Update derived timings
         this.symbolGap = this.dotLength;
         this.letterGap = this.dotLength * 3;
         this.wordGap = this.dotLength * 7;
-        
+
         // Calculate WPM (Words Per Minute)
         // Standard: PARIS = 50 dot lengths
         // WPM = 1200 / dot_length_ms
         this.wpm = Math.round(1200 / this.dotLength);
-        
-        console.log(`Updated timing: dot=${this.dotLength.toFixed(1)}ms, dash=${this.dashLength.toFixed(1)}ms, WPM=${this.wpm}`);
     }
 
     toggleAutoTune(enabled) {
-        console.log('toggleAutoTune called with:', enabled);
         this.autoTuneFrequency = enabled;
-        
+
         const freqInput = document.getElementById('cw-freq-input');
         if (freqInput) {
             freqInput.disabled = enabled;
-            console.log('Input disabled set to:', freqInput.disabled);
-        } else {
-            console.error('Could not find freq input!');
         }
-        
+
         this.radio.log(`Auto-tune ${enabled ? 'enabled' : 'disabled'}`);
+    }
+
+    resetDecoder(reason) {
+        // Reset signal detection state
+        this.noiseFloorHistory = [];
+        this.noiseFloor = -120;
+
+        // Reset timing/WPM detection
+        this.timingHistory = [];
+        this.dotLength = 100;
+        this.dashLength = 300;
+        this.wpm = 0;
+
+        // Reset signal state
+        this.signalPresent = false;
+        this.currentSymbol = '';
+
+        this.radio.log(`CW Decoder reset: ${reason}`);
     }
 
     renderUI() {
@@ -446,69 +484,68 @@ class CWDecoderExtension extends DecoderExtension {
         if (!container) return;
 
         container.innerHTML = template;
+    }
 
-        // Add clear button handler
+    attachButtonListeners() {
+        // Attach event listeners for buttons and controls
+        // This is called from onEnable() when the extension is activated
+
+        // Clear button
         const clearBtn = document.getElementById('cw-clear-btn');
         if (clearBtn) {
-            clearBtn.addEventListener('click', () => this.clearDecoded());
+            console.log('CW Decoder: Attaching clear button listener');
+            clearBtn.addEventListener('click', () => {
+                console.log('CW Decoder: Clear button clicked!');
+                this.clearDecoded();
+            });
+        } else {
+            console.error('CW Decoder: Clear button not found!');
         }
-        
-        // Add copy button handler
+
+        // Copy button
         const copyBtn = document.getElementById('cw-copy-btn');
         if (copyBtn) {
-            copyBtn.addEventListener('click', () => this.copyDecoded());
+            console.log('CW Decoder: Attaching copy button listener');
+            copyBtn.addEventListener('click', () => {
+                console.log('CW Decoder: Copy button clicked!');
+                this.copyDecoded();
+            });
+        } else {
+            console.error('CW Decoder: Copy button not found!');
         }
-        
-        // Add frequency adjustment handlers
+
+        // Frequency input
         const freqInput = document.getElementById('cw-freq-input');
-        const autoTuneCheckbox = document.getElementById('cw-auto-tune');
-        
-        console.log('CW Decoder: Setting up controls');
-        console.log('  freqInput found:', !!freqInput);
-        console.log('  autoTuneCheckbox found:', !!autoTuneCheckbox);
-        
         if (freqInput) {
             freqInput.value = this.targetFrequency;
             freqInput.addEventListener('change', (e) => {
                 this.targetFrequency = parseInt(e.target.value) || 700;
-                console.log('Manual frequency changed to:', this.targetFrequency);
             });
-        } else {
-            console.error('CW Decoder: freq input not found!');
         }
 
+        // Auto-tune checkbox
+        const autoTuneCheckbox = document.getElementById('cw-auto-tune');
         if (autoTuneCheckbox) {
-            console.log('CW Decoder: Setting up auto-tune checkbox');
             autoTuneCheckbox.checked = this.autoTuneFrequency;
-            
+
             // Set initial state of input field
             if (freqInput) {
                 freqInput.disabled = this.autoTuneFrequency;
-                console.log('  Initial disabled state:', freqInput.disabled);
             }
-            
+
             autoTuneCheckbox.addEventListener('change', (e) => {
-                console.log('=== AUTO-TUNE CHECKBOX CHANGED ===');
-                console.log('  Checked:', e.target.checked);
                 this.autoTuneFrequency = e.target.checked;
-                console.log('  this.autoTuneFrequency:', this.autoTuneFrequency);
-                
+
                 // Disable/enable manual input when auto-tune is toggled
                 if (freqInput) {
                     freqInput.disabled = this.autoTuneFrequency;
-                    console.log('  Input disabled set to:', freqInput.disabled);
-                    console.log('  Input element:', freqInput);
-                } else {
-                    console.error('  freqInput is null!');
                 }
-                
+
                 this.radio.log(`Auto-tune ${this.autoTuneFrequency ? 'enabled' : 'disabled'}`);
             });
-            console.log('CW Decoder: Auto-tune event listener attached');
-        } else {
-            console.error('CW Decoder: auto-tune checkbox not found!');
         }
-        
+
+        // Threshold input
         const thresholdInput = document.getElementById('cw-threshold-input');
         if (thresholdInput) {
             thresholdInput.value = this.signalThreshold;
@@ -547,38 +584,48 @@ class CWDecoderExtension extends DecoderExtension {
         this.updateElementById('cw-wpm', (el) => {
             el.textContent = this.wpm > 0 ? `${this.wpm} WPM` : 'Detecting...';
         });
-        
+
         this.updateElementById('cw-chars', (el) => {
             el.textContent = this.characterCount;
         });
-        
+
         this.updateElementById('cw-words', (el) => {
             el.textContent = this.wordCount;
         });
-        
+
         this.updateElementById('cw-signal-strength', (el) => {
             el.textContent = this.signalStrength.toFixed(1) + ' dB';
         });
-        
+
+        this.updateElementById('cw-noise-floor', (el) => {
+            el.textContent = this.noiseFloor.toFixed(1) + ' dB';
+        });
+
+        this.updateElementById('cw-snr', (el) => {
+            // Calculate SNR (Signal-to-Noise Ratio)
+            const snr = this.signalStrength - this.noiseFloor;
+            el.textContent = snr.toFixed(1) + ' dB';
+        });
+
         this.updateElementById('cw-detected-freq', (el) => {
             el.textContent = Math.round(this.detectedFrequency) + ' Hz';
         });
-        
+
         this.updateElementById('cw-zerocrossing-freq', (el) => {
             el.textContent = Math.round(this.zeroCrossingFrequency) + ' Hz';
         });
-        
+
         this.updateElementById('cw-current-symbol', (el) => {
             el.textContent = this.currentSymbol || '(none)';
         });
-        
+
         this.updateElementById('cw-dot-length', (el) => {
             el.textContent = Math.round(this.dotLength) + ' ms';
         });
-        
+
         // Check for timeout on current symbol
         const now = Date.now();
-        if (this.currentSymbol.length > 0 && 
+        if (this.currentSymbol.length > 0 &&
             now - this.lastUpdateTime > this.letterGap * 2) {
             // Timeout - decode what we have
             this.decodeCurrentSymbol();
@@ -597,7 +644,23 @@ class CWDecoderExtension extends DecoderExtension {
         this.currentSymbol = '';
         this.characterCount = 0;
         this.wordCount = 0;
+
+        // Update the display
         this.updateDisplay();
+
+        // Update the statistics displays
+        this.updateElementById('cw-chars', (el) => {
+            el.textContent = '0';
+        });
+
+        this.updateElementById('cw-words', (el) => {
+            el.textContent = '0';
+        });
+
+        this.updateElementById('cw-current-symbol', (el) => {
+            el.textContent = '(none)';
+        });
+
         this.radio.log('Decoded text cleared');
     }
 
@@ -606,10 +669,10 @@ class CWDecoderExtension extends DecoderExtension {
             this.radio.log('No text to copy', 'warning');
             return;
         }
-        
+
         navigator.clipboard.writeText(this.decodedText).then(() => {
             this.radio.log('Decoded text copied to clipboard');
-            
+
             // Visual feedback
             const copyBtn = document.getElementById('cw-copy-btn');
             if (copyBtn) {
@@ -633,11 +696,14 @@ class CWDecoderExtension extends DecoderExtension {
     }
 
     onFrequencyChanged(frequency) {
-        // Could auto-adjust target frequency based on tuned frequency
-        this.radio.log(`Frequency changed to ${this.radio.formatFrequency(frequency)}`);
+        // Reset decoder when frequency changes
+        this.resetDecoder(`Frequency changed to ${this.radio.formatFrequency(frequency)}`);
     }
 
     onModeChanged(mode) {
+        // Reset decoder when mode changes
+        this.resetDecoder(`Mode changed to ${mode.toUpperCase()}`);
+
         if (mode !== 'cwu' && mode !== 'cwl') {
             this.radio.log('CW Decoder works best in CW mode', 'warning');
         }

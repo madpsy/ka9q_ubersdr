@@ -818,6 +818,12 @@ let isRestoringSettings = false;
 function saveFilterSettings() {
     // Don't save while we're restoring settings
     if (isRestoringSettings) return;
+    
+    // Check if saving is enabled
+    const saveEnabled = document.getElementById('save-filters-enable');
+    if (!saveEnabled || !saveEnabled.checked) {
+        return; // Don't save if checkbox is not checked
+    }
 
     try {
         // Equalizer
@@ -1046,12 +1052,74 @@ function restoreFilterSettings() {
     }
 }
 
+// Save and restore the "Save Filters" checkbox state
+function toggleSaveFiltersEnabled() {
+    const checkbox = document.getElementById('save-filters-enable');
+    if (checkbox) {
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'saveEnabled', checkbox.checked);
+        console.log('Save Filters checkbox state saved:', checkbox.checked);
+    }
+}
+
+function restoreSaveFiltersCheckbox() {
+    const savedState = localStorage.getItem(STORAGE_KEY_PREFIX + 'saveEnabled');
+    if (savedState !== null) {
+        const checkbox = document.getElementById('save-filters-enable');
+        if (checkbox) {
+            checkbox.checked = savedState === 'true';
+            console.log('Save Filters checkbox state restored:', checkbox.checked);
+        }
+    }
+}
+
+// Clear all filter settings from localStorage
+function clearFilterStorage() {
+    // Show confirmation modal
+    const modal = document.getElementById('clear-storage-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+function closeClearStorageModal() {
+    const modal = document.getElementById('clear-storage-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function confirmClearStorage() {
+    try {
+        const keys = [
+            'equalizer',
+            'bandpass',
+            'notch',
+            'compressor',
+            'stereoVirtualizer',
+            'squelch',
+            'nr2'
+        ];
+        keys.forEach(key => {
+            localStorage.removeItem(STORAGE_KEY_PREFIX + key);
+        });
+        console.log('✅ Filter settings cleared from localStorage');
+    } catch (error) {
+        console.error('Error clearing filter settings:', error);
+    }
+    closeClearStorageModal();
+}
+
 // ============================================================================
 // EXPOSE ALL TO WINDOW
 // ============================================================================
 
 window.saveFilterSettings = saveFilterSettings;
 window.restoreFilterSettings = restoreFilterSettings;
+window.clearFilterStorage = clearFilterStorage;
+window.closeClearStorageModal = closeClearStorageModal;
+window.confirmClearStorage = confirmClearStorage;
+window.toggleSaveFiltersEnabled = toggleSaveFiltersEnabled;
+window.restoreSaveFiltersCheckbox = restoreSaveFiltersCheckbox;
 
 window.equalizerEnabled = equalizerEnabled;
 window.eqFilters = eqFilters;

@@ -198,10 +198,23 @@ func main() {
 	rateLimiterManager := NewRateLimiterManager(config.Server.CmdRateLimit)
 	log.Printf("Command rate limiting: %d commands/sec per channel (0 = unlimited)", config.Server.CmdRateLimit)
 
+	// Initialize connection rate limiter
+	connRateLimiter := NewIPConnectionRateLimiter(config.Server.ConnRateLimit)
+	log.Printf("Connection rate limiting: %d connections/sec per IP (0 = unlimited)", config.Server.ConnRateLimit)
+
+	// Start periodic cleanup for connection rate limiter (every 5 minutes)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			connRateLimiter.Cleanup()
+		}
+	}()
+
 	// Initialize WebSocket handlers
-	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager)
+	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager, connRateLimiter)
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
-	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager) // New per-user spectrum
+	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter) // New per-user spectrum
 
 	// Initialize admin handler
 	adminHandler := NewAdminHandler(config, *configFile, sessions, ipBanManager)

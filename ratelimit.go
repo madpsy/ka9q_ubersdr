@@ -140,3 +140,59 @@ func (rlm *RateLimiterManager) GetStats() int {
 	defer rlm.mu.RUnlock()
 	return len(rlm.limiters)
 }
+
+// IPConnectionRateLimiter manages rate limiters for WebSocket connections per IP address
+type IPConnectionRateLimiter struct {
+	limiters map[string]*RateLimiter
+	rate     int // connections per second per IP
+	mu       sync.RWMutex
+}
+
+// NewIPConnectionRateLimiter creates a new IP connection rate limiter
+func NewIPConnectionRateLimiter(rate int) *IPConnectionRateLimiter {
+	return &IPConnectionRateLimiter{
+		limiters: make(map[string]*RateLimiter),
+		rate:     rate,
+	}
+}
+
+// AllowConnection checks if a new WebSocket connection is allowed for the given IP
+func (icrl *IPConnectionRateLimiter) AllowConnection(ip string) bool {
+	if icrl.rate <= 0 {
+		return true // Rate limiting disabled
+	}
+
+	icrl.mu.Lock()
+	limiter, exists := icrl.limiters[ip]
+	if !exists {
+		limiter = NewRateLimiter(icrl.rate)
+		icrl.limiters[ip] = limiter
+	}
+	icrl.mu.Unlock()
+
+	return limiter.Allow()
+}
+
+// Cleanup removes rate limiters for IPs that haven't been used recently
+// This should be called periodically to prevent memory leaks
+func (icrl *IPConnectionRateLimiter) Cleanup() {
+	icrl.mu.Lock()
+	defer icrl.mu.Unlock()
+
+	now := time.Now()
+	for ip, limiter := range icrl.limiters {
+		limiter.mu.Lock()
+		// Remove limiters that haven't been used in the last 5 minutes
+		if now.Sub(limiter.lastRefill) > 5*time.Minute {
+			delete(icrl.limiters, ip)
+		}
+		limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the current number of tracked IPs
+func (icrl *IPConnectionRateLimiter) GetStats() int {
+	icrl.mu.RLock()
+	defer icrl.mu.RUnlock()
+	return len(icrl.limiters)
+}

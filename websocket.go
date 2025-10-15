@@ -224,16 +224,18 @@ type WebSocketHandler struct {
 	config             *Config
 	ipBanManager       *IPBanManager
 	rateLimiterManager *RateLimiterManager
+	connRateLimiter    *IPConnectionRateLimiter
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
-func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager) *WebSocketHandler {
+func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager, connRateLimiter *IPConnectionRateLimiter) *WebSocketHandler {
 	return &WebSocketHandler{
 		sessions:           sessions,
 		audioReceiver:      audioReceiver,
 		config:             config,
 		ipBanManager:       ipBanManager,
 		rateLimiterManager: rateLimiterManager,
+		connRateLimiter:    connRateLimiter,
 	}
 }
 
@@ -297,6 +299,13 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	if wsh.ipBanManager.IsBanned(clientIP) {
 		log.Printf("Rejected WebSocket connection from banned IP: %s (client IP: %s)", sourceIP, clientIP)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Check connection rate limit (unless IP is bypassed)
+	if !wsh.config.Server.IsIPTimeoutBypassed(clientIP) && !wsh.connRateLimiter.AllowConnection(clientIP) {
+		log.Printf("Connection rate limit exceeded for IP: %s (client IP: %s)", sourceIP, clientIP)
+		http.Error(w, "Too Many Requests - Connection rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 

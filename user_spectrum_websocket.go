@@ -16,14 +16,16 @@ type UserSpectrumWebSocketHandler struct {
 	sessions           *SessionManager
 	ipBanManager       *IPBanManager
 	rateLimiterManager *RateLimiterManager
+	connRateLimiter    *IPConnectionRateLimiter
 }
 
 // NewUserSpectrumWebSocketHandler creates a new per-user spectrum WebSocket handler
-func NewUserSpectrumWebSocketHandler(sessions *SessionManager, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager) *UserSpectrumWebSocketHandler {
+func NewUserSpectrumWebSocketHandler(sessions *SessionManager, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager, connRateLimiter *IPConnectionRateLimiter) *UserSpectrumWebSocketHandler {
 	return &UserSpectrumWebSocketHandler{
 		sessions:           sessions,
 		ipBanManager:       ipBanManager,
 		rateLimiterManager: rateLimiterManager,
+		connRateLimiter:    connRateLimiter,
 	}
 }
 
@@ -116,6 +118,13 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	if swsh.ipBanManager.IsBanned(clientIP) {
 		log.Printf("Rejected Spectrum WebSocket connection from banned IP: %s (client IP: %s)", sourceIP, clientIP)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Check connection rate limit (unless IP is bypassed)
+	if !swsh.sessions.config.Server.IsIPTimeoutBypassed(clientIP) && !swsh.connRateLimiter.AllowConnection(clientIP) {
+		log.Printf("Connection rate limit exceeded for IP: %s (client IP: %s)", sourceIP, clientIP)
+		http.Error(w, "Too Many Requests - Connection rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 

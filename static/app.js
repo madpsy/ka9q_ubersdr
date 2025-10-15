@@ -88,6 +88,11 @@ const wsManager = new WebSocketManager({
             initializeLowpassFilter();
             initializeEqualizer();
 
+            // Restore "Save Filters" checkbox state first
+            if (window.restoreSaveFiltersCheckbox) {
+                window.restoreSaveFiltersCheckbox();
+            }
+
             // Restore filter settings from localStorage
             if (window.restoreFilterSettings) {
                 window.restoreFilterSettings();

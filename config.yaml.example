@@ -64,6 +64,12 @@ server:
   # Set to 0 to disable rate limiting
   # Recommended: 10 (allows responsive UI while preventing abuse)
   cmd_rate_limit: 10
+  # WebSocket connection rate limit per IP (connections per second)
+  # This limits how many new WebSocket connections can be established from a single IP per second
+  # Helps prevent connection flooding and DoS attacks
+  # Set to 0 to disable rate limiting
+  # Recommended: 1 (allows normal reconnections while preventing abuse)
+  conn_rate_limit: 1
   # List of IP addresses or CIDR ranges that bypass all session limits
   # Useful for trusted IPs like localhost, admin networks, or specific users
   # Bypassed IPs are exempt from:

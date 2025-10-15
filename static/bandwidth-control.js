@@ -108,7 +108,7 @@ export function adjustBandwidth(direction) {
     window.currentBandwidthLow = newLow;
     window.currentBandwidthHigh = newHigh;
     
-    // Update sliders
+    // Update sliders and trigger change event to ensure all handlers are called
     bandwidthLowSlider.value = newLow;
     bandwidthHighSlider.value = newHigh;
     
@@ -121,6 +121,9 @@ export function adjustBandwidth(direction) {
     if (highValueEl) {
         highValueEl.textContent = newHigh;
     }
+    
+    // Don't call updateBandwidth() as it re-reads the globals which may have been overwritten
+    // Instead, do the side effects directly with our known-good values
     
     // Notify extension system of bandwidth change
     if (window.radioAPI) {
@@ -166,7 +169,10 @@ export function adjustBandwidth(direction) {
     
     // Update spectrum display bandwidth indicator
     if (window.spectrumDisplay) {
+        const freqInput = document.getElementById('frequency');
+        const currentFreq = freqInput ? parseInt(freqInput.value) : 0;
         window.spectrumDisplay.updateConfig({
+            tunedFreq: currentFreq,
             bandwidthLow: newLow,
             bandwidthHigh: newHigh
         });

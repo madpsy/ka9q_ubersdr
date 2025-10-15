@@ -1450,12 +1450,12 @@ function updateStatus(msg) {
         }
 
         updateBandButtons(msg.frequency);
-        // Update spectrum display cursor
+        // Update spectrum display cursor - use window globals for latest values
         if (spectrumDisplay) {
             spectrumDisplay.updateConfig({
                 tunedFreq: msg.frequency,
-                bandwidthLow: currentBandwidthLow,
-                bandwidthHigh: currentBandwidthHigh
+                bandwidthLow: window.currentBandwidthLow,
+                bandwidthHigh: window.currentBandwidthHigh
             });
         }
     } else if (msg.mode) {

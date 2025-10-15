@@ -27,12 +27,16 @@ class StatsExtension extends DecoderExtension {
         this.audioPeakValue = 0;
         this.audioZeroCrossings = 0;
         this.audioDominantFreq = 0;
+        this.audioFrequencyData = null;
+        this.audioSampleRate = 48000;
 
         // Initialize spectrum processing demo data
         this.spectrumPeakFreq = 0;
+        this.spectrumPeakBin = 0;
         this.spectrumPeakPower = -Infinity;
         this.spectrumAvgPower = 0;
         this.spectrumOccupancy = 0;
+        this.currentSpectrumData = null;
 
         // Start periodic updates
         this.updateInterval = setInterval(() => {
@@ -104,6 +108,12 @@ class StatsExtension extends DecoderExtension {
         if (audioCtx) {
             this.audioDominantFreq = this.detectFrequencyFromWaveform(vuData, audioCtx.sampleRate);
         }
+
+        // 4. Get actual frequency spectrum data for visualization
+        const freqData = new Uint8Array(vuAnalyser.frequencyBinCount);
+        vuAnalyser.getByteFrequencyData(freqData);
+        this.audioFrequencyData = freqData;
+        this.audioSampleRate = audioCtx ? audioCtx.sampleRate : 48000;
     }
 
     onProcessSpectrum(spectrumData) {
@@ -127,11 +137,15 @@ class StatsExtension extends DecoderExtension {
                 peakBin = i;
             }
         }
-        
+
         this.spectrumPeakPower = peakPower;
+        this.spectrumPeakBin = peakBin;
         // Calculate frequency of peak (bin offset from center)
         const binOffset = peakBin - (powers.length / 2);
         this.spectrumPeakFreq = centerFreq + (binOffset * binBandwidth);
+
+        // Store spectrum data for visualization
+        this.currentSpectrumData = spectrumData;
 
         // 2. Average Power Calculation
         let sumPower = 0;
@@ -329,6 +343,40 @@ class StatsExtension extends DecoderExtension {
                     background: linear-gradient(to right, #2ecc71 0%, #f39c12 50%, #e74c3c 100%);
                     border-radius: 4px;
                     transition: width 0.3s ease;
+                }
+
+                .vertical-spectrum {
+                    display: flex;
+                    align-items: flex-end;
+                    justify-content: space-around;
+                    height: 120px;
+                    background: rgba(0, 0, 0, 0.3);
+                    border-radius: 4px;
+                    padding: 8px;
+                    gap: 2px;
+                    margin-top: 8px;
+                }
+
+                .spectrum-bar {
+                    flex: 1;
+                    background: linear-gradient(to top, #2ecc71 0%, #f39c12 50%, #e74c3c 100%);
+                    border-radius: 2px;
+                    min-height: 2px;
+                    transition: height 0.1s ease;
+                    position: relative;
+                }
+
+                .spectrum-bar.peak {
+                    background: linear-gradient(to top, #3498db 0%, #e74c3c 100%);
+                    box-shadow: 0 0 8px rgba(52, 152, 219, 0.8);
+                }
+
+                .spectrum-label {
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 0.75em;
+                    color: #95a5a6;
+                    margin-top: 4px;
                 }
 
                 .stats-list-card {
@@ -548,6 +596,47 @@ class StatsExtension extends DecoderExtension {
                     </div>
                 </div>
 
+                <!-- Signal Strength Indicators -->
+                <div class="stats-grid" style="margin-bottom: 15px;">
+                    <!-- Audio Peak Signal Card -->
+                    <div class="stats-card audio">
+                        <div class="stats-card-header">
+                            <div class="stats-card-icon">🎵</div>
+                            <div class="stats-card-title">Audio Spectrum</div>
+                        </div>
+                        <div class="stats-card-content">
+                            <div class="stats-item">
+                                <span class="stats-label">Peak Frequency</span>
+                                <span class="stats-value highlight" id="stats-audio-peak-freq">-</span>
+                            </div>
+                            <div class="vertical-spectrum" id="audio-spectrum-display"></div>
+                            <div class="spectrum-label">
+                                <span id="audio-spectrum-low">-</span>
+                                <span id="audio-spectrum-high">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Spectrum Peak Signal Card -->
+                    <div class="stats-card spectrum">
+                        <div class="stats-card-header">
+                            <div class="stats-card-icon">📡</div>
+                            <div class="stats-card-title">RF Spectrum</div>
+                        </div>
+                        <div class="stats-card-content">
+                            <div class="stats-item">
+                                <span class="stats-label">Peak Frequency</span>
+                                <span class="stats-value highlight" id="stats-spectrum-peak-freq-display">-</span>
+                            </div>
+                            <div class="vertical-spectrum" id="rf-spectrum-display"></div>
+                            <div class="spectrum-label">
+                                <span id="rf-spectrum-low">-</span>
+                                <span id="rf-spectrum-high">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Bands List -->
                 <div class="stats-list-card" id="stats-bands-card" style="display: none;">
                     <div class="stats-list-header">
@@ -686,6 +775,12 @@ class StatsExtension extends DecoderExtension {
             this.updateElement('stats-audio-domfreq', 'N/A');
         }
 
+        // Update Audio Spectrum Display
+        this.updateAudioSpectrum();
+
+        // Update RF Spectrum Display
+        this.updateRFSpectrum();
+
         // Bands Information
         const bands = this.radio.getBands();
         if (bands && bands.length > 0) {
@@ -751,6 +846,128 @@ class StatsExtension extends DecoderExtension {
                     `;
                 }).join('');
             }
+        }
+    }
+
+    updateAudioSpectrum() {
+        const container = document.getElementById('audio-spectrum-display');
+        if (!container) return;
+
+        // Display peak frequency
+        if (this.audioDominantFreq !== undefined && this.audioDominantFreq > 0 && this.audioFrequencyData) {
+            this.updateElement('stats-audio-peak-freq', this.audioDominantFreq.toFixed(0) + ' Hz');
+
+            // Use actual frequency spectrum data around the peak frequency
+            const numBars = 25;
+            const rangeHz = 4000; // ±2 kHz
+            const centerFreq = this.audioDominantFreq;
+            const lowFreq = Math.max(20, centerFreq - rangeHz / 2);
+            const highFreq = Math.min(20000, centerFreq + rangeHz / 2);
+
+            this.updateElement('audio-spectrum-low', lowFreq.toFixed(0) + ' Hz');
+            this.updateElement('audio-spectrum-high', highFreq.toFixed(0) + ' Hz');
+
+            // Calculate which FFT bins correspond to our frequency range
+            const nyquist = this.audioSampleRate / 2;
+            const binCount = this.audioFrequencyData.length;
+
+            // Generate bars using actual FFT data
+            let html = '';
+            let maxAmplitude = 0;
+            let peakBarIndex = -1;
+            const barAmplitudes = [];
+
+            // First pass: collect amplitudes and find max
+            for (let i = 0; i < numBars; i++) {
+                const freq = lowFreq + (i / (numBars - 1)) * (highFreq - lowFreq);
+                const binIndex = Math.floor((freq / nyquist) * binCount);
+
+                if (binIndex >= 0 && binIndex < binCount) {
+                    const amplitude = this.audioFrequencyData[binIndex] / 255; // Normalize to 0-1
+                    barAmplitudes.push(amplitude);
+                    if (amplitude > maxAmplitude) {
+                        maxAmplitude = amplitude;
+                        peakBarIndex = i;
+                    }
+                } else {
+                    barAmplitudes.push(0);
+                }
+            }
+
+            // Second pass: render bars
+            for (let i = 0; i < numBars; i++) {
+                const amplitude = barAmplitudes[i];
+                const height = Math.max(2, amplitude * 100);
+
+                const isPeak = (i === peakBarIndex && amplitude > 0.5);
+                const barClass = isPeak ? 'spectrum-bar peak' : 'spectrum-bar';
+
+                html += `<div class="${barClass}" style="height: ${height}%"></div>`;
+            }
+            container.innerHTML = html;
+        } else {
+            this.updateElement('stats-audio-peak-freq', 'No signal');
+            this.updateElement('audio-spectrum-low', '-');
+            this.updateElement('audio-spectrum-high', '-');
+            container.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #95a5a6;">No audio signal</div>';
+        }
+    }
+
+    updateRFSpectrum() {
+        const container = document.getElementById('rf-spectrum-display');
+        if (!container) return;
+
+        if (this.currentSpectrumData && this.spectrumPeakFreq > 0) {
+            this.updateElement('stats-spectrum-peak-freq-display', this.radio.formatFrequency(this.spectrumPeakFreq));
+
+            const powers = this.currentSpectrumData.powers;
+            const binBandwidth = this.currentSpectrumData.binBandwidth;
+            const centerFreq = this.currentSpectrumData.centerFreq;
+            const peakBin = this.spectrumPeakBin;
+
+            // Show ±5 kHz around the peak (adjustable)
+            const displayRangeHz = 10000; // 10 kHz total
+            const binsToShow = Math.min(25, Math.floor(displayRangeHz / binBandwidth));
+            const halfBins = Math.floor(binsToShow / 2);
+
+            const startBin = Math.max(0, peakBin - halfBins);
+            const endBin = Math.min(powers.length - 1, peakBin + halfBins);
+
+            // Calculate frequency range
+            const startFreq = centerFreq + ((startBin - powers.length / 2) * binBandwidth);
+            const endFreq = centerFreq + ((endBin - powers.length / 2) * binBandwidth);
+
+            this.updateElement('rf-spectrum-low', this.radio.formatFrequency(startFreq));
+            this.updateElement('rf-spectrum-high', this.radio.formatFrequency(endFreq));
+
+            // Find min/max power in the display range for scaling
+            let minPower = Infinity;
+            let maxPower = -Infinity;
+            for (let i = startBin; i <= endBin; i++) {
+                if (powers[i] < minPower) minPower = powers[i];
+                if (powers[i] > maxPower) maxPower = powers[i];
+            }
+
+            const powerRange = maxPower - minPower;
+
+            // Generate bars
+            let html = '';
+            for (let i = startBin; i <= endBin; i++) {
+                const power = powers[i];
+                const normalizedPower = powerRange > 0 ? (power - minPower) / powerRange : 0;
+                const height = Math.max(2, normalizedPower * 100);
+
+                const isPeak = i === peakBin;
+                const barClass = isPeak ? 'spectrum-bar peak' : 'spectrum-bar';
+
+                html += `<div class="${barClass}" style="height: ${height}%"></div>`;
+            }
+            container.innerHTML = html;
+        } else {
+            this.updateElement('stats-spectrum-peak-freq-display', 'No signal');
+            this.updateElement('rf-spectrum-low', '-');
+            this.updateElement('rf-spectrum-high', '-');
+            container.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #95a5a6;">No spectrum data</div>';
         }
     }
 

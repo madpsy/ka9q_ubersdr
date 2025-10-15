@@ -11,7 +11,7 @@ class RTTYDecoder extends DecoderExtension {
     constructor() {
         super('rtty-decoder', {
             displayName: 'RTTY Decoder',
-            autoTune: false,
+            autoTune: true,
             requiresMode: 'usb',
             preferredBandwidth: { low: 0, high: 3000 }
         });
@@ -35,9 +35,10 @@ class RTTYDecoder extends DecoderExtension {
         // Bit detection
         this.samplesPerBit = 0;
         this.bitPhase = 0;
-        this.lastBit = 0;
+        this.lastBit = 1;  // Start in mark (idle) state
         this.bitBuffer = 0;
         this.bitCount = 0;
+        this.idleCount = 0;  // Count consecutive mark bits for idle detection
         
         // Baudot state machine
         this.baudotMode = 'letters'; // 'letters' or 'figures'
@@ -50,6 +51,19 @@ class RTTYDecoder extends DecoderExtension {
         this.markMagnitude = 0;
         this.spaceMagnitude = 0;
         this.signalStrength = 0;
+        this.signalPresent = false;
+        this.squelchThreshold = -45;  // dB threshold for signal presence
+        this.squelchHysteresis = 5;   // dB hysteresis to prevent flapping
+
+        // Squelch averaging (1 second window)
+        this.signalHistory = [];
+        this.signalHistorySize = Math.ceil(1000 / (this.bufferSize / this.sampleRate * 1000)); // ~1 second of blocks
+        this.averageSignalDb = -100;
+
+        // Auto-tune control
+        this.autoTuneInterval = 15000; // 15 seconds between auto-tunes
+        this.lastAutoTuneTime = 0;
+        this.autoTuneEnabled = true;
         
         // Goertzel filter state for mark and space
         this.goertzelMark = { q1: 0, q2: 0, coeff: 0 };
@@ -148,6 +162,20 @@ class RTTYDecoder extends DecoderExtension {
                 this.logDebug(`Polarity changed to ${this.polarity}`);
             }
         });
+
+        // Use event delegation for input events (for real-time slider updates)
+        document.addEventListener('input', (e) => {
+            // Squelch slider
+            if (e.target.id === 'rtty-squelch') {
+                this.squelchThreshold = parseFloat(e.target.value);
+                this.updateElementById('rtty-squelch-value', (el) => {
+                    el.textContent = `${this.squelchThreshold} dB`;
+                });
+                if (Math.random() < 0.1) {  // 10% logging to avoid spam
+                    this.logDebug(`Squelch changed to ${this.squelchThreshold} dB`);
+                }
+            }
+        });
         
         // Set initial values
         const baudSelect = document.getElementById('rtty-baud-rate');
@@ -161,7 +189,15 @@ class RTTYDecoder extends DecoderExtension {
         
         const polaritySelect = document.getElementById('rtty-polarity');
         if (polaritySelect) polaritySelect.value = this.polarity;
-        
+
+        const squelchSlider = document.getElementById('rtty-squelch');
+        if (squelchSlider) {
+            squelchSlider.value = this.squelchThreshold.toString();
+            this.updateElementById('rtty-squelch-value', (el) => {
+                el.textContent = `${this.squelchThreshold} dB`;
+            });
+        }
+
         console.log('RTTY: Event listeners attached using delegation');
     }
 
@@ -205,6 +241,7 @@ class RTTYDecoder extends DecoderExtension {
     }
 
     processBlock(samples) {
+        // Process block with Goertzel to get overall bit decision
         // Reset Goertzel filters
         this.goertzelMark.q1 = 0;
         this.goertzelMark.q2 = 0;
@@ -226,18 +263,22 @@ class RTTYDecoder extends DecoderExtension {
             this.goertzelSpace.q1 = q0_space;
         }
 
-        // Calculate magnitudes
-        this.markMagnitude = Math.sqrt(
-            this.goertzelMark.q1 * this.goertzelMark.q1 + 
-            this.goertzelMark.q2 * this.goertzelMark.q2 - 
+        // Calculate magnitudes (normalized by buffer size)
+        const markMagSq = (
+            this.goertzelMark.q1 * this.goertzelMark.q1 +
+            this.goertzelMark.q2 * this.goertzelMark.q2 -
             this.goertzelMark.q1 * this.goertzelMark.q2 * this.goertzelMark.coeff
         );
         
-        this.spaceMagnitude = Math.sqrt(
-            this.goertzelSpace.q1 * this.goertzelSpace.q1 + 
-            this.goertzelSpace.q2 * this.goertzelSpace.q2 - 
+        const spaceMagSq = (
+            this.goertzelSpace.q1 * this.goertzelSpace.q1 +
+            this.goertzelSpace.q2 * this.goertzelSpace.q2 -
             this.goertzelSpace.q1 * this.goertzelSpace.q2 * this.goertzelSpace.coeff
         );
+
+        // Normalize by buffer size to get consistent dB readings
+        this.markMagnitude = Math.sqrt(markMagSq) / this.bufferSize;
+        this.spaceMagnitude = Math.sqrt(spaceMagSq) / this.bufferSize;
 
         // Determine bit value (mark = 1, space = 0)
         let bit = this.markMagnitude > this.spaceMagnitude ? 1 : 0;
@@ -251,72 +292,142 @@ class RTTYDecoder extends DecoderExtension {
         this.signalStrength = Math.max(this.markMagnitude, this.spaceMagnitude);
         const signalDb = 20 * Math.log10(this.signalStrength + 1e-10);
         this.updateSignalStrength(Math.max(0, Math.min(100, (signalDb + 60) / 60 * 100)));
+
+        // Add to signal history for averaging
+        this.signalHistory.push(signalDb);
+        if (this.signalHistory.length > this.signalHistorySize) {
+            this.signalHistory.shift();
+        }
+
+        // Calculate average signal level over last ~1 second
+        if (this.signalHistory.length > 0) {
+            this.averageSignalDb = this.signalHistory.reduce((a, b) => a + b, 0) / this.signalHistory.length;
+        }
+
+        // Check if AVERAGED signal is strong enough (squelch with hysteresis)
+        // Hysteresis prevents flapping: once open, requires signal to drop more to close
+        if (this.signalPresent) {
+            // Currently open - close only if signal drops below (threshold - hysteresis)
+            if (this.averageSignalDb < (this.squelchThreshold - this.squelchHysteresis)) {
+                this.signalPresent = false;
+            }
+        } else {
+            // Currently closed - open only if signal rises above threshold
+            if (this.averageSignalDb > this.squelchThreshold) {
+                this.signalPresent = true;
+            }
+        }
+
+        // Update signal display with squelch status
         this.updateElementById('rtty-signal-value', (el) => {
-            el.textContent = signalDb.toFixed(1) + ' dB';
+            const squelchStatus = this.signalPresent ? '🟢 OPEN' : '🔴 CLOSED';
+            el.textContent = `${signalDb.toFixed(1)} dB (avg: ${this.averageSignalDb.toFixed(1)}) ${squelchStatus}`;
         });
 
-        // Bit sampling and decoding
-        this.decodeBit(bit);
+        // Only process bits if signal is present
+        if (this.signalPresent) {
+            // Advance bit timing by the number of samples in this block
+            this.bitPhase += samples.length;
+
+            // Check if we've accumulated enough samples for a bit decision
+            while (this.bitPhase >= this.samplesPerBit) {
+                this.bitPhase -= this.samplesPerBit;
+                this.decodeBit(bit);
+            }
+        } else {
+            // No signal - reset decoder state
+            if (this.bitCount > 0) {
+                this.bitCount = 0;
+                this.bitBuffer = 0;
+                this.lastBit = 1;  // Reset to idle (mark)
+                this.idleCount = 0;
+            }
+        }
+
+        // Periodic auto-tune
+        if (this.autoTuneEnabled) {
+            const now = Date.now();
+            if (now - this.lastAutoTuneTime > this.autoTuneInterval) {
+                this.lastAutoTuneTime = now;
+                this.autoTune();
+            }
+        }
     }
 
     decodeBit(bit) {
-        // Improved bit sampling with synchronization
-        this.bitPhase += this.bufferSize;
-        
-        if (this.bitPhase >= this.samplesPerBit) {
-            this.bitPhase -= this.samplesPerBit;
-            
-            // Detect start bit (transition from mark to space)
-            if (this.bitCount === 0 && bit === 0 && this.lastBit === 1) {
-                // Start bit detected - resync timing
-                this.bitPhase = this.samplesPerBit / 2;  // Sample in middle of next bit
-                this.bitCount = 1;
-                this.bitBuffer = 0;
-                if (Math.random() < 0.02) {  // 2% of start bits
-                    this.logDebug(`Start bit detected, resynced timing`);
-                }
-            } else if (this.bitCount > 0 && this.bitCount <= 5) {
-                // Data bits (5 bits for Baudot, 7-8 for ASCII)
-                this.bitBuffer |= (bit << (this.bitCount - 1));
-                this.bitCount++;
-            } else if (this.bitCount > 5) {
-                // Stop bit(s) - should be mark (1)
-                if (bit === 1) {
-                    // Valid character received
-                    const binaryStr = this.bitBuffer.toString(2).padStart(5, '0');
-                    if (Math.random() < 0.05) {  // 5% of characters
-                        this.logDebug(`✓ Decoded: 0b${binaryStr} (0x${this.bitBuffer.toString(16)})`);
-                    }
-                    this.decodeCharacter(this.bitBuffer);
-                } else {
-                    // Framing error - resync on next start bit
-                    if (Math.random() < 0.02) {  // 2% of framing errors
-                        this.logDebug(`✗ Framing error: stop=${bit}, resetting`);
-                    }
-                }
-                this.bitCount = 0;
-                this.bitBuffer = 0;
-            }
-            
-            this.lastBit = bit;
+        // Called when we have a bit decision (once per bit period)
+
+        // Track idle state (consecutive marks)
+        if (bit === 1) {
+            this.idleCount++;
+        } else {
+            this.idleCount = 0;
         }
+
+        // Detect start bit (transition from mark to space)
+        // Require at least 2 consecutive marks before accepting a start bit
+        if (this.bitCount === 0 && bit === 0 && this.lastBit === 1 && this.idleCount >= 2) {
+            // Start bit detected - resync timing to sample in middle of bits
+            this.bitPhase = this.samplesPerBit / 2;
+            this.bitCount = 1;
+            this.bitBuffer = 0;
+            if (Math.random() < 0.02) {  // 2% logging
+                this.logDebug(`Start bit detected`);
+            }
+        } else if (this.bitCount > 0 && this.bitCount <= 5) {
+            // Data bits (5 bits for Baudot)
+            this.bitBuffer |= (bit << (this.bitCount - 1));
+            this.bitCount++;
+        } else if (this.bitCount > 5) {
+            // Stop bit(s) - should be mark (1)
+            if (bit === 1) {
+                // Valid character received
+                const char = this.decodeBaudotCode(this.bitBuffer);
+                if (char) {  // Only output if we got a valid character
+                    this.decodeCharacter(this.bitBuffer);
+                }
+            } else {
+                // Framing error - reset and wait for idle
+                if (Math.random() < 0.02) {  // 2% logging
+                    this.logDebug(`Framing error`);
+                }
+            }
+            this.bitCount = 0;
+            this.bitBuffer = 0;
+        }
+
+        this.lastBit = bit;
     }
 
     decodeCharacter(code) {
         let char = '';
-        
+
         if (this.encoding === 'baudot') {
             char = this.decodeBaudot(code);
         } else {
             // ASCII decoding
             char = String.fromCharCode(code);
         }
-        
+
         if (char) {
             this.decodedText += char;
             this.charCount++;
             this.updateDisplay();
         }
+    }
+
+    decodeBaudotCode(code) {
+        // Just check if code is valid, don't update state
+        const lettersTable = {
+            0x00: '\0', 0x01: 'E', 0x02: '\n', 0x03: 'A', 0x04: ' ',
+            0x05: 'S', 0x06: 'I', 0x07: 'U', 0x08: '\r', 0x09: 'D',
+            0x0A: 'R', 0x0B: 'J', 0x0C: 'N', 0x0D: 'F', 0x0E: 'C',
+            0x0F: 'K', 0x10: 'T', 0x11: 'Z', 0x12: 'L', 0x13: 'W',
+            0x14: 'H', 0x15: 'Y', 0x16: 'P', 0x17: 'Q', 0x18: 'O',
+            0x19: 'B', 0x1A: 'G', 0x1B: 'FIGS', 0x1C: 'M', 0x1D: 'X',
+            0x1E: 'V', 0x1F: 'LTRS'
+        };
+        return lettersTable[code] !== undefined;
     }
 
     decodeBaudot(code) {
@@ -365,28 +476,14 @@ class RTTYDecoder extends DecoderExtension {
 
     autoTune() {
         // Real auto-tune: scan audio spectrum to find strongest RTTY signal
-        console.log('RTTY: autoTune() called');
-        this.logDebug('Auto-tune: Scanning spectrum...');
+        this.logDebug('Auto-tune: Scanning...');
         
-        // Update badge first
-        console.log('RTTY: Updating badge to TUNING');
         this.updateStatusBadge('TUNING', 'synced');
-        
-        // Get audio analyser
-        const analyser = this.radio.getVUAnalyser();
-        console.log('RTTY: Analyser:', analyser ? 'found' : 'NOT FOUND');
-        if (!analyser) {
-            this.logDebug('Auto-tune: No audio analyser available');
-            console.log('RTTY: No analyser, returning');
-            this.updateStatusBadge('ACTIVE', 'active');
-            return;
-        }
 
+        const analyser = this.radio.getVUAnalyser();
         const audioCtx = this.radio.getAudioContext();
-        console.log('RTTY: Audio context:', audioCtx ? 'found' : 'NOT FOUND');
-        if (!audioCtx) {
-            this.logDebug('Auto-tune: No audio context available');
-            console.log('RTTY: No audio context, returning');
+
+        if (!analyser || !audioCtx) {
             this.updateStatusBadge('ACTIVE', 'active');
             return;
         }
@@ -424,8 +521,6 @@ class RTTYDecoder extends DecoderExtension {
             binEndFreq = bandwidth.high;
         }
 
-        this.logDebug(`Auto-tune: Scanning ${binStartFreq.toFixed(0)}-${binEndFreq.toFixed(0)} Hz audio bandwidth`);
-
         // Search for strongest pair of tones separated by the shift frequency
         let bestScore = -Infinity;
         let bestCenterFreq = this.centerFreq;
@@ -433,9 +528,7 @@ class RTTYDecoder extends DecoderExtension {
         // Scan within the actual audio bandwidth, ensuring room for both tones
         const minFreq = Math.max(binStartFreq + this.shift/2, 500);
         const maxFreq = Math.min(binEndFreq - this.shift/2, 2500);
-        const step = 25; // Hz
-
-        this.logDebug(`Auto-tune: Scanning ${minFreq.toFixed(0)}-${maxFreq.toFixed(0)} Hz for RTTY pairs`);
+        const step = 50; // Hz - larger step for faster scanning
 
         for (let centerFreq = minFreq; centerFreq <= maxFreq; centerFreq += step) {
             const markFreq = centerFreq + (this.shift / 2);
@@ -473,34 +566,22 @@ class RTTYDecoder extends DecoderExtension {
             const spacePower = this.getAveragePower(dataArray, spaceBin, 2);
             const separation = markFreq - spaceFreq;
             
-            // Log detailed peak information
-            this.logDebug(`Auto-tune: Best signal at ${bestCenterFreq.toFixed(0)} Hz (avg: ${bestScore.toFixed(1)} dB)`);
-            this.logDebug(`  Mark:  ${markFreq.toFixed(1)} Hz @ ${markPower.toFixed(1)} dB`);
-            this.logDebug(`  Space: ${spaceFreq.toFixed(1)} Hz @ ${spacePower.toFixed(1)} dB`);
-            this.logDebug(`  Separation: ${separation.toFixed(1)} Hz (expected: ${this.shift} Hz)`);
-            
-            console.log(`RTTY: Best score: ${bestScore.toFixed(1)} dB at ${bestCenterFreq.toFixed(0)} Hz`);
-            console.log(`RTTY: Mark=${markFreq.toFixed(1)} Hz (${markPower.toFixed(1)} dB), Space=${spaceFreq.toFixed(1)} Hz (${spacePower.toFixed(1)} dB)`);
+            // Only log if significantly different from current frequency
+            if (Math.abs(bestCenterFreq - this.centerFreq) > 50) {
+                this.logDebug(`Found signal at ${bestCenterFreq.toFixed(0)} Hz (${bestScore.toFixed(1)} dB)`);
+            }
         }
         
-        // Use -70 dB threshold (reasonable for averaged tone power)
-        if (bestScore > -70 && isFinite(bestScore)) {
-            const oldCenter = this.centerFreq;
+        // Use -65 dB threshold and require significant frequency change to avoid jitter
+        const freqChange = Math.abs(bestCenterFreq - this.centerFreq);
+        if (bestScore > -65 && isFinite(bestScore) && freqChange > 50) {
             this.centerFreq = bestCenterFreq;
             this.updateFrequencies();
             this.calculateGoertzelCoefficients();
-            
-            this.logDebug(`Auto-tune: ✓ Tuned from ${oldCenter.toFixed(0)} Hz to ${bestCenterFreq.toFixed(0)} Hz`);
-            console.log(`RTTY: Tuned to ${bestCenterFreq.toFixed(0)} Hz`);
-        } else {
-            this.logDebug(`Auto-tune: ✗ Score ${bestScore.toFixed(1)} dB too weak (threshold -70 dB)`);
-            this.logDebug('Auto-tune: Keeping current frequency');
-            console.log('RTTY: No strong signal found');
+            this.logDebug(`Tuned to ${bestCenterFreq.toFixed(0)} Hz`);
         }
 
-        console.log('RTTY: Updating badge back to ACTIVE');
         this.updateStatusBadge('ACTIVE', 'active');
-        console.log('RTTY: autoTune() complete');
     }
 
     getAveragePower(dataArray, centerBin, radius) {

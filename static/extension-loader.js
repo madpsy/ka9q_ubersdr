@@ -92,7 +92,9 @@ function populateExtensionsDropdown(extensions) {
     extensions.forEach(ext => {
         const option = document.createElement('option');
         option.value = ext.slug;
-        option.textContent = `📊 ${ext.displayName}`;
+        // Use icon from manifest if available, otherwise default to 📊
+        const icon = ext.icon || '📊';
+        option.textContent = `${icon} ${ext.displayName}`;
         dropdown.appendChild(option);
     });
     

@@ -1,6 +1,7 @@
 {
   "name": "cw-decoder",
   "displayName": "CW Decoder",
+  "icon": "📡",
   "version": "1.0.0",
   "description": "Decodes Morse code (CW) signals using audio tone detection and timing analysis",
   "author": "UberSDR",

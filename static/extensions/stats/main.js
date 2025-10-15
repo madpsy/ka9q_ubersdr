@@ -11,7 +11,7 @@ class StatsExtension extends DecoderExtension {
         });
 
         this.updateInterval = null;
-        this.updateRate = 1000; // Update every 1 second
+        this.updateRate = 500; // Update every 500ms (2 Hz)
     }
 
     onInitialize() {

@@ -2588,6 +2588,56 @@ input[type="range"]::-moz-range-thumb {
     font-size: 1.5em;
 }
 
+.decoder-extension-modal-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.decoder-extension-modal-zoom {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #2c3e50;
+    border-radius: 6px;
+}
+
+.decoder-extension-modal-zoom-btn {
+    background: #3498db;
+    border: none;
+    color: white;
+    font-size: 1.2em;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 4px 10px;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.3s;
+    line-height: 1;
+}
+
+.decoder-extension-modal-zoom-btn:hover {
+    background: #2980b9;
+    transform: scale(1.1);
+}
+
+.decoder-extension-modal-zoom-btn:active {
+    transform: scale(0.95);
+}
+
+.decoder-extension-modal-zoom-display {
+    color: #ecf0f1;
+    font-weight: bold;
+    font-size: 0.95em;
+    min-width: 45px;
+    text-align: center;
+}
+
 .decoder-extension-modal-close {
     background: #e74c3c;
     border: none;
@@ -2614,6 +2664,12 @@ input[type="range"]::-moz-range-thumb {
     padding: 25px;
     overflow-y: auto;
     background: #34495e;
+}
+
+/* Modal content wrapper for zoom transform */
+.modal-content-wrapper {
+    transform-origin: top center;
+    transition: transform 0.3s ease;
 }
 
 /* Custom scrollbar for modal body */

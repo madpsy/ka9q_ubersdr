@@ -6106,6 +6106,9 @@ function updateBandSelector() {
 window.populateBandSelector = populateBandSelector;
 window.selectBandFromDropdown = selectBandFromDropdown;
 
+// Extension modal zoom state
+let extensionModalZoom = 1.0; // Default 100%
+
 // Extension modal functions
 function openExtensionModal(extensionName) {
     const decoder = window.decoderManager.getDecoder(extensionName);
@@ -6121,10 +6124,15 @@ function openExtensionModal(extensionName) {
         modal.id = 'decoder-extension-modal';
         modal.className = 'decoder-extension-modal';
         modal.innerHTML = `
-            <div class="decoder-extension-modal-content">
+            <div class="decoder-extension-modal-content" id="decoder-extension-modal-content">
                 <div class="decoder-extension-modal-header">
                     <h2 id="decoder-extension-modal-title"></h2>
-                    <button class="decoder-extension-modal-close" onclick="closeExtensionModal()">×</button>
+                    <div class="decoder-extension-modal-controls">
+                        <button class="decoder-extension-modal-zoom" onclick="zoomExtensionModal(-0.1)" title="Zoom Out (-)">−</button>
+                        <button class="decoder-extension-modal-zoom" onclick="resetZoomExtensionModal()" title="Reset Zoom (100%)" id="decoder-extension-modal-zoom-display">100%</button>
+                        <button class="decoder-extension-modal-zoom" onclick="zoomExtensionModal(0.1)" title="Zoom In (+)">+</button>
+                        <button class="decoder-extension-modal-close" onclick="closeExtensionModal()" title="Close Modal">×</button>
+                    </div>
                 </div>
                 <div class="decoder-extension-modal-body" id="decoder-extension-modal-body"></div>
             </div>
@@ -6157,10 +6165,52 @@ function openExtensionModal(extensionName) {
     decoder.modalBodyId = 'decoder-extension-modal-body';
     decoder.modalContentSelector = '.modal-content-wrapper';
 
+    // Reset zoom to 100%
+    extensionModalZoom = 1.0;
+    const modalContent = document.getElementById('decoder-extension-modal-content');
+    if (modalContent) {
+        modalContent.style.transform = `scale(${extensionModalZoom})`;
+    }
+    updateModalZoomDisplay();
+
     // Show modal
     modal.classList.add('show');
 
     log(`Opened ${extensionName} extension in modal`);
+}
+
+window.zoomExtensionModal = function(delta) {
+    // Adjust zoom level (clamp between 0.5x and 2.0x)
+    extensionModalZoom = Math.max(0.5, Math.min(2.0, extensionModalZoom + delta));
+
+    // Apply zoom transform
+    const modalContent = document.getElementById('decoder-extension-modal-content');
+    if (modalContent) {
+        modalContent.style.transform = `scale(${extensionModalZoom})`;
+        modalContent.style.transformOrigin = 'top center';
+    }
+
+    updateModalZoomDisplay();
+    log(`Extension modal zoom: ${Math.round(extensionModalZoom * 100)}%`);
+};
+
+window.resetZoomExtensionModal = function() {
+    extensionModalZoom = 1.0;
+
+    const modalContent = document.getElementById('decoder-extension-modal-content');
+    if (modalContent) {
+        modalContent.style.transform = `scale(${extensionModalZoom})`;
+    }
+
+    updateModalZoomDisplay();
+    log('Extension modal zoom reset to 100%');
+};
+
+function updateModalZoomDisplay() {
+    const display = document.getElementById('decoder-extension-modal-zoom-display');
+    if (display) {
+        display.textContent = `${Math.round(extensionModalZoom * 100)}%`;
+    }
 }
 
 function closeExtensionModal() {

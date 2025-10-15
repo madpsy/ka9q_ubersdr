@@ -2460,6 +2460,12 @@ input[type="range"]::-moz-range-thumb {
     font-weight: bold;
 }
 
+.decoder-header-buttons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
 .decoder-close-btn {
     background: #e74c3c;
     color: white;
@@ -2508,5 +2514,123 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .decoder-extension-content::-webkit-scrollbar-thumb:hover {
+    background: #5568d3;
+}
+
+
+/* Decoder Extension Modal Button */
+.decoder-modal-btn {
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    font-size: 1.3em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s;
+    padding: 0;
+    line-height: 1;
+}
+
+.decoder-modal-btn:hover {
+    background: #2980b9;
+    transform: scale(1.1);
+}
+
+/* Decoder Extension Modal Overlay */
+.decoder-extension-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(5px);
+}
+
+.decoder-extension-modal.show {
+    display: flex;
+}
+
+.decoder-extension-modal-content {
+    background: #2c3e50;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    width: 90%;
+    height: 90%;
+    max-width: 1400px;
+    max-height: 900px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.decoder-extension-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 25px;
+    border-bottom: 2px solid #34495e;
+    background: #34495e;
+}
+
+.decoder-extension-modal-header h2 {
+    margin: 0;
+    color: #ecf0f1;
+    font-size: 1.5em;
+}
+
+.decoder-extension-modal-close {
+    background: #e74c3c;
+    border: none;
+    color: white;
+    font-size: 2em;
+    cursor: pointer;
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.3s;
+}
+
+.decoder-extension-modal-close:hover {
+    background: #c0392b;
+    transform: rotate(90deg);
+}
+
+.decoder-extension-modal-body {
+    flex: 1;
+    padding: 25px;
+    overflow-y: auto;
+    background: #34495e;
+}
+
+/* Custom scrollbar for modal body */
+.decoder-extension-modal-body::-webkit-scrollbar {
+    width: 10px;
+}
+
+.decoder-extension-modal-body::-webkit-scrollbar-track {
+    background: #2c3e50;
+    border-radius: 5px;
+}
+
+.decoder-extension-modal-body::-webkit-scrollbar-thumb {
+    background: #667eea;
+    border-radius: 5px;
+}
+
+.decoder-extension-modal-body::-webkit-scrollbar-thumb:hover {
     background: #5568d3;
 }

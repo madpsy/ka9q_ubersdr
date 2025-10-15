@@ -6105,5 +6105,81 @@ function updateBandSelector() {
 // Expose functions to global scope
 window.populateBandSelector = populateBandSelector;
 window.selectBandFromDropdown = selectBandFromDropdown;
+
+// Extension modal functions
+function openExtensionModal(extensionName) {
+    const decoder = window.decoderManager.getDecoder(extensionName);
+    if (!decoder) {
+        log(`Extension not found: ${extensionName}`, 'error');
+        return;
+    }
+
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('decoder-extension-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'decoder-extension-modal';
+        modal.className = 'decoder-extension-modal';
+        modal.innerHTML = `
+            <div class="decoder-extension-modal-content">
+                <div class="decoder-extension-modal-header">
+                    <h2 id="decoder-extension-modal-title"></h2>
+                    <button class="decoder-extension-modal-close" onclick="closeExtensionModal()">×</button>
+                </div>
+                <div class="decoder-extension-modal-body" id="decoder-extension-modal-body"></div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+
+    // Set title
+    const title = document.getElementById('decoder-extension-modal-title');
+    if (title) {
+        title.textContent = decoder.displayName || extensionName;
+    }
+
+    // Clone extension content into modal WITHOUT changing IDs
+    // The extension will handle updating both panel and modal
+    const panel = document.getElementById(`${extensionName}-decoder-panel`);
+    if (panel) {
+        const content = panel.querySelector('.decoder-extension-content');
+        const modalBody = document.getElementById('decoder-extension-modal-body');
+        if (content && modalBody) {
+            // Clone the content - keep original IDs
+            // We'll use a wrapper div to isolate the modal content
+            modalBody.innerHTML = `<div class="modal-content-wrapper">${content.innerHTML}</div>`;
+        }
+    }
+
+    // Tell the decoder it's now in modal mode
+    // The decoder should now update elements in BOTH locations
+    decoder.modalMode = true;
+    decoder.modalBodyId = 'decoder-extension-modal-body';
+    decoder.modalContentSelector = '.modal-content-wrapper';
+
+    // Show modal
+    modal.classList.add('show');
+
+    log(`Opened ${extensionName} extension in modal`);
+}
+
+function closeExtensionModal() {
+    const modal = document.getElementById('decoder-extension-modal');
+    if (modal) {
+        modal.classList.remove('show');
+
+        // Tell all decoders they're no longer in modal mode
+        if (window.decoderManager) {
+            window.decoderManager.decoders.forEach(decoder => {
+                decoder.modalMode = false;
+                decoder.modalBodyId = null;
+            });
+        }
+    }
+}
+
+// Expose modal functions globally
+window.openExtensionModal = openExtensionModal;
+window.closeExtensionModal = closeExtensionModal;
 window.updateBandSelector = updateBandSelector;
 

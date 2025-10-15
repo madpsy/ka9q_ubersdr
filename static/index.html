@@ -197,7 +197,10 @@
             <div class="decoder-extension-container">
                 <div class="decoder-extension-header">
                     <h3>📊 Stats Monitor</h3>
-                    <button onclick="toggleExtension('')" class="decoder-close-btn">&times;</button>
+                    <div class="decoder-header-buttons">
+                        <button onclick="openExtensionModal('stats')" class="decoder-modal-btn" title="Open in Modal">⛶</button>
+                        <button onclick="toggleExtension('')" class="decoder-close-btn">&times;</button>
+                    </div>
                 </div>
                 <div class="decoder-extension-content">
                     <div id="stats-decoded-text" style="font-family: monospace; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap;">

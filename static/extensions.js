@@ -319,20 +319,24 @@ class DecoderExtension {
             preferredBandwidth: null,
             ...config
         };
-        
+
         // Radio API access
         this.radio = radioAPI;
-        
+
         // UI elements (auto-discovered by convention)
         this.panelId = `${name}-decoder-panel`;
         this.textDisplayId = `${name}-decoded-text`;
         this.statusBadgeId = `${name}-status-badge`;
         this.signalBarId = `${name}-signal-bar`;
-        
+
+        // Modal mode tracking
+        this.modalMode = false;
+        this.modalBodyId = null;
+
         // Output buffer
         this.decodedText = '';
         this.maxTextLength = 1000;
-        
+
         // Event listeners
         this.eventListeners = [];
     }
@@ -439,37 +443,99 @@ class DecoderExtension {
     }
     
     updateDisplay() {
+        // Update the original panel
         const displayElement = document.getElementById(this.textDisplayId);
         if (displayElement) {
             displayElement.textContent = this.decodedText;
             displayElement.scrollTop = displayElement.scrollHeight;
         }
+
+        // Also update modal if in modal mode
+        if (this.modalMode && this.modalBodyId) {
+            const modalBody = document.getElementById(this.modalBodyId);
+            if (modalBody) {
+                const modalDisplayElement = modalBody.querySelector(`#${this.textDisplayId}`);
+                if (modalDisplayElement) {
+                    modalDisplayElement.textContent = this.decodedText;
+                    modalDisplayElement.scrollTop = modalDisplayElement.scrollHeight;
+                }
+            }
+        }
     }
     
     updateSignalStrength(magnitude) {
+        const percentage = Math.min(100, magnitude * 100);
+        let bgColor;
+
+        if (magnitude > this.config.threshold) {
+            bgColor = '#28a745';
+        } else if (magnitude > this.config.threshold * 0.7) {
+            bgColor = '#ffc107';
+        } else {
+            bgColor = '#6c757d';
+        }
+
+        // Update the original panel
         const signalBar = document.getElementById(this.signalBarId);
         if (signalBar) {
-            const percentage = Math.min(100, magnitude * 100);
             signalBar.style.width = percentage + '%';
-            
-            if (magnitude > this.config.threshold) {
-                signalBar.style.background = '#28a745';
-            } else if (magnitude > this.config.threshold * 0.7) {
-                signalBar.style.background = '#ffc107';
-            } else {
-                signalBar.style.background = '#6c757d';
+            signalBar.style.background = bgColor;
+        }
+
+        // Also update modal if in modal mode
+        if (this.modalMode && this.modalBodyId) {
+            const modalBody = document.getElementById(this.modalBodyId);
+            if (modalBody) {
+                const modalSignalBar = modalBody.querySelector(`#${this.signalBarId}`);
+                if (modalSignalBar) {
+                    modalSignalBar.style.width = percentage + '%';
+                    modalSignalBar.style.background = bgColor;
+                }
             }
         }
     }
     
     updateStatusBadge(status, className = 'decoder-active') {
+        // Update the original panel
         const badge = document.getElementById(this.statusBadgeId);
         if (badge) {
             badge.textContent = status;
             badge.className = `decoder-status-badge ${className}`;
         }
+
+        // Also update modal if in modal mode
+        if (this.modalMode && this.modalBodyId) {
+            const modalBody = document.getElementById(this.modalBodyId);
+            if (modalBody) {
+                const modalBadge = modalBody.querySelector(`#${this.statusBadgeId}`);
+                if (modalBadge) {
+                    modalBadge.textContent = status;
+                    modalBadge.className = `decoder-status-badge ${className}`;
+                }
+            }
+        }
     }
-    
+
+    // Helper method for extensions to update custom elements in both panel and modal
+    updateElementById(id, updateFn) {
+        // Update in panel
+        const panelEl = document.getElementById(id);
+        if (panelEl) {
+            updateFn(panelEl);
+        }
+
+        // Update in modal if active
+        if (this.modalMode && this.modalBodyId) {
+            const modalBody = document.getElementById(this.modalBodyId);
+            if (modalBody) {
+                const modalEl = modalBody.querySelector(`#${id}`);
+                if (modalEl) {
+                    updateFn(modalEl);
+                }
+            }
+        }
+    }
+
     clearText() {
         this.decodedText = '';
         this.updateDisplay();

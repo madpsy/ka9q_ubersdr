@@ -86,6 +86,8 @@
     font-weight: bold;
     color: #ecf0f1;
     font-family: 'Courier New', monospace;
+    word-break: break-all;
+    overflow-wrap: break-word;
 }
 
 .stats-value.highlight {

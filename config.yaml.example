@@ -29,7 +29,7 @@ radiod:
   # Multicast group for PCM audio data
   data_group: "pcm.local:5004"
   # Network interface to use (empty = auto-detect)
-  interface: ""
+  interface: "lo"
 
 # Web server settings
 server:

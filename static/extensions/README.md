@@ -187,6 +187,78 @@ Extensions have access to the Radio API via `this.radio`:
 - `formatFrequency(hz)` - Format frequency for display
 - `getFrequencyBand(freq)` - Get band name for frequency
 
+## UI Updates and Modal Support
+
+Extensions can be displayed in both a panel and a full-screen modal overlay. The base class provides automatic modal support for standard UI updates.
+
+### Automatic Modal Support
+
+These base class methods automatically update both panel and modal:
+
+```javascript
+// Text display (for decoded output)
+this.updateDisplay();
+
+// Signal strength bar
+this.updateSignalStrength(magnitude);
+
+// Status badge
+this.updateStatusBadge('ACTIVE', 'decoder-active');
+```
+
+### Custom UI Updates
+
+For custom UI elements, use the `updateElementById()` helper:
+
+```javascript
+// Update text content
+this.updateElementById('my-element-id', (el) => {
+    el.textContent = 'New value';
+});
+
+// Update styles
+this.updateElementById('my-meter', (el) => {
+    el.style.width = '75%';
+    el.style.backgroundColor = '#28a745';
+});
+
+// Update HTML content
+this.updateElementById('my-container', (el) => {
+    el.innerHTML = '<div>New content</div>';
+});
+
+// Update multiple properties
+this.updateElementById('my-status', (el) => {
+    el.textContent = 'Connected';
+    el.className = 'status-badge connected';
+});
+```
+
+**Benefits:**
+- Automatically updates both panel and modal
+- No need to check `this.modalMode` manually
+- Cleaner, more maintainable code
+- Consistent behavior across all extensions
+
+**Example from Stats Extension:**
+```javascript
+// Old way (manual modal handling - DON'T DO THIS)
+const el = document.getElementById('my-element');
+if (el) el.textContent = value;
+if (this.modalMode && this.modalBodyId) {
+    const modalBody = document.getElementById(this.modalBodyId);
+    if (modalBody) {
+        const modalEl = modalBody.querySelector('#my-element');
+        if (modalEl) modalEl.textContent = value;
+    }
+}
+
+// New way (automatic modal support - DO THIS)
+this.updateElementById('my-element', (el) => {
+    el.textContent = value;
+});
+```
+
 ### Event System
 - `on(event, callback)` - Subscribe to events
 - `off(event, callback)` - Unsubscribe from events

@@ -258,37 +258,15 @@ class StatsExtension extends DecoderExtension {
 
                 // Update audio meter (map -60 to 0 dB to 0-100%)
                 const percentage = Math.max(0, Math.min(100, ((this.currentAudioLevel + 60) / 60) * 100));
-                const meterEl = document.getElementById('stats-audio-meter');
-                if (meterEl) {
-                    meterEl.style.width = percentage + '%';
-                }
-                // Also update modal meter if in modal mode
-                if (this.modalMode && this.modalBodyId) {
-                    const modalBody = document.getElementById(this.modalBodyId);
-                    if (modalBody) {
-                        const modalMeterEl = modalBody.querySelector('#stats-audio-meter');
-                        if (modalMeterEl) {
-                            modalMeterEl.style.width = percentage + '%';
-                        }
-                    }
-                }
+                this.updateElementById('stats-audio-meter', (el) => {
+                    el.style.width = percentage + '%';
+                });
             } else {
                 // No audio level available yet
                 this.updateElement('stats-audio-level', 'No signal');
-                const meterEl = document.getElementById('stats-audio-meter');
-                if (meterEl) {
-                    meterEl.style.width = '0%';
-                }
-                // Also update modal meter if in modal mode
-                if (this.modalMode && this.modalBodyId) {
-                    const modalBody = document.getElementById(this.modalBodyId);
-                    if (modalBody) {
-                        const modalMeterEl = modalBody.querySelector('#stats-audio-meter');
-                        if (modalMeterEl) {
-                            modalMeterEl.style.width = '0%';
-                        }
-                    }
-                }
+                this.updateElementById('stats-audio-meter', (el) => {
+                    el.style.width = '0%';
+                });
             }
         } else {
             // No audio context yet
@@ -303,22 +281,10 @@ class StatsExtension extends DecoderExtension {
         const statusText = connected ? 'Connected' : 'Disconnected';
         const statusClass = connected ? 'stats-badge connected' : 'stats-badge disconnected';
 
-        const statusEl = document.getElementById('stats-connection-status');
-        if (statusEl) {
-            statusEl.textContent = statusText;
-            statusEl.className = statusClass;
-        }
-        // Also update modal status if in modal mode
-        if (this.modalMode && this.modalBodyId) {
-            const modalBody = document.getElementById(this.modalBodyId);
-            if (modalBody) {
-                const modalStatusEl = modalBody.querySelector('#stats-connection-status');
-                if (modalStatusEl) {
-                    modalStatusEl.textContent = statusText;
-                    modalStatusEl.className = statusClass;
-                }
-            }
-        }
+        this.updateElementById('stats-connection-status', (el) => {
+            el.textContent = statusText;
+            el.className = statusClass;
+        });
         this.updateElement('stats-session', this.radio.getSessionId());
 
         // Spectrum Information
@@ -445,15 +411,9 @@ class StatsExtension extends DecoderExtension {
     }
 
     updateAudioSpectrum() {
+        // Check if container exists (will be updated in both panel and modal)
         const container = document.getElementById('audio-spectrum-display');
-        let modalContainer = null;
-        if (this.modalMode && this.modalBodyId) {
-            const modalBody = document.getElementById(this.modalBodyId);
-            if (modalBody) {
-                modalContainer = modalBody.querySelector('#audio-spectrum-display');
-            }
-        }
-        if (!container && !modalContainer) return;
+        if (!container) return;
 
         // Display peak frequency
         if (this.audioDominantFreq !== undefined && this.audioDominantFreq > 0 && this.audioFrequencyData) {
@@ -506,28 +466,25 @@ class StatsExtension extends DecoderExtension {
 
                 html += `<div class="${barClass}" style="height: ${height}%"></div>`;
             }
-            if (container) container.innerHTML = html;
-            if (modalContainer) modalContainer.innerHTML = html;
+            // Update both panel and modal using helper
+            this.updateElementById('audio-spectrum-display', (el) => {
+                el.innerHTML = html;
+            });
         } else {
             this.updateElement('stats-audio-peak-freq', 'No signal');
             this.updateElement('audio-spectrum-low', '-');
             this.updateElement('audio-spectrum-high', '-');
             const noSignalHtml = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #95a5a6;">No audio signal</div>';
-            if (container) container.innerHTML = noSignalHtml;
-            if (modalContainer) modalContainer.innerHTML = noSignalHtml;
+            this.updateElementById('audio-spectrum-display', (el) => {
+                el.innerHTML = noSignalHtml;
+            });
         }
     }
 
     updateRFSpectrum() {
+        // Check if container exists (will be updated in both panel and modal)
         const container = document.getElementById('rf-spectrum-display');
-        let modalContainer = null;
-        if (this.modalMode && this.modalBodyId) {
-            const modalBody = document.getElementById(this.modalBodyId);
-            if (modalBody) {
-                modalContainer = modalBody.querySelector('#rf-spectrum-display');
-            }
-        }
-        if (!container && !modalContainer) return;
+        if (!container) return;
 
         if (this.currentSpectrumData && this.spectrumPeakFreq > 0) {
             this.updateElement('stats-spectrum-peak-freq-display', this.radio.formatFrequency(this.spectrumPeakFreq));
@@ -574,35 +531,26 @@ class StatsExtension extends DecoderExtension {
 
                 html += `<div class="${barClass}" style="height: ${height}%"></div>`;
             }
-            if (container) container.innerHTML = html;
-            if (modalContainer) modalContainer.innerHTML = html;
+            // Update both panel and modal using helper
+            this.updateElementById('rf-spectrum-display', (el) => {
+                el.innerHTML = html;
+            });
         } else {
             this.updateElement('stats-spectrum-peak-freq-display', 'No signal');
             this.updateElement('rf-spectrum-low', '-');
             this.updateElement('rf-spectrum-high', '-');
             const noDataHtml = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #95a5a6;">No spectrum data</div>';
-            if (container) container.innerHTML = noDataHtml;
-            if (modalContainer) modalContainer.innerHTML = noDataHtml;
+            this.updateElementById('rf-spectrum-display', (el) => {
+                el.innerHTML = noDataHtml;
+            });
         }
     }
 
     updateElement(id, value) {
-        // Update the original panel element
-        const el = document.getElementById(id);
-        if (el) {
+        // Use base class helper for automatic modal support
+        this.updateElementById(id, (el) => {
             el.textContent = value;
-        }
-
-        // Also update modal element if in modal mode
-        if (this.modalMode && this.modalBodyId) {
-            const modalBody = document.getElementById(this.modalBodyId);
-            if (modalBody) {
-                const modalEl = modalBody.querySelector(`#${id}`);
-                if (modalEl) {
-                    modalEl.textContent = value;
-                }
-            }
-        }
+        });
     }
 
     getContentElement() {

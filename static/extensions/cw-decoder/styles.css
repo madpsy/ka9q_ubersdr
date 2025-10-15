@@ -1,5 +1,74 @@
 /* CW Decoder Extension Styles */
 
+/* Frequency Detector Visual */
+.cw-frequency-detector {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    border: 1px solid #2a2a3e;
+}
+
+.vertical-spectrum {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-around;
+    height: 120px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    padding: 8px;
+    gap: 2px;
+    margin-top: 8px;
+}
+
+.spectrum-bar {
+    flex: 1;
+    background: linear-gradient(to top, #2ecc71 0%, #f39c12 50%, #e74c3c 100%);
+    border-radius: 2px;
+    min-height: 2px;
+    transition: height 0.1s ease;
+    position: relative;
+}
+
+.spectrum-bar.peak {
+    background: linear-gradient(to top, #3498db 0%, #e74c3c 100%);
+    box-shadow: 0 0 8px rgba(52, 152, 219, 0.8);
+}
+
+.spectrum-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75em;
+    color: #95a5a6;
+    margin-top: 4px;
+}
+
+.cw-freq-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    margin-top: 8px;
+}
+
+.cw-freq-label {
+    color: #888;
+    font-weight: 500;
+}
+
+.cw-freq-value {
+    color: #4CAF50;
+    font-weight: bold;
+    font-size: 16px;
+    font-family: 'Courier New', monospace;
+}
+
+.cw-freq-strength {
+    color: #FFC107;
+    font-weight: 500;
+    font-family: 'Courier New', monospace;
+}
+
 .cw-decoder-container {
     padding: 15px;
     color: #ecf0f1;

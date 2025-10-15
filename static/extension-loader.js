@@ -34,7 +34,9 @@
                 if (manifest.files?.template) {
                     const html = await fetch(`/extensions/${extName}/${manifest.files.template}`).then(r => r.text());
                     // Store template in global scope for extension to use
-                    window[`${extName}_template`] = html;
+                    // Normalize extension name: replace hyphens with underscores for valid JS identifiers
+                    const normalizedName = extName.replace(/-/g, '_');
+                    window[`${normalizedName}_template`] = html;
                     console.log(`  ✓ Loaded template: ${manifest.files.template}`);
                 }
                 
@@ -56,7 +58,8 @@
                 // Store extension info for dropdown
                 extensionsList.push({
                     slug: manifest.name || extName,
-                    displayName: manifest.displayName || extName
+                    displayName: manifest.displayName || extName,
+                    icon: manifest.icon
                 });
                 
                 console.log(`✅ Successfully loaded extension: ${manifest.displayName || extName}`);

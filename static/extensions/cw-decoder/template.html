@@ -67,8 +67,12 @@
                 <span class="cw-info-value" id="cw-signal-strength">-60.0 dB</span>
             </div>
             <div class="cw-info-item">
-                <span class="cw-info-label">Detected Frequency</span>
+                <span class="cw-info-label">FFT Frequency</span>
                 <span class="cw-info-value" id="cw-detected-freq">0 Hz</span>
+            </div>
+            <div class="cw-info-item">
+                <span class="cw-info-label">Zero-Crossing Frequency</span>
+                <span class="cw-info-value" id="cw-zerocrossing-freq">0 Hz</span>
             </div>
             <div class="cw-info-item">
                 <span class="cw-info-label">Current Symbol</span>
@@ -77,14 +81,6 @@
             <div class="cw-info-item">
                 <span class="cw-info-label">Dot Length</span>
                 <span class="cw-info-value" id="cw-dot-length">100 ms</span>
-            </div>
-        </div>
-        
-        <!-- Signal Strength Meter -->
-        <div class="signal-strength-container">
-            <div class="signal-strength-label">Signal Strength</div>
-            <div class="signal-strength-bar">
-                <div class="signal-strength-fill" id="signal-strength-fill"></div>
             </div>
         </div>
     </div>
@@ -98,8 +94,15 @@
                     Target Frequency (Hz)
                     <span class="cw-setting-hint">Expected CW tone frequency</span>
                 </label>
-                <input type="number" id="cw-freq-input" class="cw-input" 
-                       min="300" max="3000" step="50" value="700">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="number" id="cw-freq-input" class="cw-input"
+                           min="300" max="3000" step="50" value="700" style="flex: 1;">
+                    <label style="display: flex; align-items: center; gap: 6px; color: #ecf0f1; font-size: 0.9em; white-space: nowrap;">
+                        <input type="checkbox" id="cw-auto-tune" style="cursor: pointer;"
+                               onchange="window.cwDecoderInstance && window.cwDecoderInstance.toggleAutoTune(this.checked);">
+                        Auto-tune
+                    </label>
+                </div>
             </div>
             <div class="cw-setting-item">
                 <label for="cw-threshold-input" class="cw-setting-label">

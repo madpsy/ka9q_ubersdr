@@ -5552,12 +5552,39 @@ function openExtensionModal() {
     modalContent.innerHTML = panelContent.innerHTML;
     modalTitle.textContent = panelTitle.textContent;
     
+    // Enable modal mode for the active decoder
+    if (window.decoderManager) {
+        const activeDecoders = window.decoderManager.getActiveDecoders();
+        if (activeDecoders.length > 0) {
+            const decoder = window.decoderManager.getDecoder(activeDecoders[0]);
+            if (decoder) {
+                decoder.modalMode = true;
+                decoder.modalBodyId = 'extension-modal-content';
+                // Force an update to sync modal with current state
+                decoder.updateDisplay();
+            }
+        }
+    }
+    
     // Show the modal
     modal.classList.add('show');
 }
 
 function closeExtensionModal() {
     const modal = document.getElementById('extension-modal');
+
+    // Disable modal mode for the active decoder
+    if (window.decoderManager) {
+        const activeDecoders = window.decoderManager.getActiveDecoders();
+        if (activeDecoders.length > 0) {
+            const decoder = window.decoderManager.getDecoder(activeDecoders[0]);
+            if (decoder) {
+                decoder.modalMode = false;
+                decoder.modalBodyId = null;
+            }
+        }
+    }
+
     modal.classList.remove('show');
 }
 

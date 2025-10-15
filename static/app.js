@@ -4,6 +4,9 @@ import { WebSocketManager } from './websocket-manager.js';
 // Import Bookmark Manager
 import { loadBookmarks, drawBookmarksOnSpectrum, handleBookmarkClick } from './bookmark-manager.js';
 
+// Import Bandwidth Control
+import { adjustBandwidth, updateBandwidthTooltips, initializeBandwidthControl } from './bandwidth-control.js';
+
 // Notification system
 function showNotification(message, type = 'error', duration = 5000) {
     const toast = document.getElementById('notification-toast');
@@ -462,6 +465,16 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             setBand('10m');
         }
+        // Z key: Decrease bandwidth
+        else if (e.key === 'z' || e.key === 'Z') {
+            e.preventDefault();
+            adjustBandwidth(-1);
+        }
+        // X key: Increase bandwidth
+        else if (e.key === 'x' || e.key === 'X') {
+            e.preventDefault();
+            adjustBandwidth(1);
+        }
     });
 
     // Setup audio start overlay
@@ -801,6 +814,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Initialize bandwidth control (tooltips and keyboard shortcuts)
+    initializeBandwidthControl();
+    
+    // Expose bandwidth control functions globally
+    window.adjustBandwidth = adjustBandwidth;
+    window.updateBandwidthTooltips = updateBandwidthTooltips;
+    
     log('Ready to connect');
 
     // Handle window resize for audio visualizer canvases
@@ -1925,8 +1945,9 @@ function tune() {
 
     const frequency = parseInt(document.getElementById('frequency').value);
     const mode = currentMode;
-    const bandwidthLow = currentBandwidthLow;
-    const bandwidthHigh = currentBandwidthHigh;
+    // Read from window globals to get the latest values
+    const bandwidthLow = window.currentBandwidthLow;
+    const bandwidthHigh = window.currentBandwidthHigh;
 
     const msg = {
         type: 'tune',
@@ -2418,6 +2439,9 @@ function setMode(mode, preserveBandwidth = false) {
             set1kHzBtn.style.display = 'none';
         }
     }
+
+    // Update bandwidth tooltips when mode changes
+    updateBandwidthTooltips();
 
     // Auto-connect if not connected
     if (!wsManager.isConnected()) {

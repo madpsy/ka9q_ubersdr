@@ -1,0 +1,288 @@
+.rtty-decoder-container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    padding: 15px;
+    background: #1a1a1a;
+    border-radius: 8px;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+}
+
+.rtty-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #333;
+    padding-bottom: 10px;
+}
+
+.rtty-header h3 {
+    margin: 0;
+    font-size: 1.2em;
+    color: #4CAF50;
+}
+
+.rtty-status {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.rtty-decoder-container .status-badge {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: bold;
+    background: #555;
+    color: #fff;
+}
+
+.rtty-decoder-container .status-badge.active {
+    background: #4CAF50;
+    animation: rtty-pulse 2s infinite;
+}
+
+.rtty-decoder-container .status-badge.synced {
+    background: #2196F3;
+}
+
+.rtty-decoder-container .status-badge.error {
+    background: #f44336;
+}
+
+@keyframes rtty-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.rtty-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    padding: 10px;
+    background: #252525;
+    border-radius: 6px;
+}
+
+.rtty-decoder-container .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.rtty-decoder-container .control-group label {
+    font-size: 0.85em;
+    color: #aaa;
+    font-weight: bold;
+}
+
+.rtty-decoder-container .control-group select,
+.rtty-decoder-container .control-group input {
+    padding: 6px;
+    background: #333;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-family: inherit;
+}
+
+.rtty-decoder-container .control-group select:focus,
+.rtty-decoder-container .control-group input:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+.rtty-decoder-container .control-button {
+    padding: 8px 16px;
+    background: #4CAF50;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.3s;
+    margin-top: auto;
+}
+
+.rtty-decoder-container .control-button:hover {
+    background: #45a049;
+}
+
+.rtty-decoder-container .control-button:active {
+    background: #3d8b40;
+}
+
+.rtty-signal-info {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    background: #252525;
+    border-radius: 6px;
+}
+
+.rtty-decoder-container .signal-meter-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.rtty-decoder-container .signal-meter-container label {
+    font-size: 0.9em;
+    color: #aaa;
+    min-width: 120px;
+}
+
+.rtty-decoder-container .signal-meter-bar {
+    flex: 1;
+    height: 20px;
+    background: #333;
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+}
+
+.rtty-decoder-container .signal-meter-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4CAF50, #8BC34A, #FFC107, #FF5722);
+    width: 0%;
+    transition: width 0.2s ease;
+    border-radius: 10px;
+}
+
+#rtty-signal-value {
+    min-width: 60px;
+    text-align: right;
+    font-weight: bold;
+    color: #4CAF50;
+}
+
+.rtty-decoder-container .frequency-display {
+    display: flex;
+    gap: 20px;
+    font-size: 0.9em;
+    color: #aaa;
+}
+
+.rtty-decoder-container .frequency-display span {
+    display: flex;
+    gap: 5px;
+}
+
+.rtty-decoder-container .frequency-display span span {
+    color: #4CAF50;
+    font-weight: bold;
+}
+
+.rtty-output-container {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.rtty-output-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.9em;
+    color: #aaa;
+}
+
+.rtty-decoder-container .char-count {
+    color: #666;
+    font-size: 0.85em;
+}
+
+.rtty-output {
+    min-height: 200px;
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 15px;
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 1em;
+    line-height: 1.5;
+    color: #0f0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.rtty-output::-webkit-scrollbar {
+    width: 8px;
+}
+
+.rtty-output::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.rtty-output::-webkit-scrollbar-thumb {
+    background: #4CAF50;
+    border-radius: 4px;
+}
+
+.rtty-output::-webkit-scrollbar-thumb:hover {
+    background: #45a049;
+}
+
+.rtty-debug {
+    margin-top: 10px;
+}
+
+.rtty-debug details {
+    background: #252525;
+    border-radius: 6px;
+    padding: 10px;
+}
+
+.rtty-debug summary {
+    cursor: pointer;
+    font-weight: bold;
+    color: #aaa;
+    user-select: none;
+}
+
+.rtty-debug summary:hover {
+    color: #4CAF50;
+}
+
+.rtty-decoder-container .debug-output {
+    margin-top: 10px;
+    padding: 10px;
+    background: #1a1a1a;
+    border-radius: 4px;
+    font-size: 0.85em;
+    max-height: 200px;
+    overflow-y: auto;
+    color: #888;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    font-family: 'Courier New', monospace;
+}
+
+.rtty-decoder-container .debug-output::-webkit-scrollbar {
+    width: 6px;
+}
+
+.rtty-decoder-container .debug-output::-webkit-scrollbar-track {
+    background: #111;
+}
+
+.rtty-decoder-container .debug-output::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 3px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .rtty-controls {
+        grid-template-columns: 1fr;
+    }
+    
+    .frequency-display {
+        flex-direction: column;
+        gap: 5px;
+    }
+}

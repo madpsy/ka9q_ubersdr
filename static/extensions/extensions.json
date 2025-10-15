@@ -1,6 +1,7 @@
 {
   "enabled": [
     "stats",
-    "cw-decoder"
+    "cw-decoder",
+    "rtty-decoder"
   ]
 }

@@ -40,7 +40,26 @@
                     console.log(`  ✓ Loaded template: ${manifest.files.template}`);
                 }
                 
-                // Load main JavaScript
+                // Load additional scripts if specified (must load before main)
+                if (manifest.files?.scripts) {
+                    for (const scriptFile of manifest.files.scripts) {
+                        await new Promise((resolve, reject) => {
+                            const script = document.createElement('script');
+                            script.src = `/extensions/${extName}/${scriptFile}`;
+                            script.onload = () => {
+                                console.log(`  ✓ Loaded script: ${scriptFile}`);
+                                resolve();
+                            };
+                            script.onerror = (err) => {
+                                console.error(`  ✗ Failed to load script: ${scriptFile}`, err);
+                                reject(err);
+                            };
+                            document.body.appendChild(script);
+                        });
+                    }
+                }
+                
+                // Load main JavaScript (after additional scripts)
                 await new Promise((resolve, reject) => {
                     const script = document.createElement('script');
                     script.src = `/extensions/${extName}/${manifest.files.main}`;

@@ -5540,28 +5540,63 @@ window.applyOffset = applyOffset;
 // Channel controls
 window.tuneToChannel = tuneToChannel;
 
+// Extension modal functions (defined before global exposure)
+function openExtensionModal() {
+    const modal = document.getElementById('extension-modal');
+    const modalContent = document.getElementById('extension-modal-content');
+    const panelContent = document.getElementById('extension-panel-content');
+    const modalTitle = document.getElementById('extension-modal-title');
+    const panelTitle = document.getElementById('extension-panel-title');
+    
+    // Clone the panel content into the modal
+    modalContent.innerHTML = panelContent.innerHTML;
+    modalTitle.textContent = panelTitle.textContent;
+    
+    // Show the modal
+    modal.classList.add('show');
+}
+
+function closeExtensionModal() {
+    const modal = document.getElementById('extension-modal');
+    modal.classList.remove('show');
+}
+
+let extensionModalZoom = 1.0;
+function zoomExtensionModal(delta) {
+    extensionModalZoom = Math.max(0.5, Math.min(2.0, extensionModalZoom + delta));
+    const wrapper = document.getElementById('extension-modal-content-wrapper');
+    const zoomDisplay = document.getElementById('extension-modal-zoom');
+    
+    wrapper.style.transform = `scale(${extensionModalZoom})`;
+    zoomDisplay.textContent = `${Math.round(extensionModalZoom * 100)}%`;
+}
+
 // Extension controls
 window.toggleExtension = toggleExtension;
+window.closeExtensionPanel = closeExtensionPanel;
+window.openExtensionModal = openExtensionModal;
+window.closeExtensionModal = closeExtensionModal;
+window.zoomExtensionModal = zoomExtensionModal;
 
 // Toggle extension from dropdown
 function toggleExtension(extensionName) {
     const dropdown = document.getElementById('extensions-dropdown');
-    
+    const panel = document.getElementById('extension-panel');
+    const panelTitle = document.getElementById('extension-panel-title');
+    const panelContent = document.getElementById('extension-panel-content');
+
     if (!extensionName) {
-        // Close all open extension panels when empty value selected
-        const allPanels = document.querySelectorAll('.decoder-extension-panel');
-        allPanels.forEach(panel => {
-            if (panel.style.display !== 'none') {
-                const panelId = panel.id;
-                const name = panelId.replace('-decoder-panel', '');
-                const decoder = window.decoderManager.getDecoder(name);
-                if (decoder) {
-                    panel.style.display = 'none';
+        // Close extension panel when empty value selected
+        if (panel && panel.style.display !== 'none') {
+            panel.style.display = 'none';
+            // Disable all active decoders
+            if (window.decoderManager) {
+                window.decoderManager.getActiveDecoders().forEach(name => {
                     window.decoderManager.disable(name);
                     log(`${name} extension disabled`);
-                }
+                });
             }
-        });
+        }
         // Update URL to remove extension parameter
         updateURL();
         return;
@@ -5574,58 +5609,87 @@ function toggleExtension(extensionName) {
         return;
     }
     
-    const panel = document.getElementById(`${extensionName}-decoder-panel`);
-    const checkbox = document.getElementById(`${extensionName}-decoder-enable`);
-    
-    if (!panel) {
-        log(`Extension panel not found for: ${extensionName}`, 'error');
+    if (!panel || !panelTitle || !panelContent) {
+        log(`Extension panel elements not found`, 'error');
         dropdown.value = '';
         return;
     }
     
-    // Toggle panel visibility
-    if (panel.style.display === 'none' || !panel.style.display) {
-        // Show panel
-        panel.style.display = 'block';
+    // Check if this extension is already showing
+    const isCurrentlyShowing = panel.style.display !== 'none' &&
+                               panelTitle.textContent === decoder.displayName;
+    
+    if (isCurrentlyShowing) {
+        // Hide panel and disable decoder
+        panel.style.display = 'none';
+        window.decoderManager.disable(extensionName);
+        log(`${extensionName} extension disabled`);
         
-        // Initialize and enable decoder if not already done
-        if (!decoder.enabled) {
-            if (!audioContext) {
-                log('Please start audio first (click "Click to Start")', 'error');
-                panel.style.display = 'none';
-                dropdown.value = '';
-                return;
+        // Update URL to remove extension parameter
+        updateURL();
+    } else {
+        // Disable any currently active decoder
+        const activeDecoders = window.decoderManager.getActiveDecoders();
+        activeDecoders.forEach(name => {
+            if (name !== extensionName) {
+                window.decoderManager.disable(name);
             }
-            
+        });
+        
+        // Initialize and enable the new decoder
+        if (!audioContext) {
+            log('Please start audio first (click "Click to Start")', 'error');
+            dropdown.value = '';
+            return;
+        }
+        
+        // Initialize decoder if needed
+        if (!decoder.enabled) {
             const centerFreq = 800; // Default center frequency
             window.decoderManager.initialize(extensionName, audioContext, analyser, centerFreq);
-            window.decoderManager.enable(extensionName);
-            
-            if (checkbox) {
-                checkbox.checked = true;
-            }
         }
         
-        log(`${extensionName} extension enabled`);
-    } else {
-        // Hide panel
-        panel.style.display = 'none';
-        
-        // Disable decoder
-        window.decoderManager.disable(extensionName);
-        
-        if (checkbox) {
-            checkbox.checked = false;
-        }
-        
-        log(`${extensionName} extension disabled`);
+        // Load extension template into panel
+        fetch(`extensions/${extensionName}/template.html`)
+            .then(response => response.text())
+            .then(html => {
+                panelContent.innerHTML = html;
+                panelTitle.textContent = decoder.displayName || extensionName;
+                panel.style.display = 'block';
+
+                // Enable decoder
+                window.decoderManager.enable(extensionName);
+                
+                log(`${extensionName} extension enabled`);
+                
+                // Update URL with new extension state (after enabling)
+                updateURL();
+            })
+            .catch(err => {
+                log(`Failed to load extension template: ${err.message}`, 'error');
+                dropdown.value = '';
+            });
     }
-    
-    // Update URL with new extension state
-    updateURL();
 
     // Reset dropdown
     dropdown.value = '';
+}
+
+// Close extension panel
+function closeExtensionPanel() {
+    const panel = document.getElementById('extension-panel');
+    if (panel) {
+        panel.style.display = 'none';
+        // Disable all active decoders
+        if (window.decoderManager) {
+            window.decoderManager.getActiveDecoders().forEach(name => {
+                window.decoderManager.disable(name);
+                log(`${name} extension disabled`);
+            });
+        }
+        // Update URL to remove extension parameter
+        updateURL();
+    }
 }
 
 // Populate band selector dropdown with grouped bands
@@ -5828,130 +5892,6 @@ function updateBandSelector() {
 window.populateBandSelector = populateBandSelector;
 window.selectBandFromDropdown = selectBandFromDropdown;
 
-// Extension modal zoom state
-let extensionModalZoom = 1.0; // Default 100%
-
-// Extension modal functions
-function openExtensionModal(extensionName) {
-    const decoder = window.decoderManager.getDecoder(extensionName);
-    if (!decoder) {
-        log(`Extension not found: ${extensionName}`, 'error');
-        return;
-    }
-
-    // Create modal if it doesn't exist
-    let modal = document.getElementById('decoder-extension-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'decoder-extension-modal';
-        modal.className = 'decoder-extension-modal';
-        modal.innerHTML = `
-            <div class="decoder-extension-modal-content" id="decoder-extension-modal-content">
-                <div class="decoder-extension-modal-header">
-                    <h2 id="decoder-extension-modal-title"></h2>
-                    <div class="decoder-extension-modal-controls">
-                        <button class="decoder-extension-modal-zoom" onclick="zoomExtensionModal(-0.1)" title="Zoom Out (-)">−</button>
-                        <button class="decoder-extension-modal-zoom" onclick="resetZoomExtensionModal()" title="Reset Zoom (100%)" id="decoder-extension-modal-zoom-display">100%</button>
-                        <button class="decoder-extension-modal-zoom" onclick="zoomExtensionModal(0.1)" title="Zoom In (+)">+</button>
-                        <button class="decoder-extension-modal-close" onclick="closeExtensionModal()" title="Close Modal">×</button>
-                    </div>
-                </div>
-                <div class="decoder-extension-modal-body" id="decoder-extension-modal-body"></div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-    }
-
-    // Set title
-    const title = document.getElementById('decoder-extension-modal-title');
-    if (title) {
-        title.textContent = decoder.displayName || extensionName;
-    }
-
-    // Clone extension content into modal WITHOUT changing IDs
-    // The extension will handle updating both panel and modal
-    const panel = document.getElementById(`${extensionName}-decoder-panel`);
-    if (panel) {
-        const content = panel.querySelector('.decoder-extension-content');
-        const modalBody = document.getElementById('decoder-extension-modal-body');
-        if (content && modalBody) {
-            // Clone the content - keep original IDs
-            // We'll use a wrapper div to isolate the modal content
-            modalBody.innerHTML = `<div class="modal-content-wrapper">${content.innerHTML}</div>`;
-        }
-    }
-
-    // Tell the decoder it's now in modal mode
-    // The decoder should now update elements in BOTH locations
-    decoder.modalMode = true;
-    decoder.modalBodyId = 'decoder-extension-modal-body';
-    decoder.modalContentSelector = '.modal-content-wrapper';
-
-    // Reset zoom to 100%
-    extensionModalZoom = 1.0;
-    const modalContent = document.getElementById('decoder-extension-modal-content');
-    if (modalContent) {
-        modalContent.style.transform = `scale(${extensionModalZoom})`;
-    }
-    updateModalZoomDisplay();
-
-    // Show modal
-    modal.classList.add('show');
-
-    log(`Opened ${extensionName} extension in modal`);
-}
-
-window.zoomExtensionModal = function(delta) {
-    // Adjust zoom level (clamp between 0.5x and 2.0x)
-    extensionModalZoom = Math.max(0.5, Math.min(2.0, extensionModalZoom + delta));
-
-    // Apply zoom transform
-    const modalContent = document.getElementById('decoder-extension-modal-content');
-    if (modalContent) {
-        modalContent.style.transform = `scale(${extensionModalZoom})`;
-        modalContent.style.transformOrigin = 'top center';
-    }
-
-    updateModalZoomDisplay();
-    log(`Extension modal zoom: ${Math.round(extensionModalZoom * 100)}%`);
-};
-
-window.resetZoomExtensionModal = function() {
-    extensionModalZoom = 1.0;
-
-    const modalContent = document.getElementById('decoder-extension-modal-content');
-    if (modalContent) {
-        modalContent.style.transform = `scale(${extensionModalZoom})`;
-    }
-
-    updateModalZoomDisplay();
-    log('Extension modal zoom reset to 100%');
-};
-
-function updateModalZoomDisplay() {
-    const display = document.getElementById('decoder-extension-modal-zoom-display');
-    if (display) {
-        display.textContent = `${Math.round(extensionModalZoom * 100)}%`;
-    }
-}
-
-function closeExtensionModal() {
-    const modal = document.getElementById('decoder-extension-modal');
-    if (modal) {
-        modal.classList.remove('show');
-
-        // Tell all decoders they're no longer in modal mode
-        if (window.decoderManager) {
-            window.decoderManager.decoders.forEach(decoder => {
-                decoder.modalMode = false;
-                decoder.modalBodyId = null;
-            });
-        }
-    }
-}
-
-// Expose modal functions globally
-window.openExtensionModal = openExtensionModal;
-window.closeExtensionModal = closeExtensionModal;
+// Expose updateBandSelector globally
 window.updateBandSelector = updateBandSelector;
 

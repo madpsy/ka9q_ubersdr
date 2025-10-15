@@ -1,0 +1,369 @@
+/* CW Decoder Extension Styles */
+
+.cw-decoder-container {
+    padding: 15px;
+    color: #ecf0f1;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+/* Header */
+.cw-header {
+    margin-bottom: 20px;
+}
+
+.cw-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.3em;
+    font-weight: 600;
+    color: #3498db;
+}
+
+.cw-icon {
+    font-size: 1.2em;
+}
+
+/* Display Section */
+.cw-display-section {
+    margin-bottom: 20px;
+}
+
+.cw-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 0.95em;
+    color: #95a5a6;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid rgba(52, 152, 219, 0.3);
+}
+
+.cw-button-group {
+    display: flex;
+    gap: 8px;
+}
+
+.cw-btn {
+    padding: 6px 12px;
+    background: rgba(52, 152, 219, 0.2);
+    border: 1px solid rgba(52, 152, 219, 0.4);
+    border-radius: 4px;
+    color: #3498db;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.cw-btn:hover {
+    background: rgba(52, 152, 219, 0.3);
+    border-color: rgba(52, 152, 219, 0.6);
+}
+
+.cw-btn-small {
+    padding: 4px 10px;
+    font-size: 0.8em;
+}
+
+/* Decoded Text Display */
+.decoder-display {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 15px;
+    min-height: 120px;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 1.1em;
+    line-height: 1.6;
+    color: #2ecc71;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+}
+
+.decoder-display:empty::before {
+    content: 'Waiting for CW signal...';
+    color: #95a5a6;
+    font-style: italic;
+}
+
+/* Statistics Grid */
+.cw-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.cw-card {
+    background: linear-gradient(135deg, rgba(52, 152, 219, 0.1) 0%, rgba(41, 128, 185, 0.05) 100%);
+    border: 1px solid rgba(52, 152, 219, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.cw-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(52, 152, 219, 0.2);
+}
+
+.cw-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 0.85em;
+    color: #95a5a6;
+}
+
+.cw-card-icon {
+    font-size: 1.2em;
+}
+
+.cw-card-title {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.cw-card-content {
+    text-align: center;
+}
+
+.cw-stat-value {
+    font-size: 1.8em;
+    font-weight: 700;
+    color: #3498db;
+    margin-bottom: 4px;
+}
+
+.cw-stat-label {
+    font-size: 0.8em;
+    color: #95a5a6;
+}
+
+/* Signal Information */
+.cw-signal-section {
+    margin-bottom: 20px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 15px;
+}
+
+.cw-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 15px;
+}
+
+.cw-info-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.cw-info-label {
+    font-size: 0.85em;
+    color: #95a5a6;
+}
+
+.cw-info-value {
+    font-weight: 600;
+    color: #ecf0f1;
+}
+
+.cw-symbol {
+    font-family: 'Courier New', monospace;
+    font-size: 1.1em;
+    color: #f39c12;
+}
+
+/* Signal Strength Meter */
+.signal-strength-container {
+    margin-top: 15px;
+}
+
+.signal-strength-label {
+    font-size: 0.85em;
+    color: #95a5a6;
+    margin-bottom: 6px;
+}
+
+.signal-strength-bar {
+    height: 24px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+}
+
+.signal-strength-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #e74c3c 0%, #f39c12 50%, #2ecc71 100%);
+    transition: width 0.3s ease;
+    border-radius: 12px;
+}
+
+/* Settings Section */
+.cw-settings-section {
+    margin-bottom: 20px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 15px;
+}
+
+.cw-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 15px;
+}
+
+.cw-setting-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cw-setting-label {
+    font-size: 0.9em;
+    font-weight: 600;
+    color: #ecf0f1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cw-setting-hint {
+    font-size: 0.85em;
+    font-weight: 400;
+    color: #95a5a6;
+    font-style: italic;
+}
+
+.cw-input {
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #ecf0f1;
+    font-size: 0.95em;
+    transition: border-color 0.2s;
+}
+
+.cw-input:focus {
+    outline: none;
+    border-color: #3498db;
+}
+
+.cw-input:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Help Section */
+.cw-help-section {
+    background: rgba(52, 152, 219, 0.1);
+    border: 1px solid rgba(52, 152, 219, 0.3);
+    border-radius: 8px;
+    padding: 15px;
+}
+
+.cw-help-content {
+    font-size: 0.9em;
+    line-height: 1.6;
+    color: #bdc3c7;
+}
+
+.cw-help-content p {
+    margin: 8px 0;
+}
+
+.cw-help-content strong {
+    color: #3498db;
+}
+
+/* Status Badge (positioned within header, not absolute) */
+.decoder-status-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: auto;
+}
+
+.decoder-listening {
+    background: rgba(52, 152, 219, 0.2);
+    color: #3498db;
+    border: 1px solid rgba(52, 152, 219, 0.4);
+}
+
+.decoder-active {
+    background: rgba(46, 204, 113, 0.2);
+    color: #2ecc71;
+    border: 1px solid rgba(46, 204, 113, 0.4);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.decoder-disabled {
+    background: rgba(149, 165, 166, 0.2);
+    color: #95a5a6;
+    border: 1px solid rgba(149, 165, 166, 0.4);
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* Scrollbar Styling */
+.decoder-display::-webkit-scrollbar {
+    width: 8px;
+}
+
+.decoder-display::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+
+.decoder-display::-webkit-scrollbar-thumb {
+    background: rgba(52, 152, 219, 0.5);
+    border-radius: 4px;
+}
+
+.decoder-display::-webkit-scrollbar-thumb:hover {
+    background: rgba(52, 152, 219, 0.7);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .cw-stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .cw-info-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .cw-settings-grid {
+        grid-template-columns: 1fr;
+    }
+}

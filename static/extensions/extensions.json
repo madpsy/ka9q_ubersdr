@@ -1,5 +1,6 @@
 {
   "enabled": [
-    "stats"
+    "stats",
+    "cw-decoder"
   ]
 }

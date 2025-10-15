@@ -1,0 +1,129 @@
+<div class="cw-decoder-container">
+    <!-- Header with Status -->
+    <div class="cw-header">
+        <div class="cw-title">
+            <span class="cw-icon">📻</span>
+            <span>CW Morse Code Decoder</span>
+        </div>
+    </div>
+
+    <!-- Decoded Text Display -->
+    <div class="cw-display-section">
+        <div class="cw-section-header">
+            <span>Decoded Text</span>
+            <div class="cw-button-group">
+                <button id="cw-copy-btn" class="cw-btn cw-btn-small">📋 Copy</button>
+                <button id="cw-clear-btn" class="cw-btn cw-btn-small">🗑️ Clear</button>
+            </div>
+        </div>
+        <div class="decoder-display" id="decoder-display"></div>
+    </div>
+
+    <!-- Statistics Grid -->
+    <div class="cw-stats-grid">
+        <!-- Speed Card -->
+        <div class="cw-card">
+            <div class="cw-card-header">
+                <span class="cw-card-icon">⚡</span>
+                <span class="cw-card-title">Speed</span>
+            </div>
+            <div class="cw-card-content">
+                <div class="cw-stat-value" id="cw-wpm">Detecting...</div>
+                <div class="cw-stat-label">Words Per Minute</div>
+            </div>
+        </div>
+
+        <!-- Characters Card -->
+        <div class="cw-card">
+            <div class="cw-card-header">
+                <span class="cw-card-icon">🔤</span>
+                <span class="cw-card-title">Characters</span>
+            </div>
+            <div class="cw-card-content">
+                <div class="cw-stat-value" id="cw-chars">0</div>
+                <div class="cw-stat-label">Decoded</div>
+            </div>
+        </div>
+
+        <!-- Words Card -->
+        <div class="cw-card">
+            <div class="cw-card-header">
+                <span class="cw-card-icon">📝</span>
+                <span class="cw-card-title">Words</span>
+            </div>
+            <div class="cw-card-content">
+                <div class="cw-stat-value" id="cw-words">0</div>
+                <div class="cw-stat-label">Decoded</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signal Information -->
+    <div class="cw-signal-section">
+        <div class="cw-section-header">Signal Information</div>
+        <div class="cw-info-grid">
+            <div class="cw-info-item">
+                <span class="cw-info-label">Signal Strength</span>
+                <span class="cw-info-value" id="cw-signal-strength">-60.0 dB</span>
+            </div>
+            <div class="cw-info-item">
+                <span class="cw-info-label">Detected Frequency</span>
+                <span class="cw-info-value" id="cw-detected-freq">0 Hz</span>
+            </div>
+            <div class="cw-info-item">
+                <span class="cw-info-label">Current Symbol</span>
+                <span class="cw-info-value cw-symbol" id="cw-current-symbol">(none)</span>
+            </div>
+            <div class="cw-info-item">
+                <span class="cw-info-label">Dot Length</span>
+                <span class="cw-info-value" id="cw-dot-length">100 ms</span>
+            </div>
+        </div>
+        
+        <!-- Signal Strength Meter -->
+        <div class="signal-strength-container">
+            <div class="signal-strength-label">Signal Strength</div>
+            <div class="signal-strength-bar">
+                <div class="signal-strength-fill" id="signal-strength-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Decoder Settings -->
+    <div class="cw-settings-section">
+        <div class="cw-section-header">Decoder Settings</div>
+        <div class="cw-settings-grid">
+            <div class="cw-setting-item">
+                <label for="cw-freq-input" class="cw-setting-label">
+                    Target Frequency (Hz)
+                    <span class="cw-setting-hint">Expected CW tone frequency</span>
+                </label>
+                <input type="number" id="cw-freq-input" class="cw-input" 
+                       min="300" max="3000" step="50" value="700">
+            </div>
+            <div class="cw-setting-item">
+                <label for="cw-threshold-input" class="cw-setting-label">
+                    Signal Threshold (dB)
+                    <span class="cw-setting-hint">Minimum signal level to detect</span>
+                </label>
+                <input type="number" id="cw-threshold-input" class="cw-input" 
+                       min="-60" max="-20" step="5" value="-40">
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Badge (positioned by base class) -->
+    <div class="decoder-status-badge" id="decoder-status-badge">LISTENING</div>
+
+    <!-- Help Section -->
+    <div class="cw-help-section">
+        <div class="cw-section-header">How to Use</div>
+        <div class="cw-help-content">
+            <p><strong>1. Tune to a CW signal:</strong> Use CWU or CWL mode with narrow bandwidth (±250 Hz recommended)</p>
+            <p><strong>2. Adjust settings:</strong> Set target frequency to match the CW tone (typically 600-800 Hz)</p>
+            <p><strong>3. Decoder adapts:</strong> Speed (WPM) is automatically detected from the signal timing</p>
+            <p><strong>4. Signal threshold:</strong> Adjust if decoder is too sensitive or not detecting signals</p>
+            <p><strong>Note:</strong> Works best with clean, steady CW signals. Noise and QSB may affect accuracy.</p>
+        </div>
+    </div>
+</div>

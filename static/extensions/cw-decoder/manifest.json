@@ -1,0 +1,20 @@
+{
+  "name": "cw-decoder",
+  "displayName": "CW Decoder",
+  "version": "1.0.0",
+  "description": "Decodes Morse code (CW) signals using audio tone detection and timing analysis",
+  "author": "UberSDR",
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "config": {
+    "autoTune": false,
+    "requiresMode": "cwu",
+    "preferredBandwidth": {
+      "low": -250,
+      "high": 250
+    }
+  }
+}

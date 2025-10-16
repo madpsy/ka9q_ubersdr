@@ -137,6 +137,12 @@ echo ""
 echo "Waiting for services to be healthy..."
 sleep 5
 
+# Get the IP address of the interface with the default route
+DEFAULT_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
+if [ -z "$DEFAULT_IP" ]; then
+    DEFAULT_IP="localhost"
+fi
+
 echo ""
 echo "=========================================="
 echo "Installation Complete!"
@@ -149,7 +155,10 @@ if [ "$GENERATED_PASSWORD" = true ]; then
     echo ""
 fi
 echo "Web interface available at:"
-echo "  http://localhost:8080"
+echo "  http://$DEFAULT_IP:8080"
+if [ "$DEFAULT_IP" != "localhost" ]; then
+    echo "  http://localhost:8080 (local access)"
+fi
 echo ""
 echo "Useful commands:"
 echo "  View logs:        cd ~/ubersdr/ka9q_ubersdr/docker && sudo docker compose logs -f"

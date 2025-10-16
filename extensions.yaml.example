@@ -1,0 +1,16 @@
+# Extension configuration file for ka9q UberSDR
+# List the extensions that should be enabled in the frontend
+# Each extension must have a corresponding directory in static/extensions/
+
+extensions:
+  # Stats Monitor - displays signal statistics and metrics
+  - stats
+  
+  # CW Decoder - decodes Morse code (CW) signals
+  - cw-decoder
+  
+  # RTTY Decoder - decodes radioteletype signals
+  - rtty-decoder
+  
+  # FT8 Decoder - decodes FT8 digital mode signals (currently disabled by default)
+  # - ft8-decoder

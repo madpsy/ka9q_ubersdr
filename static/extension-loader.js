@@ -3,16 +3,17 @@
 
 (async function() {
     try {
-        // Load extension configuration
-        const config = await fetch('/extensions/extensions.json').then(r => r.json());
+        // Load extension configuration from API endpoint
+        const extensions = await fetch('/api/extensions').then(r => r.json());
         
-        console.log(`🔌 Loading ${config.enabled.length} extension(s)...`);
+        console.log(`🔌 Loading ${extensions.length} extension(s)...`);
         
         // Array to store extension info for dropdown
         const extensionsList = [];
         
         // Load each enabled extension
-        for (const extName of config.enabled) {
+        for (const ext of extensions) {
+            const extName = ext.slug;
             try {
                 // Load manifest
                 const manifest = await fetch(`/extensions/${extName}/manifest.json`).then(r => r.json());
@@ -93,7 +94,7 @@
         console.log('🎉 Extension loading complete');
     } catch (err) {
         console.error('❌ Failed to load extensions configuration:', err);
-        console.error('Make sure /extensions/extensions.json exists and is valid JSON');
+        console.error('Make sure /api/extensions endpoint is accessible');
     }
 })();
 

@@ -1,0 +1,106 @@
+# Multi-stage build for ka9q-radio on Alpine Linux
+FROM alpine:3.19 AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    git \
+    make \
+    gcc \
+    g++ \
+    musl-dev \
+    linux-headers \
+    bsd-compat-headers \
+    opus-dev \
+    avahi-dev \
+    ncurses-dev \
+    portaudio-dev \
+    libsamplerate-dev \
+    libogg-dev \
+    libvorbis-dev \
+    fftw-dev \
+    util-linux-dev \
+    pkgconfig \
+    libusb-dev \
+    airspy-dev \
+    rtl-sdr-dev
+
+# Set working directory
+WORKDIR /build
+
+# Copy ka9q-radio source
+COPY ka9q-radio /build/ka9q-radio
+
+# Build ka9q-radio
+WORKDIR /build/ka9q-radio
+RUN make
+
+# Runtime stage
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    opus \
+    avahi \
+    avahi-tools \
+    ncurses \
+    portaudio \
+    libsamplerate \
+    libogg \
+    libvorbis \
+    fftw \
+    util-linux \
+    ca-certificates \
+    tzdata \
+    libusb \
+    airspy \
+    rtl-sdr \
+    bash
+
+# Create necessary directories
+RUN mkdir -p /var/lib/ka9q-radio \
+    && mkdir -p /etc/ka9q-radio \
+    && mkdir -p /usr/local/share/ka9q-radio
+
+# Copy built binaries from builder
+COPY --from=builder /build/ka9q-radio/src/radiod /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/monitor /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/control /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/tune /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/opusd /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/opussend /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/pcmspawn /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/rdsd /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/packetd /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/metadump /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/show-sig /usr/local/bin/
+COPY --from=builder /build/ka9q-radio/src/set_xcvr /usr/local/bin/
+
+# Make binaries executable
+RUN chmod +x /usr/local/bin/*
+
+# Copy share files
+COPY --from=builder /build/ka9q-radio/share /usr/local/share/ka9q-radio/
+
+# Copy configuration examples
+COPY --from=builder /build/ka9q-radio/config /etc/ka9q-radio/examples/
+
+# Generate FFTW wisdom (optional, can be time-consuming)
+# Uncomment if needed for better performance:
+# RUN fftwf-wisdom -v -T 1 -o /var/lib/ka9q-radio/wisdom \
+#     rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160
+
+# Set working directory
+WORKDIR /etc/ka9q-radio
+
+# Expose common ports
+# 5004 - RTP audio (UDP)
+# 5006 - RTP control (UDP)
+EXPOSE 5004/udp 5006/udp
+
+# Health check - verify radiod process is running
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD pgrep radiod || exit 1
+
+# Default command - run radiod with config file
+# Config file should be mounted as a volume
+CMD ["radiod", "/etc/ka9q-radio/radiod-rx888.conf"]

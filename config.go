@@ -10,14 +10,15 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Admin     AdminConfig    `yaml:"admin"`
-	Radiod    RadiodConfig   `yaml:"radiod"`
-	Server    ServerConfig   `yaml:"server"`
-	Audio     AudioConfig    `yaml:"audio"`
-	Spectrum  SpectrumConfig `yaml:"spectrum"`
-	Logging   LoggingConfig  `yaml:"logging"`
-	Bookmarks []Bookmark     `yaml:"bookmarks"`
-	Bands     []Band         `yaml:"bands"`
+	Admin      AdminConfig    `yaml:"admin"`
+	Radiod     RadiodConfig   `yaml:"radiod"`
+	Server     ServerConfig   `yaml:"server"`
+	Audio      AudioConfig    `yaml:"audio"`
+	Spectrum   SpectrumConfig `yaml:"spectrum"`
+	Logging    LoggingConfig  `yaml:"logging"`
+	Bookmarks  []Bookmark     `yaml:"bookmarks"`
+	Bands      []Band         `yaml:"bands"`
+	Extensions []string       `yaml:"extensions"`
 }
 
 // AdminConfig contains admin authentication settings

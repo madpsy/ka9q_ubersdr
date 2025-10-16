@@ -1,7 +1,0 @@
-{
-  "enabled": [
-    "stats",
-    "cw-decoder",
-    "rtty-decoder"
-  ]
-}

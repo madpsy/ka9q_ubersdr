@@ -149,6 +149,15 @@ func main() {
 		log.Printf("No bands.yaml found or error loading: %v", err)
 	}
 
+	// Load extensions from extensions.yaml if it exists
+	extensionsConfig, err := LoadConfig("extensions.yaml")
+	if err == nil {
+		config.Extensions = extensionsConfig.Extensions
+		log.Printf("Loaded %d enabled extensions from extensions.yaml", len(config.Extensions))
+	} else {
+		log.Printf("No extensions.yaml found or error loading: %v", err)
+	}
+
 	log.Printf("Starting ka9q_ubersdr server...")
 	log.Printf("Radiod status: %s", config.Radiod.StatusGroup)
 	log.Printf("Radiod data: %s", config.Radiod.DataGroup)
@@ -239,6 +248,9 @@ func main() {
 	http.HandleFunc("/api/bands", func(w http.ResponseWriter, r *http.Request) {
 		handleBands(w, r, config)
 	})
+	http.HandleFunc("/api/extensions", func(w http.ResponseWriter, r *http.Request) {
+		handleExtensions(w, r, config)
+	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
 		handleDescription(w, r, config)
 	})
@@ -256,6 +268,8 @@ func main() {
 	http.HandleFunc("/admin/bands", adminHandler.AuthMiddleware(adminHandler.HandleBands))
 	http.HandleFunc("/admin/bookmarks", adminHandler.AuthMiddleware(adminHandler.HandleBookmarks))
 	http.HandleFunc("/admin/extensions", adminHandler.AuthMiddleware(adminHandler.HandleExtensions))
+	http.HandleFunc("/admin/extensions-manage", adminHandler.AuthMiddleware(adminHandler.HandleExtensionsAdmin))
+	http.HandleFunc("/admin/extensions-available", adminHandler.AuthMiddleware(adminHandler.HandleAvailableExtensions))
 	http.HandleFunc("/admin/sessions", adminHandler.AuthMiddleware(adminHandler.HandleSessions))
 	http.HandleFunc("/admin/kick", adminHandler.AuthMiddleware(adminHandler.HandleKickUser))
 	http.HandleFunc("/admin/ban", adminHandler.AuthMiddleware(adminHandler.HandleBanUser))
@@ -544,7 +558,23 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	if err := json.NewEncoder(w).Encode(config.Bookmarks); err != nil {
+	// Create a map of enabled extensions for quick lookup
+	enabledExtensions := make(map[string]bool)
+	for _, ext := range config.Extensions {
+		enabledExtensions[ext] = true
+	}
+
+	// Filter bookmarks to only include enabled extensions
+	filteredBookmarks := make([]Bookmark, len(config.Bookmarks))
+	for i, bookmark := range config.Bookmarks {
+		filteredBookmarks[i] = bookmark
+		// If bookmark has an extension reference but it's not enabled, clear it
+		if bookmark.Extension != "" && !enabledExtensions[bookmark.Extension] {
+			filteredBookmarks[i].Extension = ""
+		}
+	}
+
+	if err := json.NewEncoder(w).Encode(filteredBookmarks); err != nil {
 		log.Printf("Error encoding bookmarks: %v", err)
 	}
 }
@@ -556,6 +586,50 @@ func handleBands(w http.ResponseWriter, r *http.Request, config *Config) {
 
 	if err := json.NewEncoder(w).Encode(config.Bands); err != nil {
 		log.Printf("Error encoding bands: %v", err)
+	}
+}
+
+// handleExtensions serves the enabled extensions list
+func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Read manifest for each enabled extension
+	extensions := []map[string]string{}
+	for _, extName := range config.Extensions {
+		manifestPath := fmt.Sprintf("static/extensions/%s/manifest.json", extName)
+		manifestData, err := os.ReadFile(manifestPath)
+		if err != nil {
+			log.Printf("Warning: Failed to read manifest for extension '%s': %v", extName, err)
+			// Include extension with slug only if manifest is missing
+			extensions = append(extensions, map[string]string{
+				"slug":        extName,
+				"displayName": extName,
+			})
+			continue
+		}
+
+		var manifest struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"displayName"`
+		}
+		if err := json.Unmarshal(manifestData, &manifest); err != nil {
+			log.Printf("Warning: Failed to parse manifest for extension '%s': %v", extName, err)
+			extensions = append(extensions, map[string]string{
+				"slug":        extName,
+				"displayName": extName,
+			})
+			continue
+		}
+
+		extensions = append(extensions, map[string]string{
+			"slug":        manifest.Name,
+			"displayName": manifest.DisplayName,
+		})
+	}
+
+	if err := json.NewEncoder(w).Encode(extensions); err != nil {
+		log.Printf("Error encoding extensions: %v", err)
 	}
 }
 

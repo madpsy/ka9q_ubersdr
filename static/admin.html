@@ -303,6 +303,7 @@
                     <button class="tab" onclick="switchTab('yaml')">YAML Editor</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
+                    <button class="tab" onclick="switchTab('extensions')">Extensions</button>
                     <button class="tab" onclick="switchTab('sessions')">Active Sessions</button>
                     <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
                 </div>
@@ -398,6 +399,17 @@
                     </div>
                 </div>
 
+                <!-- Extensions Tab -->
+                <div id="extensionsTab" class="tab-content">
+                    <div class="alert alert-info" style="margin-bottom: 20px;">
+                        ℹ️ <strong>Note:</strong> Extension changes take effect immediately and are visible to all users without requiring a server restart.
+                    </div>
+                    <div id="extensionsList" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading extensions...</p>
+                    </div>
+                </div>
+
                 <!-- Sessions Tab -->
                 <div id="sessionsTab" class="tab-content">
                     <div id="sessionsList" class="loading">
@@ -432,6 +444,10 @@
                     <button class="btn btn-secondary" onclick="loadBands()">Reload Bands</button>
                     <button class="btn btn-secondary" onclick="exportBands()">Export Bands</button>
                     <button class="btn btn-secondary" onclick="importBands()">Import Bands</button>
+                </div>
+                <div class="button-group" id="extensionButtons" style="display: none;">
+                    <button class="btn" onclick="saveExtensions()">Save Changes</button>
+                    <button class="btn btn-secondary" onclick="loadExtensions()">Reload Extensions</button>
                 </div>
                 <div class="button-group" id="sessionButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
@@ -530,6 +546,7 @@
             document.getElementById('configButtons').style.display = 'none';
             document.getElementById('bookmarkButtons').style.display = 'none';
             document.getElementById('bandButtons').style.display = 'none';
+            document.getElementById('extensionButtons').style.display = 'none';
             document.getElementById('sessionButtons').style.display = 'none';
             document.getElementById('bannedButtons').style.display = 'none';
 
@@ -557,14 +574,19 @@
                 document.getElementById('bandsTab').classList.add('active');
                 document.getElementById('bandButtons').style.display = 'flex';
                 loadBands();
-            } else if (tab === 'sessions') {
+            } else if (tab === 'extensions') {
                 document.querySelector('.tab:nth-child(5)').classList.add('active');
+                document.getElementById('extensionsTab').classList.add('active');
+                document.getElementById('extensionButtons').style.display = 'flex';
+                loadAvailableExtensions();
+            } else if (tab === 'sessions') {
+                document.querySelector('.tab:nth-child(6)').classList.add('active');
                 document.getElementById('sessionsTab').classList.add('active');
                 document.getElementById('sessionButtons').style.display = 'flex';
                 loadSessions();
                 startSessionsAutoRefresh();
             } else if (tab === 'banned') {
-                document.querySelector('.tab:nth-child(6)').classList.add('active');
+                document.querySelector('.tab:nth-child(7)').classList.add('active');
                 document.getElementById('bannedTab').classList.add('active');
                 document.getElementById('bannedButtons').style.display = 'flex';
                 loadBannedIPs();
@@ -824,7 +846,7 @@
         let currentBookmarks = [];
 
         // Populate extension dropdown with available extensions from API
-        async function populateExtensionDropdown() {
+        async function populateExtensionDropdown(currentExtension = '') {
             const select = document.getElementById('newBookmarkExtension');
             if (!select) return;
 
@@ -832,18 +854,44 @@
             select.innerHTML = '<option value="">None</option>';
 
             try {
-                const response = await fetch('/admin/extensions');
-                if (!response.ok) throw new Error('Failed to load extensions');
+                // Get all available extensions (enabled and disabled)
+                const availableResponse = await fetch('/admin/extensions-available');
+                if (!availableResponse.ok) throw new Error('Failed to load available extensions');
 
-                const data = await response.json();
-                const extensions = data.extensions || [];
+                const availableData = await availableResponse.json();
+                const allExtensions = availableData.extensions || [];
 
-                extensions.forEach(ext => {
+                // Separate enabled and disabled extensions
+                const enabledExtensions = allExtensions.filter(ext => ext.enabled);
+                const disabledExtensions = allExtensions.filter(ext => !ext.enabled);
+
+                // Add enabled extensions first
+                enabledExtensions.forEach(ext => {
                     const option = document.createElement('option');
                     option.value = ext.slug;
-                    option.textContent = ext.displayName;
+                    option.textContent = ext.displayName || ext.slug;
                     select.appendChild(option);
                 });
+
+                // Add disabled extensions with "(not available)" suffix
+                disabledExtensions.forEach(ext => {
+                    const option = document.createElement('option');
+                    option.value = ext.slug;
+                    option.textContent = `${ext.displayName || ext.slug} (not available)`;
+                    option.style.color = '#999';
+                    option.style.fontStyle = 'italic';
+                    select.appendChild(option);
+                });
+
+                // If current extension is set but not in the list, add it as unavailable
+                if (currentExtension && !allExtensions.find(ext => ext.slug === currentExtension)) {
+                    const option = document.createElement('option');
+                    option.value = currentExtension;
+                    option.textContent = `${currentExtension} (not available)`;
+                    option.style.color = '#999';
+                    option.style.fontStyle = 'italic';
+                    select.appendChild(option);
+                }
             } catch (error) {
                 console.error('Error loading extensions:', error);
                 // Add a note if extensions couldn't be loaded
@@ -948,7 +996,7 @@
         }
 
         async function showAddBookmarkForm() {
-            await populateExtensionDropdown(); // Ensure dropdown is populated
+            await populateExtensionDropdown(''); // Ensure dropdown is populated
             document.getElementById('bookmarkFormTitle').textContent = 'Add New Bookmark';
             document.getElementById('editBookmarkIndex').value = '-1';
             document.getElementById('addBookmarkForm').style.display = 'block';
@@ -959,8 +1007,8 @@
         }
 
         async function editBookmark(index) {
-            await populateExtensionDropdown(); // Ensure dropdown is populated
             const bookmark = currentBookmarks[index];
+            await populateExtensionDropdown(bookmark.extension || ''); // Pass current extension to ensure it's in dropdown
             document.getElementById('bookmarkFormTitle').textContent = 'Edit Bookmark';
             document.getElementById('editBookmarkIndex').value = index;
             document.getElementById('addBookmarkForm').style.display = 'block';
@@ -1864,6 +1912,124 @@
                 loadBannedIPs(); // Refresh the banned IPs list
             } catch (error) {
                 showAlert('Error unbanning IP: ' + error.message, 'error');
+            }
+        }
+
+        // Extensions management
+        let availableExtensions = [];
+
+        async function loadAvailableExtensions() {
+            try {
+                const response = await fetch('/admin/extensions-available');
+                if (!response.ok) throw new Error('Failed to load available extensions');
+
+                const data = await response.json();
+                availableExtensions = data.extensions || [];
+                renderExtensions();
+                showAlert(`Loaded ${availableExtensions.length} available extension(s)`, 'success');
+            } catch (error) {
+                showAlert('Error loading extensions: ' + error.message, 'error');
+            }
+        }
+
+        function renderExtensions() {
+            const container = document.getElementById('extensionsList');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            if (availableExtensions.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No extensions found in static/extensions/ directory</p>';
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.innerHTML = `
+                <thead>
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 12px; text-align: center; width: 60px;">Enabled</th>
+                        <th style="padding: 12px; text-align: left;">Extension</th>
+                        <th style="padding: 12px; text-align: left;">Description</th>
+                        <th style="padding: 12px; text-align: left;">Version</th>
+                        <th style="padding: 12px; text-align: left;">Author</th>
+                    </tr>
+                </thead>
+                <tbody id="extensionsTableBody"></tbody>
+            `;
+            container.appendChild(table);
+
+            const tbody = document.getElementById('extensionsTableBody');
+            availableExtensions.forEach((ext, index) => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+
+                const manifestStatus = ext.hasManifest ?
+                    '<span style="color: #28a745; font-size: 11px;">✓ Valid</span>' :
+                    '<span style="color: #dc3545; font-size: 11px;">✗ Missing/Invalid</span>';
+
+                row.innerHTML = `
+                    <td style="padding: 12px; text-align: center;">
+                        <input type="checkbox" id="ext_${index}" ${ext.enabled ? 'checked' : ''}
+                               onchange="toggleExtension(${index})"
+                               style="width: 20px; height: 20px; cursor: pointer;">
+                    </td>
+                    <td style="padding: 12px;">
+                        <strong>${ext.displayName}</strong><br>
+                        <span style="color: #666; font-size: 11px; font-family: monospace;">${ext.slug}</span><br>
+                        ${manifestStatus}
+                    </td>
+                    <td style="padding: 12px; color: #666;">${ext.description || '<em>No description</em>'}</td>
+                    <td style="padding: 12px;">${ext.version || '<em style="color: #999;">—</em>'}</td>
+                    <td style="padding: 12px;">${ext.author || '<em style="color: #999;">—</em>'}</td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            // Add summary
+            const summary = document.createElement('div');
+            summary.style.marginTop = '20px';
+            summary.style.padding = '15px';
+            summary.style.background = '#f8f9fa';
+            summary.style.borderRadius = '5px';
+            const enabledCount = availableExtensions.filter(e => e.enabled).length;
+            summary.innerHTML = `
+                <strong>Summary:</strong> ${enabledCount} of ${availableExtensions.length} extension(s) enabled
+            `;
+            container.appendChild(summary);
+        }
+
+        function toggleExtension(index) {
+            availableExtensions[index].enabled = !availableExtensions[index].enabled;
+            renderExtensions();
+        }
+
+        async function saveExtensions() {
+            try {
+                // Build list of enabled extension slugs
+                const enabledSlugs = availableExtensions
+                    .filter(ext => ext.enabled)
+                    .map(ext => ext.slug);
+
+                const extensionsData = {
+                    extensions: enabledSlugs
+                };
+
+                const response = await fetch('/admin/extensions-manage', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(extensionsData)
+                });
+
+                if (!response.ok) throw new Error('Failed to save extensions');
+
+                const result = await response.json();
+                showAlert(result.message, 'success');
+                await loadAvailableExtensions(); // Reload to confirm changes
+            } catch (error) {
+                showAlert('Error saving extensions: ' + error.message, 'error');
             }
         }
     </script>

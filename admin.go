@@ -1197,37 +1197,16 @@ func (ah *AdminHandler) HandleBannedIPs(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// HandleExtensions returns the list of available decoder extensions
+// HandleExtensions returns the list of available decoder extensions (public endpoint)
 func (ah *AdminHandler) HandleExtensions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Read extensions.json to get enabled extensions
-	extensionsConfigPath := "static/extensions/extensions.json"
-	data, err := os.ReadFile(extensionsConfigPath)
-	if err != nil {
-		log.Printf("Failed to read extensions config: %v", err)
-		// Return empty list if config doesn't exist
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"extensions": []map[string]string{},
-		})
-		return
-	}
-
-	var extensionsConfig struct {
-		Enabled []string `json:"enabled"`
-	}
-	if err := json.Unmarshal(data, &extensionsConfig); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to parse extensions config: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Read manifest for each enabled extension
+	// Read manifest for each enabled extension from config
 	extensions := []map[string]string{}
-	for _, extName := range extensionsConfig.Enabled {
+	for _, extName := range ah.config.Extensions {
 		manifestPath := fmt.Sprintf("static/extensions/%s/manifest.json", extName)
 		manifestData, err := os.ReadFile(manifestPath)
 		if err != nil {
@@ -1264,5 +1243,168 @@ func (ah *AdminHandler) HandleExtensions(w http.ResponseWriter, r *http.Request)
 		"extensions": extensions,
 	}); err != nil {
 		log.Printf("Error encoding extensions: %v", err)
+	}
+}
+
+// HandleExtensionsAdmin handles GET and PUT requests for extensions management
+func (ah *AdminHandler) HandleExtensionsAdmin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		ah.handleGetExtensionsAdmin(w, r)
+	case http.MethodPut:
+		ah.handleUpdateExtensions(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetExtensionsAdmin returns all extensions configuration
+func (ah *AdminHandler) handleGetExtensionsAdmin(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile("extensions.yaml")
+	if err != nil {
+		// If file doesn't exist, return empty extensions
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"extensions": []string{}})
+		return
+	}
+
+	var extensionsConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &extensionsConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse extensions: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(extensionsConfig)
+}
+
+// handleUpdateExtensions updates the entire extensions list
+func (ah *AdminHandler) handleUpdateExtensions(w http.ResponseWriter, r *http.Request) {
+	var extensionsConfig map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&extensionsConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Convert to YAML and write to file
+	yamlData, err := yaml.Marshal(extensionsConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal extensions: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile("extensions.yaml", yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write extensions file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reload extensions into memory
+	if err := ah.reloadExtensions(); err != nil {
+		log.Printf("Warning: Failed to reload extensions after update: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Extensions updated successfully",
+	})
+}
+
+// reloadExtensions reloads extensions from extensions.yaml into memory
+func (ah *AdminHandler) reloadExtensions() error {
+	extensionsConfig, err := LoadConfig("extensions.yaml")
+	if err != nil {
+		return fmt.Errorf("failed to reload extensions: %w", err)
+	}
+	ah.config.Extensions = extensionsConfig.Extensions
+	log.Printf("Reloaded %d extensions from extensions.yaml", len(ah.config.Extensions))
+	return nil
+}
+
+// HandleAvailableExtensions returns all available extensions in static/extensions/
+func (ah *AdminHandler) HandleAvailableExtensions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Read the static/extensions directory
+	entries, err := os.ReadDir("static/extensions")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read extensions directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	availableExtensions := []map[string]interface{}{}
+	enabledMap := make(map[string]bool)
+
+	// Create a map of enabled extensions for quick lookup
+	for _, ext := range ah.config.Extensions {
+		enabledMap[ext] = true
+	}
+
+	// Scan each directory for extensions
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		extName := entry.Name()
+
+		// Skip hidden directories and special files
+		if strings.HasPrefix(extName, ".") || extName == "extensions.json" {
+			continue
+		}
+
+		// Try to read the manifest
+		manifestPath := fmt.Sprintf("static/extensions/%s/manifest.json", extName)
+		manifestData, err := os.ReadFile(manifestPath)
+
+		extInfo := map[string]interface{}{
+			"slug":    extName,
+			"enabled": enabledMap[extName],
+		}
+
+		if err != nil {
+			// Extension exists but has no manifest
+			extInfo["displayName"] = extName
+			extInfo["description"] = "No manifest found"
+			extInfo["hasManifest"] = false
+		} else {
+			// Parse manifest
+			var manifest struct {
+				Name        string `json:"name"`
+				DisplayName string `json:"displayName"`
+				Description string `json:"description"`
+				Version     string `json:"version"`
+				Author      string `json:"author"`
+			}
+
+			if err := json.Unmarshal(manifestData, &manifest); err != nil {
+				extInfo["displayName"] = extName
+				extInfo["description"] = "Invalid manifest"
+				extInfo["hasManifest"] = false
+			} else {
+				extInfo["displayName"] = manifest.DisplayName
+				extInfo["description"] = manifest.Description
+				extInfo["version"] = manifest.Version
+				extInfo["author"] = manifest.Author
+				extInfo["hasManifest"] = true
+			}
+		}
+
+		availableExtensions = append(availableExtensions, extInfo)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"extensions": availableExtensions,
+		"count":      len(availableExtensions),
+	}); err != nil {
+		log.Printf("Error encoding available extensions: %v", err)
 	}
 }

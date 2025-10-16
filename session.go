@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"strings"
 	"sync"
 	"time"
 
@@ -439,7 +438,6 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 
 	// Update session state
 	session.mu.Lock()
-	oldBinCount := session.BinCount
 
 	if frequency > 0 {
 		session.Frequency = frequency
@@ -460,14 +458,6 @@ func (sm *SessionManager) UpdateSpectrumSession(sessionID string, frequency uint
 		return fmt.Errorf("failed to update radiod spectrum channel: %w", err)
 	}
 
-	totalBandwidth := float64(session.BinCount) * binBandwidth
-	if binCountChanged {
-		log.Printf("Spectrum session updated: %s (center: %d Hz, bins: %d->%d, bw: %.1f Hz/bin, total: %.1f MHz)",
-			sessionID, frequency, oldBinCount, session.BinCount, binBandwidth, totalBandwidth/1e6)
-	} else {
-		log.Printf("Spectrum session updated: %s (center: %d Hz, bw: %.1f Hz/bin, total: %.1f MHz)",
-			sessionID, frequency, binBandwidth, totalBandwidth/1e6)
-	}
 	return nil
 }
 
@@ -530,21 +520,6 @@ func (sm *SessionManager) UpdateSession(sessionID string, frequency uint64, mode
 		return fmt.Errorf("failed to update radiod channel: %w", err)
 	}
 
-	// Log what actually changed
-	changes := []string{}
-	if frequency > 0 && frequency != oldFreq {
-		changes = append(changes, fmt.Sprintf("freq: %d -> %d Hz", oldFreq, frequency))
-	}
-	if mode != "" && mode != oldMode {
-		changes = append(changes, fmt.Sprintf("mode: %s -> %s", oldMode, mode))
-	}
-	if bandwidth > 0 && bandwidth != oldBandwidth {
-		changes = append(changes, fmt.Sprintf("bw: %d -> %d Hz", oldBandwidth, bandwidth))
-	}
-
-	if len(changes) > 0 {
-		log.Printf("Session updated: %s (SSRC: 0x%08x) - %s", sessionID, session.SSRC, strings.Join(changes, ", "))
-	}
 	return nil
 }
 
@@ -606,21 +581,6 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		return fmt.Errorf("failed to update radiod channel: %w", err)
 	}
 
-	// Log what actually changed
-	changes := []string{}
-	if frequency > 0 && frequency != oldFreq {
-		changes = append(changes, fmt.Sprintf("freq: %d -> %d Hz", oldFreq, frequency))
-	}
-	if mode != "" && mode != oldMode {
-		changes = append(changes, fmt.Sprintf("mode: %s -> %s", oldMode, mode))
-	}
-	if sendBandwidth && (bandwidthLow != oldBandwidthLow || bandwidthHigh != oldBandwidthHigh) {
-		changes = append(changes, fmt.Sprintf("bw: %d-%d -> %d-%d Hz", oldBandwidthLow, oldBandwidthHigh, bandwidthLow, bandwidthHigh))
-	}
-
-	if len(changes) > 0 {
-		log.Printf("Session updated: %s (SSRC: 0x%08x) - %s", sessionID, session.SSRC, strings.Join(changes, ", "))
-	}
 	return nil
 }
 

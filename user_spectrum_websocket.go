@@ -233,14 +233,10 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 
 			// Check if already at defaults
 			if session.Frequency == defaultFreq && session.BinBandwidth == defaultBinBW && session.BinCount == defaultBinCount {
-				log.Printf("Spectrum session %s already at defaults (freq: %d Hz, bins: %d, bw: %.1f Hz) - skipping radiod update",
-					session.ID, defaultFreq, defaultBinCount, defaultBinBW)
 
 				// Still send status to acknowledge the request
 				swsh.sendStatus(conn, session)
 			} else {
-				log.Printf("Resetting spectrum session %s to defaults: freq %d Hz, bins %d, bw %.1f Hz",
-					session.ID, defaultFreq, defaultBinCount, defaultBinBW)
 
 				if err := swsh.sessions.UpdateSpectrumSession(session.ID, defaultFreq, defaultBinBW, defaultBinCount); err != nil {
 					swsh.sendError(conn, "Failed to reset spectrum: "+err.Error())
@@ -318,8 +314,7 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 					newBinCount = 256 // Minimum bin count
 				}
 				newBinBW = minSafeBinBW
-				log.Printf("Deep zoom: reducing bin_count from %d to %d, keeping bin_bw at %.1f Hz",
-					currentBinCount, newBinCount, newBinBW)
+
 			} else if newBinBW > maxBinBWForRestore && currentBinCount < defaultBinCount {
 				// Zooming out: restore bin_count if it was reduced
 				newBinCount = currentBinCount * 2
@@ -327,8 +322,7 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 					newBinCount = defaultBinCount
 				}
 				newBinBW = safeBinBW
-				log.Printf("Zoom out: restoring bin_count from %d to %d, bin_bw %.1f Hz",
-					currentBinCount, newBinCount, newBinBW)
+
 			} else {
 				// Normal zoom: use safe bin_bw value
 				newBinBW = safeBinBW
@@ -336,9 +330,6 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 
 			// Only update if something changed
 			if newFreq != session.Frequency || newBinBW != session.BinBandwidth || newBinCount != session.BinCount {
-				log.Printf("Updating spectrum session %s: freq %d -> %d Hz, bins %d -> %d, bw %.1f -> %.1f Hz",
-					session.ID, session.Frequency, newFreq, session.BinCount, newBinCount, session.BinBandwidth, newBinBW)
-
 				if err := swsh.sessions.UpdateSpectrumSession(session.ID, newFreq, newBinBW, newBinCount); err != nil {
 					swsh.sendError(conn, "Failed to update spectrum: "+err.Error())
 					continue
@@ -348,8 +339,6 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 				swsh.sendStatus(conn, session)
 			} else {
 				// State is already correct, accept request but don't send to radiod
-				log.Printf("Spectrum session %s already at requested state (freq: %d Hz, bins: %d, bw: %.1f Hz) - skipping radiod update",
-					session.ID, newFreq, newBinCount, newBinBW)
 
 				// Still send status to acknowledge the request
 				swsh.sendStatus(conn, session)

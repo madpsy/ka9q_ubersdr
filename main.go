@@ -17,6 +17,9 @@ import (
 // Global debug flag
 var DebugMode bool
 
+// Global stats flag
+var StatsMode bool
+
 // responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
 	http.ResponseWriter
@@ -106,12 +109,19 @@ func main() {
 	// Parse command line flags
 	configFile := flag.String("config", "config.yaml", "Path to configuration file")
 	debug := flag.Bool("debug", false, "Enable debug logging")
+	stats := flag.Bool("stats", false, "Enable WebSocket statistics logging")
 	flag.Parse()
 
 	// Set global debug mode
 	DebugMode = *debug
 	if DebugMode {
 		log.Println("Debug mode enabled")
+	}
+
+	// Set global stats mode
+	StatsMode = *stats
+	if StatsMode {
+		log.Println("WebSocket statistics logging enabled")
 	}
 
 	// Load configuration

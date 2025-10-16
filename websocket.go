@@ -102,12 +102,14 @@ func startStatsLogger() {
 					spectrumKbps = float64(spectrumBytes) / 1024 / spectrumElapsed.Seconds()
 				}
 
-				// Log combined stats if there's any activity
-				totalConns := audioConns + spectrumConns
-				totalKbps := audioKbps + spectrumKbps
-				if totalConns > 0 || totalKbps > 0 {
-					log.Printf("WebSocket stats - Audio: %.1f KB/s (%d conns), Spectrum: %.1f KB/s (%d conns), Total: %.1f KB/s (%d conns)",
-						audioKbps, audioConns, spectrumKbps, spectrumConns, totalKbps, totalConns)
+				// Log combined stats if there's any activity (only if StatsMode is enabled)
+				if StatsMode {
+					totalConns := audioConns + spectrumConns
+					totalKbps := audioKbps + spectrumKbps
+					if totalConns > 0 || totalKbps > 0 {
+						log.Printf("WebSocket stats - Audio: %.1f KB/s (%d conns), Spectrum: %.1f KB/s (%d conns), Total: %.1f KB/s (%d conns)",
+							audioKbps, audioConns, spectrumKbps, spectrumConns, totalKbps, totalConns)
+					}
 				}
 			}
 		}()
@@ -414,7 +416,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		// Both bandwidth parameters provided in URL - use them
 		bwl = *bandwidthLow
 		bwh = *bandwidthHigh
-		log.Printf("Applying URL bandwidth parameters: %d to %d Hz", bwl, bwh)
+
 	} else {
 		// No bandwidth parameters in URL - apply mode-specific defaults
 		// These match the defaults in app.js setMode() function
@@ -450,12 +452,6 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		wsh.sendError(conn, "Failed to apply bandwidth: "+err.Error())
 		wsh.sessions.DestroySession(session.ID)
 		return
-	}
-
-	if userSessionID != "" {
-		log.Printf("Audio WebSocket connected: session %s, user_session_id: %s, source IP: %s, client IP: %s", session.ID, userSessionID, sourceIP, clientIP)
-	} else {
-		log.Printf("Audio WebSocket connected: session %s, source IP: %s, client IP: %s", session.ID, sourceIP, clientIP)
 	}
 
 	// Subscribe to audio
@@ -553,10 +549,6 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			bandwidthChanged := newBandwidthLow != currentSession.BandwidthLow || newBandwidthHigh != currentSession.BandwidthHigh
 
 			if freqChanged || modeChanged || bandwidthChanged {
-				log.Printf("Updating session: %d Hz %s (BW:%d-%d) -> %d Hz %s (BW:%d-%d)",
-					currentSession.Frequency, currentSession.Mode, currentSession.BandwidthLow, currentSession.BandwidthHigh,
-					newFreq, newMode, newBandwidthLow, newBandwidthHigh)
-
 				// Validate bandwidth if it changed
 				if bandwidthChanged {
 					if newBandwidthLow == newBandwidthHigh {

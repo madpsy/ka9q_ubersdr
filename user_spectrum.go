@@ -477,14 +477,8 @@ func (usm *UserSpectrumManager) checkSpectrumParameterMismatch(ssrc uint32, radi
 		}
 		mismatchMutex.Unlock()
 
-		if shouldLog {
-			log.Printf("INFO: Parameter mismatch for SSRC 0x%08x - Session: bins=%d bw=%.1f Hz, Radiod: bins=%d bw=%.1f Hz",
-				ssrc, sessionBinCount, sessionBinBW, radiodBinCount, radiodBinBW)
-		}
-
 		// Automatically retry sending the update command
 		if shouldRetry {
-			log.Printf("INFO: Retrying spectrum update for SSRC 0x%08x to correct mismatch", ssrc)
 
 			// Determine if bin count changed (compare with radiod's current value)
 			binCountChanged := sessionBinCount != radiodBinCount
@@ -542,14 +536,8 @@ func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodF
 		}
 		mismatchMutex.Unlock()
 
-		if shouldLog {
-			log.Printf("INFO: Audio parameter mismatch for SSRC 0x%08x - Session: freq=%d Hz edges=%.1f-%.1f Hz, Radiod: freq=%d Hz edges=%.1f-%.1f Hz",
-				ssrc, sessionFreq, sessionLowEdge, sessionHighEdge, radiodFreq, radiodLowEdge, radiodHighEdge)
-		}
-
 		// Automatically retry sending the update command
 		if shouldRetry {
-			log.Printf("INFO: Retrying audio channel update for SSRC 0x%08x to correct mismatch", ssrc)
 
 			// Send update command with all parameters to ensure they're synchronized
 			// Always send bandwidth edges since that's what we're correcting

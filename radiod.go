@@ -430,11 +430,6 @@ func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64,
 		return fmt.Errorf("failed to send update spectrum command: %w", err)
 	}
 
-	if sendBinCount {
-		log.Printf("Updated spectrum channel: SSRC 0x%08x, freq: %d Hz, bins: %d, bw: %.1f Hz", ssrc, frequency, binCount, binBandwidth)
-	} else {
-		log.Printf("Updated spectrum channel: SSRC 0x%08x, freq: %d Hz, bw: %.1f Hz", ssrc, frequency, binBandwidth)
-	}
 	return nil
 }
 
@@ -477,24 +472,11 @@ func (rc *RadiodController) UpdateChannel(ssrc uint32, frequency uint64, mode st
 	// Add EOL marker
 	buf = append(buf, 0)
 
-	// Always log what we're sending for debugging
-	log.Printf("UpdateChannel - SSRC 0x%08x, freq: %d Hz, mode: '%s'",
-		ssrc, frequency, mode)
-	if sendBandwidth {
-		log.Printf("  Sending LOW_EDGE: %d Hz, HIGH_EDGE: %d Hz", bandwidthLow, bandwidthHigh)
-	}
-	log.Printf("  Command hex: % x", buf)
-
 	// Send command
 	if err := rc.sendCommand(buf); err != nil {
 		return fmt.Errorf("failed to send update command: %w", err)
 	}
 
-	if sendBandwidth {
-		log.Printf("Updated channel: SSRC 0x%08x (freq: %d Hz, mode: %s, edges: %d-%d Hz)", ssrc, frequency, mode, bandwidthLow, bandwidthHigh)
-	} else {
-		log.Printf("Updated channel: SSRC 0x%08x (freq: %d Hz, mode: %s)", ssrc, frequency, mode)
-	}
 	return nil
 }
 

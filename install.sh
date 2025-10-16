@@ -75,19 +75,25 @@ if [ ! -f "docker/docker-compose.yml" ]; then
     mkdir -p "$INSTALL_DIR"
     cd "$INSTALL_DIR"
 
-    # Clone repositories
-    echo "Cloning ka9q-radio repository..."
+    # Clone or update repositories
+    echo "Setting up ka9q-radio repository..."
     if [ ! -d "ka9q-radio" ]; then
         git clone https://github.com/madpsy/ka9q-radio.git
     else
-        echo "ka9q-radio already exists, skipping clone"
+        echo "Updating ka9q-radio..."
+        cd ka9q-radio
+        git pull
+        cd ..
     fi
 
-    echo "Cloning ka9q_ubersdr repository..."
+    echo "Setting up ka9q_ubersdr repository..."
     if [ ! -d "ka9q_ubersdr" ]; then
         git clone https://github.com/madpsy/ka9q_ubersdr.git
     else
-        echo "ka9q_ubersdr already exists, skipping clone"
+        echo "Updating ka9q_ubersdr..."
+        cd ka9q_ubersdr
+        git pull
+        cd ..
     fi
 
     cd ka9q_ubersdr
@@ -142,7 +148,7 @@ echo "Web interface available at:"
 echo "  http://localhost:8080"
 echo ""
 echo "Useful commands:"
-echo "  View logs:        cd docker && sudo docker compose logs -f"
-echo "  Stop services:    cd docker && sudo docker compose down"
-echo "  Restart services: cd docker && sudo docker compose restart"
+echo "  View logs:        cd ~/ubersdr/ka9q_ubersdr/docker && sudo docker compose logs -f"
+echo "  Stop services:    cd ~/ubersdr/ka9q_ubersdr/docker && sudo docker compose down"
+echo "  Restart services: cd ~/ubersdr/ka9q_ubersdr/docker && sudo docker compose restart"
 echo ""

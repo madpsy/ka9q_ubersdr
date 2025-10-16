@@ -5,6 +5,8 @@ import (
 	"log"
 	"math"
 	"net"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,16 +21,92 @@ type RadiodController struct {
 	iface      *net.Interface
 }
 
+// fnv1hash implements the FNV-1 hash algorithm
+// Matches ka9q-radio's fnv1hash() from misc.c (lines 589-596)
+// https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
+func fnv1hash(data []byte) uint32 {
+	hash := uint32(0x811c9dc5) // FNV-1 offset basis
+	for _, b := range data {
+		hash *= 0x01000193 // FNV-1 prime
+		hash ^= uint32(b)
+	}
+	return hash
+}
+
+// makeMaddr generates a multicast address from a hostname using FNV-1 hash
+// Matches ka9q-radio's make_maddr() from multicast.c (lines 786-797)
+func makeMaddr(hostname string) string {
+	// Generate hash of hostname
+	hash := fnv1hash([]byte(hostname))
+
+	// Create address in 239.0.0.0/8 (administratively scoped)
+	addr := (239 << 24) | (hash & 0xffffff)
+
+	// Avoid 239.0.0.0/24 and 239.128.0.0/24 to prevent MAC address collisions
+	// These ranges map to the same Ethernet multicast MAC addresses
+	if (addr & 0x007fff00) == 0 {
+		addr |= (addr & 0xff) << 8
+	}
+	if (addr & 0x007fff00) == 0 {
+		addr |= 0x00100000
+	}
+
+	// Convert to IP address string
+	return fmt.Sprintf("%d.%d.%d.%d",
+		(addr>>24)&0xff,
+		(addr>>16)&0xff,
+		(addr>>8)&0xff,
+		addr&0xff)
+}
+
+// resolveMulticastAddr resolves a multicast address, with fallback to hash-based generation
+// This matches ka9q-radio's behavior when DNS resolution fails
+func resolveMulticastAddr(addrStr string) (*net.UDPAddr, error) {
+	// First try standard DNS resolution
+	addr, err := net.ResolveUDPAddr("udp", addrStr)
+	if err == nil {
+		return addr, nil
+	}
+
+	// DNS resolution failed - extract hostname and port
+	// Format is typically "hostname:port" or just "hostname"
+	parts := strings.Split(addrStr, ":")
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("invalid address format: %s", addrStr)
+	}
+
+	hostname := parts[0]
+	port := "0" // default port
+	if len(parts) > 1 {
+		port = parts[1]
+	}
+
+	// Generate multicast IP using FNV-1 hash (same as ka9q-radio)
+	multicastIP := makeMaddr(hostname)
+
+	// Parse the port
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		return nil, fmt.Errorf("invalid port in address %s: %w", addrStr, err)
+	}
+
+	// Create UDP address with generated IP
+	generatedAddr := fmt.Sprintf("%s:%d", multicastIP, portNum)
+	log.Printf("DNS resolution failed for %s, using FNV-1 hash-generated address: %s", addrStr, generatedAddr)
+
+	return net.ResolveUDPAddr("udp", generatedAddr)
+}
+
 // NewRadiodController creates a new radiod controller
 func NewRadiodController(statusGroup, dataGroup, ifaceName string) (*RadiodController, error) {
-	// Parse status multicast address
-	statusAddr, err := net.ResolveUDPAddr("udp", statusGroup)
+	// Parse status multicast address (with FNV-1 hash fallback)
+	statusAddr, err := resolveMulticastAddr(statusGroup)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve status address: %w", err)
 	}
 
-	// Parse data multicast address
-	dataAddr, err := net.ResolveUDPAddr("udp", dataGroup)
+	// Parse data multicast address (with FNV-1 hash fallback)
+	dataAddr, err := resolveMulticastAddr(dataGroup)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve data address: %w", err)
 	}
@@ -194,22 +272,22 @@ func (rc *RadiodController) CreateChannel(name string, frequency uint64, mode st
 func (rc *RadiodController) CreateChannelWithBandwidth(name string, frequency uint64, mode string, sampleRate int, ssrc uint32, bandwidth int) error {
 	// Build control command with SSRC - match ka9q-multidecoder order exactly
 	buf := make([]byte, 0, 1500)
-	
+
 	// Start with CMD packet type
 	buf = append(buf, 1) // CMD = 1
-	
+
 	// Add SSRC (tag 18 = 0x12)
 	buf = encodeInt32(&buf, 0x12, ssrc)
-	
+
 	// Add RADIO_FREQUENCY (tag 33 = 0x21) - MUST come before PRESET
 	buf = encodeDouble(&buf, 0x21, float64(frequency))
-	
+
 	// Add PRESET (tag 85 = 0x55)
 	buf = encodeString(&buf, 0x55, mode)
-	
+
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
-	
+
 	// Add EOL marker
 	buf = append(buf, 0)
 
@@ -233,49 +311,49 @@ func (rc *RadiodController) CreateChannelWithBandwidth(name string, frequency ui
 func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64, binCount int, binBandwidth float64, ssrc uint32) error {
 	log.Printf("CreateSpectrumChannel called: name=%s, freq=%d, bins=%d, bw=%.1f, ssrc=0x%08x",
 		name, frequency, binCount, binBandwidth, ssrc)
-	
+
 	// Calculate filter edges for full bandwidth coverage
 	// Total bandwidth = binCount * binBandwidth
 	// For 0-30 MHz with center at 15 MHz: edges at ±15 MHz
 	halfBandwidth := float64(binCount) * binBandwidth / 2.0
-	
+
 	log.Printf("Calculated filter edges: LOW=%.1f Hz, HIGH=%.1f Hz (total BW=%.1f Hz)",
 		-halfBandwidth, halfBandwidth, halfBandwidth*2)
-	
+
 	// Build control command for spectrum mode
 	buf := make([]byte, 0, 1500)
-	
+
 	// Start with CMD packet type
 	buf = append(buf, 1) // CMD = 1
-	
+
 	// Add SSRC (tag 18 = 0x12)
 	buf = encodeInt32(&buf, 0x12, ssrc)
-	
+
 	// Add RADIO_FREQUENCY (tag 33 = 0x21) - MUST come before PRESET
 	buf = encodeDouble(&buf, 0x21, float64(frequency))
-	
+
 	// Add PRESET (tag 85 = 0x55) - MUST come early to set demod_type
 	// This calls loadpreset() which sets demod_type=SPECT_DEMOD and default parameters
 	buf = encodeString(&buf, 0x55, "spectrum")
-	
+
 	// Now override the preset defaults with our custom parameters
 	// These come AFTER preset so they override the defaults
-	
+
 	// Add LOW_EDGE (tag 39 = 0x27) - lower frequency edge relative to center
 	buf = encodeDouble(&buf, 0x27, -halfBandwidth)
-	
+
 	// Add HIGH_EDGE (tag 40 = 0x28) - upper frequency edge relative to center
 	buf = encodeDouble(&buf, 0x28, halfBandwidth)
-	
+
 	// Add BIN_COUNT (tag 94 = 0x5e)
 	buf = encodeInt32(&buf, 0x5e, uint32(binCount))
-	
+
 	// Add NONCOHERENT_BIN_BW (tag 93 = 0x5d)
 	buf = encodeFloat(&buf, 0x5d, float32(binBandwidth))
-	
+
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
-	
+
 	// Add EOL marker
 	buf = append(buf, 0)
 
@@ -298,18 +376,18 @@ func (rc *RadiodController) CreateSpectrumChannel(name string, frequency uint64,
 func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64, binBandwidth float64, binCount int, sendBinCount bool) error {
 	// Build control command to update spectrum parameters
 	buf := make([]byte, 0, 1500)
-	
+
 	// Start with CMD packet type
 	buf = append(buf, 1) // CMD = 1
-	
+
 	// Add SSRC (tag 18 = 0x12)
 	buf = encodeInt32(&buf, 0x12, ssrc)
-	
+
 	// Add RADIO_FREQUENCY (tag 33 = 0x21) if changed
 	if frequency > 0 {
 		buf = encodeDouble(&buf, 0x21, float64(frequency))
 	}
-	
+
 	// Add BIN_COUNT (tag 94 = 0x5e) if it changed
 	if sendBinCount && binCount > 0 {
 		buf = encodeInt32(&buf, 0x5e, uint32(binCount))
@@ -317,29 +395,29 @@ func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64,
 			log.Printf("DEBUG: Sending BIN_COUNT=%d", binCount)
 		}
 	}
-	
+
 	// Add NONCOHERENT_BIN_BW (tag 93 = 0x5d) if changed
 	if binBandwidth > 0 {
 		buf = encodeFloat(&buf, 0x5d, float32(binBandwidth))
-		
+
 		// When bin bandwidth changes, we must also update filter edges
 		// Calculate new filter edges based on total bandwidth
 		halfBandwidth := float64(binCount) * binBandwidth / 2.0
-		
+
 		// Add LOW_EDGE (tag 39 = 0x27)
 		buf = encodeDouble(&buf, 0x27, -halfBandwidth)
-		
+
 		// Add HIGH_EDGE (tag 40 = 0x28)
 		buf = encodeDouble(&buf, 0x28, halfBandwidth)
-		
+
 		if DebugMode {
 			log.Printf("DEBUG: Updated filter edges: LOW=%.1f Hz, HIGH=%.1f Hz", -halfBandwidth, halfBandwidth)
 		}
 	}
-	
+
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
-	
+
 	// Add EOL marker
 	buf = append(buf, 0)
 
@@ -367,35 +445,35 @@ func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64,
 func (rc *RadiodController) UpdateChannel(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error {
 	// Build control command with SSRC to identify the channel
 	buf := make([]byte, 0, 1500)
-	
+
 	// Start with CMD packet type
 	buf = append(buf, 1) // CMD = 1
-	
+
 	// Add SSRC (tag 18 = 0x12) - identifies which channel to update
 	buf = encodeInt32(&buf, 0x12, ssrc)
-	
+
 	// Add RADIO_FREQUENCY (tag 33 = 0x21) if provided
 	if frequency > 0 {
 		buf = encodeDouble(&buf, 0x21, float64(frequency))
 	}
-	
+
 	// Add PRESET (tag 85 = 0x55) if provided
 	if mode != "" {
 		buf = encodeString(&buf, 0x55, mode)
 	}
-	
+
 	// Add bandwidth via LOW_EDGE and HIGH_EDGE if requested
 	if sendBandwidth {
 		// Add LOW_EDGE (tag 39 = 0x27)
 		buf = encodeFloat(&buf, 0x27, float32(bandwidthLow))
-		
+
 		// Add HIGH_EDGE (tag 40 = 0x28)
 		buf = encodeFloat(&buf, 0x28, float32(bandwidthHigh))
 	}
-	
+
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
-	
+
 	// Add EOL marker
 	buf = append(buf, 0)
 
@@ -444,7 +522,7 @@ func (rc *RadiodController) DisableChannel(name string, ssrc uint32) error {
 // This matches ka9q-radio's encode_int64() and encode_double() exactly
 func (rc *RadiodController) buildCommand(channelName string, ssrc uint32, params map[string]interface{}) []byte {
 	buf := make([]byte, 0, 1500)
-	
+
 	// Start with CMD packet type
 	buf = append(buf, 1) // CMD = 1 (from enum pkt_type)
 
@@ -466,10 +544,10 @@ func (rc *RadiodController) buildCommand(channelName string, ssrc uint32, params
 			buf = encodeString(&buf, 0x55, mode)
 		}
 	}
-	
+
 	// Add COMMAND_TAG for tracking (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
-	
+
 	// Add EOL marker (tag 0)
 	buf = append(buf, 0)
 
@@ -480,12 +558,12 @@ func (rc *RadiodController) buildCommand(channelName string, ssrc uint32, params
 // Matches ka9q-radio's encode_int32() -> encode_int64()
 func encodeInt32(buf *[]byte, tag byte, value uint32) []byte {
 	*buf = append(*buf, tag)
-	
+
 	if value == 0 {
 		*buf = append(*buf, 0) // Zero length for zero value
 		return *buf
 	}
-	
+
 	// Convert to uint64 and suppress leading zeros
 	x := uint64(value)
 	length := 8
@@ -493,13 +571,13 @@ func encodeInt32(buf *[]byte, tag byte, value uint32) []byte {
 		x <<= 8
 		length--
 	}
-	
+
 	*buf = append(*buf, byte(length))
 	for i := 0; i < length; i++ {
 		*buf = append(*buf, byte(x>>56))
 		x <<= 8
 	}
-	
+
 	return *buf
 }
 
@@ -507,28 +585,28 @@ func encodeInt32(buf *[]byte, tag byte, value uint32) []byte {
 // Matches ka9q-radio's encode_double() which converts to uint64 then suppresses zeros
 func encodeDouble(buf *[]byte, tag byte, value float64) []byte {
 	*buf = append(*buf, tag)
-	
+
 	// Convert double to uint64 via IEEE 754 bits
 	bits := math.Float64bits(value)
-	
+
 	if bits == 0 {
 		*buf = append(*buf, 0) // Zero length for zero value
 		return *buf
 	}
-	
+
 	// Suppress leading zeros
 	length := 8
 	for length > 0 && ((bits >> 56) == 0) {
 		bits <<= 8
 		length--
 	}
-	
+
 	*buf = append(*buf, byte(length))
 	for i := 0; i < length; i++ {
 		*buf = append(*buf, byte(bits>>56))
 		bits <<= 8
 	}
-	
+
 	return *buf
 }
 
@@ -536,28 +614,28 @@ func encodeDouble(buf *[]byte, tag byte, value float64) []byte {
 // Matches ka9q-radio's encode_float() which converts to uint32 then suppresses zeros
 func encodeFloat(buf *[]byte, tag byte, value float32) []byte {
 	*buf = append(*buf, tag)
-	
+
 	// Convert float to uint32 via IEEE 754 bits
 	bits := math.Float32bits(value)
-	
+
 	if bits == 0 {
 		*buf = append(*buf, 0) // Zero length for zero value
 		return *buf
 	}
-	
+
 	// Suppress leading zeros
 	length := 4
 	for length > 0 && ((bits >> 24) == 0) {
 		bits <<= 8
 		length--
 	}
-	
+
 	*buf = append(*buf, byte(length))
 	for i := 0; i < length; i++ {
 		*buf = append(*buf, byte(bits>>24))
 		bits <<= 8
 	}
-	
+
 	return *buf
 }
 
@@ -573,7 +651,7 @@ func encodeByte(buf *[]byte, tag byte, value byte) []byte {
 // Matches ka9q-radio's encode_string()
 func encodeString(buf *[]byte, tag byte, value string) []byte {
 	*buf = append(*buf, tag)
-	
+
 	length := len(value)
 	if length < 128 {
 		*buf = append(*buf, byte(length))
@@ -584,7 +662,7 @@ func encodeString(buf *[]byte, tag byte, value string) []byte {
 		*buf = append(*buf, byte(length>>8))
 		*buf = append(*buf, byte(length))
 	}
-	
+
 	*buf = append(*buf, []byte(value)...)
 	return *buf
 }

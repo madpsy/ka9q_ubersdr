@@ -35,8 +35,8 @@ type UserSpectrumManager struct {
 
 // NewUserSpectrumManager creates a new per-user spectrum manager
 func NewUserSpectrumManager(radiod *RadiodController, config *Config, sessions *SessionManager) (*UserSpectrumManager, error) {
-	// Parse status multicast address
-	statusAddr, err := net.ResolveUDPAddr("udp", config.Radiod.StatusGroup)
+	// Parse status multicast address (with FNV-1 hash fallback)
+	statusAddr, err := resolveMulticastAddr(config.Radiod.StatusGroup)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve status address: %w", err)
 	}
@@ -458,17 +458,17 @@ func (usm *UserSpectrumManager) checkSpectrumParameterMismatch(ssrc uint32, radi
 
 	if !binBWMatch || !binCountMatch {
 		now := time.Now()
-		
+
 		mismatchMutex.Lock()
 		lastLog, logExists := lastMismatchLog[ssrc]
 		lastRetry, retryExists := lastRetryTime[ssrc]
-		
+
 		// Determine if we should log
 		shouldLog := !logExists || now.Sub(lastLog) > mismatchLogPeriod
-		
+
 		// Determine if we should retry (once per second)
 		shouldRetry := !retryExists || now.Sub(lastRetry) > retryPeriod
-		
+
 		if shouldLog {
 			lastMismatchLog[ssrc] = now
 		}
@@ -485,10 +485,10 @@ func (usm *UserSpectrumManager) checkSpectrumParameterMismatch(ssrc uint32, radi
 		// Automatically retry sending the update command
 		if shouldRetry {
 			log.Printf("INFO: Retrying spectrum update for SSRC 0x%08x to correct mismatch", ssrc)
-			
+
 			// Determine if bin count changed (compare with radiod's current value)
 			binCountChanged := sessionBinCount != radiodBinCount
-			
+
 			if err := usm.radiod.UpdateSpectrumChannel(ssrc, sessionFreq, float64(sessionBinBW), sessionBinCount, binCountChanged); err != nil {
 				log.Printf("ERROR: Failed to retry spectrum update for SSRC 0x%08x: %v", ssrc, err)
 			}
@@ -523,17 +523,17 @@ func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodF
 
 	if !freqMatch || !lowEdgeMatch || !highEdgeMatch {
 		now := time.Now()
-		
+
 		mismatchMutex.Lock()
 		lastLog, logExists := lastMismatchLog[ssrc]
 		lastRetry, retryExists := lastRetryTime[ssrc]
-		
+
 		// Determine if we should log
 		shouldLog := !logExists || now.Sub(lastLog) > mismatchLogPeriod
-		
+
 		// Determine if we should retry (once per second)
 		shouldRetry := !retryExists || now.Sub(lastRetry) > retryPeriod
-		
+
 		if shouldLog {
 			lastMismatchLog[ssrc] = now
 		}
@@ -550,7 +550,7 @@ func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodF
 		// Automatically retry sending the update command
 		if shouldRetry {
 			log.Printf("INFO: Retrying audio channel update for SSRC 0x%08x to correct mismatch", ssrc)
-			
+
 			// Send update command with all parameters to ensure they're synchronized
 			// Always send bandwidth edges since that's what we're correcting
 			if err := usm.radiod.UpdateChannel(ssrc, sessionFreq, sessionMode, int(sessionLowEdge), int(sessionHighEdge), true); err != nil {

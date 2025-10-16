@@ -1,318 +1,255 @@
 # Docker Setup for ka9q_ubersdr and ka9q-radio
 
-This directory contains Docker configuration files for running both ka9q-radio (SDR backend) and ka9q_ubersdr (web interface) in containerized environments based on Alpine Linux.
+This directory contains Docker configuration files for running both ka9q_ubersdr (web interface) and ka9q-radio (SDR backend) in containerized environments based on Ubuntu 24.04.
 
 ## Overview
 
-The setup includes two separate Docker images:
+This setup provides two Docker containers that communicate via a private bridge network:
+- **radiod** - ka9q-radio SDR backend for hardware control and signal processing
+- **ubersdr** - ka9q_ubersdr web interface for browser-based SDR control
 
-1. **ka9q-radio** - The SDR backend that interfaces with hardware and provides RTP streams
-2. **ka9q_ubersdr** - The web interface for controlling and monitoring the SDR
+Both containers use a private Docker bridge network (`sdr-network`) for multicast communication, isolating SDR traffic from the host network.
 
 ## Prerequisites
 
 - Docker installed on your system
-- Docker Compose (optional, but recommended)
-- For ka9q_ubersdr: Pre-built binary (see Building section)
-- For ka9q-radio: Source code will be built in the container
-- USB SDR hardware (for ka9q-radio)
+- Docker Compose (recommended)
+- SDR hardware (for radiod container)
+- USB access for SDR devices
 
 ## Files
 
-- **Dockerfile.ka9q-radio** - Alpine Linux container for ka9q-radio SDR backend
-- **Dockerfile.ubersdr** - Alpine Linux container for ka9q_ubersdr web interface
-- **docker-compose.yml** - Orchestrates both services together
-- **entrypoint.sh** - Startup script for ubersdr that handles configuration
+- **Dockerfile** - Ubuntu 24.04 container for ka9q_ubersdr web interface
+- **docker-compose.yml** - Docker Compose configuration for easy deployment
+- **entrypoint.sh** - Startup script that handles configuration and admin password
 - **.dockerignore** - Files to exclude from the Docker build context
 
-## Quick Start with Docker Compose (Both Services)
+## Quick Start with Docker Compose
 
-This is the recommended way to run the complete system.
+This is the recommended way to run both ka9q-radio and ka9q_ubersdr together.
 
-1. Build the ka9q_ubersdr binary:
+### Prerequisites
+
+1. Clone the ka9q-radio repository alongside this project:
    ```bash
-   make build
+   cd /path/to/repos
+   git clone https://github.com/ka9q/ka9q-radio.git
    ```
 
-2. Edit radiod-rx888.conf as needed:
+2. Create the shared Docker network:
    ```bash
-   nano radiod-rx888.conf
+   docker network create sdr-network --subnet 172.20.0.0/16
    ```
 
-3. Set admin password (optional):
+### Starting the Services
+
+1. Set environment variables (optional):
    ```bash
    export ADMIN_PASSWORD=your_secure_password
+   export TZ=America/New_York
    ```
 
-4. Start both services:
+2. Start ka9q-radio first:
    ```bash
-   cd docker
+   cd ~/repos/ka9q-radio/docker
    docker-compose up -d
    ```
 
-5. Access the web interface at `http://localhost:8080`
-
-6. View logs:
+3. Start ka9q_ubersdr:
    ```bash
-   docker-compose logs -f
-   # Or for specific service:
-   docker-compose logs -f radiod
-   docker-compose logs -f ubersdr
+   cd ~/repos/ka9q_ubersdr/docker
+   docker-compose up -d
    ```
 
-7. Stop the services:
-   ```bash
-   docker-compose down
-   ```
+4. Access the web interface at `http://localhost:8080`
 
-## Running Services Individually
+### Managing the Services
 
-### ka9q-radio (SDR Backend)
+View logs:
+```bash
+# From ka9q-radio directory
+docker-compose logs -f
 
-#### Build the Image
+# From ka9q_ubersdr directory
+docker-compose logs -f
+```
+
+Stop the services:
+```bash
+# Stop both (run from each directory)
+docker-compose down
+
+# Or stop all containers
+docker stop ka9q-radio ka9q_ubersdr
+```
+
+Remove everything (including volumes):
+```bash
+docker-compose down -v  # Run in each directory
+docker network rm sdr-network
+```
+
+## Architecture
+
+### Network Configuration
+
+Both containers use an **external shared bridge network** (`sdr-network` on subnet 172.20.0.0/16) for multicast communication:
+
+- **External network**: Created once with `docker network create sdr-network --subnet 172.20.0.0/16`
+- **radiod** container runs ka9q-radio and publishes multicast streams on the bridge network
+- **ubersdr** container connects to radiod via Docker DNS (`radiod:5006` and `radiod:5004`)
+- Multicast addresses are generated using FNV-1 hash algorithm when DNS resolution fails
+- The web interface is exposed on host port 8080
+
+This architecture isolates SDR multicast traffic from the host network while allowing browser access to the web interface. Using an external network allows both docker-compose files to be managed independently while sharing the same network.
+
+### Container Communication
+
+```
+┌─────────────────────────────────────────────────┐
+│ Host Network                                     │
+│                                                  │
+│  ┌────────────────────────────────────────────┐ │
+│  │ sdr-network (172.20.0.0/16)                │ │
+│  │                                            │ │
+│  │  ┌──────────────┐      ┌───────────────┐  │ │
+│  │  │   radiod     │─────▶│   ubersdr     │  │ │
+│  │  │ (ka9q-radio) │      │ (web UI)      │  │ │
+│  │  │              │      │               │  │ │
+│  │  │ Multicast:   │      │ Listens on:   │  │ │
+│  │  │ radiod:5006  │      │ radiod:5006   │  │ │
+│  │  │ radiod:5004  │      │ radiod:5004   │  │ │
+│  │  └──────────────┘      └───────────────┘  │ │
+│  │        │                      │            │ │
+│  └────────┼──────────────────────┼────────────┘ │
+│           │                      │              │
+│           │                      └──────────────┼─▶ Port 8080
+│           │                                     │   (Web Interface)
+│           └─────────────────────────────────────┼─▶ USB Devices
+│                                                 │   (/dev/bus/usb)
+└─────────────────────────────────────────────────┘
+```
+
+## Building and Running with Docker CLI
+
+### Build the Image
 
 From the project root directory:
 
 ```bash
-docker build -f docker/Dockerfile.ka9q-radio -t ka9q_radio:latest .
+docker build -f docker/Dockerfile -t ka9q_ubersdr:latest .
 ```
 
-#### Run the Container
+### Run the Container
 
 ```bash
-# Create a network first
-docker network create ka9q-network
-
-# Run radiod
-docker run -d \
-  --name ka9q_radiod \
-  --network ka9q-network \
-  --privileged \
-  --device /dev/bus/usb:/dev/bus/usb \
-  -v $(pwd)/radiod-rx888.conf:/etc/ka9q-radio/radiod-rx888.conf:ro \
-  -v $(pwd)/docker/radiod-data:/var/lib/ka9q-radio \
-  ka9q_radio:latest
-```
-
-**Note:** The `--privileged` flag and device mapping are required for USB SDR hardware access.
-
-### ka9q_ubersdr (Web Interface)
-
-#### Build the Binary First
-
-```bash
-make build
-```
-
-#### Build the Image
-
-From the project root directory:
-
-```bash
-docker build -f docker/Dockerfile.ubersdr -t ka9q_ubersdr:latest .
-```
-
-#### Run the Container
-
-```bash
-# Create a network first
-docker network create ka9q-network
-
-# Run ubersdr (mount config files from project root)
 docker run -d \
   --name ka9q_ubersdr \
-  --network ka9q-network \
-  -p 8080:8073 \
-  -v $(pwd)/config.yaml:/app/config/config.yaml \
-  -v $(pwd)/bands.yaml:/app/config/bands.yaml \
-  -v $(pwd)/bookmarks.yaml:/app/config/bookmarks.yaml \
+  -p 8080:8080 \
+  -e ADMIN_PASSWORD=your_secure_password \
+  -v ubersdr-data:/app \
   ka9q_ubersdr:latest
 ```
 
 ## Configuration
 
-### ka9q-radio Configuration
+### Environment Variables
 
-#### Environment Variables
-
+- **ADMIN_PASSWORD** - Sets the admin password in config.yaml (optional, updates on every startup if set)
 - **TZ** - Timezone for the container (default: `UTC`)
 
-#### Volumes
+### Volumes
 
-- `/etc/ka9q-radio/radiod-rx888.conf` - Configuration file (mount from project root)
-- `/var/lib/ka9q-radio` - Data directory (wisdom files, etc.)
-
-- `/var/lib/ka9q-radio` - Data directory (wisdom files, etc.)
-
-#### Ports
-
-- **5004/udp** - RTP audio stream
-- **5006/udp** - RTP control
-
-#### Configuration File
-
-The container expects the configuration file to be mounted at `/etc/ka9q-radio/radiod-rx888.conf`. By default, docker-compose mounts the `radiod-rx888.conf` file from the project root directory.
-
-**Note:** The radiod configuration uses multicast addresses (`hf-status.local`, `pcm.local`) which work fine in the container. The ubersdr container is configured to connect to `ka9q_radiod` (the container hostname) instead of multicast addresses, as Docker bridge networks don't support multicast DNS resolution.
-
-#### Hardware Access
-
-The container needs privileged mode and USB device access to communicate with SDR hardware:
-
-```yaml
-privileged: true
-devices:
-  - /dev/bus/usb:/dev/bus/usb
-```
-
-### ka9q_ubersdr Configuration
-
-#### Environment Variables
-
-- **CONFIG_PATH** - Path to the config.yaml file (default: `/app/config/config.yaml`)
-- **TZ** - Timezone for the container (default: `UTC`)
-
-#### Volumes
-
-- `/app` - Working directory (persistent volume mounted to `docker/ubersdr-data/`)
+- `/app` - Working directory (Docker named volume `ubersdr-data`)
   - Contains config files: `config.yaml`, `bands.yaml`, `bookmarks.yaml`
   - On first run, example configs are automatically copied here
-  - Edit files directly in `docker/ubersdr-data/` directory
+  - Managed by Docker's volume system for persistence
 
-**Important:** ka9q_ubersdr expects config files in its current working directory (/app). The entire /app directory is mounted as a volume for persistence. Configuration files are automatically initialized from examples on first run, and Docker networking fixes plus admin password are applied on every startup.
+**Important:** ka9q_ubersdr expects config files in its current working directory (/app). The entire /app directory is stored in a Docker named volume for persistence. Configuration files are automatically initialized from examples on first run, and Docker networking fixes plus admin password are applied on every startup.
 
-#### Ports
+### Ports
 
 - **8080/tcp** - Web interface
 
-#### Automatic Configuration Changes
+### Automatic Configuration Changes
 
-The entrypoint script runs on every container startup and:
-1. **Initializes config files** - Copies example configs to `/app/config/` if they don't exist
-2. **Applies Docker networking fixes** to config.yaml:
-   - Changes `radiod->interface` from `"lo"` to `""` (listen on all interfaces)
-   - Changes `radiod->status_group` from `"hf-status.local:5006"` to `"ka9q_radiod:5006"`
-   - Changes `radiod->data_group` from `"pcm.local:5004"` to `"ka9q_radiod:5004"`
-3. **Updates admin password** - If `ADMIN_PASSWORD` environment variable is set, it overwrites the password in config.yaml
+The ubersdr entrypoint script runs on every container startup and:
+1. **Initializes config files** - Copies example configs to `/app` if they don't exist
+2. **Applies Docker bridge networking fixes** to config.yaml:
+   - Sets `radiod->interface` to `"eth0"` (Docker bridge interface)
+   - Changes `radiod->status_group` from `"hf-status.local:5006"` to `"radiod:5006"`
+   - Changes `radiod->data_group` from `"pcm.local:5004"` to `"radiod:5004"`
+3. **Updates admin password** - If `ADMIN_PASSWORD` environment variable is set, overwrites the password in config.yaml
 
-These changes ensure proper communication between containers on the private network, as multicast DNS (.local) doesn't work in Docker bridge networks.
+These changes ensure proper communication between containers on the private bridge network.
 
-## Network Configuration
+## Customizing Configuration
 
-### Docker Compose Setup
+Configuration files are stored in the Docker named volume `ubersdr-data` and persist across container restarts:
 
-The docker-compose.yml creates a private bridge network (`ka9q-network`) for both services:
-- Both containers communicate on the private network
-- ubersdr can access radiod by container name (`radiod`)
-- Only ubersdr's web interface (port 8080) is exposed to the host
-- RTP streams remain internal to the private network
+1. On first run, example configs are automatically copied to the volume
 
-### Standalone Containers
+2. Edit configuration files by accessing them in the running container:
+   ```bash
+   # Copy config out to edit
+   docker cp ka9q_ubersdr:/app/config.yaml ./config.yaml
+   nano config.yaml
+   docker cp ./config.yaml ka9q_ubersdr:/app/config.yaml
+   
+   # Or edit directly in the container
+   docker exec -it ka9q_ubersdr nano /app/config.yaml
+   ```
 
-If running containers separately, they must be on the same network to communicate:
+3. Restart the container to apply changes:
+   ```bash
+   docker-compose restart ubersdr
+   ```
 
+**Alternative:** You can also inspect the volume location:
 ```bash
-# Create a network
-docker network create ka9q-network
-
-# Run radiod on the network
-docker run --network ka9q-network --name radiod ...
-
-# Run ubersdr on the same network
-docker run --network ka9q-network --name ubersdr ...
+docker volume inspect ubersdr-data
+# Then edit files at the Mountpoint location shown
 ```
 
-This allows ubersdr to connect to radiod using the container name as hostname.
-
-### Multicast Support
-
-For multicast networking, use host network mode:
-
-```yaml
-network_mode: host
-```
-
-Or with Docker CLI:
+**Tip:** You can also set the admin password via environment variable:
 ```bash
-docker run --network host ...
+ADMIN_PASSWORD=mysecurepassword docker-compose up -d
 ```
+This will override the password in config.yaml on every startup.
 
-**Note:** When using host network mode, port mappings are ignored.
+## Health Check
 
-## Health Checks
+The container includes a health check that verifies the web interface is responding:
 
-### ka9q-radio
-
-Checks if the radiod process is running:
 ```bash
-docker ps  # Check HEALTH status
-```
-
-### ka9q_ubersdr
-
-Verifies the web interface is responding:
-```bash
-docker ps  # Check HEALTH status
+# Check container health
+docker ps
+# or
+docker-compose ps
 ```
 
 ## Troubleshooting
 
-### ka9q-radio Issues
-
-#### Container won't start
-
-1. Check logs:
-   ```bash
-   docker-compose logs radiod
-   ```
-
-2. Verify USB device access:
-   ```bash
-   docker exec ka9q_radiod ls -la /dev/bus/usb
-   ```
-
-3. Check if SDR hardware is detected:
-   ```bash
-   docker exec ka9q_radiod lsusb
-   ```
-
-#### No audio output
-
-1. Verify RTP ports are accessible:
-   ```bash
-   netstat -an | grep 5004
-   ```
-
-2. Check radiod configuration file
-3. Verify SDR hardware is working
-
-### ka9q_ubersdr Issues
-
-#### Container won't start
+### Container won't start
 
 1. Check logs:
    ```bash
    docker-compose logs ubersdr
    ```
 
-2. Verify the binary was built:
+2. Verify the build completed successfully:
    ```bash
-   ls -lh ka9q_ubersdr
+   docker-compose build ubersdr
    ```
 
-3. Check file permissions:
-   ```bash
-   chmod +x ka9q_ubersdr
-   ```
-
-#### Can't access web interface
+### Can't access web interface
 
 1. Verify the container is running:
    ```bash
    docker ps
    ```
 
-2. Check port bindings (should show 8080 -> 8073):
+2. Check port bindings (should show 8080 -> 8080):
    ```bash
    docker port ka9q_ubersdr
    ```
@@ -321,24 +258,23 @@ docker ps  # Check HEALTH status
 
 4. Check firewall rules on your host
 
-#### Can't connect to radiod
+### Can't connect to radiod
 
-1. Verify both containers are on the same network:
+1. Verify radiod is running and accessible
+
+2. Check the network configuration between containers/host
+
+3. Verify the addresses in config.yaml:
    ```bash
-   docker network inspect ka9q-network
+   docker exec ka9q_ubersdr cat /app/config.yaml | grep -A 3 radiod:
    ```
 
-2. Check radiod is running and healthy:
+4. Test connectivity:
    ```bash
-   docker ps
+   docker exec ka9q_ubersdr ping -c 3 radiod
+   # or
+   docker exec ka9q_ubersdr ping -c 3 host.docker.internal
    ```
-
-3. Verify ubersdr can reach radiod:
-   ```bash
-   docker exec ka9q_ubersdr ping -c 3 ka9q_radiod
-   ```
-
-4. Check RTP stream configuration in ubersdr config points to `radiod` or `ka9q_radiod`
 
 ### Configuration not updating
 
@@ -349,72 +285,24 @@ docker ps  # Check HEALTH status
 
 2. Restart the container after configuration changes:
    ```bash
-   docker-compose restart
+   docker-compose restart ubersdr
    ```
 
 ## Updating
 
-### Update ka9q-radio
-
-Rebuild the image (source code is built during image creation):
+Rebuild the Docker images (source code is built during image creation):
 
 ```bash
+# Update both containers
+docker-compose build
+docker-compose up -d
+
+# Or update individually
+docker-compose build ubersdr
+docker-compose up -d ubersdr
+
 docker-compose build radiod
 docker-compose up -d radiod
-```
-
-### Update ka9q_ubersdr
-
-1. Rebuild the binary:
-   ```bash
-   make build
-   ```
-
-2. Rebuild the Docker image:
-   ```bash
-   docker-compose build ubersdr
-   ```
-
-3. Restart the container:
-   ```bash
-   docker-compose up -d ubersdr
-   ```
-
-## Advanced Usage
-
-### Running Multiple Instances
-
-You can run multiple instances with different configurations:
-
-```bash
-# First instance
-docker-compose -p ka9q1 up -d
-
-# Second instance (edit docker-compose.yml to use different ports first)
-docker-compose -p ka9q2 up -d
-```
-
-### Resource Limits
-
-Add resource limits in docker-compose.yml:
-
-```yaml
-deploy:
-  resources:
-    limits:
-      cpus: '2'
-      memory: 1G
-    reservations:
-      cpus: '0.5'
-      memory: 256M
-```
-
-### Custom Entrypoint
-
-Override the entrypoint for debugging:
-
-```bash
-docker run -it --entrypoint /bin/bash ka9q_ubersdr:latest
 ```
 
 ## Security Considerations
@@ -424,42 +312,51 @@ docker run -it --entrypoint /bin/bash ka9q_ubersdr:latest
 - Keep your Docker images updated
 - Consider using Docker secrets for sensitive data in production
 - Limit network exposure by binding to specific interfaces if needed
-- Be cautious with `--privileged` mode - only use when necessary for hardware access
-- Review and restrict USB device access to only required devices
 
 ## Production Deployment
 
 For production deployments, consider:
 
-1. Using specific Alpine version tags instead of `latest`
+1. Using specific Ubuntu version tags instead of `latest`
 2. Implementing proper logging and monitoring
-3. Setting resource limits
+3. Setting resource limits in docker-compose.yml
 4. Using Docker secrets for sensitive configuration
 5. Running behind a reverse proxy (nginx, traefik) for HTTPS
-6. Regular backups of configuration and data volumes
+6. Regular backups of Docker volumes:
+   ```bash
+   docker run --rm -v ubersdr-data:/data -v $(pwd):/backup ubuntu tar czf /backup/ubersdr-backup.tar.gz /data
+   ```
 7. Implementing automatic restart policies
 8. Using orchestration tools (Kubernetes, Docker Swarm) for high availability
 
-## Performance Optimization
+## Advanced Configuration
 
-### FFTW Wisdom
+### Running Only ubersdr (with external radiod)
 
-For better performance, generate FFTW wisdom in the ka9q-radio container:
+If you want to run only the ubersdr container with an external radiod instance:
 
-```bash
-docker exec ka9q_radiod fftwf-wisdom -v -T 1 -o /var/lib/ka9q-radio/wisdom \
-  rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160
-```
+1. Comment out the radiod service in docker-compose.yml
+2. Update the network configuration to connect to your radiod instance
+3. Modify the ubersdr config.yaml to point to your radiod address
 
-This can take several minutes but will improve FFT performance.
+### USB Device Permissions
 
-### CPU Affinity
+The radiod container runs in privileged mode for USB access. For better security in production:
 
-Pin containers to specific CPU cores for better performance:
+1. Use specific device mappings instead of privileged mode:
+   ```yaml
+   devices:
+     - /dev/bus/usb/001/002:/dev/bus/usb/001/002
+   ```
 
-```yaml
-cpuset: "0,1"  # Use cores 0 and 1
-```
+2. Add udev rules on the host for SDR devices
+
+### Multicast Configuration
+
+The containers use FNV-1 hash-based multicast address generation (matching ka9q-radio's behavior):
+- When DNS resolution fails for "radiod:5006", a multicast address is generated using FNV-1 hash
+- Addresses are in the 239.0.0.0/8 range (administratively scoped)
+- Collision avoidance for 239.0.0.0/24 and 239.128.0.0/24 ranges
 
 ## Support
 
@@ -467,7 +364,6 @@ For issues specific to the Docker setup:
 - Docker logs: `docker-compose logs`
 - Container status: `docker-compose ps`
 - System resources: `docker stats`
+- Network inspection: `docker network inspect docker_sdr-network`
 
-For application-specific issues, refer to:
-- ka9q-radio: `ka9q-radio/README.md`
-- ka9q_ubersdr: Main project `README.md`
+For application-specific issues, refer to the main project README.md

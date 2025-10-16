@@ -1,76 +1,33 @@
 version: '3.8'
 
-networks:
-  ka9q-network:
-    driver: bridge
-
 services:
-  # ka9q-radio service - SDR backend
-  radiod:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.ka9q-radio
-    image: ka9q_radio:latest
-    container_name: ka9q_radiod
-    restart: unless-stopped
-    
-    # Environment variables
-    environment:
-      - TZ=${TZ:-UTC}
-    
-    # Connect to private network
-    networks:
-      - ka9q-network
-    
-    # Volumes for configuration
-    # Mount the radiod-rx888.conf from project root
-    volumes:
-      - ../radiod-rx888.conf:/etc/ka9q-radio/radiod-rx888.conf:ro
-      - ./radiod-data:/var/lib/ka9q-radio
-    
-    # Privileged mode for USB device access
-    privileged: true
-    
-    # Device access for SDR hardware
-    devices:
-      - /dev/bus/usb:/dev/bus/usb
-    
-    # Health check
-    healthcheck:
-      test: ["CMD", "pgrep", "radiod"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
   # ka9q_ubersdr service - Web interface
+  # Note: ka9q-radio (radiod) is managed separately in ~/repos/ka9q-radio/docker
   ubersdr:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.ubersdr
+      dockerfile: docker/Dockerfile
     image: ka9q_ubersdr:latest
     container_name: ka9q_ubersdr
-    depends_on:
-      - radiod
     restart: unless-stopped
+    
+    # Use external bridge network for multicast communication with radiod
+    # The radiod container must be started first from ka9q-radio repository
+    networks:
+      - sdr-network
+    
+    # Expose web interface port
+    ports:
+      - "8080:8080"
     
     # Environment variables
     environment:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - TZ=${TZ:-UTC}
     
-    # Ports - expose web interface on host
-    ports:
-      - "8080:8080"  # Web interface (ubersdr listens on 8080 in container)
-    
     # Volumes for persistent configuration
-    # Mount /app as a volume so config files persist in CWD
     volumes:
-      - ./ubersdr-data:/app
-    
-    # Connect to private network to communicate with radiod
-    networks:
-      - ka9q-network
+      - ubersdr-data:/app
     
     # Healthcheck
     healthcheck:
@@ -90,7 +47,12 @@ services:
     #       cpus: '0.5'
     #       memory: 256M
 
-# Optional: Create named volumes
+# External network shared with ka9q-radio container
+# Create with: docker network create sdr-network --subnet 172.20.0.0/16
+# The ka9q-radio container in ~/repos/ka9q-radio/docker also uses this network
+networks:
+  sdr-network:
+    external: true
+
 volumes:
-  config:
-  data:
+  ubersdr-data:

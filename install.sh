@@ -137,6 +137,44 @@ echo ""
 echo "Waiting for services to be healthy..."
 sleep 5
 
+# Check for FFTW wisdom file after installation
+WISDOM_FILE="/var/lib/docker/volumes/docker_radiod-data/_data/wisdom"
+echo ""
+echo "Checking for FFTW wisdom file..."
+if sudo test -f "$WISDOM_FILE"; then
+    echo "FFTW wisdom file found."
+else
+    echo "FFTW wisdom file not found."
+    echo ""
+    echo "It's recommended to generate an FFTW wisdom file for optimal FFT performance."
+    echo "This file is specific to your computer's hardware."
+    echo ""
+    echo "WARNING: This process may take over an hour on slower CPUs."
+    echo ""
+    read -p "Would you like to generate the wisdom file now? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Stopping services..."
+        sudo docker compose down
+        echo ""
+        echo "Generating FFTW wisdom file..."
+        echo "This will take some time. Please be patient..."
+        sudo fftwf-wisdom -v -T 1 -o /var/lib/docker/volumes/docker_radiod-data/_data/wisdom rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160
+        echo "FFTW wisdom file generated successfully!"
+        echo ""
+        echo "Starting services with the new wisdom file..."
+        sudo ADMIN_PASSWORD="$ADMIN_PASSWORD" docker compose up -d
+        echo "Services started."
+        sleep 5
+    else
+        echo "Skipping wisdom file generation."
+        echo "You can generate it later by running:"
+        echo "  sudo fftwf-wisdom -v -T 1 -o /var/lib/docker/volumes/docker_radiod-data/_data/wisdom rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160"
+        echo "Then restart the containers with:"
+        echo "  cd ~/ubersdr/ka9q_ubersdr/docker && sudo docker compose down && sudo docker compose up -d"
+    fi
+fi
+
 # Get the IP address of the interface with the default route
 DEFAULT_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
 if [ -z "$DEFAULT_IP" ]; then

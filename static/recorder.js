@@ -87,8 +87,9 @@ async function startRecording() {
             window.recorderGainNode.gain.value = 1.0; // Unity gain (no change to audio)
         }
         
-        // Connect the recorder gain node to both the destination and our MediaStreamDestination
-        window.recorderGainNode.connect(window.audioContext.destination);
+        // Connect the recorder gain node to MediaStreamDestination for recording
+        // NOTE: Do NOT connect to audioContext.destination here - app.js handles that
+        // to avoid dual connection which would double the audio volume
         window.recorderGainNode.connect(dest);
 
         // Create MediaRecorder

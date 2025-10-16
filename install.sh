@@ -113,10 +113,12 @@ sudo docker compose build
 
 echo ""
 echo "Starting services..."
-# Prompt for admin password if not set
+# Generate random admin password if not set
 if [ -z "$ADMIN_PASSWORD" ]; then
-    read -sp "Enter admin password (or press Enter for no password): " ADMIN_PASSWORD
-    echo ""
+    ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
+    GENERATED_PASSWORD=true
+else
+    GENERATED_PASSWORD=false
 fi
 
 sudo ADMIN_PASSWORD="$ADMIN_PASSWORD" docker compose up -d
@@ -132,6 +134,10 @@ echo "=========================================="
 echo ""
 echo "Services are now running!"
 echo ""
+if [ "$GENERATED_PASSWORD" = true ]; then
+    echo "Admin password (save this): $ADMIN_PASSWORD"
+    echo ""
+fi
 echo "Web interface available at:"
 echo "  http://localhost:8080"
 echo ""

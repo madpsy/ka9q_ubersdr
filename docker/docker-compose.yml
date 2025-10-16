@@ -25,9 +25,9 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - TZ=${TZ:-UTC}
     
-    # Volumes for persistent configuration
+    # Volumes for persistent configuration only (static files are part of the image)
     volumes:
-      - ubersdr-data:/app
+      - ubersdr-config:/app/config
     
     # Healthcheck
     healthcheck:
@@ -55,4 +55,4 @@ networks:
     external: true
 
 volumes:
-  ubersdr-data:
+  ubersdr-config:

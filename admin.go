@@ -110,20 +110,30 @@ func (s *AdminSessionStore) cleanupExpiredSessions() {
 type AdminHandler struct {
 	config        *Config
 	configFile    string
+	configDir     string
 	sessions      *SessionManager
 	adminSessions *AdminSessionStore
 	ipBanManager  *IPBanManager
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, sessions *SessionManager, ipBanManager *IPBanManager) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager) *AdminHandler {
 	return &AdminHandler{
 		config:        config,
 		configFile:    configFile,
+		configDir:     configDir,
 		sessions:      sessions,
 		adminSessions: NewAdminSessionStore(),
 		ipBanManager:  ipBanManager,
 	}
+}
+
+// getConfigPath returns the full path to a config file
+func (ah *AdminHandler) getConfigPath(filename string) string {
+	if ah.configDir == "" || ah.configDir == "." {
+		return filename
+	}
+	return ah.configDir + "/" + filename
 }
 
 // HandleLogin handles admin login and creates a session
@@ -298,10 +308,12 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Configuration updated. Restart server to apply changes.",
-	})
+	}); err != nil {
+		log.Printf("Error encoding config update response: %v", err)
+	}
 }
 
 // handlePatchConfig updates specific configuration values
@@ -346,10 +358,12 @@ func (ah *AdminHandler) handlePatchConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Configuration updated. Restart server to apply changes.",
-	})
+	}); err != nil {
+		log.Printf("Error encoding config patch response: %v", err)
+	}
 }
 
 // setNestedValue sets a value in a nested map using dot notation
@@ -469,7 +483,7 @@ func (ah *AdminHandler) HandleBookmarks(w http.ResponseWriter, r *http.Request) 
 
 // handleGetBookmarks returns all bookmarks
 func (ah *AdminHandler) handleGetBookmarks(w http.ResponseWriter, r *http.Request) {
-	data, err := os.ReadFile("bookmarks.yaml")
+	data, err := os.ReadFile(ah.getConfigPath("bookmarks.yaml"))
 	if err != nil {
 		// If file doesn't exist, return empty bookmarks
 		w.WriteHeader(http.StatusOK)
@@ -503,7 +517,7 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 
 	// Read existing bookmarks
 	var bookmarksConfig map[string]interface{}
-	data, err := os.ReadFile("bookmarks.yaml")
+	data, err := os.ReadFile(ah.getConfigPath("bookmarks.yaml"))
 	if err == nil {
 		yaml.Unmarshal(data, &bookmarksConfig)
 	} else {
@@ -535,7 +549,7 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := os.WriteFile("bookmarks.yaml", yamlData, 0644); err != nil {
+	if err := os.WriteFile(ah.getConfigPath("bookmarks.yaml"), yamlData, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write bookmarks file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -571,7 +585,7 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 			return
 		}
 
-		if err := os.WriteFile("bookmarks.yaml", yamlData, 0644); err != nil {
+		if err := os.WriteFile(ah.getConfigPath("bookmarks.yaml"), yamlData, 0644); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to write bookmarks file: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -609,7 +623,7 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 	}
 
 	// Read existing bookmarks
-	data, err := os.ReadFile("bookmarks.yaml")
+	data, err := os.ReadFile(ah.getConfigPath("bookmarks.yaml"))
 	if err != nil {
 		http.Error(w, "Failed to read bookmarks file", http.StatusInternalServerError)
 		return
@@ -647,7 +661,7 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if err := os.WriteFile("bookmarks.yaml", yamlData, 0644); err != nil {
+	if err := os.WriteFile(ah.getConfigPath("bookmarks.yaml"), yamlData, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write bookmarks file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -679,7 +693,7 @@ func (ah *AdminHandler) handleDeleteBookmark(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Read existing bookmarks
-	data, err := os.ReadFile("bookmarks.yaml")
+	data, err := os.ReadFile(ah.getConfigPath("bookmarks.yaml"))
 	if err != nil {
 		http.Error(w, "Failed to read bookmarks file", http.StatusInternalServerError)
 		return
@@ -709,7 +723,7 @@ func (ah *AdminHandler) handleDeleteBookmark(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := os.WriteFile("bookmarks.yaml", yamlData, 0644); err != nil {
+	if err := os.WriteFile(ah.getConfigPath("bookmarks.yaml"), yamlData, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write bookmarks file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -728,7 +742,7 @@ func (ah *AdminHandler) handleDeleteBookmark(w http.ResponseWriter, r *http.Requ
 
 // reloadBookmarks reloads bookmarks from bookmarks.yaml into memory
 func (ah *AdminHandler) reloadBookmarks() error {
-	bookmarksConfig, err := LoadConfig("bookmarks.yaml")
+	bookmarksConfig, err := LoadConfig(ah.getConfigPath("bookmarks.yaml"))
 	if err != nil {
 		return fmt.Errorf("failed to reload bookmarks: %w", err)
 	}
@@ -757,7 +771,7 @@ func (ah *AdminHandler) HandleBands(w http.ResponseWriter, r *http.Request) {
 
 // handleGetBands returns all bands
 func (ah *AdminHandler) handleGetBands(w http.ResponseWriter, r *http.Request) {
-	data, err := os.ReadFile("bands.yaml")
+	data, err := os.ReadFile(ah.getConfigPath("bands.yaml"))
 	if err != nil {
 		// If file doesn't exist, return empty bands
 		w.WriteHeader(http.StatusOK)
@@ -796,7 +810,7 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 
 	// Read existing bands
 	var bandsConfig map[string]interface{}
-	data, err := os.ReadFile("bands.yaml")
+	data, err := os.ReadFile(ah.getConfigPath("bands.yaml"))
 	if err == nil {
 		yaml.Unmarshal(data, &bandsConfig)
 	} else {
@@ -828,7 +842,7 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.WriteFile("bands.yaml", yamlData, 0644); err != nil {
+	if err := os.WriteFile(ah.getConfigPath("bands.yaml"), yamlData, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write bands file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -864,7 +878,7 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		if err := os.WriteFile("bands.yaml", yamlData, 0644); err != nil {
+		if err := os.WriteFile(ah.getConfigPath("bands.yaml"), yamlData, 0644); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to write bands file: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -907,7 +921,7 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 	}
 
 	// Read existing bands
-	data, err := os.ReadFile("bands.yaml")
+	data, err := os.ReadFile(ah.getConfigPath("bands.yaml"))
 	if err != nil {
 		http.Error(w, "Failed to read bands file", http.StatusInternalServerError)
 		return
@@ -945,7 +959,7 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := os.WriteFile("bands.yaml", yamlData, 0644); err != nil {
+	if err := os.WriteFile(ah.getConfigPath("bands.yaml"), yamlData, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write bands file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -977,7 +991,7 @@ func (ah *AdminHandler) handleDeleteBand(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Read existing bands
-	data, err := os.ReadFile("bands.yaml")
+	data, err := os.ReadFile(ah.getConfigPath("bands.yaml"))
 	if err != nil {
 		http.Error(w, "Failed to read bands file", http.StatusInternalServerError)
 		return
@@ -1007,7 +1021,7 @@ func (ah *AdminHandler) handleDeleteBand(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := os.WriteFile("bands.yaml", yamlData, 0644); err != nil {
+	if err := os.WriteFile(ah.getConfigPath("bands.yaml"), yamlData, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write bands file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -1026,7 +1040,7 @@ func (ah *AdminHandler) handleDeleteBand(w http.ResponseWriter, r *http.Request)
 
 // reloadBands reloads bands from bands.yaml into memory
 func (ah *AdminHandler) reloadBands() error {
-	bandsConfig, err := LoadConfig("bands.yaml")
+	bandsConfig, err := LoadConfig(ah.getConfigPath("bands.yaml"))
 	if err != nil {
 		return fmt.Errorf("failed to reload bands: %w", err)
 	}
@@ -1262,7 +1276,7 @@ func (ah *AdminHandler) HandleExtensionsAdmin(w http.ResponseWriter, r *http.Req
 
 // handleGetExtensionsAdmin returns all extensions configuration
 func (ah *AdminHandler) handleGetExtensionsAdmin(w http.ResponseWriter, r *http.Request) {
-	data, err := os.ReadFile("extensions.yaml")
+	data, err := os.ReadFile(ah.getConfigPath("extensions.yaml"))
 	if err != nil {
 		// If file doesn't exist, return empty extensions
 		w.WriteHeader(http.StatusOK)
@@ -1295,7 +1309,7 @@ func (ah *AdminHandler) handleUpdateExtensions(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := os.WriteFile("extensions.yaml", yamlData, 0644); err != nil {
+	if err := os.WriteFile(ah.getConfigPath("extensions.yaml"), yamlData, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write extensions file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -1314,7 +1328,7 @@ func (ah *AdminHandler) handleUpdateExtensions(w http.ResponseWriter, r *http.Re
 
 // reloadExtensions reloads extensions from extensions.yaml into memory
 func (ah *AdminHandler) reloadExtensions() error {
-	extensionsConfig, err := LoadConfig("extensions.yaml")
+	extensionsConfig, err := LoadConfig(ah.getConfigPath("extensions.yaml"))
 	if err != nil {
 		return fmt.Errorf("failed to reload extensions: %w", err)
 	}

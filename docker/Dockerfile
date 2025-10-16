@@ -34,14 +34,14 @@ WORKDIR /app
 COPY --from=builder /build/ka9q_ubersdr /usr/local/bin/ka9q_ubersdr
 RUN chmod +x /usr/local/bin/ka9q_ubersdr
 
-# Copy static files
+# Copy static files (part of the build, not a volume)
 COPY --from=builder /build/static ./static
 
 # Copy example configuration files to /etc/ka9q_ubersdr (not affected by volume mounts)
-COPY --from=builder /build/config.yaml.example /etc/ka9q_ubersdr/config.yaml.example
-COPY --from=builder /build/bands.yaml.example /etc/ka9q_ubersdr/bands.yaml.example
-COPY --from=builder /build/bookmarks.yaml.example /etc/ka9q_ubersdr/bookmarks.yaml.example
-COPY --from=builder /build/extensions.yaml.example /etc/ka9q_ubersdr/extensions.yaml.example
+COPY --from=builder /build/config/config.yaml.example /etc/ka9q_ubersdr/config.yaml.example
+COPY --from=builder /build/config/bands.yaml.example /etc/ka9q_ubersdr/bands.yaml.example
+COPY --from=builder /build/config/bookmarks.yaml.example /etc/ka9q_ubersdr/bookmarks.yaml.example
+COPY --from=builder /build/config/extensions.yaml.example /etc/ka9q_ubersdr/extensions.yaml.example
 
 # Copy entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh

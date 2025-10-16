@@ -153,6 +153,8 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Server.ConnRateLimit == 0 {
 		config.Server.ConnRateLimit = 2 // Default 2 connections/sec per IP
 	}
+	// Note: LogFile path is relative to working directory, not config directory
+	// If you want it in the config directory, set it explicitly in config.yaml
 	if config.Server.LogFile == "" {
 		config.Server.LogFile = "web.log"
 	}

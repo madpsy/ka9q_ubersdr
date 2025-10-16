@@ -1,31 +1,35 @@
 #!/bin/bash
 set -e
 
-# Working directory is /app (CWD where ka9q_ubersdr expects config files)
+# Working directory is /app
+# Config files are in /app/config (mounted as a volume)
 
 # Function to initialize config files from examples if they don't exist
 initialize_configs() {
-    echo "Checking configuration files in /app..."
+    echo "Checking configuration files in /app/config..."
+
+    # Create config directory if it doesn't exist
+    mkdir -p /app/config
     
-    # Copy example configs from /etc/ka9q_ubersdr if they don't exist in /app
-    if [ ! -f "/app/config.yaml" ]; then
+    # Copy example configs from /etc/ka9q_ubersdr if they don't exist in /app/config
+    if [ ! -f "/app/config/config.yaml" ]; then
         echo "Initializing config.yaml from example..."
-        cp /etc/ka9q_ubersdr/config.yaml.example /app/config.yaml
+        cp /etc/ka9q_ubersdr/config.yaml.example /app/config/config.yaml
     fi
     
-    if [ ! -f "/app/bands.yaml" ]; then
+    if [ ! -f "/app/config/bands.yaml" ]; then
         echo "Initializing bands.yaml from example..."
-        cp /etc/ka9q_ubersdr/bands.yaml.example /app/bands.yaml
+        cp /etc/ka9q_ubersdr/bands.yaml.example /app/config/bands.yaml
     fi
     
-    if [ ! -f "/app/bookmarks.yaml" ]; then
+    if [ ! -f "/app/config/bookmarks.yaml" ]; then
         echo "Initializing bookmarks.yaml from example..."
-        cp /etc/ka9q_ubersdr/bookmarks.yaml.example /app/bookmarks.yaml
+        cp /etc/ka9q_ubersdr/bookmarks.yaml.example /app/config/bookmarks.yaml
     fi
     
-    if [ ! -f "/app/extensions.yaml" ]; then
+    if [ ! -f "/app/config/extensions.yaml" ]; then
         echo "Initializing extensions.yaml from example..."
-        cp /etc/ka9q_ubersdr/extensions.yaml.example /app/extensions.yaml
+        cp /etc/ka9q_ubersdr/extensions.yaml.example /app/config/extensions.yaml
     fi
 }
 
@@ -34,13 +38,13 @@ update_admin_password() {
     if [ -n "$ADMIN_PASSWORD" ]; then
         echo "ADMIN_PASSWORD environment variable detected"
         echo "Updating admin password in config file..."
-        sed -i "s/password:.*/password: \"$ADMIN_PASSWORD\"/" /app/config.yaml
+        sed -i "s/password:.*/password: \"$ADMIN_PASSWORD\"/" /app/config/config.yaml
         echo "Admin password updated successfully"
     else
         echo "No ADMIN_PASSWORD environment variable set, generating random password"
         # Generate a random password to avoid security error
         RANDOM_PASSWORD=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 16)
-        sed -i "s/password:.*/password: \"$RANDOM_PASSWORD\"/" /app/config.yaml
+        sed -i "s/password:.*/password: \"$RANDOM_PASSWORD\"/" /app/config/config.yaml
         echo "Generated random admin password (set ADMIN_PASSWORD env var to use custom password)"
     fi
 }
@@ -78,7 +82,7 @@ fix_docker_networking() {
     if [ -n "$bridge_iface" ]; then
         echo "Using bridge interface: $bridge_iface"
         # Set the interface in config - match any existing interface value
-        sed -i "s/interface: \".*\"/interface: \"$bridge_iface\"/" /app/config.yaml
+        sed -i "s/interface: \".*\"/interface: \"$bridge_iface\"/" /app/config/config.yaml
         
         # Enable allmulticast on the interface
         echo "Enabling allmulticast on $bridge_iface..."
@@ -90,7 +94,7 @@ fix_docker_networking() {
     else
         echo "Using all interfaces for multicast"
         # Fix interface to listen on all interfaces
-        sed -i 's/interface: ".*"/interface: ""/' /app/config.yaml
+        sed -i 's/interface: ".*"/interface: ""/' /app/config/config.yaml
     fi
     
     echo "Docker bridge networking configuration applied"
@@ -100,12 +104,18 @@ fix_docker_networking() {
 initialize_configs
 
 # Apply Docker networking fixes and admin password
-if [ -f "/app/config.yaml" ]; then
+if [ -f "/app/config/config.yaml" ]; then
     fix_docker_networking
     update_admin_password
 else
-    echo "Warning: Config file not found at /app/config.yaml"
+    echo "Warning: Config file not found at /app/config/config.yaml"
 fi
 
-# Execute the main command
-exec "$@"
+# If the command is ka9q_ubersdr, add the -config-dir flag
+if [ "$1" = "ka9q_ubersdr" ]; then
+    shift
+    exec ka9q_ubersdr -config-dir /app/config "$@"
+else
+    # Execute the command as-is
+    exec "$@"
+fi

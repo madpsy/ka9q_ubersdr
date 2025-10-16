@@ -107,6 +107,7 @@ func httpLogger(logFile *os.File, next http.Handler) http.Handler {
 
 func main() {
 	// Parse command line flags
+	configDir := flag.String("config-dir", ".", "Directory containing configuration files")
 	configFile := flag.String("config", "config.yaml", "Path to configuration file")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	stats := flag.Bool("stats", false, "Enable WebSocket statistics logging")
@@ -125,7 +126,11 @@ func main() {
 	}
 
 	// Load configuration
-	config, err := LoadConfig(*configFile)
+	configPath := *configFile
+	if *configDir != "." {
+		configPath = *configDir + "/" + *configFile
+	}
+	config, err := LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
@@ -142,7 +147,11 @@ func main() {
 	}
 
 	// Load bookmarks from bookmarks.yaml if it exists
-	bookmarksConfig, err := LoadConfig("bookmarks.yaml")
+	bookmarksPath := "bookmarks.yaml"
+	if *configDir != "." {
+		bookmarksPath = *configDir + "/bookmarks.yaml"
+	}
+	bookmarksConfig, err := LoadConfig(bookmarksPath)
 	if err == nil {
 		config.Bookmarks = bookmarksConfig.Bookmarks
 		log.Printf("Loaded %d bookmarks from bookmarks.yaml", len(config.Bookmarks))
@@ -151,7 +160,11 @@ func main() {
 	}
 
 	// Load bands from bands.yaml if it exists
-	bandsConfig, err := LoadConfig("bands.yaml")
+	bandsPath := "bands.yaml"
+	if *configDir != "." {
+		bandsPath = *configDir + "/bands.yaml"
+	}
+	bandsConfig, err := LoadConfig(bandsPath)
 	if err == nil {
 		config.Bands = bandsConfig.Bands
 		log.Printf("Loaded %d amateur radio bands from bands.yaml", len(config.Bands))
@@ -160,7 +173,11 @@ func main() {
 	}
 
 	// Load extensions from extensions.yaml if it exists
-	extensionsConfig, err := LoadConfig("extensions.yaml")
+	extensionsPath := "extensions.yaml"
+	if *configDir != "." {
+		extensionsPath = *configDir + "/extensions.yaml"
+	}
+	extensionsConfig, err := LoadConfig(extensionsPath)
 	if err == nil {
 		config.Extensions = extensionsConfig.Extensions
 		log.Printf("Loaded %d enabled extensions from extensions.yaml", len(config.Extensions))
@@ -189,7 +206,11 @@ func main() {
 	sessions := NewSessionManager(config, radiod)
 
 	// Initialize IP ban manager
-	ipBanManager := NewIPBanManager("banned_ips.yaml")
+	bannedIPsPath := "banned_ips.yaml"
+	if *configDir != "." {
+		bannedIPsPath = *configDir + "/banned_ips.yaml"
+	}
+	ipBanManager := NewIPBanManager(bannedIPsPath)
 
 	// Initialize audio receiver
 	audioReceiver, err := NewAudioReceiver(
@@ -236,7 +257,7 @@ func main() {
 	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter) // New per-user spectrum
 
 	// Initialize admin handler
-	adminHandler := NewAdminHandler(config, *configFile, sessions, ipBanManager)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -287,12 +308,17 @@ func main() {
 	http.HandleFunc("/admin/banned-ips", adminHandler.AuthMiddleware(adminHandler.HandleBannedIPs))
 
 	// Open log file for HTTP request logging
-	logFile, err := os.OpenFile(config.Server.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// If LogFile is a relative path and we have a config directory, prepend it
+	logFilePath := config.Server.LogFile
+	if *configDir != "." && !strings.HasPrefix(logFilePath, "/") {
+		logFilePath = *configDir + "/" + logFilePath
+	}
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		log.Fatalf("Failed to open log file %s: %v", config.Server.LogFile, err)
+		log.Fatalf("Failed to open log file %s: %v", logFilePath, err)
 	}
 	defer logFile.Close()
-	log.Printf("HTTP request logging to: %s", config.Server.LogFile)
+	log.Printf("HTTP request logging to: %s", logFilePath)
 
 	// Serve static files
 	fs := http.FileServer(http.Dir("static"))

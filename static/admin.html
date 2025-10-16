@@ -424,6 +424,20 @@
                         <div class="spinner"></div>
                         <p>Loading banned IPs...</p>
                     </div>
+                    <div id="addBanForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+                        <h3>Ban IP Address or CIDR Range</h3>
+                        <div class="config-field">
+                            <label>IP Address or CIDR Range</label>
+                            <input type="text" id="newBanIP" placeholder="e.g., 192.168.1.100 or 10.0.0.0/24 or 2001:db8::/32">
+                            <small>Supports IPv4, IPv6, and CIDR notation (e.g., 192.168.1.0/24, 2001:db8::/32)</small>
+                        </div>
+                        <div class="config-field">
+                            <label>Reason</label>
+                            <input type="text" id="newBanReason" placeholder="e.g., Abuse, spam, etc.">
+                        </div>
+                        <button class="btn" onclick="addBannedIP()">Ban IP/Range</button>
+                        <button class="btn btn-secondary" onclick="cancelBanForm()">Cancel</button>
+                    </div>
                 </div>
 
                 <div class="button-group" id="configButtons">
@@ -453,6 +467,7 @@
                     <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
                 </div>
                 <div class="button-group" id="bannedButtons" style="display: none;">
+                    <button class="btn" onclick="showAddBanForm()">Ban IP/Range</button>
                     <button class="btn btn-secondary" onclick="loadBannedIPs()">Refresh Banned IPs</button>
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
@@ -802,6 +817,14 @@
         }
 
         async function saveConfig() {
+            // Disable save button and show loading state
+            const saveButton = event?.target || document.querySelector('.button-group .btn');
+            const originalText = saveButton?.textContent;
+            if (saveButton) {
+                saveButton.disabled = true;
+                saveButton.textContent = 'Saving...';
+            }
+
             try {
                 let configToSave = currentConfig;
                 
@@ -811,6 +834,8 @@
                     return;
                 }
 
+                showAlert('Saving configuration...', 'info');
+
                 const response = await fetch('/admin/config', {
                     method: 'PUT',
                     headers: {
@@ -819,12 +844,21 @@
                     body: JSON.stringify(configToSave)
                 });
 
-                if (!response.ok) throw new Error('Failed to save config');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to save config');
+                }
                 
                 const result = await response.json();
-                showAlert(result.message, 'success');
+                showAlert(result.message || 'Configuration saved successfully', 'success');
             } catch (error) {
                 showAlert('Error saving configuration: ' + error.message, 'error');
+            } finally {
+                // Re-enable save button
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.textContent = originalText;
+                }
             }
         }
 
@@ -837,6 +871,10 @@
         function showAlert(message, type) {
             const alertBox = document.getElementById('alertBox');
             alertBox.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+            
+            // Scroll alert into view so user can see it
+            alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            
             setTimeout(() => {
                 alertBox.innerHTML = '';
             }, 5000);
@@ -1912,6 +1950,96 @@
                 loadBannedIPs(); // Refresh the banned IPs list
             } catch (error) {
                 showAlert('Error unbanning IP: ' + error.message, 'error');
+            }
+        }
+
+        function showAddBanForm() {
+            document.getElementById('addBanForm').style.display = 'block';
+            document.getElementById('newBanIP').value = '';
+            document.getElementById('newBanReason').value = '';
+            document.getElementById('newBanIP').focus();
+        }
+
+        function cancelBanForm() {
+            document.getElementById('addBanForm').style.display = 'none';
+        }
+
+        function validateIPorCIDR(input) {
+            // IPv4 address pattern
+            const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+            // IPv4 CIDR pattern
+            const ipv4CIDRPattern = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
+            // IPv6 address pattern (simplified)
+            const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+            // IPv6 CIDR pattern
+            const ipv6CIDRPattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}\/\d{1,3}$/;
+
+            // Check IPv4
+            if (ipv4Pattern.test(input)) {
+                const parts = input.split('.');
+                return parts.every(part => {
+                    const num = parseInt(part, 10);
+                    return num >= 0 && num <= 255;
+                });
+            }
+
+            // Check IPv4 CIDR
+            if (ipv4CIDRPattern.test(input)) {
+                const [ip, cidr] = input.split('/');
+                const parts = ip.split('.');
+                const cidrNum = parseInt(cidr, 10);
+                return parts.every(part => {
+                    const num = parseInt(part, 10);
+                    return num >= 0 && num <= 255;
+                }) && cidrNum >= 0 && cidrNum <= 32;
+            }
+
+            // Check IPv6 or IPv6 CIDR
+            if (ipv6Pattern.test(input) || ipv6CIDRPattern.test(input)) {
+                if (ipv6CIDRPattern.test(input)) {
+                    const [, cidr] = input.split('/');
+                    const cidrNum = parseInt(cidr, 10);
+                    return cidrNum >= 0 && cidrNum <= 128;
+                }
+                return true;
+            }
+
+            return false;
+        }
+
+        async function addBannedIP() {
+            const ip = document.getElementById('newBanIP').value.trim();
+            const reason = document.getElementById('newBanReason').value.trim() || 'Banned by admin';
+
+            if (!ip) {
+                showAlert('Please enter an IP address or CIDR range', 'error');
+                return;
+            }
+
+            // Validate IP or CIDR format
+            if (!validateIPorCIDR(ip)) {
+                showAlert('Invalid IP address or CIDR range format. Please enter a valid IPv4, IPv6, or CIDR notation.', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/ban', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ip, reason: reason })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to ban IP');
+                }
+
+                const result = await response.json();
+                showAlert(result.message, 'success');
+                cancelBanForm();
+                loadBannedIPs(); // Refresh the banned IPs list
+            } catch (error) {
+                showAlert('Error banning IP: ' + error.message, 'error');
             }
         }
 

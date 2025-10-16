@@ -2,7 +2,17 @@
 
 Web interface for ka9q-radio SDR software.
 
-## Installation
+## Quick Start
+
+Run this one-liner to install and start everything automatically:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install.sh | bash
+```
+
+This will install Docker, clone both repositories, build the images, and start the services.
+
+## Manual Installation
 
 ### System Prerequisites
 

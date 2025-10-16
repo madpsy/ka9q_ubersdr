@@ -6,10 +6,12 @@ Web interface for ka9q-radio SDR software.
 
 ### System Prerequisites
 
-Install Docker and Docker Compose:
+Install Docker:
 ```bash
-sudo apt install docker-compose
+sudo apt install docker.io
 ```
+
+Docker includes Compose as a built-in plugin (use `docker compose` instead of `docker-compose`).
 
 ### Clone Repositories
 

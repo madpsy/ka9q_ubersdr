@@ -53,7 +53,6 @@ docker network create sdr-network --subnet 172.20.0.0/16
 
 Start both services using the unified docker-compose:
 ```bash
-cd ../../ka9q_ubersdr/docker/
 ADMIN_PASSWORD="supersecretpassword" docker compose up -d
 ```
 

@@ -2,6 +2,8 @@
 
 Web interface for ka9q-radio SDR software.
 
+> **Note:** This is currently designed for RX888 MKII SDR hardware to provide 0-30 MHz (full HF) coverage.
+
 ## Quick Start
 
 Run this one-liner to install and start everything automatically:

@@ -160,6 +160,12 @@ if [ "$DEFAULT_IP" != "localhost" ]; then
     echo "  http://localhost:8080 (local access)"
 fi
 echo ""
+echo "Admin interface (use password above):"
+echo "  http://$DEFAULT_IP:8080/admin.html"
+if [ "$DEFAULT_IP" != "localhost" ]; then
+    echo "  http://localhost:8080/admin.html (local access)"
+fi
+echo ""
 echo "Useful commands:"
 echo "  View logs:        cd ~/ubersdr/ka9q_ubersdr/docker && sudo docker compose logs -f"
 echo "  Stop services:    cd ~/ubersdr/ka9q_ubersdr/docker && sudo docker compose down"

@@ -30,9 +30,11 @@ function calculateFilterLatencies() {
         latencies.bandpass = Math.round(stages * 1.5);
     }
 
-    // Notch: Fixed per notch (6 cascaded stages each)
+    // Notch: Variable based on number of notches (6 cascaded stages each)
     if (notchEnabled && notchFilters.length > 0) {
-        latencies.notch = 5; // ~5ms per notch, but parallel processing
+        // Each notch adds ~5ms latency (6 cascaded biquad stages)
+        // Multiple notches are processed in series, so latencies add up
+        latencies.notch = notchFilters.length * 5;
     }
 
     // NR2: Fixed FFT-based latency
@@ -405,6 +407,7 @@ function addNotchFilter(centerFreq) {
         }
     }
     updateNotchFilterUI();
+    updateAllLatencyDisplays();
     saveFilterSettings();
     console.log(`Notch filter added at ${centerFreq} Hz`);
 }
@@ -417,6 +420,7 @@ function removeNotchFilter(index) {
     }
     notchFilters.splice(index, 1);
     updateNotchFilterUI();
+    updateAllLatencyDisplays();
     saveFilterSettings();
     console.log(`Notch filter removed`);
 }
@@ -521,6 +525,7 @@ function clearAllNotches() {
     }
     notchFilters = [];
     updateNotchFilterUI();
+    updateAllLatencyDisplays();
     console.log('All notch filters cleared');
 }
 

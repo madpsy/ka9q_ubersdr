@@ -28,20 +28,6 @@ git clone https://github.com/madpsy/ka9q-radio.git
 git clone https://github.com/madpsy/ka9q_ubersdr.git
 ```
 
-### Build Docker Images
-
-Build the ka9q-radio container:
-```bash
-cd ka9q-radio/docker
-docker-compose build
-```
-
-Build the ka9q_ubersdr container:
-```bash
-cd ../../ka9q_ubersdr/docker/
-docker-compose build
-```
-
 ### Create Docker Network
 
 Create the shared network for communication between containers:
@@ -51,16 +37,18 @@ docker network create sdr-network --subnet 172.20.0.0/16
 
 ### Start the Services
 
-Start ka9q_ubersdr with admin password:
+The unified docker-compose configuration manages both ka9q-radio and ka9q_ubersdr together:
+
 ```bash
-ADMIN_PASSWORD="supersecretpassword" docker-compose up -d
+cd ka9q_ubersdr/docker
+ADMIN_PASSWORD="supersecretpassword" docker compose up -d
 ```
 
-Start ka9q-radio:
-```bash
-cd ../../ka9q-radio/docker/
-docker-compose up -d
-```
+This will automatically:
+- Build both ka9q-radio and ka9q_ubersdr images
+- Start radiod (the SDR backend)
+- Wait for radiod to be healthy
+- Start the web interface
 
 ### Access the Web Interface
 
@@ -70,3 +58,29 @@ http://<IP address>:8080
 ```
 
 Replace `<IP address>` with your server's IP address, or use `localhost` if running locally.
+
+### View Logs
+
+```bash
+cd ka9q_ubersdr/docker
+
+# All services
+docker compose logs -f
+
+# Just radiod
+docker compose logs -f ka9q-radio
+
+# Just web interface
+docker compose logs -f ubersdr
+```
+
+### Stop Services
+
+```bash
+cd ka9q_ubersdr/docker
+docker compose down
+```
+
+## Documentation
+
+For detailed configuration options, troubleshooting, and development workflow, see [docker/README.md](docker/README.md).

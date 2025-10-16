@@ -36,7 +36,7 @@ server:
   # Maximum concurrent unique users (by user_session_id UUID)
   # Each unique user can have multiple sessions (e.g., audio + spectrum)
   # but they all count as one user toward this limit
-  max_sessions: 50
+  max_sessions: 20
   # Maximum concurrent unique users (UUIDs) per IP address (0 = unlimited)
   # This limits the number of unique user_session_ids from a single IP
   # Each unique user can have multiple sessions (e.g., audio + spectrum)
@@ -44,18 +44,18 @@ server:
   # UUID can establish both audio and spectrum channels
   # Useful for preventing abuse from a single source
   # Set to 0 to disable IP-based limiting
-  max_sessions_ip: 0
+  max_sessions_ip: 2
   # Session idle timeout in seconds (0 = no timeout). This tracks a heartbeat message to websocket
   # connections. The UI sends a ping every 10 seconds if the user is detected as being active.
   # Client will show warning dialog 30 seconds before this timeout. If they do not interact
   # with the UI within the 30 seconds the session UUID will be kicked.
-  session_timeout: 3600
+  session_timeout: 1800
   # Maximum session time in seconds (0 = unlimited)
   # This is the maximum total time a user session can exist, regardless of activity
   # After this time, the user will be automatically kicked and must reconnect
   # Useful for ensuring fair access and preventing long-term monopolisation
   # Set to 0 to disable time-based limiting
-  max_session_time: 0
+  max_session_time: 3600
   # Command rate limit per UUID (commands per second per channel)
   # This limits how many commands (tune, zoom, pan, etc.) a user can send per second
   # Applies separately to audio and spectrum channels (e.g., 10 means 10 audio commands/sec + 10 spectrum commands/sec)

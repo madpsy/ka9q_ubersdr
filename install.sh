@@ -116,10 +116,10 @@ fi
 # Stop existing containers if running
 echo "Stopping any running containers..."
 cd docker
-sudo docker compose down 2>/dev/null || true
+sudo docker compose down --remove-orphans 2>/dev/null || true
 
 echo "Building Docker images..."
-sudo docker compose build
+sudo docker compose build --no-cache
 
 echo ""
 echo "Starting services..."

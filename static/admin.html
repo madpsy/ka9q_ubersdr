@@ -299,17 +299,47 @@
 
             <div class="editor-container">
                 <div class="editor-tabs">
-                    <button class="tab active" onclick="switchTab('visual')">Visual Editor</button>
+                    <button class="tab active" onclick="switchTab('sessions')">Active Sessions</button>
+                    <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
+                    <button class="tab" onclick="switchTab('visual')">Visual Editor</button>
                     <button class="tab" onclick="switchTab('yaml')">YAML Editor</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
                     <button class="tab" onclick="switchTab('extensions')">Extensions</button>
-                    <button class="tab" onclick="switchTab('sessions')">Active Sessions</button>
-                    <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
+                </div>
+
+                <!-- Sessions Tab -->
+                <div id="sessionsTab" class="tab-content active">
+                    <div id="sessionsList" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading sessions...</p>
+                    </div>
+                </div>
+
+                <!-- Banned IPs Tab -->
+                <div id="bannedTab" class="tab-content">
+                    <div id="bannedIPsList" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading banned IPs...</p>
+                    </div>
+                    <div id="addBanForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
+                        <h3>Ban IP Address or CIDR Range</h3>
+                        <div class="config-field">
+                            <label>IP Address or CIDR Range</label>
+                            <input type="text" id="newBanIP" placeholder="e.g., 192.168.1.100 or 10.0.0.0/24 or 2001:db8::/32">
+                            <small>Supports IPv4, IPv6, and CIDR notation (e.g., 192.168.1.0/24, 2001:db8::/32)</small>
+                        </div>
+                        <div class="config-field">
+                            <label>Reason</label>
+                            <input type="text" id="newBanReason" placeholder="e.g., Abuse, spam, etc.">
+                        </div>
+                        <button class="btn" onclick="addBannedIP()">Ban IP/Range</button>
+                        <button class="btn btn-secondary" onclick="cancelBanForm()">Cancel</button>
+                    </div>
                 </div>
 
                 <!-- Visual Editor Tab -->
-                <div id="visualTab" class="tab-content active">
+                <div id="visualTab" class="tab-content">
                     <div id="visualEditor" class="loading">
                         <div class="spinner"></div>
                         <p>Loading configuration...</p>
@@ -410,37 +440,14 @@
                     </div>
                 </div>
 
-                <!-- Sessions Tab -->
-                <div id="sessionsTab" class="tab-content">
-                    <div id="sessionsList" class="loading">
-                        <div class="spinner"></div>
-                        <p>Loading sessions...</p>
-                    </div>
+                <div class="button-group" id="sessionButtons" style="display: flex;">
+                    <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
                 </div>
-
-                <!-- Banned IPs Tab -->
-                <div id="bannedTab" class="tab-content">
-                    <div id="bannedIPsList" class="loading">
-                        <div class="spinner"></div>
-                        <p>Loading banned IPs...</p>
-                    </div>
-                    <div id="addBanForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
-                        <h3>Ban IP Address or CIDR Range</h3>
-                        <div class="config-field">
-                            <label>IP Address or CIDR Range</label>
-                            <input type="text" id="newBanIP" placeholder="e.g., 192.168.1.100 or 10.0.0.0/24 or 2001:db8::/32">
-                            <small>Supports IPv4, IPv6, and CIDR notation (e.g., 192.168.1.0/24, 2001:db8::/32)</small>
-                        </div>
-                        <div class="config-field">
-                            <label>Reason</label>
-                            <input type="text" id="newBanReason" placeholder="e.g., Abuse, spam, etc.">
-                        </div>
-                        <button class="btn" onclick="addBannedIP()">Ban IP/Range</button>
-                        <button class="btn btn-secondary" onclick="cancelBanForm()">Cancel</button>
-                    </div>
+                <div class="button-group" id="bannedButtons" style="display: none;">
+                    <button class="btn" onclick="showAddBanForm()">Ban IP/Range</button>
+                    <button class="btn btn-secondary" onclick="loadBannedIPs()">Refresh Banned IPs</button>
                 </div>
-
-                <div class="button-group" id="configButtons">
+                <div class="button-group" id="configButtons" style="display: none;">
                     <button class="btn" onclick="saveConfig()">Save Configuration</button>
                     <button class="btn btn-secondary" onclick="loadConfig()">Reload</button>
                     <button class="btn btn-secondary" onclick="exportConfig()">Export Config</button>
@@ -463,13 +470,6 @@
                     <button class="btn" onclick="saveExtensions()">Save Changes</button>
                     <button class="btn btn-secondary" onclick="loadExtensions()">Reload Extensions</button>
                 </div>
-                <div class="button-group" id="sessionButtons" style="display: none;">
-                    <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
-                </div>
-                <div class="button-group" id="bannedButtons" style="display: none;">
-                    <button class="btn" onclick="showAddBanForm()">Ban IP/Range</button>
-                    <button class="btn btn-secondary" onclick="loadBannedIPs()">Refresh Banned IPs</button>
-                </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
                 <input type="file" id="bandsFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBandsImport(event)">
@@ -479,7 +479,7 @@
 
     <script>
         let currentConfig = {};
-        let currentTab = 'visual';
+        let currentTab = 'sessions';
 
         // Check for existing session on page load
         async function checkSession() {
@@ -490,6 +490,9 @@
                     document.getElementById('loginBox').style.display = 'none';
                     document.getElementById('configEditor').classList.add('active');
                     await loadConfig();
+                    // Load sessions since it's the default tab
+                    await loadSessions();
+                    startSessionsAutoRefresh();
                     return true;
                 }
             } catch (error) {
@@ -520,6 +523,9 @@
                     document.getElementById('loginBox').style.display = 'none';
                     document.getElementById('configEditor').classList.add('active');
                     await loadConfig();
+                    // Load sessions since it's the default tab
+                    await loadSessions();
+                    startSessionsAutoRefresh();
                 } else {
                     const errorText = await response.text();
                     showLoginError(errorText || 'Invalid password');
@@ -570,41 +576,41 @@
                 stopSessionsAutoRefresh();
             }
 
-            if (tab === 'visual') {
+            if (tab === 'sessions') {
                 document.querySelector('.tab:nth-child(1)').classList.add('active');
-                document.getElementById('visualTab').classList.add('active');
-                document.getElementById('configButtons').style.display = 'flex';
-            } else if (tab === 'yaml') {
-                document.querySelector('.tab:nth-child(2)').classList.add('active');
-                document.getElementById('yamlTab').classList.add('active');
-                document.getElementById('configButtons').style.display = 'flex';
-                updateYamlEditor();
-            } else if (tab === 'bookmarks') {
-                document.querySelector('.tab:nth-child(3)').classList.add('active');
-                document.getElementById('bookmarksTab').classList.add('active');
-                document.getElementById('bookmarkButtons').style.display = 'flex';
-                loadBookmarks();
-            } else if (tab === 'bands') {
-                document.querySelector('.tab:nth-child(4)').classList.add('active');
-                document.getElementById('bandsTab').classList.add('active');
-                document.getElementById('bandButtons').style.display = 'flex';
-                loadBands();
-            } else if (tab === 'extensions') {
-                document.querySelector('.tab:nth-child(5)').classList.add('active');
-                document.getElementById('extensionsTab').classList.add('active');
-                document.getElementById('extensionButtons').style.display = 'flex';
-                loadAvailableExtensions();
-            } else if (tab === 'sessions') {
-                document.querySelector('.tab:nth-child(6)').classList.add('active');
                 document.getElementById('sessionsTab').classList.add('active');
                 document.getElementById('sessionButtons').style.display = 'flex';
                 loadSessions();
                 startSessionsAutoRefresh();
             } else if (tab === 'banned') {
-                document.querySelector('.tab:nth-child(7)').classList.add('active');
+                document.querySelector('.tab:nth-child(2)').classList.add('active');
                 document.getElementById('bannedTab').classList.add('active');
                 document.getElementById('bannedButtons').style.display = 'flex';
                 loadBannedIPs();
+            } else if (tab === 'visual') {
+                document.querySelector('.tab:nth-child(3)').classList.add('active');
+                document.getElementById('visualTab').classList.add('active');
+                document.getElementById('configButtons').style.display = 'flex';
+            } else if (tab === 'yaml') {
+                document.querySelector('.tab:nth-child(4)').classList.add('active');
+                document.getElementById('yamlTab').classList.add('active');
+                document.getElementById('configButtons').style.display = 'flex';
+                updateYamlEditor();
+            } else if (tab === 'bookmarks') {
+                document.querySelector('.tab:nth-child(5)').classList.add('active');
+                document.getElementById('bookmarksTab').classList.add('active');
+                document.getElementById('bookmarkButtons').style.display = 'flex';
+                loadBookmarks();
+            } else if (tab === 'bands') {
+                document.querySelector('.tab:nth-child(6)').classList.add('active');
+                document.getElementById('bandsTab').classList.add('active');
+                document.getElementById('bandButtons').style.display = 'flex';
+                loadBands();
+            } else if (tab === 'extensions') {
+                document.querySelector('.tab:nth-child(7)').classList.add('active');
+                document.getElementById('extensionsTab').classList.add('active');
+                document.getElementById('extensionButtons').style.display = 'flex';
+                loadAvailableExtensions();
             }
         }
 

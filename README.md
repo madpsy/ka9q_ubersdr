@@ -92,13 +92,21 @@ sudo docker compose down
 ```
 ## Generate FFTW Wisdom File (Optional but Recommended)
 
-It's recommended to generate an FFTW wisdom file, which is specific to each computer and optimizes FFT performance. This step is optional but can significantly improve performance:
+It's recommended to generate an FFTW wisdom file, which is specific to each computer and optimises FFT performance. This step is optional but can significantly improve performance:
 
 ```bash
 sudo fftwf-wisdom -v -T 1 -o /var/lib/docker/volumes/docker_radiod-data/_data/ rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160
 ```
 
 This command will take some time to complete as it benchmarks various FFT algorithms on your specific hardware.
+
+After generating the wisdom file, restart the containers to use it:
+
+```bash
+cd ka9q_ubersdr/docker
+sudo docker compose down
+sudo docker compose up -d
+```
 
 
 ## Making it Public with Cloudflare Tunnel

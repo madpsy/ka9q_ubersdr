@@ -1,10 +1,5 @@
 ka9q_ubersdr
-config.yaml
-bookmarks.yaml
-bands.yaml
-banned_ips.yaml
-extensions.yaml
-web.log
+config/
 clients/go/radio_client
 clients/go/go.sum
 clients/python/__pycache__

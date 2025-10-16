@@ -4,6 +4,92 @@
 // NR2 remains in its own file (nr2.js)
 
 // ============================================================================
+// LATENCY CALCULATION AND DISPLAY
+// ============================================================================
+
+// Calculate latency for each filter based on current settings
+function calculateFilterLatencies() {
+    const latencies = {
+        equalizer: 0,
+        bandpass: 0,
+        notch: 0,
+        nr2: 0,
+        compressor: 0,
+        stereo: 0,
+        squelch: 0
+    };
+
+    // Equalizer: Fixed latency (~1ms per biquad filter, 12 bands)
+    if (equalizerEnabled) {
+        latencies.equalizer = 12;
+    }
+
+    // Bandpass: Variable based on stages
+    if (bandpassEnabled) {
+        const stages = parseInt(document.getElementById('bandpass-stages')?.value || 4);
+        latencies.bandpass = Math.round(stages * 1.5);
+    }
+
+    // Notch: Fixed per notch (6 cascaded stages each)
+    if (notchEnabled && notchFilters.length > 0) {
+        latencies.notch = 5; // ~5ms per notch, but parallel processing
+    }
+
+    // NR2: Fixed FFT-based latency
+    const nr2Checkbox = document.getElementById('noise-reduction-enable');
+    if (nr2Checkbox && nr2Checkbox.checked) {
+        latencies.nr2 = 43; // ~43ms for 2048 FFT @ 48kHz
+    }
+
+    // Compressor: Based on attack time + lookahead
+    if (compressorEnabled) {
+        const attack = parseFloat(document.getElementById('compressor-attack')?.value || 0.003);
+        latencies.compressor = Math.round((attack * 1000) + 5); // attack + 5ms lookahead
+    }
+
+    // Stereo Virtualizer: Direct delay value
+    if (stereoVirtualizerEnabled) {
+        const delay = parseInt(document.getElementById('stereo-delay')?.value || 16);
+        latencies.stereo = delay;
+    }
+
+    // Squelch: Based on attack time
+    if (squelchEnabled) {
+        const attack = parseInt(document.getElementById('squelch-attack')?.value || 20);
+        latencies.squelch = attack;
+    }
+
+    return latencies;
+}
+
+// Update latency display badges for all filters
+function updateAllLatencyDisplays() {
+    const latencies = calculateFilterLatencies();
+
+    updateLatencyBadge('equalizer', latencies.equalizer);
+    updateLatencyBadge('bandpass', latencies.bandpass);
+    updateLatencyBadge('notch', latencies.notch);
+    updateLatencyBadge('noise-reduction', latencies.nr2);
+    updateLatencyBadge('compressor', latencies.compressor);
+    updateLatencyBadge('stereo-virtualizer', latencies.stereo);
+    updateLatencyBadge('squelch', latencies.squelch);
+}
+
+// Update individual latency badge
+function updateLatencyBadge(filterId, latencyMs) {
+    const badge = document.getElementById(`${filterId}-latency-badge`);
+    if (badge) {
+        if (latencyMs > 0) {
+            badge.textContent = `${latencyMs}ms`;
+            badge.style.display = 'inline';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+}
+
+
+// ============================================================================
 // EQUALIZER (12-band parametric EQ)
 // ============================================================================
 
@@ -52,6 +138,7 @@ function toggleEqualizer() {
         }
         console.log('Equalizer disabled');
     }
+    updateAllLatencyDisplays();
     saveFilterSettings();
 }
 
@@ -143,6 +230,7 @@ function toggleBandpassFilter() {
         }
         console.log('Bandpass disabled');
     }
+    updateAllLatencyDisplays();
     saveFilterSettings();
 }
 
@@ -225,12 +313,16 @@ function updateBandpassFilter() {
         if (window.audioContext) {
             initializeBandpassFilter();
         }
+        updateAllLatencyDisplays();
+        saveFilterSettings();
         return;
     }
     if (bandpassFilters.length === 0) {
         if (window.audioContext) {
             initializeBandpassFilter();
         }
+        updateAllLatencyDisplays();
+        saveFilterSettings();
         return;
     }
     const actualCenter = (window.currentBandwidthLow < 0 && window.currentBandwidthHigh <= 0) ? -sliderCenter : sliderCenter;
@@ -250,6 +342,7 @@ function updateBandpassFilter() {
     if (window.cwDecoder && window.cwDecoder.enabled) {
         window.updateCWDecoderFrequency(Math.abs(actualCenter));
     }
+    updateAllLatencyDisplays();
     saveFilterSettings();
 }
 
@@ -373,6 +466,7 @@ function toggleNotchFilter() {
         }
         console.log('Notch filters disabled');
     }
+    updateAllLatencyDisplays();
     saveFilterSettings();
 }
 
@@ -479,6 +573,7 @@ function toggleCompressor() {
         }
         console.log('Compressor disabled');
     }
+    updateAllLatencyDisplays();
     saveFilterSettings();
 }
 
@@ -506,6 +601,7 @@ function updateCompressor() {
     document.getElementById('compressor-attack-value').textContent = attack.toFixed(3) + ' s';
     document.getElementById('compressor-release-value').textContent = release.toFixed(2) + ' s';
     document.getElementById('compressor-makeup-gain-value').textContent = '+' + makeupGainDb + ' dB';
+    updateAllLatencyDisplays();
     saveFilterSettings();
 }
 
@@ -610,6 +706,7 @@ function toggleStereoVirtualizer() {
         }
         console.log('Stereo virtualizer disabled');
     }
+    updateAllLatencyDisplays();
     saveFilterSettings();
 }
 
@@ -634,6 +731,7 @@ function updateStereoVirtualizer() {
     stereoGainRight.gain.value = 1.0;
     stereoWidthGain.gain.value = width / 100;
     stereoMakeupGain.gain.value = Math.pow(10, makeupGainDb / 20);
+    updateAllLatencyDisplays();
     saveFilterSettings();
 }
 
@@ -715,6 +813,7 @@ function toggleSquelch() {
         }
         console.log('Squelch disabled');
     }
+    updateAllLatencyDisplays();
     saveFilterSettings();
 }
 
@@ -731,6 +830,7 @@ function updateSquelch() {
     document.getElementById('squelch-hysteresis-value').textContent = hysteresisDb + ' dB';
     document.getElementById('squelch-attack-value').textContent = attackMs + ' ms';
     document.getElementById('squelch-release-value').textContent = releaseMs + ' ms';
+    updateAllLatencyDisplays();
     saveFilterSettings();
 }
 
@@ -818,7 +918,7 @@ let isRestoringSettings = false;
 function saveFilterSettings() {
     // Don't save while we're restoring settings
     if (isRestoringSettings) return;
-    
+
     // Check if saving is enabled
     const saveEnabled = document.getElementById('save-filters-enable');
     if (!saveEnabled || !saveEnabled.checked) {
@@ -1191,5 +1291,9 @@ window.updateSquelch = updateSquelch;
 window.resetSquelch = resetSquelch;
 window.processSquelch = processSquelch;
 window.updateSquelchStatus = updateSquelchStatus;
+
+window.calculateFilterLatencies = calculateFilterLatencies;
+window.updateAllLatencyDisplays = updateAllLatencyDisplays;
+window.updateLatencyBadge = updateLatencyBadge;
 
 console.log('✅ Filters module loaded: Equalizer, Bandpass, Notch, Compressor, Stereo Virtualizer, Squelch');

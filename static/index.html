@@ -347,6 +347,7 @@
             <!-- Row 1, Column 1: Notch -->
             <div class="notch-panel">
                 <div class="notch-container" style="position: relative;">
+                    <span id="notch-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
                     <span id="notch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <div class="control-group">
                         <label>
@@ -369,6 +370,7 @@
             <!-- Row 1, Column 2: Bandpass -->
             <div class="bandpass-panel">
                 <div class="bandpass-container" style="position: relative;">
+                    <span id="bandpass-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
                     <span id="bandpass-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <div class="control-group">
                         <label>
@@ -407,6 +409,7 @@
             <!-- Row 1, Column 3: Noise Reduction (NR2) -->
             <div class="noise-reduction-panel">
                 <div class="noise-reduction-container" style="position: relative;">
+                    <span id="noise-reduction-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
                     <span id="noise-reduction-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <span id="noise-reduction-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
                     <div class="control-group">
@@ -441,6 +444,7 @@
             <!-- Row 2, Column 1: Squelch -->
             <div class="squelch-panel">
                 <div class="squelch-container" style="position: relative;">
+                    <span id="squelch-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
                     <span id="squelch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <div class="control-group">
                         <label>
@@ -478,6 +482,7 @@
             <!-- Row 2, Column 2: Compressor -->
             <div class="compressor-panel">
                 <div class="compressor-container" style="position: relative;">
+                    <span id="compressor-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
                     <span id="compressor-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <span id="compressor-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
                     <div class="control-group">
@@ -515,6 +520,7 @@
             <!-- Row 2, Column 3: Stereo Virtualizer -->
             <div class="stereo-virtualizer-panel">
                 <div class="stereo-virtualizer-container" style="position: relative;">
+                    <span id="stereo-virtualizer-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
                     <span id="stereo-virtualizer-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                     <span id="stereo-virtualizer-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
                     <div class="control-group">
@@ -552,6 +558,7 @@
         <!-- Equalizer: Full Width Below Grid -->
         <div class="equalizer-panel">
             <div class="equalizer-container" style="position: relative;">
+                <span id="equalizer-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
                 <span id="equalizer-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
                 <span id="equalizer-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
                 <div class="control-group">

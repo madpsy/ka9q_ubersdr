@@ -4963,6 +4963,11 @@ function updateNoiseReduction() {
         nr2.setParameters(noiseReductionStrength, noiseReductionFloor, adaptRate);
     }
 
+    // Update latency displays
+    if (window.updateAllLatencyDisplays) {
+        window.updateAllLatencyDisplays();
+    }
+
     // Save settings to localStorage
     if (window.saveFilterSettings) {
         window.saveFilterSettings();
@@ -5085,6 +5090,11 @@ function toggleNoiseReduction() {
         }
 
         log('❌ NR2 Noise Reduction DISABLED');
+    }
+
+    // Update latency displays
+    if (window.updateAllLatencyDisplays) {
+        window.updateAllLatencyDisplays();
     }
 
     // Save settings to localStorage

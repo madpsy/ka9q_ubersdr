@@ -1297,6 +1297,24 @@ input[type="range"]::-moz-range-thumb {
     border-color: #28a745;
 }
 
+/* Filter Latency Badges */
+.filter-latency-badge {
+    position: absolute;
+    top: 8px;
+    right: 105px;
+    font-weight: bold;
+    padding: 4px 10px;
+    border-radius: 4px;
+    z-index: 100;
+    font-size: 11px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    border: 2px solid #3498db;
+    color: #3498db;
+    background-color: rgba(52, 152, 219, 0.15);
+    transition: all 0.3s ease;
+    font-family: 'Courier New', monospace;
+}
+
 /* CW Decoder Panel - Full Width */
 .cw-decoder-panel {
     padding: 10px 30px;

@@ -6,6 +6,8 @@ Web interface for ka9q-radio SDR software.
 
 ## Quick Start
 
+> **Note:** This installation script is designed for Debian/Ubuntu-based systems only.
+
 Run this one-liner to install and start everything automatically:
 
 ```bash

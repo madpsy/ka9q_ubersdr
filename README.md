@@ -80,7 +80,7 @@ docker compose logs -f
 docker compose logs -f ka9q-radio
 
 # Just web interface
-docker compose logs -f ubersdr
+docker compose logs -f ka9q_ubersdr
 ```
 
 ### Stop Services

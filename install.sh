@@ -13,29 +13,40 @@ if [ "$EUID" -eq 0 ]; then
     exit 1
 fi
 
-# Detect if running on Debian Bookworm
+# Detect if running on Debian Bookworm and handle Docker installation
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     if [ "$VERSION_CODENAME" = "bookworm" ]; then
         echo "Detected Debian Bookworm"
-        if [ -f "./install-docker-bookworm.sh" ]; then
-            echo "Running Bookworm-specific Docker installer..."
-            ./install-docker-bookworm.sh
+        # Install Docker if not already installed
+        if ! command -v docker &> /dev/null; then
+            echo "Installing Docker for Bookworm..."
+            # Download and run the Bookworm installer
+            curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-docker-bookworm.sh | bash
         else
-            echo "Warning: install-docker-bookworm.sh not found in current directory"
-            echo "Continuing with standard Docker installation..."
+            echo "Docker is already installed"
+        fi
+    else
+        # Install Docker if not already installed (non-Bookworm)
+        if ! command -v docker &> /dev/null; then
+            echo "Installing Docker..."
+            sudo apt update
+            sudo apt install -y docker.io
+            echo "Docker installed successfully"
+        else
+            echo "Docker is already installed"
         fi
     fi
-fi
-
-# Install Docker if not already installed
-if ! command -v docker &> /dev/null; then
-    echo "Installing Docker..."
-    sudo apt update
-    sudo apt install -y docker.io
-    echo "Docker installed successfully"
 else
-    echo "Docker is already installed"
+    # Fallback if os-release not found
+    if ! command -v docker &> /dev/null; then
+        echo "Installing Docker..."
+        sudo apt update
+        sudo apt install -y docker.io
+        echo "Docker installed successfully"
+    else
+        echo "Docker is already installed"
+    fi
 fi
 
 # Verify docker compose is available
@@ -49,20 +60,42 @@ echo ""
 echo "Docker installation complete!"
 echo ""
 
-# Check if we're in the ka9q_ubersdr directory
+# Create working directory if running from curl
+INSTALL_DIR="$HOME/ubersdr"
+if [ ! -f "docker/docker-compose.yml" ]; then
+    echo "Setting up installation directory at $INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+    cd "$INSTALL_DIR"
+
+    # Clone repositories
+    echo "Cloning ka9q-radio repository..."
+    if [ ! -d "ka9q-radio" ]; then
+        git clone https://github.com/madpsy/ka9q-radio.git
+    else
+        echo "ka9q-radio already exists, skipping clone"
+    fi
+
+    echo "Cloning ka9q_ubersdr repository..."
+    if [ ! -d "ka9q_ubersdr" ]; then
+        git clone https://github.com/madpsy/ka9q_ubersdr.git
+    else
+        echo "ka9q_ubersdr already exists, skipping clone"
+    fi
+
+    cd ka9q_ubersdr
+fi
+
+# Verify we're now in the correct directory
 if [ ! -f "docker/docker-compose.yml" ]; then
     echo "Error: docker/docker-compose.yml not found"
-    echo "Please run this script from the ka9q_ubersdr repository root"
+    echo "Installation failed - please check the repository structure"
     exit 1
 fi
 
 # Check if ka9q-radio repository exists
 if [ ! -d "../ka9q-radio" ]; then
     echo "Error: ka9q-radio repository not found at ../ka9q-radio"
-    echo "Please ensure both repositories are cloned in the same parent directory:"
-    echo "  parent-dir/"
-    echo "    ├── ka9q-radio/"
-    echo "    └── ka9q_ubersdr/"
+    echo "Please ensure both repositories are cloned in the same parent directory"
     exit 1
 fi
 

@@ -113,8 +113,12 @@ if [ ! -d "../ka9q-radio" ]; then
     exit 1
 fi
 
-echo "Building Docker images..."
+# Stop existing containers if running
+echo "Stopping any running containers..."
 cd docker
+sudo docker compose down 2>/dev/null || true
+
+echo "Building Docker images..."
 sudo docker compose build
 
 echo ""

@@ -23,6 +23,12 @@ git clone https://github.com/madpsy/ka9q-radio.git
 git clone https://github.com/madpsy/ka9q_ubersdr.git
 ```
 
+**Note for Debian Bookworm users (Raspberry Pi, etc.):** If you're running Debian Bookworm, run the Docker installation script before proceeding:
+```bash
+cd ka9q_ubersdr
+./install-docker-bookworm.sh
+```
+
 ### Build and Start Services
 
 Build both containers from the unified docker-compose:

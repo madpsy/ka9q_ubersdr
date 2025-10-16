@@ -926,7 +926,7 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
                 if (checkData.reason.includes('banned')) {
                     errorIcon = '⛔';
                 } else if (checkData.reason.includes('Maximum')) {
-                    errorIcon = '👥';
+                    errorIcon = '🚫';
                 }
 
                 audioStartButton.innerHTML = `<span>${errorIcon} ${checkData.reason}</span>`;

@@ -2,7 +2,7 @@
 
 Web interface for ka9q-radio SDR software.
 
-## Docker Installation (Recommended)
+## Installation
 
 ### System Prerequisites
 
@@ -70,39 +70,3 @@ http://<IP address>:8080
 ```
 
 Replace `<IP address>` with your server's IP address, or use `localhost` if running locally.
-
-## Manual Installation
-
-### Build radiod
-
-Install at least Golang 1.24
-
-Install dependencies for radiod:
-
-```bash
-sudo apt install libbsd-dev libiniparser-dev libopus-dev libavahi-client-dev libavahi-common-dev libavahi-client-dev libavahi-common-dev libncurses5-dev libncursesw5-dev libportaudio2 portaudio19-dev libsamplerate0 libsamplerate0-dev libogg-dev libvorbis-dev libogg-dev libvorbis-dev libairspyhf-dev libairspy-dev librtlsdr-dev libfftw3-dev uuid-dev avahi-utils
-```
-
-Build and install:
-```bash
-cd ka9q-radio
-make
-sudo make install
-sudo fftwf-wisdom -v -T 1 -o /var/lib/ka9q-radio/wisdom rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160
-cd ..
-radiod radiod-rx888.conf
-```
-
-### Build ubersdr
-
-```bash
-make
-cp config.yaml.example config.yaml
-cp bands.yaml.example bands.yaml
-cp bookmarks.yaml.example bookmarks.yaml
-```
-
-Change admin password in config.yaml
-
-```bash
-./ka9q_ubersdr

@@ -19,8 +19,6 @@ admin:
   asl: 30
   # Location description
   location: "Dalgety Bay, Scotland, UK"
-  # Software version
-  version: "v1.2.40"
 
 # Radiod connection settings
 radiod:

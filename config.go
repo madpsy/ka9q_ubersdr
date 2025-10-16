@@ -30,7 +30,6 @@ type AdminConfig struct {
 	GPS         GPSConfig `yaml:"gps"`
 	ASL         int       `yaml:"asl"` // Altitude above sea level in meters
 	Location    string    `yaml:"location"`
-	Version     string    `yaml:"version"`
 }
 
 // GPSConfig contains GPS coordinates
@@ -198,9 +197,6 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Admin.Location == "" {
 		config.Admin.Location = "Dalgety Bay, Scotland, UK"
-	}
-	if config.Admin.Version == "" {
-		config.Admin.Version = "v1.00.00"
 	}
 
 	// Set spectrum defaults if not specified

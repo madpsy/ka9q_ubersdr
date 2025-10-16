@@ -688,7 +688,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
 			"location": config.Admin.Location,
 		},
 		"max_clients": config.Server.MaxSessions,
-		"version":     config.Admin.Version,
+		"version":     Version,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -714,7 +714,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request, config *Config) {
 			"location": config.Admin.Location,
 		},
 		"max_clients": config.Server.MaxSessions,
-		"version":     config.Admin.Version,
+		"version":     Version,
 		"sdrs": []map[string]interface{}{
 			{
 				"name": "UberSDR",

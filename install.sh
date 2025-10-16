@@ -60,6 +60,14 @@ echo ""
 echo "Docker installation complete!"
 echo ""
 
+# Ensure git is installed
+if ! command -v git &> /dev/null; then
+    echo "Installing git..."
+    sudo apt update
+    sudo apt install -y git
+    echo "Git installed successfully"
+fi
+
 # Create working directory if running from curl
 INSTALL_DIR="$HOME/ubersdr"
 if [ ! -f "docker/docker-compose.yml" ]; then

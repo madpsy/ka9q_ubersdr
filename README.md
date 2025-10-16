@@ -79,6 +79,60 @@ cd ka9q_ubersdr/docker
 sudo docker compose down
 ```
 
-## Documentation
+## Making it Public with Cloudflare Tunnel
 
-For detailed configuration options, troubleshooting, and development workflow, see [docker/README.md](docker/README.md).
+You can expose your SDR web interface to the internet securely using Cloudflare Tunnel (no port forwarding required).
+
+### Prerequisites
+
+1. A Cloudflare account with a domain
+2. Install cloudflared:
+   ```bash
+   wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
+   sudo dpkg -i cloudflared-linux-arm64.deb
+   ```
+
+### Setup
+
+1. Authenticate with Cloudflare:
+   ```bash
+   cloudflared tunnel login
+   ```
+
+2. Create a tunnel:
+   ```bash
+   cloudflared tunnel create my-sdr-tunnel
+   ```
+   This will output a tunnel UUID - save this for the next step.
+
+3. Create a config file at `~/.cloudflared/config.yml`:
+   ```yaml
+   tunnel: <your-tunnel-uuid>
+   credentials-file: /home/<username>/.cloudflared/<your-tunnel-uuid>.json
+
+   ingress:
+     - hostname: sdr.yourdomain.com
+       service: http://localhost:8080
+     - service: http_status:404
+   ```
+
+4. Create a DNS record:
+   ```bash
+   cloudflared tunnel route dns my-sdr-tunnel sdr.yourdomain.com
+   ```
+
+5. Run the tunnel:
+   ```bash
+   cloudflared tunnel run my-sdr-tunnel
+   ```
+
+Your SDR interface will now be accessible at `https://sdr.yourdomain.com`
+
+### Run as a Service
+
+To keep the tunnel running automatically:
+```bash
+sudo cloudflared service install
+sudo systemctl start cloudflared
+sudo systemctl enable cloudflared
+```

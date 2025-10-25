@@ -8,6 +8,10 @@
 class RadioAPI {
     constructor() {
         this.callbacks = new Map();
+        // Track mute state ourselves since window.isMuted isn't reliable
+        this._muteState = false;
+        // Track if we just set mute state (DOM needs time to update)
+        this._justSetMute = false;
     }
     
     // === STATE QUERIES ===
@@ -124,7 +128,71 @@ class RadioAPI {
         }
         return false;
     }
-    
+
+    // === AUDIO CONTROLS ===
+
+    getMuted() {
+        // If we just set mute state, return our tracked state
+        // (DOM needs time to update after toggleMute)
+        if (this._justSetMute) {
+            return this._muteState;
+        }
+
+        // Check the actual mute button state in the DOM by reading its text
+        const muteBtn = document.getElementById('mute-btn');
+        if (muteBtn) {
+            // Button text is '🔇 Unmute' when muted, '🔊 Mute' when not muted
+            const isMuted = muteBtn.textContent.includes('Unmute');
+            // Sync our internal state with the actual state
+            this._muteState = isMuted;
+            return isMuted;
+        }
+        // Fallback to our tracked state if button not found
+        return this._muteState;
+    }
+
+    setMuted(muted) {
+        // Get current state (will use tracked state if we just set it)
+        const currentlyMuted = this.getMuted();
+
+        // If already in desired state, nothing to do
+        if (currentlyMuted === muted) {
+            return true;
+        }
+
+        // Need to toggle - use window.toggleMute() which handles everything
+        if (window.toggleMute) {
+            window.toggleMute();
+            // Update our tracked state immediately
+            this._muteState = muted;
+            // Mark that we just set mute (so getMuted returns tracked state)
+            this._justSetMute = true;
+            // After 100ms, allow reading from DOM again
+            setTimeout(() => {
+                this._justSetMute = false;
+            }, 100);
+            return true;
+        }
+
+        return false;
+    }
+
+    toggleMute() {
+        // Just call window.toggleMute and update our state
+        if (window.toggleMute) {
+            window.toggleMute();
+            // Toggle our tracked state
+            this._muteState = !this._muteState;
+            // Mark that we just set mute
+            this._justSetMute = true;
+            setTimeout(() => {
+                this._justSetMute = false;
+            }, 100);
+            return true;
+        }
+        return false;
+    }
+
     // === AUDIO PROCESSING ===
     
     getAnalyser() {

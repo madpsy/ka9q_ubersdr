@@ -42,35 +42,39 @@ class RadioSyncExtension extends DecoderExtension {
         this.protocolHandler = null;
         
         this.selectedRadio = null;
+        this.selectedBaudRate = null; // Will be set when radio is selected
         this.syncMode = 'both'; // 'sdr-to-radio', 'radio-to-sdr', 'both'
+        // Display style cycling (starting with modern digital)
+        this.displayStyles = ['style-digital', 'style-led', 'style-amber', 'style-cyan', 'style-red', 'style-vfd'];
+        this.currentStyleIndex = 0;
+
         
-        // State tracking
-        this.currentFrequency = 0;
-        this.currentMode = 'USB';
-        this.txState = false; // false = RX, true = TX
+        // State tracking - these track the RADIO state, not SDR
+        this.currentFrequency = 0;  // Radio frequency
+        this.currentMode = 'USB';   // Radio mode
+        this.txState = false;       // false = RX, true = TX
+        this.muteOnTX = true; // Mute SDR when radio is transmitting
+        this.wasMutedBeforeTX = false; // Track if SDR was already muted before TX
         
-        // Update interval
+        // Track last values sent to radio to prevent feedback loops
+        this.lastSentFrequency = 0;
+        this.lastSentMode = '';
+
+        // Flag to temporarily disable event handlers when we're updating SDR from radio
+        this.updatingFromRadio = false;
+
+        // Update intervals
         this.updateInterval = null;
+        this.radioPollingInterval = null;
     }
 
     onInitialize() {
         console.log('Radio Sync Extension onInitialize called');
         this.radio.log('Radio Sync Extension initialized');
-        
-        // Load and render template first (so error div exists)
+
+        // Load and render template
         this.renderUI();
-        
-        // Set up event listeners (must be after renderUI)
-        this.setupEventListeners();
-        
-        // Check for Web Serial API support
-        if (!('serial' in navigator)) {
-            this.showSerialAPIError();
-        }
-        
-        // Initialize display with current SDR state
-        this.updateFromSDR();
-        
+
         console.log('Radio Sync Extension initialization complete');
     }
 
@@ -99,13 +103,45 @@ class RadioSyncExtension extends DecoderExtension {
     setupEventListeners() {
         // Radio model selection
         const modelSelect = document.getElementById('radio-sync-model');
+        const connectBtn = document.getElementById('radio-sync-connect');
+
         if (modelSelect) {
             modelSelect.addEventListener('change', (e) => {
                 this.selectedRadio = e.target.value;
-                this.addMessage(`Selected: ${this.radioProtocols[this.selectedRadio]?.name || 'Unknown'}`, 'info');
+
+                // Update baud rate dropdown to default for selected radio
+                const baudRateSelect = document.getElementById('radio-sync-baud-rate');
+                if (baudRateSelect && this.selectedRadio) {
+                    const radioConfig = this.radioProtocols[this.selectedRadio];
+                    if (radioConfig) {
+                        baudRateSelect.value = radioConfig.baudRate.toString();
+                        this.selectedBaudRate = radioConfig.baudRate;
+                    }
+                }
+
+                // Update connect button based on selection
+                if (connectBtn) {
+                    if (this.selectedRadio) {
+                        connectBtn.disabled = false;
+                        connectBtn.textContent = 'Connect to Radio';
+                        this.addMessage(`Selected: ${this.radioProtocols[this.selectedRadio]?.name || 'Unknown'}`, 'info');
+                    } else {
+                        connectBtn.disabled = true;
+                        connectBtn.textContent = 'Select Radio First';
+                    }
+                }
             });
         } else {
             console.error('Radio Sync: model select not found');
+        }
+
+        // Baud rate selection
+        const baudRateSelect = document.getElementById('radio-sync-baud-rate');
+        if (baudRateSelect) {
+            baudRateSelect.addEventListener('change', (e) => {
+                this.selectedBaudRate = parseInt(e.target.value, 10);
+                this.addMessage(`Baud rate: ${this.selectedBaudRate}`, 'info');
+            });
         }
 
         // Sync direction buttons
@@ -124,11 +160,14 @@ class RadioSyncExtension extends DecoderExtension {
         }
 
         // Connect/Disconnect buttons
-        const connectBtn = document.getElementById('radio-sync-connect');
         const disconnectBtn = document.getElementById('radio-sync-disconnect');
 
         if (connectBtn) {
             console.log('Radio Sync: Connect button found, adding listener');
+            // Set initial state
+            connectBtn.disabled = true;
+            connectBtn.textContent = 'Select Radio First';
+
             connectBtn.addEventListener('click', () => {
                 console.log('Radio Sync: Connect button clicked');
                 this.connectToRadio();
@@ -142,11 +181,48 @@ class RadioSyncExtension extends DecoderExtension {
         } else {
             console.error('Radio Sync: Disconnect button not found');
         }
+
+        // Mute on TX checkbox
+        const muteOnTXCheckbox = document.getElementById('radio-sync-mute-on-tx');
+        if (muteOnTXCheckbox) {
+            muteOnTXCheckbox.addEventListener('change', (e) => {
+                this.muteOnTX = e.target.checked;
+                this.addMessage(`Mute on TX: ${this.muteOnTX ? 'enabled' : 'disabled'}`, 'info');
+            });
+        }
+
+        // Display style cycling
+        const displayElement = document.getElementById('radio-sync-display');
+        if (displayElement) {
+            displayElement.addEventListener('click', () => this.cycleDisplayStyle());
+        }
+    }
+
+    cycleDisplayStyle() {
+        const displayElement = document.getElementById('radio-sync-display');
+        if (!displayElement) return;
+
+        // Remove current style
+        displayElement.classList.remove(this.displayStyles[this.currentStyleIndex]);
+
+        // Move to next style
+        this.currentStyleIndex = (this.currentStyleIndex + 1) % this.displayStyles.length;
+
+        // Add new style
+        displayElement.classList.add(this.displayStyles[this.currentStyleIndex]);
+
+        // Get style name for message
+        const styleName = this.displayStyles[this.currentStyleIndex]
+            .replace('style-', '')
+            .replace('-', ' ')
+            .toUpperCase();
+        
+        this.addMessage(`Display style: ${styleName}`, 'info');
     }
 
     setSyncMode(mode) {
         this.syncMode = mode;
-        
+
         // Update button states
         const buttons = {
             'sdr-to-radio': document.getElementById('radio-sync-sdr-to-radio'),
@@ -154,13 +230,31 @@ class RadioSyncExtension extends DecoderExtension {
             'both': document.getElementById('radio-sync-both')
         };
 
+        console.log('setSyncMode called with mode:', mode);
         Object.keys(buttons).forEach(key => {
             if (buttons[key]) {
                 if (key === mode) {
+                    console.log('Adding active class to:', key, buttons[key]);
                     buttons[key].classList.add('radio-sync-btn-active');
+                    // Force inline styles to override any CSS
+                    buttons[key].style.background = '#3498db';
+                    buttons[key].style.borderColor = '#5dade2';
+                    buttons[key].style.boxShadow = '0 0 15px rgba(52, 152, 219, 0.6)';
+                    buttons[key].style.color = '#ffffff';
+                    buttons[key].style.fontWeight = '700';
+                    console.log('Button classes after add:', buttons[key].className);
                 } else {
+                    console.log('Removing active class from:', key);
                     buttons[key].classList.remove('radio-sync-btn-active');
+                    // Remove inline styles
+                    buttons[key].style.background = '';
+                    buttons[key].style.borderColor = '';
+                    buttons[key].style.boxShadow = '';
+                    buttons[key].style.color = '';
+                    buttons[key].style.fontWeight = '';
                 }
+            } else {
+                console.error('Button not found:', key);
             }
         });
 
@@ -169,13 +263,13 @@ class RadioSyncExtension extends DecoderExtension {
 
 
     updateFromSDR() {
-        // Get current SDR state
-        this.currentFrequency = this.radio.getFrequency();
-        this.currentMode = this.radio.getMode();
+        // Initialize display with SDR state until we get radio state
+        const sdrFreq = this.radio.getFrequency();
+        const sdrMode = this.radio.getMode();
         
-        // Update displays
-        this.updateFrequencyDisplay(this.currentFrequency);
-        this.updateModeDisplay(this.currentMode);
+        // Update displays (will be overwritten by radio responses)
+        this.updateFrequencyDisplay(sdrFreq);
+        this.updateModeDisplay(sdrMode);
     }
 
     updateFrequencyDisplay(freq) {
@@ -186,6 +280,10 @@ class RadioSyncExtension extends DecoderExtension {
     }
 
     formatFrequencyLED(hz) {
+        // Show dashes if frequency is 0 (not connected)
+        if (hz === 0) {
+            return '--.---.---';
+        }
         // Format for LED display: 14.074.000
         const mhz = (hz / 1000000).toFixed(6);
         // Add dots every 3 digits from the right (after decimal point)
@@ -202,24 +300,108 @@ class RadioSyncExtension extends DecoderExtension {
 
     updateModeDisplay(mode) {
         this.updateElementById('radio-sync-mode-display', (el) => {
-            el.textContent = mode.toUpperCase();
+            // Show dashes if mode is empty or '---'
+            if (!mode || mode === '---') {
+                el.textContent = '---';
+            } else {
+                el.textContent = mode.toUpperCase();
+            }
         });
     }
 
-    updateTXRXState(isTX) {
+    updateTXRXState(isTX, isConnected = true) {
+        const wasTransmitting = this.txState;
         this.txState = isTX;
+
+        const stateDisplay = document.getElementById('radio-sync-state-display');
         
-        const rxLed = document.getElementById('radio-sync-rx-led');
-        const txLed = document.getElementById('radio-sync-tx-led');
-        
-        if (rxLed && txLed) {
-            if (isTX) {
-                rxLed.classList.remove('active');
-                txLed.classList.add('active');
+        if (stateDisplay) {
+            if (!isConnected) {
+                // Show dashes when not connected
+                stateDisplay.textContent = '--';
+                stateDisplay.classList.remove('led-state-tx', 'led-state-rx');
+            } else if (isTX) {
+                stateDisplay.textContent = 'TX';
+                stateDisplay.classList.remove('led-state-rx');
+                stateDisplay.classList.add('led-state-tx');
             } else {
-                rxLed.classList.add('active');
-                txLed.classList.remove('active');
+                stateDisplay.textContent = 'RX';
+                stateDisplay.classList.remove('led-state-tx');
+                stateDisplay.classList.add('led-state-rx');
             }
+        }
+
+        // Handle mute on TX (only when connected)
+        if (isConnected && this.muteOnTX) {
+            if (isTX && !wasTransmitting) {
+                // Just started transmitting - mute SDR
+                console.log('TX started - calling muteSDR()');
+                this.muteSDR();
+            } else if (!isTX && wasTransmitting) {
+                // Just stopped transmitting - unmute SDR
+                console.log('TX stopped - calling unmuteSDR()');
+                this.unmuteSDR();
+            }
+        }
+    }
+
+    muteSDR() {
+        try {
+            // Store whether SDR was already muted before we mute it
+            this.wasMutedBeforeTX = this.radio.getMuted();
+            console.log('muteSDR: Current mute state =', this.wasMutedBeforeTX);
+            console.log('muteSDR: wasMutedBeforeTX will be set to', this.wasMutedBeforeTX);
+
+            // Only mute if not already muted
+            if (!this.wasMutedBeforeTX) {
+                console.log('muteSDR: Calling setMuted(true)...');
+                const result = this.radio.setMuted(true);
+                console.log('muteSDR: setMuted(true) returned', result);
+
+                // Verify it actually got muted
+                const newState = this.radio.getMuted();
+                console.log('muteSDR: After setMuted(true), getMuted() returns', newState);
+
+                if (result) {
+                    this.addMessage('🔇 SDR muted (radio TX)', 'info');
+                } else {
+                    this.addMessage('Failed to mute SDR', 'warning');
+                }
+            } else {
+                console.log('muteSDR: SDR was already muted, not muting again');
+            }
+        } catch (error) {
+            console.error('Error in muteSDR:', error);
+            this.addMessage(`Mute error: ${error.message}`, 'error');
+        }
+    }
+
+    unmuteSDR() {
+        try {
+            console.log('unmuteSDR: wasMutedBeforeTX =', this.wasMutedBeforeTX);
+            console.log('unmuteSDR: Current mute state before unmute =', this.radio.getMuted());
+
+            // Only unmute if we muted it (don't unmute if it was already muted)
+            if (!this.wasMutedBeforeTX) {
+                console.log('unmuteSDR: Calling setMuted(false)...');
+                const result = this.radio.setMuted(false);
+                console.log('unmuteSDR: setMuted(false) returned', result);
+
+                // Verify it actually got unmuted
+                const newState = this.radio.getMuted();
+                console.log('unmuteSDR: After setMuted(false), getMuted() returns', newState);
+
+                if (result) {
+                    this.addMessage('🔊 SDR unmuted (radio RX)', 'info');
+                } else {
+                    this.addMessage('Failed to unmute SDR', 'warning');
+                }
+            } else {
+                console.log('unmuteSDR: SDR was muted before TX, not unmuting');
+            }
+        } catch (error) {
+            console.error('Error in unmuteSDR:', error);
+            this.addMessage(`Unmute error: ${error.message}`, 'error');
         }
     }
 
@@ -266,14 +448,17 @@ class RadioSyncExtension extends DecoderExtension {
             
             // Update UI
             this.updateConnectionUI(true);
-            
-            // Update status badge
-            this.updateStatusBadge('Connected', 'decoder-active');
 
-            // Start reading from radio (for radio-to-sdr sync)
-            if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
-                this.startReading();
-            }
+            // Start reading from radio
+            this.startReading();
+
+            // Start polling radio state (for radio-to-sdr sync)
+            // Note: We always poll for TX status, but only poll freq/mode in radio-to-sdr or both modes
+            this.startRadioPolling();
+
+            // Get current SDR state before syncing to radio
+            this.currentFrequency = this.radio.getFrequency();
+            this.currentMode = this.radio.getMode();
 
             // Send initial state to radio (for sdr-to-radio sync)
             if (this.syncMode === 'sdr-to-radio' || this.syncMode === 'both') {
@@ -292,6 +477,9 @@ class RadioSyncExtension extends DecoderExtension {
         if (!this.serialPort) return;
 
         try {
+            // Stop radio polling
+            this.stopRadioPolling();
+
             // Stop reading
             if (this.reader) {
                 await this.reader.cancel();
@@ -305,24 +493,72 @@ class RadioSyncExtension extends DecoderExtension {
 
             this.addMessage('Disconnected from radio', 'info');
             this.updateConnectionUI(false);
-            this.updateStatusBadge('Disconnected', 'decoder-inactive');
 
         } catch (error) {
             this.addMessage(`Disconnect error: ${error.message}`, 'error');
+        } finally {
+            // Reset display to dashes when disconnected
+            this.updateFrequencyDisplay(0);
+            this.updateModeDisplay('---');
+            this.updateTXRXState(false, false);
+        }
+    }
+
+    startRadioPolling() {
+        // Stop any existing polling
+        this.stopRadioPolling();
+
+        // Poll radio every 100ms for freq/mode (always, for display) and TX state (always, for mute)
+        this.radioPollingInterval = setInterval(async () => {
+            if (this.isConnected && this.protocolHandler) {
+                try {
+                    // Always query frequency and mode to update display
+                    const freqCmd = this.protocolHandler.buildGetFrequencyCommand();
+                    await this.sendCommand(freqCmd);
+
+                    const modeCmd = this.protocolHandler.buildGetModeCommand();
+                    await this.sendCommand(modeCmd);
+
+                    // Always query TX/RX state for mute-on-TX feature
+                    const txCmd = this.protocolHandler.buildGetTXStatusCommand();
+                    await this.sendCommand(txCmd);
+                } catch (error) {
+                    console.error('Radio polling error:', error);
+                }
+            }
+        }, 100); // Poll every 100ms (10 Hz) for responsive sync
+
+        this.addMessage('Started polling radio state (freq/mode/TX) at 10 Hz', 'info');
+    }
+
+    stopRadioPolling() {
+        if (this.radioPollingInterval) {
+            clearInterval(this.radioPollingInterval);
+            this.radioPollingInterval = null;
+            this.addMessage('Stopped polling radio state', 'info');
         }
     }
 
     updateConnectionUI(connected) {
         const connectBtn = document.getElementById('radio-sync-connect');
         const disconnectBtn = document.getElementById('radio-sync-disconnect');
+        const baudRateSelect = document.getElementById('radio-sync-baud-rate');
 
         if (connectBtn && disconnectBtn) {
             if (connected) {
                 connectBtn.style.display = 'none';
-                disconnectBtn.style.display = 'block';
+                disconnectBtn.style.display = 'inline-block';
+                // Disable baud rate selection when connected
+                if (baudRateSelect) {
+                    baudRateSelect.disabled = true;
+                }
             } else {
-                connectBtn.style.display = 'block';
+                connectBtn.style.display = 'inline-block';
                 disconnectBtn.style.display = 'none';
+                // Enable baud rate selection when disconnected
+                if (baudRateSelect) {
+                    baudRateSelect.disabled = false;
+                }
             }
         }
     }
@@ -376,30 +612,87 @@ class RadioSyncExtension extends DecoderExtension {
         switch (response.type) {
             case 'frequency':
                 this.addMessage(`Radio VFO-${response.vfo}: ${this.radio.formatFrequency(response.frequency)}`, 'info');
+
+                // Update our display with radio frequency
+                this.currentFrequency = response.frequency;
+                this.updateFrequencyDisplay(response.frequency);
+
                 if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
-                    // Update SDR frequency
-                    this.radio.setFrequency(response.frequency);
+                    // Only update SDR if frequency actually differs
+                    const currentSDRFreq = this.radio.getFrequency();
+                    if (response.frequency !== currentSDRFreq) {
+                        // Set flag to prevent our event handlers from reacting
+                        this.updatingFromRadio = true;
+                        // Track this as the last sent frequency to prevent feedback
+                        this.lastSentFrequency = response.frequency;
+                        // Update SDR frequency
+                        this.radio.setFrequency(response.frequency);
+                        // Clear flag immediately after event loop processes the event
+                        setTimeout(() => { this.updatingFromRadio = false; }, 0);
+                    }
                 }
                 break;
-                
+
             case 'mode':
                 this.addMessage(`Radio mode: ${response.mode}`, 'info');
+
+                // Update our display with radio mode
+                this.currentMode = response.mode;
+                this.updateModeDisplay(response.mode);
+
                 if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
-                    // Update SDR mode
+                    // Only update SDR if mode actually differs
                     const sdrMode = response.mode.toLowerCase();
-                    this.radio.setMode(sdrMode);
+                    const currentSDRMode = this.radio.getMode();
+                    if (sdrMode !== currentSDRMode) {
+                        // Set flag to prevent our event handlers from reacting
+                        this.updatingFromRadio = true;
+                        // Track this as the last sent mode to prevent feedback
+                        this.lastSentMode = sdrMode;
+                        // Update SDR mode
+                        this.radio.setMode(sdrMode);
+                        // Clear flag immediately after event loop processes the event
+                        setTimeout(() => { this.updatingFromRadio = false; }, 0);
+                    }
                 }
                 break;
-                
+
             case 'status':
                 // Full status from IF command
                 this.addMessage(`Radio status: ${this.radio.formatFrequency(response.frequency)} ${response.mode} ${response.transmitting ? 'TX' : 'RX'}`, 'info');
+
+                // Update our display with radio state
+                this.currentFrequency = response.frequency;
+                this.currentMode = response.mode;
+                this.updateFrequencyDisplay(response.frequency);
+                this.updateModeDisplay(response.mode);
                 this.updateTXRXState(response.transmitting);
-                
+
                 if (this.syncMode === 'radio-to-sdr' || this.syncMode === 'both') {
-                    this.radio.setFrequency(response.frequency);
+                    // Only update SDR if values actually differ
+                    const currentSDRFreq = this.radio.getFrequency();
                     const sdrMode = response.mode.toLowerCase();
-                    this.radio.setMode(sdrMode);
+                    const currentSDRMode = this.radio.getMode();
+
+                    const freqChanged = response.frequency !== currentSDRFreq;
+                    const modeChanged = sdrMode !== currentSDRMode;
+
+                    if (freqChanged || modeChanged) {
+                        // Set flag to prevent our event handlers from reacting
+                        this.updatingFromRadio = true;
+                        // Track these as the last sent values to prevent feedback
+                        this.lastSentFrequency = response.frequency;
+                        this.lastSentMode = sdrMode;
+                        // Update SDR only if changed
+                        if (freqChanged) {
+                            this.radio.setFrequency(response.frequency);
+                        }
+                        if (modeChanged) {
+                            this.radio.setMode(sdrMode);
+                        }
+                        // Clear flag immediately after event loop processes the events
+                        setTimeout(() => { this.updatingFromRadio = false; }, 0);
+                    }
                 }
                 break;
                 
@@ -472,8 +765,8 @@ class RadioSyncExtension extends DecoderExtension {
         messagesDiv.appendChild(messageDiv);
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-        // Keep only last 50 messages
-        while (messagesDiv.children.length > 50) {
+        // Keep only last 1000 messages
+        while (messagesDiv.children.length > 1000) {
             messagesDiv.removeChild(messagesDiv.firstChild);
         }
     }
@@ -488,22 +781,37 @@ class RadioSyncExtension extends DecoderExtension {
 
     onEnable() {
         console.log('Radio Sync Extension onEnable called');
-        this.addMessage('Radio Sync extension enabled', 'success');
-        
+
+        // Set up event listeners now that template is definitely in DOM
+        this.setupEventListeners();
+
+        // Subscribe to radio events for SDR changes
+        console.log('About to subscribe to radio events...');
+        console.log('RadioAPI instance:', this.radio);
+        console.log('RadioAPI callbacks before:', this.radio.callbacks);
+        this.subscribeToRadioEvents();
+        console.log('RadioAPI callbacks after:', this.radio.callbacks);
+
+        // Set initial sync mode button state
+        this.setSyncMode(this.syncMode);
+
         // Check for Web Serial API support and show error if not available
         if (!('serial' in navigator)) {
             this.showSerialAPIError();
         }
-        
-        // Start periodic updates to poll SDR state (like Stats extension)
+
+        this.addMessage('Radio Sync extension enabled', 'success');
+
+        // Start periodic updates to poll SDR state
         this.updateInterval = setInterval(() => {
             this.pollSDRState();
-        }, 500); // Update every 500ms
-        
+        }, 100); // Update every 100ms (10 Hz) for responsive sync
+
         // Initial update
         this.updateFromSDR();
-        
+
         console.log('Radio Sync Extension enabled, current freq:', this.currentFrequency);
+        console.log('Event listeners subscribed:', this.eventListeners.length);
     }
 
     onDisable() {
@@ -522,32 +830,33 @@ class RadioSyncExtension extends DecoderExtension {
     }
     
     pollSDRState() {
-        // Poll current SDR state and update if changed
-        const newFreq = this.radio.getFrequency();
-        const newMode = this.radio.getMode();
-        
-        // Check if frequency changed
-        if (newFreq !== this.currentFrequency) {
-            console.log('Radio Sync: Frequency changed from', this.currentFrequency, 'to', newFreq);
-            this.currentFrequency = newFreq;
-            this.updateFrequencyDisplay(newFreq);
-            
-            // Sync to radio if enabled
-            if (this.isConnected && (this.syncMode === 'sdr-to-radio' || this.syncMode === 'both')) {
-                this.sendFrequencyToRadio(newFreq);
-            }
+        // If not connected, ensure display shows dashes
+        if (!this.isConnected) {
+            this.updateFrequencyDisplay(0);
+            this.updateModeDisplay('---');
+            return;
         }
-        
-        // Check if mode changed
-        if (newMode !== this.currentMode) {
-            console.log('Radio Sync: Mode changed from', this.currentMode, 'to', newMode);
-            this.currentMode = newMode;
-            this.updateModeDisplay(newMode);
-            
-            // Sync to radio if enabled
-            if (this.isConnected && (this.syncMode === 'sdr-to-radio' || this.syncMode === 'both')) {
-                this.sendModeToRadio(newMode);
-            }
+
+        // Poll SDR state and send changes to radio if in sdr-to-radio or both mode
+        if (this.syncMode !== 'sdr-to-radio' && this.syncMode !== 'both') {
+            return;
+        }
+
+        const sdrFreq = this.radio.getFrequency();
+        const sdrMode = this.radio.getMode();
+
+        // Check if SDR frequency changed and send to radio
+        if (sdrFreq !== this.lastSentFrequency) {
+            console.log('SDR frequency changed:', sdrFreq, 'last sent:', this.lastSentFrequency);
+            this.lastSentFrequency = sdrFreq;
+            this.sendFrequencyToRadio(sdrFreq);
+        }
+
+        // Check if SDR mode changed and send to radio
+        if (sdrMode !== this.lastSentMode) {
+            console.log('SDR mode changed:', sdrMode, 'last sent:', this.lastSentMode);
+            this.lastSentMode = sdrMode;
+            this.sendModeToRadio(sdrMode);
         }
     }
 
@@ -556,11 +865,65 @@ class RadioSyncExtension extends DecoderExtension {
     }
 
     onFrequencyChanged(frequency) {
-        // Polling handles this, but keep for compatibility
+        console.log('onFrequencyChanged called:', {
+            frequency,
+            updatingFromRadio: this.updatingFromRadio,
+            lastSentFrequency: this.lastSentFrequency,
+            isConnected: this.isConnected,
+            syncMode: this.syncMode
+        });
+
+        // Ignore if we're currently updating from radio (prevents feedback loop)
+        if (this.updatingFromRadio) {
+            console.log('Blocked: updatingFromRadio is true');
+            return;
+        }
+
+        // Only send if frequency actually changed from what we last sent
+        if (frequency === this.lastSentFrequency) {
+            console.log('Blocked: frequency matches lastSentFrequency');
+            return;
+        }
+
+        // Send to radio if in sdr-to-radio or both mode
+        if (this.isConnected && (this.syncMode === 'sdr-to-radio' || this.syncMode === 'both')) {
+            console.log('Sending frequency to radio:', frequency);
+            this.lastSentFrequency = frequency;
+            this.sendFrequencyToRadio(frequency);
+        } else {
+            console.log('Not sending: isConnected=' + this.isConnected + ', syncMode=' + this.syncMode);
+        }
     }
 
     onModeChanged(mode) {
-        // Polling handles this, but keep for compatibility
+        console.log('onModeChanged called:', {
+            mode,
+            updatingFromRadio: this.updatingFromRadio,
+            lastSentMode: this.lastSentMode,
+            isConnected: this.isConnected,
+            syncMode: this.syncMode
+        });
+
+        // Ignore if we're currently updating from radio (prevents feedback loop)
+        if (this.updatingFromRadio) {
+            console.log('Blocked: updatingFromRadio is true');
+            return;
+        }
+
+        // Only send if mode actually changed from what we last sent
+        if (mode === this.lastSentMode) {
+            console.log('Blocked: mode matches lastSentMode');
+            return;
+        }
+
+        // Send to radio if in sdr-to-radio or both mode
+        if (this.isConnected && (this.syncMode === 'sdr-to-radio' || this.syncMode === 'both')) {
+            console.log('Sending mode to radio:', mode);
+            this.lastSentMode = mode;
+            this.sendModeToRadio(mode);
+        } else {
+            console.log('Not sending: isConnected=' + this.isConnected + ', syncMode=' + this.syncMode);
+        }
     }
 }
 

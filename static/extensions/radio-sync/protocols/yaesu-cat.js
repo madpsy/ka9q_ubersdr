@@ -131,20 +131,20 @@ class YaesuCATProtocol {
         // Convert Uint8Array to string
         const text = new TextDecoder().decode(data);
         this.responseBuffer += text;
-        
+
         // Look for complete responses (terminated with semicolon)
         const responses = [];
         let semicolonIndex;
-        
+
         while ((semicolonIndex = this.responseBuffer.indexOf(this.commandTerminator)) !== -1) {
             const response = this.responseBuffer.substring(0, semicolonIndex);
             this.responseBuffer = this.responseBuffer.substring(semicolonIndex + 1);
-            
+
             if (response.length > 0) {
                 responses.push(this.parseCommand(response));
             }
         }
-        
+
         return responses.length > 0 ? responses : null;
     }
     
@@ -228,7 +228,7 @@ class YaesuCATProtocol {
      */
     parseIFResponse(data) {
         if (data.length < 27) {
-            return { type: 'error', message: 'IF response too short' };
+            return { type: 'error', message: `IF response too short (got ${data.length} chars, need 27+)` };
         }
         
         try {

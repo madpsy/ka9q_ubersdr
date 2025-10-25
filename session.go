@@ -543,12 +543,15 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 	oldMode := session.Mode
 	oldBandwidthLow := session.BandwidthLow
 	oldBandwidthHigh := session.BandwidthHigh
+	oldSampleRate := session.SampleRate
 
 	if frequency > 0 {
 		session.Frequency = frequency
 	}
 	if mode != "" {
 		session.Mode = mode
+		// Update sample rate when mode changes
+		session.SampleRate = sm.config.Audio.GetSampleRateForMode(mode)
 	}
 	if sendBandwidth {
 		session.BandwidthLow = bandwidthLow
@@ -577,6 +580,7 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		session.Mode = oldMode
 		session.BandwidthLow = oldBandwidthLow
 		session.BandwidthHigh = oldBandwidthHigh
+		session.SampleRate = oldSampleRate
 		session.mu.Unlock()
 		return fmt.Errorf("failed to update radiod channel: %w", err)
 	}

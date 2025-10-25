@@ -53,12 +53,14 @@ const wsManager = new WebSocketManager({
 
         // Initialize audio context if not already done
         if (!audioContext) {
+            // Start with browser's default sample rate - will be recreated when first audio arrives
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             window.audioContext = audioContext;
+            currentAudioContextSampleRate = audioContext.sampleRate;
             nextPlayTime = audioContext.currentTime;
             window.nextPlayTime = nextPlayTime;
             audioStartTime = audioContext.currentTime;
-            log(`Audio context initialized (sample rate: ${audioContext.sampleRate} Hz)`);
+            log(`Audio context initialized (sample rate: ${audioContext.sampleRate} Hz, will match incoming audio)`);
 
             // Create analyser for spectrum/waterfall (pre-filter tap)
             analyser = audioContext.createAnalyser();
@@ -71,9 +73,9 @@ const wsManager = new WebSocketManager({
             postFilterAnalyser.fftSize = getOptimalFFTSize();
             postFilterAnalyser.smoothingTimeConstant = 0;
 
-            // Create dedicated analyser for VU meter
+            // Create dedicated analyser for VU meter and visualizations
             vuAnalyser = audioContext.createAnalyser();
-            vuAnalyser.fftSize = 2048;
+            vuAnalyser.fftSize = getOptimalFFTSize();
             vuAnalyser.smoothingTimeConstant = 0;
 
             // Expose analysers globally for extensions
@@ -155,6 +157,7 @@ const wsManager = new WebSocketManager({
 });
 
 let audioContext = null;
+let currentAudioContextSampleRate = 0; // Track current AudioContext sample rate
 let audioUserDisconnected = false; // Flag to prevent reconnection after user disconnect
 // Expose audioContext globally for recorder
 window.audioContext = null;
@@ -192,10 +195,9 @@ window.currentBandwidthLow = currentBandwidthLow;
 window.currentBandwidthHigh = currentBandwidthHigh;
 
 // Audio analysis
-let analyser = null; // Analyser for spectrum/waterfall (taps signal before processing)
-let postFilterAnalyser = null; // Analyser for post-filter visualization (same tap point as VU meter)
-let vuAnalyser = null; // Dedicated analyser for VU meter (after all processing)
-let visualizationTapPoint = 'post'; // 'pre' or 'post' - controls which analyser to use for visualization
+let analyser = null; // Analyser for spectrum/waterfall (legacy - kept for compatibility)
+let postFilterAnalyser = null; // Post-filter analyser (legacy - kept for compatibility)
+let vuAnalyser = null; // Dedicated analyser for VU meter and all visualizations (after all processing, real-time)
 let spectrumCanvas = null;
 let spectrumCtx = null;
 let spectrumPeaks = null; // Array to store peak values for each bar
@@ -1503,6 +1505,67 @@ async function handleAudio(msg) {
 
 // Handle PCM audio data
 function handlePCMAudio(msg) {
+    // Check if sample rate changed - if so, recreate AudioContext
+    if (audioContext && msg.sampleRate !== currentAudioContextSampleRate) {
+        log(`Sample rate changed from ${currentAudioContextSampleRate} Hz to ${msg.sampleRate} Hz - recreating AudioContext`);
+
+        // Store old context reference to check if nodes belong to it
+        const oldContext = audioContext;
+
+        // Close old context
+        oldContext.close();
+
+        // Create new context with matching sample rate
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({
+            sampleRate: msg.sampleRate
+        });
+        window.audioContext = audioContext;
+        currentAudioContextSampleRate = msg.sampleRate;
+        nextPlayTime = audioContext.currentTime;
+        window.nextPlayTime = nextPlayTime;
+        audioStartTime = audioContext.currentTime;
+
+        // Reinitialize all audio nodes
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = getOptimalFFTSize();
+        analyser.smoothingTimeConstant = 0;
+        updateFFTSizeDropdown();
+
+        postFilterAnalyser = audioContext.createAnalyser();
+        postFilterAnalyser.fftSize = getOptimalFFTSize();
+        postFilterAnalyser.smoothingTimeConstant = 0;
+
+        vuAnalyser = audioContext.createAnalyser();
+        vuAnalyser.fftSize = getOptimalFFTSize();
+        vuAnalyser.smoothingTimeConstant = 0;
+
+        window.analyser = analyser;
+        window.postFilterAnalyser = postFilterAnalyser;
+        window.vuAnalyser = vuAnalyser;
+
+        // Reinitialize audio processing nodes
+        initializeStereoChannels();
+        initializeSquelch();
+        initializeCompressor();
+        initializeLowpassFilter();
+        initializeEqualizer();
+
+        // Restore filter settings
+        if (window.restoreFilterSettings) {
+            window.restoreFilterSettings();
+        }
+
+        // Re-enable NR2 if it was enabled
+        if (noiseReductionEnabled) {
+            const nr2Checkbox = document.getElementById('noise-reduction-enable');
+            if (nr2Checkbox && nr2Checkbox.checked) {
+                toggleNoiseReduction();
+            }
+        }
+
+        log(`AudioContext recreated at ${msg.sampleRate} Hz (eliminates Chrome resampling artifacts)`);
+    }
+
     // Decode base64 PCM data
     const binaryString = atob(msg.data);
     const bytes = new Uint8Array(binaryString.length);
@@ -1611,6 +1674,18 @@ async function handleOpusAudio(msg) {
 
 // Play audio buffer with proper timing
 function playAudioBuffer(buffer) {
+    // Safety check: ensure audioContext and analysers are valid
+    if (!audioContext || audioContext.state === 'closed') {
+        console.warn('AudioContext is closed, skipping buffer');
+        return;
+    }
+
+    // Safety check: ensure analysers belong to current context
+    if (!analyser || analyser.context !== audioContext) {
+        console.warn('Analyser belongs to old context, skipping buffer');
+        return;
+    }
+
     const source = audioContext.createBufferSource();
     source.buffer = buffer;
 
@@ -1884,16 +1959,16 @@ function playAudioBuffer(buffer) {
     // Step 11: Final output to destination
     outputNode.connect(audioContext.destination);
 
-    // Schedule playback to maintain continuous audio
-    const currentTime = audioContext.currentTime;
-
     // Buffer management constants
     const MAX_BUFFER_MS = 150; // Maximum 150ms buffer (aggressive packet dropping)
     const MAX_BUFFER_SEC = MAX_BUFFER_MS / 1000;
+    const MIN_BUFFER_MS = 40; // Minimum 40ms buffer for Chrome stability
+    const MIN_BUFFER_SEC = MIN_BUFFER_MS / 1000;
+    const currentTime = audioContext.currentTime;
 
     // If we're falling behind (underrun), reset the schedule
     if (nextPlayTime < currentTime) {
-        nextPlayTime = currentTime;
+        nextPlayTime = currentTime + MIN_BUFFER_SEC; // Add minimum buffer for Chrome
         window.nextPlayTime = nextPlayTime;
     }
     // If we're too far ahead (overrun), drop this packet to prevent lag accumulation
@@ -2410,6 +2485,12 @@ function setMode(mode, preserveBandwidth = false) {
 
         if (oldFFTSize !== newFFTSize) {
             analyser.fftSize = newFFTSize;
+            if (postFilterAnalyser) {
+                postFilterAnalyser.fftSize = newFFTSize;
+            }
+            if (vuAnalyser) {
+                vuAnalyser.fftSize = newFFTSize;
+            }
             updateFFTSizeDropdown();
             log(`FFT size auto-adjusted to ${newFFTSize} for ${Math.abs(currentBandwidthHigh - currentBandwidthLow)} Hz bandwidth`);
         }
@@ -2477,6 +2558,12 @@ function updateBandwidth() {
 
         if (oldFFTSize !== newFFTSize) {
             analyser.fftSize = newFFTSize;
+            if (postFilterAnalyser) {
+                postFilterAnalyser.fftSize = newFFTSize;
+            }
+            if (vuAnalyser) {
+                vuAnalyser.fftSize = newFFTSize;
+            }
             updateFFTSizeDropdown();
             log(`FFT size auto-adjusted to ${newFFTSize} for ${Math.abs(bandwidthHigh - bandwidthLow)} Hz bandwidth`);
         }
@@ -2793,8 +2880,8 @@ function startVisualization() {
 
             // Update oscilloscope (throttled to 30fps)
             if (oscilloscope) {
-                // Use the selected analyser based on tap point setting
-                const activeAnalyser = (visualizationTapPoint === 'post' && postFilterAnalyser) ? postFilterAnalyser : analyser;
+                // Always use vuAnalyser for real-time display (matches what you're hearing)
+                const activeAnalyser = vuAnalyser || analyser;
                 oscilloscope.update(activeAnalyser, audioContext, currentMode, currentBandwidthLow, currentBandwidthHigh);
             }
 
@@ -3702,8 +3789,8 @@ function createSpectrumLabelsCache(width, height, minDb, maxDb) {
 }
 
 function updateSpectrum() {
-    // Use the selected analyser based on tap point setting
-    const activeAnalyser = (visualizationTapPoint === 'post' && postFilterAnalyser) ? postFilterAnalyser : analyser;
+    // Always use vuAnalyser for real-time display (matches what you're hearing)
+    const activeAnalyser = vuAnalyser || analyser;
     if (!activeAnalyser || !spectrumCtx) return;
 
     const dataArray = new Uint8Array(activeAnalyser.frequencyBinCount);
@@ -4266,8 +4353,8 @@ function updateSpectrum() {
 }
 
 function updateWaterfall() {
-    // Use the selected analyser based on tap point setting
-    const activeAnalyser = (visualizationTapPoint === 'post' && postFilterAnalyser) ? postFilterAnalyser : analyser;
+    // Always use vuAnalyser for real-time display (matches what you're hearing)
+    const activeAnalyser = vuAnalyser || analyser;
     if (!activeAnalyser || !waterfallCtx || !waterfallImageData) return;
 
     const dataArray = new Uint8Array(activeAnalyser.frequencyBinCount);
@@ -4750,6 +4837,11 @@ function updateFFTSize() {
     // Update post-filter analyser to match
     if (postFilterAnalyser) {
         postFilterAnalyser.fftSize = newFFTSize;
+    }
+
+    // Update VU analyser to match (used for all visualizations)
+    if (vuAnalyser) {
+        vuAnalyser.fftSize = newFFTSize;
     }
 
     // Clear waterfall canvas to avoid misaligned old data
@@ -5473,25 +5565,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 100);
 });
 
-// Update visualization tap point (pre-filter or post-filter)
-function updateVisualizationTapPoint() {
-    const selectedRadio = document.querySelector('input[name="viz-tap-point"]:checked');
-    
-    if (selectedRadio) {
-        visualizationTapPoint = selectedRadio.value;
-        if (visualizationTapPoint === 'pre') {
-            log('Visualization tap point: Pre-Filter (raw signal)');
-        } else {
-            log('Visualization tap point: Post-Filter (processed signal)');
-        }
-    }
-}
 
 // Expose functions to global scope for HTML onclick/onchange handlers
 // (Required because ES6 modules don't automatically expose functions globally)
-
-// Visualization tap point control
-window.updateVisualizationTapPoint = updateVisualizationTapPoint;
 
 // Spectrum controls
 window.toggleSpectrumLineGraph = toggleSpectrumLineGraph;

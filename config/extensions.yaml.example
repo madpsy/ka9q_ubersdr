@@ -14,3 +14,6 @@ extensions:
   
   # FT8 Decoder - decodes FT8 digital mode signals (currently disabled by default)
   # - ft8-decoder
+
+  # Radio Sync - syncs the SDR <-> Radio via serial CAT
+  - radio-sync

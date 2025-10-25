@@ -847,14 +847,12 @@ class RadioSyncExtension extends DecoderExtension {
 
         // Check if SDR frequency changed and send to radio
         if (sdrFreq !== this.lastSentFrequency) {
-            console.log('SDR frequency changed:', sdrFreq, 'last sent:', this.lastSentFrequency);
             this.lastSentFrequency = sdrFreq;
             this.sendFrequencyToRadio(sdrFreq);
         }
 
         // Check if SDR mode changed and send to radio
         if (sdrMode !== this.lastSentMode) {
-            console.log('SDR mode changed:', sdrMode, 'last sent:', this.lastSentMode);
             this.lastSentMode = sdrMode;
             this.sendModeToRadio(sdrMode);
         }

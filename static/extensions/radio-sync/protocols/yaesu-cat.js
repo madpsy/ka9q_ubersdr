@@ -8,14 +8,15 @@ class YaesuCATProtocol {
         this.responseBuffer = '';
         
         // Mode mappings (Yaesu CAT to Hamlib)
+        // Map radio responses to SDR mode names
         this.modeMap = {
             '1': 'LSB',
             '2': 'USB',
-            '3': 'CW',
+            '3': 'CWU',     // CW-USB (changed from 'CW' to 'CWU')
             '4': 'FM',
             '5': 'AM',
             '6': 'RTTY',
-            '7': 'CWR',
+            '7': 'CWL',     // CW-LSB (changed from 'CWR' to 'CWL')
             '8': 'PKTLSB',
             '9': 'RTTYR',
             'A': 'PKTFM',
@@ -29,6 +30,13 @@ class YaesuCATProtocol {
         for (const [key, value] of Object.entries(this.modeMap)) {
             this.reverseModeMap[value] = key;
         }
+
+        // Add aliases for legacy mode names
+        this.reverseModeMap['CW'] = '3';   // CW is an alias for CWU
+        this.reverseModeMap['CWR'] = '7';  // CWR is an alias for CWL
+
+        // Add alias for NFM to use FM
+        this.reverseModeMap['NFM'] = '4';  // NFM uses FM mode
     }
     
     /**
@@ -58,7 +66,8 @@ class YaesuCATProtocol {
      */
     formatMode(mode) {
         const modeUpper = mode.toUpperCase();
-        return this.reverseModeMap[modeUpper] || '2'; // Default to USB
+        const modeCode = this.reverseModeMap[modeUpper];
+        return modeCode || '2'; // Default to USB
     }
     
     /**

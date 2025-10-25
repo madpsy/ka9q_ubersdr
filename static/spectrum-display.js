@@ -319,7 +319,7 @@ class SpectrumDisplay {
         this.dragStartFreq = 0;
         this.lastPanTime = 0;
         this.panThrottleMs = 150; // Throttle pan requests to avoid backend rounding issues
-        this.scrollEnabled = false; // Mouse scroll wheel disabled by default
+        this.scrollEnabled = true; // Mouse scroll wheel enabled by default
         this.zoomScrollEnabled = false; // Zoom scroll wheel disabled by default
         this.setupMouseHandlers();
         this.setupScrollHandler();
@@ -2575,6 +2575,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         let lastScrollTime = 0;
         const SCROLL_THROTTLE_MS = 250;
 
+        // Track scroll velocity (time between scroll events, measured BEFORE throttle)
+        let lastScrollEventTime = 0;
+
+        // Track scroll count for gradual ramp-up
+        let scrollCount = 0;
+        let scrollResetTimer = null;
+        let lastScrollDirection = 0; // Track direction: -1 for down, 1 for up, 0 for none
+
         // Setup checkbox handlers
         const scrollCheckbox = document.getElementById('spectrum-scroll-enable');
         const zoomScrollCheckbox = document.getElementById('spectrum-zoom-scroll-enable');
@@ -2612,8 +2620,33 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             
             e.preventDefault();
 
-            // Throttle scroll events to prevent rate limiting (250ms like zoom buttons)
             const now = Date.now();
+
+            // Measure time between scroll events BEFORE throttling (for velocity detection)
+            const timeSinceLastScrollEvent = now - lastScrollEventTime;
+            lastScrollEventTime = now;
+
+            // Detect scroll direction
+            const currentDirection = e.deltaY < 0 ? 1 : -1;
+
+            // Reset counter if direction changed
+            if (lastScrollDirection !== 0 && currentDirection !== lastScrollDirection) {
+                scrollCount = 0;
+                console.log('Scroll direction changed - resetting to 10 Hz');
+            }
+            lastScrollDirection = currentDirection;
+
+            // Count consecutive scrolls and reset counter after 500ms of no scrolling
+            if (scrollResetTimer) {
+                clearTimeout(scrollResetTimer);
+            }
+            scrollCount++;
+            scrollResetTimer = setTimeout(() => {
+                scrollCount = 0;
+                lastScrollDirection = 0;
+            }, 500);
+
+            // Throttle scroll events to prevent rate limiting (250ms like zoom buttons)
             const timeSinceLastScroll = now - lastScrollTime;
             if (timeSinceLastScroll < SCROLL_THROTTLE_MS) {
                 return; // Ignore this scroll event
@@ -2628,21 +2661,45 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                     this.zoomOut();
                 }
             } else if (this.scrollEnabled) {
-                // Frequency scroll mode: scroll up = increase frequency, scroll down = decrease frequency
+                // Frequency scroll mode with velocity-based step size
                 const freqInput = document.getElementById('frequency');
                 if (!freqInput) return;
-                
+
                 const currentFreq = parseInt(freqInput.value);
                 if (isNaN(currentFreq)) return;
-                
-                // Scroll up = increase frequency by 100 Hz
-                // Scroll down = decrease frequency by 100 Hz
-                const delta = e.deltaY < 0 ? 100 : -100;
+
+                // Determine step size based on number of consecutive scrolls
+                // Very gradual ramp-up: 10 Hz -> 100 Hz -> 500 Hz -> 1 kHz -> 10 kHz
+                // Requires many scrolls to reach higher speeds for maximum control
+                const scrollSpeed = Math.abs(e.deltaY);
+                let step;
+
+                if (scrollCount <= 10) {
+                    // First 10 scrolls - ultra-fine control
+                    step = 10;       // 10 Hz - ultra-fine tuning
+                } else if (scrollCount <= 30) {
+                    // Scrolls 11-30 - fine tuning
+                    step = 100;      // 100 Hz - fine tuning
+                } else if (scrollCount <= 60) {
+                    // Scrolls 31-60 - moderate speed
+                    step = 500;      // 500 Hz - moderate jumps
+                } else if (scrollCount <= 90) {
+                    // Scrolls 61-90 - fast navigation
+                    step = 1000;     // 1 kHz - quick navigation
+                } else {
+                    // Scroll 91+ - maximum speed
+                    step = 10000;    // 10 kHz - very fast navigation
+                }
+
+                console.log(`Scroll: deltaY=${e.deltaY}, count=${scrollCount}, timeDelta=${timeSinceLastScrollEvent}ms, step=${step}Hz`);
+
+                // Scroll up = increase frequency, scroll down = decrease frequency
+                const delta = e.deltaY < 0 ? step : -step;
                 let newFreq = currentFreq + delta;
-                
-                // Round to nearest 100 Hz
-                newFreq = Math.round(newFreq / 100) * 100;
-                
+
+                // Round to nearest step size for clean values
+                newFreq = Math.round(newFreq / step) * step;
+
                 // Clamp to valid range (100 kHz to 30 MHz)
                 const MIN_FREQ = 100000;
                 const MAX_FREQ = 30000000;

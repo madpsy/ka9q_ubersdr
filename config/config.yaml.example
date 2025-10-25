@@ -142,7 +142,7 @@ spectrum:
     bin_bandwidth: 29296.875
   # Poll period in milliseconds (how often to request spectrum data)
   # Lower values = faster updates but more CPU/network usage
-  poll_period_ms: 100
+  poll_period_ms: 50 
   # Maximum spectrum sessions per user (to prevent abuse)
   max_sessions_per_user: 2
   # Gain adjustment in dB applied to all spectrum data
@@ -150,7 +150,7 @@ spectrum:
   # Negative values decrease displayed signal levels (darken)
   # Default: 0 (no adjustment)
   # Example: 20 adds 20 dB to all spectrum values
-  gain_db: 15
+  gain_db: 0
   
   # Smoothing settings for waterfall display
   # Reduces fuzziness and noise in the spectrum display

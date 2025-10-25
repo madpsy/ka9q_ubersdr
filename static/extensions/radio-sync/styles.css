@@ -1,0 +1,313 @@
+/* Radio Sync Extension Styles */
+
+.radio-sync-container {
+    padding: 15px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.radio-sync-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #3498db;
+}
+
+.radio-sync-header h3 {
+    margin: 0;
+    color: #ecf0f1;
+    font-size: 1.3em;
+}
+
+.radio-sync-section {
+    margin-bottom: 20px;
+}
+
+.radio-sync-section label {
+    display: block;
+    margin-bottom: 8px;
+    color: #bdc3c7;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+/* Error Display */
+.radio-sync-error {
+    background: rgba(231, 76, 60, 0.2);
+    border: 2px solid #e74c3c;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.radio-sync-error strong {
+    color: #e74c3c;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.radio-sync-error p {
+    color: #ecf0f1;
+    margin: 0;
+    font-size: 0.9em;
+}
+
+/* Select Dropdown */
+.radio-sync-select {
+    width: 100%;
+    padding: 10px;
+    background: #34495e;
+    color: #ecf0f1;
+    border: 2px solid #3498db;
+    border-radius: 6px;
+    font-size: 1em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.radio-sync-select:hover {
+    border-color: #5dade2;
+    background: #3d566e;
+}
+
+.radio-sync-select:focus {
+    outline: none;
+    border-color: #5dade2;
+    box-shadow: 0 0 10px rgba(52, 152, 219, 0.5);
+}
+
+.radio-sync-select option {
+    background: #34495e;
+    color: #ecf0f1;
+}
+
+/* Buttons */
+.radio-sync-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.radio-sync-btn {
+    flex: 1;
+    padding: 10px 15px;
+    background: #34495e;
+    color: #ecf0f1;
+    border: 2px solid #3498db;
+    border-radius: 6px;
+    font-size: 0.9em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.radio-sync-btn:hover {
+    background: #3d566e;
+    border-color: #5dade2;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.radio-sync-btn:active {
+    transform: translateY(0);
+}
+
+.radio-sync-btn-active {
+    background: #3498db;
+    border-color: #5dade2;
+}
+
+.radio-sync-btn-primary {
+    background: #27ae60;
+    border-color: #2ecc71;
+}
+
+.radio-sync-btn-primary:hover {
+    background: #2ecc71;
+    border-color: #58d68d;
+}
+
+.radio-sync-btn-danger {
+    background: #c0392b;
+    border-color: #e74c3c;
+}
+
+.radio-sync-btn-danger:hover {
+    background: #e74c3c;
+    border-color: #ec7063;
+}
+
+/* LED Frequency Display */
+.led-display {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1a1a1a;
+    border: 3px solid #2c3e50;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
+}
+
+.led-digits {
+    font-family: 'Courier New', monospace;
+    font-size: 2.5em;
+    font-weight: bold;
+    color: #00ff00;
+    text-shadow: 
+        0 0 10px #00ff00,
+        0 0 20px #00ff00,
+        0 0 30px #00ff00,
+        0 0 40px #00aa00;
+    letter-spacing: 0.1em;
+    animation: led-glow 2s ease-in-out infinite alternate;
+}
+
+@keyframes led-glow {
+    from {
+        text-shadow: 
+            0 0 10px #00ff00,
+            0 0 20px #00ff00,
+            0 0 30px #00ff00,
+            0 0 40px #00aa00;
+    }
+    to {
+        text-shadow: 
+            0 0 15px #00ff00,
+            0 0 25px #00ff00,
+            0 0 35px #00ff00,
+            0 0 50px #00aa00;
+    }
+}
+
+.led-unit {
+    font-size: 1.2em;
+    color: #7f8c8d;
+    margin-left: 15px;
+    font-weight: 600;
+}
+
+/* Mode Display */
+.mode-display {
+    display: flex;
+    justify-content: center;
+}
+
+.mode-indicator {
+    background: #34495e;
+    border: 2px solid #3498db;
+    border-radius: 8px;
+    padding: 15px 30px;
+    font-size: 1.5em;
+    font-weight: bold;
+    color: #3498db;
+    text-align: center;
+    min-width: 100px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* TX/RX State Display */
+.state-display {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+}
+
+.state-led {
+    flex: 1;
+    padding: 15px;
+    border-radius: 8px;
+    font-size: 1.2em;
+    font-weight: bold;
+    text-align: center;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+    opacity: 0.4;
+}
+
+.state-led-rx {
+    background: #2c3e50;
+    color: #27ae60;
+    border-color: #27ae60;
+}
+
+.state-led-tx {
+    background: #2c3e50;
+    color: #e74c3c;
+    border-color: #e74c3c;
+}
+
+.state-led.active {
+    opacity: 1;
+    box-shadow: 0 0 20px currentColor;
+    animation: state-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes state-pulse {
+    0%, 100% {
+        box-shadow: 0 0 20px currentColor;
+    }
+    50% {
+        box-shadow: 0 0 30px currentColor;
+    }
+}
+
+/* Status Messages */
+.radio-sync-messages {
+    background: #2c3e50;
+    border: 1px solid #34495e;
+    border-radius: 6px;
+    padding: 10px;
+    min-height: 60px;
+    max-height: 150px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85em;
+    color: #95a5a6;
+}
+
+.radio-sync-messages:empty::before {
+    content: 'No messages';
+    color: #7f8c8d;
+    font-style: italic;
+}
+
+.radio-sync-message {
+    margin-bottom: 5px;
+    padding: 3px 0;
+}
+
+.radio-sync-message-info {
+    color: #3498db;
+}
+
+.radio-sync-message-success {
+    color: #27ae60;
+}
+
+.radio-sync-message-error {
+    color: #e74c3c;
+}
+
+.radio-sync-message-warning {
+    color: #f39c12;
+}
+
+/* Scrollbar Styling */
+.radio-sync-messages::-webkit-scrollbar {
+    width: 8px;
+}
+
+.radio-sync-messages::-webkit-scrollbar-track {
+    background: #1a1a1a;
+    border-radius: 4px;
+}
+
+.radio-sync-messages::-webkit-scrollbar-thumb {
+    background: #3498db;
+    border-radius: 4px;
+}
+
+.radio-sync-messages::-webkit-scrollbar-thumb:hover {
+    background: #5dade2;
+}

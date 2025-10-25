@@ -1887,10 +1887,19 @@ function playAudioBuffer(buffer) {
     // Schedule playback to maintain continuous audio
     const currentTime = audioContext.currentTime;
 
-    // If we're falling behind, reset the schedule
+    // Buffer management constants
+    const MAX_BUFFER_MS = 150; // Maximum 150ms buffer (aggressive packet dropping)
+    const MAX_BUFFER_SEC = MAX_BUFFER_MS / 1000;
+
+    // If we're falling behind (underrun), reset the schedule
     if (nextPlayTime < currentTime) {
         nextPlayTime = currentTime;
         window.nextPlayTime = nextPlayTime;
+    }
+    // If we're too far ahead (overrun), drop this packet to prevent lag accumulation
+    else if ((nextPlayTime - currentTime) > MAX_BUFFER_SEC) {
+        console.log(`Dropping audio packet: buffer at ${((nextPlayTime - currentTime) * 1000).toFixed(0)}ms (max ${MAX_BUFFER_MS}ms)`);
+        return; // Exit without scheduling this buffer
     }
 
     // Schedule this buffer to play at the next available time
@@ -2514,7 +2523,16 @@ function toggleMute() {
     isMuted = !isMuted;
     const btn = document.getElementById('mute-btn');
     btn.textContent = isMuted ? '🔇 Unmute' : '🔊 Mute';
-    log(isMuted ? 'Muted' : 'Unmuted');
+
+    // When muting, reset the audio buffer to provide instant mute response
+    if (isMuted && audioContext) {
+        const currentTime = audioContext.currentTime;
+        nextPlayTime = currentTime;
+        window.nextPlayTime = nextPlayTime;
+        log('Muted (buffer flushed for instant response)');
+    } else {
+        log('Unmuted');
+    }
 }
 
 // Update channel selection (L/R checkboxes)
@@ -4729,6 +4747,22 @@ function updateFFTSize() {
 
     analyser.fftSize = newFFTSize;
 
+    // Update post-filter analyser to match
+    if (postFilterAnalyser) {
+        postFilterAnalyser.fftSize = newFFTSize;
+    }
+
+    // Clear waterfall canvas to avoid misaligned old data
+    if (waterfallCtx) {
+        waterfallCtx.fillStyle = '#000';
+        waterfallCtx.fillRect(0, 0, waterfallCanvas.width, waterfallCanvas.height);
+        waterfallStartTime = Date.now();
+        waterfallLineCount = 0;
+    }
+
+    // Reset spectrum peaks array to force recreation with correct dimensions
+    spectrumPeaks = null;
+
     // Force update the display to reflect new FFT size
     updateOscilloscopeZoom();
 
@@ -5059,6 +5093,9 @@ function toggleNoiseReduction() {
         // Enable processing in NR2
         if (nr2) {
             nr2.enabled = true;
+            // Force parameter update to ensure processor activates immediately
+            // This fixes browser-specific initialization race conditions
+            nr2.setParameters(noiseReductionStrength, noiseReductionFloor, 1.0);
         }
 
         if (statusBadge) {

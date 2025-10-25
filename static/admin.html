@@ -165,17 +165,6 @@
             display: block;
         }
 
-        .yaml-editor {
-            width: 100%;
-            min-height: 500px;
-            font-family: 'Courier New', monospace;
-            font-size: 13px;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            resize: vertical;
-        }
-
         .config-section {
             margin-bottom: 30px;
             padding: 20px;
@@ -301,8 +290,7 @@
                 <div class="editor-tabs">
                     <button class="tab active" onclick="switchTab('sessions')">Active Sessions</button>
                     <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
-                    <button class="tab" onclick="switchTab('visual')">Visual Editor</button>
-                    <button class="tab" onclick="switchTab('yaml')">YAML Editor</button>
+                    <button class="tab" onclick="switchTab('visual')">Config</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
                     <button class="tab" onclick="switchTab('extensions')">Extensions</button>
@@ -344,11 +332,6 @@
                         <div class="spinner"></div>
                         <p>Loading configuration...</p>
                     </div>
-                </div>
-
-                <!-- YAML Editor Tab -->
-                <div id="yamlTab" class="tab-content">
-                    <textarea id="yamlEditor" class="yaml-editor"></textarea>
                 </div>
 
                 <!-- Bookmarks Tab -->
@@ -591,23 +574,18 @@
                 document.querySelector('.tab:nth-child(3)').classList.add('active');
                 document.getElementById('visualTab').classList.add('active');
                 document.getElementById('configButtons').style.display = 'flex';
-            } else if (tab === 'yaml') {
-                document.querySelector('.tab:nth-child(4)').classList.add('active');
-                document.getElementById('yamlTab').classList.add('active');
-                document.getElementById('configButtons').style.display = 'flex';
-                updateYamlEditor();
             } else if (tab === 'bookmarks') {
-                document.querySelector('.tab:nth-child(5)').classList.add('active');
+                document.querySelector('.tab:nth-child(4)').classList.add('active');
                 document.getElementById('bookmarksTab').classList.add('active');
                 document.getElementById('bookmarkButtons').style.display = 'flex';
                 loadBookmarks();
             } else if (tab === 'bands') {
-                document.querySelector('.tab:nth-child(6)').classList.add('active');
+                document.querySelector('.tab:nth-child(5)').classList.add('active');
                 document.getElementById('bandsTab').classList.add('active');
                 document.getElementById('bandButtons').style.display = 'flex';
                 loadBands();
             } else if (tab === 'extensions') {
-                document.querySelector('.tab:nth-child(7)').classList.add('active');
+                document.querySelector('.tab:nth-child(6)').classList.add('active');
                 document.getElementById('extensionsTab').classList.add('active');
                 document.getElementById('extensionButtons').style.display = 'flex';
                 loadAvailableExtensions();
@@ -629,7 +607,6 @@
 
                 currentConfig = await response.json();
                 renderVisualEditor();
-                updateYamlEditor();
                 showAlert('Configuration loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading configuration: ' + error.message, 'error');
@@ -763,63 +740,6 @@
             } else {
                 obj[lastKey] = value;
             }
-            
-            updateYamlEditor();
-        }
-
-        function updateYamlEditor() {
-            const yaml = objectToYaml(currentConfig);
-            document.getElementById('yamlEditor').value = yaml;
-        }
-
-        function objectToYaml(obj, indent = 0) {
-            let yaml = '';
-            const spaces = '  '.repeat(indent);
-            
-            for (const [key, value] of Object.entries(obj)) {
-                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    yaml += `${spaces}${key}:\n`;
-                    yaml += objectToYaml(value, indent + 1);
-                } else if (Array.isArray(value)) {
-                    yaml += `${spaces}${key}:\n`;
-                    value.forEach(item => {
-                        if (typeof item === 'object') {
-                            yaml += `${spaces}  -\n`;
-                            yaml += objectToYaml(item, indent + 2);
-                        } else {
-                            yaml += `${spaces}  - ${escapeYamlString(item)}\n`;
-                        }
-                    });
-                } else {
-                    yaml += `${spaces}${key}: ${escapeYamlString(value)}\n`;
-                }
-            }
-            
-            return yaml;
-        }
-
-        function escapeYamlString(value) {
-            // Handle non-string values
-            if (typeof value === 'boolean' || typeof value === 'number') {
-                return value;
-            }
-
-            // Convert to string
-            const str = String(value);
-
-            // Check if string needs quoting (contains special YAML characters)
-            const needsQuoting = /[:'"\n\r\t#\[\]{}|>@`!%&*]/.test(str) ||
-                                 str.trim() !== str ||
-                                 str === '' ||
-                                 /^(true|false|null|yes|no|on|off)$/i.test(str);
-
-            if (!needsQuoting) {
-                return str;
-            }
-
-            // Use single quotes and escape any single quotes in the string
-            const escaped = str.replace(/'/g, "''");
-            return `'${escaped}'`;
         }
 
         async function saveConfig() {
@@ -832,14 +752,6 @@
             }
 
             try {
-                let configToSave = currentConfig;
-                
-                if (currentTab === 'yaml') {
-                    // Parse YAML from editor (simplified - in production use a proper YAML parser)
-                    showAlert('YAML editor save not fully implemented. Please use visual editor or implement YAML parsing.', 'info');
-                    return;
-                }
-
                 showAlert('Saving configuration...', 'info');
 
                 const response = await fetch('/admin/config', {
@@ -847,7 +759,7 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify(configToSave)
+                    body: JSON.stringify(currentConfig)
                 });
 
                 if (!response.ok) {
@@ -1144,57 +1056,6 @@
             } catch (error) {
                 showAlert('Error deleting bookmark: ' + error.message, 'error');
             }
-        }
-
-        // Config Import/Export functions
-        function exportConfig() {
-            const yamlContent = document.getElementById('yamlEditor').value;
-            const blob = new Blob([yamlContent], { type: 'text/yaml' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'config.yaml';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            showAlert('Configuration exported successfully', 'success');
-        }
-
-        function importConfig() {
-            document.getElementById('configFileInput').click();
-        }
-
-        async function handleConfigImport(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            try {
-                const text = await file.text();
-
-                // Try to parse as YAML/JSON to validate
-                let parsedConfig;
-                if (file.name.endsWith('.json')) {
-                    parsedConfig = JSON.parse(text);
-                } else {
-                    // For YAML, we'll just update the editor and let the user save
-                    document.getElementById('yamlEditor').value = text;
-                    showAlert('Configuration imported. Please review and click Save to apply.', 'info');
-                    switchTab('yaml');
-                    return;
-                }
-
-                // If JSON, convert to our config format and update
-                currentConfig = parsedConfig;
-                renderVisualEditor();
-                updateYamlEditor();
-                showAlert('Configuration imported. Please review and click Save to apply.', 'info');
-            } catch (error) {
-                showAlert('Error importing configuration: ' + error.message, 'error');
-            }
-
-            // Reset file input
-            event.target.value = '';
         }
 
         // Bookmarks Import/Export functions

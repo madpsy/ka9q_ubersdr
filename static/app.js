@@ -4067,7 +4067,7 @@ function updateSpectrum() {
         spectrumPeaks = new Array(numPoints).fill(-Infinity);
     }
 
-    const peakDecayRate = 0.5; // dB per frame to decay
+    const peakDecayRate = 2.0; // dB per frame to decay (faster fall time)
 
     // Draw filled area
     spectrumCtx.fillStyle = gradient;
@@ -4076,6 +4076,9 @@ function updateSpectrum() {
 
     // Store dBFS values for peak hold (scale-independent)
     const dbfsValues = new Array(numPoints);
+
+    // Also store normalized magnitudes for peak comparison
+    const normalizedMagnitudes = new Array(numPoints);
 
     for (let i = 0; i < numPoints; i++) {
         // Average the bins for this point
@@ -4112,6 +4115,9 @@ function updateSpectrum() {
             normalizedMagnitude = average / 255;
         }
 
+        // Store normalized magnitude for peak tracking
+        normalizedMagnitudes[i] = normalizedMagnitude;
+
         // Calculate y position (inverted - higher magnitude at top)
         const y = height - (normalizedMagnitude * height);
 
@@ -4123,44 +4129,66 @@ function updateSpectrum() {
     spectrumCtx.closePath();
     spectrumCtx.fill();
 
-    // Update and draw peak hold line using dBFS values (scale-independent)
+    // Update peak hold line using normalized magnitudes (same scale as display)
     for (let i = 0; i < numPoints; i++) {
-        const currentDbfs = dbfsValues[i];
+        const currentNormalized = normalizedMagnitudes[i];
 
-        // Update peak hold with dBFS values
-        if (!isFinite(spectrumPeaks[i]) || currentDbfs > spectrumPeaks[i]) {
-            spectrumPeaks[i] = currentDbfs; // New peak (store dBFS)
+        // Update peak hold with normalized values (0-1 range)
+        if (!isFinite(spectrumPeaks[i]) || currentNormalized > spectrumPeaks[i]) {
+            spectrumPeaks[i] = currentNormalized; // New peak
         } else {
-            // Decay the peak dBFS value
-            spectrumPeaks[i] = Math.max(-Infinity, spectrumPeaks[i] - peakDecayRate);
+            // Decay the peak (fixed rate in normalized 0-1 space)
+            // At 30fps, decay 0.01 per frame = 0.3 per second = full range in ~3 seconds
+            const decayAmount = 0.01;
+            spectrumPeaks[i] = Math.max(0, spectrumPeaks[i] - decayAmount);
         }
     }
 
     // Draw peak hold line (light yellow, semi-transparent like main graph)
     spectrumCtx.strokeStyle = 'rgba(255, 255, 200, 0.5)';
     spectrumCtx.lineWidth = 1;
-    spectrumCtx.beginPath();
 
-    let firstPeak = true;
-    const dbRange = displayMaxDb - displayMinDb;
+    // Draw peaks as separate segments, breaking when gap between adjacent peaks is too large
+    let inSegment = false;
+    let lastPeakY = -1;
+    const MAX_PEAK_GAP = height * 0.15; // Break line if vertical gap > 15% of height
+
     for (let i = 0; i < numPoints; i++) {
-        // Convert stored dBFS to screen position using current dBFS scale
-        if (isFinite(spectrumPeaks[i]) && dbRange > 0) {
-            const normalizedPeak = (spectrumPeaks[i] - displayMinDb) / dbRange;
-            const peakY = height - (normalizedPeak * height);
+        // Use normalized peak values (same coordinate system as current signal)
+        if (isFinite(spectrumPeaks[i]) && spectrumPeaks[i] > 0.05) { // Only draw peaks above 5% of range
+            const peakY = height - (spectrumPeaks[i] * height);
 
             if (peakY < height && peakY >= 0) {
-                if (firstPeak) {
+                // Check if we should break the line due to large gap
+                if (inSegment && lastPeakY >= 0 && Math.abs(peakY - lastPeakY) > MAX_PEAK_GAP) {
+                    // Gap too large - end current segment and start new one
+                    spectrumCtx.stroke();
+                    spectrumCtx.beginPath();
                     spectrumCtx.moveTo(i, peakY);
-                    firstPeak = false;
+                } else if (!inSegment) {
+                    // Start a new segment
+                    spectrumCtx.beginPath();
+                    spectrumCtx.moveTo(i, peakY);
+                    inSegment = true;
                 } else {
                     spectrumCtx.lineTo(i, peakY);
                 }
+                lastPeakY = peakY;
+            }
+        } else {
+            // Peak too low or invalid - end current segment if any
+            if (inSegment) {
+                spectrumCtx.stroke();
+                inSegment = false;
+                lastPeakY = -1;
             }
         }
     }
 
-    spectrumCtx.stroke();
+    // Stroke final segment if still drawing
+    if (inSegment) {
+        spectrumCtx.stroke();
+    }
 
     // Draw bandpass filter indicators if enabled
     if (bandpassEnabled && bandpassFilters.length > 0) {

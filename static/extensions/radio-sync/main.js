@@ -78,6 +78,63 @@ class RadioSyncExtension extends DecoderExtension {
         console.log('Radio Sync Extension initialization complete');
     }
 
+    /**
+     * Check which protocol implementations are available and hide radios without them
+     */
+    async filterAvailableRadios() {
+        const availableProtocols = new Set();
+
+        // Check which protocol files are available
+        const protocolsToCheck = [
+            { name: 'yaesu-cat', class: 'YaesuCATProtocol' },
+            { name: 'icom-civ', class: 'IcomCIVProtocol' },
+            { name: 'kenwood-cat', class: 'KenwoodCATProtocol' },
+            { name: 'elecraft', class: 'ElecraftProtocol' }
+        ];
+
+        for (const protocol of protocolsToCheck) {
+            if (typeof window[protocol.class] !== 'undefined') {
+                availableProtocols.add(protocol.name);
+                console.log(`✅ Protocol available: ${protocol.name}`);
+            } else {
+                console.log(`❌ Protocol not available: ${protocol.name}`);
+            }
+        }
+
+        // Filter radio options based on available protocols
+        const modelSelect = document.getElementById('radio-sync-model');
+        if (!modelSelect) return;
+
+        let hiddenCount = 0;
+
+        // Iterate through all options and hide those without available protocols
+        for (const [radioId, radioConfig] of Object.entries(this.radioProtocols)) {
+            if (!availableProtocols.has(radioConfig.protocol)) {
+                // Find and hide the option
+                const option = modelSelect.querySelector(`option[value="${radioId}"]`);
+                if (option) {
+                    option.style.display = 'none';
+                    option.disabled = true;
+                    hiddenCount++;
+                }
+            }
+        }
+
+        // Hide empty optgroups
+        const optgroups = modelSelect.querySelectorAll('optgroup');
+        optgroups.forEach(optgroup => {
+            const visibleOptions = Array.from(optgroup.querySelectorAll('option'))
+                .filter(opt => opt.style.display !== 'none');
+            if (visibleOptions.length === 0) {
+                optgroup.style.display = 'none';
+            }
+        });
+
+        if (hiddenCount > 0) {
+            this.addMessage(`${hiddenCount} radio(s) hidden (protocol not implemented)`, 'info');
+        }
+    }
+
     showSerialAPIError() {
         const errorDiv = document.getElementById('radio-sync-api-error');
         if (errorDiv) {
@@ -781,6 +838,9 @@ class RadioSyncExtension extends DecoderExtension {
 
     onEnable() {
         console.log('Radio Sync Extension onEnable called');
+
+        // Filter radio options based on available protocols (do this first, before event listeners)
+        this.filterAvailableRadios();
 
         // Set up event listeners now that template is definitely in DOM
         this.setupEventListeners();

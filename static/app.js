@@ -170,6 +170,11 @@ let currentVolume = 0.7;
 let lastBufferDisplayUpdate = 0;
 let nextPlayTime = 0;
 let audioStartTime = 0;
+
+// Audio buffer configuration (user-configurable)
+let maxBufferMs = 150; // Default 150ms, can be changed by user
+const MIN_BUFFER_MS = 40; // Minimum 40ms buffer for Chrome stability
+const BUFFER_PRESETS = [50, 100, 150, 200, 300, 500]; // Available preset values
 // Expose nextPlayTime globally for extensions
 window.nextPlayTime = 0;
 let currentMode = 'usb';
@@ -1959,10 +1964,8 @@ function playAudioBuffer(buffer) {
     // Step 11: Final output to destination
     outputNode.connect(audioContext.destination);
 
-    // Buffer management constants
-    const MAX_BUFFER_MS = 150; // Maximum 150ms buffer (aggressive packet dropping)
-    const MAX_BUFFER_SEC = MAX_BUFFER_MS / 1000;
-    const MIN_BUFFER_MS = 40; // Minimum 40ms buffer for Chrome stability
+    // Buffer management using configurable threshold
+    const MAX_BUFFER_SEC = maxBufferMs / 1000;
     const MIN_BUFFER_SEC = MIN_BUFFER_MS / 1000;
     const currentTime = audioContext.currentTime;
 
@@ -1973,7 +1976,7 @@ function playAudioBuffer(buffer) {
     }
     // If we're too far ahead (overrun), drop this packet to prevent lag accumulation
     else if ((nextPlayTime - currentTime) > MAX_BUFFER_SEC) {
-        console.log(`Dropping audio packet: buffer at ${((nextPlayTime - currentTime) * 1000).toFixed(0)}ms (max ${MAX_BUFFER_MS}ms)`);
+        console.log(`Dropping audio packet: buffer at ${((nextPlayTime - currentTime) * 1000).toFixed(0)}ms (max ${maxBufferMs}ms)`);
         return; // Exit without scheduling this buffer
     }
 
@@ -2002,20 +2005,23 @@ function playAudioBuffer(buffer) {
             // Update text display
             bufferText.textContent = `${bufferMs.toFixed(0)}ms`;
 
-            // Calculate bar width (0-200ms range, max at 200ms)
-            const maxBuffer = 200;
-            const widthPercent = Math.min((bufferMs / maxBuffer) * 100, 100);
+            // Calculate bar width based on configurable max (show up to 1.5x max for visibility)
+            const displayMax = maxBufferMs * 1.5;
+            const widthPercent = Math.min((bufferMs / displayMax) * 100, 100);
             bufferBar.style.width = `${widthPercent}%`;
 
-            // Calculate color based on buffer value
-            // Green: 0-125ms, Orange: 125-175ms, Red: 175-200ms
+            // Calculate color based on buffer value (dynamic thresholds)
+            // Green: 0-62.5% of max, Orange: 62.5-87.5% of max, Red: 87.5-100%+ of max
+            const greenThreshold = maxBufferMs * 0.625;
+            const orangeThreshold = maxBufferMs * 0.875;
+            
             let color;
-            if (bufferMs <= 125) {
+            if (bufferMs <= greenThreshold) {
                 // Green zone
                 color = '#28a745';
-            } else if (bufferMs <= 175) {
+            } else if (bufferMs <= orangeThreshold) {
                 // Orange zone - gradient from green to orange
-                const ratio = (bufferMs - 125) / (175 - 125);
+                const ratio = (bufferMs - greenThreshold) / (orangeThreshold - greenThreshold);
                 const r = Math.round(40 + (255 - 40) * ratio);
                 const g = Math.round(167 + (193 - 167) * ratio);
                 const b = Math.round(69 + (193 - 69) * ratio);
@@ -6044,4 +6050,69 @@ window.selectBandFromDropdown = selectBandFromDropdown;
 
 // Expose updateBandSelector globally
 window.updateBandSelector = updateBandSelector;
+
+// Audio Buffer Configuration Functions
+function openBufferConfigModal() {
+    const modal = document.getElementById('buffer-config-modal');
+    if (modal) {
+        // Highlight current selection
+        const buttons = modal.querySelectorAll('.buffer-preset-btn');
+        buttons.forEach(btn => {
+            const value = parseInt(btn.getAttribute('data-value'));
+            if (value === maxBufferMs) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+        modal.style.display = 'flex';
+    }
+}
+
+function closeBufferConfigModal() {
+    const modal = document.getElementById('buffer-config-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function setBufferThreshold(value) {
+    maxBufferMs = value;
+    
+    // Save to localStorage
+    try {
+        localStorage.setItem('audioBufferThreshold', value.toString());
+    } catch (e) {
+        console.error('Failed to save buffer threshold to localStorage:', e);
+    }
+    
+    log(`Audio buffer threshold set to ${value}ms`);
+    closeBufferConfigModal();
+}
+
+// Load buffer threshold from localStorage on startup
+function loadBufferThreshold() {
+    try {
+        const saved = localStorage.getItem('audioBufferThreshold');
+        if (saved) {
+            const value = parseInt(saved);
+            if (BUFFER_PRESETS.includes(value)) {
+                maxBufferMs = value;
+                log(`Loaded audio buffer threshold: ${value}ms`);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load buffer threshold from localStorage:', e);
+    }
+}
+
+// Load buffer threshold on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadBufferThreshold();
+});
+
+// Expose buffer configuration functions globally
+window.openBufferConfigModal = openBufferConfigModal;
+window.closeBufferConfigModal = closeBufferConfigModal;
+window.setBufferThreshold = setBufferThreshold;
 

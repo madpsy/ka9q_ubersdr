@@ -2707,4 +2707,19 @@ input[type="range"]::-moz-range-thumb {
 
 .decoder-extension-modal-body::-webkit-scrollbar-thumb:hover {
     background: #5568d3;
+
+/* Buffer Configuration Modal Button Styles */
+.buffer-preset-btn.active {
+    background: #28a745 !important;
+    border-color: #28a745 !important;
+    color: white !important;
+    box-shadow: 0 0 10px rgba(40, 167, 69, 0.5);
+}
+
+.buffer-preset-btn:hover {
+    background: #667eea !important;
+    border-color: #667eea !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+}
 }

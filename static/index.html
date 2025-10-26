@@ -34,7 +34,7 @@
     <div class="container">
 
         <!-- Audio Buffer Display in bottom right -->
-        <div id="audio-buffer-display" class="audio-buffer-display" title="Buffer: --">
+        <div id="audio-buffer-display" class="audio-buffer-display" title="Click to configure buffer threshold" onclick="openBufferConfigModal()" style="cursor: pointer;">
             <div id="audio-buffer-bar" class="audio-buffer-bar"></div>
             <span id="audio-buffer-text" class="audio-buffer-text">--</span>
         </div>
@@ -719,6 +719,35 @@
                     <button onclick="closeClearStorageModal()" style="padding: 8px 20px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
                     <button onclick="confirmClearStorage()" style="padding: 8px 20px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">Clear Storage</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Buffer Configuration Modal -->
+    <div id="buffer-config-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>Audio Buffer Threshold</h2>
+                <button class="modal-close" onclick="closeBufferConfigModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: #fff; margin-bottom: 15px;">Select the maximum audio buffer before frames are dropped:</p>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px;">
+                    <button class="buffer-preset-btn" data-value="50" onclick="setBufferThreshold(50)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">50ms</button>
+                    <button class="buffer-preset-btn" data-value="100" onclick="setBufferThreshold(100)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">100ms</button>
+                    <button class="buffer-preset-btn" data-value="150" onclick="setBufferThreshold(150)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">150ms</button>
+                    <button class="buffer-preset-btn" data-value="200" onclick="setBufferThreshold(200)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">200ms</button>
+                    <button class="buffer-preset-btn" data-value="300" onclick="setBufferThreshold(300)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">300ms</button>
+                    <button class="buffer-preset-btn" data-value="500" onclick="setBufferThreshold(500)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">500ms</button>
+                </div>
+                <p style="font-size: 0.9em; color: #888; margin-bottom: 10px;">
+                    <strong>Lower values (50-100ms):</strong> Minimal latency, may drop more frames on slow connections<br>
+                    <strong>Medium values (150-200ms):</strong> Balanced performance (recommended)<br>
+                    <strong>Higher values (300-500ms):</strong> More stable on poor connections, higher latency
+                </p>
+                <p style="font-size: 0.85em; color: #666;">
+                    The buffer indicator colors adjust dynamically based on your selection.
+                </p>
             </div>
         </div>
     </div>

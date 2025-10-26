@@ -833,11 +833,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize bandwidth control (tooltips and keyboard shortcuts)
     initializeBandwidthControl();
-    
+
     // Expose bandwidth control functions globally
     window.adjustBandwidth = adjustBandwidth;
     window.updateBandwidthTooltips = updateBandwidthTooltips;
-    
+
     log('Ready to connect');
 
     // Handle window resize for audio visualizer canvases
@@ -2014,7 +2014,7 @@ function playAudioBuffer(buffer) {
             // Green: 0-62.5% of max, Orange: 62.5-87.5% of max, Red: 87.5-100%+ of max
             const greenThreshold = maxBufferMs * 0.625;
             const orangeThreshold = maxBufferMs * 0.875;
-            
+
             let color;
             if (bufferMs <= greenThreshold) {
                 // Green zone
@@ -2532,12 +2532,83 @@ function setMode(mode, preserveBandwidth = false) {
     }
 }
 
-// Update bandwidth display (called on input for real-time display)
+// Throttling for bandwidth slider updates (250ms = 4 updates per second max)
+// Store on window to ensure persistence
+if (!window.bandwidthSliderState) {
+    window.bandwidthSliderState = {
+        lastUpdateTime: 0,
+        throttleMs: 250
+    };
+}
+
+// Update bandwidth display (called on input for real-time display with throttled tune)
 function updateBandwidthDisplay() {
     const bandwidthLow = parseInt(document.getElementById('bandwidth-low').value);
     const bandwidthHigh = parseInt(document.getElementById('bandwidth-high').value);
     document.getElementById('bandwidth-low-value').textContent = bandwidthLow;
     document.getElementById('bandwidth-high-value').textContent = bandwidthHigh;
+
+    // Throttle tune updates to 4 per second (250ms interval) - same as Z/X keys
+    const now = Date.now();
+    const timeSinceLastUpdate = now - window.bandwidthSliderState.lastUpdateTime;
+
+    if (timeSinceLastUpdate >= window.bandwidthSliderState.throttleMs) {
+        window.bandwidthSliderState.lastUpdateTime = now;
+
+        // Update global references
+        currentBandwidthLow = bandwidthLow;
+        currentBandwidthHigh = bandwidthHigh;
+        window.currentBandwidthLow = bandwidthLow;
+        window.currentBandwidthHigh = bandwidthHigh;
+
+        // Notify extension system of bandwidth change
+        if (window.radioAPI) {
+            window.radioAPI.notifyBandwidthChange(bandwidthLow, bandwidthHigh);
+        }
+
+        // Update FFT size based on new bandwidth
+        if (analyser) {
+            const oldFFTSize = analyser.fftSize;
+            const newFFTSize = getOptimalFFTSize();
+
+            if (oldFFTSize !== newFFTSize) {
+                analyser.fftSize = newFFTSize;
+                if (postFilterAnalyser) {
+                    postFilterAnalyser.fftSize = newFFTSize;
+                }
+                if (vuAnalyser) {
+                    vuAnalyser.fftSize = newFFTSize;
+                }
+                updateFFTSizeDropdown();
+            }
+        }
+
+        // Update spectrum display bandwidth indicator
+        if (spectrumDisplay) {
+            const freqInput = document.getElementById('frequency');
+            const currentFreq = freqInput ? parseInt(freqInput.value) : 0;
+            spectrumDisplay.updateConfig({
+                tunedFreq: currentFreq,
+                bandwidthLow: bandwidthLow,
+                bandwidthHigh: bandwidthHigh
+            });
+        }
+
+        // Update bandpass slider ranges if bandpass is enabled
+        if (bandpassEnabled && window.updateBandpassSliderRanges) {
+            window.updateBandpassSliderRanges();
+        }
+
+        // Update URL with new bandwidth
+        if (window.updateURL) {
+            window.updateURL();
+        }
+
+        // Tune to new bandwidth (this will send the tune command to radiod)
+        if (window.autoTune) {
+            window.autoTune();
+        }
+    }
 }
 
 // Update bandwidth value and trigger tune (called on change when slider is released)
@@ -3856,7 +3927,7 @@ function updateSpectrum() {
 
     // Use absolute dBFS scale from float frequency data with averaging and throttling
     const scaleNow = performance.now();
-    
+
     // Update peak/floor/SNR values twice as fast (250ms)
     if (scaleNow - lastPeakFloorUpdate >= peakFloorUpdateInterval) {
         // Find the actual dBFS range in the visible bandwidth
@@ -3902,7 +3973,7 @@ function updateSpectrum() {
 
         lastPeakFloorUpdate = scaleNow;
     }
-    
+
     // Update scale labels at slower rate (500ms)
     if (scaleNow - lastDbScaleUpdate >= dbScaleUpdateInterval) {
         // Add to scale history for slower updates
@@ -3932,14 +4003,14 @@ function updateSpectrum() {
         }
 
         lastDbScaleUpdate = scaleNow;
-        
+
         // Also update peak frequency at the same 500ms rate
         if (analyser && audioContext && oscilloscope) {
             const bufferLength = analyser.fftSize;
             const timeDataArray = new Uint8Array(bufferLength);
             analyser.getByteTimeDomainData(timeDataArray);
             const detectedFreq = oscilloscope.detectFrequencyFromWaveform(timeDataArray, audioContext.sampleRate);
-            
+
             if (detectedFreq > 0 && detectedFreq >= 20 && detectedFreq <= 20000) {
                 if (detectedFreq >= 1000) {
                     cachedPeakFreq.value = (detectedFreq / 1000).toFixed(2);
@@ -4019,7 +4090,7 @@ function updateSpectrum() {
         for (let binIndex = Math.floor(startBin); binIndex < Math.ceil(endBin) && binIndex < dataArray.length; binIndex++) {
             sum += dataArray[binIndex] || 0;
             count++;
-            
+
             // Also average dBFS values for peak hold
             if (floatDataArray && binIndex < floatDataArray.length) {
                 const dbValue = floatDataArray[binIndex];
@@ -4055,7 +4126,7 @@ function updateSpectrum() {
     // Update and draw peak hold line using dBFS values (scale-independent)
     for (let i = 0; i < numPoints; i++) {
         const currentDbfs = dbfsValues[i];
-        
+
         // Update peak hold with dBFS values
         if (!isFinite(spectrumPeaks[i]) || currentDbfs > spectrumPeaks[i]) {
             spectrumPeaks[i] = currentDbfs; // New peak (store dBFS)
@@ -4077,7 +4148,7 @@ function updateSpectrum() {
         if (isFinite(spectrumPeaks[i]) && dbRange > 0) {
             const normalizedPeak = (spectrumPeaks[i] - displayMinDb) / dbRange;
             const peakY = height - (normalizedPeak * height);
-            
+
             if (peakY < height && peakY >= 0) {
                 if (firstPeak) {
                     spectrumCtx.moveTo(i, peakY);
@@ -4269,7 +4340,7 @@ function updateSpectrum() {
         spectrumCtx.textAlign = 'left';
         spectrumCtx.strokeText(label, debugX + 4, y);
         spectrumCtx.fillText(label, debugX + 4, y);
-        
+
         // Right-align unit
         spectrumCtx.textAlign = 'right';
         const unitText = value + unit;
@@ -5261,10 +5332,10 @@ const ZOOM_THROTTLE_MS = 250;
 document.addEventListener('DOMContentLoaded', () => {
     // Load amateur radio bands
         loadBands();
-    
+
         // Load bookmarks
         loadBookmarks();
-    
+
         // Populate band selector dropdown after bands are loaded
         setTimeout(() => {
             populateBandSelector();
@@ -5676,11 +5747,11 @@ function openExtensionModal() {
     const panelContent = document.getElementById('extension-panel-content');
     const modalTitle = document.getElementById('extension-modal-title');
     const panelTitle = document.getElementById('extension-panel-title');
-    
+
     // Clone the panel content into the modal
     modalContent.innerHTML = panelContent.innerHTML;
     modalTitle.textContent = panelTitle.textContent;
-    
+
     // Enable modal mode for the active decoder
     if (window.decoderManager) {
         const activeDecoders = window.decoderManager.getActiveDecoders();
@@ -5694,7 +5765,7 @@ function openExtensionModal() {
             }
         }
     }
-    
+
     // Show the modal
     modal.classList.add('show');
 }
@@ -5722,7 +5793,7 @@ function zoomExtensionModal(delta) {
     extensionModalZoom = Math.max(0.5, Math.min(2.0, extensionModalZoom + delta));
     const wrapper = document.getElementById('extension-modal-content-wrapper');
     const zoomDisplay = document.getElementById('extension-modal-zoom');
-    
+
     wrapper.style.transform = `scale(${extensionModalZoom})`;
     zoomDisplay.textContent = `${Math.round(extensionModalZoom * 100)}%`;
 }
@@ -5757,30 +5828,30 @@ function toggleExtension(extensionName) {
         updateURL();
         return;
     }
-    
+
     const decoder = window.decoderManager.getDecoder(extensionName);
     if (!decoder) {
         log(`Extension not found: ${extensionName}`, 'error');
         dropdown.value = '';
         return;
     }
-    
+
     if (!panel || !panelTitle || !panelContent) {
         log(`Extension panel elements not found`, 'error');
         dropdown.value = '';
         return;
     }
-    
+
     // Check if this extension is already showing
     const isCurrentlyShowing = panel.style.display !== 'none' &&
                                panelTitle.textContent === decoder.displayName;
-    
+
     if (isCurrentlyShowing) {
         // Hide panel and disable decoder
         panel.style.display = 'none';
         window.decoderManager.disable(extensionName);
         log(`${extensionName} extension disabled`);
-        
+
         // Update URL to remove extension parameter
         updateURL();
     } else {
@@ -5791,20 +5862,20 @@ function toggleExtension(extensionName) {
                 window.decoderManager.disable(name);
             }
         });
-        
+
         // Initialize and enable the new decoder
         if (!audioContext) {
             log('Please start audio first (click "Click to Start")', 'error');
             dropdown.value = '';
             return;
         }
-        
+
         // Initialize decoder if needed
         if (!decoder.enabled) {
             const centerFreq = 800; // Default center frequency
             window.decoderManager.initialize(extensionName, audioContext, analyser, centerFreq);
         }
-        
+
         // Load extension template into panel
         fetch(`extensions/${extensionName}/template.html`)
             .then(response => response.text())
@@ -5815,9 +5886,9 @@ function toggleExtension(extensionName) {
 
                 // Enable decoder
                 window.decoderManager.enable(extensionName);
-                
+
                 log(`${extensionName} extension enabled`);
-                
+
                 // Update URL with new extension state (after enabling)
                 updateURL();
             })
@@ -5878,7 +5949,7 @@ function populateBandSelector() {
     groupNames.forEach(groupName => {
         const optgroup = document.createElement('optgroup');
         optgroup.label = groupName;
-        
+
         grouped[groupName].forEach(band => {
             const option = document.createElement('option');
             option.value = JSON.stringify({
@@ -5889,7 +5960,7 @@ function populateBandSelector() {
             option.textContent = band.label;
             optgroup.appendChild(option);
         });
-        
+
         selector.appendChild(optgroup);
     });
 
@@ -5897,7 +5968,7 @@ function populateBandSelector() {
     if (ungrouped.length > 0) {
         const optgroup = document.createElement('optgroup');
         optgroup.label = 'Other';
-        
+
         ungrouped.forEach(band => {
             const option = document.createElement('option');
             option.value = JSON.stringify({
@@ -5908,7 +5979,7 @@ function populateBandSelector() {
             option.textContent = band.label;
             optgroup.appendChild(option);
         });
-        
+
         selector.appendChild(optgroup);
     }
 
@@ -6086,14 +6157,14 @@ function closeBufferConfigModal() {
 
 function setBufferThreshold(value) {
     maxBufferMs = value;
-    
+
     // Save to localStorage
     try {
         localStorage.setItem('audioBufferThreshold', value.toString());
     } catch (e) {
         console.error('Failed to save buffer threshold to localStorage:', e);
     }
-    
+
     log(`Audio buffer threshold set to ${value}ms`);
     closeBufferConfigModal();
 }

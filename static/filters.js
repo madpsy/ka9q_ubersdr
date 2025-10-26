@@ -104,6 +104,10 @@ let eqClipIndicatorTimeout = null;
 
 function initializeEqualizer() {
     if (!window.audioContext) return;
+
+    // Clear old filters (they belong to old audio context)
+    eqFilters = [];
+
     const frequencies = [60, 170, 310, 600, 1000, 1500, 2000, 2500, 3000, 4000, 6000, 8000];
     frequencies.forEach(freq => {
         const filter = window.audioContext.createBiquadFilter();

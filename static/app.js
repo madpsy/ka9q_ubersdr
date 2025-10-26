@@ -4801,23 +4801,23 @@ function getOptimalFFTSize() {
 
     // Target: maintain good bin density across all bandwidths
     // At 48kHz sample rate, each FFT size gives:
-    // 2048  -> 11.72 Hz/bin (very coarse)
-    // 4096  -> 5.86 Hz/bin (coarse)
-    // 8192  -> 2.93 Hz/bin (medium)
-    // 16384 -> 1.46 Hz/bin (fine)
-    // 32768 -> 0.73 Hz/bin (very fine)
-    // 65536 -> 0.37 Hz/bin (ultra fine)
+    // 2048  -> 11.72 Hz/bin (very coarse) - Fastest
+    // 4096  -> 5.86 Hz/bin (coarse) - Fast
+    // 8192  -> 2.93 Hz/bin (medium) - Balanced
+    // 16384 -> 1.46 Hz/bin (fine) - High Detail
+    // 32768 -> 0.73 Hz/bin (very fine) - Very High Detail
+    // 65536 -> 0.37 Hz/bin (ultra fine) - Ultra High Detail
 
     if (bandwidth < 300) {
-        return 65536;  // Very narrow CW: ultra fine resolution (0.37 Hz/bin)
+        return 32768;  // Very narrow CW: Very High Detail (0.73 Hz/bin)
     } else if (bandwidth < 600) {
-        return 32768;  // CW modes: very fine resolution (0.73 Hz/bin)
+        return 16384;  // CW modes: High Detail (1.46 Hz/bin)
     } else if (bandwidth < 1500) {
-        return 16384;  // Narrow modes: fine resolution (1.46 Hz/bin)
+        return 8192;   // Narrow modes (USB/LSB): Balanced (2.93 Hz/bin)
     } else if (bandwidth < 4000) {
-        return 16384;  // Medium modes: fine resolution (1.46 Hz/bin)
+        return 8192;   // Medium modes: Balanced (2.93 Hz/bin)
     } else {
-        return 8192;   // Wide modes: medium resolution (2.93 Hz/bin)
+        return 4096;   // Wide modes (AM/FM): Fast (5.86 Hz/bin)
     }
 }
 

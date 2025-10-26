@@ -484,6 +484,12 @@ class RadioSyncExtension extends DecoderExtension {
                 }
                 this.protocolHandler = new YaesuCATProtocol();
                 this.addMessage('Initialized Yaesu CAT protocol', 'info');
+            } else if (radioConfig.protocol === 'kenwood-cat') {
+                if (typeof KenwoodCATProtocol === 'undefined') {
+                    throw new Error('Kenwood CAT protocol handler not loaded');
+                }
+                this.protocolHandler = new KenwoodCATProtocol();
+                this.addMessage('Initialized Kenwood CAT protocol', 'info');
             } else {
                 throw new Error(`Protocol ${radioConfig.protocol} not yet implemented`);
             }

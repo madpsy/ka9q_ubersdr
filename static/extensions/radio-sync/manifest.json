@@ -9,7 +9,7 @@
     "main": "main.js",
     "styles": ["styles.css"],
     "template": "template.html",
-    "scripts": ["protocols/yaesu-cat.js"]
+    "scripts": ["protocols/yaesu-cat.js", "protocols/kenwood-cat.js"]
   },
   "config": {
     "autoTune": false,

@@ -6055,14 +6055,22 @@ window.updateBandSelector = updateBandSelector;
 function openBufferConfigModal() {
     const modal = document.getElementById('buffer-config-modal');
     if (modal) {
-        // Highlight current selection
+        // Highlight current selection by directly modifying button styles
         const buttons = modal.querySelectorAll('.buffer-preset-btn');
         buttons.forEach(btn => {
             const value = parseInt(btn.getAttribute('data-value'));
             if (value === maxBufferMs) {
-                btn.classList.add('active');
+                // Active state - green with glow
+                btn.style.background = '#28a745';
+                btn.style.borderColor = '#28a745';
+                btn.style.color = 'white';
+                btn.style.boxShadow = '0 0 10px rgba(40, 167, 69, 0.5)';
             } else {
-                btn.classList.remove('active');
+                // Inactive state - default gray
+                btn.style.background = '#34495e';
+                btn.style.borderColor = '#7f8c8d';
+                btn.style.color = '#ecf0f1';
+                btn.style.boxShadow = 'none';
             }
         });
         modal.style.display = 'flex';

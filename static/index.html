@@ -168,8 +168,13 @@
                     <canvas id="s-meter-canvas" width="280" height="160"></canvas>
                 </div>
                 <div style="display: flex; justify-content: center; align-items: center; padding: 5px;">
-                    <div id="s-meter-value-display" style="text-align: center; font-size: 18px; font-weight: bold; color: #ecf0f1; padding: 8px; background: #2c3e50; border-radius: 4px; margin-top: 5px; width: 280px; box-sizing: border-box;">
-                        S0
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 50px; background: #2c3e50; border-radius: 4px; margin-top: 5px; width: 280px; box-sizing: border-box;">
+                        <div id="s-meter-value-display" style="font-size: 18px; font-weight: bold; color: #ecf0f1; min-width: 80px; text-align: left;">
+                            S0
+                        </div>
+                        <div id="s-meter-peak-display" style="font-size: 18px; font-weight: bold; color: rgba(0, 255, 255, 0.9); min-width: 80px; text-align: right;">
+                            S0
+                        </div>
                     </div>
                 </div>
             </div>

@@ -64,6 +64,12 @@ function calculateFilterLatencies() {
     return latencies;
 }
 
+// Get total filter latency in milliseconds
+function getTotalFilterLatency() {
+    const latencies = calculateFilterLatencies();
+    return Object.values(latencies).reduce((sum, lat) => sum + lat, 0);
+}
+
 // Update latency display badges for all filters
 function updateAllLatencyDisplays() {
     const latencies = calculateFilterLatencies();
@@ -1302,6 +1308,7 @@ window.processSquelch = processSquelch;
 window.updateSquelchStatus = updateSquelchStatus;
 
 window.calculateFilterLatencies = calculateFilterLatencies;
+window.getTotalFilterLatency = getTotalFilterLatency;
 window.updateAllLatencyDisplays = updateAllLatencyDisplays;
 window.updateLatencyBadge = updateLatencyBadge;
 

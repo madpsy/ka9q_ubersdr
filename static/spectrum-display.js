@@ -433,6 +433,9 @@ class SpectrumDisplay {
                 const currentTime = window.audioContext.currentTime;
                 const bufferAhead = window.nextPlayTime - currentTime;
 
+                // Get total filter latency in seconds (convert from ms)
+                const filterLatency = (window.getTotalFilterLatency ? window.getTotalFilterLatency() : 0) / 1000;
+
                 // Process frames that should be displayed now
                 const now = Date.now();
 
@@ -440,8 +443,8 @@ class SpectrumDisplay {
                     const frame = this.frameQueue[0];
 
                     // Calculate when this frame should be displayed
-                    // Frame should display when: current time >= receive time + buffer delay + margin
-                    const displayTime = frame.receiveTime + (bufferAhead + this.bufferMargin) * 1000;
+                    // Frame should display when: current time >= receive time + buffer delay + filter latency + margin
+                    const displayTime = frame.receiveTime + (bufferAhead + filterLatency + this.bufferMargin) * 1000;
 
                     if (now >= displayTime) {
                         // Time to display this frame

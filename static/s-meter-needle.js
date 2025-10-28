@@ -34,8 +34,8 @@ class SMeterNeedle {
         this.peakHoldTime = 15; // frames to hold peak before decay (0.5 seconds at 30fps)
         this.peakHoldCounter = 0;
         
-        // Animation settings - match the main signal meter timing
-        this.animationSpeed = 0.3; // Faster response to match main meter
+        // Animation settings - faster response for quicker needle movement
+        this.animationSpeed = 0.6; // Increased from 0.3 for quicker response
         
         // S-meter scale configuration
         // S1 = -115 dBFS, S9 = -73 dBFS (6 dB per S-unit)
@@ -220,21 +220,28 @@ class SMeterNeedle {
         this.ctx.fillText('dB', this.width - 10, this.height - 10);
     }
     
-    // Update the value display div
+    // Update the value display divs
     updateValueDisplay() {
         const valueDiv = document.getElementById('s-meter-value-display');
+        const peakDiv = document.getElementById('s-meter-peak-display');
+        
         if (valueDiv) {
             const sUnitText = this.formatSUnits(this.currentValue);
             valueDiv.textContent = sUnitText;
             
-            // Color the text based on signal strength
+            // Color the main text based on signal strength (matches main signal meter)
             if (this.currentValue >= -70) {
-                valueDiv.style.color = '#28a745'; // Green
+                valueDiv.style.color = '#28a745'; // Green - strong signal (>= -70 dBFS)
             } else if (this.currentValue >= -85) {
-                valueDiv.style.color = '#ffc107'; // Yellow
+                valueDiv.style.color = '#ffc107'; // Yellow - moderate signal (>= -85 dBFS)
             } else {
-                valueDiv.style.color = '#dc3545'; // Red
+                valueDiv.style.color = '#dc3545'; // Red - weak signal (< -85 dBFS)
             }
+        }
+        
+        if (peakDiv) {
+            const peakText = this.formatSUnits(this.peakValue);
+            peakDiv.textContent = peakText;
         }
     }
     
@@ -286,7 +293,7 @@ class SMeterNeedle {
         this.ctx.lineTo(4, -10);
         this.ctx.closePath();
         
-        // Needle color based on dBFS value (matches main signal meter thresholds)
+        // Needle color based on dBFS value (matches main signal meter thresholds exactly)
         if (this.currentValue >= -70) {
             this.ctx.fillStyle = '#28a745'; // Green - strong signal (>= -70 dBFS)
         } else if (this.currentValue >= -85) {

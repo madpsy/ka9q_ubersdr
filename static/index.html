@@ -39,6 +39,12 @@
             <span id="audio-buffer-text" class="audio-buffer-text">--</span>
         </div>
 
+        <!-- Time Display in bottom left -->
+        <div id="time-display" class="time-display">
+            <div id="utc-time" class="time-line">--:--:--</div>
+            <div id="local-time" class="time-line">--:--:--</div>
+        </div>
+
         <!-- Full-band Spectrum Display -->
         <div class="spectrum-display-panel">
             <div class="spectrum-display-container">
@@ -765,6 +771,7 @@
     <script src="oscilloscope.js"></script>
     <script src="recorder.js"></script>
     <script src="idle-detector.js"></script>
+    <script src="time-display.js"></script>
     <script type="module" src="app.js"></script>
 </body>
 </html>

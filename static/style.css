@@ -175,6 +175,30 @@ body {
     text-decoration: underline;
 }
 
+/* Time Display in bottom left */
+.time-display {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    background: rgba(44, 62, 80, 0.9);
+    border-radius: 0 6px 0 0;
+    z-index: 10001;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    padding: 4px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.time-line {
+    color: white;
+    font-size: 10px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    white-space: nowrap;
+}
+
 /* Audio Buffer Display in bottom right */
 .audio-buffer-display {
     position: fixed;

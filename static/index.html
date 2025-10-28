@@ -163,6 +163,17 @@
                 </select>
             </div>
 
+            <div class="control-group">
+                <div class="s-meter-container">
+                    <canvas id="s-meter-canvas" width="280" height="160"></canvas>
+                </div>
+                <div style="display: flex; justify-content: center; align-items: center; padding: 5px;">
+                    <div id="s-meter-value-display" style="text-align: center; font-size: 18px; font-weight: bold; color: #ecf0f1; padding: 8px; background: #2c3e50; border-radius: 4px; margin-top: 5px; width: 280px; box-sizing: border-box;">
+                        S0
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         <div class="audio-controls">
@@ -771,6 +782,7 @@
     <script src="extension-loader.js"></script>
     <script src="carrier-detector.js"></script>
     <script src="signal-meter.js"></script>
+    <script src="s-meter-needle.js"></script>
     <script src="spectrum-display.js"></script>
     <script src="oscilloscope.js"></script>
     <script src="recorder.js"></script>

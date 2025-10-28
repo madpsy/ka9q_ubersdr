@@ -337,6 +337,11 @@ class SpectrumDisplay {
         // Initialize signal meter
         this.signalMeter = new SignalMeter();
 
+        // Initialize S-meter needle display
+        if (typeof initSMeterNeedle === 'function') {
+            initSMeterNeedle();
+        }
+
         // Initialize split mode if it's the default
         if (this.displayMode === 'split') {
             this.splitModeLogged = false;

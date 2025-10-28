@@ -134,6 +134,11 @@ class SignalMeter {
     // Update the visual display
     updateDisplay(avgPeakDb) {
         if (!this.meterBar || !this.meterValue) return;
+
+        // Update S-meter needle if it exists
+        if (typeof sMeterNeedle !== 'undefined' && sMeterNeedle) {
+            sMeterNeedle.update(avgPeakDb);
+        }
         
         // Calculate SNR if in SNR mode
         let displayValue = avgPeakDb;

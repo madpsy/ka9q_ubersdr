@@ -20,9 +20,16 @@ This will install Docker, clone both repositories, build the images, and start t
 
 ### System Prerequisites
 
+Install Git, curl and libfftw3-bin:
 Install Docker:
 ```bash
-sudo apt install docker.io
+sudo apt install git curl libfftw3-bin
+```
+
+Install Docker:
+```bash
+curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+sudo sh /tmp/get-docker.sh
 ```
 
 Docker includes Compose as a built-in plugin (use `docker compose` instead of `docker-compose`).

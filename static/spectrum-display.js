@@ -32,6 +32,12 @@ class SpectrumDisplay {
         this.peakHoldDecayRate = 3.0; // dB per second decay rate (faster decay)
         this.lastPeakHoldUpdate = Date.now();
 
+        // Frame buffering for audio synchronization
+        this.frameQueue = [];
+        this.maxQueueSize = 100;
+        this.bufferMargin = 0.05; // 50ms safety margin (matching frequency tracking)
+        this.animationLoopRunning = false;
+
         // Setup mouse handlers for line graph canvas
         if (this.lineGraphCanvas) {
             this.setupLineGraphMouseHandlers();
@@ -386,6 +392,110 @@ class SpectrumDisplay {
         }
     }
 
+    // Queue spectrum frame for synchronized display with audio
+    queueSpectrumFrame(data) {
+        const frame = {
+            data: data,
+            receiveTime: Date.now()
+        };
+
+        // Add to queue
+        this.frameQueue.push(frame);
+
+        // Limit queue size to prevent unbounded growth
+        if (this.frameQueue.length > this.maxQueueSize) {
+            this.frameQueue.shift(); // Remove oldest frame
+        }
+
+        // Start animation loop if not already running
+        if (!this.animationLoopRunning) {
+            this.startFrameProcessing();
+        }
+    }
+
+    // Start animation loop to process queued frames
+    startFrameProcessing() {
+        if (this.animationLoopRunning) return;
+
+        this.animationLoopRunning = true;
+        console.log('Started spectrum frame processing loop');
+
+        const processFrame = () => {
+            if (!this.animationLoopRunning) return;
+
+            // Check if audio timing is available
+            if (window.audioContext && window.nextPlayTime) {
+                const currentTime = window.audioContext.currentTime;
+                const bufferAhead = window.nextPlayTime - currentTime;
+
+                // Process frames that should be displayed now
+                const now = Date.now();
+
+                while (this.frameQueue.length > 0) {
+                    const frame = this.frameQueue[0];
+
+                    // Calculate when this frame should be displayed
+                    // Frame should display when: current time >= receive time + buffer delay + margin
+                    const displayTime = frame.receiveTime + (bufferAhead + this.bufferMargin) * 1000;
+
+                    if (now >= displayTime) {
+                        // Time to display this frame
+                        this.frameQueue.shift();
+                        this.displayFrame(frame.data);
+                    } else {
+                        // This frame and all subsequent frames are not ready yet
+                        break;
+                    }
+                }
+            } else {
+                // No audio timing available - display frames immediately (fallback)
+                if (this.frameQueue.length > 0) {
+                    const frame = this.frameQueue.shift();
+                    this.displayFrame(frame.data);
+                }
+            }
+
+            // Continue processing
+            requestAnimationFrame(processFrame);
+        };
+
+        processFrame();
+    }
+
+    // Stop frame processing loop
+    stopFrameProcessing() {
+        this.animationLoopRunning = false;
+        this.frameQueue = [];
+        console.log('Stopped spectrum frame processing loop');
+    }
+
+    // Display a spectrum frame
+    displayFrame(data) {
+        this.spectrumData = data;
+        this.lastUpdate = Date.now();
+        this.draw();
+
+        // Update tooltip with new data even if mouse hasn't moved
+        if (this.mouseX >= 0 && this.mouseY >= 0 && !this.isDragging) {
+            this.updateTooltip();
+        }
+
+        // Update signal meter with new data
+        this.updateSignalMeter();
+
+        // Process spectrum data for decoder extensions
+        if (window.decoderManager) {
+            const spectrumDataForExtensions = {
+                powers: this.spectrumData,
+                centerFreq: this.centerFreq,
+                binBandwidth: this.binBandwidth,
+                binCount: this.binCount,
+                totalBandwidth: this.totalBandwidth
+            };
+            window.decoderManager.processSpectrum(spectrumDataForExtensions);
+        }
+    }
+
     // Connect to spectrum WebSocket
     async connect() {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -534,6 +644,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.ws = null;
         }
 
+        // Stop frame processing
+        this.stopFrameProcessing();
+
         this.connected = false;
     }
 
@@ -649,46 +762,28 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 const N = rawData.length;
                 const halfBins = Math.floor(N / 2);
 
-                this.spectrumData = new Float32Array(N);
+                const unwrappedData = new Float32Array(N);
 
                 // Put second half (negative frequencies) first
                 for (let i = 0; i < halfBins; i++) {
-                    this.spectrumData[i] = rawData[halfBins + i];
+                    unwrappedData[i] = rawData[halfBins + i];
                 }
                 // Put first half (positive frequencies) second
                 for (let i = 0; i < halfBins; i++) {
-                    this.spectrumData[halfBins + i] = rawData[i];
+                    unwrappedData[halfBins + i] = rawData[i];
                 }
 
                 // Log only once for debugging
                 if (!this.spectrumLogged) {
                     this.spectrumLogged = true;
                     console.log(`=== SPECTRUM UNWRAPPED ===`);
-                    console.log(`After unwrap - First 5 bins: ${this.spectrumData.slice(0, 5).map(v => v.toFixed(1)).join(', ')}`);
-                    console.log(`After unwrap - Middle 5 bins: ${this.spectrumData.slice(1022, 1027).map(v => v.toFixed(1)).join(', ')}`);
-                    console.log(`After unwrap - Last 5 bins: ${this.spectrumData.slice(-5).map(v => v.toFixed(1)).join(', ')}`);
+                    console.log(`After unwrap - First 5 bins: ${unwrappedData.slice(0, 5).map(v => v.toFixed(1)).join(', ')}`);
+                    console.log(`After unwrap - Middle 5 bins: ${unwrappedData.slice(1022, 1027).map(v => v.toFixed(1)).join(', ')}`);
+                    console.log(`After unwrap - Last 5 bins: ${unwrappedData.slice(-5).map(v => v.toFixed(1)).join(', ')}`);
                 }
 
-                this.lastUpdate = Date.now();
-                this.draw();
-                // Update tooltip with new data even if mouse hasn't moved
-                if (this.mouseX >= 0 && this.mouseY >= 0 && !this.isDragging) {
-                    this.updateTooltip();
-                }
-                // Update signal meter with new data
-                this.updateSignalMeter();
-
-                // Process spectrum data for decoder extensions
-                if (window.decoderManager) {
-                    const spectrumDataForExtensions = {
-                        powers: this.spectrumData,
-                        centerFreq: this.centerFreq,
-                        binBandwidth: this.binBandwidth,
-                        binCount: this.binCount,
-                        totalBandwidth: this.totalBandwidth
-                    };
-                    window.decoderManager.processSpectrum(spectrumDataForExtensions);
-                }
+                // Queue frame with timestamp for synchronized display
+                this.queueSpectrumFrame(unwrappedData);
                 break;
 
             case 'pong':

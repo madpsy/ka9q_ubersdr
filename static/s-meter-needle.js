@@ -30,8 +30,8 @@ class SMeterNeedle {
         // Peak hold values
         this.peakValue = -120; // dBFS
         this.peakAngle = this.getAngleForValue(-120);
-        this.peakDecayRate = 0.5; // dB per frame to decay
-        this.peakHoldTime = 30; // frames to hold peak before decay
+        this.peakDecayRate = 1.0; // dB per frame to decay (faster decay)
+        this.peakHoldTime = 15; // frames to hold peak before decay (0.5 seconds at 30fps)
         this.peakHoldCounter = 0;
         
         // Animation settings - match the main signal meter timing

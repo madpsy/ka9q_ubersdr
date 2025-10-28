@@ -1,5 +1,6 @@
-// Old Radio JavaScript - Simple AM Receiver
-// Frequency range: 600 kHz to 2000 kHz (AM broadcast band)
+
+// Old Radio JavaScript - Pluggable Radio System
+// Supports multiple radio models with different configurations
 
 // Generate a unique user session ID for linking connections
 function generateUserSessionID() {
@@ -10,105 +11,363 @@ function generateUserSessionID() {
     });
 }
 
-// Generate UUID once when page loads
-const userSessionID = generateUserSessionID();
+// Generate UUID - will be regenerated when changing radios
+let userSessionID = generateUserSessionID();
 console.log('User Session ID:', userSessionID);
 
-// Configuration
-const MIN_FREQ = 600000;  // 600 kHz in Hz
-const MAX_FREQ = 2000000; // 2000 kHz in Hz
-const MODE = 'am';        // Fixed to AM mode
-const DIAL_GEAR_RATIO = 10; // Number of full rotations to cover full frequency range
+// Radio Configuration
+let currentRadioConfig = null;
+let availableRadios = [];
+
+// Configuration from loaded radio
+let MIN_FREQ = 600000;
+let MAX_FREQ = 2000000;
+let MODE = 'am';
+let DIAL_GEAR_RATIO = 10;
 
 // State
 let ws = null;
 let audioContext = null;
 let audioQueue = [];
 let isPlaying = false;
-let nextPlayTime = 0; // Audio playback scheduling
-let audioStartTime = 0; // Track when audio started for logging
-let currentFrequency = 1000000; // Start at 1000 kHz
+let nextPlayTime = 0;
+let audioStartTime = 0;
+let currentFrequency = 1000000;
 let currentVolume = 0.7;
 let dialRotation = 0;
-let volumeRotation = 231; // Start at ~70% volume (0.7 * 330 = 231 degrees)
-let tuneTimeout = null; // For debouncing tune commands
-let lastTuneTime = 0; // Track last tune command time
-const TUNE_DEBOUNCE_MS = 200; // Maximum tune update rate
-let urlUpdateTimeout = null; // For throttling URL updates
-let lastUrlUpdateTime = 0; // Track last URL update time
-const URL_UPDATE_THROTTLE_MS = 1000; // Only update URL once per second
+let volumeRotation = 231;
+let tuneTimeout = null;
+let lastTuneTime = 0;
+const TUNE_DEBOUNCE_MS = 200;
+let urlUpdateTimeout = null;
+let lastUrlUpdateTime = 0;
+const URL_UPDATE_THROTTLE_MS = 1000;
+let serverSampleRate = null;
+let isChangingRadio = false;
+let shouldReconnect = true;
+let audioBufferCount = 0;
 
 // Signal LED
 let vuLevel = 0;
-let vuAnalyser = null; // Analyser for signal strength
+let vuAnalyser = null;
 
 // Oscilloscope
-let oscilloscopeActive = true; // Start with oscilloscope visible
+let oscilloscopeActive = true;
 let oscilloscopeCanvas = null;
 let oscilloscopeCtx = null;
 let oscilloscopeAnalyser = null;
 
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', () => {
-    loadSettingsFromURL();
-    setupAudioStartButton();
-    
-    // Debug: Log screen and radio dimensions
-    console.log('=== SCREEN DEBUG ===');
-    console.log('Window width:', window.innerWidth);
-    console.log('Window height:', window.innerHeight);
-    console.log('Screen width:', screen.width);
-    console.log('Device pixel ratio:', window.devicePixelRatio);
-    
-    const radioBody = document.querySelector('.radio-body');
-    if (radioBody) {
-        const rect = radioBody.getBoundingClientRect();
-        const computed = window.getComputedStyle(radioBody);
-        console.log('Radio body width:', rect.width);
-        console.log('Radio body computed width:', computed.width);
-        console.log('Radio body computed max-width:', computed.maxWidth);
-        console.log('Radio body padding:', computed.padding);
+document.addEventListener('DOMContentLoaded', async () => {
+    const radioLoaded = await loadAvailableRadios();
+    if (!radioLoaded) {
+        await showRadioSelector();
     }
-    console.log('==================');
 });
 
+// Load available radios from radios.json
+// Returns true if a radio was loaded, false otherwise
+async function loadAvailableRadios() {
+    try {
+        const response = await fetch('radios/radios.json');
+        const data = await response.json();
+        availableRadios = data.radios;
+        
+        // Check URL parameter for radio selection
+        const params = new URLSearchParams(window.location.search);
+        const radioParam = params.get('radio');
+        
+        if (radioParam) {
+            const radio = availableRadios.find(r => r.id === radioParam);
+            if (radio) {
+                await loadRadio(radio.id);
+                return true;
+            }
+        }
+        
+        // Load default radio if specified and no URL parameter
+        if (data.default) {
+            const defaultRadio = availableRadios.find(r => r.id === data.default);
+            if (defaultRadio && availableRadios.length === 1) {
+                // If only one radio, load it automatically
+                await loadRadio(defaultRadio.id);
+                return true;
+            }
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('Failed to load available radios:', error);
+        return false;
+    }
+}
+
+// Show radio selector overlay
+async function showRadioSelector() {
+    const overlay = document.getElementById('radio-selector-overlay');
+    const radioList = document.getElementById('radio-list');
+    
+    // Clear existing options
+    radioList.innerHTML = '';
+    
+    // Create radio options
+    for (const radio of availableRadios) {
+        const option = document.createElement('div');
+        option.className = 'radio-option';
+        option.innerHTML = `
+            <h3>${radio.name}</h3>
+            <p>${radio.description}</p>
+        `;
+        option.addEventListener('click', async () => {
+            overlay.style.display = 'none';
+            await loadRadio(radio.id);
+        });
+        radioList.appendChild(option);
+    }
+    
+    // Hide the change radio button while selector is showing
+    const changeRadioFloating = document.getElementById('change-radio-floating');
+    if (changeRadioFloating) {
+        changeRadioFloating.style.display = 'none';
+    }
+    
+    overlay.style.display = 'flex';
+}
+
+// Load a specific radio configuration
+async function loadRadio(radioId) {
+    try {
+        // Hide the radio selector overlay
+        const selectorOverlay = document.getElementById('radio-selector-overlay');
+        if (selectorOverlay) {
+            selectorOverlay.style.display = 'none';
+        }
+        
+        const radio = availableRadios.find(r => r.id === radioId);
+        if (!radio) {
+            console.error('Radio not found:', radioId);
+            return;
+        }
+        
+        // Load radio configuration
+        const configResponse = await fetch(`${radio.path}/config.json`);
+        currentRadioConfig = await configResponse.json();
+        
+        // Update global configuration
+        MIN_FREQ = currentRadioConfig.minFreq;
+        MAX_FREQ = currentRadioConfig.maxFreq;
+        MODE = currentRadioConfig.mode;
+        DIAL_GEAR_RATIO = currentRadioConfig.dialGearRatio;
+        currentFrequency = currentRadioConfig.defaultFrequency;
+        currentVolume = currentRadioConfig.defaultVolume;
+        volumeRotation = currentVolume * 330;
+        
+        // Load radio template
+        const templateResponse = await fetch(`${radio.path}/template.html`);
+        const template = await templateResponse.text();
+        
+        // Replace template variables
+        let processedTemplate = template
+            .replace(/\{\{brand\}\}/g, currentRadioConfig.brand)
+            .replace(/\{\{model\}\}/g, currentRadioConfig.model);
+        
+        // Load template into radio body
+        document.getElementById('radio-body').innerHTML = processedTemplate;
+        
+        // Load radio-specific CSS and wait for it to load
+        const styleLink = document.getElementById('radio-style');
+        await new Promise((resolve) => {
+            styleLink.onload = resolve;
+            styleLink.href = `${radio.path}/style.css`;
+        });
+        
+        // Generate frequency scale marks
+        generateFrequencyScale();
+        
+        // Generate volume notches
+        generateVolumeNotches();
+        
+        // Update URL with radio selection
+        updateURLWithRadio(radioId);
+        
+        // Load settings from URL
+        loadSettingsFromURL();
+        
+        // Show audio start overlay
+        const audioOverlay = document.getElementById('audio-start-overlay');
+        if (audioOverlay) {
+            audioOverlay.style.display = 'flex';
+        }
+        
+        // Setup audio start button (only once)
+        setupAudioStartButton();
+        
+        // Show the change radio button
+        const changeRadioFloating = document.getElementById('change-radio-floating');
+        if (changeRadioFloating) {
+            changeRadioFloating.style.display = 'block';
+            changeRadioFloating.onclick = async () => {
+                // Set flags to prevent processing audio and reconnection
+                isChangingRadio = true;
+                shouldReconnect = false;
+                
+                // Close websocket immediately
+                if (ws) {
+                    // Remove all event handlers to prevent any more messages
+                    const oldWs = ws;
+                    ws = null; // Null it out immediately so no more messages are processed
+                    
+                    oldWs.onmessage = null;
+                    oldWs.onerror = null;
+                    oldWs.onclose = null;
+                    oldWs.onopen = null;
+                    
+                    // Close the connection
+                    if (oldWs.readyState !== WebSocket.CLOSED && oldWs.readyState !== WebSocket.CLOSING) {
+                        oldWs.close();
+                    }
+                }
+                
+                // Close audio context
+                if (audioContext) {
+                    await audioContext.close();
+                    audioContext = null;
+                }
+                
+                // Wait a bit for server to clean up the old session
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Generate new session ID for the new radio
+                userSessionID = generateUserSessionID();
+                console.log('New User Session ID:', userSessionID);
+                
+                // Reset state (but don't reset audioStartButtonSetup - we'll clean it up properly)
+                serverSampleRate = null;
+                audioBufferCount = 0;
+                
+                // Clear the changing flag now that cleanup is done
+                isChangingRadio = false;
+                
+                // Show selector
+                showRadioSelector();
+            };
+        }
+        
+        console.log('Loaded radio:', radioId, currentRadioConfig);
+    } catch (error) {
+        console.error('Failed to load radio:', error);
+        alert('Failed to load radio configuration');
+    }
+}
+
+// Generate frequency scale marks dynamically
+function generateFrequencyScale() {
+    const scaleMarks = document.getElementById('scale-marks');
+    if (!scaleMarks || !currentRadioConfig) return;
+    
+    scaleMarks.innerHTML = '';
+    
+    for (const mark of currentRadioConfig.frequencyScale) {
+        const span = document.createElement('span');
+        span.className = 'mark';
+        span.style.left = mark.position;
+        span.textContent = mark.label;
+        scaleMarks.appendChild(span);
+    }
+}
+
+// Generate volume notches dynamically
+function generateVolumeNotches() {
+    const volumeNotches = document.getElementById('volume-notches');
+    if (!volumeNotches || !currentRadioConfig) return;
+    
+    volumeNotches.innerHTML = '';
+    
+    const notchCount = currentRadioConfig.volumeNotches;
+    const angleStep = 330 / (notchCount - 1);
+    
+    for (let i = 0; i < notchCount; i++) {
+        const span = document.createElement('span');
+        span.className = 'notch';
+        span.style.transform = `rotate(${i * angleStep}deg)`;
+        span.textContent = i;
+        volumeNotches.appendChild(span);
+    }
+}
+
+// Update URL with radio selection
+function updateURLWithRadio(radioId) {
+    // Create fresh params with only the radio parameter
+    // This clears any old freq/vol parameters from previous radio
+    const params = new URLSearchParams();
+    params.set('radio', radioId);
+    const newURL = window.location.pathname + '?' + params.toString();
+    window.history.replaceState({}, '', newURL);
+}
+
 // Audio Start Button
+let audioStartButtonSetup = false;
+let audioStartHandler = null;
+let changeRadioHandler = null;
+
 function setupAudioStartButton() {
     const overlay = document.getElementById('audio-start-overlay');
     const button = document.getElementById('audio-start-button');
+    const changeButton = document.getElementById('change-radio-button');
     
-    button.addEventListener('click', async () => {
+    // Remove old event listeners if they exist
+    if (audioStartHandler) {
+        button.removeEventListener('click', audioStartHandler);
+    }
+    if (changeRadioHandler) {
+        changeButton.removeEventListener('click', changeRadioHandler);
+    }
+    
+    // Create new handlers
+    audioStartHandler = async () => {
         try {
-            await initializeAudio();
+            // Don't initialize audio context yet - wait for first audio packet with sample rate
             overlay.style.display = 'none';
             startRadio();
         } catch (error) {
-            console.error('Failed to initialize audio:', error);
-            alert('Failed to start audio. Please check your browser permissions.');
+            console.error('Failed to start radio:', error);
+            alert('Failed to start radio. Please check your browser permissions.');
         }
-    });
+    };
+    
+    changeRadioHandler = () => {
+        overlay.style.display = 'none';
+        showRadioSelector();
+    };
+    
+    // Add new event listeners
+    button.addEventListener('click', audioStartHandler);
+    changeButton.addEventListener('click', changeRadioHandler);
+    
+    audioStartButtonSetup = true;
 }
 
-// Initialize Audio Context
-async function initializeAudio() {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+// Initialize Audio Context with specific sample rate
+async function initializeAudio(sampleRate) {
+    // If sample rate is provided, use it; otherwise use default
+    if (sampleRate) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: sampleRate });
+    } else {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
     
-    // Resume audio context if suspended (browser autoplay policy)
     if (audioContext.state === 'suspended') {
         await audioContext.resume();
     }
     
-    // Initialize playback timing to prevent audio glitches on startup
-    nextPlayTime = audioContext.currentTime;
+    // Start with a larger buffer to allow for fade-in
+    nextPlayTime = audioContext.currentTime + 0.2;
     audioStartTime = audioContext.currentTime;
     
-    // Create analyser for signal strength LED (NOT connected to destination)
-    // This will tap the signal before volume is applied
     vuAnalyser = audioContext.createAnalyser();
     vuAnalyser.fftSize = 2048;
-    vuAnalyser.smoothingTimeConstant = 0; // No smoothing - instant response
+    vuAnalyser.smoothingTimeConstant = 0;
     
-    // Start signal LED update loop
     updateSignalLED();
     
     console.log('Audio context initialized:', audioContext.sampleRate, 'Hz');
@@ -117,7 +376,8 @@ async function initializeAudio() {
 // Start Radio
 function startRadio() {
     setupDials();
-    setupOscilloscope();
+    setupChannelButtons();
+    // Don't setup oscilloscope yet - wait until audio context is initialized
     connectWebSocket();
 }
 
@@ -127,41 +387,46 @@ function setupDials() {
     const volumeKnob = document.getElementById('volume-knob');
     const frequencyScale = document.querySelector('.frequency-scale');
     
-    // Click on frequency scale to tune
-    frequencyScale.addEventListener('click', (e) => {
+    // Click on frequency scale to tune (only if it exists)
+    if (frequencyScale) {
+        frequencyScale.addEventListener('click', (e) => {
         const rect = frequencyScale.getBoundingClientRect();
         const clickX = e.clientX - rect.left;
         const normalized = clickX / rect.width;
-        
-        // Clamp to 0-1 range
         const clampedNormalized = Math.max(0, Math.min(1, normalized));
         
-        // Calculate frequency from click position
         const freqHz = MIN_FREQ + clampedNormalized * (MAX_FREQ - MIN_FREQ);
         currentFrequency = Math.round(freqHz);
         
-        // Update dial rotation to match frequency
         dialRotation = (clampedNormalized * 360) * DIAL_GEAR_RATIO;
         tuningDial.style.transform = `rotate(${dialRotation}deg)`;
         
-        // Update display and send tune command
         updateFrequencyDisplay();
         throttledUpdateURL();
         sendTuneCommand();
-    });
+        });
+    }
+    
+    // Tuning dial (only if it exists)
+    if (!tuningDial) {
+        console.log('No tuning dial found - not a dial-based radio');
+        // Still setup volume knob if it exists
+        if (volumeKnob) {
+            setupVolumeKnob(volumeKnob);
+        }
+        return;
+    }
     
     // Tuning dial
     let isDraggingTuning = false;
     let lastAngleTuning = 0;
     
-    // Mouse events for tuning dial
     tuningDial.addEventListener('mousedown', (e) => {
         isDraggingTuning = true;
         lastAngleTuning = getAngle(tuningDial, e);
         e.preventDefault();
     });
     
-    // Touch events for tuning dial
     tuningDial.addEventListener('touchstart', (e) => {
         isDraggingTuning = true;
         const touch = e.touches[0];
@@ -174,13 +439,10 @@ function setupDials() {
             const angle = getAngle(tuningDial, e);
             let delta = angle - lastAngleTuning;
             
-            // Handle wrap-around at 180/-180 boundary
             if (delta > 180) delta -= 360;
             if (delta < -180) delta += 360;
             
             lastAngleTuning = angle;
-            
-            // Allow unlimited rotation
             dialRotation += delta;
             
             tuningDial.style.transform = `rotate(${dialRotation}deg)`;
@@ -194,13 +456,10 @@ function setupDials() {
             const angle = getAngle(tuningDial, touch);
             let delta = angle - lastAngleTuning;
             
-            // Handle wrap-around at 180/-180 boundary
             if (delta > 180) delta -= 360;
             if (delta < -180) delta += 360;
             
             lastAngleTuning = angle;
-            
-            // Allow unlimited rotation
             dialRotation += delta;
             
             tuningDial.style.transform = `rotate(${dialRotation}deg)`;
@@ -218,17 +477,22 @@ function setupDials() {
     });
     
     // Volume knob
+    if (volumeKnob) {
+        setupVolumeKnob(volumeKnob);
+    }
+}
+
+// Setup Volume Knob (separate function for reuse)
+function setupVolumeKnob(volumeKnob) {
     let isDraggingVolume = false;
     let lastAngleVolume = 0;
     
-    // Mouse events for volume knob
     volumeKnob.addEventListener('mousedown', (e) => {
         isDraggingVolume = true;
         lastAngleVolume = getAngle(volumeKnob, e);
         e.preventDefault();
     });
     
-    // Touch events for volume knob
     volumeKnob.addEventListener('touchstart', (e) => {
         isDraggingVolume = true;
         const touch = e.touches[0];
@@ -241,14 +505,11 @@ function setupDials() {
             const angle = getAngle(volumeKnob, e);
             let delta = angle - lastAngleVolume;
             
-            // Handle wrap-around at 180/-180 boundary
             if (delta > 180) delta -= 360;
             if (delta < -180) delta += 360;
             
             lastAngleVolume = angle;
-            
             volumeRotation += delta;
-            // Clamp to 0-330 degrees (0 to notch 11)
             volumeRotation = Math.max(0, Math.min(330, volumeRotation));
             
             volumeKnob.style.transform = `rotate(${volumeRotation}deg)`;
@@ -262,14 +523,11 @@ function setupDials() {
             const angle = getAngle(volumeKnob, touch);
             let delta = angle - lastAngleVolume;
             
-            // Handle wrap-around at 180/-180 boundary
             if (delta > 180) delta -= 360;
             if (delta < -180) delta += 360;
             
             lastAngleVolume = angle;
-            
             volumeRotation += delta;
-            // Clamp to 0-330 degrees (0 to notch 11)
             volumeRotation = Math.max(0, Math.min(330, volumeRotation));
             
             volumeKnob.style.transform = `rotate(${volumeRotation}deg)`;
@@ -287,7 +545,83 @@ function setupDials() {
     });
 }
 
-// Get angle from center of element (works with both mouse and touch events)
+// Setup Channel Buttons for CB radio
+function setupChannelButtons() {
+    const channelUpBtn = document.getElementById('channel-up');
+    const channelDownBtn = document.getElementById('channel-down');
+    
+    if (!channelUpBtn || !channelDownBtn) {
+        console.log('Channel buttons not found - not a channel-based radio');
+        return;
+    }
+    if (!currentRadioConfig || !currentRadioConfig.channels) {
+        console.log('No channels configured for this radio');
+        return;
+    }
+    
+    console.log('Setting up channel buttons for', currentRadioConfig.channels.length, 'channels');
+    
+    channelUpBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('Channel UP clicked');
+        changeChannel(1);
+    });
+    
+    channelDownBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('Channel DOWN clicked');
+        changeChannel(-1);
+    });
+}
+
+// Change channel for CB radio
+function changeChannel(direction) {
+    if (!currentRadioConfig || !currentRadioConfig.channels) {
+        console.log('No channels available');
+        return;
+    }
+    
+    // Find current channel
+    const currentChannel = currentRadioConfig.channels.find(ch => ch.frequency === currentFrequency);
+    if (!currentChannel) {
+        console.log('Current frequency not found in channels, using first channel');
+        // If current frequency doesn't match a channel, start at channel 1
+        const firstChannel = currentRadioConfig.channels[0];
+        currentFrequency = firstChannel.frequency;
+        updateFrequencyDisplay();
+        throttledUpdateURL();
+        sendTuneCommand();
+        return;
+    }
+    
+    console.log('Current channel:', currentChannel.number, 'Direction:', direction);
+    
+    // Calculate new channel number
+    let newChannelNum = currentChannel.number + direction;
+    
+    // Wrap around
+    if (newChannelNum > currentRadioConfig.channels.length) {
+        newChannelNum = 1;
+    } else if (newChannelNum < 1) {
+        newChannelNum = currentRadioConfig.channels.length;
+    }
+    
+    console.log('New channel number:', newChannelNum);
+    
+    // Find new channel
+    const newChannel = currentRadioConfig.channels.find(ch => ch.number === newChannelNum);
+    if (newChannel) {
+        console.log('Changing to channel', newChannel.number, 'frequency', newChannel.frequency);
+        currentFrequency = newChannel.frequency;
+        updateFrequencyDisplay();
+        throttledUpdateURL();
+        sendTuneCommand();
+    } else {
+        console.log('New channel not found!');
+    }
+}
+
+// Get angle from center of element
 function getAngle(element, event) {
     const rect = element.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
@@ -300,18 +634,12 @@ function getAngle(element, event) {
 
 // Update frequency from dial position
 function updateFrequencyFromDial() {
-    // Apply gear ratio: divide rotation by gear ratio for slower tuning
     const gearAdjustedRotation = dialRotation / DIAL_GEAR_RATIO;
-    
-    // Normalize rotation to 0-360 range for frequency mapping
     const normalizedRotation = ((gearAdjustedRotation % 360) + 360) % 360;
-    
-    // Map rotation (0-360) to frequency range (600-2000 kHz)
-    const normalized = normalizedRotation / 360; // 0 to 1
+    const normalized = normalizedRotation / 360;
     const freqKHz = MIN_FREQ / 1000 + normalized * ((MAX_FREQ - MIN_FREQ) / 1000);
     let freqHz = Math.round(freqKHz * 1000);
     
-    // Wrap frequency at boundaries
     if (freqHz > MAX_FREQ) freqHz = MIN_FREQ + (freqHz - MAX_FREQ);
     if (freqHz < MIN_FREQ) freqHz = MAX_FREQ - (MIN_FREQ - freqHz);
     
@@ -319,17 +647,14 @@ function updateFrequencyFromDial() {
     updateFrequencyDisplay();
     throttledUpdateURL();
     
-    // Debounce tune commands - only send at most every 200ms
     const now = Date.now();
     if (now - lastTuneTime >= TUNE_DEBOUNCE_MS) {
         sendTuneCommand();
         lastTuneTime = now;
     } else {
-        // Clear any pending tune command
         if (tuneTimeout) {
             clearTimeout(tuneTimeout);
         }
-        // Schedule a tune command for later
         tuneTimeout = setTimeout(() => {
             sendTuneCommand();
             lastTuneTime = Date.now();
@@ -344,7 +669,7 @@ function sendTuneCommand() {
             type: 'tune',
             frequency: currentFrequency,
             mode: MODE,
-            bandwidthLow: -5000,  // AM mode: -5000 to +5000 Hz
+            bandwidthLow: -5000,
             bandwidthHigh: 5000
         }));
     }
@@ -352,8 +677,6 @@ function sendTuneCommand() {
 
 // Update volume from knob position
 function updateVolumeFromKnob() {
-    // Map knob rotation (0 to 330) to volume (0 to 1)
-    // 0° = 0%, 330° = 100% (notch 11)
     const maxRotation = 330;
     const clampedRotation = Math.min(volumeRotation, maxRotation);
     currentVolume = clampedRotation / maxRotation;
@@ -363,49 +686,73 @@ function updateVolumeFromKnob() {
 
 // Update frequency display
 function updateFrequencyDisplay() {
-    const freqKHz = Math.round(currentFrequency / 1000);
-    document.getElementById('frequency-value').textContent = freqKHz;
+    const freqElement = document.getElementById('frequency-value');
+    if (!freqElement) return;
     
-    // Update needle position
-    const normalized = (currentFrequency - MIN_FREQ) / (MAX_FREQ - MIN_FREQ);
-    const needlePos = normalized * 100;
-    document.getElementById('frequency-needle').style.left = needlePos + '%';
+    // Check if this is a channel-based radio
+    if (currentRadioConfig && currentRadioConfig.channels) {
+        // Find the channel number for current frequency
+        const channel = currentRadioConfig.channels.find(ch => ch.frequency === currentFrequency);
+        if (channel) {
+            // Update channel number display
+            const channelElement = document.getElementById('channel-number');
+            if (channelElement) {
+                channelElement.textContent = String(channel.number).padStart(2, '0');
+            }
+            // Update frequency display in MHz
+            freqElement.textContent = (currentFrequency / 1000000).toFixed(5);
+            
+            // Update signal bars based on signal strength
+            updateSignalBars();
+        }
+    } else {
+        // Traditional frequency display in kHz
+        const freqKHz = Math.round(currentFrequency / 1000);
+        freqElement.textContent = freqKHz;
+    }
+    
+    // Update needle position if it exists
+    const needle = document.getElementById('frequency-needle');
+    if (needle) {
+        const normalized = (currentFrequency - MIN_FREQ) / (MAX_FREQ - MIN_FREQ);
+        const needlePos = normalized * 100;
+        needle.style.left = needlePos + '%';
+    }
 }
 
-// Update power indicator brightness based on signal level
+// Update signal bars for CB radio
+function updateSignalBars() {
+    for (let i = 1; i <= 5; i++) {
+        const bar = document.getElementById(`signal-bar-${i}`);
+        if (bar) {
+            if (vuLevel * 5 >= i) {
+                bar.classList.add('active');
+            } else {
+                bar.classList.remove('active');
+            }
+        }
+    }
+}
+
+// Update power indicator brightness
 function updatePowerIndicator(level) {
     const indicator = document.getElementById('power-indicator');
-    // level is 0-1, map to opacity 0.1-1.0
+    if (!indicator) return;
+    
     const opacity = 0.1 + (level * 0.9);
     indicator.style.opacity = opacity;
     
-    // Also adjust box-shadow intensity
-    const shadowIntensity = 5 + (level * 15); // 5px to 20px
+    const shadowIntensity = 5 + (level * 15);
     indicator.style.boxShadow = `0 0 ${shadowIntensity}px #ff6b35`;
 }
 
-// Show error overlay (similar to main UI)
+// Show error overlay
 function showErrorOverlay(message, isTerminated = false) {
-    // Create overlay if it doesn't exist
     let overlay = document.getElementById('error-overlay');
     if (!overlay) {
         overlay = document.createElement('div');
         overlay.id = 'error-overlay';
-        overlay.style.position = 'fixed';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100%';
-        overlay.style.height = '100%';
-        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.95)';
-        overlay.style.zIndex = '99999';
-        overlay.style.display = 'flex';
-        overlay.style.flexDirection = 'column';
-        overlay.style.justifyContent = 'center';
-        overlay.style.alignItems = 'center';
-        overlay.style.color = '#fff';
-        overlay.style.fontFamily = 'Arial, sans-serif';
-        overlay.style.textAlign = 'center';
-        overlay.style.padding = '20px';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);z-index:99999;display:flex;flex-direction:column;justify-content:center;align-items:center;color:#fff;font-family:Arial,sans-serif;text-align:center;padding:20px';
         document.body.appendChild(overlay);
     }
 
@@ -413,20 +760,11 @@ function showErrorOverlay(message, isTerminated = false) {
     const title = isTerminated ? 'Session Terminated' : 'Connection Not Allowed';
 
     overlay.innerHTML = `
-        <div style="max-width: 600px;">
-            <div style="font-size: 80px; margin-bottom: 20px;">${icon}</div>
-            <h1 style="font-size: 32px; margin-bottom: 20px; color: #dc3545;">${title}</h1>
-            <p style="font-size: 20px; margin-bottom: 30px; line-height: 1.5;">${message}</p>
-            <button onclick="location.reload()" style="
-                background: #007bff;
-                color: white;
-                border: none;
-                padding: 15px 40px;
-                font-size: 18px;
-                border-radius: 5px;
-                cursor: pointer;
-                font-weight: bold;
-            ">Refresh Page</button>
+        <div style="max-width:600px">
+            <div style="font-size:80px;margin-bottom:20px">${icon}</div>
+            <h1 style="font-size:32px;margin-bottom:20px;color:#dc3545">${title}</h1>
+            <p style="font-size:20px;margin-bottom:30px;line-height:1.5">${message}</p>
+            <button onclick="location.reload()" style="background:#007bff;color:white;border:none;padding:15px 40px;font-size:18px;border-radius:5px;cursor:pointer;font-weight:bold">Refresh Page</button>
         </div>
     `;
 
@@ -435,8 +773,19 @@ function showErrorOverlay(message, isTerminated = false) {
 
 // WebSocket Connection
 async function connectWebSocket() {
+    // Don't connect if we're changing radios
+    if (isChangingRadio) {
+        console.log('Skipping connection - changing radios');
+        return;
+    }
+    
+    // Don't connect if there's already an active connection
+    if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+        console.log('Skipping connection - WebSocket already active', ws.readyState);
+        return;
+    }
+    
     try {
-        // First, check if connection is allowed via /connection endpoint
         const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
         const connectionUrl = `${httpProtocol}//${window.location.host}/connection`;
 
@@ -462,11 +811,9 @@ async function connectWebSocket() {
 
             console.error('Connection not allowed:', response.status, errorData);
 
-            // Check if this is a terminated session (410 Gone status)
             if (response.status === 410) {
                 showErrorOverlay(errorData.reason || 'Your session has been terminated', true);
             } else {
-                // Show error overlay for other connection rejections
                 showErrorOverlay(errorData.reason || 'Server rejected connection', false);
             }
 
@@ -477,7 +824,6 @@ async function connectWebSocket() {
         const result = await response.json();
         console.log('Connection check result:', result);
 
-        // Now proceed with WebSocket connection
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${currentFrequency}&mode=${MODE}&user_session_id=${encodeURIComponent(userSessionID)}`;
 
@@ -505,12 +851,14 @@ async function connectWebSocket() {
             console.log('WebSocket closed');
             updatePowerIndicator(0);
 
-            // Attempt to reconnect after 3 seconds
-            setTimeout(() => {
-                if (audioContext) {
-                    connectWebSocket();
-                }
-            }, 3000);
+            // Only reconnect if we should (not when changing radios)
+            if (shouldReconnect) {
+                setTimeout(() => {
+                    if (audioContext) {
+                        connectWebSocket();
+                    }
+                }, 3000);
+            }
         };
 
     } catch (error) {
@@ -520,12 +868,12 @@ async function connectWebSocket() {
     }
 }
 
-// Send periodic keepalive to prevent connection timeout
+// Send periodic keepalive
 setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'ping' }));
     }
-}, 30000); // Every 30 seconds
+}, 30000);
 
 // Handle WebSocket Messages
 function handleWebSocketMessage(message) {
@@ -534,13 +882,25 @@ function handleWebSocketMessage(message) {
             handleAudioData(message);
             break;
         case 'status':
-            // Status updates - silently ignore
             break;
         case 'error':
             console.error('Server error:', message.error);
+            // If we get a session conflict error, close the websocket and don't reconnect
+            if (message.error && message.error.includes('active audio session')) {
+                console.log('Session conflict detected, closing connection');
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+                // Stop audio context to prevent reconnection
+                if (audioContext) {
+                    audioContext.close();
+                    audioContext = null;
+                }
+                showErrorOverlay('Another session is already active. Please close other tabs/windows and refresh this page.', false);
+            }
             break;
         case 'pong':
-            // Keepalive response - silently ignore
             break;
         default:
             console.log('Unknown message type:', message.type);
@@ -548,22 +908,35 @@ function handleWebSocketMessage(message) {
 }
 
 // Handle Audio Data
-function handleAudioData(message) {
-    if (!audioContext || !message.data) return;
+async function handleAudioData(message) {
+    if (!message.data) return;
+    
+    // Don't process audio if we're changing radios or if there's no audio context
+    if (isChangingRadio || (!audioContext && !message.sampleRate)) return;
+    
+    // If we haven't initialized audio context yet and we have a sample rate, initialize it now
+    if (!audioContext && message.sampleRate) {
+        serverSampleRate = message.sampleRate;
+        audioBufferCount = 0;  // Set BEFORE initializing audio
+        console.log('Initializing audio context with server sample rate:', serverSampleRate, 'Hz');
+        await initializeAudio(serverSampleRate);
+        setupOscilloscope();
+        // Don't process this first packet - let it be dropped so the next one starts cleanly
+        return;
+    }
+    
+    if (!audioContext) return;
     
     try {
-        // Decode base64 audio data
         const binaryString = atob(message.data);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
             bytes[i] = binaryString.charCodeAt(i);
         }
         
-        // RTP audio from radiod is big-endian signed 16-bit PCM
         const numSamples = bytes.length / 2;
         const floatData = new Float32Array(numSamples);
         
-        // Parse big-endian int16 and convert to float
         for (let i = 0; i < numSamples; i++) {
             const highByte = bytes[i * 2];
             const lowByte = bytes[i * 2 + 1];
@@ -571,15 +944,12 @@ function handleAudioData(message) {
             if (sample >= 0x8000) {
                 sample -= 0x10000;
             }
-            // Use 32767 (INT16_MAX) not 32768
             floatData[i] = sample / 32767.0;
         }
         
-        // Create audio buffer BEFORE applying volume
-        const audioBuffer = audioContext.createBuffer(1, floatData.length, message.sampleRate || 12000);
+        const audioBuffer = audioContext.createBuffer(1, floatData.length, message.sampleRate || serverSampleRate || 12000);
         audioBuffer.getChannelData(0).set(floatData);
         
-        // Play audio buffer with proper timing (volume applied in playback)
         playAudioBuffer(audioBuffer);
         
     } catch (error) {
@@ -587,63 +957,62 @@ function handleAudioData(message) {
     }
 }
 
-// Play audio buffer with proper timing
+// Play audio buffer
 function playAudioBuffer(buffer) {
     const source = audioContext.createBufferSource();
     source.buffer = buffer;
     
-    // Create gain node for volume control
     const gainNode = audioContext.createGain();
-    gainNode.gain.value = currentVolume;
     
-    // Connect: source -> vuAnalyser (for signal measurement before volume)
-    //          source -> oscilloscopeAnalyser (for oscilloscope display)
-    //          source -> gain -> destination (for audio output with volume)
-    // The analysers measure the signal BEFORE volume is applied
-    source.connect(vuAnalyser);
-    // Only connect to oscilloscope analyser if oscilloscope is active
+    // Connect to analysers if they exist
+    if (vuAnalyser) {
+        source.connect(vuAnalyser);
+    }
     if (oscilloscopeAnalyser && oscilloscopeActive) {
         source.connect(oscilloscopeAnalyser);
     }
     source.connect(gainNode);
     gainNode.connect(audioContext.destination);
     
-    // Schedule playback to maintain continuous audio
     const currentTime = audioContext.currentTime;
     const bufferAhead = nextPlayTime - currentTime;
     
-    // Check if we need to reset (falling behind or buffer critically low)
-    const needsReset = nextPlayTime < currentTime || bufferAhead < 0.05;
+    // Don't reset on the first few buffers - they're expected to have low buffer
+    const needsReset = audioBufferCount >= 3 && (nextPlayTime < currentTime || bufferAhead < 0.05);
     
-    if (needsReset) {
-        // Use gain ramping to fade out/in smoothly to eliminate pop
-        const FADE_TIME = 0.01; // 10ms fade
+    // Handle first buffer fade-in FIRST, before any other gain settings
+    if (audioBufferCount === 0) {
+        const FADE_TIME = 0.5;
+        // Use max of nextPlayTime and currentTime to ensure we're not setting gain in the past
+        const fadeStartTime = Math.max(nextPlayTime, currentTime);
+        gainNode.gain.setValueAtTime(0, fadeStartTime);
+        gainNode.gain.linearRampToValueAtTime(currentVolume, fadeStartTime + FADE_TIME);
+    } else if (needsReset) {
+        const FADE_TIME = 0.01;
         
-        // Fade out current gain quickly
         gainNode.gain.setValueAtTime(currentVolume, currentTime);
         gainNode.gain.linearRampToValueAtTime(0, currentTime + FADE_TIME);
         
-        // Reset position with small buffer
         if (nextPlayTime < currentTime) {
-            nextPlayTime = currentTime + FADE_TIME + 0.05; // Start after fade + small buffer
+            nextPlayTime = currentTime + FADE_TIME + 0.05;
             console.log('Audio scheduler reset - was falling behind');
         } else {
             nextPlayTime = currentTime + FADE_TIME + 0.05;
             console.log(`Audio buffer critically low (${bufferAhead.toFixed(3)}s), resetting`);
         }
         
-        // Fade back in
         gainNode.gain.setValueAtTime(0, nextPlayTime);
         gainNode.gain.linearRampToValueAtTime(currentVolume, nextPlayTime + FADE_TIME);
+    } else {
+        // Normal playback - just set the gain
+        gainNode.gain.value = currentVolume;
     }
     
-    // Schedule this buffer to play at the next available time
-    source.start(nextPlayTime);
+    audioBufferCount++;
     
-    // Update next play time based on buffer duration
+    source.start(nextPlayTime);
     nextPlayTime += buffer.duration;
     
-    // Log timing info occasionally for debugging
     const timeSinceStart = currentTime - audioStartTime;
     if (Math.floor(timeSinceStart) % 10 === 0 && Math.floor(timeSinceStart) !== Math.floor(timeSinceStart - buffer.duration)) {
         const bufferAhead = nextPlayTime - currentTime;
@@ -651,7 +1020,7 @@ function playAudioBuffer(buffer) {
     }
 }
 
-// Update Signal LED from analyser
+// Update Signal LED
 function updateSignalLED() {
     if (!vuAnalyser) {
         requestAnimationFrame(updateSignalLED);
@@ -661,7 +1030,6 @@ function updateSignalLED() {
     const dataArray = new Uint8Array(vuAnalyser.frequencyBinCount);
     vuAnalyser.getByteTimeDomainData(dataArray);
     
-    // Calculate RMS (Root Mean Square)
     let sumSquares = 0;
     for (let i = 0; i < dataArray.length; i++) {
         const normalized = (dataArray[i] - 128) / 128;
@@ -669,18 +1037,11 @@ function updateSignalLED() {
     }
     
     const rms = Math.sqrt(sumSquares / dataArray.length);
-    
-    // Convert RMS to dB (with floor at -60 dB)
     const rmsDb = 20 * Math.log10(rms + 0.0001);
     const clampedRmsDb = Math.max(-60, Math.min(0, rmsDb));
-    
-    // Convert dB to percentage (0% = -60dB, 100% = 0dB)
     const rmsPercentage = ((clampedRmsDb + 60) / 60);
     
-    // Apply light smoothing for display stability
     vuLevel = vuLevel * 0.8 + rmsPercentage * 0.2;
-    
-    // Update signal indicator brightness
     updatePowerIndicator(vuLevel);
     
     requestAnimationFrame(updateSignalLED);
@@ -693,7 +1054,6 @@ function setupOscilloscope() {
     oscilloscopeCanvas = document.getElementById('oscilloscope-canvas');
     oscilloscopeCtx = oscilloscopeCanvas.getContext('2d');
     
-    // Set canvas size to match its display size
     const resizeCanvas = () => {
         const rect = oscilloscopeCanvas.getBoundingClientRect();
         oscilloscopeCanvas.width = rect.width;
@@ -702,16 +1062,13 @@ function setupOscilloscope() {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
     
-    // Create separate analyser for oscilloscope
     oscilloscopeAnalyser = audioContext.createAnalyser();
     oscilloscopeAnalyser.fftSize = 2048;
     oscilloscopeAnalyser.smoothingTimeConstant = 0.3;
     
-    // Start with oscilloscope visible
     oscilloscopeOverlay.classList.add('active');
     drawOscilloscope();
     
-    // Toggle oscilloscope on speaker click
     speakerGrille.addEventListener('click', () => {
         oscilloscopeActive = !oscilloscopeActive;
         if (oscilloscopeActive) {
@@ -723,7 +1080,7 @@ function setupOscilloscope() {
     });
 }
 
-// Draw Oscilloscope Waveform
+// Draw Oscilloscope
 function drawOscilloscope() {
     if (!oscilloscopeActive || !oscilloscopeAnalyser) return;
     
@@ -736,15 +1093,12 @@ function drawOscilloscope() {
     const width = oscilloscopeCanvas.width;
     const height = oscilloscopeCanvas.height;
     
-    // Clear canvas with vintage radio background
     oscilloscopeCtx.fillStyle = '#0a0805';
     oscilloscopeCtx.fillRect(0, 0, width, height);
     
-    // Draw grid lines (vintage oscilloscope style)
     oscilloscopeCtx.strokeStyle = 'rgba(212, 165, 116, 0.15)';
     oscilloscopeCtx.lineWidth = 1;
     
-    // Horizontal grid lines
     for (let i = 0; i <= 4; i++) {
         const y = (height / 4) * i;
         oscilloscopeCtx.beginPath();
@@ -753,7 +1107,6 @@ function drawOscilloscope() {
         oscilloscopeCtx.stroke();
     }
     
-    // Vertical grid lines
     for (let i = 0; i <= 10; i++) {
         const x = (width / 10) * i;
         oscilloscopeCtx.beginPath();
@@ -762,7 +1115,6 @@ function drawOscilloscope() {
         oscilloscopeCtx.stroke();
     }
     
-    // Draw waveform with vintage glow effect
     oscilloscopeCtx.lineWidth = 2;
     oscilloscopeCtx.strokeStyle = '#ff6b35';
     oscilloscopeCtx.shadowBlur = 10;
@@ -773,22 +1125,17 @@ function drawOscilloscope() {
     const sliceWidth = width / bufferLength;
     let x = 0;
     
-    // Calculate DC offset (average value) to center the waveform
     let sum = 0;
     for (let i = 0; i < bufferLength; i++) {
         sum += dataArray[i];
     }
     const dcOffset = sum / bufferLength;
     
-    // Apply gain to make waveform more visible
-    const gain = 5.0; // Amplify the signal for better visibility
+    const gain = 5.0;
     
     for (let i = 0; i < bufferLength; i++) {
-        // Remove DC offset, normalize to -1 to 1 range, then apply gain
         const v = ((dataArray[i] - dcOffset) / 128.0) * gain;
-        // Clamp to prevent overflow
         const clampedV = Math.max(-1, Math.min(1, v));
-        // Map to canvas coordinates (center at height/2)
         const y = height / 2 - (clampedV * height / 2);
         
         if (i === 0) {
@@ -802,48 +1149,48 @@ function drawOscilloscope() {
     
     oscilloscopeCtx.lineTo(width, height / 2);
     oscilloscopeCtx.stroke();
-    
-    // Reset shadow for next frame
     oscilloscopeCtx.shadowBlur = 0;
 }
 
-// Load settings from URL parameters
+// Load settings from URL
 function loadSettingsFromURL() {
     const params = new URLSearchParams(window.location.search);
     
-    // Load frequency if provided
     if (params.has('freq')) {
         let freq = parseInt(params.get('freq'));
         if (!isNaN(freq)) {
-            // Clamp frequency to valid range
             freq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, freq));
             currentFrequency = freq;
-            // Calculate dial rotation from frequency (accounting for gear ratio)
-            // Map frequency to 0-360 degrees, then apply gear ratio
             const normalized = (freq - MIN_FREQ) / (MAX_FREQ - MIN_FREQ);
             dialRotation = (normalized * 360) * DIAL_GEAR_RATIO;
             
-            // Update dial visual position
             const tuningDial = document.getElementById('tuning-dial');
             if (tuningDial) {
                 tuningDial.style.transform = `rotate(${dialRotation}deg)`;
             }
             
-            // Update frequency display
             updateFrequencyDisplay();
-            
             console.log('Loaded frequency from URL:', freq, 'Hz');
         }
+    } else {
+        // No URL parameter, use default from config and update dial position
+        const normalized = (currentFrequency - MIN_FREQ) / (MAX_FREQ - MIN_FREQ);
+        dialRotation = (normalized * 360) * DIAL_GEAR_RATIO;
+        
+        const tuningDial = document.getElementById('tuning-dial');
+        if (tuningDial) {
+            tuningDial.style.transform = `rotate(${dialRotation}deg)`;
+        }
+        
+        updateFrequencyDisplay();
     }
     
-    // Load volume if provided
     if (params.has('vol')) {
         const vol = parseFloat(params.get('vol'));
         if (!isNaN(vol) && vol >= 0 && vol <= 1) {
             currentVolume = vol;
             volumeRotation = vol * 330;
             
-            // Update volume knob visual position
             const volumeKnob = document.getElementById('volume-knob');
             if (volumeKnob) {
                 volumeKnob.style.transform = `rotate(${volumeRotation}deg)`;
@@ -851,24 +1198,29 @@ function loadSettingsFromURL() {
             
             console.log('Loaded volume from URL:', Math.round(vol * 100) + '%');
         }
+    } else {
+        // No URL parameter, use default from config and update knob position
+        volumeRotation = currentVolume * 330;
+        
+        const volumeKnob = document.getElementById('volume-knob');
+        if (volumeKnob) {
+            volumeKnob.style.transform = `rotate(${volumeRotation}deg)`;
+        }
     }
 }
 
-// Throttled URL update to prevent "too many calls" error
+// Throttled URL update
 function throttledUpdateURL() {
     const now = Date.now();
     
-    // Clear any pending update
     if (urlUpdateTimeout) {
         clearTimeout(urlUpdateTimeout);
     }
     
-    // If enough time has passed, update immediately
     if (now - lastUrlUpdateTime >= URL_UPDATE_THROTTLE_MS) {
         updateURL();
         lastUrlUpdateTime = now;
     } else {
-        // Otherwise, schedule an update for later
         urlUpdateTimeout = setTimeout(() => {
             updateURL();
             lastUrlUpdateTime = Date.now();
@@ -879,18 +1231,18 @@ function throttledUpdateURL() {
 // Update URL with current settings
 function updateURL() {
     try {
-        const params = new URLSearchParams();
+        const params = new URLSearchParams(window.location.search);
         params.set('freq', currentFrequency);
         params.set('vol', currentVolume.toFixed(2));
         
-        // Update URL without reloading page
         const newURL = window.location.pathname + '?' + params.toString();
         window.history.replaceState({}, '', newURL);
     } catch (e) {
-        // Silently ignore if we hit rate limits
         console.debug('URL update skipped:', e.message);
     }
 }
 
-// Initialize frequency display
-updateFrequencyDisplay();
+// Initialize frequency display (only if element exists)
+if (document.getElementById('frequency-value')) {
+    updateFrequencyDisplay();
+}

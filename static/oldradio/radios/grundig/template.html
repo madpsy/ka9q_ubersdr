@@ -1,0 +1,57 @@
+<!-- Radio Brand/Model -->
+<div class="radio-header">
+    <h1 class="radio-brand">{{brand}}</h1>
+    <div class="radio-model">{{model}}</div>
+</div>
+
+<!-- Speaker Grille -->
+<div class="speaker-grille" id="speaker-grille">
+    <div class="grille-pattern"></div>
+    <!-- Oscilloscope Overlay -->
+    <div class="oscilloscope-overlay" id="oscilloscope-overlay">
+        <canvas id="oscilloscope-canvas"></canvas>
+    </div>
+</div>
+
+<!-- Frequency Display -->
+<div class="frequency-display">
+    <div class="display-window">
+        <div class="frequency-scale">
+            <div class="scale-marks" id="scale-marks">
+                <!-- Frequency marks will be generated dynamically -->
+            </div>
+            <div class="frequency-needle" id="frequency-needle"></div>
+        </div>
+        <div class="frequency-readout">
+            <span id="frequency-value">1000</span> <span class="unit">kHz</span>
+        </div>
+    </div>
+</div>
+
+<!-- Tuning Dial -->
+<div class="tuning-section">
+    <div class="dial-container">
+        <div class="dial" id="tuning-dial">
+            <div class="dial-pointer"></div>
+            <div class="dial-center"></div>
+        </div>
+        <div class="dial-label">TUNING</div>
+    </div>
+
+    <!-- Volume Control -->
+    <div class="volume-container">
+        <div class="volume-notches" id="volume-notches">
+            <!-- Volume notches will be generated dynamically -->
+        </div>
+        <div class="knob" id="volume-knob">
+            <div class="knob-pointer"></div>
+        </div>
+        <div class="dial-label">VOLUME</div>
+    </div>
+</div>
+
+<!-- Status Indicator -->
+<div class="status-section">
+    <div class="power-indicator" id="power-indicator"></div>
+    <div class="status-text">SIGNAL</div>
+</div>

@@ -1,0 +1,192 @@
+/* Grundig Radio Specific Styles */
+
+.radio-body {
+    width: 600px;
+    background: linear-gradient(145deg, #8b6f47, #6b5537);
+    border: 5px solid #4a3a2a;
+}
+
+.radio-brand {
+    font-size: 48px;
+    font-weight: bold;
+    color: #d4a574;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    letter-spacing: 8px;
+    margin-bottom: 5px;
+}
+
+.radio-model {
+    font-size: 14px;
+    color: #a08060;
+    letter-spacing: 4px;
+    font-weight: bold;
+}
+
+.speaker-grille {
+    width: 100%;
+    height: 120px;
+    background: linear-gradient(145deg, #3a2a1a, #2a1a0a);
+    border-radius: 10px;
+    margin-bottom: 25px;
+    box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.8);
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    transition: box-shadow 0.3s ease;
+}
+
+.speaker-grille:hover {
+    box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.8), 0 0 15px rgba(212, 165, 116, 0.3);
+}
+
+.grille-pattern {
+    width: 100%;
+    height: 100%;
+    background-image:
+        repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(100, 80, 60, 0.3) 3px, rgba(100, 80, 60, 0.3) 4px),
+        repeating-linear-gradient(90deg, transparent, transparent 3px, rgba(100, 80, 60, 0.3) 3px, rgba(100, 80, 60, 0.3) 4px);
+    transition: opacity 0.3s ease;
+}
+
+.frequency-readout {
+    text-align: center;
+    font-size: 36px;
+    font-weight: bold;
+    color: #ff6b35;
+    text-shadow: 0 0 15px rgba(255, 107, 53, 0.8);
+    font-family: 'Courier New', monospace;
+}
+
+.unit {
+    font-size: 20px;
+    color: #d4a574;
+}
+
+.dial, .knob {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #5a4a3a, #2a1a0a);
+    box-shadow:
+        0 8px 20px rgba(0, 0, 0, 0.8),
+        inset 0 2px 5px rgba(255, 255, 255, 0.1),
+        inset 0 -2px 5px rgba(0, 0, 0, 0.5);
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.1s ease;
+    z-index: 2;
+}
+
+.dial:active, .knob:active {
+    transform: scale(0.98);
+}
+
+.dial-pointer, .knob-pointer {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    width: 4px;
+    height: 40px;
+    background: #d4a574;
+    transform: translateX(-50%);
+    border-radius: 2px;
+    box-shadow: 0 0 5px rgba(212, 165, 116, 0.5);
+}
+
+.dial-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 30px;
+    height: 30px;
+    background: radial-gradient(circle, #3a2a1a, #1a0a00);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 
+        0 2px 5px rgba(0, 0, 0, 0.8),
+        inset 0 1px 2px rgba(255, 255, 255, 0.1);
+}
+
+.dial-label {
+    color: #d4a574;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+.power-indicator {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #ff6b35;
+    box-shadow: 0 0 10px #ff6b35;
+    opacity: 0.1;
+    transition: opacity 0.1s ease, box-shadow 0.1s ease;
+}
+
+.status-text {
+    color: #d4a574;
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 2px;
+}
+
+.volume-notches {
+    position: absolute;
+    width: 150px;
+    height: 150px;
+    top: -15px;
+    left: -10px;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.volume-notches .notch {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform-origin: 0 75px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #d4a574;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    font-family: 'Arial', sans-serif;
+    margin-left: -6px;
+}
+
+/* Responsive Design */
+@media (max-width: 700px) {
+    .radio-body {
+        width: 100% !important;
+        max-width: none !important;
+        padding: 20px 15px;
+        box-sizing: border-box;
+    }
+
+    .radio-brand {
+        font-size: 36px;
+        letter-spacing: 4px;
+    }
+
+    .dial, .knob {
+        width: 100px;
+        height: 100px;
+    }
+
+    .frequency-readout {
+        font-size: 28px;
+    }
+}
+
+/* Change Radio Button - Grundig Style */
+.change-radio-floating {
+    background: linear-gradient(145deg, #8b6f47, #6b5537) !important;
+    border: 2px solid #d4a574 !important;
+    color: #d4a574 !important;
+}
+
+.change-radio-floating:hover {
+    background: linear-gradient(145deg, #9b7f57, #7b6547) !important;
+    border-color: #e4b584 !important;
+}

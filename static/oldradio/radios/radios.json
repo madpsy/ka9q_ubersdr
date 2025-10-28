@@ -1,0 +1,17 @@
+{
+  "radios": [
+    {
+      "id": "grundig",
+      "name": "Grundig AM Receiver",
+      "description": "Classic Grundig AM radio with vintage styling",
+      "path": "radios/grundig"
+    },
+    {
+      "id": "uk-cb",
+      "name": "UK CB Radio",
+      "description": "Classic UK CB radio with 40 FM channels (27 MHz band)",
+      "path": "radios/uk-cb"
+    }
+  ],
+  "default": "grundig"
+}

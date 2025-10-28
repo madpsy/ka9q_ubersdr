@@ -1,0 +1,30 @@
+{
+  "id": "grundig",
+  "name": "Grundig AM Receiver",
+  "brand": "GRUNDIG",
+  "model": "AM RECEIVER",
+  "description": "Classic Grundig AM radio with vintage styling",
+  "minFreq": 600000,
+  "maxFreq": 2000000,
+  "mode": "am",
+  "dialGearRatio": 10,
+  "frequencyScale": [
+    { "position": "0%", "label": "600" },
+    { "position": "14.3%", "label": "800" },
+    { "position": "28.6%", "label": "1000" },
+    { "position": "42.9%", "label": "1200" },
+    { "position": "57.1%", "label": "1400" },
+    { "position": "71.4%", "label": "1600" },
+    { "position": "85.7%", "label": "1800" },
+    { "position": "100%", "label": "2000" }
+  ],
+  "volumeNotches": 12,
+  "defaultFrequency": 910000,
+  "defaultVolume": 0.7,
+  "theme": {
+    "primaryColor": "#d4a574",
+    "secondaryColor": "#ff6b35",
+    "bodyGradient": "linear-gradient(145deg, #8b6f47, #6b5537)",
+    "borderColor": "#4a3a2a"
+  }
+}

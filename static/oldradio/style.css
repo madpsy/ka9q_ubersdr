@@ -6,12 +6,85 @@
 
 body {
     font-family: 'Arial', sans-serif;
-    background: linear-gradient(135deg, #2c1810 0%, #1a0f0a 100%);
+    background: linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 100%);
     display: flex;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
     padding: 20px;
+}
+
+/* Radio Selector Overlay */
+.radio-selector-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.95);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10001;
+}
+
+.radio-selector-content {
+    background: linear-gradient(145deg, #2a2a2a, #1a1a1a);
+    border: 3px solid #444;
+    border-radius: 15px;
+    padding: 40px;
+    max-width: 600px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+}
+
+.radio-selector-content h2 {
+    color: #fff;
+    font-size: 32px;
+    text-align: center;
+    margin-bottom: 30px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+}
+
+.radio-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.radio-option {
+    background: linear-gradient(145deg, #333, #222);
+    border: 2px solid #444;
+    border-radius: 10px;
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+
+.radio-option:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.7);
+    border-color: #666;
+    background: linear-gradient(145deg, #3a3a3a, #2a2a2a);
+}
+
+.radio-option.selected {
+    border-color: #0af;
+    box-shadow: 0 0 20px rgba(0, 170, 255, 0.5);
+}
+
+.radio-option h3 {
+    color: #fff;
+    font-size: 24px;
+    margin-bottom: 8px;
+}
+
+.radio-option p {
+    color: #aaa;
+    font-size: 14px;
+    line-height: 1.5;
 }
 
 /* Audio Start Overlay */
@@ -30,11 +103,14 @@ body {
 
 .audio-start-content {
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
 }
 
 .audio-start-button {
-    background: linear-gradient(145deg, #8b6f47, #6b5537);
-    border: 3px solid #d4a574;
+    background: linear-gradient(145deg, #2a2a2a, #1a1a1a);
+    border: 3px solid #444;
     border-radius: 15px;
     padding: 30px 50px;
     cursor: pointer;
@@ -49,14 +125,37 @@ body {
 .audio-start-button:hover {
     transform: scale(1.05);
     box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
+    background: linear-gradient(145deg, #3a3a3a, #2a2a2a);
 }
 
 .audio-start-button span {
-    color: #d4a574;
+    color: #fff;
     font-size: 24px;
     font-weight: bold;
     text-transform: uppercase;
     letter-spacing: 2px;
+}
+
+.change-radio-button {
+    background: linear-gradient(145deg, #333, #222);
+    border: 2px solid #444;
+    border-radius: 10px;
+    padding: 15px 30px;
+    cursor: pointer;
+    color: #fff;
+    font-size: 16px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+
+.change-radio-button:hover {
+    transform: scale(1.05);
+    border-color: #666;
+    background: linear-gradient(145deg, #3a3a3a, #2a2a2a);
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.7);
 }
 
 /* Radio Container */
@@ -67,18 +166,46 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
+    position: relative;
 }
 
 .radio-body {
-    width: 600px;
-    background: linear-gradient(145deg, #8b6f47, #6b5537);
     border-radius: 20px;
     padding: 40px;
     box-shadow:
         0 20px 60px rgba(0, 0, 0, 0.8),
         inset 0 2px 5px rgba(255, 255, 255, 0.1),
         inset 0 -2px 5px rgba(0, 0, 0, 0.3);
-    border: 5px solid #4a3a2a;
+}
+
+/* Change Radio Button */
+.change-radio-floating {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.8);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    padding: 10px 20px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.change-radio-floating:hover {
+    background: rgba(0, 0, 0, 0.95);
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7);
+}
+
+.change-radio-floating:active {
+    transform: translateY(0);
 }
 
 /* Radio Header */
@@ -87,47 +214,13 @@ body {
     margin-bottom: 20px;
 }
 
-.radio-brand {
-    font-size: 48px;
-    font-weight: bold;
-    color: #d4a574;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-    letter-spacing: 8px;
-    margin-bottom: 5px;
-}
-
-.radio-model {
-    font-size: 14px;
-    color: #a08060;
-    letter-spacing: 4px;
-    font-weight: bold;
-}
-
 /* Speaker Grille */
 .speaker-grille {
     width: 100%;
-    height: 120px;
-    background: linear-gradient(145deg, #3a2a1a, #2a1a0a);
-    border-radius: 10px;
-    margin-bottom: 25px;
-    box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.8);
     overflow: hidden;
     position: relative;
     cursor: pointer;
     transition: box-shadow 0.3s ease;
-}
-
-.speaker-grille:hover {
-    box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.8), 0 0 15px rgba(212, 165, 116, 0.3);
-}
-
-.grille-pattern {
-    width: 100%;
-    height: 100%;
-    background-image:
-        repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(100, 80, 60, 0.3) 3px, rgba(100, 80, 60, 0.3) 4px),
-        repeating-linear-gradient(90deg, transparent, transparent 3px, rgba(100, 80, 60, 0.3) 3px, rgba(100, 80, 60, 0.3) 4px);
-    transition: opacity 0.3s ease;
 }
 
 /* Oscilloscope Overlay */

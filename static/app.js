@@ -5367,6 +5367,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Populate band selector dropdown after bands are loaded
         setTimeout(() => {
             populateBandSelector();
+            populateBookmarkSelector();
         }, 500);
 
     // Initialize spectrum display
@@ -6149,6 +6150,61 @@ window.selectBandFromDropdown = selectBandFromDropdown;
 
 // Expose updateBandSelector globally
 window.updateBandSelector = updateBandSelector;
+
+// Populate bookmark selector dropdown
+function populateBookmarkSelector() {
+    const selector = document.getElementById('bookmark-selector');
+    if (!selector || !window.bookmarks || window.bookmarks.length === 0) {
+        return;
+    }
+
+    // Clear existing options except the first one
+    selector.innerHTML = '<option value="">Select Bookmark...</option>';
+
+    // Add each bookmark as an option
+    window.bookmarks.forEach(bookmark => {
+        const option = document.createElement('option');
+        option.value = JSON.stringify({
+            name: bookmark.name,
+            frequency: bookmark.frequency,
+            mode: bookmark.mode,
+            extension: bookmark.extension
+        });
+        option.textContent = bookmark.name;
+        selector.appendChild(option);
+    });
+
+    log(`Bookmark selector populated with ${window.bookmarks.length} bookmarks`);
+}
+
+// Handle bookmark selection from dropdown
+function selectBookmarkFromDropdown(value) {
+    const selector = document.getElementById('bookmark-selector');
+
+    if (!value) {
+        return;
+    }
+
+    try {
+        const bookmarkData = JSON.parse(value);
+
+        // Use the existing handleBookmarkClick function from bookmark-manager.js
+        if (window.handleBookmarkClick) {
+            window.handleBookmarkClick(bookmarkData);
+        }
+
+    } catch (e) {
+        console.error('Error parsing bookmark data:', e);
+        log('Error selecting bookmark', 'error');
+    }
+
+    // Reset dropdown to default after selection
+    selector.value = '';
+}
+
+// Expose bookmark selector functions globally
+window.populateBookmarkSelector = populateBookmarkSelector;
+window.selectBookmarkFromDropdown = selectBookmarkFromDropdown;
 
 // Audio Buffer Configuration Functions
 function openBufferConfigModal() {

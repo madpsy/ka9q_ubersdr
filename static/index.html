@@ -157,6 +157,9 @@
                 <div class="current-settings-text">
                     <span id="current-freq">-</span> • <span id="current-mode">-</span>
                 </div>
+                <select id="bookmark-selector" onchange="selectBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px;">
+                    <option value="">Select Bookmark...</option>
+                </select>
                 <select id="extensions-dropdown" onchange="toggleExtension(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px;">
                     <option value="">Extensions...</option>
                     <!-- Extensions populated dynamically by extension-loader.js -->

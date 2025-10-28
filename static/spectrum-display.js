@@ -42,10 +42,10 @@ class SpectrumDisplay {
 
         this.ctx = this.canvas.getContext('2d', { alpha: false });
         // Disable image smoothing for crisp pixels
-        this.ctx.imageSmoothingEnabled = false;
-        this.ctx.mozImageSmoothingEnabled = false;
-        this.ctx.webkitImageSmoothingEnabled = false;
-        this.ctx.msImageSmoothingEnabled = false;
+        this.ctx.imageSmoothingEnabled = true;
+        this.ctx.mozImageSmoothingEnabled = true;
+        this.ctx.webkitImageSmoothingEnabled = true;
+        this.ctx.msImageSmoothingEnabled = true;
 
         // Store both canvas pixel dimensions and CSS dimensions
         this.canvasWidth = this.canvas.width;

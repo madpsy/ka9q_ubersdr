@@ -321,6 +321,7 @@ class SpectrumDisplay {
         this.panThrottleMs = 150; // Throttle pan requests to avoid backend rounding issues
         this.scrollEnabled = true; // Mouse scroll wheel enabled by default
         this.zoomScrollEnabled = false; // Zoom scroll wheel disabled by default
+        this.smoothingEnabled = false; // Temporal smoothing disabled by default
         this.setupMouseHandlers();
         this.setupScrollHandler();
 
@@ -1016,17 +1017,24 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 35, graphWidth, graphHeight - 35);
 
-        // Add current spectrum data to history for temporal smoothing
+        // Apply temporal smoothing with different levels based on toggle
         const now = Date.now();
+
+        // Add current spectrum data to history
         this.lineGraphDataHistory.push({
             data: new Float32Array(this.spectrumData),
             timestamp: now
         });
 
-        // Remove old data (keep last 5 frames or data older than 300ms)
+        // Remove old data based on smoothing level
+        // Smooth enabled: keep last 5 frames (300ms window) - heavy smoothing
+        // Smooth disabled: keep last 2 frames (100ms window) - light smoothing
+        const maxFrames = this.smoothingEnabled ? this.lineGraphDataHistoryMaxSize : 2;
+        const maxAge = this.smoothingEnabled ? this.lineGraphDataHistoryMaxAge : 100;
+
         this.lineGraphDataHistory = this.lineGraphDataHistory
-            .filter(d => now - d.timestamp <= this.lineGraphDataHistoryMaxAge)
-            .slice(-this.lineGraphDataHistoryMaxSize);
+            .filter(d => now - d.timestamp <= maxAge)
+            .slice(-maxFrames);
 
         // Create smoothed data by averaging recent frames
         const smoothedData = new Float32Array(this.spectrumData.length);
@@ -1151,17 +1159,24 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 35, graphWidth, graphHeight - 35);
 
-        // Add current spectrum data to history for temporal smoothing
+        // Apply temporal smoothing with different levels based on toggle
         const now = Date.now();
+
+        // Add current spectrum data to history
         this.lineGraphDataHistory.push({
             data: new Float32Array(this.spectrumData),
             timestamp: now
         });
 
-        // Remove old data
+        // Remove old data based on smoothing level
+        // Smooth enabled: keep last 5 frames (300ms window) - heavy smoothing
+        // Smooth disabled: keep last 2 frames (100ms window) - light smoothing
+        const maxFrames = this.smoothingEnabled ? this.lineGraphDataHistoryMaxSize : 2;
+        const maxAge = this.smoothingEnabled ? this.lineGraphDataHistoryMaxAge : 100;
+
         this.lineGraphDataHistory = this.lineGraphDataHistory
-            .filter(d => now - d.timestamp <= this.lineGraphDataHistoryMaxAge)
-            .slice(-this.lineGraphDataHistoryMaxSize);
+            .filter(d => now - d.timestamp <= maxAge)
+            .slice(-maxFrames);
 
         // Create smoothed data
         const smoothedData = new Float32Array(this.spectrumData.length);
@@ -2586,8 +2601,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         // Setup checkbox handlers
         const scrollCheckbox = document.getElementById('spectrum-scroll-enable');
         const zoomScrollCheckbox = document.getElementById('spectrum-zoom-scroll-enable');
+        const smoothCheckbox = document.getElementById('spectrum-smooth-enable');
         
-        // Make checkboxes mutually exclusive
+        // Make scroll checkboxes mutually exclusive
         if (scrollCheckbox && zoomScrollCheckbox) {
             scrollCheckbox.addEventListener('change', (e) => {
                 if (e.target.checked) {
@@ -2610,6 +2626,16 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             scrollCheckbox.addEventListener('change', (e) => {
                 this.scrollEnabled = e.target.checked;
                 console.log(`Spectrum scroll ${this.scrollEnabled ? 'enabled' : 'disabled'}`);
+            });
+        }
+
+        // Setup smoothing checkbox handler
+        if (smoothCheckbox) {
+            smoothCheckbox.addEventListener('change', (e) => {
+                this.smoothingEnabled = e.target.checked;
+                console.log(`Spectrum smoothing ${this.smoothingEnabled ? 'enabled' : 'disabled'}`);
+                // Clear history when toggling to avoid artifacts
+                this.lineGraphDataHistory = [];
             });
         }
 

@@ -27,6 +27,13 @@ class SMeterNeedle {
         this.targetValue = -120;
         this.needleAngle = this.getAngleForValue(-120);
         
+        // Peak hold values
+        this.peakValue = -120; // dBFS
+        this.peakAngle = this.getAngleForValue(-120);
+        this.peakDecayRate = 0.5; // dB per frame to decay
+        this.peakHoldTime = 30; // frames to hold peak before decay
+        this.peakHoldCounter = 0;
+        
         // Animation settings - match the main signal meter timing
         this.animationSpeed = 0.3; // Faster response to match main meter
         
@@ -113,7 +120,10 @@ class SMeterNeedle {
         // Draw scale markings and labels
         this.drawScale();
         
-        // Draw the needle
+        // Draw the peak needle (behind main needle)
+        this.drawPeakNeedle();
+        
+        // Draw the main needle
         this.drawNeedle();
         
         // Draw center pivot
@@ -228,7 +238,33 @@ class SMeterNeedle {
         }
     }
     
-    // Draw the needle
+    // Draw the peak hold needle
+    drawPeakNeedle() {
+        this.ctx.save();
+        this.ctx.translate(this.centerX, this.centerY);
+        this.ctx.rotate(this.peakAngle - Math.PI / 2);
+        
+        // Peak needle shape (thinner triangle)
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, -this.needleLength);
+        this.ctx.lineTo(-2, -10);
+        this.ctx.lineTo(0, 0);
+        this.ctx.lineTo(2, -10);
+        this.ctx.closePath();
+        
+        // Peak needle color - semi-transparent white/cyan
+        this.ctx.fillStyle = 'rgba(0, 255, 255, 0.6)';
+        this.ctx.fill();
+        
+        // Peak needle outline
+        this.ctx.strokeStyle = 'rgba(0, 200, 200, 0.8)';
+        this.ctx.lineWidth = 1;
+        this.ctx.stroke();
+        
+        this.ctx.restore();
+    }
+    
+    // Draw the main needle
     drawNeedle() {
         this.ctx.save();
         this.ctx.translate(this.centerX, this.centerY);
@@ -299,6 +335,27 @@ class SMeterNeedle {
         // Update needle angle directly from current value
         this.needleAngle = this.getAngleForValue(this.currentValue);
         
+        // Update peak hold
+        if (this.currentValue > this.peakValue) {
+            // New peak detected
+            this.peakValue = this.currentValue;
+            this.peakAngle = this.getAngleForValue(this.peakValue);
+            this.peakHoldCounter = this.peakHoldTime;
+        } else {
+            // Decay peak
+            if (this.peakHoldCounter > 0) {
+                // Hold peak for specified time
+                this.peakHoldCounter--;
+            } else {
+                // Decay peak value
+                this.peakValue -= this.peakDecayRate;
+                if (this.peakValue < this.currentValue) {
+                    this.peakValue = this.currentValue;
+                }
+                this.peakAngle = this.getAngleForValue(this.peakValue);
+            }
+        }
+        
         // Redraw
         this.draw();
     }
@@ -308,6 +365,9 @@ class SMeterNeedle {
         this.currentValue = -120;
         this.targetValue = -120;
         this.needleAngle = this.getAngleForValue(-120);
+        this.peakValue = -120;
+        this.peakAngle = this.getAngleForValue(-120);
+        this.peakHoldCounter = 0;
         this.draw();
     }
 }

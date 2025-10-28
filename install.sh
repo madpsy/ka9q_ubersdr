@@ -64,7 +64,7 @@ echo ""
 echo "Installing git and libfftw3-bin..."
 sudo apt update
 sudo apt install -y git libfftw3-bin
-echo "Git and libfftw3-bin installed successfully"
+echo "Git libfftw3-bin installed successfully"
 
 # Create working directory if running from curl
 INSTALL_DIR="$HOME/ubersdr"

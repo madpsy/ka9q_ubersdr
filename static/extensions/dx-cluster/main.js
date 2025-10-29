@@ -237,6 +237,8 @@ class DXClusterExtension extends DecoderExtension {
             const cell = row.insertCell();
             cell.colSpan = 5;
             cell.textContent = this.spots.length === 0 ? 'Waiting for spots...' : 'No spots match filter';
+            // Update count to show 0 filtered of total when no spots match filter
+            this.updateCount(0, this.spots.length);
             return;
         }
 
@@ -318,35 +320,49 @@ class DXClusterExtension extends DecoderExtension {
             this.newSpotId = null;
         }
 
-        // Update count
-        this.updateCount(filteredSpots.length);
+        // Update count with both filtered and total
+        this.updateCount(filteredSpots.length, this.spots.length);
     }
 
     tuneToSpot(spot) {
-        // Set frequency
+        // Set frequency using RadioAPI
         this.radio.setFrequency(spot.frequency);
-        
+
         // Determine appropriate mode based on frequency and comment
         let mode;
         const freqMHz = spot.frequency / 1000000;
         const comment = (spot.comment || '').toUpperCase();
-        
+
         // Check if CW is mentioned in the comment
         const isCW = comment.includes('CW');
-        
+
+        console.log('DX Cluster tuneToSpot:', {
+            callsign: spot.dx_call,
+            frequency: spot.frequency,
+            comment: spot.comment,
+            isCW: isCW,
+            freqMHz: freqMHz
+        });
+
         if (isCW) {
             // CW mode: use CWU for 10 MHz and above, CWL below
             mode = freqMHz >= 10 ? 'cwu' : 'cwl';
+
+            console.log('DX Cluster: Setting CW mode to', mode, 'with mode defaults');
+
+            // Set mode with preserveBandwidth=false to use CW mode defaults (-200/+200 Hz)
+            // This ensures only ONE tune command is sent with correct mode AND bandwidth
+            this.radio.setMode(mode, false);
         } else {
             // Voice mode: use USB for 10 MHz and above, LSB below
             mode = freqMHz >= 10 ? 'usb' : 'lsb';
+
+            console.log('DX Cluster: Setting voice mode to', mode, 'with preserveBandwidth=false');
+
+            // Set mode with preserveBandwidth=false to get default voice bandwidth
+            this.radio.setMode(mode, false);
         }
-        
-        // Set the mode using the global setMode function
-        if (window.setMode) {
-            window.setMode(mode);
-        }
-        
+
         this.radio.log(`Tuned to ${spot.dx_call} on ${this.formatFrequency(spot.frequency)} MHz ${mode.toUpperCase()}`);
     }
 
@@ -383,10 +399,16 @@ class DXClusterExtension extends DecoderExtension {
         }
     }
 
-    updateCount(count) {
+    updateCount(filteredCount, totalCount = null) {
         const countEl = document.getElementById('dx-cluster-count');
         if (countEl) {
-            countEl.textContent = `${count} spot${count !== 1 ? 's' : ''}`;
+            if (totalCount !== null && filteredCount !== totalCount) {
+                // Show "x spots of n total" when filtering
+                countEl.textContent = `${filteredCount} spot${filteredCount !== 1 ? 's' : ''} of ${totalCount} total`;
+            } else {
+                // Show just "x spots" when not filtering or all spots match
+                countEl.textContent = `${filteredCount} spot${filteredCount !== 1 ? 's' : ''}`;
+            }
         }
     }
 

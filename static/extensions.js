@@ -1,5 +1,6 @@
 // Decoder Extension System for ka9q UberSDR
 // Provides a unified interface for adding signal decoders (CW, WWV, RTTY, PSK31, FT8, etc.)
+// Version: 2024-10-29-fix-bandwidth-race-condition
 
 // ============================================================================
 // Radio API - Provides radio state and control to decoder extensions
@@ -125,10 +126,10 @@ class RadioAPI {
         return this.setFrequency(newFreq);
     }
     
-    setMode(mode) {
+    setMode(mode, preserveBandwidth = false) {
         if (['usb', 'lsb', 'cwu', 'cwl', 'am', 'sam', 'fm', 'nfm'].includes(mode)) {
             if (window.setMode) {
-                window.setMode(mode);
+                window.setMode(mode, preserveBandwidth);
                 this.notifyModeChange(mode);
                 return true;
             }
@@ -139,10 +140,25 @@ class RadioAPI {
     setBandwidth(low, high) {
         const lowSlider = document.getElementById('bandwidth-low');
         const highSlider = document.getElementById('bandwidth-high');
-        
+
         if (lowSlider && highSlider) {
+            // IMPORTANT: Update slider min/max constraints first if needed
+            // This prevents values from being clamped by current mode constraints
+            // For example, USB mode has min=0 for low slider, but CW needs negative values
+            if (low < parseInt(lowSlider.min)) {
+                lowSlider.min = low;
+            }
+            if (high > parseInt(highSlider.max)) {
+                highSlider.max = high;
+            }
+            
             lowSlider.value = low;
             highSlider.value = high;
+
+            // Update global variables immediately (don't wait for updateBandwidth callback)
+            window.currentBandwidthLow = low;
+            window.currentBandwidthHigh = high;
+
             if (window.updateBandwidth) window.updateBandwidth();
             this.notifyBandwidthChange(low, high);
             return true;

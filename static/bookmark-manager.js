@@ -268,6 +268,7 @@ function handleBookmarkClick(bookmarkOrFrequency, mode) {
     const formatFrequency = window.formatFrequency;
     const log = window.log;
     const toggleExtension = window.toggleExtension;
+    const radioAPI = window.radioAPI;
 
     // Set frequency
     const freqInput = document.getElementById('frequency');
@@ -279,9 +280,23 @@ function handleBookmarkClick(bookmarkOrFrequency, mode) {
         updateBandButtons(frequency);
     }
 
-    // Set mode (mode is already lowercase from JSON)
+    // Set mode with proper bandwidth handling for CW modes
     if (setMode && bookmarkMode) {
-        setMode(bookmarkMode);
+        // For CW modes, set narrow bandwidth before changing mode
+        if (bookmarkMode === 'cwu' || bookmarkMode === 'cwl') {
+            if (radioAPI) {
+                // Set CW bandwidth first
+                radioAPI.setBandwidth(-200, 200);
+                // Then set mode with bandwidth preservation
+                radioAPI.setMode(bookmarkMode, true);
+            } else {
+                // Fallback if radioAPI not available
+                setMode(bookmarkMode);
+            }
+        } else {
+            // For non-CW modes, use default bandwidth
+            setMode(bookmarkMode);
+        }
     }
 
     // Update URL

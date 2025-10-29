@@ -443,8 +443,9 @@ class SpectrumDisplay {
                     const frame = this.frameQueue[0];
 
                     // Calculate when this frame should be displayed
-                    // Frame should display when: current time >= receive time + buffer delay + filter latency + margin
-                    const displayTime = frame.receiveTime + (bufferAhead + filterLatency + this.bufferMargin) * 1000;
+                    // The audio buffer (bufferAhead) already accounts for all processing delays,
+                    // so we only need to add the buffer ahead time without double-counting filter latency
+                    const displayTime = frame.receiveTime + bufferAhead * 1000;
 
                     if (now >= displayTime) {
                         // Time to display this frame

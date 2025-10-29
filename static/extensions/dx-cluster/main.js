@@ -333,18 +333,30 @@ class DXClusterExtension extends DecoderExtension {
         const freqMHz = spot.frequency / 1000000;
         const comment = (spot.comment || '').toUpperCase();
 
-        // Check if CW is mentioned in the comment
+        // Check for digital modes in the comment
         const isCW = comment.includes('CW');
+        const isFT8 = comment.includes('FT8');
+        const isFT4 = comment.includes('FT4');
+        const isDigital = isFT8 || isFT4;
 
         console.log('DX Cluster tuneToSpot:', {
             callsign: spot.dx_call,
             frequency: spot.frequency,
             comment: spot.comment,
             isCW: isCW,
+            isDigital: isDigital,
             freqMHz: freqMHz
         });
 
-        if (isCW) {
+        if (isDigital) {
+            // FT8/FT4: always use USB mode on all bands
+            mode = 'usb';
+
+            console.log('DX Cluster: Setting digital mode (FT8/FT4) to USB with mode defaults');
+
+            // Set mode with preserveBandwidth=false to use USB mode defaults
+            this.radio.setMode(mode, false);
+        } else if (isCW) {
             // CW mode: use CWU for 10 MHz and above, CWL below
             mode = freqMHz >= 10 ? 'cwu' : 'cwl';
 

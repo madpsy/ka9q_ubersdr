@@ -50,17 +50,39 @@ class DXClusterExtension extends DecoderExtension {
         this.renderTemplate();
         
         // Set up event handlers after template is rendered
-        // Use requestAnimationFrame to ensure DOM is updated
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                this.setupEventHandlers();
-            });
-        });
+        // Use a more reliable method to ensure DOM is ready
+        this.waitForDOMAndSetupHandlers();
         
         // subscribeToDXSpots() is now called in constructor to catch buffered spots
         this.updateConnectionStatus();
         this.startAgeUpdates();
         this.startRadioStateMonitoring();
+    }
+
+    waitForDOMAndSetupHandlers() {
+        // Try to set up handlers, retry if elements don't exist yet
+        const trySetup = (attempts = 0) => {
+            const maxAttempts = 10;
+
+            // Check if key elements exist
+            const ageFilter = document.getElementById('dx-cluster-age-filter');
+            const bandFilter = document.getElementById('dx-cluster-band-filter');
+            const tbody = document.getElementById('dx-cluster-spots');
+
+            if (ageFilter && bandFilter && tbody) {
+                // Elements exist, set up handlers
+                this.setupEventHandlers();
+                console.log('DX Cluster: Event handlers set up successfully');
+            } else if (attempts < maxAttempts) {
+                // Elements don't exist yet, try again
+                console.log(`DX Cluster: Waiting for DOM elements (attempt ${attempts + 1}/${maxAttempts})`);
+                requestAnimationFrame(() => trySetup(attempts + 1));
+            } else {
+                console.error('DX Cluster: Failed to find DOM elements after', maxAttempts, 'attempts');
+            }
+        };
+
+        trySetup();
     }
 
     renderTemplate() {
@@ -89,50 +111,67 @@ class DXClusterExtension extends DecoderExtension {
     }
 
     setupEventHandlers() {
-        // Age filter
-        const ageFilter = document.getElementById('dx-cluster-age-filter');
-        if (ageFilter) {
-            ageFilter.value = this.ageFilter.toString();
-            ageFilter.addEventListener('change', (e) => {
+        console.log('DX Cluster: Setting up event handlers using event delegation');
+
+        // Get the container element (parent of all controls)
+        const container = this.getContentElement();
+        if (!container) {
+            console.error('DX Cluster: Container element not found');
+            return;
+        }
+
+        console.log('DX Cluster: Container found:', container);
+
+        // Use event delegation on the container to handle all events
+        // This works even if elements are replaced in the DOM
+        container.addEventListener('change', (e) => {
+            console.log('DX Cluster: Change event detected on:', e.target.id);
+
+            if (e.target.id === 'dx-cluster-age-filter') {
                 const value = e.target.value;
                 this.ageFilter = value === 'none' ? null : parseInt(value);
-                console.log('Age filter changed to:', this.ageFilter);
+                console.log('DX Cluster: Age filter changed to:', this.ageFilter, 'spots count:', this.spots.length);
                 this.filterAndRenderSpots();
-            });
-        } else {
-            console.error('Age filter element not found');
-        }
-
-        // Band filter
-        const bandFilter = document.getElementById('dx-cluster-band-filter');
-        if (bandFilter) {
-            bandFilter.value = this.bandFilter;
-            bandFilter.addEventListener('change', (e) => {
+            } else if (e.target.id === 'dx-cluster-band-filter') {
                 this.bandFilter = e.target.value;
-                console.log('Band filter changed to:', this.bandFilter);
+                console.log('DX Cluster: Band filter changed to:', this.bandFilter, 'spots count:', this.spots.length);
                 this.filterAndRenderSpots();
-            });
-        } else {
-            console.error('Band filter element not found');
-        }
+            }
+        });
 
-        // Callsign filter
-        const callsignFilter = document.getElementById('dx-cluster-callsign-filter');
-        if (callsignFilter) {
-            callsignFilter.value = this.callsignFilter;
-            callsignFilter.addEventListener('input', (e) => {
+        container.addEventListener('input', (e) => {
+            console.log('DX Cluster: Input event detected on:', e.target.id);
+
+            if (e.target.id === 'dx-cluster-callsign-filter') {
                 this.callsignFilter = e.target.value.toUpperCase();
+                console.log('DX Cluster: Callsign filter changed to:', this.callsignFilter, 'spots count:', this.spots.length);
                 this.filterAndRenderSpots();
-            });
-        }
+            }
+        });
 
-        // Clear button
-        const clearButton = document.getElementById('dx-cluster-clear');
-        if (clearButton) {
-            clearButton.addEventListener('click', () => {
+        container.addEventListener('click', (e) => {
+            console.log('DX Cluster: Click event detected on:', e.target.id);
+
+            if (e.target.id === 'dx-cluster-clear') {
+                console.log('DX Cluster: Clear button clicked');
                 this.clearSpots();
-            });
-        }
+            }
+        });
+
+        // Set initial values after handlers are attached
+        requestAnimationFrame(() => {
+            const ageFilter = document.getElementById('dx-cluster-age-filter');
+            const bandFilter = document.getElementById('dx-cluster-band-filter');
+            const callsignFilter = document.getElementById('dx-cluster-callsign-filter');
+
+            if (ageFilter) ageFilter.value = this.ageFilter.toString();
+            if (bandFilter) bandFilter.value = this.bandFilter;
+            if (callsignFilter) callsignFilter.value = this.callsignFilter;
+
+            console.log('DX Cluster: Initial filter values set');
+        });
+
+        console.log('DX Cluster: Event delegation handlers attached successfully');
     }
 
     subscribeToDXSpots() {

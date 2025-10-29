@@ -240,6 +240,9 @@ class DXClusterExtension extends DecoderExtension {
             return;
         }
 
+        // Track if we've highlighted the new spot in this render
+        let highlightedNewSpot = false;
+
         // Render spots
         filteredSpots.forEach((spot) => {
             const row = tbody.insertRow();
@@ -247,13 +250,10 @@ class DXClusterExtension extends DecoderExtension {
             // Highlight only if this spot has the current new spot ID
             if (this.newSpotId && spot._highlightId === this.newSpotId && this.highlightNew) {
                 row.className = 'spot-new';
+                highlightedNewSpot = true;
                 // Remove class after animation completes (0.5s)
                 setTimeout(() => {
                     row.classList.remove('spot-new');
-                    // Clear the new spot ID after highlighting
-                    if (this.newSpotId === spot._highlightId) {
-                        this.newSpotId = null;
-                    }
                 }, 500);
             }
 
@@ -312,6 +312,11 @@ class DXClusterExtension extends DecoderExtension {
             commentCell.className = 'spot-comment';
             commentCell.textContent = spot.comment || '';
         });
+
+        // Clear new spot ID after first render to prevent re-highlighting
+        if (highlightedNewSpot) {
+            this.newSpotId = null;
+        }
 
         // Update count
         this.updateCount(filteredSpots.length);
@@ -669,9 +674,20 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
         );
     }
 
-    // Draw each spot that's within the visible range
-    let drawnCount = 0;
+    // Deduplicate spots by callsign+frequency combination - keep only the most recent
+    const uniqueSpots = [];
+    const seenCombinations = new Set();
     filteredSpots.forEach(spot => {
+        const key = `${spot.dx_call}@${spot.frequency}`;
+        if (!seenCombinations.has(key)) {
+            uniqueSpots.push(spot);
+            seenCombinations.add(key);
+        }
+    });
+
+    // Draw each unique spot that's within the visible range
+    let drawnCount = 0;
+    uniqueSpots.forEach(spot => {
         // Only draw if frequency is within visible range
         if (spot.frequency < startFreq || spot.frequency > endFreq) {
             return;

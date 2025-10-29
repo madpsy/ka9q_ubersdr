@@ -209,12 +209,17 @@
 
 .spot-frequency:hover {
     color: #66BB6A;
-    text-decoration: underline;
 }
 
 .spot-dx-call {
     color: #2196F3;
     font-weight: bold;
+    cursor: pointer;
+}
+
+.spot-dx-call:hover {
+    color: #42A5F5;
+    text-decoration: underline;
 }
 
 .spot-spotter {

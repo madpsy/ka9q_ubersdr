@@ -277,6 +277,11 @@ class DXClusterExtension extends DecoderExtension {
             const dxCell = row.insertCell();
             dxCell.className = 'spot-dx-call';
             dxCell.textContent = spot.dx_call;
+            dxCell.style.cursor = 'pointer';
+            dxCell.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.openQRZ(spot.dx_call);
+            });
 
             // Spotter
             const spotterCell = row.insertCell();
@@ -319,6 +324,13 @@ class DXClusterExtension extends DecoderExtension {
         }
         
         this.radio.log(`Tuned to ${spot.dx_call} on ${this.formatFrequency(spot.frequency)} MHz ${mode.toUpperCase()}`);
+    }
+
+    openQRZ(callsign) {
+        // Strip anything after a slash (e.g., W1ABC/P becomes W1ABC)
+        const baseCallsign = callsign.split('/')[0];
+        const url = `https://www.qrz.com/db/${baseCallsign}`;
+        window.open(url, '_blank');
     }
 
     formatFrequency(hz) {

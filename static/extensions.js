@@ -88,31 +88,14 @@ class RadioAPI {
     }
 
     onDXSpot(callback) {
-        // Subscribe to DX spots by wrapping the client's message handler
+        // Subscribe to DX spots via the client's onSpot method
         if (!window.dxClusterClient) {
             console.warn('DX Cluster client not available');
             return null;
         }
 
-        // Store original handler
-        const client = window.dxClusterClient;
-        const originalHandler = client.handleMessage.bind(client);
-
-        // Wrap handler to call callback for spots
-        client.handleMessage = function(message) {
-            // Call original handler first
-            originalHandler(message);
-
-            // Call callback for spot messages
-            if (message.type === 'spot' && message.data) {
-                callback(message.data);
-            }
-        };
-
-        // Return unsubscribe function
-        return () => {
-            client.handleMessage = originalHandler;
-        };
+        // Use the client's built-in subscription mechanism
+        return window.dxClusterClient.onSpot(callback);
     }
 
     // === RADIO CONTROLS ===

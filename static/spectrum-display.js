@@ -207,7 +207,37 @@ class SpectrumDisplay {
                 }
             }
 
-            // No bookmark under mouse, hide tooltip
+            // Check if mouse is over a DX spot
+            if (window.dxSpotPositions && window.dxSpotPositions.length > 0) {
+                for (let pos of window.dxSpotPositions) {
+                    // Check if mouse is within DX spot bounds
+                    if (x >= pos.x - pos.width / 2 &&
+                        x <= pos.x + pos.width / 2 &&
+                        y >= pos.y &&
+                        y <= pos.y + pos.height) {
+
+                        // Show DX spot info
+                        const freqStr = this.formatFrequency(pos.spot.frequency);
+                        const timeStr = pos.spot.time ? new Date(pos.spot.time).toLocaleTimeString('en-US', { hour12: false, timeZone: 'UTC' }) : 'N/A';
+                        let tooltipText = `${pos.spot.dx_call}: ${freqStr}<br>Time: ${timeStr} UTC<br>Spotter: ${pos.spot.spotter}`;
+                        if (pos.spot.comment) {
+                            tooltipText += `<br>Comment: ${pos.spot.comment}`;
+                        }
+                        this.tooltip.innerHTML = tooltipText;
+
+                        // Position tooltip near cursor
+                        const tooltipX = e.clientX + 15;
+                        const tooltipY = e.clientY - 10;
+
+                        this.tooltip.style.left = tooltipX + 'px';
+                        this.tooltip.style.top = tooltipY + 'px';
+                        this.tooltip.style.display = 'block';
+                        return;
+                    }
+                }
+            }
+
+            // No bookmark or DX spot under mouse, hide tooltip
             this.hideTooltip();
         });
 
@@ -216,11 +246,29 @@ class SpectrumDisplay {
             this.hideTooltip();
         });
 
-        // Add click handler for bookmarks on overlay canvas
+        // Add click handler for bookmarks and DX spots on overlay canvas
         this.overlayCanvas.addEventListener('click', (e) => {
             const rect = this.overlayCanvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
+
+            // Check if click is on a DX spot first (they're drawn on top)
+            if (window.dxSpotPositions && window.dxSpotPositions.length > 0) {
+                for (let pos of window.dxSpotPositions) {
+                    // Check if click is within DX spot bounds
+                    if (x >= pos.x - pos.width / 2 &&
+                        x <= pos.x + pos.width / 2 &&
+                        y >= pos.y &&
+                        y <= pos.y + pos.height) {
+                        
+                        // Tune to the DX spot
+                        if (window.dxClusterExtensionInstance) {
+                            window.dxClusterExtensionInstance.tuneToSpot(pos.spot);
+                        }
+                        return;
+                    }
+                }
+            }
 
             // Check if click is on a bookmark
             if (typeof window.bookmarks !== 'undefined' && typeof window.handleBookmarkClick === 'function') {
@@ -2097,12 +2145,24 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.overlayCtx.fillRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
         }
 
-        // Draw bookmarks first (so cursor appears on top)
-        // This needs to be redrawn because we just cleared the canvas
+        // Draw bookmarks FIRST (bottom layer - under everything)
         if (typeof window.drawBookmarksOnSpectrum === 'function') {
             window.drawBookmarksOnSpectrum(this, console.log);
         }
 
+        // Draw tuned frequency cursor second (middle layer - above bookmarks, below DX spots)
+        if (this.currentTunedFreq && this.totalBandwidth) {
+            this.drawTunedFrequencyCursorOnly();
+        }
+
+        // Draw DX spots LAST (top layer - on top of everything)
+        if (typeof window.drawDXSpotsOnSpectrum === 'function') {
+            window.drawDXSpotsOnSpectrum(this, console.log);
+        }
+    }
+
+    // Draw only the tuned frequency cursor (without bookmarks/DX spots)
+    drawTunedFrequencyCursorOnly() {
         if (!this.currentTunedFreq || !this.totalBandwidth) return;
 
         // Calculate frequency range from server data

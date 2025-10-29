@@ -32,6 +32,8 @@ type DXClusterClient struct {
 	keepaliveTimer  *time.Timer
 	spotHandlers    []func(DXSpot)
 	messageHandlers []func(string)
+	spotBuffer      []DXSpot // Circular buffer for last N spots
+	bufferSize      int      // Maximum buffer size
 }
 
 // NewDXClusterClient creates a new DX cluster client
@@ -41,6 +43,8 @@ func NewDXClusterClient(config *DXClusterConfig) *DXClusterClient {
 		stopChan:        make(chan struct{}),
 		spotHandlers:    make([]func(DXSpot), 0),
 		messageHandlers: make([]func(string), 0),
+		spotBuffer:      make([]DXSpot, 0, 100),
+		bufferSize:      100,
 	}
 }
 
@@ -339,6 +343,9 @@ func (c *DXClusterClient) processLine(line string) {
 
 	// Try to parse as DX spot
 	if spot, ok := c.parseDXSpot(line); ok {
+		// Add to buffer
+		c.addSpotToBuffer(spot)
+
 		// Call spot handlers
 		c.mu.RLock()
 		handlers := c.spotHandlers
@@ -462,4 +469,31 @@ func (c *DXClusterClient) SendCommand(cmd string) error {
 
 	log.Printf("DX Cluster: >> %s", cmd)
 	return c.writeLine(cmd)
+}
+
+// addSpotToBuffer adds a spot to the circular buffer
+func (c *DXClusterClient) addSpotToBuffer(spot DXSpot) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Add spot to buffer
+	c.spotBuffer = append(c.spotBuffer, spot)
+
+	// If buffer exceeds size, remove oldest spot
+	if len(c.spotBuffer) > c.bufferSize {
+		c.spotBuffer = c.spotBuffer[1:]
+	}
+
+	log.Printf("DX Cluster: Buffer now has %d spots (added: %s @ %.1f kHz)", len(c.spotBuffer), spot.DXCall, spot.Frequency/1000)
+}
+
+// GetBufferedSpots returns a copy of all buffered spots
+func (c *DXClusterClient) GetBufferedSpots() []DXSpot {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Return a copy to avoid race conditions
+	spots := make([]DXSpot, len(c.spotBuffer))
+	copy(spots, c.spotBuffer)
+	return spots
 }

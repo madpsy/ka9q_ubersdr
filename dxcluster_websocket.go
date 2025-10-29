@@ -110,6 +110,9 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	// Send connection status
 	h.sendConnectionStatus(conn)
 
+	// Send buffered spots to new client
+	h.sendBufferedSpots(conn)
+
 	// Handle client messages (mainly for ping/pong)
 	go h.handleClient(conn)
 }
@@ -280,6 +283,31 @@ func (h *DXClusterWebSocketHandler) BroadcastStatus() {
 		if err != nil {
 			// Just log the error - the read handler will detect and clean up dead connections
 			log.Printf("DX Cluster WebSocket: Failed to send status to client: %v", err)
+		}
+	}
+}
+
+// sendBufferedSpots sends all buffered spots to a newly connected client
+func (h *DXClusterWebSocketHandler) sendBufferedSpots(conn *websocket.Conn) {
+	// Get buffered spots from DX cluster client
+	bufferedSpots := h.dxCluster.GetBufferedSpots()
+
+	if len(bufferedSpots) == 0 {
+		return
+	}
+
+	log.Printf("DX Cluster WebSocket: Sending %d buffered spots to new client", len(bufferedSpots))
+
+	// Send each spot as an individual message
+	for _, spot := range bufferedSpots {
+		message := map[string]interface{}{
+			"type": "spot",
+			"data": spot,
+		}
+
+		if err := h.sendMessage(conn, message); err != nil {
+			log.Printf("DX Cluster WebSocket: Failed to send buffered spot: %v", err)
+			// Continue sending other spots even if one fails
 		}
 	}
 }

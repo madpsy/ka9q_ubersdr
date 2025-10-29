@@ -1,6 +1,13 @@
 // DX Cluster Extension for ka9q UberSDR
 // Displays real-time DX spots from amateur radio DX clusters
 
+// Global array for DX spot positions (for spectrum display)
+let dxSpotPositions = [];
+window.dxSpotPositions = dxSpotPositions;
+
+// Global reference to the extension instance
+let dxClusterExtensionInstance = null;
+
 class DXClusterExtension extends DecoderExtension {
     constructor() {
         super('dx-cluster', {
@@ -33,6 +40,10 @@ class DXClusterExtension extends DecoderExtension {
             '12m': { min: 24890000, max: 24990000 },
             '10m': { min: 28000000, max: 29700000 }
         };
+
+        // Subscribe to DX spots immediately in constructor (before extension is enabled)
+        // This ensures we receive buffered spots that arrive right after WebSocket connection
+        this.subscribeToDXSpots();
     }
 
     onInitialize() {
@@ -46,7 +57,7 @@ class DXClusterExtension extends DecoderExtension {
             });
         });
         
-        this.subscribeToDXSpots();
+        // subscribeToDXSpots() is now called in constructor to catch buffered spots
         this.updateConnectionStatus();
         this.startAgeUpdates();
         this.startRadioStateMonitoring();
@@ -85,8 +96,11 @@ class DXClusterExtension extends DecoderExtension {
             ageFilter.addEventListener('change', (e) => {
                 const value = e.target.value;
                 this.ageFilter = value === 'none' ? null : parseInt(value);
+                console.log('Age filter changed to:', this.ageFilter);
                 this.filterAndRenderSpots();
             });
+        } else {
+            console.error('Age filter element not found');
         }
 
         // Band filter
@@ -95,8 +109,11 @@ class DXClusterExtension extends DecoderExtension {
             bandFilter.value = this.bandFilter;
             bandFilter.addEventListener('change', (e) => {
                 this.bandFilter = e.target.value;
+                console.log('Band filter changed to:', this.bandFilter);
                 this.filterAndRenderSpots();
             });
+        } else {
+            console.error('Band filter element not found');
         }
 
         // Callsign filter
@@ -141,11 +158,13 @@ class DXClusterExtension extends DecoderExtension {
     }
 
     handleSpot(spot) {
-        this.addSpot(spot, true);
+        // Check if this is a buffered spot (has a time more than 5 seconds old)
+        const isBuffered = spot.time && (Date.now() - new Date(spot.time).getTime()) > 5000;
+        this.addSpot(spot, !isBuffered);
     }
 
     addSpot(spot, isNewSpot = false) {
-        // Assign unique ID to new spots
+        // Assign unique ID to new spots only
         if (isNewSpot) {
             spot._highlightId = ++this.spotIdCounter;
             this.newSpotId = spot._highlightId;
@@ -563,7 +582,178 @@ class DXClusterExtension extends DecoderExtension {
     }
 }
 
+// Draw DX spots on spectrum display (exposed on window for spectrum-display.js access)
+let lastDebugLog = 0;
+function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
+    const now = Date.now();
+    const shouldLog = (now - lastDebugLog) > 5000; // Log once every 5 seconds
+    
+    if (!spectrumDisplay || !spectrumDisplay.overlayCtx) {
+        dxSpotPositions = [];
+        window.dxSpotPositions = dxSpotPositions;
+        return;
+    }
+
+    // Get the DX cluster extension instance from global reference
+    const dxExtension = dxClusterExtensionInstance;
+
+    // Only draw if extension exists, is enabled, and has spots
+    if (!dxExtension || !dxExtension.enabled || !dxExtension.spots || dxExtension.spots.length === 0) {
+        dxSpotPositions = [];
+        window.dxSpotPositions = dxSpotPositions;
+        return;
+    }
+    
+    if (shouldLog) {
+        console.log('DX Spots: enabled=', dxExtension.enabled, 'spots=', dxExtension.spots.length);
+        lastDebugLog = now;
+    }
+
+    // Use the overlay canvas context (same as bookmarks, but draw at bottom)
+    const ctx = spectrumDisplay.overlayCtx;
+
+    if (!ctx || !spectrumDisplay.totalBandwidth || !spectrumDisplay.centerFreq) {
+        dxSpotPositions = [];
+        window.dxSpotPositions = dxSpotPositions;
+        return;
+    }
+
+    // Calculate frequency range
+    const startFreq = spectrumDisplay.centerFreq - spectrumDisplay.totalBandwidth / 2;
+    const endFreq = spectrumDisplay.centerFreq + spectrumDisplay.totalBandwidth / 2;
+
+    // Clear spot positions array
+    dxSpotPositions = [];
+
+    // Get filtered spots (apply same filters as the extension)
+    let filteredSpots = dxExtension.spots.filter(spot =>
+        spot.frequency > 0 && spot.frequency <= 30000000
+    );
+    
+    if (shouldLog) {
+        console.log('Spectrum range:', (startFreq/1e6).toFixed(3), '-', (endFreq/1e6).toFixed(3), 'MHz');
+        console.log('Filtered spots:', filteredSpots.length);
+    }
+
+    // Apply age filter
+    if (dxExtension.ageFilter !== null) {
+        const now = new Date();
+        const maxAgeMs = dxExtension.ageFilter * 60 * 1000;
+        filteredSpots = filteredSpots.filter(spot => {
+            try {
+                const spotTime = new Date(spot.time);
+                const ageMs = now - spotTime;
+                return ageMs <= maxAgeMs;
+            } catch (e) {
+                return true;
+            }
+        });
+    }
+
+    // Apply band filter
+    if (dxExtension.bandFilter !== 'all') {
+        const band = dxExtension.bands[dxExtension.bandFilter];
+        if (band) {
+            filteredSpots = filteredSpots.filter(spot =>
+                spot.frequency >= band.min && spot.frequency <= band.max
+            );
+        }
+    }
+
+    // Apply callsign filter
+    if (dxExtension.callsignFilter) {
+        filteredSpots = filteredSpots.filter(spot =>
+            spot.dx_call.toUpperCase().includes(dxExtension.callsignFilter) ||
+            spot.spotter.toUpperCase().includes(dxExtension.callsignFilter) ||
+            (spot.comment && spot.comment.toUpperCase().includes(dxExtension.callsignFilter))
+        );
+    }
+
+    // Draw each spot that's within the visible range
+    let drawnCount = 0;
+    filteredSpots.forEach(spot => {
+        // Only draw if frequency is within visible range
+        if (spot.frequency < startFreq || spot.frequency > endFreq) {
+            return;
+        }
+        drawnCount++;
+
+        // Calculate x position
+        const x = ((spot.frequency - startFreq) / (endFreq - startFreq)) * spectrumDisplay.width;
+
+        // Draw at same height as bookmarks (y=20) - match bookmark styling exactly
+        const labelY = 20;
+        
+        if (shouldLog) {
+            console.log(`Drawing ${spot.dx_call} at x=${x.toFixed(0)}, y=${labelY}`);
+        }
+
+        // Draw spot label (match bookmark styling exactly)
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+
+        // Background for label
+        const labelWidth = ctx.measureText(spot.dx_call).width + 8;
+        const labelHeight = 12;
+
+        ctx.fillStyle = 'rgba(40, 167, 69, 0.95)'; // Green background (instead of gold)
+        ctx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
+
+        // Border for label
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
+
+        // Label text
+        ctx.fillStyle = '#FFFFFF'; // White text on green background
+        ctx.fillText(spot.dx_call, x, labelY + 2);
+
+        // Draw downward arrow below label (match bookmark arrow exactly)
+        const arrowY = labelY + labelHeight;
+        const arrowLength = 6;
+        ctx.fillStyle = 'rgba(40, 167, 69, 0.95)';
+        ctx.beginPath();
+        ctx.moveTo(x, arrowY + arrowLength); // Arrow tip
+        ctx.lineTo(x - 4, arrowY); // Left point
+        ctx.lineTo(x + 4, arrowY); // Right point
+        ctx.closePath();
+        ctx.fill();
+
+        // Arrow border
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Store spot position for hover detection (match bookmark position format)
+        dxSpotPositions.push({
+            x: x,
+            y: labelY,
+            width: labelWidth,
+            height: labelHeight + arrowLength,
+            spot: spot
+        });
+    });
+
+    // Update window reference
+    window.dxSpotPositions = dxSpotPositions;
+    
+    if (shouldLog && drawnCount > 0) {
+        console.log('Drew', drawnCount, 'DX spot markers on spectrum');
+    }
+}
+
+// Expose function on window for spectrum-display.js access
+window.drawDXSpotsOnSpectrum = drawDXSpotsOnSpectrum;
+
 // Register the extension
 if (window.decoderManager) {
-    window.decoderManager.register(new DXClusterExtension());
+    dxClusterExtensionInstance = new DXClusterExtension();
+    window.decoderManager.register(dxClusterExtensionInstance);
+    console.log('DX Cluster extension registered:', dxClusterExtensionInstance);
+} else {
+    console.error('decoderManager not available for DX Cluster extension');
 }
+
+// Also expose the instance globally for debugging
+window.dxClusterExtensionInstance = dxClusterExtensionInstance;

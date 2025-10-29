@@ -5,6 +5,9 @@ class DXClusterClient {
         this.reconnectDelay = 5000; // 5 seconds
         this.reconnectTimer = null;
         this.connected = false;
+        this.spotCallbacks = []; // Array of spot callbacks
+        this.receivedSpots = []; // Buffer for spots received before callbacks registered
+        this.maxBufferedSpots = 100; // Maximum spots to buffer
     }
 
     connect() {
@@ -66,15 +69,33 @@ class DXClusterClient {
     }
 
     handleMessage(message) {
-        // Handle different message types silently
-        // Extensions can subscribe via radioAPI.onDXSpot() for spot notifications
+        // Handle different message types
         switch (message.type) {
             case 'status':
                 // Status update received
                 break;
 
             case 'spot':
-                // Spot received - handled by radioAPI subscribers
+                // Spot received
+                if (message.data) {
+                    // If no callbacks registered yet, buffer the spot
+                    if (this.spotCallbacks.length === 0) {
+                        this.receivedSpots.push(message.data);
+                        // Limit buffer size
+                        if (this.receivedSpots.length > this.maxBufferedSpots) {
+                            this.receivedSpots.shift();
+                        }
+                    } else {
+                        // Notify all callbacks
+                        this.spotCallbacks.forEach(callback => {
+                            try {
+                                callback(message.data);
+                            } catch (error) {
+                                console.error('[DX Cluster] Error in spot callback:', error);
+                            }
+                        });
+                    }
+                }
                 break;
 
             case 'pong':
@@ -84,6 +105,32 @@ class DXClusterClient {
             default:
                 console.warn('[DX Cluster] Unknown message type:', message.type);
         }
+    }
+
+    // Subscribe to spot notifications
+    onSpot(callback) {
+        this.spotCallbacks.push(callback);
+        
+        // Send any buffered spots to the new callback
+        if (this.receivedSpots.length > 0) {
+            this.receivedSpots.forEach(spot => {
+                try {
+                    callback(spot);
+                } catch (error) {
+                    console.error('[DX Cluster] Error sending buffered spot:', error);
+                }
+            });
+            // Clear the buffer after sending
+            this.receivedSpots = [];
+        }
+        
+        // Return unsubscribe function
+        return () => {
+            const index = this.spotCallbacks.indexOf(callback);
+            if (index > -1) {
+                this.spotCallbacks.splice(index, 1);
+            }
+        };
     }
 
     scheduleReconnect() {

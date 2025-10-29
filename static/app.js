@@ -1568,11 +1568,45 @@ function handlePCMAudio(msg) {
             window.restoreFilterSettings();
         }
 
-        // Re-enable NR2 if it was enabled
+        // Reinitialize NR2 processor if it was enabled
         if (noiseReductionEnabled) {
-            const nr2Checkbox = document.getElementById('noise-reduction-enable');
-            if (nr2Checkbox && nr2Checkbox.checked) {
-                toggleNoiseReduction();
+            // Disconnect and clear old processor (belongs to closed AudioContext)
+            try {
+                if (noiseReductionProcessor) {
+                    noiseReductionProcessor.disconnect();
+                }
+                if (noiseReductionMakeupGain) {
+                    noiseReductionMakeupGain.disconnect();
+                }
+                if (noiseReductionAnalyser) {
+                    noiseReductionAnalyser.disconnect();
+                }
+            } catch (e) {
+                // Ignore disconnect errors from closed context
+            }
+
+            noiseReductionProcessor = null;
+            noiseReductionMakeupGain = null;
+            noiseReductionAnalyser = null;
+            nr2 = null;
+
+            // Reinitialize with new AudioContext
+            const success = initNoiseReduction();
+            if (success) {
+                // Enable processing in NR2
+                if (nr2) {
+                    nr2.enabled = true;
+                    nr2.setParameters(noiseReductionStrength, noiseReductionFloor, 1.0);
+                }
+                log('✅ NR2 reinitialized after AudioContext recreation');
+            } else {
+                // Failed to reinitialize - disable NR2
+                noiseReductionEnabled = false;
+                const nr2Checkbox = document.getElementById('noise-reduction-enable');
+                if (nr2Checkbox) {
+                    nr2Checkbox.checked = false;
+                }
+                log('❌ Failed to reinitialize NR2 - disabled', 'error');
             }
         }
 
@@ -1714,23 +1748,33 @@ function playAudioBuffer(buffer) {
 
     // Step 0: Noise Reduction (FIRST - clean signal before squelch/other processing)
     if (noiseReductionEnabled && noiseReductionProcessor) {
-        try {
-            noiseReductionProcessor.disconnect();
-            if (noiseReductionMakeupGain) {
-                noiseReductionMakeupGain.disconnect();
+        // Safety check: ensure processor belongs to current AudioContext
+        if (noiseReductionProcessor.context !== audioContext) {
+            console.warn('NR2 processor belongs to old AudioContext, skipping connection');
+            // Clear the old processor to trigger reinitialization
+            noiseReductionProcessor = null;
+            noiseReductionMakeupGain = null;
+            noiseReductionAnalyser = null;
+            nr2 = null;
+        } else {
+            try {
+                noiseReductionProcessor.disconnect();
+                if (noiseReductionMakeupGain) {
+                    noiseReductionMakeupGain.disconnect();
+                }
+            } catch (e) {
+                // Ignore if already disconnected
             }
-        } catch (e) {
-            // Ignore if already disconnected
-        }
 
-        // Connect processor in signal chain
-        nextNode.connect(noiseReductionProcessor);
-        nextNode = noiseReductionProcessor;
+            // Connect processor in signal chain
+            nextNode.connect(noiseReductionProcessor);
+            nextNode = noiseReductionProcessor;
 
-        // Add makeup gain after NR2
-        if (noiseReductionMakeupGain) {
-            nextNode.connect(noiseReductionMakeupGain);
-            nextNode = noiseReductionMakeupGain;
+            // Add makeup gain after NR2
+            if (noiseReductionMakeupGain) {
+                nextNode.connect(noiseReductionMakeupGain);
+                nextNode = noiseReductionMakeupGain;
+            }
         }
     }
 

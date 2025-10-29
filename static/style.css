@@ -2087,6 +2087,20 @@ input[type="range"]::-moz-range-thumb {
     }
 }
 
+/* S-Meter Overload Flashing */
+.s-meter-overload {
+    animation: s-meter-overload-flash 0.5s ease-in-out infinite;
+}
+
+@keyframes s-meter-overload-flash {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.3;
+    }
+}
+
 
 /* Audio Recorder Modal */
 .modal {

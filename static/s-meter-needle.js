@@ -25,10 +25,12 @@ class SMeterNeedle {
         // Signal values
         this.currentValue = -120; // dBFS
         this.targetValue = -120;
+        this.originalValue = -120; // Store unclamped value for display
         this.needleAngle = this.getAngleForValue(-120);
         
         // Peak hold values
         this.peakValue = -120; // dBFS
+        this.originalPeakValue = -120; // Store unclamped peak value for display
         this.peakAngle = this.getAngleForValue(-120);
         this.peakDecayRate = 1.0; // dB per frame to decay (faster decay)
         this.peakHoldTime = 15; // frames to hold peak before decay (0.5 seconds at 30fps)
@@ -226,22 +228,46 @@ class SMeterNeedle {
         const peakDiv = document.getElementById('s-meter-peak-display');
         
         if (valueDiv) {
-            const sUnitText = this.formatSUnits(this.currentValue);
+            // Use original (unclamped) value for display
+            const sUnitText = this.formatSUnits(this.originalValue);
             valueDiv.textContent = sUnitText;
             
-            // Color the main text based on signal strength (matches main signal meter)
-            if (this.currentValue >= -70) {
-                valueDiv.style.color = '#28a745'; // Green - strong signal (>= -70 dBFS)
-            } else if (this.currentValue >= -85) {
-                valueDiv.style.color = '#ffc107'; // Yellow - moderate signal (>= -85 dBFS)
+            // Check if signal exceeds S9+40 (-33 dBFS)
+            const exceedsMax = this.originalValue > -33;
+
+            if (exceedsMax) {
+                // Flash red for signals exceeding S9+40
+                valueDiv.style.color = '#dc3545'; // Red
+                valueDiv.classList.add('s-meter-overload');
             } else {
-                valueDiv.style.color = '#dc3545'; // Red - weak signal (< -85 dBFS)
+                // Remove flashing class
+                valueDiv.classList.remove('s-meter-overload');
+
+                // Color the main text based on signal strength (matches main signal meter)
+                if (this.currentValue >= -70) {
+                    valueDiv.style.color = '#28a745'; // Green - strong signal (>= -70 dBFS)
+                } else if (this.currentValue >= -85) {
+                    valueDiv.style.color = '#ffc107'; // Yellow - moderate signal (>= -85 dBFS)
+                } else {
+                    valueDiv.style.color = '#dc3545'; // Red - weak signal (< -85 dBFS)
+                }
             }
         }
         
         if (peakDiv) {
-            const peakText = this.formatSUnits(this.peakValue);
+            // Use original (unclamped) peak value for display
+            const peakText = this.formatSUnits(this.originalPeakValue);
             peakDiv.textContent = peakText;
+
+            // Check if peak exceeds S9+40
+            const peakExceedsMax = this.originalPeakValue > -33;
+
+            if (peakExceedsMax) {
+                peakDiv.classList.add('s-meter-overload');
+                peakDiv.style.color = '#dc3545'; // Red
+            } else {
+                peakDiv.classList.remove('s-meter-overload');
+            }
         }
     }
     
@@ -333,7 +359,10 @@ class SMeterNeedle {
     update(dbfsValue) {
         if (!this.canvas) return;
         
-        // Clamp input value to valid range
+        // Store original (unclamped) value for display
+        this.originalValue = dbfsValue;
+
+        // Clamp input value to valid range for needle position
         this.targetValue = Math.max(this.minDb, Math.min(this.maxDb, dbfsValue));
         
         // Smooth interpolation for needle movement (matches main signal meter)
@@ -346,6 +375,7 @@ class SMeterNeedle {
         if (this.currentValue > this.peakValue) {
             // New peak detected
             this.peakValue = this.currentValue;
+            this.originalPeakValue = dbfsValue; // Store unclamped peak
             this.peakAngle = this.getAngleForValue(this.peakValue);
             this.peakHoldCounter = this.peakHoldTime;
         } else {
@@ -356,8 +386,10 @@ class SMeterNeedle {
             } else {
                 // Decay peak value
                 this.peakValue -= this.peakDecayRate;
+                this.originalPeakValue -= this.peakDecayRate; // Decay unclamped peak too
                 if (this.peakValue < this.currentValue) {
                     this.peakValue = this.currentValue;
+                    this.originalPeakValue = this.originalValue;
                 }
                 this.peakAngle = this.getAngleForValue(this.peakValue);
             }
@@ -371,8 +403,10 @@ class SMeterNeedle {
     reset() {
         this.currentValue = -120;
         this.targetValue = -120;
+        this.originalValue = -120;
         this.needleAngle = this.getAngleForValue(-120);
         this.peakValue = -120;
+        this.originalPeakValue = -120;
         this.peakAngle = this.getAngleForValue(-120);
         this.peakHoldCounter = 0;
         this.draw();

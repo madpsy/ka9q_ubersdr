@@ -185,3 +185,18 @@ logging:
   level: "info"
   # Log format: text, json
   format: "text"
+
+# DX Cluster settings
+dxcluster:
+  # Enable DX cluster connection
+  enabled: false
+  # DX cluster host (well-known public cluster - dxspider.co.uk is very active)
+  host: "dxspider.co.uk"
+  # DX cluster port (standard telnet port for DX clusters)
+  port: 7300
+  # Your amateur radio callsign (required for login - must be a valid callsign)
+  callsign: "N0CALL"
+  # Reconnection delay in seconds (time to wait before reconnecting after disconnect)
+  reconnect_delay: 30
+  # Keep-alive delay in seconds (time between keep-alive messages to prevent timeout)
+  keepalive_delay: 300

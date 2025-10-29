@@ -77,6 +77,44 @@ class RadioAPI {
         return window.bookmarkPositions || [];
     }
     
+    // === DX CLUSTER ACCESS ===
+
+    getDXClusterClient() {
+        return window.dxClusterClient;
+    }
+
+    isDXClusterConnected() {
+        return window.dxClusterClient ? window.dxClusterClient.connected : false;
+    }
+
+    onDXSpot(callback) {
+        // Subscribe to DX spots by wrapping the client's message handler
+        if (!window.dxClusterClient) {
+            console.warn('DX Cluster client not available');
+            return null;
+        }
+
+        // Store original handler
+        const client = window.dxClusterClient;
+        const originalHandler = client.handleMessage.bind(client);
+
+        // Wrap handler to call callback for spots
+        client.handleMessage = function(message) {
+            // Call original handler first
+            originalHandler(message);
+
+            // Call callback for spot messages
+            if (message.type === 'spot' && message.data) {
+                callback(message.data);
+            }
+        };
+
+        // Return unsubscribe function
+        return () => {
+            client.handleMessage = originalHandler;
+        };
+    }
+
     // === RADIO CONTROLS ===
     
     setFrequency(freq) {

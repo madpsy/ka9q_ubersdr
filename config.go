@@ -10,15 +10,16 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Admin      AdminConfig    `yaml:"admin"`
-	Radiod     RadiodConfig   `yaml:"radiod"`
-	Server     ServerConfig   `yaml:"server"`
-	Audio      AudioConfig    `yaml:"audio"`
-	Spectrum   SpectrumConfig `yaml:"spectrum"`
-	Logging    LoggingConfig  `yaml:"logging"`
-	Bookmarks  []Bookmark     `yaml:"bookmarks"`
-	Bands      []Band         `yaml:"bands"`
-	Extensions []string       `yaml:"extensions"`
+	Admin      AdminConfig     `yaml:"admin"`
+	Radiod     RadiodConfig    `yaml:"radiod"`
+	Server     ServerConfig    `yaml:"server"`
+	Audio      AudioConfig     `yaml:"audio"`
+	Spectrum   SpectrumConfig  `yaml:"spectrum"`
+	Logging    LoggingConfig   `yaml:"logging"`
+	DXCluster  DXClusterConfig `yaml:"dxcluster"`
+	Bookmarks  []Bookmark      `yaml:"bookmarks"`
+	Bands      []Band          `yaml:"bands"`
+	Extensions []string        `yaml:"extensions"`
 }
 
 // AdminConfig contains admin authentication settings
@@ -122,6 +123,16 @@ type LoggingConfig struct {
 	Format string `yaml:"format"`
 }
 
+// DXClusterConfig contains DX cluster connection settings
+type DXClusterConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	Host           string `yaml:"host"`
+	Port           int    `yaml:"port"`
+	Callsign       string `yaml:"callsign"`
+	ReconnectDelay int    `yaml:"reconnect_delay"` // Seconds between reconnection attempts
+	KeepAliveDelay int    `yaml:"keepalive_delay"` // Seconds between keep-alive messages
+}
+
 // LoadConfig loads configuration from a YAML file
 func LoadConfig(filename string) (*Config, error) {
 	data, err := os.ReadFile(filename)
@@ -223,6 +234,17 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Spectrum.Smoothing.SpatialSigma == 0 {
 		config.Spectrum.Smoothing.SpatialSigma = 1.5 // Moderate Gaussian smoothing
+	}
+
+	// Set DX cluster defaults if not specified
+	if config.DXCluster.Port == 0 {
+		config.DXCluster.Port = 7300 // Default DX cluster port
+	}
+	if config.DXCluster.ReconnectDelay == 0 {
+		config.DXCluster.ReconnectDelay = 30 // 30 seconds default
+	}
+	if config.DXCluster.KeepAliveDelay == 0 {
+		config.DXCluster.KeepAliveDelay = 300 // 5 minutes default
 	}
 
 	return &config, nil

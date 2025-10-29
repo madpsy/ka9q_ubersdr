@@ -242,6 +242,22 @@ func main() {
 	}
 	defer userSpectrumManager.Stop()
 
+	// Initialize DX cluster client
+	dxCluster := NewDXClusterClient(&config.DXCluster)
+	if err := dxCluster.Start(); err != nil {
+		log.Printf("Warning: Failed to start DX cluster client: %v", err)
+	}
+	defer dxCluster.Stop()
+
+	// Initialize DX cluster WebSocket handler
+	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager)
+
+	// Register DX spot handler for logging
+	dxCluster.OnSpot(func(spot DXSpot) {
+		log.Printf("DX Spot: %.1f kHz %s by %s - %s",
+			spot.Frequency/1000, spot.DXCall, spot.Spotter, spot.Comment)
+	})
+
 	// Initialize rate limiter manager
 	rateLimiterManager := NewRateLimiterManager(config.Server.CmdRateLimit)
 	log.Printf("Command rate limiting: %d commands/sec per channel (0 = unlimited)", config.Server.CmdRateLimit)
@@ -274,6 +290,7 @@ func main() {
 	http.HandleFunc("/ws", wsHandler.HandleWebSocket)
 	// http.HandleFunc("/ws/spectrum", spectrumWsHandler.HandleWebSocket) // Old endpoint - DISABLED
 	http.HandleFunc("/ws/user-spectrum", userSpectrumWsHandler.HandleSpectrumWebSocket) // New endpoint
+	http.HandleFunc("/ws/dxcluster", dxClusterWsHandler.HandleWebSocket)                // DX cluster spots
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
 		handleStats(w, r, sessions)

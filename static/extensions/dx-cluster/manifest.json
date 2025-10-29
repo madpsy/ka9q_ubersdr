@@ -1,0 +1,42 @@
+{
+  "name": "dx-cluster",
+  "displayName": "DX Cluster",
+  "version": "1.0.0",
+  "description": "Display DX spots from amateur radio DX clusters in real-time",
+  "author": "ka9q UberSDR",
+  "type": "display",
+  "icon": "📡",
+  "category": "network",
+  "requiresAudio": false,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "settings": {
+    "maxSpots": {
+      "type": "number",
+      "default": 100,
+      "min": 10,
+      "max": 500,
+      "description": "Maximum number of spots to display"
+    },
+    "autoTune": {
+      "type": "boolean",
+      "default": false,
+      "description": "Automatically tune to clicked spots"
+    },
+    "filterBand": {
+      "type": "string",
+      "default": "all",
+      "options": ["all", "160m", "80m", "40m", "30m", "20m", "17m", "15m", "12m", "10m"],
+      "description": "Filter spots by band"
+    },
+    "highlightNew": {
+      "type": "boolean",
+      "default": true,
+      "description": "Highlight new spots briefly"
+    }
+  }
+}

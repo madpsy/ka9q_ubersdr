@@ -12,12 +12,14 @@ class DXClusterExtension extends DecoderExtension {
 
         this.spots = [];
         this.maxSpots = 100;
+        this.ageFilter = 10; // Default 10 minutes
         this.bandFilter = 'all';
         this.callsignFilter = '';
         this.highlightNew = true;
         this.unsubscribe = null;
         this.newSpotId = null; // Track ID of the newest spot to highlight
         this.spotIdCounter = 0; // Counter for unique spot IDs
+        this.ageUpdateInterval = null; // Timer for updating spot ages
 
         // Band frequency ranges (in Hz)
         this.bands = {
@@ -46,6 +48,8 @@ class DXClusterExtension extends DecoderExtension {
         
         this.subscribeToDXSpots();
         this.updateConnectionStatus();
+        this.startAgeUpdates();
+        this.startRadioStateMonitoring();
     }
 
     renderTemplate() {
@@ -74,6 +78,17 @@ class DXClusterExtension extends DecoderExtension {
     }
 
     setupEventHandlers() {
+        // Age filter
+        const ageFilter = document.getElementById('dx-cluster-age-filter');
+        if (ageFilter) {
+            ageFilter.value = this.ageFilter.toString();
+            ageFilter.addEventListener('change', (e) => {
+                const value = e.target.value;
+                this.ageFilter = value === 'none' ? null : parseInt(value);
+                this.filterAndRenderSpots();
+            });
+        }
+
         // Band filter
         const bandFilter = document.getElementById('dx-cluster-band-filter');
         if (bandFilter) {
@@ -160,6 +175,21 @@ class DXClusterExtension extends DecoderExtension {
             spot.frequency > 0 && spot.frequency <= 30000000
         );
 
+        // Filter spots by age
+        if (this.ageFilter !== null) {
+            const now = new Date();
+            const maxAgeMs = this.ageFilter * 60 * 1000; // Convert minutes to milliseconds
+            filteredSpots = filteredSpots.filter(spot => {
+                try {
+                    const spotTime = new Date(spot.time);
+                    const ageMs = now - spotTime;
+                    return ageMs <= maxAgeMs;
+                } catch (e) {
+                    return true; // Keep spot if time parsing fails
+                }
+            });
+        }
+
         // Filter spots by band
         if (this.bandFilter !== 'all') {
             const band = this.bands[this.bandFilter];
@@ -219,10 +249,25 @@ class DXClusterExtension extends DecoderExtension {
             timeCell.className = 'spot-time';
             timeCell.textContent = this.formatTime(spot.time);
 
+            // Age (how long ago)
+            const ageCell = row.insertCell();
+            ageCell.className = 'spot-age';
+            ageCell.setAttribute('data-timestamp', spot.time);
+            ageCell.textContent = this.formatAge(spot.time);
+
             // Frequency
             const freqCell = row.insertCell();
             freqCell.className = 'spot-frequency';
-            freqCell.textContent = this.formatFrequency(spot.frequency);
+            
+            // Check if current radio state matches this spot
+            const isCurrentSpot = this.isCurrentSpot(spot);
+            
+            if (isCurrentSpot) {
+                freqCell.innerHTML = this.formatFrequency(spot.frequency) + ' <span class="current-spot-indicator">●</span>';
+            } else {
+                freqCell.textContent = this.formatFrequency(spot.frequency);
+            }
+            
             freqCell.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.tuneToSpot(spot);
@@ -322,11 +367,177 @@ class DXClusterExtension extends DecoderExtension {
         this.filterAndRenderSpots();
     }
 
+    formatAge(timeStr) {
+        if (!timeStr) return '';
+        
+        try {
+            const spotTime = new Date(timeStr);
+            const now = new Date();
+            const diffMs = now - spotTime;
+            const diffSec = Math.floor(diffMs / 1000);
+            
+            if (diffSec < 60) {
+                return `-${diffSec}s`;
+            } else if (diffSec < 3600) {
+                const minutes = Math.floor(diffSec / 60);
+                const seconds = diffSec % 60;
+                return `-${minutes}m${seconds}s`;
+            } else if (diffSec < 86400) {
+                const hours = Math.floor(diffSec / 3600);
+                const minutes = Math.floor((diffSec % 3600) / 60);
+                return `-${hours}h${minutes}m`;
+            } else {
+                const days = Math.floor(diffSec / 86400);
+                return `-${days}d`;
+            }
+        } catch (e) {
+            return '';
+        }
+    }
+
+    startAgeUpdates() {
+        // Update ages every second and re-render if age filter is active
+        this.ageUpdateInterval = setInterval(() => {
+            const ageCells = document.querySelectorAll('.spot-age');
+            ageCells.forEach(cell => {
+                const timestamp = cell.getAttribute('data-timestamp');
+                if (timestamp) {
+                    cell.textContent = this.formatAge(timestamp);
+                }
+            });
+
+            // If age filter is active, re-render to remove spots that have aged out
+            if (this.ageFilter !== null) {
+                this.filterAndRenderSpots();
+            }
+        }, 1000);
+    }
+
+    stopAgeUpdates() {
+        if (this.ageUpdateInterval) {
+            clearInterval(this.ageUpdateInterval);
+            this.ageUpdateInterval = null;
+        }
+    }
+
+    startRadioStateMonitoring() {
+        // Monitor radio state changes to update current spot indicator
+        this.radioStateInterval = setInterval(() => {
+            this.updateCurrentSpotIndicators();
+        }, 500); // Check twice per second
+    }
+
+    stopRadioStateMonitoring() {
+        if (this.radioStateInterval) {
+            clearInterval(this.radioStateInterval);
+            this.radioStateInterval = null;
+        }
+    }
+
+    isCurrentSpot(spot) {
+        // Get current radio state
+        const currentFreq = this.radio.getFrequency();
+        const currentMode = this.radio.getMode();
+        
+        if (!currentFreq || !currentMode) return false;
+        
+        // Determine expected mode for this spot
+        const freqMHz = spot.frequency / 1000000;
+        const comment = (spot.comment || '').toUpperCase();
+        const isCW = comment.includes('CW');
+        
+        let expectedMode;
+        if (isCW) {
+            expectedMode = freqMHz >= 10 ? 'cwu' : 'cwl';
+        } else {
+            expectedMode = freqMHz >= 10 ? 'usb' : 'lsb';
+        }
+        
+        // Check if frequency matches (within 1 kHz tolerance)
+        const freqMatch = Math.abs(currentFreq - spot.frequency) < 1000;
+        
+        // Check if mode matches (case insensitive)
+        const modeMatch = currentMode.toLowerCase() === expectedMode.toLowerCase();
+        
+        return freqMatch && modeMatch;
+    }
+
+    updateCurrentSpotIndicators() {
+        // Update all frequency cells to show/hide current spot indicator
+        const rows = document.querySelectorAll('#dx-cluster-spots tr');
+        
+        rows.forEach((row, index) => {
+            if (row.classList.contains('no-spots')) return;
+            
+            // Get the spot for this row
+            const tbody = document.getElementById('dx-cluster-spots');
+            if (!tbody) return;
+            
+            // Filter spots same way as filterAndRenderSpots
+            let filteredSpots = this.spots.filter(spot =>
+                spot.frequency > 0 && spot.frequency <= 30000000
+            );
+
+            // Filter by age
+            if (this.ageFilter !== null) {
+                const now = new Date();
+                const maxAgeMs = this.ageFilter * 60 * 1000;
+                filteredSpots = filteredSpots.filter(spot => {
+                    try {
+                        const spotTime = new Date(spot.time);
+                        const ageMs = now - spotTime;
+                        return ageMs <= maxAgeMs;
+                    } catch (e) {
+                        return true;
+                    }
+                });
+            }
+
+            if (this.bandFilter !== 'all') {
+                const band = this.bands[this.bandFilter];
+                if (band) {
+                    filteredSpots = filteredSpots.filter(spot =>
+                        spot.frequency >= band.min && spot.frequency <= band.max
+                    );
+                }
+            }
+
+            if (this.callsignFilter) {
+                filteredSpots = filteredSpots.filter(spot =>
+                    spot.dx_call.toUpperCase().includes(this.callsignFilter) ||
+                    spot.spotter.toUpperCase().includes(this.callsignFilter) ||
+                    (spot.comment && spot.comment.toUpperCase().includes(this.callsignFilter))
+                );
+            }
+            
+            if (index >= filteredSpots.length) return;
+            
+            const spot = filteredSpots[index];
+            const freqCell = row.cells[2]; // Frequency is 3rd column (index 2)
+            
+            if (freqCell && freqCell.classList.contains('spot-frequency')) {
+                const isCurrentSpot = this.isCurrentSpot(spot);
+                
+                if (isCurrentSpot) {
+                    freqCell.innerHTML = this.formatFrequency(spot.frequency) + ' <span class="current-spot-indicator">●</span>';
+                } else {
+                    freqCell.textContent = this.formatFrequency(spot.frequency);
+                }
+            }
+        });
+    }
+
     onEnable() {
         // Extension enabled
     }
 
     onDisable() {
+        // Stop age updates
+        this.stopAgeUpdates();
+        
+        // Stop radio state monitoring
+        this.stopRadioStateMonitoring();
+        
         // Unsubscribe from spots
         if (this.unsubscribe) {
             this.unsubscribe();

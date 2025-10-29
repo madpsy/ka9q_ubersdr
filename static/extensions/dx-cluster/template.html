@@ -7,6 +7,18 @@
         </div>
         <div class="dx-cluster-controls">
             <label>
+                Max Age:
+                <select id="dx-cluster-age-filter">
+                    <option value="1">1 min</option>
+                    <option value="5">5 min</option>
+                    <option value="10" selected>10 min</option>
+                    <option value="20">20 min</option>
+                    <option value="30">30 min</option>
+                    <option value="60">60 min</option>
+                    <option value="none">None</option>
+                </select>
+            </label>
+            <label>
                 Band:
                 <select id="dx-cluster-band-filter">
                     <option value="all">All Bands</option>
@@ -30,6 +42,7 @@
             <thead>
                 <tr>
                     <th>Time (UTC)</th>
+                    <th></th>
                     <th>Frequency (MHz)</th>
                     <th>DX Call</th>
                     <th>Spotter</th>

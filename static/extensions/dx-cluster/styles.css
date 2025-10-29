@@ -180,6 +180,25 @@
 .spot-time {
     color: #888;
     font-size: 11px;
+    width: 90px;
+    max-width: 90px;
+}
+
+.spot-age {
+    color: #e0e0e0;
+    font-size: 10px;
+    font-style: italic;
+    white-space: nowrap;
+    padding-left: 8px;
+    width: 65px;
+    max-width: 65px;
+}
+
+.current-spot-indicator {
+    color: #00ff00;
+    font-size: 14px;
+    margin-left: 4px;
+    vertical-align: middle;
 }
 
 .spot-frequency {

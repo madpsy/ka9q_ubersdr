@@ -1016,6 +1016,14 @@ async function fetchSiteDescription() {
             if (descriptionEl && data.description) {
                 descriptionEl.innerHTML = data.description;
 
+                // Update footer version if available
+                if (data.version) {
+                    const footerVersionEl = document.getElementById('footer-version');
+                    if (footerVersionEl) {
+                        footerVersionEl.textContent = `• v${data.version}`;
+                    }
+                }
+
                 // Add map if GPS coordinates are available
                 if (data.receiver && data.receiver.gps &&
                     data.receiver.gps.lat !== 0 && data.receiver.gps.lon !== 0) {
@@ -2415,18 +2423,18 @@ function setMode(mode, preserveBandwidth = false) {
         	defaultHigh = 200;
         	break;
         case 'fm':
+            minLow = -8000;
+            maxLow = 0;
+            defaultLow = -8000;
+            maxHigh = 8000;
+            defaultHigh = 8000;
+            break;
+        case 'nfm':
             minLow = -5000;
             maxLow = 0;
             defaultLow = -5000;
             maxHigh = 5000;
             defaultHigh = 5000;
-            break;
-        case 'nfm':
-            minLow = -6250;
-            maxLow = 0;
-            defaultLow = -6250;
-            maxHigh = 6250;
-            defaultHigh = 6250;
             break;
         default:
             minLow = 0;

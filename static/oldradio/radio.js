@@ -34,8 +34,10 @@ let nextPlayTime = 0;
 let audioStartTime = 0;
 let currentFrequency = 1000000;
 let currentVolume = 0.7;
+let currentSquelch = 0; // Squelch level 0-1 (0 = off, 1 = max)
 let dialRotation = 0;
 let volumeRotation = 231;
+let squelchRotation = 0; // Squelch knob starts at 0 (off)
 let tuneTimeout = null;
 let lastTuneTime = 0;
 const TUNE_DEBOUNCE_MS = 200;
@@ -377,6 +379,7 @@ async function initializeAudio(sampleRate) {
 function startRadio() {
     setupDials();
     setupChannelButtons();
+    setupSquelchKnob();
     // Don't setup oscilloscope yet - wait until audio context is initialized
     connectWebSocket();
 }
@@ -665,13 +668,34 @@ function updateFrequencyFromDial() {
 // Send tune command to server
 function sendTuneCommand() {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
+        const message = {
             type: 'tune',
             frequency: currentFrequency,
             mode: MODE,
             bandwidthLow: -5000,
             bandwidthHigh: 5000
-        }));
+        };
+        
+        // Always add squelch parameters for FM mode
+        // Map squelch knob position (0-1) to dB SNR values
+        // Position 0 (off): -999 dB (special value to force squelch always open)
+        // Position 1 (max): 20 dB (strong signals only)
+        // Use 2 dB hysteresis for stability
+        let squelchOpen, squelchClose;
+        if (currentSquelch === 0) {
+            // Special case: knob fully off = force squelch open
+            squelchOpen = -999;
+            squelchClose = -999;
+        } else {
+            // Map 0.01-1.0 range to 1-20 dB (avoid 0 dB which is too sensitive)
+            squelchOpen = 1 + (currentSquelch * 19); // 1 to 20 dB SNR range
+            squelchClose = Math.max(1, squelchOpen - 2); // Clamp to 1 dB minimum
+        }
+        
+        message.squelchOpen = squelchOpen;
+        message.squelchClose = squelchClose;
+        
+        ws.send(JSON.stringify(message));
     }
 }
 
@@ -682,6 +706,104 @@ function updateVolumeFromKnob() {
     currentVolume = clampedRotation / maxRotation;
     throttledUpdateURL();
     console.log('Volume:', Math.round(currentVolume * 100) + '%');
+}
+
+// Setup Squelch Knob
+function setupSquelchKnob() {
+    const squelchKnob = document.getElementById('squelch-knob');
+    if (!squelchKnob) {
+        console.log('No squelch knob found');
+        return;
+    }
+    
+    let isDraggingSquelch = false;
+    let lastAngleSquelch = 0;
+    
+    squelchKnob.addEventListener('mousedown', (e) => {
+        isDraggingSquelch = true;
+        lastAngleSquelch = getAngle(squelchKnob, e);
+        e.preventDefault();
+    });
+    
+    squelchKnob.addEventListener('touchstart', (e) => {
+        isDraggingSquelch = true;
+        const touch = e.touches[0];
+        lastAngleSquelch = getAngle(squelchKnob, touch);
+        e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (isDraggingSquelch) {
+            const angle = getAngle(squelchKnob, e);
+            let delta = angle - lastAngleSquelch;
+            
+            if (delta > 180) delta -= 360;
+            if (delta < -180) delta += 360;
+            
+            lastAngleSquelch = angle;
+            squelchRotation += delta;
+            squelchRotation = Math.max(0, Math.min(330, squelchRotation));
+            
+            squelchKnob.style.transform = `rotate(${squelchRotation}deg)`;
+            updateSquelchFromKnob();
+        }
+    });
+    
+    document.addEventListener('touchmove', (e) => {
+        if (isDraggingSquelch) {
+            const touch = e.touches[0];
+            const angle = getAngle(squelchKnob, touch);
+            let delta = angle - lastAngleSquelch;
+            
+            if (delta > 180) delta -= 360;
+            if (delta < -180) delta += 360;
+            
+            lastAngleSquelch = angle;
+            squelchRotation += delta;
+            squelchRotation = Math.max(0, Math.min(330, squelchRotation));
+            
+            squelchKnob.style.transform = `rotate(${squelchRotation}deg)`;
+            updateSquelchFromKnob();
+            e.preventDefault();
+        }
+    });
+    
+    document.addEventListener('mouseup', () => {
+        isDraggingSquelch = false;
+    });
+    
+    document.addEventListener('touchend', () => {
+        isDraggingSquelch = false;
+    });
+}
+
+// Update squelch from knob position
+function updateSquelchFromKnob() {
+    const maxRotation = 330;
+    const clampedRotation = Math.min(squelchRotation, maxRotation);
+    currentSquelch = clampedRotation / maxRotation;
+    
+    const squelchDb = -20 + (currentSquelch * 40);
+    if (currentSquelch === 0) {
+        console.log('Squelch: OFF (always open at', squelchDb.toFixed(1), 'dB)');
+    } else {
+        console.log('Squelch:', squelchDb.toFixed(1), 'dB');
+    }
+    
+    // Debounce squelch updates like frequency tuning
+    const now = Date.now();
+    if (now - lastTuneTime >= TUNE_DEBOUNCE_MS) {
+        sendTuneCommand();
+        lastTuneTime = now;
+    } else {
+        if (tuneTimeout) {
+            clearTimeout(tuneTimeout);
+        }
+        tuneTimeout = setTimeout(() => {
+            sendTuneCommand();
+            lastTuneTime = Date.now();
+        }, TUNE_DEBOUNCE_MS - (now - lastTuneTime));
+    }
 }
 
 // Update frequency display

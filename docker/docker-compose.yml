@@ -65,6 +65,7 @@ services:
     environment:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - TZ=${TZ:-UTC}
+      - DEBUG=true
 
     # Volumes for persistent configuration only (static files are part of the image)
     volumes:

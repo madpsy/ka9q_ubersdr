@@ -113,14 +113,22 @@ func main() {
 	stats := flag.Bool("stats", false, "Enable WebSocket statistics logging")
 	flag.Parse()
 
-	// Set global debug mode
+	// Set global debug mode - check environment variable first, then CLI flag
 	DebugMode = *debug
+	if debugEnv := os.Getenv("DEBUG"); debugEnv != "" {
+		// Environment variable takes precedence
+		DebugMode = debugEnv == "true" || debugEnv == "1" || debugEnv == "yes"
+	}
 	if DebugMode {
 		log.Println("Debug mode enabled")
 	}
 
-	// Set global stats mode
+	// Set global stats mode - check environment variable first, then CLI flag
 	StatsMode = *stats
+	if statsEnv := os.Getenv("STATS"); statsEnv != "" {
+		// Environment variable takes precedence
+		StatsMode = statsEnv == "true" || statsEnv == "1" || statsEnv == "yes"
+	}
 	if StatsMode {
 		log.Println("WebSocket statistics logging enabled")
 	}

@@ -270,6 +270,13 @@ func (rc *RadiodController) CreateChannel(name string, frequency uint64, mode st
 // NOTE: Bandwidth parameter is currently ignored - radiod preset filter settings are used
 // Dynamic bandwidth control proved incompatible with radiod's command processing
 func (rc *RadiodController) CreateChannelWithBandwidth(name string, frequency uint64, mode string, sampleRate int, ssrc uint32, bandwidth int) error {
+	return rc.CreateChannelWithSquelch(name, frequency, mode, sampleRate, ssrc, bandwidth, nil, nil)
+}
+
+// CreateChannelWithSquelch creates a new radiod channel with optional squelch parameters
+// squelchOpen and squelchClose are pointers to allow nil (disabled) vs 0.0 (valid value)
+// Values are in dB SNR - typical: open=10.0, close=8.0 for hysteresis
+func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint64, mode string, sampleRate int, ssrc uint32, bandwidth int, squelchOpen, squelchClose *float32) error {
 	// Build control command with SSRC - match ka9q-multidecoder order exactly
 	buf := make([]byte, 0, 1500)
 
@@ -285,6 +292,16 @@ func (rc *RadiodController) CreateChannelWithBandwidth(name string, frequency ui
 	// Add PRESET (tag 85 = 0x55)
 	buf = encodeString(&buf, 0x55, mode)
 
+	// Add optional squelch parameters
+	if squelchOpen != nil && squelchClose != nil {
+		// Enable SNR squelch (tag 92 = 0x5C) - CRITICAL for squelch to work!
+		buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
+
+		// Add squelch thresholds (tag 83 = 0x53 for SQUELCH_OPEN, 84 = 0x54 for SQUELCH_CLOSE)
+		buf = encodeFloat(&buf, 0x53, *squelchOpen)
+		buf = encodeFloat(&buf, 0x54, *squelchClose)
+	}
+
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
 
@@ -294,6 +311,9 @@ func (rc *RadiodController) CreateChannelWithBandwidth(name string, frequency ui
 	if DebugMode {
 		log.Printf("DEBUG: Sending CreateChannel command (%d bytes) to %s", len(buf), rc.statusAddr)
 		log.Printf("DEBUG: Command hex: % x", buf)
+		if squelchOpen != nil || squelchClose != nil {
+			log.Printf("DEBUG: Squelch - open: %v, close: %v", squelchOpen, squelchClose)
+		}
 	}
 
 	// Send command
@@ -301,8 +321,12 @@ func (rc *RadiodController) CreateChannelWithBandwidth(name string, frequency ui
 		return fmt.Errorf("failed to send create command: %w", err)
 	}
 
-	log.Printf("Created channel: %s (SSRC: 0x%08x (%d), freq: %d Hz, mode: %s, rate: %d Hz)",
-		name, ssrc, ssrc, frequency, mode, sampleRate)
+	squelchInfo := ""
+	if squelchOpen != nil && squelchClose != nil {
+		squelchInfo = fmt.Sprintf(", squelch: %.1f/%.1f dB", *squelchOpen, *squelchClose)
+	}
+	log.Printf("Created channel: %s (SSRC: 0x%08x (%d), freq: %d Hz, mode: %s, rate: %d Hz%s)",
+		name, ssrc, ssrc, frequency, mode, sampleRate, squelchInfo)
 	return nil
 }
 
@@ -438,6 +462,12 @@ func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64,
 // bandwidthLow and bandwidthHigh are the filter edges in Hz (can be negative for low edge)
 // sendBandwidth controls whether to send bandwidth parameters
 func (rc *RadiodController) UpdateChannel(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool) error {
+	return rc.UpdateChannelWithSquelch(ssrc, frequency, mode, bandwidthLow, bandwidthHigh, sendBandwidth, nil, nil)
+}
+
+// UpdateChannelWithSquelch updates an existing channel including optional squelch parameters
+// squelchOpen and squelchClose are pointers to allow nil (no change) vs 0.0 (valid value)
+func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, squelchOpen, squelchClose *float32) error {
 	// Build control command with SSRC to identify the channel
 	buf := make([]byte, 0, 1500)
 
@@ -466,6 +496,16 @@ func (rc *RadiodController) UpdateChannel(ssrc uint32, frequency uint64, mode st
 		buf = encodeFloat(&buf, 0x28, float32(bandwidthHigh))
 	}
 
+	// Add optional squelch parameters
+	if squelchOpen != nil && squelchClose != nil {
+		// Enable SNR squelch (tag 92 = 0x5C) - CRITICAL for squelch to work!
+		buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
+
+		// Add squelch thresholds (tag 83 = 0x53 for SQUELCH_OPEN, 84 = 0x54 for SQUELCH_CLOSE)
+		buf = encodeFloat(&buf, 0x53, *squelchOpen)
+		buf = encodeFloat(&buf, 0x54, *squelchClose)
+	}
+
 	// Add COMMAND_TAG (tag 1 = 0x01)
 	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
 
@@ -477,6 +517,50 @@ func (rc *RadiodController) UpdateChannel(ssrc uint32, frequency uint64, mode st
 		return fmt.Errorf("failed to send update command: %w", err)
 	}
 
+	return nil
+}
+
+// UpdateSquelch updates only the squelch thresholds for an existing channel
+// This is useful for adjusting squelch without changing other parameters
+// squelchOpen and squelchClose are in dB SNR
+func (rc *RadiodController) UpdateSquelch(ssrc uint32, squelchOpen, squelchClose float32) error {
+	// Build control command with SSRC to identify the channel
+	buf := make([]byte, 0, 1500)
+
+	// Start with CMD packet type
+	buf = append(buf, 1) // CMD = 1
+
+	// Add SSRC (tag 18 = 0x12) - identifies which channel to update
+	buf = encodeInt32(&buf, 0x12, ssrc)
+
+	// Enable SNR squelch (tag 92 = 0x5C) - CRITICAL for squelch to work!
+	buf = encodeByte(&buf, 0x5C, 1) // SNR_SQUELCH = enabled
+
+	// Add SQUELCH_OPEN (tag 83 = 0x53)
+	buf = encodeFloat(&buf, 0x53, squelchOpen)
+
+	// Add SQUELCH_CLOSE (tag 84 = 0x54)
+	buf = encodeFloat(&buf, 0x54, squelchClose)
+
+	// Add COMMAND_TAG (tag 1 = 0x01)
+	buf = encodeInt32(&buf, 0x01, uint32(time.Now().Unix()))
+
+	// Add EOL marker
+	buf = append(buf, 0)
+
+	// Always log squelch updates to verify they're being sent
+	log.Printf("Updating squelch for SSRC 0x%08x: open=%.1f dB, close=%.1f dB", ssrc, squelchOpen, squelchClose)
+
+	if DebugMode {
+		log.Printf("DEBUG: Squelch command hex: % x", buf)
+	}
+
+	// Send command
+	if err := rc.sendCommand(buf); err != nil {
+		return fmt.Errorf("failed to send squelch update command: %w", err)
+	}
+
+	log.Printf("Squelch update sent successfully for SSRC 0x%08x", ssrc)
 	return nil
 }
 

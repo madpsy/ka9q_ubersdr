@@ -97,10 +97,8 @@ func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager
 // translateModeForRadiod translates UI mode names to radiod preset names
 // This allows the UI to show user-friendly names while sending correct presets to radiod
 func translateModeForRadiod(mode string) string {
-	// FM in the UI should request "pm" (phase modulation) preset from radiod
-	if mode == "fm" {
-		return "pm"
-	}
+	// FM modes use their own presets (not PM)
+	// NFM (narrow FM) and FM (wide FM) are separate presets in radiod
 	// All other modes pass through unchanged
 	return mode
 }
@@ -233,8 +231,12 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	// Translate mode for radiod (e.g., "fm" -> "pm")
 	radiodMode := translateModeForRadiod(mode)
 
-	// Create radiod channel with unique random SSRC and bandwidth
-	if err := sm.radiod.CreateChannelWithBandwidth(channelName, frequency, radiodMode, sampleRate, ssrc, bandwidth); err != nil {
+	// Create radiod channel with unique random SSRC, bandwidth, and default squelch
+	// Default squelch: -999 dB (force squelch always open initially)
+	// User can adjust via squelch knob to enable threshold-based squelch
+	squelchOpen := float32(-999.0)
+	squelchClose := float32(-999.0)
+	if err := sm.radiod.CreateChannelWithSquelch(channelName, frequency, radiodMode, sampleRate, ssrc, bandwidth, &squelchOpen, &squelchClose); err != nil {
 		return nil, fmt.Errorf("failed to create radiod channel: %w", err)
 	}
 
@@ -583,6 +585,31 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		session.SampleRate = oldSampleRate
 		session.mu.Unlock()
 		return fmt.Errorf("failed to update radiod channel: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateSquelch updates only the squelch thresholds for an existing session
+// squelchOpen and squelchClose are in dB SNR
+func (sm *SessionManager) UpdateSquelch(sessionID string, squelchOpen, squelchClose float32) error {
+	session, ok := sm.GetSession(sessionID)
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	if session.IsSpectrum {
+		return fmt.Errorf("cannot update squelch on spectrum session")
+	}
+
+	// Update last active time
+	session.mu.Lock()
+	session.LastActive = time.Now()
+	session.mu.Unlock()
+
+	// Send squelch update command to radiod
+	if err := sm.radiod.UpdateSquelch(session.SSRC, squelchOpen, squelchClose); err != nil {
+		return fmt.Errorf("failed to update radiod squelch: %w", err)
 	}
 
 	return nil

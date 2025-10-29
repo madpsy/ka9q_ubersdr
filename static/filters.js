@@ -19,43 +19,53 @@ function calculateFilterLatencies() {
         squelch: 0
     };
 
-    // Equalizer: Fixed latency (~1ms per biquad filter, 12 bands)
+    // Get current sample rate from audio context (changes with mode)
+    const sampleRate = window.audioContext ? window.audioContext.sampleRate : 48000;
+
+    // Equalizer: Fixed latency (~1ms per biquad filter at 48kHz, scales with sample rate)
     if (equalizerEnabled) {
-        latencies.equalizer = 12;
+        // Each biquad filter adds approximately 1 sample of latency
+        // 12 bands = 12 samples latency
+        latencies.equalizer = Math.round((12 / sampleRate) * 1000);
     }
 
-    // Bandpass: Variable based on stages
+    // Bandpass: Variable based on stages (each stage adds ~1 sample latency)
     if (bandpassEnabled) {
         const stages = parseInt(document.getElementById('bandpass-stages')?.value || 4);
-        latencies.bandpass = Math.round(stages * 1.5);
+        // Each stage adds approximately 1 sample of latency
+        latencies.bandpass = Math.round((stages / sampleRate) * 1000);
     }
 
     // Notch: Variable based on number of notches (6 cascaded stages each)
     if (notchEnabled && notchFilters.length > 0) {
-        // Each notch adds ~5ms latency (6 cascaded biquad stages)
+        // Each notch has 6 cascaded biquad stages = 6 samples latency per notch
         // Multiple notches are processed in series, so latencies add up
-        latencies.notch = notchFilters.length * 5;
+        const samplesLatency = notchFilters.length * 6;
+        latencies.notch = Math.round((samplesLatency / sampleRate) * 1000);
     }
 
-    // NR2: Fixed FFT-based latency
+    // NR2: FFT-based latency (dynamic based on sample rate)
     const nr2Checkbox = document.getElementById('noise-reduction-enable');
     if (nr2Checkbox && nr2Checkbox.checked) {
-        latencies.nr2 = 43; // ~43ms for 2048 FFT @ 48kHz
+        // NR2 uses overlap-add processing with hopSize = fftSize / overlapFactor
+        // fftSize = 2048, overlapFactor = 4, so hopSize = 512 samples
+        const hopSize = 512;
+        latencies.nr2 = Math.round((hopSize / sampleRate) * 1000);
     }
 
-    // Compressor: Based on attack time + lookahead
+    // Compressor: Based on attack time + lookahead (already in time units)
     if (compressorEnabled) {
         const attack = parseFloat(document.getElementById('compressor-attack')?.value || 0.003);
         latencies.compressor = Math.round((attack * 1000) + 5); // attack + 5ms lookahead
     }
 
-    // Stereo Virtualizer: Direct delay value
+    // Stereo Virtualizer: Direct delay value (already in ms)
     if (stereoVirtualizerEnabled) {
         const delay = parseInt(document.getElementById('stereo-delay')?.value || 16);
         latencies.stereo = delay;
     }
 
-    // Squelch: Based on attack time
+    // Squelch: Based on attack time (already in ms)
     if (squelchEnabled) {
         const attack = parseInt(document.getElementById('squelch-attack')?.value || 20);
         latencies.squelch = attack;

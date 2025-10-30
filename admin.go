@@ -1252,10 +1252,14 @@ func (ah *AdminHandler) HandleExtensions(w http.ResponseWriter, r *http.Request)
 		})
 	}
 
+	// Prepare response with available extensions and default extension
+	response := map[string]interface{}{
+		"available": extensions,
+		"default":   ah.config.DefaultExtension,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"extensions": extensions,
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding extensions: %v", err)
 	}
 }
@@ -1280,7 +1284,10 @@ func (ah *AdminHandler) handleGetExtensionsAdmin(w http.ResponseWriter, r *http.
 	if err != nil {
 		// If file doesn't exist, return empty extensions
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{"extensions": []string{}})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"extensions":        []string{},
+			"default_extension": "",
+		})
 		return
 	}
 
@@ -1288,6 +1295,11 @@ func (ah *AdminHandler) handleGetExtensionsAdmin(w http.ResponseWriter, r *http.
 	if err := yaml.Unmarshal(data, &extensionsConfig); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to parse extensions: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Ensure default_extension key exists in response
+	if _, ok := extensionsConfig["default_extension"]; !ok {
+		extensionsConfig["default_extension"] = ""
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -1333,7 +1345,8 @@ func (ah *AdminHandler) reloadExtensions() error {
 		return fmt.Errorf("failed to reload extensions: %w", err)
 	}
 	ah.config.Extensions = extensionsConfig.Extensions
-	log.Printf("Reloaded %d extensions from extensions.yaml", len(ah.config.Extensions))
+	ah.config.DefaultExtension = extensionsConfig.DefaultExtension
+	log.Printf("Reloaded %d extensions from extensions.yaml (default: %s)", len(ah.config.Extensions), ah.config.DefaultExtension)
 	return nil
 }
 

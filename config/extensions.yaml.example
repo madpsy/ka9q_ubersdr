@@ -17,3 +17,7 @@ extensions:
 
   # Radio Sync - syncs the SDR <-> Radio via serial CAT
   - radio-sync
+
+# Default extension to load automatically (optional)
+# Set to the slug of an extension from the list above, or leave empty/commented for none
+# default_extension: ""

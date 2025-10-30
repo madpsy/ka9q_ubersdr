@@ -188,7 +188,8 @@ func main() {
 	extensionsConfig, err := LoadConfig(extensionsPath)
 	if err == nil {
 		config.Extensions = extensionsConfig.Extensions
-		log.Printf("Loaded %d enabled extensions from extensions.yaml", len(config.Extensions))
+		config.DefaultExtension = extensionsConfig.DefaultExtension
+		log.Printf("Loaded %d enabled extensions from extensions.yaml (default: %s)", len(config.Extensions), config.DefaultExtension)
 	} else {
 		log.Printf("No extensions.yaml found or error loading: %v", err)
 	}
@@ -689,7 +690,13 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 		})
 	}
 
-	if err := json.NewEncoder(w).Encode(extensions); err != nil {
+	// Prepare response with available extensions and default extension
+	response := map[string]interface{}{
+		"available": extensions,
+		"default":   config.DefaultExtension,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding extensions: %v", err)
 	}
 }

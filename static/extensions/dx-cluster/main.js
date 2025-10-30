@@ -22,6 +22,7 @@ class DXClusterExtension extends DecoderExtension {
         this.ageFilter = 10; // Default 10 minutes
         this.bandFilter = 'all';
         this.callsignFilter = '';
+        this.showMarkers = false; // Default: markers disabled
         this.highlightNew = true;
         this.unsubscribe = null;
         this.newSpotId = null; // Track ID of the newest spot to highlight
@@ -45,6 +46,9 @@ class DXClusterExtension extends DecoderExtension {
         // Subscribe to DX spots immediately in constructor (before extension is enabled)
         // This ensures we receive buffered spots that arrive right after WebSocket connection
         this.subscribeToDXSpots();
+
+        // Set up connection status monitoring
+        this.connectionCheckInterval = null;
     }
 
     onInitialize() {
@@ -56,6 +60,7 @@ class DXClusterExtension extends DecoderExtension {
         
         // subscribeToDXSpots() is now called in constructor to catch buffered spots
         this.updateConnectionStatus();
+        this.startConnectionMonitoring();
         this.startAgeUpdates();
         this.startRadioStateMonitoring();
     }
@@ -137,6 +142,10 @@ class DXClusterExtension extends DecoderExtension {
                 this.bandFilter = e.target.value;
                 console.log('DX Cluster: Band filter changed to:', this.bandFilter, 'spots count:', this.spots.length);
                 this.filterAndRenderSpots();
+            } else if (e.target.id === 'dx-cluster-show-markers') {
+                this.showMarkers = e.target.checked;
+                console.log('DX Cluster: Show markers changed to:', this.showMarkers);
+                // Markers will be shown/hidden on next spectrum redraw
             }
         });
 
@@ -164,10 +173,12 @@ class DXClusterExtension extends DecoderExtension {
             const ageFilter = document.getElementById('dx-cluster-age-filter');
             const bandFilter = document.getElementById('dx-cluster-band-filter');
             const callsignFilter = document.getElementById('dx-cluster-callsign-filter');
+            const showMarkers = document.getElementById('dx-cluster-show-markers');
 
             if (ageFilter) ageFilter.value = this.ageFilter.toString();
             if (bandFilter) bandFilter.value = this.bandFilter;
             if (callsignFilter) callsignFilter.value = this.callsignFilter;
+            if (showMarkers) showMarkers.checked = this.showMarkers;
 
             console.log('DX Cluster: Initial filter values set');
         });
@@ -184,6 +195,23 @@ class DXClusterExtension extends DecoderExtension {
         // Subscription handled silently
     }
 
+    startConnectionMonitoring() {
+        // Update immediately
+        this.updateConnectionStatus();
+
+        // Check connection status every 500ms for responsive updates
+        this.connectionCheckInterval = setInterval(() => {
+            this.updateConnectionStatus();
+        }, 500);
+    }
+
+    stopConnectionMonitoring() {
+        if (this.connectionCheckInterval) {
+            clearInterval(this.connectionCheckInterval);
+            this.connectionCheckInterval = null;
+        }
+    }
+
     updateConnectionStatus() {
         const connected = this.radio.isDXClusterConnected();
 
@@ -192,9 +220,6 @@ class DXClusterExtension extends DecoderExtension {
         } else {
             this.updateStatus('disconnected', 'Disconnected');
         }
-
-        // Check status periodically
-        setTimeout(() => this.updateConnectionStatus(), 5000);
     }
 
     handleSpot(spot) {
@@ -229,10 +254,8 @@ class DXClusterExtension extends DecoderExtension {
         const tbody = document.getElementById('dx-cluster-spots');
         if (!tbody) return;
 
-        // Filter spots by frequency range (0-30 MHz only)
-        let filteredSpots = this.spots.filter(spot =>
-            spot.frequency > 0 && spot.frequency <= 30000000
-        );
+        // Start with all spots (backend already filters to 0-30 MHz)
+        let filteredSpots = this.spots;
 
         // Filter spots by age
         if (this.ageFilter !== null) {
@@ -584,9 +607,8 @@ class DXClusterExtension extends DecoderExtension {
             if (!tbody) return;
             
             // Filter spots same way as filterAndRenderSpots
-            let filteredSpots = this.spots.filter(spot =>
-                spot.frequency > 0 && spot.frequency <= 30000000
-            );
+            // Start with all spots (backend already filters to 0-30 MHz)
+            let filteredSpots = this.spots;
 
             // Filter by age
             if (this.ageFilter !== null) {
@@ -642,6 +664,9 @@ class DXClusterExtension extends DecoderExtension {
     }
 
     onDisable() {
+        // Stop connection monitoring
+        this.stopConnectionMonitoring();
+
         // Stop age updates
         this.stopAgeUpdates();
         
@@ -676,8 +701,8 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
     // Get the DX cluster extension instance from global reference
     const dxExtension = dxClusterExtensionInstance;
 
-    // Only draw if extension exists, is enabled, and has spots
-    if (!dxExtension || !dxExtension.enabled || !dxExtension.spots || dxExtension.spots.length === 0) {
+    // Only draw if extension exists, is enabled, has spots, AND showMarkers is enabled
+    if (!dxExtension || !dxExtension.enabled || !dxExtension.spots || dxExtension.spots.length === 0 || !dxExtension.showMarkers) {
         dxSpotPositions = [];
         window.dxSpotPositions = dxSpotPositions;
         return;
@@ -704,10 +729,8 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
     // Clear spot positions array
     dxSpotPositions = [];
 
-    // Get filtered spots (apply same filters as the extension)
-    let filteredSpots = dxExtension.spots.filter(spot =>
-        spot.frequency > 0 && spot.frequency <= 30000000
-    );
+    // Get filtered spots (backend already filters to 0-30 MHz)
+    let filteredSpots = dxExtension.spots;
     
     if (shouldLog) {
         console.log('Spectrum range:', (startFreq/1e6).toFixed(3), '-', (endFreq/1e6).toFixed(3), 'MHz');

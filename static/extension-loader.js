@@ -4,9 +4,16 @@
 (async function() {
     try {
         // Load extension configuration from API endpoint
-        const extensions = await fetch('/api/extensions').then(r => r.json());
+        const response = await fetch('/api/extensions').then(r => r.json());
+
+        // Handle new API format with 'available' and 'default' keys
+        const extensions = response.available || response; // Fallback to old format if needed
+        const defaultExtension = response.default || null;
         
         console.log(`🔌 Loading ${extensions.length} extension(s)...`);
+        if (defaultExtension) {
+            console.log(`🎯 Default extension: ${defaultExtension}`);
+        }
         
         // Array to store extension info for dropdown
         const extensionsList = [];
@@ -78,6 +85,7 @@
                 // Store extension info for dropdown
                 extensionsList.push({
                     slug: manifest.name || extName,
+                    originalSlug: extName, // Keep original slug for matching
                     displayName: manifest.displayName || extName,
                     icon: manifest.icon
                 });
@@ -91,6 +99,48 @@
         // Populate extensions dropdown
         populateExtensionsDropdown(extensionsList);
         
+        // Auto-load default extension if specified
+        if (defaultExtension) {
+            // Wait for audio context to be initialized before auto-loading
+            // The toggleExtension function requires audioContext to exist
+            const waitForAudioContext = () => {
+                if (window.audioContext) {
+                    const dropdown = document.getElementById('extensions-dropdown');
+
+                    if (dropdown) {
+                        // Find the extension by matching against both slug and originalSlug
+                        const matchingExt = extensionsList.find(ext =>
+                            ext.slug === defaultExtension || ext.originalSlug === defaultExtension
+                        );
+
+                        if (matchingExt) {
+                            // Check if the option exists in dropdown
+                            const option = Array.from(dropdown.options).find(opt => opt.value === matchingExt.slug);
+
+                            if (option) {
+                                dropdown.value = matchingExt.slug;
+                                // Trigger the change event to activate the extension
+                                dropdown.dispatchEvent(new Event('change'));
+                                console.log(`✅ Auto-loaded default extension: ${defaultExtension} (${matchingExt.displayName})`);
+                            } else {
+                                console.warn(`⚠️ Default extension "${defaultExtension}" option not found in dropdown`);
+                            }
+                        } else {
+                            console.warn(`⚠️ Default extension "${defaultExtension}" not found in available extensions`);
+                        }
+                    } else {
+                        console.warn('⚠️ Extensions dropdown not found, cannot auto-load default extension');
+                    }
+                } else {
+                    // Check again in 500ms
+                    setTimeout(waitForAudioContext, 500);
+                }
+            };
+
+            // Start checking for audio context after a short delay
+            setTimeout(waitForAudioContext, 500);
+        }
+
         console.log('🎉 Extension loading complete');
     } catch (err) {
         console.error('❌ Failed to load extensions configuration:', err);

@@ -1912,6 +1912,7 @@
 
         // Extensions management
         let availableExtensions = [];
+        let defaultExtension = '';
 
         async function loadAvailableExtensions() {
             try {
@@ -1920,6 +1921,14 @@
 
                 const data = await response.json();
                 availableExtensions = data.extensions || [];
+                
+                // Load current extensions config to get default_extension
+                const configResponse = await fetch('/admin/extensions-manage');
+                if (configResponse.ok) {
+                    const configData = await configResponse.json();
+                    defaultExtension = configData.default_extension || '';
+                }
+                
                 renderExtensions();
                 showAlert(`Loaded ${availableExtensions.length} available extension(s)`, 'success');
             } catch (error) {
@@ -1944,6 +1953,7 @@
                 <thead>
                     <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                         <th style="padding: 12px; text-align: center; width: 60px;">Enabled</th>
+                        <th style="padding: 12px; text-align: center; width: 60px;">Default</th>
                         <th style="padding: 12px; text-align: left;">Extension</th>
                         <th style="padding: 12px; text-align: left;">Description</th>
                         <th style="padding: 12px; text-align: left;">Version</th>
@@ -1963,11 +1973,22 @@
                     '<span style="color: #28a745; font-size: 11px;">✓ Valid</span>' :
                     '<span style="color: #dc3545; font-size: 11px;">✗ Missing/Invalid</span>';
 
+                const isDefault = defaultExtension === ext.slug;
+
                 row.innerHTML = `
                     <td style="padding: 12px; text-align: center;">
                         <input type="checkbox" id="ext_${index}" ${ext.enabled ? 'checked' : ''}
                                onchange="toggleExtension(${index})"
                                style="width: 20px; height: 20px; cursor: pointer;">
+                    </td>
+                    <td style="padding: 12px; text-align: center;">
+                        <input type="radio" name="defaultExtension" value="${ext.slug}"
+                               id="default_${index}"
+                               ${isDefault ? 'checked' : ''}
+                               ${!ext.enabled ? 'disabled' : ''}
+                               onchange="setDefaultExtension('${ext.slug}')"
+                               style="width: 20px; height: 20px; cursor: ${ext.enabled ? 'pointer' : 'not-allowed'};"
+                               title="${ext.enabled ? 'Set as default extension to load automatically' : 'Enable extension first to set as default'}">
                     </td>
                     <td style="padding: 12px;">
                         <strong>${ext.displayName}</strong><br>
@@ -1980,6 +2001,25 @@
                 `;
                 tbody.appendChild(row);
             });
+
+            // Add "None" option for default extension
+            const noneRow = document.createElement('tr');
+            noneRow.style.borderTop = '2px solid #dee2e6';
+            noneRow.style.background = '#f8f9fa';
+            noneRow.innerHTML = `
+                <td style="padding: 12px; text-align: center;">—</td>
+                <td style="padding: 12px; text-align: center;">
+                    <input type="radio" name="defaultExtension" value=""
+                           ${!defaultExtension ? 'checked' : ''}
+                           onchange="setDefaultExtension('')"
+                           style="width: 20px; height: 20px; cursor: pointer;"
+                           title="No default extension">
+                </td>
+                <td colspan="4" style="padding: 12px; color: #666; font-style: italic;">
+                    <strong>None</strong> — No extension will load automatically
+                </td>
+            `;
+            tbody.appendChild(noneRow);
 
             // Add summary
             const summary = document.createElement('div');
@@ -1996,7 +2036,18 @@
 
         function toggleExtension(index) {
             availableExtensions[index].enabled = !availableExtensions[index].enabled;
+            
+            // If disabling an extension that is currently the default, clear the default
+            if (!availableExtensions[index].enabled && defaultExtension === availableExtensions[index].slug) {
+                defaultExtension = '';
+            }
+            
             renderExtensions();
+        }
+
+        function setDefaultExtension(slug) {
+            defaultExtension = slug;
+            // Note: Changes are not saved until saveExtensions() is called
         }
 
         async function saveExtensions() {
@@ -2007,7 +2058,8 @@
                     .map(ext => ext.slug);
 
                 const extensionsData = {
-                    extensions: enabledSlugs
+                    extensions: enabledSlugs,
+                    default_extension: defaultExtension
                 };
 
                 const response = await fetch('/admin/extensions-manage', {

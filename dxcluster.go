@@ -343,6 +343,12 @@ func (c *DXClusterClient) processLine(line string) {
 
 	// Try to parse as DX spot
 	if spot, ok := c.parseDXSpot(line); ok {
+		// Filter spots: only process spots between 0 and 30 MHz
+		if spot.Frequency <= 0 || spot.Frequency > 30000000 {
+			// Silently discard spots outside the 0-30 MHz range
+			return
+		}
+
 		// Add to buffer
 		c.addSpotToBuffer(spot)
 

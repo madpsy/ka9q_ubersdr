@@ -493,9 +493,10 @@ class SpectrumDisplay {
                     const frame = this.frameQueue[0];
 
                     // Calculate when this frame should be displayed
-                    // The audio buffer (bufferAhead) already accounts for all processing delays,
-                    // so we only need to add the buffer ahead time without double-counting filter latency
-                    const displayTime = frame.receiveTime + bufferAhead * 1000;
+                    // Subtract bufferAhead to sync with currently playing audio:
+                    // Audio playing now was captured at (serverTime - bufferAhead),
+                    // so spectrum captured at serverTime should display now
+                    const displayTime = frame.receiveTime - bufferAhead * 1000;
 
                     if (now >= displayTime) {
                         // Time to display this frame

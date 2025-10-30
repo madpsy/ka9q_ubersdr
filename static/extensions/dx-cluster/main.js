@@ -22,7 +22,7 @@ class DXClusterExtension extends DecoderExtension {
         this.ageFilter = 10; // Default 10 minutes
         this.bandFilter = 'all';
         this.callsignFilter = '';
-        this.showMarkers = false; // Default: markers disabled
+        this.showMarkers = true; // Default: markers enabled
         this.highlightNew = true;
         this.unsubscribe = null;
         this.newSpotId = null; // Track ID of the newest spot to highlight

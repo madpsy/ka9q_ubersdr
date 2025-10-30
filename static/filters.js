@@ -26,14 +26,14 @@ function calculateFilterLatencies() {
     if (equalizerEnabled) {
         // Each biquad filter adds approximately 1 sample of latency
         // 12 bands = 12 samples latency
-        latencies.equalizer = Math.round((12 / sampleRate) * 1000);
+        latencies.equalizer = (12 / sampleRate) * 1000;
     }
 
     // Bandpass: Variable based on stages (each stage adds ~1 sample latency)
     if (bandpassEnabled) {
         const stages = parseInt(document.getElementById('bandpass-stages')?.value || 4);
         // Each stage adds approximately 1 sample of latency
-        latencies.bandpass = Math.round((stages / sampleRate) * 1000);
+        latencies.bandpass = (stages / sampleRate) * 1000;
     }
 
     // Notch: Variable based on number of notches (6 cascaded stages each)
@@ -41,22 +41,25 @@ function calculateFilterLatencies() {
         // Each notch has 6 cascaded biquad stages = 6 samples latency per notch
         // Multiple notches are processed in series, so latencies add up
         const samplesLatency = notchFilters.length * 6;
-        latencies.notch = Math.round((samplesLatency / sampleRate) * 1000);
+        latencies.notch = (samplesLatency / sampleRate) * 1000;
     }
 
     // NR2: FFT-based latency (dynamic based on sample rate)
     const nr2Checkbox = document.getElementById('noise-reduction-enable');
     if (nr2Checkbox && nr2Checkbox.checked) {
-        // NR2 uses overlap-add processing with hopSize = fftSize / overlapFactor
-        // fftSize = 2048, overlapFactor = 4, so hopSize = 512 samples
-        const hopSize = 512;
-        latencies.nr2 = Math.round((hopSize / sampleRate) * 1000);
+        // NR2 uses overlap-add processing with a 2048-sample FFT buffer
+        // The algorithm must fill the entire FFT buffer before producing output
+        // This creates an initial latency of fftSize samples (not just hopSize)
+        // fftSize = 2048, overlapFactor = 4, hopSize = 512
+        // Actual latency = fftSize = 2048 samples
+        const fftSize = 2048;
+        latencies.nr2 = (fftSize / sampleRate) * 1000;
     }
 
     // Compressor: Based on attack time + lookahead (already in time units)
     if (compressorEnabled) {
         const attack = parseFloat(document.getElementById('compressor-attack')?.value || 0.003);
-        latencies.compressor = Math.round((attack * 1000) + 5); // attack + 5ms lookahead
+        latencies.compressor = (attack * 1000) + 5; // attack + 5ms lookahead
     }
 
     // Stereo Virtualizer: Direct delay value (already in ms)
@@ -91,6 +94,22 @@ function updateAllLatencyDisplays() {
     updateLatencyBadge('compressor', latencies.compressor);
     updateLatencyBadge('stereo-virtualizer', latencies.stereo);
     updateLatencyBadge('squelch', latencies.squelch);
+
+    // Notify spectrum display of latency change for synchronization
+    notifyFilterLatencyChanged();
+}
+
+// Notify listeners that filter latency has changed
+function notifyFilterLatencyChanged() {
+    const totalLatency = getTotalFilterLatency();
+
+    // Dispatch custom event for spectrum display synchronization
+    const event = new CustomEvent('filterLatencyChanged', {
+        detail: { totalLatency }
+    });
+    window.dispatchEvent(event);
+
+    console.log(`Filter latency changed: ${totalLatency.toFixed(1)}ms`);
 }
 
 // Update individual latency badge
@@ -98,7 +117,8 @@ function updateLatencyBadge(filterId, latencyMs) {
     const badge = document.getElementById(`${filterId}-latency-badge`);
     if (badge) {
         if (latencyMs > 0) {
-            badge.textContent = `${latencyMs}ms`;
+            // Format with 1 decimal place for precision
+            badge.textContent = `${latencyMs.toFixed(1)}ms`;
             badge.style.display = 'inline';
         } else {
             badge.style.display = 'none';
@@ -1321,5 +1341,6 @@ window.calculateFilterLatencies = calculateFilterLatencies;
 window.getTotalFilterLatency = getTotalFilterLatency;
 window.updateAllLatencyDisplays = updateAllLatencyDisplays;
 window.updateLatencyBadge = updateLatencyBadge;
+window.notifyFilterLatencyChanged = notifyFilterLatencyChanged;
 
 console.log('✅ Filters module loaded: Equalizer, Bandpass, Notch, Compressor, Stereo Virtualizer, Squelch');

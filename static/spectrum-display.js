@@ -37,6 +37,9 @@ class SpectrumDisplay {
         this.maxQueueSize = 100;
         this.bufferMargin = 0.05; // 50ms safety margin (matching frequency tracking)
         this.animationLoopRunning = false;
+    
+        // Cache filter latency for synchronization (updated dynamically)
+        this.cachedFilterLatency = 0; // milliseconds
 
         // Setup mouse handlers for line graph canvas
         if (this.lineGraphCanvas) {
@@ -424,6 +427,23 @@ class SpectrumDisplay {
 
             this.waterfallImageData = null;
         }
+
+        // Setup filter latency change listener for synchronization
+        this.setupFilterLatencyListener();
+    }
+
+    // Setup listener for filter latency changes
+    setupFilterLatencyListener() {
+        window.addEventListener('filterLatencyChanged', (event) => {
+            this.cachedFilterLatency = event.detail.totalLatency;
+            console.log(`Spectrum sync: Filter latency updated to ${this.cachedFilterLatency.toFixed(1)}ms`);
+        });
+
+        // Initialize cached latency value
+        if (window.getTotalFilterLatency) {
+            this.cachedFilterLatency = window.getTotalFilterLatency();
+            console.log(`Spectrum sync: Initial filter latency ${this.cachedFilterLatency.toFixed(1)}ms`);
+        }
     }
 
     // Resize canvas to match container
@@ -483,11 +503,11 @@ class SpectrumDisplay {
             if (window.audioContext && window.nextPlayTime) {
                 const currentTime = window.audioContext.currentTime;
                 const bufferAhead = window.nextPlayTime - currentTime;
-
-                // Get total filter latency in seconds (convert from ms)
-                // This includes EQ, NR2, bandpass, notch, compressor, stereo, and squelch
-                const filterLatency = (window.getTotalFilterLatency ? window.getTotalFilterLatency() : 0) / 1000;
-
+    
+                // Use cached filter latency in seconds (convert from ms)
+                // This value is updated dynamically when filters are toggled or parameters change
+                const filterLatency = this.cachedFilterLatency / 1000;
+    
                 // Process frames that should be displayed now
                 const now = Date.now();
 
@@ -495,11 +515,14 @@ class SpectrumDisplay {
                     const frame = this.frameQueue[0];
 
                     // Calculate when this frame should be displayed
-                    // Subtract bufferAhead to sync with currently playing audio:
-                    // Audio playing now was captured at (serverTime - bufferAhead),
-                    // so spectrum captured at serverTime should display now
-                    // Also subtract filter latency (EQ, NR2, etc.) and buffer margin for safety
-                    const displayTime = frame.receiveTime - (bufferAhead * 1000) - (filterLatency * 1000) - (this.bufferMargin * 1000);
+                    // The audio path has these delays:
+                    // 1. bufferAhead: Audio buffered ahead of playback (subtract to sync with current playback)
+                    // 2. filterLatency: Processing delay from filters (ADD to delay waterfall to match delayed audio)
+                    // 3. bufferMargin: Safety margin for timing jitter (subtract for conservative display)
+                    //
+                    // Audio captured at time T goes through filters (adding filterLatency) and plays at T + filterLatency
+                    // Spectrum captured at time T should display when audio plays, so add filterLatency to delay it
+                    const displayTime = frame.receiveTime - (bufferAhead * 1000) + (filterLatency * 1000) - (this.bufferMargin * 1000);
 
                     if (now >= displayTime) {
                         // Time to display this frame

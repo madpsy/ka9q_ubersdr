@@ -378,6 +378,7 @@ class SpectrumDisplay {
         this.scrollEnabled = true; // Mouse scroll wheel enabled by default
         this.zoomScrollEnabled = false; // Zoom scroll wheel disabled by default
         this.smoothingEnabled = false; // Temporal smoothing disabled by default
+        this.snapEnabled = true; // 1 KHz snap enabled by default (matches checkbox)
         this.setupMouseHandlers();
         this.setupScrollHandler();
 
@@ -1957,7 +1958,21 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             if (!lineGraphDragDidMove && this.config.onFrequencyClick && x >= 0 && x < this.width) {
                 // Calculate frequency from click position
                 const startFreq = this.centerFreq - this.totalBandwidth / 2;
-                const freq = startFreq + (x / this.width) * this.totalBandwidth;
+                let freq = startFreq + (x / this.width) * this.totalBandwidth;
+
+                // Apply 1 KHz snap if enabled and in USB/LSB mode
+                if (this.snapEnabled) {
+                    const currentMode = window.currentMode ? window.currentMode.toLowerCase() : '';
+                    if (currentMode === 'lsb') {
+                        // LSB: add 200 Hz offset, then round to nearest 1 kHz
+                        const adjustedFreq = freq + 200;
+                        freq = Math.round(adjustedFreq / 1000) * 1000;
+                    } else if (currentMode === 'usb') {
+                        // USB: subtract 200 Hz offset, then round to nearest 1 kHz
+                        const adjustedFreq = freq - 200;
+                        freq = Math.round(adjustedFreq / 1000) * 1000;
+                    }
+                }
 
                 // Set flag to skip auto-pan since this frequency change is from clicking
                 this.skipNextPan = true;
@@ -2723,7 +2738,21 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 if (this.config.onFrequencyClick) {
                     // Calculate frequency from server data range
                     const startFreq = this.centerFreq - this.totalBandwidth / 2;
-                    const freq = startFreq + (x / this.width) * this.totalBandwidth;
+                    let freq = startFreq + (x / this.width) * this.totalBandwidth;
+
+                    // Apply 1 KHz snap if enabled and in USB/LSB mode
+                    if (this.snapEnabled) {
+                        const currentMode = window.currentMode ? window.currentMode.toLowerCase() : '';
+                        if (currentMode === 'lsb') {
+                            // LSB: add 200 Hz offset, then round to nearest 1 kHz
+                            const adjustedFreq = freq + 200;
+                            freq = Math.round(adjustedFreq / 1000) * 1000;
+                        } else if (currentMode === 'usb') {
+                            // USB: subtract 200 Hz offset, then round to nearest 1 kHz
+                            const adjustedFreq = freq - 200;
+                            freq = Math.round(adjustedFreq / 1000) * 1000;
+                        }
+                    }
 
                     // Set flag to skip auto-pan since this frequency change is from clicking
                     this.skipNextPan = true;
@@ -2817,6 +2846,19 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 this.lineGraphDataHistory = [];
             });
         }
+
+        // Setup 1 KHz snap checkbox handler
+        const snapCheckbox = document.getElementById('spectrum-snap-enable');
+        if (snapCheckbox) {
+            snapCheckbox.addEventListener('change', (e) => {
+                this.snapEnabled = e.target.checked;
+                console.log(`Spectrum 1 KHz snap ${this.snapEnabled ? 'enabled' : 'disabled'}`);
+            });
+        }
+
+        // Store reference to snap checkbox and label for mode-based enable/disable
+        this.snapCheckbox = snapCheckbox;
+        this.snapLabel = document.getElementById('spectrum-snap-label');
 
         // Add wheel event listener to both main canvas and line graph canvas
         const handleWheel = (e) => {
@@ -3415,6 +3457,26 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                     document.body.removeChild(feedback);
                 }, 500);
             }, 1000);
+    }
+
+    // Update snap checkbox state based on current mode
+    updateSnapCheckboxState() {
+        if (!this.snapCheckbox || !this.snapLabel) return;
+
+        const currentMode = window.currentMode ? window.currentMode.toLowerCase() : '';
+        const isSSBMode = currentMode === 'usb' || currentMode === 'lsb';
+
+        // Enable/disable checkbox based on mode
+        this.snapCheckbox.disabled = !isSSBMode;
+
+        // Update label styling to show disabled state
+        if (isSSBMode) {
+            this.snapLabel.style.opacity = '1';
+            this.snapLabel.style.cursor = 'pointer';
+        } else {
+            this.snapLabel.style.opacity = '0.5';
+            this.snapLabel.style.cursor = 'not-allowed';
+        }
     }
 
     // Get current status

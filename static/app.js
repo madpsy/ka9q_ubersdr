@@ -2582,6 +2582,11 @@ function setMode(mode, preserveBandwidth = false) {
     // Update bandwidth tooltips when mode changes
     updateBandwidthTooltips();
 
+    // Update snap checkbox state based on new mode
+    if (spectrumDisplay && spectrumDisplay.updateSnapCheckboxState) {
+        spectrumDisplay.updateSnapCheckboxState();
+    }
+
     // Auto-connect if not connected
     if (!wsManager.isConnected()) {
         connect();

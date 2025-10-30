@@ -169,10 +169,18 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 		}
 	}
 
-	// Check if this UUID already has an audio session (enforce 1 audio per UUID)
+	// Check if this UUID already has an audio session
+	// If so, replace it (allows reconnection after disconnection)
 	if userSessionID != "" {
 		if existingSessionID, exists := sm.uuidAudioSessions[userSessionID]; exists {
-			return nil, fmt.Errorf("user already has an active audio session (session: %s)", existingSessionID)
+			log.Printf("Replacing existing audio session %s for UUID %s (reconnection detected)", existingSessionID, userSessionID)
+			// Unlock before calling DestroySession to avoid deadlock
+			sm.mu.Unlock()
+			if err := sm.DestroySession(existingSessionID); err != nil {
+				log.Printf("Warning: failed to destroy old audio session %s: %v", existingSessionID, err)
+			}
+			// Re-lock after destroying the old session
+			sm.mu.Lock()
 		}
 	}
 
@@ -337,10 +345,18 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 		}
 	}
 
-	// Check if this UUID already has a spectrum session (enforce 1 spectrum per UUID)
+	// Check if this UUID already has a spectrum session
+	// If so, replace it (allows reconnection after disconnection)
 	if userSessionID != "" {
 		if existingSessionID, exists := sm.uuidSpectrumSessions[userSessionID]; exists {
-			return nil, fmt.Errorf("user already has an active spectrum session (session: %s)", existingSessionID)
+			log.Printf("Replacing existing spectrum session %s for UUID %s (reconnection detected)", existingSessionID, userSessionID)
+			// Unlock before calling DestroySession to avoid deadlock
+			sm.mu.Unlock()
+			if err := sm.DestroySession(existingSessionID); err != nil {
+				log.Printf("Warning: failed to destroy old spectrum session %s: %v", existingSessionID, err)
+			}
+			// Re-lock after destroying the old session
+			sm.mu.Lock()
 		}
 	}
 

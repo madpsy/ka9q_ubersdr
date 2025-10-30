@@ -5990,7 +5990,8 @@ function toggleExtension(extensionName) {
             });
     }
 
-    // Reset dropdown
+    // Reset dropdown to empty (but don't trigger change event)
+    // This allows the user to select the same extension again from the dropdown
     dropdown.value = '';
 }
 

@@ -121,6 +121,8 @@
                                 dropdown.value = matchingExt.slug;
                                 // Trigger the change event to activate the extension
                                 dropdown.dispatchEvent(new Event('change'));
+                                // Keep the dropdown value set (don't reset it)
+                                // This prevents the extension from being immediately disabled
                                 console.log(`✅ Auto-loaded default extension: ${defaultExtension} (${matchingExt.displayName})`);
                             } else {
                                 console.warn(`⚠️ Default extension "${defaultExtension}" option not found in dropdown`);

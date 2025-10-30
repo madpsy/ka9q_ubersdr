@@ -1172,33 +1172,39 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 35, graphWidth, graphHeight - 35);
 
-        // Apply temporal smoothing with different levels based on toggle
+        // Apply temporal smoothing based on toggle
         const now = Date.now();
 
-        // Add current spectrum data to history
-        this.lineGraphDataHistory.push({
-            data: new Float32Array(this.spectrumData),
-            timestamp: now
-        });
+        let smoothedData;
 
-        // Remove old data based on smoothing level
-        // Smooth enabled: keep last 5 frames (300ms window) - heavy smoothing
-        // Smooth disabled: keep last 2 frames (100ms window) - light smoothing
-        const maxFrames = this.smoothingEnabled ? this.lineGraphDataHistoryMaxSize : 2;
-        const maxAge = this.smoothingEnabled ? this.lineGraphDataHistoryMaxAge : 100;
+        if (this.smoothingEnabled) {
+            // Smoothing enabled: keep last 5 frames (300ms window) - heavy smoothing
+            // Add current spectrum data to history
+            this.lineGraphDataHistory.push({
+                data: new Float32Array(this.spectrumData),
+                timestamp: now
+            });
 
-        this.lineGraphDataHistory = this.lineGraphDataHistory
-            .filter(d => now - d.timestamp <= maxAge)
-            .slice(-maxFrames);
+            // Remove old data based on smoothing level
+            const maxFrames = this.lineGraphDataHistoryMaxSize;
+            const maxAge = this.lineGraphDataHistoryMaxAge;
 
-        // Create smoothed data by averaging recent frames
-        const smoothedData = new Float32Array(this.spectrumData.length);
-        for (let i = 0; i < this.spectrumData.length; i++) {
-            let sum = 0;
-            for (let j = 0; j < this.lineGraphDataHistory.length; j++) {
-                sum += this.lineGraphDataHistory[j].data[i];
+            this.lineGraphDataHistory = this.lineGraphDataHistory
+                .filter(d => now - d.timestamp <= maxAge)
+                .slice(-maxFrames);
+
+            // Create smoothed data by averaging recent frames
+            smoothedData = new Float32Array(this.spectrumData.length);
+            for (let i = 0; i < this.spectrumData.length; i++) {
+                let sum = 0;
+                for (let j = 0; j < this.lineGraphDataHistory.length; j++) {
+                    sum += this.lineGraphDataHistory[j].data[i];
+                }
+                smoothedData[i] = sum / this.lineGraphDataHistory.length;
             }
-            smoothedData[i] = sum / this.lineGraphDataHistory.length;
+        } else {
+            // Smoothing disabled: use raw spectrum data directly (no averaging)
+            smoothedData = this.spectrumData;
         }
 
         // Find min and max values in smoothed data
@@ -1314,33 +1320,39 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 35, graphWidth, graphHeight - 35);
 
-        // Apply temporal smoothing with different levels based on toggle
+        // Apply temporal smoothing based on toggle
         const now = Date.now();
 
-        // Add current spectrum data to history
-        this.lineGraphDataHistory.push({
-            data: new Float32Array(this.spectrumData),
-            timestamp: now
-        });
+        let smoothedData;
 
-        // Remove old data based on smoothing level
-        // Smooth enabled: keep last 5 frames (300ms window) - heavy smoothing
-        // Smooth disabled: keep last 2 frames (100ms window) - light smoothing
-        const maxFrames = this.smoothingEnabled ? this.lineGraphDataHistoryMaxSize : 2;
-        const maxAge = this.smoothingEnabled ? this.lineGraphDataHistoryMaxAge : 100;
+        if (this.smoothingEnabled) {
+            // Smoothing enabled: keep last 5 frames (300ms window) - heavy smoothing
+            // Add current spectrum data to history
+            this.lineGraphDataHistory.push({
+                data: new Float32Array(this.spectrumData),
+                timestamp: now
+            });
 
-        this.lineGraphDataHistory = this.lineGraphDataHistory
-            .filter(d => now - d.timestamp <= maxAge)
-            .slice(-maxFrames);
+            // Remove old data based on smoothing level
+            const maxFrames = this.lineGraphDataHistoryMaxSize;
+            const maxAge = this.lineGraphDataHistoryMaxAge;
 
-        // Create smoothed data
-        const smoothedData = new Float32Array(this.spectrumData.length);
-        for (let i = 0; i < this.spectrumData.length; i++) {
-            let sum = 0;
-            for (let j = 0; j < this.lineGraphDataHistory.length; j++) {
-                sum += this.lineGraphDataHistory[j].data[i];
+            this.lineGraphDataHistory = this.lineGraphDataHistory
+                .filter(d => now - d.timestamp <= maxAge)
+                .slice(-maxFrames);
+
+            // Create smoothed data by averaging recent frames
+            smoothedData = new Float32Array(this.spectrumData.length);
+            for (let i = 0; i < this.spectrumData.length; i++) {
+                let sum = 0;
+                for (let j = 0; j < this.lineGraphDataHistory.length; j++) {
+                    sum += this.lineGraphDataHistory[j].data[i];
+                }
+                smoothedData[i] = sum / this.lineGraphDataHistory.length;
             }
-            smoothedData[i] = sum / this.lineGraphDataHistory.length;
+        } else {
+            // Smoothing disabled: use raw spectrum data directly (no averaging)
+            smoothedData = this.spectrumData;
         }
 
         // Find min and max values

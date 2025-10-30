@@ -660,7 +660,17 @@ class DXClusterExtension extends DecoderExtension {
     }
 
     onEnable() {
-        // Extension enabled
+        // Re-subscribe to DX spots when extension is enabled
+        // This ensures we receive new spots after closing and reopening the extension
+        if (!this.unsubscribe) {
+            this.subscribeToDXSpots();
+        }
+
+        // Restart monitoring intervals
+        this.updateConnectionStatus();
+        this.startConnectionMonitoring();
+        this.startAgeUpdates();
+        this.startRadioStateMonitoring();
     }
 
     onDisable() {
@@ -669,11 +679,11 @@ class DXClusterExtension extends DecoderExtension {
 
         // Stop age updates
         this.stopAgeUpdates();
-        
+
         // Stop radio state monitoring
         this.stopRadioStateMonitoring();
-        
-        // Unsubscribe from spots
+
+        // Unsubscribe from spots and clear the reference
         if (this.unsubscribe) {
             this.unsubscribe();
             this.unsubscribe = null;

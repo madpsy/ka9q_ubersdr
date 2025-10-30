@@ -448,10 +448,10 @@ class SpectrumDisplay {
     }
 
     // Queue spectrum frame for synchronized display with audio
-    queueSpectrumFrame(data) {
+    queueSpectrumFrame(data, serverTimestamp) {
         const frame = {
             data: data,
-            receiveTime: Date.now()
+            receiveTime: serverTimestamp || Date.now()  // Use server timestamp if provided, fallback to client time
         };
 
         // Add to queue
@@ -841,8 +841,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                     console.log(`After unwrap - Last 5 bins: ${unwrappedData.slice(-5).map(v => v.toFixed(1)).join(', ')}`);
                 }
 
-                // Queue frame with timestamp for synchronized display
-                this.queueSpectrumFrame(unwrappedData);
+                // Queue frame with server timestamp for accurate synchronization
+                this.queueSpectrumFrame(unwrappedData, msg.timestamp);
                 break;
 
             case 'pong':

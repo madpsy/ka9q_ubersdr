@@ -76,6 +76,7 @@ type UserSpectrumServerMessage struct {
 	Frequency    uint64      `json:"frequency,omitempty"`    // Current center frequency
 	BinCount     int         `json:"binCount,omitempty"`     // Number of bins (constant)
 	BinBandwidth float64     `json:"binBandwidth,omitempty"` // Bandwidth per bin
+	Timestamp    int64       `json:"timestamp,omitempty"`    // Server capture timestamp in milliseconds (Unix epoch)
 	SessionID    string      `json:"sessionId,omitempty"`
 	Error        string      `json:"error,omitempty"`
 	Status       int         `json:"status,omitempty"` // HTTP-style status code (e.g., 429 for rate limit)
@@ -387,13 +388,14 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 				// Removed debug logging
 			}
 
-			// Send spectrum message
+			// Send spectrum message with server timestamp for accurate synchronization
 			msg := UserSpectrumServerMessage{
 				Type:         "spectrum",
 				Data:         spectrumData,
 				Frequency:    session.Frequency,
 				BinCount:     session.BinCount,
 				BinBandwidth: session.BinBandwidth,
+				Timestamp:    time.Now().UnixMilli(), // Capture time in milliseconds
 			}
 
 			if err := swsh.sendMessage(conn, msg); err != nil {

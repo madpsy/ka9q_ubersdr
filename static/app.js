@@ -2050,6 +2050,7 @@ function playAudioBuffer(buffer) {
     // Update buffer display element (throttled to ~2 updates per second)
     const now = performance.now();
     if (now - lastBufferDisplayUpdate >= 500) {
+        // Update audio buffer display
         const bufferDisplay = document.getElementById('audio-buffer-display');
         const bufferBar = document.getElementById('audio-buffer-bar');
         const bufferText = document.getElementById('audio-buffer-text');
@@ -2088,6 +2089,7 @@ function playAudioBuffer(buffer) {
             }
             bufferBar.style.backgroundColor = color;
         }
+
         lastBufferDisplayUpdate = now;
     }
 }

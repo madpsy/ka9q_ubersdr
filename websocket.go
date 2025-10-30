@@ -260,6 +260,7 @@ type ServerMessage struct {
 	Channels    int         `json:"channels,omitempty"`
 	Frequency   uint64      `json:"frequency,omitempty"`
 	Mode        string      `json:"mode,omitempty"`
+	Timestamp   int64       `json:"timestamp,omitempty"` // Server send timestamp in milliseconds (Unix epoch)
 	SessionID   string      `json:"sessionId,omitempty"`
 	Error       string      `json:"error,omitempty"`
 	Status      int         `json:"status,omitempty"` // HTTP-style status code (e.g., 429 for rate limit)
@@ -741,13 +742,14 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			// Encode audio (will return PCM if Opus not available/enabled)
 			encoded, audioFormat, _ := opusEncoder.Encode(pcmData)
 
-			// Send audio message with format indicator
+			// Send audio message with format indicator and server timestamp
 			msg := ServerMessage{
 				Type:        "audio",
 				Data:        encoded,
 				SampleRate:  session.SampleRate,
 				Channels:    1, // Mono
 				AudioFormat: audioFormat,
+				Timestamp:   time.Now().UnixMilli(), // Send time in milliseconds for latency tracking
 			}
 
 			if err := wsh.sendMessage(conn, msg); err != nil {

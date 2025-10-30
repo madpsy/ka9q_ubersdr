@@ -3300,7 +3300,23 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         // Calculate new dial frequency
         const offset = result.frequency - this.currentTunedFreq;
         const currentDialFreq = window.getCurrentDialFrequency ? window.getCurrentDialFrequency() : this.currentTunedFreq;
-        const newDialFreq = Math.round(currentDialFreq + offset);
+        let newDialFreq = Math.round(currentDialFreq + offset);
+
+        // Account for typical 200 Hz audio offset and round to nearest 1 kHz
+        if (currentMode === 'lsb') {
+            // LSB: audio is below dial frequency (dial - 3000 Hz to dial - 200 Hz)
+            // Detected edge is at dial - 200 Hz, so add 200 Hz to get dial frequency
+            // Then round to nearest 1 kHz
+            const adjustedFreq = newDialFreq + 200;
+            newDialFreq = Math.round(adjustedFreq / 1000) * 1000;
+        } else if (currentMode === 'usb') {
+            // USB: audio is above dial frequency (dial + 200 Hz to dial + 3000 Hz)
+            // Detected edge is at dial + 200 Hz, so subtract 200 Hz to get dial frequency
+            // Then round to nearest 1 kHz
+            const adjustedFreq = newDialFreq - 200;
+            newDialFreq = Math.round(adjustedFreq / 1000) * 1000;
+        }
+        // AM/SAM modes don't need special rounding - use exact carrier frequency
 
         // Create menu text based on mode
         let menuText;

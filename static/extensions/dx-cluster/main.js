@@ -450,7 +450,7 @@ class DXClusterExtension extends DecoderExtension {
 
     formatFrequency(hz) {
         // Always return MHz without unit (unit is in column header)
-        return (hz / 1000000).toFixed(3);
+        return (hz / 1000000).toFixed(5);
     }
 
     formatTime(timeStr) {

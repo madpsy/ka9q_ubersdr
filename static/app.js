@@ -5934,10 +5934,12 @@ function toggleExtension(extensionName) {
         return;
     }
 
-    // Check if this extension is already enabled (more reliable than checking display state)
-    const isCurrentlyEnabled = decoder.enabled &&
-                               panel.style.display !== 'none' &&
-                               panelTitle.textContent === decoder.displayName;
+    // Check if this extension is already enabled
+    // Priority: check if panel is visible AND showing this extension
+    // decoder.enabled alone is not reliable during initialization
+    const isPanelVisible = panel.style.display !== 'none';
+    const isShowingThisExtension = panelTitle.textContent === decoder.displayName;
+    const isCurrentlyEnabled = isPanelVisible && isShowingThisExtension;
 
     if (isCurrentlyEnabled) {
         // Hide panel and disable decoder

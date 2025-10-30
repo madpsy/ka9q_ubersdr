@@ -99,8 +99,18 @@
         // Populate extensions dropdown
         populateExtensionsDropdown(extensionsList);
         
-        // Auto-load default extension if specified
+        // Auto-load default extension if specified AND no URL parameter overrides it
         if (defaultExtension) {
+            // Check if URL parameters specify extensions to load instead
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlExtensions = urlParams.has('ext') ? urlParams.get('ext').split(',').filter(e => e.trim()) : [];
+            
+            // If URL specifies extensions, don't auto-load the default
+            if (urlExtensions.length > 0) {
+                console.log(`🔗 URL specifies extensions: ${urlExtensions.join(', ')} - skipping default auto-load`);
+                return; // Exit early, let URL parameter code handle it
+            }
+            
             // Wait for audio context to be initialized before auto-loading
             // The toggleExtension function requires audioContext to exist
             const waitForAudioContext = () => {

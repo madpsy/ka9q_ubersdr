@@ -48,12 +48,15 @@ function calculateFilterLatencies() {
     const nr2Checkbox = document.getElementById('noise-reduction-enable');
     if (nr2Checkbox && nr2Checkbox.checked) {
         // NR2 uses overlap-add processing with a 2048-sample FFT buffer
+        // PLUS a ScriptProcessorNode with a 2048-sample buffer (from app.js:5186)
         // The algorithm must fill the entire FFT buffer before producing output
-        // This creates an initial latency of fftSize samples (not just hopSize)
+        // AND the ScriptProcessorNode adds its own buffer latency
         // fftSize = 2048, overlapFactor = 4, hopSize = 512
-        // Actual latency = fftSize = 2048 samples
+        // scriptProcessorBuffer = 2048 (from app.js line 5186)
+        // Total latency = fftSize + scriptProcessorBuffer = 4096 samples
         const fftSize = 2048;
-        latencies.nr2 = (fftSize / sampleRate) * 1000;
+        const scriptProcessorBuffer = 2048;
+        latencies.nr2 = ((fftSize + scriptProcessorBuffer) / sampleRate) * 1000;
     }
 
     // Compressor: Based on attack time + lookahead (already in time units)

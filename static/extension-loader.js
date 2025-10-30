@@ -118,15 +118,44 @@
                             const option = Array.from(dropdown.options).find(opt => opt.value === matchingExt.slug);
 
                             if (option) {
-                                // Directly call toggleExtension with the extension name
-                                // This ensures proper initialization without race conditions
-                                if (window.toggleExtension) {
-                                    // Set flag to prevent URL parameter code from re-toggling
-                                    window.extensionAutoLoaded = matchingExt.slug;
-                                    window.toggleExtension(matchingExt.slug);
-                                    console.log(`✅ Auto-loaded default extension: ${defaultExtension} (${matchingExt.displayName})`);
+                                // Auto-load the extension by directly enabling it
+                                // This avoids race conditions with toggleExtension's state detection
+                                if (window.decoderManager && window.audioContext) {
+                                    const decoder = window.decoderManager.getDecoder(matchingExt.slug);
+                                    if (decoder) {
+                                        // Set flag to prevent URL parameter code from re-toggling
+                                        window.extensionAutoLoaded = matchingExt.slug;
+
+                                        // Get panel elements
+                                        const panel = document.getElementById('extension-panel');
+                                        const panelTitle = document.getElementById('extension-panel-title');
+                                        const panelContent = document.getElementById('extension-panel-content');
+
+                                        if (panel && panelTitle && panelContent) {
+                                            // Load extension template into panel
+                                            fetch(`extensions/${matchingExt.slug}/template.html`)
+                                                .then(response => response.text())
+                                                .then(html => {
+                                                    panelContent.innerHTML = html;
+                                                    panelTitle.textContent = decoder.displayName || matchingExt.slug;
+                                                    panel.style.display = 'block';
+
+                                                    // Initialize and enable decoder
+                                                    const centerFreq = 800; // Default center frequency
+                                                    window.decoderManager.initialize(matchingExt.slug, window.audioContext, window.analyser, centerFreq);
+                                                    window.decoderManager.enable(matchingExt.slug);
+
+                                                    console.log(`✅ Auto-loaded default extension: ${defaultExtension} (${matchingExt.displayName})`);
+                                                })
+                                                .catch(err => {
+                                                    console.error(`Failed to load extension template: ${err.message}`);
+                                                });
+                                        }
+                                    } else {
+                                        console.warn(`⚠️ Decoder not found: ${matchingExt.slug}`);
+                                    }
                                 } else {
-                                    console.warn(`⚠️ toggleExtension function not available yet`);
+                                    console.warn(`⚠️ decoderManager or audioContext not available yet`);
                                 }
                             } else {
                                 console.warn(`⚠️ Default extension "${defaultExtension}" option not found in dropdown`);

@@ -22,18 +22,20 @@ type DXSpot struct {
 
 // DXClusterClient manages connection to a DX cluster
 type DXClusterClient struct {
-	config          *DXClusterConfig
-	conn            net.Conn
-	reader          *bufio.Reader
-	mu              sync.RWMutex
-	connected       bool
-	stopChan        chan struct{}
-	reconnectTimer  *time.Timer
-	keepaliveTimer  *time.Timer
-	spotHandlers    []func(DXSpot)
-	messageHandlers []func(string)
-	spotBuffer      []DXSpot // Circular buffer for last N spots
-	bufferSize      int      // Maximum buffer size
+	config           *DXClusterConfig
+	conn             net.Conn
+	reader           *bufio.Reader
+	mu               sync.RWMutex
+	connected        bool
+	stopChan         chan struct{}
+	reconnectTimer   *time.Timer
+	keepaliveTimer   *time.Timer
+	inactivityTimer  *time.Timer
+	lastActivityTime time.Time
+	spotHandlers     []func(DXSpot)
+	messageHandlers  []func(string)
+	spotBuffer       []DXSpot // Circular buffer for last N spots
+	bufferSize       int      // Maximum buffer size
 }
 
 // NewDXClusterClient creates a new DX cluster client
@@ -84,6 +86,9 @@ func (c *DXClusterClient) Stop() {
 	}
 	if c.keepaliveTimer != nil {
 		c.keepaliveTimer.Stop()
+	}
+	if c.inactivityTimer != nil {
+		c.inactivityTimer.Stop()
 	}
 	if c.conn != nil {
 		c.conn.Close()
@@ -143,6 +148,7 @@ func (c *DXClusterClient) connect() error {
 	c.conn = conn
 	c.reader = bufio.NewReader(conn)
 	c.connected = true
+	c.lastActivityTime = time.Now()
 	c.mu.Unlock()
 
 	log.Printf("DX Cluster: Connected to %s", addr)
@@ -165,6 +171,10 @@ func (c *DXClusterClient) disconnect() {
 	if c.keepaliveTimer != nil {
 		c.keepaliveTimer.Stop()
 		c.keepaliveTimer = nil
+	}
+	if c.inactivityTimer != nil {
+		c.inactivityTimer.Stop()
+		c.inactivityTimer = nil
 	}
 	if c.conn != nil {
 		c.conn.Close()
@@ -235,8 +245,16 @@ func (c *DXClusterClient) login() error {
 	// Clear read deadline for normal operation
 	conn.SetReadDeadline(time.Time{})
 
+	// Update last activity time
+	c.mu.Lock()
+	c.lastActivityTime = time.Now()
+	c.mu.Unlock()
+
 	// Start keepalive timer
 	c.startKeepalive()
+
+	// Start inactivity monitor
+	c.startInactivityMonitor()
 
 	return nil
 }
@@ -256,6 +274,14 @@ func (c *DXClusterClient) handleConnection() {
 				c.scheduleReconnect()
 				return
 			}
+
+			// Update last activity time on successful read
+			c.mu.Lock()
+			c.lastActivityTime = time.Now()
+			c.mu.Unlock()
+
+			// Reset inactivity timer
+			c.resetInactivityTimer()
 
 			// Process the line
 			c.processLine(line)
@@ -451,6 +477,56 @@ func (c *DXClusterClient) sendKeepalive() {
 
 	// Schedule next keepalive
 	c.startKeepalive()
+}
+
+// startInactivityMonitor starts the inactivity monitoring timer
+func (c *DXClusterClient) startInactivityMonitor() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.inactivityTimer != nil {
+		c.inactivityTimer.Stop()
+	}
+
+	// Set 5 minute inactivity timeout
+	c.inactivityTimer = time.AfterFunc(5*time.Minute, func() {
+		c.checkInactivity()
+	})
+}
+
+// resetInactivityTimer resets the inactivity timer
+func (c *DXClusterClient) resetInactivityTimer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.inactivityTimer != nil {
+		c.inactivityTimer.Stop()
+	}
+
+	// Reset 5 minute inactivity timeout
+	c.inactivityTimer = time.AfterFunc(5*time.Minute, func() {
+		c.checkInactivity()
+	})
+}
+
+// checkInactivity checks if the connection has been inactive and triggers reconnection
+func (c *DXClusterClient) checkInactivity() {
+	c.mu.RLock()
+	lastActivity := c.lastActivityTime
+	connected := c.connected
+	c.mu.RUnlock()
+
+	if !connected {
+		return
+	}
+
+	// Check if we've been inactive for more than 5 minutes
+	inactiveDuration := time.Since(lastActivity)
+	if inactiveDuration >= 5*time.Minute {
+		log.Printf("DX Cluster: No activity for %v, reconnecting", inactiveDuration)
+		c.disconnect()
+		c.scheduleReconnect()
+	}
 }
 
 // scheduleReconnect schedules a reconnection attempt

@@ -118,12 +118,14 @@
                             const option = Array.from(dropdown.options).find(opt => opt.value === matchingExt.slug);
 
                             if (option) {
-                                dropdown.value = matchingExt.slug;
-                                // Trigger the change event to activate the extension
-                                dropdown.dispatchEvent(new Event('change'));
-                                // Keep the dropdown value set (don't reset it)
-                                // This prevents the extension from being immediately disabled
-                                console.log(`✅ Auto-loaded default extension: ${defaultExtension} (${matchingExt.displayName})`);
+                                // Directly call toggleExtension with the extension name
+                                // This ensures proper initialization without race conditions
+                                if (window.toggleExtension) {
+                                    window.toggleExtension(matchingExt.slug);
+                                    console.log(`✅ Auto-loaded default extension: ${defaultExtension} (${matchingExt.displayName})`);
+                                } else {
+                                    console.warn(`⚠️ toggleExtension function not available yet`);
+                                }
                             } else {
                                 console.warn(`⚠️ Default extension "${defaultExtension}" option not found in dropdown`);
                             }

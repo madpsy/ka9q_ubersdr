@@ -5924,21 +5924,22 @@ function toggleExtension(extensionName) {
     const decoder = window.decoderManager.getDecoder(extensionName);
     if (!decoder) {
         log(`Extension not found: ${extensionName}`, 'error');
-        dropdown.value = '';
+        if (dropdown) dropdown.value = '';
         return;
     }
 
     if (!panel || !panelTitle || !panelContent) {
         log(`Extension panel elements not found`, 'error');
-        dropdown.value = '';
+        if (dropdown) dropdown.value = '';
         return;
     }
 
-    // Check if this extension is already showing
-    const isCurrentlyShowing = panel.style.display !== 'none' &&
+    // Check if this extension is already enabled (more reliable than checking display state)
+    const isCurrentlyEnabled = decoder.enabled &&
+                               panel.style.display !== 'none' &&
                                panelTitle.textContent === decoder.displayName;
 
-    if (isCurrentlyShowing) {
+    if (isCurrentlyEnabled) {
         // Hide panel and disable decoder
         panel.style.display = 'none';
         window.decoderManager.disable(extensionName);

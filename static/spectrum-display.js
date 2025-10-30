@@ -337,6 +337,13 @@ class SpectrumDisplay {
         this.currentBandwidthLow = 50;
         this.currentBandwidthHigh = 3000;
 
+        // Track last spectrum view state for conditional marker redraw (performance optimization)
+        this.lastMarkerCenterFreq = null;
+        this.lastMarkerTotalBandwidth = null;
+        this.lastMarkerDisplayMode = null;
+        this.markerCache = null; // Offscreen canvas for caching markers
+        this.markerCacheCtx = null;
+
         // Flag to prevent auto-pan when frequency is changed by clicking waterfall
         this.skipNextPan = false;
 
@@ -2190,29 +2197,70 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     drawTunedFrequencyCursor() {
         // Update overlay position in case canvas moved
         this.updateOverlayPosition();
-        
+
+        // Check if spectrum view has changed (pan/zoom) - regenerate marker cache if needed
+        const viewChanged = this.lastMarkerCenterFreq !== this.centerFreq ||
+                           this.lastMarkerTotalBandwidth !== this.totalBandwidth ||
+                           this.lastMarkerDisplayMode !== this.displayMode;
+
+        // Create or update offscreen canvas for marker caching if view changed
+        if (viewChanged || !this.markerCache) {
+            // Create offscreen canvas for caching markers (bookmarks + DX spots)
+            if (!this.markerCache) {
+                this.markerCache = document.createElement('canvas');
+                this.markerCacheCtx = this.markerCache.getContext('2d', { alpha: true });
+            }
+
+            // Ensure cache canvas matches overlay size
+            if (this.markerCache.width !== this.overlayCanvas.width ||
+                this.markerCache.height !== this.overlayCanvas.height) {
+                this.markerCache.width = this.overlayCanvas.width;
+                this.markerCache.height = this.overlayCanvas.height;
+            }
+
+            // Clear marker cache
+            this.markerCacheCtx.clearRect(0, 0, this.markerCache.width, this.markerCache.height);
+
+            // Fill with grey background in waterfall mode
+            if (this.displayMode === 'waterfall') {
+                this.markerCacheCtx.fillStyle = '#adb5bd';
+                this.markerCacheCtx.fillRect(0, 0, this.markerCache.width, this.markerCache.height);
+            }
+
+            // Temporarily swap context to draw markers to cache
+            const originalCtx = this.overlayCtx;
+            this.overlayCtx = this.markerCacheCtx;
+
+            // Draw bookmarks to cache
+            if (typeof window.drawBookmarksOnSpectrum === 'function') {
+                window.drawBookmarksOnSpectrum(this, console.log);
+            }
+
+            // Draw DX spots to cache
+            if (typeof window.drawDXSpotsOnSpectrum === 'function') {
+                window.drawDXSpotsOnSpectrum(this, console.log);
+            }
+
+            // Restore original context
+            this.overlayCtx = originalCtx;
+
+            // Update tracking variables
+            this.lastMarkerCenterFreq = this.centerFreq;
+            this.lastMarkerTotalBandwidth = this.totalBandwidth;
+            this.lastMarkerDisplayMode = this.displayMode;
+        }
+
         // Clear overlay canvas
         this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
 
-        // Fill with grey background in waterfall mode (in split/graph modes, line graph canvas provides background)
-        if (this.displayMode === 'waterfall') {
-            this.overlayCtx.fillStyle = '#adb5bd';
-            this.overlayCtx.fillRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+        // Draw cached markers (fast - just a bitmap copy)
+        if (this.markerCache) {
+            this.overlayCtx.drawImage(this.markerCache, 0, 0);
         }
 
-        // Draw bookmarks FIRST (bottom layer - under everything)
-        if (typeof window.drawBookmarksOnSpectrum === 'function') {
-            window.drawBookmarksOnSpectrum(this, console.log);
-        }
-
-        // Draw tuned frequency cursor second (middle layer - above bookmarks, below DX spots)
+        // Draw tuned frequency cursor on top (this changes frequently with tuning)
         if (this.currentTunedFreq && this.totalBandwidth) {
             this.drawTunedFrequencyCursorOnly();
-        }
-
-        // Draw DX spots LAST (top layer - on top of everything)
-        if (typeof window.drawDXSpotsOnSpectrum === 'function') {
-            window.drawDXSpotsOnSpectrum(this, console.log);
         }
     }
 

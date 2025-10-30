@@ -121,6 +121,8 @@
                                 // Directly call toggleExtension with the extension name
                                 // This ensures proper initialization without race conditions
                                 if (window.toggleExtension) {
+                                    // Set flag to prevent URL parameter code from re-toggling
+                                    window.extensionAutoLoaded = matchingExt.slug;
                                     window.toggleExtension(matchingExt.slug);
                                     console.log(`✅ Auto-loaded default extension: ${defaultExtension} (${matchingExt.displayName})`);
                                 } else {

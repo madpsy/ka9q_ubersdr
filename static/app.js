@@ -119,12 +119,18 @@ const wsManager = new WebSocketManager({
             if (window.extensionsToOpen && window.extensionsToOpen.length > 0) {
                 setTimeout(() => {
                     window.extensionsToOpen.forEach(extName => {
+                        // Skip if this extension was already auto-loaded by extension-loader
+                        if (window.extensionAutoLoaded === extName) {
+                            log(`Skipping URL extension (already auto-loaded): ${extName}`);
+                            return;
+                        }
                         if (window.toggleExtension) {
                             window.toggleExtension(extName);
                             log(`Opened extension from URL: ${extName}`);
                         }
                     });
                     delete window.extensionsToOpen;
+                    delete window.extensionAutoLoaded; // Clean up flag
                 }, 100);
             }
         }

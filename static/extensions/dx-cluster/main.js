@@ -783,11 +783,13 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
     });
 
     // Draw each unique spot that's within the visible range
+    // Draw in reverse order so newest spots (at start of array) are drawn last and appear on top
     let drawnCount = 0;
-    uniqueSpots.forEach(spot => {
+    for (let i = uniqueSpots.length - 1; i >= 0; i--) {
+        const spot = uniqueSpots[i];
         // Only draw if frequency is within visible range
         if (spot.frequency < startFreq || spot.frequency > endFreq) {
-            return;
+            continue;
         }
         drawnCount++;
 
@@ -846,7 +848,7 @@ function drawDXSpotsOnSpectrum(spectrumDisplay, log) {
             height: labelHeight + arrowLength,
             spot: spot
         });
-    });
+    }
 
     // Update window reference
     window.dxSpotPositions = dxSpotPositions;

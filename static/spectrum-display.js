@@ -207,9 +207,10 @@ class SpectrumDisplay {
                 }
             }
 
-            // Check if mouse is over a DX spot
+            // Check if mouse is over a DX spot (iterate in reverse to show most recent spot on top)
             if (window.dxSpotPositions && window.dxSpotPositions.length > 0) {
-                for (let pos of window.dxSpotPositions) {
+                for (let i = window.dxSpotPositions.length - 1; i >= 0; i--) {
+                    const pos = window.dxSpotPositions[i];
                     // Check if mouse is within DX spot bounds
                     if (x >= pos.x - pos.width / 2 &&
                         x <= pos.x + pos.width / 2 &&
@@ -252,9 +253,10 @@ class SpectrumDisplay {
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // Check if click is on a DX spot first (they're drawn on top)
+            // Check if click is on a DX spot first (iterate in reverse to prioritize most recent spot)
             if (window.dxSpotPositions && window.dxSpotPositions.length > 0) {
-                for (let pos of window.dxSpotPositions) {
+                for (let i = window.dxSpotPositions.length - 1; i >= 0; i--) {
+                    const pos = window.dxSpotPositions[i];
                     // Check if click is within DX spot bounds
                     if (x >= pos.x - pos.width / 2 &&
                         x <= pos.x + pos.width / 2 &&

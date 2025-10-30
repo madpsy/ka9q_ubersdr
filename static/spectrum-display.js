@@ -485,6 +485,7 @@ class SpectrumDisplay {
                 const bufferAhead = window.nextPlayTime - currentTime;
 
                 // Get total filter latency in seconds (convert from ms)
+                // This includes EQ, NR2, bandpass, notch, compressor, stereo, and squelch
                 const filterLatency = (window.getTotalFilterLatency ? window.getTotalFilterLatency() : 0) / 1000;
 
                 // Process frames that should be displayed now
@@ -497,7 +498,8 @@ class SpectrumDisplay {
                     // Subtract bufferAhead to sync with currently playing audio:
                     // Audio playing now was captured at (serverTime - bufferAhead),
                     // so spectrum captured at serverTime should display now
-                    const displayTime = frame.receiveTime - bufferAhead * 1000;
+                    // Also subtract filter latency (EQ, NR2, etc.) and buffer margin for safety
+                    const displayTime = frame.receiveTime - (bufferAhead * 1000) - (filterLatency * 1000) - (this.bufferMargin * 1000);
 
                     if (now >= displayTime) {
                         // Time to display this frame

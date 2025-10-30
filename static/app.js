@@ -324,6 +324,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // F key: Focus on frequency input (works even when not in an input field)
         if (e.key === 'f' || e.key === 'F') {
+            // Don't capture F key when typing in an input field
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+                return;
+            }
             e.preventDefault();
             const freqInput = document.getElementById('frequency');
             if (freqInput) {

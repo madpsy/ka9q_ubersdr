@@ -5,15 +5,6 @@
 extensions:
   # Stats Monitor - displays signal statistics and metrics
   - stats
-  
-  # CW Decoder - decodes Morse code (CW) signals
-  - cw-decoder
-  
-  # RTTY Decoder - decodes radioteletype signals
-  - rtty-decoder
-  
-  # FT8 Decoder - decodes FT8 digital mode signals (currently disabled by default)
-  # - ft8-decoder
 
   # Radio Sync - syncs the SDR <-> Radio via serial CAT
   - radio-sync

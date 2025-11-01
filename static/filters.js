@@ -233,6 +233,98 @@ function resetEqualizer() {
     console.log('Equalizer reset');
 }
 
+function applyEQPreset(presetName) {
+    // Enable equalizer if not already enabled
+    if (!equalizerEnabled) {
+        const checkbox = document.getElementById('equalizer-enable');
+        if (checkbox) {
+            checkbox.checked = true;
+            toggleEqualizer();
+        }
+    }
+
+    const frequencies = [60, 170, 310, 600, 1000, 1500, 2000, 2500, 3000, 4000, 6000, 8000];
+    let presetValues = {};
+
+    if (presetName === 'voice') {
+        // Voice preset: Optimized for SSB voice communications
+        // Roll off low frequencies, boost speech intelligibility range (300-3000 Hz)
+        presetValues = {
+            60: -6,      // Roll off very low frequencies
+            170: -3,     // Reduce low rumble
+            310: 0,      // Start of voice range
+            600: 2,      // Boost lower voice fundamentals
+            1000: 3,     // Boost mid-range for clarity
+            1500: 4,     // Boost upper mid for intelligibility
+            2000: 4,     // Peak boost for consonants
+            2500: 3,     // Maintain presence
+            3000: 2,     // Start rolling off
+            4000: 0,     // Reduce sibilance
+            6000: -3,    // Roll off high frequencies
+            8000: -6     // Reduce noise and hiss
+        };
+    } else if (presetName === 'cw') {
+        // CW preset: Narrow bandpass centered around typical CW tones (600-800 Hz)
+        // Very aggressive filtering to isolate CW signals
+        presetValues = {
+            60: -12,     // Eliminate very low frequencies
+            170: -12,    // Eliminate low frequencies
+            310: -6,     // Reduce below CW range
+            600: 6,      // Boost CW fundamental range
+            1000: 6,     // Boost CW range
+            1500: 0,     // Neutral above CW range
+            2000: -6,    // Reduce harmonics
+            2500: -9,    // Reduce high frequencies
+            3000: -12,   // Eliminate high frequencies
+            4000: -12,   // Eliminate very high frequencies
+            6000: -12,   // Eliminate very high frequencies
+            8000: -12    // Eliminate very high frequencies
+        };
+    } else {
+        console.error('Unknown EQ preset:', presetName);
+        return;
+    }
+
+    // Calculate total positive gain for makeup gain compensation
+    let totalPositiveGain = 0;
+    let positiveGainCount = 0;
+    frequencies.forEach(freq => {
+        const gain = presetValues[freq];
+        if (gain > 0) {
+            totalPositiveGain += gain;
+            positiveGainCount++;
+        }
+    });
+
+    // Calculate average positive gain for compensation
+    const avgPositiveGain = positiveGainCount > 0 ? totalPositiveGain / positiveGainCount : 0;
+    // Apply compensation: reduce makeup gain by approximately the average boost
+    const makeupGainCompensation = Math.min(0, -avgPositiveGain * 0.7); // 70% compensation to avoid over-correction
+
+    console.log(`Preset ${presetName}: Total positive gain=${totalPositiveGain.toFixed(1)} dB, Avg=${avgPositiveGain.toFixed(1)} dB, Compensation=${makeupGainCompensation.toFixed(1)} dB`);
+
+    // Apply the preset values to sliders and filters
+    frequencies.forEach((freq, index) => {
+        const slider = document.getElementById(`eq-${freq}`);
+        if (slider) {
+            slider.value = presetValues[freq];
+        }
+    });
+
+    // Apply makeup gain compensation to slider
+    const makeupGainSlider = document.getElementById('equalizer-makeup-gain');
+    if (makeupGainSlider) {
+        const compensatedGain = Math.max(-12, Math.min(12, makeupGainCompensation));
+        makeupGainSlider.value = compensatedGain;
+        console.log(`Set makeup gain slider to ${compensatedGain.toFixed(1)} dB`);
+    }
+
+    // Now call updateEqualizer to apply all changes to filters and displays
+    updateEqualizer();
+
+    console.log(`Applied ${presetName} EQ preset with ${makeupGainCompensation.toFixed(1)} dB makeup gain compensation`);
+}
+
 function showEqualizerClipIndicator() {
     const indicator = document.getElementById('equalizer-clip-indicator');
     if (!indicator) return;
@@ -1277,6 +1369,7 @@ window.initializeEqualizer = initializeEqualizer;
 window.toggleEqualizer = toggleEqualizer;
 window.updateEqualizer = updateEqualizer;
 window.resetEqualizer = resetEqualizer;
+window.applyEQPreset = applyEQPreset;
 window.showEqualizerClipIndicator = showEqualizerClipIndicator;
 
 window.bandpassFilters = bandpassFilters;

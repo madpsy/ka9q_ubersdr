@@ -200,3 +200,104 @@ dxcluster:
   reconnect_delay: 30
   # Keep-alive delay in seconds (time between keep-alive messages to prevent timeout)
   keepalive_delay: 300
+
+# Noise Floor Monitoring settings
+noisefloor:
+  # Enable or disable noise floor monitoring
+  # When enabled, creates SEPARATE spectrum sessions for each band (better resolution!)
+  enabled: false
+  
+  # Polling interval in seconds (how often to collect measurements)
+  # Lower values = more frequent updates but more CPU/disk usage
+  # Recommended: 60 seconds (1 minute) for good time resolution
+  poll_interval_sec: 60
+  
+  # Directory to store CSV data files (one file per day)
+  # If relative path, will be created relative to config directory
+  # Default: "noisefloor" (creates <config_dir>/noisefloor/)
+  # Absolute paths are also supported
+  data_dir: "noisefloor"
+  
+  # Amateur radio bands to monitor
+  # Each band gets its own dedicated spectrum channel with optimized resolution
+  # This provides much better frequency resolution than a single wide 0-30 MHz spectrum
+  #
+  # Each band has three parameters:
+  #   - center_frequency: Center frequency for this band's spectrum (Hz)
+  #   - bin_count: Number of FFT bins for this band
+  #   - bin_bandwidth: Bandwidth per bin in Hz (determines resolution)
+  #
+  # Example: 20m band with 350 Hz/bin can clearly see 50 Hz wide FT8 signals!
+  # Compare to old 3 kHz/bin where FT8 was averaged out.
+  #
+  # If you omit these parameters, sensible defaults will be calculated automatically.
+  bands:
+    - name: "160m"
+      start: 1800000          # 1.8 MHz
+      end: 2000000            # 2.0 MHz
+      center_frequency: 1900000
+      bin_count: 1000
+      bin_bandwidth: 200      # 200 Hz resolution
+    
+    - name: "80m"
+      start: 3500000          # 3.5 MHz
+      end: 4000000            # 4.0 MHz
+      center_frequency: 3750000
+      bin_count: 1000
+      bin_bandwidth: 500      # 500 Hz resolution
+    
+    - name: "60m"
+      start: 5250000          # 5.25 MHz
+      end: 5450000            # 5.45 MHz
+      center_frequency: 5350000
+      bin_count: 1000
+      bin_bandwidth: 200      # 200 Hz resolution
+    
+    - name: "40m"
+      start: 7000000          # 7.0 MHz
+      end: 7300000            # 7.3 MHz
+      center_frequency: 7150000
+      bin_count: 1000
+      bin_bandwidth: 300      # 300 Hz resolution
+    
+    - name: "30m"
+      start: 10100000         # 10.1 MHz
+      end: 10150000           # 10.15 MHz
+      center_frequency: 10125000
+      bin_count: 500
+      bin_bandwidth: 100      # 100 Hz resolution (narrow band)
+    
+    - name: "20m"
+      start: 14000000         # 14.0 MHz
+      end: 14350000           # 14.35 MHz
+      center_frequency: 14175000
+      bin_count: 1000
+      bin_bandwidth: 350      # 350 Hz resolution
+    
+    - name: "17m"
+      start: 18068000         # 18.068 MHz
+      end: 18168000           # 18.168 MHz
+      center_frequency: 18118000
+      bin_count: 500
+      bin_bandwidth: 200      # 200 Hz resolution
+    
+    - name: "15m"
+      start: 21000000         # 21.0 MHz
+      end: 21450000           # 21.45 MHz
+      center_frequency: 21225000
+      bin_count: 1000
+      bin_bandwidth: 450      # 450 Hz resolution
+    
+    - name: "12m"
+      start: 24890000         # 24.89 MHz
+      end: 24990000           # 24.99 MHz
+      center_frequency: 24940000
+      bin_count: 500
+      bin_bandwidth: 200      # 200 Hz resolution
+    
+    - name: "10m"
+      start: 28000000         # 28.0 MHz
+      end: 29700000           # 29.7 MHz
+      center_frequency: 28850000
+      bin_count: 1000
+      bin_bandwidth: 1700     # 1.7 kHz resolution (wide band)

@@ -194,7 +194,6 @@ func (usm *UserSpectrumManager) receiveLoop() {
 	defer usm.wg.Done()
 
 	buffer := make([]byte, 65536)
-	packetCount := 0
 
 	for {
 		select {
@@ -218,11 +217,6 @@ func (usm *UserSpectrumManager) receiveLoop() {
 		if n < 2 || buffer[0] != 0 { // STATUS = 0
 			// Skip non-STATUS packets silently
 			continue
-		}
-
-		packetCount++
-		if DebugMode && packetCount%100 == 1 {
-			log.Printf("DEBUG: Received STATUS packet #%d (%d bytes)", packetCount, n)
 		}
 
 		// Parse STATUS packet
@@ -552,26 +546,18 @@ func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodF
 func (usm *UserSpectrumManager) distributeSpectrum(ssrc uint32, data []float32) {
 	session, ok := usm.sessions.GetSessionBySSRC(ssrc)
 	if !ok {
-		if DebugMode {
-			log.Printf("DEBUG: No session found for SSRC 0x%08x", ssrc)
-		}
 		return
 	}
 
 	if !session.IsSpectrum {
-		if DebugMode {
-			log.Printf("DEBUG: Session 0x%08x is not a spectrum session", ssrc)
-		}
 		return
 	}
 
 	// Send to session's spectrum channel (non-blocking)
 	select {
 	case session.SpectrumChan <- data:
-		// Removed debug logging
+		// Data sent successfully
 	default:
-		if DebugMode {
-			log.Printf("DEBUG: Channel full for session 0x%08x, dropping data", ssrc)
-		}
+		// Channel full, drop data
 	}
 }

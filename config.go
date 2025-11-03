@@ -10,17 +10,18 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Admin            AdminConfig     `yaml:"admin"`
-	Radiod           RadiodConfig    `yaml:"radiod"`
-	Server           ServerConfig    `yaml:"server"`
-	Audio            AudioConfig     `yaml:"audio"`
-	Spectrum         SpectrumConfig  `yaml:"spectrum"`
-	Logging          LoggingConfig   `yaml:"logging"`
-	DXCluster        DXClusterConfig `yaml:"dxcluster"`
-	Bookmarks        []Bookmark      `yaml:"bookmarks"`
-	Bands            []Band          `yaml:"bands"`
-	Extensions       []string        `yaml:"extensions"`
-	DefaultExtension string          `yaml:"default_extension,omitempty"`
+	Admin            AdminConfig      `yaml:"admin"`
+	Radiod           RadiodConfig     `yaml:"radiod"`
+	Server           ServerConfig     `yaml:"server"`
+	Audio            AudioConfig      `yaml:"audio"`
+	Spectrum         SpectrumConfig   `yaml:"spectrum"`
+	NoiseFloor       NoiseFloorConfig `yaml:"noisefloor"`
+	Logging          LoggingConfig    `yaml:"logging"`
+	DXCluster        DXClusterConfig  `yaml:"dxcluster"`
+	Bookmarks        []Bookmark       `yaml:"bookmarks"`
+	Bands            []Band           `yaml:"bands"`
+	Extensions       []string         `yaml:"extensions"`
+	DefaultExtension string           `yaml:"default_extension,omitempty"`
 }
 
 // AdminConfig contains admin authentication settings
@@ -132,6 +133,25 @@ type DXClusterConfig struct {
 	Callsign       string `yaml:"callsign"`
 	ReconnectDelay int    `yaml:"reconnect_delay"` // Seconds between reconnection attempts
 	KeepAliveDelay int    `yaml:"keepalive_delay"` // Seconds between keep-alive messages
+}
+
+// NoiseFloorConfig contains noise floor monitoring settings
+type NoiseFloorConfig struct {
+	Enabled         bool             `yaml:"enabled"`
+	PollIntervalSec int              `yaml:"poll_interval_sec"` // Seconds between measurements
+	DataDir         string           `yaml:"data_dir"`          // Directory to store CSV files
+	Bands           []NoiseFloorBand `yaml:"bands"`             // Amateur radio bands to monitor
+}
+
+// NoiseFloorBand defines an amateur radio band for noise floor monitoring
+// Each band gets its own spectrum channel with dedicated parameters
+type NoiseFloorBand struct {
+	Name            string  `yaml:"name"`             // Band name (e.g., "160m", "80m")
+	Start           uint64  `yaml:"start"`            // Start frequency in Hz
+	End             uint64  `yaml:"end"`              // End frequency in Hz
+	CenterFrequency uint64  `yaml:"center_frequency"` // Center frequency for this band's spectrum
+	BinCount        int     `yaml:"bin_count"`        // Number of FFT bins for this band
+	BinBandwidth    float64 `yaml:"bin_bandwidth"`    // Bandwidth per bin in Hz for this band
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -246,6 +266,46 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.DXCluster.KeepAliveDelay == 0 {
 		config.DXCluster.KeepAliveDelay = 300 // 5 minutes default
+	}
+
+	// Set noise floor defaults if not specified
+	if config.NoiseFloor.PollIntervalSec == 0 {
+		config.NoiseFloor.PollIntervalSec = 60 // 60 seconds default
+	}
+	// Note: DataDir will be set relative to config directory in main.go
+	// Default is "noisefloor" subdirectory in config directory
+
+	// Set default amateur radio bands with per-band spectrum parameters if not specified
+	if len(config.NoiseFloor.Bands) == 0 {
+		config.NoiseFloor.Bands = []NoiseFloorBand{
+			{Name: "160m", Start: 1800000, End: 2000000, CenterFrequency: 1900000, BinCount: 1000, BinBandwidth: 200},
+			{Name: "80m", Start: 3500000, End: 4000000, CenterFrequency: 3750000, BinCount: 1000, BinBandwidth: 500},
+			{Name: "60m", Start: 5250000, End: 5450000, CenterFrequency: 5350000, BinCount: 1000, BinBandwidth: 200},
+			{Name: "40m", Start: 7000000, End: 7300000, CenterFrequency: 7150000, BinCount: 1000, BinBandwidth: 300},
+			{Name: "30m", Start: 10100000, End: 10150000, CenterFrequency: 10125000, BinCount: 500, BinBandwidth: 100},
+			{Name: "20m", Start: 14000000, End: 14350000, CenterFrequency: 14175000, BinCount: 1000, BinBandwidth: 350},
+			{Name: "17m", Start: 18068000, End: 18168000, CenterFrequency: 18118000, BinCount: 500, BinBandwidth: 200},
+			{Name: "15m", Start: 21000000, End: 21450000, CenterFrequency: 21225000, BinCount: 1000, BinBandwidth: 450},
+			{Name: "12m", Start: 24890000, End: 24990000, CenterFrequency: 24940000, BinCount: 500, BinBandwidth: 200},
+			{Name: "10m", Start: 28000000, End: 29700000, CenterFrequency: 28850000, BinCount: 1000, BinBandwidth: 1700},
+		}
+	}
+
+	// Set per-band spectrum parameters if not specified
+	for i := range config.NoiseFloor.Bands {
+		band := &config.NoiseFloor.Bands[i]
+		if band.CenterFrequency == 0 {
+			// Calculate center frequency from start/end
+			band.CenterFrequency = (band.Start + band.End) / 2
+		}
+		if band.BinCount == 0 {
+			band.BinCount = 1000 // Default 1000 bins per band
+		}
+		if band.BinBandwidth == 0 {
+			// Calculate bin bandwidth to cover the band
+			bandwidth := float64(band.End - band.Start)
+			band.BinBandwidth = bandwidth / float64(band.BinCount)
+		}
 	}
 
 	return &config, nil

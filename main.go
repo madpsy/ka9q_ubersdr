@@ -243,6 +243,26 @@ func main() {
 	}
 	defer userSpectrumManager.Stop()
 
+	// Initialize noise floor monitor
+	// Set data directory relative to config directory
+	if config.NoiseFloor.Enabled && config.NoiseFloor.DataDir == "" {
+		config.NoiseFloor.DataDir = *configDir + "/noisefloor"
+	} else if config.NoiseFloor.Enabled && !strings.HasPrefix(config.NoiseFloor.DataDir, "/") {
+		// If relative path, make it relative to config directory
+		config.NoiseFloor.DataDir = *configDir + "/" + config.NoiseFloor.DataDir
+	}
+
+	noiseFloorMonitor, err := NewNoiseFloorMonitor(config, radiod, sessions)
+	if err != nil {
+		log.Fatalf("Failed to initialize noise floor monitor: %v", err)
+	}
+	if noiseFloorMonitor != nil {
+		if err := noiseFloorMonitor.Start(); err != nil {
+			log.Fatalf("Failed to start noise floor monitor: %v", err)
+		}
+		defer noiseFloorMonitor.Stop()
+	}
+
 	// Initialize DX cluster client
 	dxCluster := NewDXClusterClient(&config.DXCluster)
 	if err := dxCluster.Start(); err != nil {
@@ -313,6 +333,20 @@ func main() {
 	})
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(w, r, config)
+	})
+
+	// Noise floor endpoints
+	http.HandleFunc("/api/noisefloor/latest", func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorLatest(w, r, noiseFloorMonitor)
+	})
+	http.HandleFunc("/api/noisefloor/history", func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorHistory(w, r, noiseFloorMonitor)
+	})
+	http.HandleFunc("/api/noisefloor/dates", func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorDates(w, r, noiseFloorMonitor)
+	})
+	http.HandleFunc("/api/noisefloor/fft", func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorFFT(w, r, noiseFloorMonitor)
 	})
 
 	// Admin authentication endpoints (no auth required)
@@ -764,5 +798,141 @@ func handleStatus(w http.ResponseWriter, r *http.Request, config *Config) {
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding status: %v", err)
+	}
+}
+
+// handleNoiseFloorLatest serves the latest noise floor measurements
+func handleNoiseFloorLatest(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if nfm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Noise floor monitoring is not enabled",
+		})
+		return
+	}
+
+	measurements := nfm.GetLatestMeasurements()
+	if len(measurements) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "No measurements available yet",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(measurements); err != nil {
+		log.Printf("Error encoding noise floor measurements: %v", err)
+	}
+}
+
+// handleNoiseFloorHistory serves historical noise floor data
+func handleNoiseFloorHistory(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if nfm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Noise floor monitoring is not enabled",
+		})
+		return
+	}
+
+	// Get query parameters
+	date := r.URL.Query().Get("date")
+	band := r.URL.Query().Get("band")
+
+	if date == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "date parameter is required (format: YYYY-MM-DD)",
+		})
+		return
+	}
+
+	measurements, err := nfm.GetHistoricalData(date, band)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get historical data: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(measurements); err != nil {
+		log.Printf("Error encoding historical noise floor data: %v", err)
+	}
+}
+
+// handleNoiseFloorDates serves the list of available dates
+func handleNoiseFloorDates(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if nfm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Noise floor monitoring is not enabled",
+		})
+		return
+	}
+
+	dates, err := nfm.GetAvailableDates()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get available dates: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"dates": dates,
+	}); err != nil {
+		log.Printf("Error encoding available dates: %v", err)
+	}
+}
+
+// handleNoiseFloorFFT serves the latest FFT data for a specific band
+func handleNoiseFloorFFT(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if nfm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Noise floor monitoring is not enabled",
+		})
+		return
+	}
+
+	// Get band parameter
+	band := r.URL.Query().Get("band")
+	if band == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "band parameter is required (e.g., 20m, 40m)",
+		})
+		return
+	}
+
+	fft := nfm.GetLatestFFT(band)
+	if fft == nil {
+		// Return 204 No Content instead of 404 - data not available yet but will be soon
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": fmt.Sprintf("No FFT data available yet for band %s. Data will be available after the first spectrum samples are collected.", band),
+		})
+		if DebugMode {
+			log.Printf("DEBUG: FFT request for band %s returned no data (buffer may be empty or averaging window too short)", band)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(fft); err != nil {
+		log.Printf("Error encoding FFT data: %v", err)
 	}
 }

@@ -20,10 +20,13 @@ var (
 
 // BandSpectrum represents a spectrum channel for a single band
 type BandSpectrum struct {
-	Band         NoiseFloorBand
-	SSRC         uint32
-	SessionID    string
-	SpectrumChan chan []float32
+	Band          NoiseFloorBand
+	SSRC          uint32
+	SessionID     string
+	SpectrumChan  chan []float32
+	LastDataTime  time.Time
+	LastReconnect time.Time
+	mu            sync.Mutex
 }
 
 // NoiseFloorMonitor manages noise floor monitoring across amateur radio bands
@@ -462,12 +465,21 @@ func (nfm *NoiseFloorMonitor) monitorLoop() {
 				case <-nfm.stopChan:
 					return
 				case spectrum := <-bs.SpectrumChan:
+					// Update last data time
+					bs.mu.Lock()
+					bs.LastDataTime = time.Now()
+					bs.mu.Unlock()
+
 					// Add spectrum data directly to this band's buffer
 					nfm.addBandSampleToBuffer(name, spectrum)
 				}
 			}
 		}(bandName, bandSpectrum)
 	}
+
+	// Start watchdog goroutine to detect stalled channels
+	nfm.wg.Add(1)
+	go nfm.watchdogLoop()
 
 	// Main loop for periodic statistics calculation
 	for {
@@ -852,5 +864,94 @@ func (nfm *NoiseFloorMonitor) GetAveragedFFT(band string, duration time.Duration
 	if buffer, ok := nfm.fftBuffers[band]; ok {
 		return buffer.GetAveragedFFT(duration)
 	}
+	return nil
+}
+
+// watchdogLoop monitors for stalled spectrum channels and attempts reconnection
+func (nfm *NoiseFloorMonitor) watchdogLoop() {
+	defer nfm.wg.Done()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-nfm.stopChan:
+			return
+		case <-ticker.C:
+			nfm.checkAndReconnectStalled()
+		}
+	}
+}
+
+// checkAndReconnectStalled checks for bands that haven't received data and attempts reconnection
+func (nfm *NoiseFloorMonitor) checkAndReconnectStalled() {
+	now := time.Now()
+	stallThreshold := 90 * time.Second    // Consider stalled if no data for 90 seconds
+	reconnectCooldown := 60 * time.Second // Don't reconnect more than once per minute
+
+	for bandName, bs := range nfm.bandSpectrums {
+		bs.mu.Lock()
+		lastData := bs.LastDataTime
+		lastReconnect := bs.LastReconnect
+		bs.mu.Unlock()
+
+		// Skip if we've never received data yet (still initializing)
+		if lastData.IsZero() {
+			continue
+		}
+
+		// Check if channel is stalled
+		timeSinceData := now.Sub(lastData)
+		if timeSinceData > stallThreshold {
+			// Check if we're in cooldown period
+			timeSinceReconnect := now.Sub(lastReconnect)
+			if timeSinceReconnect < reconnectCooldown {
+				if DebugMode {
+					log.Printf("DEBUG: Band %s stalled (%.0fs since data) but in reconnect cooldown (%.0fs since last attempt)",
+						bandName, timeSinceData.Seconds(), timeSinceReconnect.Seconds())
+				}
+				continue
+			}
+
+			log.Printf("WARNING: Band %s spectrum stalled (%.0fs since last data), attempting reconnection with same SSRC 0x%08x",
+				bandName, timeSinceData.Seconds(), bs.SSRC)
+
+			// Update reconnect time
+			bs.mu.Lock()
+			bs.LastReconnect = now
+			bs.mu.Unlock()
+
+			// Attempt to recreate the channel with the same SSRC
+			if err := nfm.reconnectBand(bandName, bs); err != nil {
+				log.Printf("ERROR: Failed to reconnect band %s: %v", bandName, err)
+			} else {
+				log.Printf("Successfully requested reconnection for band %s", bandName)
+			}
+		}
+	}
+}
+
+// reconnectBand attempts to recreate a spectrum channel for a band using the same SSRC
+func (nfm *NoiseFloorMonitor) reconnectBand(bandName string, bs *BandSpectrum) error {
+	channelName := fmt.Sprintf("noisefloor-%s", bandName)
+
+	if DebugMode {
+		log.Printf("DEBUG: Reconnecting %s - freq: %d Hz, bins: %d, bw: %.1f Hz, SSRC: 0x%08x",
+			bandName, bs.Band.CenterFrequency, bs.Band.BinCount, bs.Band.BinBandwidth, bs.SSRC)
+	}
+
+	// Request the channel again with the same SSRC
+	// radiod should recognize the SSRC and resume sending data
+	if err := nfm.radiod.CreateSpectrumChannel(
+		channelName,
+		bs.Band.CenterFrequency,
+		bs.Band.BinCount,
+		bs.Band.BinBandwidth,
+		bs.SSRC,
+	); err != nil {
+		return fmt.Errorf("failed to recreate spectrum channel: %w", err)
+	}
+
 	return nil
 }

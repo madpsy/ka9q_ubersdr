@@ -691,8 +691,27 @@ func (nfm *NoiseFloorMonitor) rotateFile(band, dateStr string) error {
 		}
 	}
 
-	// Open new file with band-specific name
-	filename := filepath.Join(nfm.config.NoiseFloor.DataDir, fmt.Sprintf("noise_floor_%s_%s.csv", band, dateStr))
+	// Parse date to create year/month/day directory structure
+	t, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return fmt.Errorf("invalid date format: %w", err)
+	}
+
+	// Create directory path: base_dir/YYYY/MM/DD/
+	dirPath := filepath.Join(
+		nfm.config.NoiseFloor.DataDir,
+		fmt.Sprintf("%04d", t.Year()),
+		fmt.Sprintf("%02d", t.Month()),
+		fmt.Sprintf("%02d", t.Day()),
+	)
+
+	// Create directory structure if it doesn't exist
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return fmt.Errorf("failed to create directory structure: %w", err)
+	}
+
+	// Create file: base_dir/YYYY/MM/DD/band.csv
+	filename := filepath.Join(dirPath, fmt.Sprintf("%s.csv", band))
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -774,7 +793,21 @@ func (nfm *NoiseFloorMonitor) GetHistoricalData(date string, band string) ([]*Ba
 
 // readBandFile reads a single band's CSV file for a specific date
 func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasurement, error) {
-	filename := filepath.Join(nfm.config.NoiseFloor.DataDir, fmt.Sprintf("noise_floor_%s_%s.csv", band, date))
+	// Parse date to create year/month/day directory structure
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return nil, fmt.Errorf("invalid date format: %w", err)
+	}
+
+	// Build path: base_dir/YYYY/MM/DD/band.csv
+	filename := filepath.Join(
+		nfm.config.NoiseFloor.DataDir,
+		fmt.Sprintf("%04d", t.Year()),
+		fmt.Sprintf("%02d", t.Month()),
+		fmt.Sprintf("%02d", t.Day()),
+		fmt.Sprintf("%s.csv", band),
+	)
+
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
@@ -832,32 +865,70 @@ func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasuremen
 }
 
 // GetAvailableDates returns a list of dates for which data is available
+// Scans the year/month/day directory structure
 func (nfm *NoiseFloorMonitor) GetAvailableDates() ([]string, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
 
-	files, err := os.ReadDir(nfm.config.NoiseFloor.DataDir)
+	dateMap := make(map[string]bool)
+
+	// Walk through year directories
+	yearDirs, err := os.ReadDir(nfm.config.NoiseFloor.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read data directory: %w", err)
 	}
 
-	// Use a map to collect unique dates
-	dateMap := make(map[string]bool)
-	for _, file := range files {
-		if file.IsDir() {
+	for _, yearDir := range yearDirs {
+		if !yearDir.IsDir() {
+			continue
+		}
+		year := yearDir.Name()
+
+		// Walk through month directories
+		monthPath := filepath.Join(nfm.config.NoiseFloor.DataDir, year)
+		monthDirs, err := os.ReadDir(monthPath)
+		if err != nil {
 			continue
 		}
 
-		name := file.Name()
-		// New format: noise_floor_{band}_{date}.csv
-		// Example: noise_floor_20m_2025-11-03.csv
-		if len(name) > 20 && name[:12] == "noise_floor_" && name[len(name)-4:] == ".csv" {
-			// Extract date from end of filename (last 14 chars before .csv = _YYYY-MM-DD)
-			if len(name) >= 18 {
-				dateWithUnderscore := name[len(name)-15 : len(name)-4] // _YYYY-MM-DD
-				if len(dateWithUnderscore) == 11 && dateWithUnderscore[0] == '_' {
-					date := dateWithUnderscore[1:] // YYYY-MM-DD
+		for _, monthDir := range monthDirs {
+			if !monthDir.IsDir() {
+				continue
+			}
+			month := monthDir.Name()
+
+			// Walk through day directories
+			dayPath := filepath.Join(monthPath, month)
+			dayDirs, err := os.ReadDir(dayPath)
+			if err != nil {
+				continue
+			}
+
+			for _, dayDir := range dayDirs {
+				if !dayDir.IsDir() {
+					continue
+				}
+				day := dayDir.Name()
+
+				// Check if this day directory has any CSV files
+				csvPath := filepath.Join(dayPath, day)
+				files, err := os.ReadDir(csvPath)
+				if err != nil {
+					continue
+				}
+
+				hasCSV := false
+				for _, file := range files {
+					if !file.IsDir() && filepath.Ext(file.Name()) == ".csv" {
+						hasCSV = true
+						break
+					}
+				}
+
+				if hasCSV {
+					// Format as YYYY-MM-DD
+					date := fmt.Sprintf("%s-%s-%s", year, month, day)
 					dateMap[date] = true
 				}
 			}

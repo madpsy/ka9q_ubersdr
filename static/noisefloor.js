@@ -557,7 +557,7 @@ class NoiseFloorMonitor {
                         },
                         title: {
                             display: true,
-                            text: 'Real-time Spectrum',
+                            text: 'Real-time Spectrum (10s)',
                             color: 'rgba(255, 255, 255, 0.9)',
                             font: {
                                 size: 12

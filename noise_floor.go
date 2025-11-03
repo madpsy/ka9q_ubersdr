@@ -40,11 +40,11 @@ type NoiseFloorMonitor struct {
 	bandSpectrums  map[string]*BandSpectrum
 	spectrumsReady bool
 
-	// CSV logging
-	currentFile *os.File
-	csvWriter   *csv.Writer
-	currentDate string
-	mu          sync.Mutex
+	// CSV logging (one file per band)
+	currentFiles map[string]*os.File
+	csvWriters   map[string]*csv.Writer
+	currentDates map[string]string
+	fileMu       sync.Mutex
 
 	// Control
 	running  bool
@@ -283,6 +283,9 @@ func NewNoiseFloorMonitor(config *Config, radiod *RadiodController, sessions *Se
 		bandSpectrums:      make(map[string]*BandSpectrum),
 		latestMeasurements: make(map[string]*BandMeasurement),
 		fftBuffers:         make(map[string]*FFTBuffer),
+		currentFiles:       make(map[string]*os.File),
+		csvWriters:         make(map[string]*csv.Writer),
+		currentDates:       make(map[string]string),
 	}
 
 	// Initialize FFT buffers for each band (store up to 1 minute of samples)
@@ -409,14 +412,16 @@ func (nfm *NoiseFloorMonitor) Stop() {
 	close(nfm.stopChan)
 	nfm.wg.Wait()
 
-	// Close CSV file
-	nfm.mu.Lock()
-	if nfm.currentFile != nil {
-		if err := nfm.currentFile.Close(); err != nil {
-			log.Printf("Error closing noise floor CSV file: %v", err)
+	// Close all CSV files
+	nfm.fileMu.Lock()
+	for band, file := range nfm.currentFiles {
+		if file != nil {
+			if err := file.Close(); err != nil {
+				log.Printf("Error closing noise floor CSV file for %s: %v", band, err)
+			}
 		}
 	}
-	nfm.mu.Unlock()
+	nfm.fileMu.Unlock()
 
 	// Disable and remove all band spectrum channels
 	if nfm.spectrumsReady {
@@ -635,23 +640,28 @@ func (nfm *NoiseFloorMonitor) calculateStatistics(timestamp time.Time, bandName 
 	return measurement
 }
 
-// logMeasurement writes a measurement to the CSV file
+// logMeasurement writes a measurement to the band-specific CSV file
 func (nfm *NoiseFloorMonitor) logMeasurement(m *BandMeasurement) error {
-	nfm.mu.Lock()
-	defer nfm.mu.Unlock()
+	nfm.fileMu.Lock()
+	defer nfm.fileMu.Unlock()
 
-	// Check if we need to rotate to a new file
+	// Check if we need to rotate to a new file for this band
 	dateStr := m.Timestamp.Format("2006-01-02")
-	if dateStr != nfm.currentDate {
-		if err := nfm.rotateFile(dateStr); err != nil {
+	if dateStr != nfm.currentDates[m.Band] {
+		if err := nfm.rotateFile(m.Band, dateStr); err != nil {
 			return err
 		}
 	}
 
-	// Write CSV record
+	// Get writer for this band
+	writer := nfm.csvWriters[m.Band]
+	if writer == nil {
+		return fmt.Errorf("no CSV writer for band %s", m.Band)
+	}
+
+	// Write CSV record (no band column needed since it's per-band file)
 	record := []string{
 		m.Timestamp.Format(time.RFC3339),
-		m.Band,
 		fmt.Sprintf("%.1f", m.MinDB),
 		fmt.Sprintf("%.1f", m.MaxDB),
 		fmt.Sprintf("%.1f", m.MeanDB),
@@ -663,26 +673,26 @@ func (nfm *NoiseFloorMonitor) logMeasurement(m *BandMeasurement) error {
 		fmt.Sprintf("%.1f", m.OccupancyPct),
 	}
 
-	if err := nfm.csvWriter.Write(record); err != nil {
+	if err := writer.Write(record); err != nil {
 		return err
 	}
 
 	// Flush after each write to ensure data is saved
-	nfm.csvWriter.Flush()
-	return nfm.csvWriter.Error()
+	writer.Flush()
+	return writer.Error()
 }
 
-// rotateFile creates a new CSV file for the current date
-func (nfm *NoiseFloorMonitor) rotateFile(dateStr string) error {
-	// Close current file if open
-	if nfm.currentFile != nil {
-		if err := nfm.currentFile.Close(); err != nil {
-			log.Printf("Warning: error closing previous CSV file: %v", err)
+// rotateFile creates a new CSV file for the specified band and date
+func (nfm *NoiseFloorMonitor) rotateFile(band, dateStr string) error {
+	// Close current file for this band if open
+	if nfm.currentFiles[band] != nil {
+		if err := nfm.currentFiles[band].Close(); err != nil {
+			log.Printf("Warning: error closing previous CSV file for %s: %v", band, err)
 		}
 	}
 
-	// Open new file
-	filename := filepath.Join(nfm.config.NoiseFloor.DataDir, fmt.Sprintf("noise_floor_%s.csv", dateStr))
+	// Open new file with band-specific name
+	filename := filepath.Join(nfm.config.NoiseFloor.DataDir, fmt.Sprintf("noise_floor_%s_%s.csv", band, dateStr))
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -692,20 +702,20 @@ func (nfm *NoiseFloorMonitor) rotateFile(dateStr string) error {
 	stat, _ := file.Stat()
 	needsHeader := stat.Size() == 0
 
-	nfm.currentFile = file
-	nfm.csvWriter = csv.NewWriter(file)
-	nfm.currentDate = dateStr
+	nfm.currentFiles[band] = file
+	nfm.csvWriters[band] = csv.NewWriter(file)
+	nfm.currentDates[band] = dateStr
 
-	// Write header if new file
+	// Write header if new file (no band column since it's per-band)
 	if needsHeader {
 		header := []string{
-			"timestamp", "band", "min_db", "max_db", "mean_db", "median_db",
+			"timestamp", "min_db", "max_db", "mean_db", "median_db",
 			"p5_db", "p10_db", "p95_db", "dynamic_range", "occupancy_pct",
 		}
-		if err := nfm.csvWriter.Write(header); err != nil {
+		if err := nfm.csvWriters[band].Write(header); err != nil {
 			return fmt.Errorf("failed to write CSV header: %w", err)
 		}
-		nfm.csvWriter.Flush()
+		nfm.csvWriters[band].Flush()
 		log.Printf("Created new noise floor log file: %s", filename)
 	} else if DebugMode {
 		log.Printf("DEBUG: Appending to existing noise floor log file: %s", filename)
@@ -733,13 +743,38 @@ func (nfm *NoiseFloorMonitor) GetLatestMeasurements() map[string]*BandMeasuremen
 	return result
 }
 
-// GetHistoricalData reads historical data from CSV files
+// GetHistoricalData reads historical data from band-specific CSV files
 func (nfm *NoiseFloorMonitor) GetHistoricalData(date string, band string) ([]*BandMeasurement, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
 
-	filename := filepath.Join(nfm.config.NoiseFloor.DataDir, fmt.Sprintf("noise_floor_%s.csv", date))
+	// If band is specified, read only that band's file
+	if band != "" {
+		return nfm.readBandFile(band, date)
+	}
+
+	// If no band specified, read all band files for this date
+	measurements := make([]*BandMeasurement, 0)
+	for _, bandConfig := range nfm.config.NoiseFloor.Bands {
+		bandMeasurements, err := nfm.readBandFile(bandConfig.Name, date)
+		if err != nil {
+			// Skip bands that don't have data for this date
+			continue
+		}
+		measurements = append(measurements, bandMeasurements...)
+	}
+
+	if len(measurements) == 0 {
+		return nil, fmt.Errorf("no data found for date %s", date)
+	}
+
+	return measurements, nil
+}
+
+// readBandFile reads a single band's CSV file for a specific date
+func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasurement, error) {
+	filename := filepath.Join(nfm.config.NoiseFloor.DataDir, fmt.Sprintf("noise_floor_%s_%s.csv", band, date))
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
@@ -763,14 +798,9 @@ func (nfm *NoiseFloorMonitor) GetHistoricalData(date string, band string) ([]*Ba
 	// Skip header
 	records = records[1:]
 
-	measurements := make([]*BandMeasurement, 0)
+	measurements := make([]*BandMeasurement, 0, len(records))
 	for _, record := range records {
-		if len(record) < 11 {
-			continue
-		}
-
-		// Filter by band if specified
-		if band != "" && record[1] != band {
+		if len(record) < 10 {
 			continue
 		}
 
@@ -781,19 +811,19 @@ func (nfm *NoiseFloorMonitor) GetHistoricalData(date string, band string) ([]*Ba
 
 		m := &BandMeasurement{
 			Timestamp: timestamp,
-			Band:      record[1],
+			Band:      band, // Band comes from filename, not CSV
 		}
 
-		// Parse float values (ignore errors, use zero values on parse failure)
-		_, _ = fmt.Sscanf(record[2], "%f", &m.MinDB)
-		_, _ = fmt.Sscanf(record[3], "%f", &m.MaxDB)
-		_, _ = fmt.Sscanf(record[4], "%f", &m.MeanDB)
-		_, _ = fmt.Sscanf(record[5], "%f", &m.MedianDB)
-		_, _ = fmt.Sscanf(record[6], "%f", &m.P5DB)
-		_, _ = fmt.Sscanf(record[7], "%f", &m.P10DB)
-		_, _ = fmt.Sscanf(record[8], "%f", &m.P95DB)
-		_, _ = fmt.Sscanf(record[9], "%f", &m.DynamicRange)
-		_, _ = fmt.Sscanf(record[10], "%f", &m.OccupancyPct)
+		// Parse float values (no band column in per-band files)
+		_, _ = fmt.Sscanf(record[1], "%f", &m.MinDB)
+		_, _ = fmt.Sscanf(record[2], "%f", &m.MaxDB)
+		_, _ = fmt.Sscanf(record[3], "%f", &m.MeanDB)
+		_, _ = fmt.Sscanf(record[4], "%f", &m.MedianDB)
+		_, _ = fmt.Sscanf(record[5], "%f", &m.P5DB)
+		_, _ = fmt.Sscanf(record[6], "%f", &m.P10DB)
+		_, _ = fmt.Sscanf(record[7], "%f", &m.P95DB)
+		_, _ = fmt.Sscanf(record[8], "%f", &m.DynamicRange)
+		_, _ = fmt.Sscanf(record[9], "%f", &m.OccupancyPct)
 
 		measurements = append(measurements, m)
 	}
@@ -812,17 +842,32 @@ func (nfm *NoiseFloorMonitor) GetAvailableDates() ([]string, error) {
 		return nil, fmt.Errorf("failed to read data directory: %w", err)
 	}
 
-	dates := make([]string, 0)
+	// Use a map to collect unique dates
+	dateMap := make(map[string]bool)
 	for _, file := range files {
 		if file.IsDir() {
 			continue
 		}
 
 		name := file.Name()
-		if len(name) > 17 && name[:12] == "noise_floor_" && name[len(name)-4:] == ".csv" {
-			date := name[12 : len(name)-4]
-			dates = append(dates, date)
+		// New format: noise_floor_{band}_{date}.csv
+		// Example: noise_floor_20m_2025-11-03.csv
+		if len(name) > 20 && name[:12] == "noise_floor_" && name[len(name)-4:] == ".csv" {
+			// Extract date from end of filename (last 14 chars before .csv = _YYYY-MM-DD)
+			if len(name) >= 18 {
+				dateWithUnderscore := name[len(name)-15 : len(name)-4] // _YYYY-MM-DD
+				if len(dateWithUnderscore) == 11 && dateWithUnderscore[0] == '_' {
+					date := dateWithUnderscore[1:] // YYYY-MM-DD
+					dateMap[date] = true
+				}
+			}
 		}
+	}
+
+	// Convert map to sorted slice
+	dates := make([]string, 0, len(dateMap))
+	for date := range dateMap {
+		dates = append(dates, date)
 	}
 
 	// Sort dates in descending order (newest first)

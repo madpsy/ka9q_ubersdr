@@ -1,9 +1,11 @@
 package main
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -103,6 +105,39 @@ func httpLogger(logFile *os.File, next http.Handler) http.Handler {
 			log.Printf("Error writing to access log: %v", err)
 		}
 	})
+}
+
+// gzipResponseWriter wraps http.ResponseWriter to provide gzip compression
+type gzipResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
+func (w gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
+
+// gzipHandler wraps an http.HandlerFunc with gzip compression
+func gzipHandler(fn http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check if client accepts gzip
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			fn(w, r)
+			return
+		}
+
+		// Set gzip headers
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+
+		// Create gzip writer
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+
+		// Wrap response writer
+		gzipW := gzipResponseWriter{Writer: gz, ResponseWriter: w}
+		fn(gzipW, r)
+	}
 }
 
 func main() {
@@ -335,19 +370,19 @@ func main() {
 		handleStatus(w, r, config)
 	})
 
-	// Noise floor endpoints
-	http.HandleFunc("/api/noisefloor/latest", func(w http.ResponseWriter, r *http.Request) {
+	// Noise floor endpoints (with gzip compression)
+	http.HandleFunc("/api/noisefloor/latest", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorLatest(w, r, noiseFloorMonitor)
-	})
-	http.HandleFunc("/api/noisefloor/history", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	http.HandleFunc("/api/noisefloor/history", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorHistory(w, r, noiseFloorMonitor)
-	})
-	http.HandleFunc("/api/noisefloor/dates", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	http.HandleFunc("/api/noisefloor/dates", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorDates(w, r, noiseFloorMonitor)
-	})
-	http.HandleFunc("/api/noisefloor/fft", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	http.HandleFunc("/api/noisefloor/fft", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorFFT(w, r, noiseFloorMonitor)
-	})
+	}))
 
 	// Admin authentication endpoints (no auth required)
 	http.HandleFunc("/admin/login", adminHandler.HandleLogin)

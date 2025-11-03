@@ -6,6 +6,7 @@ class NoiseFloorMonitor {
         this.trendChart = null;
         this.dynamicRangeChart = null;
         this.refreshInterval = null;
+        this.fftRefreshInterval = null;
         this.currentDate = 'live';
         this.currentBand = 'all';
         this.compactView = false;
@@ -974,12 +975,19 @@ class NoiseFloorMonitor {
     }
     
     startAutoRefresh() {
-        // Auto-refresh every 60 seconds for live data
+        // Auto-refresh full data every 60 seconds for live data
         this.refreshInterval = setInterval(() => {
             if (this.currentDate === 'live') {
                 this.loadData();
             }
         }, 60000);
+        
+        // Auto-refresh FFT spectrums every 10 seconds for live data
+        this.fftRefreshInterval = setInterval(() => {
+            if (this.currentDate === 'live') {
+                this.updateFFTSpectrums();
+            }
+        }, 10000);
         
         // Initial load
         this.loadData();
@@ -989,6 +997,64 @@ class NoiseFloorMonitor {
         if (this.refreshInterval) {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
+        }
+        if (this.fftRefreshInterval) {
+            clearInterval(this.fftRefreshInterval);
+            this.fftRefreshInterval = null;
+        }
+    }
+    
+    async updateFFTSpectrums() {
+        // Get all visible bands
+        const bands = this.currentBand === 'all'
+            ? ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m']
+            : [this.currentBand];
+        
+        // Update FFT for each visible band
+        for (const band of bands) {
+            const canvasId = `fft-${band}`;
+            const canvas = document.getElementById(canvasId);
+            if (canvas) {
+                await this.updateSingleFFT(canvasId, band);
+            }
+        }
+    }
+    
+    async updateSingleFFT(canvasId, band) {
+        try {
+            const response = await fetch(`/api/noisefloor/fft?band=${band}`);
+            
+            if (!response.ok) {
+                return;
+            }
+            
+            const fftData = await response.json();
+            
+            if (!fftData || !fftData.data || fftData.data.length === 0) {
+                return;
+            }
+            
+            // Find the existing chart and update its data
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            
+            const chart = Chart.getChart(canvas);
+            if (chart) {
+                // Update the chart data
+                chart.data.datasets[0].data = fftData.data;
+                
+                // Update Y-axis scaling
+                const dataMin = Math.min(...fftData.data);
+                const dataMax = Math.max(...fftData.data);
+                const range = dataMax - dataMin;
+                const padding = range * 0.05;
+                chart.options.scales.y.min = Math.floor(dataMin - padding);
+                chart.options.scales.y.max = Math.ceil(dataMax + padding);
+                
+                chart.update('none'); // Update without animation
+            }
+        } catch (error) {
+            console.error(`Error updating FFT for ${band}:`, error);
         }
     }
 }

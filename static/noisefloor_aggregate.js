@@ -455,7 +455,7 @@ function displayStatistics(data, request) {
     if (data.comparison) {
         addStatCard(statsGrid, totalComparison, 'Comparison Data Points');
     }
-    addStatCard(statsGrid, request.bands.length, 'Bands Analyzed');
+    addStatCard(statsGrid, request.bands.length, 'Bands Analysed');
     addStatCard(statsGrid, request.fields.length, 'Metrics Tracked');
     
     // Add processing time if available
@@ -701,19 +701,29 @@ function createFieldChart(field, data, request) {
                     labels: { color: '#fff' }
                 },
                 tooltip: {
-                    mode: 'index',
+                    mode: 'nearest',
                     intersect: false,
+                    axis: 'x',
                     callbacks: {
                         title: function(context) {
-                            // Show actual timestamp in tooltip
-                            if (context[0] && context[0].raw && context[0].raw.actualTime) {
-                                return context[0].raw.actualTime.toLocaleString('en-GB', {
-                                    year: 'numeric',
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                });
+                            if (context[0]) {
+                                if (useTimeOfDayAlignment) {
+                                    // In time-of-day mode, show only the time (matching X-axis)
+                                    // Use the X value from the nearest point
+                                    const timeMs = context[0].parsed.x;
+                                    return formatTimeOfDay(timeMs);
+                                } else {
+                                    // In elapsed time mode, show actual timestamp from the data point
+                                    if (context[0].raw && context[0].raw.actualTime) {
+                                        return context[0].raw.actualTime.toLocaleString('en-GB', {
+                                            year: 'numeric',
+                                            month: 'short',
+                                            day: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                        });
+                                    }
+                                }
                             }
                             return '';
                         },
@@ -1076,18 +1086,29 @@ function createFieldChartData(field, data, request, ctx) {
                     labels: { color: '#fff' }
                 },
                 tooltip: {
-                    mode: 'index',
+                    mode: 'nearest',
                     intersect: false,
+                    axis: 'x',
                     callbacks: {
                         title: function(context) {
-                            if (context[0] && context[0].raw && context[0].raw.actualTime) {
-                                return context[0].raw.actualTime.toLocaleString('en-GB', {
-                                    year: 'numeric',
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                });
+                            if (context[0]) {
+                                if (useTimeOfDayAlignment) {
+                                    // In time-of-day mode, show only the time (matching X-axis)
+                                    // Use the X value from the nearest point
+                                    const timeMs = context[0].parsed.x;
+                                    return formatTimeOfDay(timeMs);
+                                } else {
+                                    // In elapsed time mode, show actual timestamp from the data point
+                                    if (context[0].raw && context[0].raw.actualTime) {
+                                        return context[0].raw.actualTime.toLocaleString('en-GB', {
+                                            year: 'numeric',
+                                            month: 'short',
+                                            day: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                        });
+                                    }
+                                }
                             }
                             return '';
                         },

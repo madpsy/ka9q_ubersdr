@@ -16,7 +16,16 @@ class NoiseFloorMonitor {
         this.sparklineCharts = {}; // Store sparkline chart references by band
         this.fftCharts = {}; // Store FFT chart references by band
         this.wasHistorical = false; // Track if we were viewing historical data
-        
+
+        // Audio preview
+        this.audioPreview = null;
+        this.audioPreviewEnabled = false;
+        this.audioPreviewFrequency = null; // Current tuned audio frequency
+        this.audioPreviewVisualFrequency = null; // Visual indicator frequency (follows cursor)
+        this.currentBandData = null; // Store current band data for audio preview
+        this.tuneDebounceTimer = null; // Debounce timer for tune commands
+        this.pendingTuneFrequency = null; // Pending frequency for debounced tune
+
         // Tableau 10 color palette - designed for maximum distinction
         this.bandColors = {
             '160m': '#4E79A7',  // Blue
@@ -30,11 +39,11 @@ class NoiseFloorMonitor {
             '12m': '#9C755F',   // Brown
             '10m': '#BAB0AC'    // Gray
         };
-        
+
         this.init();
         this.loadVersion();
     }
-    
+
     async loadVersion() {
         try {
             const response = await fetch('/api/description');
@@ -66,7 +75,7 @@ class NoiseFloorMonitor {
             }
         }
     }
-    
+
     sortBands(bands) {
         // Sort bands by their numeric value (160m, 80m, 60m, 40m, 30m, 20m, 17m, 15m, 12m, 10m)
         const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
@@ -78,7 +87,7 @@ class NoiseFloorMonitor {
             return indexA - indexB;
         });
     }
-    
+
     init() {
         this.setupEventListeners();
         this.loadAvailableDates();
@@ -93,7 +102,7 @@ class NoiseFloorMonitor {
 
         this.startAutoRefresh();
     }
-    
+
     setupEventListeners() {
         document.getElementById('dateSelect').addEventListener('change', (e) => {
             this.currentDate = e.target.value;
@@ -101,40 +110,54 @@ class NoiseFloorMonitor {
             this.cleanup(); // Clean up before loading new data
             this.loadData();
         });
-        
-        document.getElementById('bandSelect').addEventListener('change', (e) => {
+
+        document.getElementById('bandSelect').addEventListener('change', async (e) => {
+            // Stop audio preview when changing bands
+            if (this.audioPreview && this.audioPreviewEnabled) {
+                await this.audioPreview.stopPreview();
+                this.audioPreviewEnabled = false;
+                this.audioPreviewFrequency = null;
+            }
+
             this.currentBand = e.target.value;
             this.updateURL();
             this.cleanup(); // Clean up before loading new data
             this.loadData();
         });
-        
+
         document.getElementById('refreshBtn').addEventListener('click', () => {
             this.loadData();
         });
-        
-        document.getElementById('allBandsBtn').addEventListener('click', () => {
+
+        document.getElementById('allBandsBtn').addEventListener('click', async () => {
+            // Stop audio preview when switching to all bands
+            if (this.audioPreview && this.audioPreviewEnabled) {
+                await this.audioPreview.stopPreview();
+                this.audioPreviewEnabled = false;
+                this.audioPreviewFrequency = null;
+            }
+
             this.currentBand = 'all';
             document.getElementById('bandSelect').value = 'all';
             this.updateURL();
             this.loadData();
         });
-        
+
         document.getElementById('viewToggleBtn').addEventListener('click', () => {
             this.toggleCompactView();
         });
     }
-    
+
     toggleCompactView() {
         // Only allow compact view toggle in "all bands" mode
         if (this.currentBand !== 'all') {
             return;
         }
-        
+
         this.compactView = !this.compactView;
         const btn = document.getElementById('viewToggleBtn');
         btn.textContent = this.compactView ? '📋 Full View' : '📊 Compact View';
-        
+
         // Toggle compact-view class on all cards
         const cards = document.querySelectorAll('.card');
         cards.forEach(card => {
@@ -145,17 +168,17 @@ class NoiseFloorMonitor {
             }
         });
     }
-    
+
     loadFromURL() {
         const params = new URLSearchParams(window.location.search);
         const band = params.get('band');
-        
+
         if (band && band !== 'all') {
             this.currentBand = band;
             document.getElementById('bandSelect').value = band;
         }
     }
-    
+
     updateURL() {
         const params = new URLSearchParams();
         if (this.currentBand !== 'all') {
@@ -164,20 +187,20 @@ class NoiseFloorMonitor {
         const newURL = params.toString() ? `?${params.toString()}` : window.location.pathname;
         window.history.replaceState({}, '', newURL);
     }
-    
+
     async loadAvailableDates() {
         try {
             const response = await fetch('/api/noisefloor/dates');
             if (!response.ok) {
                 throw new Error('Failed to load dates');
             }
-            
+
             const data = await response.json();
             const select = document.getElementById('dateSelect');
-            
+
             // Keep "Live Data" option
             select.innerHTML = '<option value="live">Live Data</option>';
-            
+
             // Add historical dates
             if (data.dates && data.dates.length > 0) {
                 data.dates.forEach(date => {
@@ -191,11 +214,11 @@ class NoiseFloorMonitor {
             console.error('Error loading dates:', error);
         }
     }
-    
+
     loadBands() {
         const bands = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
         const select = document.getElementById('bandSelect');
-        
+
         select.innerHTML = '<option value="all">All Bands</option>';
         bands.forEach(band => {
             const option = document.createElement('option');
@@ -204,10 +227,10 @@ class NoiseFloorMonitor {
             select.appendChild(option);
         });
     }
-    
+
     async loadData() {
         this.setStatus('Loading...', 'info');
-        
+
         try {
             if (this.currentDate === 'live') {
                 await this.loadLiveData();
@@ -220,49 +243,49 @@ class NoiseFloorMonitor {
             this.setStatus(`Error: ${error.message}`, 'error');
         }
     }
-    
+
     async loadLiveData() {
         // Show the live data dashboard when viewing live data
         const liveDataSection = document.getElementById('liveData');
         liveDataSection.style.display = 'block';
-        
+
         // Only cleanup when switching from historical to live mode
         if (this.wasHistorical) {
             this.cleanup();
             this.wasHistorical = false;
         }
-        
+
         const response = await fetch('/api/noisefloor/latest');
-        
+
         // Handle 204 No Content (no data available yet)
         if (response.status === 204) {
             this.showNoData('Collecting initial data... Please wait a moment and refresh.');
             return;
         }
-        
+
         if (!response.ok) {
             if (response.status === 503) {
                 throw new Error('Noise floor monitoring is not enabled');
             }
             throw new Error('Failed to load live data');
         }
-        
+
         const data = await response.json();
-        
+
         if (!data || Object.keys(data).length === 0) {
             this.showNoData('No measurements available yet');
             return;
         }
-        
+
         // Clear cache for new data load
         this.historicalDataCache = {};
         this.recentDataCache = {};
         this.trendDataCache = {};
-        
+
         // Load data for all charts
         const today = new Date().toISOString().split('T')[0];
         const bands = this.currentBand === 'all' ? Object.keys(data).sort() : [this.currentBand];
-        
+
         for (const band of bands) {
             if (data[band]) {
                 try {
@@ -286,42 +309,42 @@ class NoiseFloorMonitor {
                 }
             }
         }
-        
+
         this.displayLiveData(data);
         await this.updateTrendChart(data);
         await this.updateDynamicRangeChart(data);
         await this.updateFT8SnrChart(data);
     }
-    
+
     async loadHistoricalData() {
         // Hide the live data dashboard when viewing historical data
         const liveDataSection = document.getElementById('liveData');
         liveDataSection.style.display = 'none';
-        
+
         // Mark that we're viewing historical data
         this.wasHistorical = true;
-        
+
         // Use trend endpoint for 10-minute averaged data, just like live mode
         const url = `/api/noisefloor/trend?date=${this.currentDate}${this.currentBand !== 'all' ? '&band=' + this.currentBand : ''}`;
         const response = await fetch(url);
-        
+
         if (!response.ok) {
             throw new Error('Failed to load historical data');
         }
-        
+
         const data = await response.json();
-        
+
         if (!data || data.length === 0) {
             this.showNoData();
             return;
         }
-        
+
         this.displayHistoricalData(data);
         await this.updateTrendChartHistorical(data);
         await this.updateDynamicRangeChartHistorical(data);
         await this.updateFT8SnrChartHistorical(data);
     }
-    
+
     async updateTrendChartHistorical(data) {
         // Group by band
         const bandData = {};
@@ -334,7 +357,7 @@ class NoiseFloorMonitor {
                 y: m.p5_db
             });
         });
-        
+
         const bands = this.sortBands(Object.keys(bandData));
         const datasets = bands.map(band => ({
             label: band,
@@ -345,13 +368,13 @@ class NoiseFloorMonitor {
             pointRadius: 2,
             tension: 0.4
         }));
-        
+
         const ctx = document.getElementById('trendChart');
-        
+
         if (this.trendChart) {
             this.trendChart.destroy();
         }
-        
+
         this.trendChart = new Chart(ctx, {
             type: 'line',
             data: { datasets },
@@ -411,16 +434,16 @@ class NoiseFloorMonitor {
             }
         });
     }
-    
+
     displayLiveData(data) {
         const dashboard = document.getElementById('dashboard');
         const trendsContainer = document.getElementById('trendsContainer');
-        
+
         // Filter by selected band if not "all"
         const bands = this.currentBand === 'all'
             ? this.sortBands(Object.keys(data))
             : [this.currentBand];
-        
+
         // Toggle layout classes based on view mode
         if (this.currentBand === 'all') {
             dashboard.classList.remove('single-band');
@@ -437,14 +460,14 @@ class NoiseFloorMonitor {
             const btn = document.getElementById('viewToggleBtn');
             btn.textContent = '📊 Compact View';
         }
-        
+
         // Always use two-column layout for trend charts
         trendsContainer.classList.add('two-column');
-        
+
         // Calculate noise floor statistics for color coding
         const noiseFloors = bands.map(band => data[band]?.p5_db).filter(v => v !== undefined);
         const noiseFloorStats = this.calculateNoiseFloorStats(noiseFloors);
-        
+
         // Check if we need to recreate cards (band selection changed or switching from historical)
         const existingBands = Array.from(dashboard.querySelectorAll('[data-band]')).map(card =>
             card.dataset.band
@@ -452,20 +475,20 @@ class NoiseFloorMonitor {
         const needsRecreate = JSON.stringify(existingBands) !== JSON.stringify(bands) ||
                               dashboard.children.length === 0 || // Force recreate if dashboard is empty
                               Object.keys(this.sparklineCharts).length === 0; // Force recreate if no charts exist
-        
+
         if (needsRecreate) {
             // Clean up old charts before recreating
             this.cleanupBandCharts(existingBands);
             dashboard.innerHTML = '';
-            
+
             bands.forEach(band => {
                 if (!data[band]) return;
-                
+
                 const measurement = data[band];
                 const card = this.createBandCard(band, measurement, noiseFloorStats);
                 dashboard.appendChild(card);
             });
-            
+
             // Reapply compact view if it was enabled
             if (this.compactView) {
                 const cards = document.querySelectorAll('.card');
@@ -481,24 +504,24 @@ class NoiseFloorMonitor {
             });
         }
     }
-    
+
     calculateNoiseFloorStats(values) {
         if (values.length === 0) return { median: 0, q1: 0, q3: 0 };
-        
+
         const sorted = [...values].sort((a, b) => a - b);
         const median = sorted[Math.floor(sorted.length / 2)];
         const q1 = sorted[Math.floor(sorted.length * 0.25)];
         const q3 = sorted[Math.floor(sorted.length * 0.75)];
-        
+
         return { median, q1, q3 };
     }
-    
+
     getNoiseFloorColor(value, stats) {
         // Lower (more negative) is better for noise floor
         // Green: below Q1 (best 25%)
         // Orange: between Q1 and Q3 (middle 50%)
         // Red: above Q3 (worst 25%)
-        
+
         if (value <= stats.q1) {
             return '#4CAF50'; // Green - good
         } else if (value <= stats.q3) {
@@ -507,20 +530,20 @@ class NoiseFloorMonitor {
             return '#F44336'; // Red - poor
         }
     }
-    
+
     createBandCard(band, measurement, noiseFloorStats = null) {
         // In single band view, create three separate cards
         if (this.currentBand !== 'all') {
             return this.createSingleBandCards(band, measurement, noiseFloorStats);
         }
-        
+
         // Original card for "all bands" view
         const card = document.createElement('div');
         card.className = 'card';
         card.style.cursor = 'pointer';
         card.title = `Click to view ${band} only`;
         card.dataset.band = band;
-        
+
         const clickHandler = () => {
             if (this.currentBand === 'all') {
                 this.currentBand = band;
@@ -532,22 +555,22 @@ class NoiseFloorMonitor {
         };
         card.addEventListener('click', clickHandler);
         card._clickHandler = clickHandler;
-        
+
         const timestamp = new Date(measurement.timestamp).toLocaleTimeString();
         const sparklineId = `sparkline-${band}`;
         const fftId = `fft-${band}`;
-        
+
         const noiseFloorColor = noiseFloorStats
             ? this.getNoiseFloorColor(measurement.p5_db, noiseFloorStats)
             : '#4CAF50';
-        
+
         const ft8SnrHtml = measurement.ft8_snr && measurement.ft8_snr > 0
             ? `<div class="metric">
                 <span class="metric-label">FT8 SNR:</span>
                 <span class="metric-value ft8-snr">${measurement.ft8_snr.toFixed(1)} dB</span>
             </div>`
             : '';
-        
+
         card.innerHTML = `
             <h3 style="display: flex; justify-content: space-between; align-items: center;">
                 <span>${band}</span>
@@ -589,35 +612,35 @@ class NoiseFloorMonitor {
                 <canvas id="${fftId}"></canvas>
             </div>
         `;
-        
+
         setTimeout(() => {
             this.createSparkline(sparklineId, band);
             this.createFFTSpectrum(fftId, band);
         }, 0);
-        
+
         return card;
     }
-    
+
     createSingleBandCards(band, measurement, noiseFloorStats = null) {
         const container = document.createElement('div');
         container.style.display = 'contents'; // Makes children act as direct grid items
         container.dataset.band = band;
-        
+
         const timestamp = new Date(measurement.timestamp).toLocaleTimeString();
         const sparklineId = `sparkline-${band}`;
         const fftId = `fft-${band}`;
-        
+
         const noiseFloorColor = noiseFloorStats
             ? this.getNoiseFloorColor(measurement.p5_db, noiseFloorStats)
             : '#4CAF50';
-        
+
         const ft8SnrHtml = measurement.ft8_snr && measurement.ft8_snr > 0
             ? `<div class="metric">
                 <span class="metric-label">FT8 SNR:</span>
                 <span class="metric-value ft8-snr">${measurement.ft8_snr.toFixed(1)} dB</span>
             </div>`
             : '';
-        
+
         // Card 1: Metrics
         const metricsCard = document.createElement('div');
         metricsCard.className = 'card';
@@ -656,7 +679,7 @@ class NoiseFloorMonitor {
             </div>
             ${ft8SnrHtml}
         `;
-        
+
         // Card 2: Sparkline (1 hour noise floor)
         const sparklineCard = document.createElement('div');
         sparklineCard.className = 'card';
@@ -668,36 +691,45 @@ class NoiseFloorMonitor {
                 <canvas id="${sparklineId}"></canvas>
             </div>
         `;
-        
-        // Card 3: FFT Spectrum
+
+        // Card 3: FFT Spectrum with Audio Preview
         const fftCard = document.createElement('div');
         fftCard.className = 'card';
         fftCard.style.gridColumn = '1 / -1'; // Span both columns
         fftCard.innerHTML = `
-            <h3>${band} Real-time Spectrum</h3>
-            <div style="margin-top: 15px; height: 300px;">
-                <canvas id="${fftId}"></canvas>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3>${band} Real-time Spectrum</h3>
+                <button id="audio-preview-btn-${band}" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                    🔊 Audio Preview
+                </button>
+            </div>
+            <div style="margin-top: 15px; height: 300px; position: relative;">
+                <canvas id="${fftId}" style="cursor: crosshair;"></canvas>
             </div>
         `;
-        
+
         container.appendChild(metricsCard);
         container.appendChild(sparklineCard);
         container.appendChild(fftCard);
-        
+
         setTimeout(() => {
             this.createSparkline(sparklineId, band);
             this.createFFTSpectrum(fftId, band);
+            // Setup audio preview after a short delay to ensure chart is stored
+            setTimeout(() => {
+                this.setupAudioPreview(band, fftId);
+            }, 100);
         }, 0);
-        
+
         return container;
     }
-    
+
     updateBandCard(band, measurement, noiseFloorStats = null) {
         const timestamp = new Date(measurement.timestamp).toLocaleTimeString();
         const noiseFloorColor = noiseFloorStats
             ? this.getNoiseFloorColor(measurement.p5_db, noiseFloorStats)
             : '#4CAF50';
-        
+
         // In "all bands" view, find the card with data-band attribute
         // In single band view, find all cards (they're children of a container with data-band)
         let cards;
@@ -711,7 +743,7 @@ class NoiseFloorMonitor {
             if (!container) return;
             cards = Array.from(container.querySelectorAll('.card'));
         }
-        
+
         // Update all cards (in single band view there are 3, in all bands view there's 1)
         cards.forEach(card => {
             // Update h3 spans (noise floor value and color)
@@ -720,7 +752,7 @@ class NoiseFloorMonitor {
                 h3Spans[1].textContent = `${measurement.p5_db.toFixed(0)} dB`;
                 h3Spans[1].style.color = noiseFloorColor;
             }
-            
+
             // Update metric values
             const metricValues = card.querySelectorAll('.metric-value');
             if (metricValues.length >= 7) {
@@ -730,16 +762,16 @@ class NoiseFloorMonitor {
                 metricValues[5].textContent = `${measurement.median_db.toFixed(1)} dB`;
                 metricValues[6].textContent = `${measurement.occupancy_pct.toFixed(1)}%`;
             }
-            
+
             const noiseFloorEl = card.querySelector('.noise-floor');
             if (noiseFloorEl) noiseFloorEl.textContent = `${measurement.p5_db.toFixed(1)} dB`;
-            
+
             const signalPeakEl = card.querySelector('.signal-peak');
             if (signalPeakEl) signalPeakEl.textContent = `${measurement.max_db.toFixed(1)} dB`;
-            
+
             const dynamicRangeEl = card.querySelector('.dynamic-range');
             if (dynamicRangeEl) dynamicRangeEl.textContent = `${measurement.dynamic_range.toFixed(1)} dB`;
-            
+
             // Update FT8 SNR if present
             const ft8SnrEl = card.querySelector('.ft8-snr');
             if (ft8SnrEl && measurement.ft8_snr && measurement.ft8_snr > 0) {
@@ -747,19 +779,19 @@ class NoiseFloorMonitor {
             }
         });
     }
-    
+
     async createSparkline(canvasId, band) {
         try {
             // Use cached recent data (last hour, all points)
             const recentData = this.recentDataCache[band];
-            
+
             if (!recentData || recentData.length === 0) {
                 return;
             }
-            
+
             const ctx = document.getElementById(canvasId);
             if (!ctx) return;
-            
+
             // Check if chart already exists
             const existingChart = this.sparklineCharts[band];
             if (existingChart) {
@@ -769,7 +801,7 @@ class NoiseFloorMonitor {
                 existingChart.update('none');
                 return;
             }
-            
+
             // Create new chart and store reference
             this.sparklineCharts[band] = new Chart(ctx, {
                 type: 'line',
@@ -877,31 +909,31 @@ class NoiseFloorMonitor {
             console.error(`Error creating sparkline for ${band}:`, error);
         }
     }
-    
+
     async createFFTSpectrum(canvasId, band) {
         try {
             // Fetch FFT data for this band
             const response = await fetch(`/api/noisefloor/fft?band=${band}`);
-            
+
             if (!response.ok) {
                 return; // Silently fail if no data
             }
-            
+
             const fftData = await response.json();
-            
+
             if (!fftData || !fftData.data || fftData.data.length === 0) {
                 return;
             }
-            
+
             const ctx = document.getElementById(canvasId);
             if (!ctx) return;
-            
+
             // Check if chart already exists
             const existingChart = this.fftCharts[band];
             if (existingChart) {
                 // Update existing chart data (no flicker)
                 existingChart.data.datasets[0].data = fftData.data;
-                
+
                 // Update Y-axis scaling
                 const dataMin = Math.min(...fftData.data);
                 const dataMax = Math.max(...fftData.data);
@@ -909,29 +941,29 @@ class NoiseFloorMonitor {
                 const padding = range * 0.05;
                 existingChart.options.scales.y.min = Math.floor(dataMin - padding);
                 existingChart.options.scales.y.max = Math.ceil(dataMax + padding);
-                
+
                 // Update marker annotations if they exist
                 if (fftData.markers && fftData.markers.length > 0) {
                     existingChart.options.plugins.annotation.annotations = this.createMarkerAnnotations(fftData.markers);
                 }
-                
+
                 existingChart.update('none');
                 return;
             }
-            
+
             // Calculate frequency for each bin
             const startFreq = fftData.start_freq / 1e6; // Convert to MHz
             const endFreq = fftData.end_freq / 1e6;
             const binWidthMHz = fftData.bin_width / 1e6; // Convert to MHz
             const numBins = fftData.data.length;
-            
+
             // Create frequency labels
             const frequencies = [];
             for (let i = 0; i < numBins; i++) {
                 const freq = startFreq + (i * binWidthMHz); // MHz
                 frequencies.push(freq);
             }
-            
+
             // Calculate actual min/max from data for proper Y-axis scaling
             const dataMin = Math.min(...fftData.data);
             const dataMax = Math.max(...fftData.data);
@@ -939,12 +971,12 @@ class NoiseFloorMonitor {
             const padding = range * 0.05; // 5% padding
             const yMin = Math.floor(dataMin - padding);
             const yMax = Math.ceil(dataMax + padding);
-            
+
             // Create marker annotations if markers exist
             const annotations = fftData.markers && fftData.markers.length > 0
                 ? this.createMarkerAnnotations(fftData.markers)
                 : {};
-            
+
             // Create new chart and store reference
             this.fftCharts[band] = new Chart(ctx, {
                 type: 'line',
@@ -1054,7 +1086,7 @@ class NoiseFloorMonitor {
             console.error(`Error creating FFT spectrum for ${band}:`, error);
         }
     }
-    
+
     displayHistoricalData(data) {
         // Group by band
         const bandData = {};
@@ -1064,44 +1096,44 @@ class NoiseFloorMonitor {
             }
             bandData[m.band].push(m);
         });
-        
+
         // Display latest measurement for each band
         const dashboard = document.getElementById('dashboard');
         dashboard.innerHTML = '';
-        
+
         this.sortBands(Object.keys(bandData)).forEach(band => {
             const measurements = bandData[band];
             const latest = measurements[measurements.length - 1];
             const card = this.createBandCard(band, latest);
             dashboard.appendChild(card);
         });
-        
+
         // Reapply compact view if it was enabled
         if (this.compactView) {
             const cards = document.querySelectorAll('.card');
             cards.forEach(card => card.classList.add('compact-view'));
         }
     }
-    
+
     async updateTrendChart(data) {
         const ctx = document.getElementById('trendChart');
-        
+
         // Prepare datasets
         const bands = this.currentBand === 'all'
             ? this.sortBands(Object.keys(data))
             : [this.currentBand];
-        
+
         // Load today's historical data for trend chart
         const today = new Date().toISOString().split('T')[0];
         const datasets = [];
-        
+
         for (const band of bands) {
             if (!data[band]) continue;
-            
+
             try {
                 // Use cached trend data (24 hours, 10-min averages)
                 const trendData = this.trendDataCache[band] || [];
-                
+
                 // If we have trend data, use it; otherwise just show current point
                 const dataPoints = trendData.length > 0
                     ? trendData.map(d => ({
@@ -1112,7 +1144,7 @@ class NoiseFloorMonitor {
                         x: new Date(data[band].timestamp),
                         y: data[band].p5_db
                       }];
-                
+
                 datasets.push({
                     label: band,
                     data: dataPoints,
@@ -1137,14 +1169,14 @@ class NoiseFloorMonitor {
                 });
             }
         }
-        
+
         // Update existing chart if it exists, otherwise create new one
         if (this.trendChart) {
             this.trendChart.data.datasets = datasets;
             this.trendChart.update('none');
             return;
         }
-        
+
         this.trendChart = new Chart(ctx, {
             type: 'line',
             data: { datasets },
@@ -1204,21 +1236,21 @@ class NoiseFloorMonitor {
             }
         });
     }
-    
+
     async updateDynamicRangeChart(data) {
         const bands = this.currentBand === 'all'
             ? this.sortBands(Object.keys(data))
             : [this.currentBand];
-        
+
         const datasets = [];
-        
+
         for (const band of bands) {
             if (!data[band]) continue;
-            
+
             try {
                 // Use cached trend data (24 hours, 10-min averages)
                 const trendData = this.trendDataCache[band] || [];
-                
+
                 const dataPoints = trendData.length > 0
                     ? trendData.map(d => ({
                         x: new Date(d.timestamp),
@@ -1228,7 +1260,7 @@ class NoiseFloorMonitor {
                         x: new Date(data[band].timestamp),
                         y: data[band].dynamic_range
                       }];
-                
+
                 datasets.push({
                     label: band,
                     data: dataPoints,
@@ -1242,24 +1274,24 @@ class NoiseFloorMonitor {
                 console.error(`Error loading dynamic range data for ${band}:`, error);
             }
         }
-        
+
         const ctx = document.getElementById('dynamicRangeChart');
-        
+
         // Update existing chart if it exists and canvas is still in DOM, otherwise create new one
         if (this.dynamicRangeChart && ctx && ctx.parentElement) {
             this.dynamicRangeChart.data.datasets = datasets;
             this.dynamicRangeChart.update('none');
             return;
         }
-        
+
         // Destroy old chart if canvas was removed
         if (this.dynamicRangeChart && (!ctx || !ctx.parentElement)) {
             this.dynamicRangeChart.destroy();
             this.dynamicRangeChart = null;
         }
-        
+
         if (!ctx) return;
-        
+
         this.dynamicRangeChart = new Chart(ctx, {
             type: 'line',
             data: { datasets },
@@ -1319,7 +1351,7 @@ class NoiseFloorMonitor {
             }
         });
     }
-    
+
     async updateDynamicRangeChartHistorical(data) {
         // Group by band
         const bandData = {};
@@ -1332,7 +1364,7 @@ class NoiseFloorMonitor {
                 y: m.dynamic_range
             });
         });
-        
+
         const bands = this.sortBands(Object.keys(bandData));
         const datasets = bands.map(band => ({
             label: band,
@@ -1343,13 +1375,13 @@ class NoiseFloorMonitor {
             pointRadius: 2,
             tension: 0.4
         }));
-        
+
         const ctx = document.getElementById('dynamicRangeChart');
-        
+
         if (this.dynamicRangeChart) {
             this.dynamicRangeChart.destroy();
         }
-        
+
         this.dynamicRangeChart = new Chart(ctx, {
             type: 'line',
             data: { datasets },
@@ -1479,7 +1511,7 @@ class NoiseFloorMonitor {
             this.ft8SnrChart.update('none');
             return;
         }
-        
+
         // Destroy old chart if canvas was removed
         if (this.ft8SnrChart && !ctx.parentElement) {
             this.ft8SnrChart.destroy();
@@ -1656,7 +1688,7 @@ class NoiseFloorMonitor {
     updateLegend(bands) {
         const legend = document.getElementById('legend');
         legend.innerHTML = '';
-        
+
         bands.forEach(band => {
             const item = document.createElement('div');
             item.className = 'legend-item';
@@ -1667,12 +1699,12 @@ class NoiseFloorMonitor {
             legend.appendChild(item);
         });
     }
-    
+
     showNoData(message = 'No data available') {
         const dashboard = document.getElementById('dashboard');
         dashboard.innerHTML = `<div class="loading"><p>${message}</p></div>`;
     }
-    
+
     setStatus(message, type = 'info') {
         const status = document.getElementById('status');
         status.textContent = message;
@@ -1683,7 +1715,7 @@ class NoiseFloorMonitor {
             status.classList.add('success');
         }
     }
-    
+
     startAutoRefresh() {
         // Auto-refresh full data every 60 seconds for live data
         this.refreshInterval = setInterval(() => {
@@ -1691,18 +1723,18 @@ class NoiseFloorMonitor {
                 this.loadData();
             }
         }, 60000);
-        
+
         // Auto-refresh FFT spectrums every 10 seconds for live data
         this.fftRefreshInterval = setInterval(() => {
             if (this.currentDate === 'live') {
                 this.updateFFTSpectrums();
             }
         }, 10000);
-        
+
         // Initial load
         this.loadData();
     }
-    
+
     stopAutoRefresh() {
         if (this.refreshInterval) {
             clearInterval(this.refreshInterval);
@@ -1713,13 +1745,13 @@ class NoiseFloorMonitor {
             this.fftRefreshInterval = null;
         }
     }
-    
+
     async updateFFTSpectrums() {
         // Get all visible bands
         const bands = this.currentBand === 'all'
             ? ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m']
             : [this.currentBand];
-        
+
         // Update FFT for each visible band
         for (const band of bands) {
             const canvasId = `fft-${band}`;
@@ -1729,30 +1761,30 @@ class NoiseFloorMonitor {
             }
         }
     }
-    
+
     async updateSingleFFT(canvasId, band) {
         try {
             const response = await fetch(`/api/noisefloor/fft?band=${band}`);
-            
+
             if (!response.ok) {
                 return;
             }
-            
+
             const fftData = await response.json();
-            
+
             if (!fftData || !fftData.data || fftData.data.length === 0) {
                 return;
             }
-            
+
             // Find the existing chart and update its data
             const canvas = document.getElementById(canvasId);
             if (!canvas) return;
-            
+
             const chart = Chart.getChart(canvas);
             if (chart) {
                 // Update the chart data
                 chart.data.datasets[0].data = fftData.data;
-                
+
                 // Update Y-axis scaling
                 const dataMin = Math.min(...fftData.data);
                 const dataMax = Math.max(...fftData.data);
@@ -1760,26 +1792,26 @@ class NoiseFloorMonitor {
                 const padding = range * 0.05;
                 chart.options.scales.y.min = Math.floor(dataMin - padding);
                 chart.options.scales.y.max = Math.ceil(dataMax + padding);
-                
+
                 // Update marker annotations if they exist
                 if (fftData.markers && fftData.markers.length > 0) {
                     chart.options.plugins.annotation.annotations = this.createMarkerAnnotations(fftData.markers);
                 }
-                
+
                 chart.update('none'); // Update without animation
             }
         } catch (error) {
             console.error(`Error updating FFT for ${band}:`, error);
         }
     }
-    
+
     createMarkerAnnotations(markers) {
         const annotations = {};
-        
+
         markers.forEach((marker, index) => {
             const freqMHz = marker.frequency / 1e6; // Convert Hz to MHz
             const bandwidthMHz = marker.bandwidth / 1e6;
-            
+
             // Determine the frequency range based on sideband
             let xMin, xMax;
             if (marker.sideband === 'upper') {
@@ -1792,7 +1824,7 @@ class NoiseFloorMonitor {
                 xMin = freqMHz - (bandwidthMHz / 2);
                 xMax = freqMHz + (bandwidthMHz / 2);
             }
-            
+
             // Create shaded box annotation for bandwidth
             annotations[`marker_box_${index}`] = {
                 type: 'box',
@@ -1803,7 +1835,7 @@ class NoiseFloorMonitor {
                 borderWidth: 1,
                 borderDash: [5, 5]
             };
-            
+
             // Create label line at start of bandwidth (without visible line)
             annotations[`marker_label_${index}`] = {
                 type: 'line',
@@ -1825,12 +1857,231 @@ class NoiseFloorMonitor {
                 }
             };
         });
-        
+
         return annotations;
     }
-    
+
+    setupAudioPreview(band, canvasId) {
+        const button = document.getElementById(`audio-preview-btn-${band}`);
+        const canvas = document.getElementById(canvasId);
+
+        console.log('setupAudioPreview called for band:', band);
+        console.log('Button found:', button);
+        console.log('Canvas found:', canvas);
+
+        if (!button || !canvas) {
+            console.warn('Button or canvas not found for audio preview setup');
+            return;
+        }
+
+        // Get band frequency range from FFT data
+        const chart = this.fftCharts[band];
+        if (!chart) {
+            console.warn('FFT chart not found for band:', band);
+            return;
+        }
+
+        console.log('FFT chart found:', chart);
+        console.log('Chart scales:', chart.options.scales);
+
+        const startFreq = chart.options.scales.x.min * 1e6; // Convert MHz to Hz
+        const endFreq = chart.options.scales.x.max * 1e6;
+        const centerFreq = (startFreq + endFreq) / 2;
+
+        console.log('Frequency range:', { startFreq, endFreq, centerFreq });
+
+        // Store band data for audio preview
+        this.currentBandData = {
+            band: band,
+            startFreq: startFreq,
+            endFreq: endFreq,
+            centerFreq: centerFreq
+        };
+
+        // Button click handler
+        console.log('Adding click event listener to button');
+        button.addEventListener('click', async () => {
+            console.log('Audio preview button clicked!');
+            this.audioPreviewEnabled = !this.audioPreviewEnabled;
+
+            if (this.audioPreviewEnabled) {
+                console.log('Enabling audio preview');
+                // Initialize audio preview if needed
+                if (!this.audioPreview) {
+                    this.audioPreview = new MinimalRadio();
+                }
+
+                // Update button appearance
+                button.style.background = '#F44336'; // Red when active
+                button.textContent = '🔇 Stop Preview';
+
+                // Start preview at center frequency (mode auto-detected by MinimalRadio)
+                const freq = Math.round(this.currentBandData.centerFreq / 1000) * 1000; // Round to nearest kHz
+                try {
+                    console.log('Starting preview at frequency:', freq);
+                    await this.audioPreview.startPreview(freq);
+                    this.audioPreviewFrequency = freq;
+
+                    // Add visual indicator
+                    this.updatePreviewIndicator(band, freq);
+
+                    console.log('Audio preview started successfully');
+                } catch (error) {
+                    console.error('Failed to start audio preview:', error);
+                    this.audioPreviewEnabled = false;
+                    button.style.background = '#4CAF50';
+                    button.textContent = '🔊 Audio Preview';
+                    alert('Failed to start audio preview: ' + error.message);
+                }
+            } else {
+                console.log('Disabling audio preview');
+                // Stop preview
+                if (this.audioPreview) {
+                    await this.audioPreview.stopPreview();
+                }
+                this.audioPreviewFrequency = null;
+
+                // Remove visual indicator
+                this.removePreviewIndicator(band);
+
+                // Update button appearance
+                button.style.background = '#4CAF50'; // Green when inactive
+                button.textContent = '🔊 Audio Preview';
+            }
+        });
+
+        // Canvas hover handler for frequency tracking
+        canvas.addEventListener('mousemove', (e) => {
+            if (!this.audioPreviewEnabled || !this.audioPreview) return;
+
+            const chart = this.fftCharts[band];
+            if (!chart) return;
+
+            // Use Chart.js to get the exact frequency at cursor position
+            // This matches what the tooltip shows
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+
+            // Get the x-axis scale and convert pixel to value
+            const xScale = chart.scales.x;
+            const freqMHz = xScale.getValueForPixel(x);
+
+            if (freqMHz === undefined || freqMHz === null) return;
+
+            // Convert MHz to Hz and round to nearest 1 kHz
+            const freq = freqMHz * 1e6;
+            const roundedFreq = Math.round(freq / 1000) * 1000;
+
+            // Always update visual indicator to follow cursor exactly
+            this.audioPreviewVisualFrequency = roundedFreq;
+            this.updatePreviewIndicator(band, roundedFreq);
+
+            // Only send tune command if frequency changed significantly (debounced)
+            if (!this.pendingTuneFrequency || Math.abs(roundedFreq - this.pendingTuneFrequency) > 500) {
+                this.debouncedTune(roundedFreq);
+            }
+        });
+
+        // Canvas mouse leave handler
+        canvas.addEventListener('mouseleave', () => {
+            if (!this.audioPreviewEnabled || !this.audioPreview) return;
+
+            // Return to center frequency when mouse leaves
+            const centerFreq = Math.round(this.currentBandData.centerFreq / 1000) * 1000;
+            if (this.audioPreviewVisualFrequency !== centerFreq) {
+                this.audioPreviewVisualFrequency = centerFreq;
+
+                // Update visual indicator
+                this.updatePreviewIndicator(band, centerFreq);
+
+                // Return to center frequency (debounced)
+                this.debouncedTune(centerFreq);
+            }
+        });
+    }
+
+    debouncedTune(frequency) {
+        // Store the pending frequency
+        this.pendingTuneFrequency = frequency;
+
+        // Clear any existing timer
+        if (this.tuneDebounceTimer) {
+            clearTimeout(this.tuneDebounceTimer);
+        }
+
+        // Set new timer for 250ms
+        this.tuneDebounceTimer = setTimeout(() => {
+            if (this.pendingTuneFrequency !== null && this.audioPreview) {
+                try {
+                    this.audioPreview.changeFrequency(this.pendingTuneFrequency);
+                    // Update the actual tuned frequency after command is sent
+                    this.audioPreviewFrequency = this.pendingTuneFrequency;
+                } catch (error) {
+                    console.error('Failed to update preview frequency:', error);
+                }
+                this.pendingTuneFrequency = null;
+            }
+            this.tuneDebounceTimer = null;
+        }, 250);
+    }
+
+    updatePreviewIndicator(band, frequency) {
+        const chart = this.fftCharts[band];
+        if (!chart) return;
+
+        const freqMHz = frequency / 1e6; // Convert Hz to MHz
+
+        // Create or update the preview indicator annotation
+        if (!chart.options.plugins.annotation.annotations) {
+            chart.options.plugins.annotation.annotations = {};
+        }
+
+        chart.options.plugins.annotation.annotations.preview_line = {
+            type: 'line',
+            xMin: freqMHz,
+            xMax: freqMHz,
+            borderColor: 'rgba(255, 0, 0, 0.8)',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            label: {
+                display: true,
+                content: `${(frequency / 1e6).toFixed(3)} MHz`,
+                position: 'start',
+                backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                color: '#fff',
+                font: {
+                    size: 10,
+                    weight: 'bold'
+                },
+                padding: 4
+            }
+        };
+
+        chart.update('none'); // Update without animation
+    }
+
+    removePreviewIndicator(band) {
+        const chart = this.fftCharts[band];
+        if (!chart || !chart.options.plugins.annotation.annotations) return;
+
+        delete chart.options.plugins.annotation.annotations.preview_line;
+        chart.update('none');
+    }
+
     // Cleanup methods to prevent memory leaks
     cleanup() {
+        // Stop audio preview if active
+        if (this.audioPreview && this.audioPreviewEnabled) {
+            this.audioPreview.stopPreview();
+            this.audioPreviewEnabled = false;
+            this.audioPreviewFrequency = null;
+
+            // Remove preview indicator
+            if (this.currentBandData) {
+                this.removePreviewIndicator(this.currentBandData.band);
+            }
+        }
+
         // Destroy all stored charts
         Object.values(this.sparklineCharts).forEach(chart => {
             if (chart) chart.destroy();
@@ -1838,15 +2089,15 @@ class NoiseFloorMonitor {
         Object.values(this.fftCharts).forEach(chart => {
             if (chart) chart.destroy();
         });
-        
+
         this.sparklineCharts = {};
         this.fftCharts = {};
-        
+
         // Clear caches
         this.historicalDataCache = {};
         this.recentDataCache = {};
         this.trendDataCache = {};
-        
+
         // Remove event listeners from cards
         const cards = document.querySelectorAll('.card');
         cards.forEach(card => {
@@ -1856,7 +2107,7 @@ class NoiseFloorMonitor {
             }
         });
     }
-    
+
     cleanupBandCharts(bands) {
         // Destroy charts for specific bands
         bands.forEach(band => {

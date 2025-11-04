@@ -3,6 +3,9 @@
 
 class NoiseFloorMonitor {
     constructor() {
+        // Generate session ID for audio preview (only used when preview is active)
+        this.userSessionID = this.generateUserSessionID();
+        
         this.trendChart = null;
         this.dynamicRangeChart = null;
         this.ft8SnrChart = null;
@@ -45,6 +48,15 @@ class NoiseFloorMonitor {
 
         this.init();
         this.loadVersion();
+    }
+
+    // Generate unique session ID
+    generateUserSessionID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
     }
 
     async loadVersion() {
@@ -1974,7 +1986,9 @@ class NoiseFloorMonitor {
                 console.log('Enabling audio preview');
                 // Initialize audio preview if needed
                 if (!this.audioPreview) {
-                    this.audioPreview = new MinimalRadio();
+                    this.audioPreview = new MinimalRadio(this.userSessionID);
+                    // Expose audio WebSocket to window for idle detector heartbeats
+                    window.audioPreviewWs = this.audioPreview.ws;
                 }
 
                 // Update button appearance
@@ -1995,6 +2009,9 @@ class NoiseFloorMonitor {
                     await this.audioPreview.startPreview(freq);
                     this.audioPreviewFrequency = freq;
 
+                    // Expose audio WebSocket to window for idle detector heartbeats
+                    window.audioPreviewWs = this.audioPreview.ws;
+
                     // Add visual indicator
                     this.updatePreviewIndicator(band, freq);
 
@@ -2007,6 +2024,13 @@ class NoiseFloorMonitor {
                         this.audioPreview.connectSpectrum(band, (spectrumData) => {
                             this.updateFFTFromSpectrum(band, spectrumData);
                         });
+                        
+                        // Expose spectrum WebSocket to window for idle detector heartbeats
+                        // Use a structure similar to spectrumDisplay for compatibility
+                        if (!window.spectrumDisplay) {
+                            window.spectrumDisplay = {};
+                        }
+                        window.spectrumDisplay.ws = this.audioPreview.spectrumWs;
 
                         // After connection, send spectrum request message
                         // Wait a bit for WebSocket to connect
@@ -2046,6 +2070,12 @@ class NoiseFloorMonitor {
                 if (this.audioPreview) {
                     this.audioPreview.disconnectSpectrum();
                     await this.audioPreview.stopPreview();
+                    
+                    // Clear window references
+                    window.audioPreviewWs = null;
+                    if (window.spectrumDisplay) {
+                        window.spectrumDisplay.ws = null;
+                    }
                 }
                 this.audioPreviewFrequency = null;
                 this.audioPreviewVisualFrequency = null;
@@ -2281,6 +2311,12 @@ class NoiseFloorMonitor {
             this.audioPreviewEnabled = false;
             this.audioPreviewFrequency = null;
             this.audioPreviewVisualFrequency = null;
+            
+            // Clear window references
+            window.audioPreviewWs = null;
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.ws = null;
+            }
 
             // Remove preview indicator
             if (this.currentBandData) {

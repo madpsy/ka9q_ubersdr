@@ -2,9 +2,9 @@
 // Adapted from oldradio/radio.js with only essential audio functionality
 
 class MinimalRadio {
-    constructor() {
-        // Generate unique session ID
-        this.userSessionID = this.generateUserSessionID();
+    constructor(userSessionID = null) {
+        // Use provided session ID or generate new one
+        this.userSessionID = userSessionID || this.generateUserSessionID();
         
         // Audio state
         this.ws = null;
@@ -29,8 +29,43 @@ class MinimalRadio {
         this.spectrumConnected = false;
         this.spectrumCallback = null;
         this.spectrumConfig = null; // Store spectrum config (centerFreq, binCount, etc.)
+        
+        // Heartbeat timer
+        this.heartbeatInterval = null;
 
         console.log('MinimalRadio initialized, session:', this.userSessionID);
+    }
+    
+    // Start sending periodic heartbeats to keep connections alive
+    startHeartbeat() {
+        // Clear any existing interval
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+        }
+        
+        // Send heartbeat every 10 seconds
+        this.heartbeatInterval = setInterval(() => {
+            // Send to audio WebSocket
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({ type: 'ping' }));
+            }
+            
+            // Send to spectrum WebSocket
+            if (this.spectrumWs && this.spectrumWs.readyState === WebSocket.OPEN) {
+                this.spectrumWs.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 10000);
+        
+        console.log('Heartbeat started (10s interval)');
+    }
+    
+    // Stop sending heartbeats
+    stopHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+            console.log('Heartbeat stopped');
+        }
     }
     
     // Generate unique session ID
@@ -73,6 +108,7 @@ class MinimalRadio {
         try {
             await this.connectWebSocket();
             this.isPlaying = true;
+            this.startHeartbeat();
         } catch (error) {
             console.error('Failed to start preview:', error);
             throw error;
@@ -107,6 +143,9 @@ class MinimalRadio {
     async stopPreview() {
         console.log('Stopping preview');
         this.isPlaying = false;
+        
+        // Stop heartbeat
+        this.stopHeartbeat();
         
         // Close WebSocket
         if (this.ws) {

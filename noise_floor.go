@@ -1209,12 +1209,14 @@ func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasuremen
 
 // GetAvailableDates returns a list of dates for which data is available
 // Scans the year/month/day directory structure
+// Excludes today's date since it uses a rolling 24-hour window
 func (nfm *NoiseFloorMonitor) GetAvailableDates() ([]string, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
 
 	dateMap := make(map[string]bool)
+	today := time.Now().Format("2006-01-02")
 
 	// Walk through year directories
 	yearDirs, err := os.ReadDir(nfm.config.NoiseFloor.DataDir)
@@ -1272,7 +1274,10 @@ func (nfm *NoiseFloorMonitor) GetAvailableDates() ([]string, error) {
 				if hasCSV {
 					// Format as YYYY-MM-DD
 					date := fmt.Sprintf("%s-%s-%s", year, month, day)
-					dateMap[date] = true
+					// Exclude today's date (uses rolling window, not suitable for historical comparison)
+					if date != today {
+						dateMap[date] = true
+					}
 				}
 			}
 		}

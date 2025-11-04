@@ -262,6 +262,7 @@ class NoiseFloorMonitor {
             const data = await response.json();
             
             // Store available dates for date picker
+            // Backend already excludes today's date (which uses rolling window)
             this.availableDates = data.dates || [];
 
             // Update date pickers if they exist
@@ -2747,13 +2748,9 @@ class NoiseFloorMonitor {
 
     openComparisonPicker(chartType) {
         const currentComparison = this.comparisonDates[chartType];
-        const today = new Date().toISOString().split('T')[0];
         
-        // Filter out both the current date and today's date
-        // (today uses rolling window, not suitable for comparison)
-        const availableDates = this.availableDates.filter(d =>
-            d !== this.currentDate && d !== today
-        );
+        // Filter out the current date (backend already excludes today's date)
+        const availableDates = this.availableDates.filter(d => d !== this.currentDate);
         
         if (!this.comparisonPickers[chartType]) {
             this.comparisonPickers[chartType] = new DatePicker(

@@ -651,7 +651,9 @@
                     renderFields(subSection, value, fullPath);
                     container.appendChild(subSection);
                 } else if (Array.isArray(value)) {
-                    // Handle arrays (like timeout_bypass_ips)
+                    // Check if array contains objects
+                    const hasObjects = value.length > 0 && typeof value[0] === 'object' && value[0] !== null;
+                    
                     const field = document.createElement('div');
                     field.className = 'config-field';
                     
@@ -659,33 +661,124 @@
                     label.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     field.appendChild(label);
 
-                    const textarea = document.createElement('textarea');
-                    textarea.style.width = '100%';
-                    textarea.style.minHeight = '80px';
-                    textarea.style.fontFamily = 'monospace';
-                    textarea.style.fontSize = '13px';
-                    textarea.style.padding = '8px';
-                    textarea.style.border = '1px solid #ddd';
-                    textarea.style.borderRadius = '5px';
-                    textarea.style.resize = 'vertical';
-                    // Display array items one per line
-                    textarea.value = value.join('\n');
-                    textarea.dataset.path = fullPath;
-                    textarea.addEventListener('change', (e) => {
-                        // Split by newlines and filter out empty lines
-                        const arrayValue = e.target.value.split('\n')
-                            .map(line => line.trim())
-                            .filter(line => line.length > 0);
-                        updateConfigValue(e.target.dataset.path, arrayValue);
-                    });
-                    field.appendChild(textarea);
+                    if (hasObjects) {
+                        // Render array of objects with expandable sections for each item
+                        const arrayContainer = document.createElement('div');
+                        arrayContainer.style.marginTop = '10px';
+                        
+                        value.forEach((item, index) => {
+                            const itemSection = document.createElement('details');
+                            itemSection.style.marginBottom = '15px';
+                            itemSection.style.padding = '15px';
+                            itemSection.style.background = '#f8f9fa';
+                            itemSection.style.border = '1px solid #dee2e6';
+                            itemSection.style.borderRadius = '5px';
+                            itemSection.open = index === 0; // Open first item by default
+                            
+                            const summary = document.createElement('summary');
+                            summary.style.cursor = 'pointer';
+                            summary.style.fontWeight = 'bold';
+                            summary.style.marginBottom = '10px';
+                            summary.style.color = '#667eea';
+                            // Use 'name' property if available, otherwise use index
+                            summary.textContent = item.name || `Item ${index + 1}`;
+                            itemSection.appendChild(summary);
+                            
+                            // Render each property of the object
+                            for (const [propKey, propValue] of Object.entries(item)) {
+                                const propField = document.createElement('div');
+                                propField.style.marginBottom = '10px';
+                                
+                                const propLabel = document.createElement('label');
+                                propLabel.textContent = propKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                                propLabel.style.display = 'block';
+                                propLabel.style.marginBottom = '5px';
+                                propLabel.style.color = '#555';
+                                propLabel.style.fontSize = '13px';
+                                propField.appendChild(propLabel);
+                                
+                                const propInput = document.createElement('input');
+                                propInput.type = typeof propValue === 'number' ? 'number' : 'text';
+                                propInput.value = propValue;
+                                propInput.style.width = '100%';
+                                propInput.style.padding = '8px';
+                                propInput.style.border = '1px solid #ddd';
+                                propInput.style.borderRadius = '5px';
+                                propInput.style.fontSize = '13px';
+                                if (typeof propValue === 'number') {
+                                    propInput.step = propValue % 1 === 0 ? '1' : '0.01';
+                                }
+                                propInput.dataset.path = fullPath;
+                                propInput.dataset.index = index;
+                                propInput.dataset.property = propKey;
+                                propInput.addEventListener('change', (e) => {
+                                    const arrayPath = e.target.dataset.path;
+                                    const itemIndex = parseInt(e.target.dataset.index);
+                                    const property = e.target.dataset.property;
+                                    
+                                    // Get the current array
+                                    const keys = arrayPath.split('.');
+                                    let obj = currentConfig;
+                                    for (let i = 0; i < keys.length - 1; i++) {
+                                        obj = obj[keys[i]];
+                                    }
+                                    const arrayKey = keys[keys.length - 1];
+                                    const array = obj[arrayKey];
+                                    
+                                    // Update the specific property
+                                    const oldValue = array[itemIndex][property];
+                                    if (typeof oldValue === 'number') {
+                                        array[itemIndex][property] = parseFloat(e.target.value);
+                                    } else {
+                                        array[itemIndex][property] = e.target.value;
+                                    }
+                                });
+                                propField.appendChild(propInput);
+                                
+                                itemSection.appendChild(propField);
+                            }
+                            
+                            arrayContainer.appendChild(itemSection);
+                        });
+                        
+                        field.appendChild(arrayContainer);
+                        
+                        const small = document.createElement('small');
+                        small.textContent = 'Click on each item to expand and edit. Changes require server restart.';
+                        small.style.display = 'block';
+                        small.style.marginTop = '10px';
+                        small.style.color = '#666';
+                        field.appendChild(small);
+                    } else {
+                        // Render simple array (strings, numbers) as one per line
+                        const textarea = document.createElement('textarea');
+                        textarea.style.width = '100%';
+                        textarea.style.minHeight = '80px';
+                        textarea.style.fontFamily = 'monospace';
+                        textarea.style.fontSize = '13px';
+                        textarea.style.padding = '8px';
+                        textarea.style.border = '1px solid #ddd';
+                        textarea.style.borderRadius = '5px';
+                        textarea.style.resize = 'vertical';
+                        // Display array items one per line
+                        textarea.value = value.join('\n');
+                        textarea.dataset.path = fullPath;
+                        textarea.addEventListener('change', (e) => {
+                            // Split by newlines and filter out empty lines
+                            const arrayValue = e.target.value.split('\n')
+                                .map(line => line.trim())
+                                .filter(line => line.length > 0);
+                            updateConfigValue(e.target.dataset.path, arrayValue);
+                        });
+                        field.appendChild(textarea);
 
-                    const small = document.createElement('small');
-                    small.textContent = 'Enter one item per line';
-                    small.style.display = 'block';
-                    small.style.marginTop = '5px';
-                    small.style.color = '#666';
-                    field.appendChild(small);
+                        const small = document.createElement('small');
+                        small.textContent = 'Enter one item per line';
+                        small.style.display = 'block';
+                        small.style.marginTop = '5px';
+                        small.style.color = '#666';
+                        field.appendChild(small);
+                    }
                     
                     container.appendChild(field);
                 } else {

@@ -1089,13 +1089,16 @@ class NoiseFloorMonitor {
                             ticks: {
                                 color: 'rgba(255, 255, 255, 0.7)',
                                 font: {
-                                    size: 9
+                                    size: 9,
+                                    family: 'monospace'
                                 },
                                 callback: (value) => {
                                     // Pad to consistent width (4 chars: -100 to 100)
                                     const str = value.toFixed(0);
                                     return str.padStart(4, ' ');
-                                }
+                                },
+                                autoSkip: true,
+                                maxTicksLimit: 8
                             },
                             title: {
                                 display: true,

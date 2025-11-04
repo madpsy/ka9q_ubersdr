@@ -291,8 +291,10 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 				safeBinBW = 50
 			} else if newBinBW < 150 {
 				safeBinBW = 100
-			} else if newBinBW < 350 {
+			} else if newBinBW < 250 {
 				safeBinBW = 200
+			} else if newBinBW < 400 {
+				safeBinBW = 300
 			} else if newBinBW < 750 {
 				safeBinBW = 500
 			} else if newBinBW < 1500 {

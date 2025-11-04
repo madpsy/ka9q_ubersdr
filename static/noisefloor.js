@@ -2001,12 +2001,21 @@ class NoiseFloorMonitor {
                         // Wait a bit for WebSocket to connect
                         setTimeout(() => {
                             if (this.audioPreview.spectrumConnected) {
+                                // Use the same parameters as the static noise floor FFT
                                 const request = {
                                     type: 'zoom',
                                     frequency: bandConfig.center_frequency,
                                     binBandwidth: bandConfig.bin_bandwidth
                                 };
                                 console.log('Sending spectrum request:', request);
+                                console.log('Band config:', {
+                                    start: bandConfig.start_frequency / 1e6,
+                                    end: bandConfig.end_frequency / 1e6,
+                                    center: bandConfig.center_frequency / 1e6,
+                                    binBandwidth: bandConfig.bin_bandwidth,
+                                    binCount: bandConfig.bin_count,
+                                    totalBandwidth: bandConfig.total_bandwidth / 1e3
+                                });
                                 this.audioPreview.spectrumWs.send(JSON.stringify(request));
                             }
                         }, 500);

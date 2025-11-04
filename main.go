@@ -392,6 +392,9 @@ func main() {
 	http.HandleFunc("/api/noisefloor/config", func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorConfig(w, r, config)
 	})
+	http.HandleFunc("/api/noisefloor/aggregate", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorAggregate(w, r, noiseFloorMonitor)
+	}))
 
 	// Admin authentication endpoints (no auth required)
 	http.HandleFunc("/admin/login", adminHandler.HandleLogin)
@@ -1008,7 +1011,10 @@ func handleNoiseFloorDates(w http.ResponseWriter, r *http.Request, nfm *NoiseFlo
 		return
 	}
 
-	dates, err := nfm.GetAvailableDates()
+	// Check for ?today=true parameter
+	includeToday := r.URL.Query().Get("today") == "true"
+
+	dates, err := nfm.GetAvailableDates(includeToday)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{

@@ -2015,45 +2015,48 @@ class NoiseFloorMonitor {
                     // Add visual indicator
                     this.updatePreviewIndicator(band, freq);
 
-                    // Connect spectrum WebSocket for real-time FFT updates
+                    // Connect spectrum WebSocket for real-time FFT updates (delayed to avoid Cloudflare rate limiting)
                     if (this.bandConfigs && this.bandConfigs[band]) {
                         console.log('Connecting spectrum WebSocket for band:', band);
                         const bandConfig = this.bandConfigs[band];
 
-                        // Connect spectrum WebSocket with callback to update FFT chart
-                        this.audioPreview.connectSpectrum(band, (spectrumData) => {
-                            this.updateFFTFromSpectrum(band, spectrumData);
-                        });
-                        
-                        // Expose spectrum WebSocket to window for idle detector heartbeats
-                        // Use a structure similar to spectrumDisplay for compatibility
-                        if (!window.spectrumDisplay) {
-                            window.spectrumDisplay = {};
-                        }
-                        window.spectrumDisplay.ws = this.audioPreview.spectrumWs;
-
-                        // After connection, send spectrum request message
-                        // Wait a bit for WebSocket to connect
+                        // Delay spectrum connection by 1000ms to avoid simultaneous WebSocket creation
                         setTimeout(() => {
-                            if (this.audioPreview.spectrumConnected) {
-                                // Use the same parameters as the static noise floor FFT
-                                const request = {
-                                    type: 'zoom',
-                                    frequency: bandConfig.center_frequency,
-                                    binBandwidth: bandConfig.bin_bandwidth
-                                };
-                                console.log('Sending spectrum request:', request);
-                                console.log('Band config:', {
-                                    start: bandConfig.start_frequency / 1e6,
-                                    end: bandConfig.end_frequency / 1e6,
-                                    center: bandConfig.center_frequency / 1e6,
-                                    binBandwidth: bandConfig.bin_bandwidth,
-                                    binCount: bandConfig.bin_count,
-                                    totalBandwidth: bandConfig.total_bandwidth / 1e3
-                                });
-                                this.audioPreview.spectrumWs.send(JSON.stringify(request));
+                            // Connect spectrum WebSocket with callback to update FFT chart
+                            this.audioPreview.connectSpectrum(band, (spectrumData) => {
+                                this.updateFFTFromSpectrum(band, spectrumData);
+                            });
+
+                            // Expose spectrum WebSocket to window for idle detector heartbeats
+                            // Use a structure similar to spectrumDisplay for compatibility
+                            if (!window.spectrumDisplay) {
+                                window.spectrumDisplay = {};
                             }
-                        }, 500);
+                            window.spectrumDisplay.ws = this.audioPreview.spectrumWs;
+
+                            // After connection, send spectrum request message
+                            // Wait a bit for WebSocket to connect
+                            setTimeout(() => {
+                                if (this.audioPreview.spectrumConnected) {
+                                    // Use the same parameters as the static noise floor FFT
+                                    const request = {
+                                        type: 'zoom',
+                                        frequency: bandConfig.center_frequency,
+                                        binBandwidth: bandConfig.bin_bandwidth
+                                    };
+                                    console.log('Sending spectrum request:', request);
+                                    console.log('Band config:', {
+                                        start: bandConfig.start_frequency / 1e6,
+                                        end: bandConfig.end_frequency / 1e6,
+                                        center: bandConfig.center_frequency / 1e6,
+                                        binBandwidth: bandConfig.bin_bandwidth,
+                                        binCount: bandConfig.bin_count,
+                                        totalBandwidth: bandConfig.total_bandwidth / 1e3
+                                    });
+                                    this.audioPreview.spectrumWs.send(JSON.stringify(request));
+                                }
+                            }, 500);
+                        }, 2000); // Delay spectrum connection by 2000ms
                     }
 
                     console.log('Audio preview started successfully');

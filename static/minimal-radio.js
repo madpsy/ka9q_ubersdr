@@ -32,6 +32,9 @@ class MinimalRadio {
         
         // Heartbeat timer
         this.heartbeatInterval = null;
+        
+        // Connection validation cache (avoid duplicate /connection checks)
+        this.connectionValidated = false;
 
         console.log('MinimalRadio initialized, session:', this.userSessionID);
     }
@@ -166,6 +169,9 @@ class MinimalRadio {
         this.audioBufferCount = 0;
         this.nextPlayTime = 0;
         this.audioStartTime = 0;
+        
+        // Reset connection validation flag for next session
+        this.connectionValidated = false;
     }
     
     // Set volume (0.0 to 1.0)
@@ -177,43 +183,48 @@ class MinimalRadio {
     // Connect to WebSocket
     async connectWebSocket() {
         try {
-            // Check connection permission
-            const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-            const connectionUrl = `${httpProtocol}//${window.location.host}/connection`;
-            
-            console.log('Checking connection permission:', connectionUrl);
-            
-            const response = await fetch(connectionUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_session_id: this.userSessionID })
-            });
-            
-            if (!response.ok) {
-                let errorData;
-                try {
-                    errorData = await response.json();
-                } catch (e) {
-                    errorData = { reason: 'Server rejected connection' };
+            // Check connection permission (only if not already validated)
+            if (!this.connectionValidated) {
+                const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+                const connectionUrl = `${httpProtocol}//${window.location.host}/connection`;
+                
+                console.log('Checking connection permission:', connectionUrl);
+                
+                const response = await fetch(connectionUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_session_id: this.userSessionID })
+                });
+                
+                if (!response.ok) {
+                    let errorData;
+                    try {
+                        errorData = await response.json();
+                    } catch (e) {
+                        errorData = { reason: 'Server rejected connection' };
+                    }
+                    
+                    console.error('Connection not allowed:', response.status, errorData);
+                    
+                    // Show user-friendly error message
+                    const errorMsg = errorData.reason || 'Server rejected connection';
+                    alert(`Connection Error: ${errorMsg}`);
+                    throw new Error(errorMsg);
                 }
                 
-                console.error('Connection not allowed:', response.status, errorData);
+                const result = await response.json();
+                console.log('Connection check result:', result);
                 
-                // Show user-friendly error message
-                const errorMsg = errorData.reason || 'Server rejected connection';
-                alert(`Connection Error: ${errorMsg}`);
-                throw new Error(errorMsg);
-            }
-            
-            const result = await response.json();
-            console.log('Connection check result:', result);
-            
-            // Validate that connection is allowed
-            if (!result.allowed) {
-                const errorMsg = 'Connection not allowed by server';
-                console.error(errorMsg, result);
-                alert(`Connection Error: ${errorMsg}`);
-                throw new Error(errorMsg);
+                // Validate that connection is allowed
+                if (!result.allowed) {
+                    const errorMsg = 'Connection not allowed by server';
+                    console.error(errorMsg, result);
+                    alert(`Connection Error: ${errorMsg}`);
+                    throw new Error(errorMsg);
+                }
+                
+                // Mark as validated so we don't check again
+                this.connectionValidated = true;
             }
             
             // Create WebSocket connection
@@ -417,38 +428,43 @@ class MinimalRadio {
         this.spectrumCallback = callback;
 
         try {
-            // Check connection permission (reuse same session ID)
-            const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-            const connectionUrl = `${httpProtocol}//${window.location.host}/connection`;
+            // Check connection permission (only if not already validated)
+            if (!this.connectionValidated) {
+                const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+                const connectionUrl = `${httpProtocol}//${window.location.host}/connection`;
 
-            console.log('Checking spectrum connection permission:', connectionUrl);
+                console.log('Checking spectrum connection permission:', connectionUrl);
 
-            const response = await fetch(connectionUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_session_id: this.userSessionID })
-            });
+                const response = await fetch(connectionUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_session_id: this.userSessionID })
+                });
 
-            if (!response.ok) {
-                let errorData;
-                try {
-                    errorData = await response.json();
-                } catch (e) {
-                    errorData = { reason: 'Server rejected connection' };
+                if (!response.ok) {
+                    let errorData;
+                    try {
+                        errorData = await response.json();
+                    } catch (e) {
+                        errorData = { reason: 'Server rejected connection' };
+                    }
+
+                    console.error('Spectrum connection not allowed:', response.status, errorData);
+                    const errorMsg = errorData.reason || 'Server rejected connection';
+                    throw new Error(errorMsg);
                 }
 
-                console.error('Spectrum connection not allowed:', response.status, errorData);
-                const errorMsg = errorData.reason || 'Server rejected connection';
-                throw new Error(errorMsg);
-            }
+                const result = await response.json();
+                console.log('Spectrum connection check result:', result);
 
-            const result = await response.json();
-            console.log('Spectrum connection check result:', result);
-
-            if (!result.allowed) {
-                const errorMsg = 'Spectrum connection not allowed by server';
-                console.error(errorMsg, result);
-                throw new Error(errorMsg);
+                if (!result.allowed) {
+                    const errorMsg = 'Spectrum connection not allowed by server';
+                    console.error(errorMsg, result);
+                    throw new Error(errorMsg);
+                }
+                
+                // Mark as validated so we don't check again
+                this.connectionValidated = true;
             }
 
             // Create spectrum WebSocket connection

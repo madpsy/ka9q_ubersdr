@@ -5,12 +5,15 @@ class NoiseFloorMonitor {
     constructor() {
         this.trendChart = null;
         this.dynamicRangeChart = null;
+        this.ft8SnrChart = null;
         this.refreshInterval = null;
         this.fftRefreshInterval = null;
         this.currentDate = 'live';
         this.currentBand = 'all';
         this.compactView = false;
         this.historicalDataCache = {}; // Cache historical data to avoid redundant API calls
+        this.sparklineCharts = {}; // Store sparkline chart references by band
+        this.fftCharts = {}; // Store FFT chart references by band
         
         // Tableau 10 color palette - designed for maximum distinction
         this.bandColors = {
@@ -53,12 +56,14 @@ class NoiseFloorMonitor {
         document.getElementById('dateSelect').addEventListener('change', (e) => {
             this.currentDate = e.target.value;
             this.updateURL();
+            this.cleanup(); // Clean up before loading new data
             this.loadData();
         });
         
         document.getElementById('bandSelect').addEventListener('change', (e) => {
             this.currentBand = e.target.value;
             this.updateURL();
+            this.cleanup(); // Clean up before loading new data
             this.loadData();
         });
         
@@ -194,20 +199,33 @@ class NoiseFloorMonitor {
         
         // Clear cache for new data load
         this.historicalDataCache = {};
+        this.recentDataCache = {};
+        this.trendDataCache = {};
         
-        // Load today's historical data once for all charts
+        // Load data for all charts
         const today = new Date().toISOString().split('T')[0];
         const bands = this.currentBand === 'all' ? Object.keys(data).sort() : [this.currentBand];
         
         for (const band of bands) {
             if (data[band]) {
                 try {
-                    const response = await fetch(`/api/noisefloor/history?date=${today}&band=${band}`);
-                    if (response.ok) {
-                        this.historicalDataCache[band] = await response.json();
+                    // Load recent data (last hour, all points) for sparklines
+                    const recentResponse = await fetch(`/api/noisefloor/recent?band=${band}`);
+                    if (recentResponse.ok && recentResponse.status !== 204) {
+                        this.recentDataCache[band] = await recentResponse.json();
+                    } else if (recentResponse.status === 204) {
+                        this.recentDataCache[band] = []; // No data available yet
+                    }
+
+                    // Load trend data (24 hours, 10-min averages) for trend charts
+                    const trendResponse = await fetch(`/api/noisefloor/trend?date=${today}&band=${band}`);
+                    if (trendResponse.ok && trendResponse.status !== 204) {
+                        this.trendDataCache[band] = await trendResponse.json();
+                    } else if (trendResponse.status === 204) {
+                        this.trendDataCache[band] = []; // No data available yet
                     }
                 } catch (error) {
-                    console.error(`Error loading historical data for ${band}:`, error);
+                    console.error(`Error loading data for ${band}:`, error);
                 }
             }
         }
@@ -215,6 +233,7 @@ class NoiseFloorMonitor {
         this.displayLiveData(data);
         await this.updateTrendChart(data);
         await this.updateDynamicRangeChart(data);
+        await this.updateFT8SnrChart(data);
     }
     
     async loadHistoricalData() {
@@ -234,11 +253,11 @@ class NoiseFloorMonitor {
         
         this.displayHistoricalData(data);
         await this.updateDynamicRangeChartHistorical(data);
+        await this.updateFT8SnrChartHistorical(data);
     }
     
     displayLiveData(data) {
         const dashboard = document.getElementById('dashboard');
-        dashboard.innerHTML = '';
         
         // Filter by selected band if not "all"
         const bands = this.currentBand === 'all'
@@ -249,18 +268,36 @@ class NoiseFloorMonitor {
         const noiseFloors = bands.map(band => data[band]?.p5_db).filter(v => v !== undefined);
         const noiseFloorStats = this.calculateNoiseFloorStats(noiseFloors);
         
-        bands.forEach(band => {
-            if (!data[band]) return;
-            
-            const measurement = data[band];
-            const card = this.createBandCard(band, measurement, noiseFloorStats);
-            dashboard.appendChild(card);
-        });
+        // Check if we need to recreate cards (band selection changed)
+        const existingBands = Array.from(dashboard.querySelectorAll('.card')).map(card =>
+            card.querySelector('h3 span').textContent
+        );
+        const needsRecreate = JSON.stringify(existingBands) !== JSON.stringify(bands);
         
-        // Reapply compact view if it was enabled
-        if (this.compactView) {
-            const cards = document.querySelectorAll('.card');
-            cards.forEach(card => card.classList.add('compact-view'));
+        if (needsRecreate) {
+            // Clean up old charts before recreating
+            this.cleanupBandCharts(existingBands);
+            dashboard.innerHTML = '';
+            
+            bands.forEach(band => {
+                if (!data[band]) return;
+                
+                const measurement = data[band];
+                const card = this.createBandCard(band, measurement, noiseFloorStats);
+                dashboard.appendChild(card);
+            });
+            
+            // Reapply compact view if it was enabled
+            if (this.compactView) {
+                const cards = document.querySelectorAll('.card');
+                cards.forEach(card => card.classList.add('compact-view'));
+            }
+        } else {
+            // Just update existing card data (no flicker)
+            bands.forEach(band => {
+                if (!data[band]) return;
+                this.updateBandCard(band, data[band], noiseFloorStats);
+            });
         }
     }
     
@@ -295,16 +332,21 @@ class NoiseFloorMonitor {
         card.className = 'card';
         card.style.cursor = 'pointer';
         card.title = `Click to view ${band} only`;
+        card.dataset.band = band; // Store band name for easy lookup
         
         // Add click handler to switch to this band
-        card.addEventListener('click', () => {
+        const clickHandler = () => {
             if (this.currentBand === 'all') {
                 this.currentBand = band;
                 document.getElementById('bandSelect').value = band;
                 this.updateURL();
+                this.cleanup();
                 this.loadData();
             }
-        });
+        };
+        card.addEventListener('click', clickHandler);
+        // Store handler reference for cleanup
+        card._clickHandler = clickHandler;
         
         const timestamp = new Date(measurement.timestamp).toLocaleTimeString();
         const sparklineId = `sparkline-${band}`;
@@ -313,6 +355,14 @@ class NoiseFloorMonitor {
         const noiseFloorColor = noiseFloorStats
             ? this.getNoiseFloorColor(measurement.p5_db, noiseFloorStats)
             : '#4CAF50';
+        
+        // Determine FT8 SNR display (only show if > 0)
+        const ft8SnrHtml = measurement.ft8_snr && measurement.ft8_snr > 0
+            ? `<div class="metric">
+                <span class="metric-label">FT8 SNR:</span>
+                <span class="metric-value ft8-snr">${measurement.ft8_snr.toFixed(1)} dB</span>
+            </div>`
+            : '';
         
         card.innerHTML = `
             <h3 style="display: flex; justify-content: space-between; align-items: center;">
@@ -347,6 +397,7 @@ class NoiseFloorMonitor {
                 <span class="metric-label">Band Occupancy:</span>
                 <span class="metric-value">${measurement.occupancy_pct.toFixed(1)}%</span>
             </div>
+            ${ft8SnrHtml}
             <div style="margin-top: 15px; height: ${this.currentBand === 'all' ? '100px' : '150px'};">
                 <canvas id="${sparklineId}"></canvas>
             </div>
@@ -364,27 +415,72 @@ class NoiseFloorMonitor {
         return card;
     }
     
+    updateBandCard(band, measurement, noiseFloorStats = null) {
+        // Find the card for this band
+        const card = document.querySelector(`.card[data-band="${band}"]`);
+        if (!card) return;
+        
+        const timestamp = new Date(measurement.timestamp).toLocaleTimeString();
+        const noiseFloorColor = noiseFloorStats
+            ? this.getNoiseFloorColor(measurement.p5_db, noiseFloorStats)
+            : '#4CAF50';
+        
+        // Update card content without recreating - use safer selectors
+        const h3Spans = card.querySelectorAll('h3 span');
+        if (h3Spans.length >= 2) {
+            h3Spans[1].textContent = `${measurement.p5_db.toFixed(0)} dB`;
+            h3Spans[1].style.color = noiseFloorColor;
+        }
+        
+        const metricValues = card.querySelectorAll('.metric-value');
+        if (metricValues.length >= 7) {
+            metricValues[0].textContent = timestamp;
+            metricValues[2].textContent = `${measurement.max_db.toFixed(1)} dB`;
+            metricValues[3].textContent = `${measurement.p95_db.toFixed(1)} dB`;
+            metricValues[5].textContent = `${measurement.median_db.toFixed(1)} dB`;
+            metricValues[6].textContent = `${measurement.occupancy_pct.toFixed(1)}%`;
+        }
+        
+        const noiseFloorEl = card.querySelector('.noise-floor');
+        if (noiseFloorEl) noiseFloorEl.textContent = `${measurement.p5_db.toFixed(1)} dB`;
+        
+        const signalPeakEl = card.querySelector('.signal-peak');
+        if (signalPeakEl) signalPeakEl.textContent = `${measurement.max_db.toFixed(1)} dB`;
+        
+        const dynamicRangeEl = card.querySelector('.dynamic-range');
+        if (dynamicRangeEl) dynamicRangeEl.textContent = `${measurement.dynamic_range.toFixed(1)} dB`;
+        
+        // Update FT8 SNR if present
+        const ft8SnrEl = card.querySelector('.ft8-snr');
+        if (ft8SnrEl && measurement.ft8_snr && measurement.ft8_snr > 0) {
+            ft8SnrEl.textContent = `${measurement.ft8_snr.toFixed(1)} dB`;
+        }
+    }
+    
     async createSparkline(canvasId, band) {
         try {
-            // Use cached historical data
-            const data = this.historicalDataCache[band];
+            // Use cached recent data (last hour, all points)
+            const recentData = this.recentDataCache[band];
             
-            if (!data || data.length === 0) {
-                return;
-            }
-            
-            // Filter to last hour
-            const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-            const recentData = data.filter(d => new Date(d.timestamp) >= oneHourAgo);
-            
-            if (recentData.length === 0) {
+            if (!recentData || recentData.length === 0) {
                 return;
             }
             
             const ctx = document.getElementById(canvasId);
             if (!ctx) return;
             
-            new Chart(ctx, {
+            // Check if chart already exists
+            const existingChart = this.sparklineCharts[band];
+            if (existingChart) {
+                // Update existing chart data (no flicker)
+                existingChart.data.labels = recentData.map(d => new Date(d.timestamp));
+                existingChart.data.datasets[0].data = recentData.map(d => d.p5_db);
+                existingChart.update('none');
+                return;
+            }
+            
+            // Create new chart and store reference
+            this.sparklineCharts[band] = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: recentData.map(d => new Date(d.timestamp)),
@@ -509,6 +605,29 @@ class NoiseFloorMonitor {
             const ctx = document.getElementById(canvasId);
             if (!ctx) return;
             
+            // Check if chart already exists
+            const existingChart = this.fftCharts[band];
+            if (existingChart) {
+                // Update existing chart data (no flicker)
+                existingChart.data.datasets[0].data = fftData.data;
+                
+                // Update Y-axis scaling
+                const dataMin = Math.min(...fftData.data);
+                const dataMax = Math.max(...fftData.data);
+                const range = dataMax - dataMin;
+                const padding = range * 0.05;
+                existingChart.options.scales.y.min = Math.floor(dataMin - padding);
+                existingChart.options.scales.y.max = Math.ceil(dataMax + padding);
+                
+                // Update marker annotations if they exist
+                if (fftData.markers && fftData.markers.length > 0) {
+                    existingChart.options.plugins.annotation.annotations = this.createMarkerAnnotations(fftData.markers);
+                }
+                
+                existingChart.update('none');
+                return;
+            }
+            
             // Calculate frequency for each bin
             const startFreq = fftData.start_freq / 1e6; // Convert to MHz
             const endFreq = fftData.end_freq / 1e6;
@@ -530,9 +649,13 @@ class NoiseFloorMonitor {
             const yMin = Math.floor(dataMin - padding);
             const yMax = Math.ceil(dataMax + padding);
             
-            console.log(`FFT for ${band}: ${numBins} bins, ${startFreq.toFixed(3)}-${endFreq.toFixed(3)} MHz, bin width ${(binWidthMHz*1000).toFixed(1)} kHz, Y-axis: ${yMin} to ${yMax} dB`);
+            // Create marker annotations if markers exist
+            const annotations = fftData.markers && fftData.markers.length > 0
+                ? this.createMarkerAnnotations(fftData.markers)
+                : {};
             
-            new Chart(ctx, {
+            // Create new chart and store reference
+            this.fftCharts[band] = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: frequencies,
@@ -575,6 +698,9 @@ class NoiseFloorMonitor {
                                     return `${item.parsed.y.toFixed(1)} dB`;
                                 }
                             }
+                        },
+                        annotation: {
+                            annotations: annotations
                         }
                     },
                     scales: {
@@ -682,12 +808,12 @@ class NoiseFloorMonitor {
             if (!data[band]) continue;
             
             try {
-                // Use cached historical data
-                const historicalData = this.historicalDataCache[band] || [];
+                // Use cached trend data (24 hours, 10-min averages)
+                const trendData = this.trendDataCache[band] || [];
                 
-                // If we have historical data, use it; otherwise just show current point
-                const dataPoints = historicalData.length > 0
-                    ? historicalData.map(d => ({
+                // If we have trend data, use it; otherwise just show current point
+                const dataPoints = trendData.length > 0
+                    ? trendData.map(d => ({
                         x: new Date(d.timestamp),
                         y: d.p5_db
                       }))
@@ -740,6 +866,18 @@ class NoiseFloorMonitor {
                     legend: {
                         display: true,
                         labels: { color: '#fff' }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false
+                                });
+                            }
+                        }
                     }
                 },
                 scales: {
@@ -784,11 +922,11 @@ class NoiseFloorMonitor {
             if (!data[band]) continue;
             
             try {
-                // Use cached historical data
-                const historicalData = this.historicalDataCache[band] || [];
+                // Use cached trend data (24 hours, 10-min averages)
+                const trendData = this.trendDataCache[band] || [];
                 
-                const dataPoints = historicalData.length > 0
-                    ? historicalData.map(d => ({
+                const dataPoints = trendData.length > 0
+                    ? trendData.map(d => ({
                         x: new Date(d.timestamp),
                         y: d.dynamic_range
                       }))
@@ -832,6 +970,18 @@ class NoiseFloorMonitor {
                     legend: {
                         display: true,
                         labels: { color: '#fff' }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false
+                                });
+                            }
+                        }
                     }
                 },
                 scales: {
@@ -910,6 +1060,18 @@ class NoiseFloorMonitor {
                     legend: {
                         display: true,
                         labels: { color: '#fff' }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false
+                                });
+                            }
+                        }
                     }
                 },
                 scales: {
@@ -942,7 +1104,232 @@ class NoiseFloorMonitor {
             }
         });
     }
-    
+
+    async updateFT8SnrChart(data) {
+        const bands = this.currentBand === 'all'
+            ? this.sortBands(Object.keys(data))
+            : [this.currentBand];
+
+        const datasets = [];
+
+        for (const band of bands) {
+            if (!data[band]) continue;
+
+            try {
+                // Use cached trend data (24 hours, 10-min averages)
+                const trendData = this.trendDataCache[band] || [];
+
+                // Filter out bands with no FT8 frequency configured (ft8_snr = 0)
+                const hasValidFT8Data = trendData.some(d => d.ft8_snr && d.ft8_snr > 0);
+                if (!hasValidFT8Data && (!data[band].ft8_snr || data[band].ft8_snr <= 0)) {
+                    continue; // Skip bands without FT8 configured
+                }
+
+                const dataPoints = trendData.length > 0
+                    ? trendData.map(d => ({
+                        x: new Date(d.timestamp),
+                        y: d.ft8_snr || 0
+                      }))
+                    : [{
+                        x: new Date(data[band].timestamp),
+                        y: data[band].ft8_snr || 0
+                      }];
+
+                datasets.push({
+                    label: band,
+                    data: dataPoints,
+                    borderColor: this.bandColors[band] || '#999',
+                    backgroundColor: this.bandColors[band] || '#999',
+                    borderWidth: 2,
+                    pointRadius: 2,
+                    tension: 0.4
+                });
+            } catch (error) {
+                console.error(`Error loading FT8 SNR data for ${band}:`, error);
+            }
+        }
+
+        const ctx = document.getElementById('ft8SnrChart');
+
+        if (this.ft8SnrChart) {
+            this.ft8SnrChart.destroy();
+        }
+
+        // Only create chart if we have data
+        if (datasets.length === 0) {
+            ctx.parentElement.style.display = 'none';
+            return;
+        } else {
+            ctx.parentElement.style.display = 'block';
+        }
+
+        this.ft8SnrChart = new Chart(ctx, {
+            type: 'line',
+            data: { datasets },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2.5,
+                plugins: {
+                    title: {
+                        display: false
+                    },
+                    legend: {
+                        display: true,
+                        labels: { color: '#fff' }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false
+                                });
+                            },
+                            label: (item) => {
+                                return `${item.dataset.label}: ${item.parsed.y.toFixed(1)} dB`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'FT8 SNR (dB)',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
+                }
+            }
+        });
+    }
+
+    async updateFT8SnrChartHistorical(data) {
+        // Group by band
+        const bandData = {};
+        data.forEach(m => {
+            // Only include bands with FT8 data
+            if (m.ft8_snr && m.ft8_snr > 0) {
+                if (!bandData[m.band]) {
+                    bandData[m.band] = [];
+                }
+                bandData[m.band].push({
+                    x: new Date(m.timestamp),
+                    y: m.ft8_snr
+                });
+            }
+        });
+
+        const bands = this.sortBands(Object.keys(bandData));
+        const datasets = bands.map(band => ({
+            label: band,
+            data: bandData[band],
+            borderColor: this.bandColors[band] || '#999',
+            backgroundColor: this.bandColors[band] || '#999',
+            borderWidth: 2,
+            pointRadius: 2,
+            tension: 0.4
+        }));
+
+        const ctx = document.getElementById('ft8SnrChart');
+
+        if (this.ft8SnrChart) {
+            this.ft8SnrChart.destroy();
+        }
+
+        // Only create chart if we have data
+        if (datasets.length === 0) {
+            ctx.parentElement.style.display = 'none';
+            return;
+        } else {
+            ctx.parentElement.style.display = 'block';
+        }
+
+        this.ft8SnrChart = new Chart(ctx, {
+            type: 'line',
+            data: { datasets },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2.5,
+                plugins: {
+                    title: {
+                        display: false
+                    },
+                    legend: {
+                        display: true,
+                        labels: { color: '#fff' }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false
+                                });
+                            },
+                            label: (item) => {
+                                return `${item.dataset.label}: ${item.parsed.y.toFixed(1)} dB`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'FT8 SNR (dB)',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
+                }
+            }
+        });
+    }
+
     updateLegend(bands) {
         const legend = document.getElementById('legend');
         legend.innerHTML = '';
@@ -1051,11 +1438,114 @@ class NoiseFloorMonitor {
                 chart.options.scales.y.min = Math.floor(dataMin - padding);
                 chart.options.scales.y.max = Math.ceil(dataMax + padding);
                 
+                // Update marker annotations if they exist
+                if (fftData.markers && fftData.markers.length > 0) {
+                    chart.options.plugins.annotation.annotations = this.createMarkerAnnotations(fftData.markers);
+                }
+                
                 chart.update('none'); // Update without animation
             }
         } catch (error) {
             console.error(`Error updating FFT for ${band}:`, error);
         }
+    }
+    
+    createMarkerAnnotations(markers) {
+        const annotations = {};
+        
+        markers.forEach((marker, index) => {
+            const freqMHz = marker.frequency / 1e6; // Convert Hz to MHz
+            const bandwidthMHz = marker.bandwidth / 1e6;
+            
+            // Determine the frequency range based on sideband
+            let xMin, xMax;
+            if (marker.sideband === 'upper') {
+                xMin = freqMHz;
+                xMax = freqMHz + bandwidthMHz;
+            } else if (marker.sideband === 'lower') {
+                xMin = freqMHz - bandwidthMHz;
+                xMax = freqMHz;
+            } else { // 'both' or default
+                xMin = freqMHz - (bandwidthMHz / 2);
+                xMax = freqMHz + (bandwidthMHz / 2);
+            }
+            
+            // Create shaded box annotation for bandwidth
+            annotations[`marker_box_${index}`] = {
+                type: 'box',
+                xMin: xMin,
+                xMax: xMax,
+                backgroundColor: 'rgba(255, 193, 7, 0.15)', // Semi-transparent amber
+                borderColor: 'rgba(255, 193, 7, 0.5)',
+                borderWidth: 1,
+                borderDash: [5, 5]
+            };
+            
+            // Create label line at start of bandwidth (without visible line)
+            annotations[`marker_label_${index}`] = {
+                type: 'line',
+                xMin: xMin,
+                xMax: xMin,
+                borderColor: 'rgba(255, 193, 7, 0)', // Transparent line
+                borderWidth: 0,
+                label: {
+                    display: true,
+                    content: marker.display_name,
+                    position: 'start',
+                    backgroundColor: 'rgba(255, 193, 7, 0.9)',
+                    color: '#000',
+                    font: {
+                        size: 10,
+                        weight: 'bold'
+                    },
+                    padding: 4
+                }
+            };
+        });
+        
+        return annotations;
+    }
+    
+    // Cleanup methods to prevent memory leaks
+    cleanup() {
+        // Destroy all stored charts
+        Object.values(this.sparklineCharts).forEach(chart => {
+            if (chart) chart.destroy();
+        });
+        Object.values(this.fftCharts).forEach(chart => {
+            if (chart) chart.destroy();
+        });
+        
+        this.sparklineCharts = {};
+        this.fftCharts = {};
+        
+        // Clear caches
+        this.historicalDataCache = {};
+        this.recentDataCache = {};
+        this.trendDataCache = {};
+        
+        // Remove event listeners from cards
+        const cards = document.querySelectorAll('.card');
+        cards.forEach(card => {
+            if (card._clickHandler) {
+                card.removeEventListener('click', card._clickHandler);
+                delete card._clickHandler;
+            }
+        });
+    }
+    
+    cleanupBandCharts(bands) {
+        // Destroy charts for specific bands
+        bands.forEach(band => {
+            if (this.sparklineCharts[band]) {
+                this.sparklineCharts[band].destroy();
+                delete this.sparklineCharts[band];
+            }
+            if (this.fftCharts[band]) {
+                this.fftCharts[band].destroy();
+                delete this.fftCharts[band];
+            }
+        });
     }
 }
 

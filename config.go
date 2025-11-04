@@ -152,6 +152,7 @@ type NoiseFloorBand struct {
 	CenterFrequency uint64  `yaml:"center_frequency"` // Center frequency for this band's spectrum
 	BinCount        int     `yaml:"bin_count"`        // Number of FFT bins for this band
 	BinBandwidth    float64 `yaml:"bin_bandwidth"`    // Bandwidth per bin in Hz for this band
+	FT8Frequency    uint64  `yaml:"ft8_frequency"`    // FT8 frequency for SNR calculation (0 = disabled)
 }
 
 // LoadConfig loads configuration from a YAML file

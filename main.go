@@ -374,6 +374,12 @@ func main() {
 	http.HandleFunc("/api/noisefloor/latest", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorLatest(w, r, noiseFloorMonitor)
 	}))
+	http.HandleFunc("/api/noisefloor/recent", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorRecent(w, r, noiseFloorMonitor)
+	}))
+	http.HandleFunc("/api/noisefloor/trend", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorTrend(w, r, noiseFloorMonitor)
+	}))
 	http.HandleFunc("/api/noisefloor/history", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorHistory(w, r, noiseFloorMonitor)
 	}))
@@ -899,6 +905,91 @@ func handleNoiseFloorHistory(w http.ResponseWriter, r *http.Request, nfm *NoiseF
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(measurements); err != nil {
 		log.Printf("Error encoding historical noise floor data: %v", err)
+	}
+}
+
+// handleNoiseFloorRecent serves the last hour of noise floor data (all data points)
+func handleNoiseFloorRecent(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if nfm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Noise floor monitoring is not enabled",
+		})
+		return
+	}
+
+	// Get optional band parameter
+	band := r.URL.Query().Get("band")
+
+	measurements, err := nfm.GetRecentData(band)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get recent data: %v", err),
+		})
+		return
+	}
+
+	if len(measurements) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "No recent data available",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(measurements); err != nil {
+		log.Printf("Error encoding recent noise floor data: %v", err)
+	}
+}
+
+// handleNoiseFloorTrend serves 24 hours of noise floor data averaged in 10-minute chunks
+func handleNoiseFloorTrend(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if nfm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Noise floor monitoring is not enabled",
+		})
+		return
+	}
+
+	// Get query parameters
+	date := r.URL.Query().Get("date")
+	band := r.URL.Query().Get("band")
+
+	if date == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "date parameter is required (format: YYYY-MM-DD)",
+		})
+		return
+	}
+
+	measurements, err := nfm.GetTrendData(date, band)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get trend data: %v", err),
+		})
+		return
+	}
+
+	if len(measurements) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "No trend data available",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(measurements); err != nil {
+		log.Printf("Error encoding trend noise floor data: %v", err)
 	}
 }
 

@@ -238,6 +238,7 @@ noisefloor:
       center_frequency: 1900000
       bin_count: 1000
       bin_bandwidth: 200      # 200 Hz resolution
+      ft8_frequency: 1840000  # 1.840 MHz - FT8 calling frequency
     
     - name: "80m"
       start: 3500000          # 3.5 MHz
@@ -245,6 +246,7 @@ noisefloor:
       center_frequency: 3750000
       bin_count: 1000
       bin_bandwidth: 500      # 500 Hz resolution
+      ft8_frequency: 3573000  # 3.573 MHz - FT8 calling frequency
     
     - name: "60m"
       start: 5250000          # 5.25 MHz
@@ -252,6 +254,7 @@ noisefloor:
       center_frequency: 5350000
       bin_count: 1000
       bin_bandwidth: 200      # 200 Hz resolution
+      ft8_frequency: 5357000  # 5.357 MHz - FT8 calling frequency
     
     - name: "40m"
       start: 7000000          # 7.0 MHz
@@ -259,6 +262,7 @@ noisefloor:
       center_frequency: 7150000
       bin_count: 1000
       bin_bandwidth: 300      # 300 Hz resolution
+      ft8_frequency: 7074000  # 7.074 MHz - FT8 calling frequency
     
     - name: "30m"
       start: 10100000         # 10.1 MHz
@@ -266,6 +270,7 @@ noisefloor:
       center_frequency: 10125000
       bin_count: 500
       bin_bandwidth: 100      # 100 Hz resolution (narrow band)
+      ft8_frequency: 10136000 # 10.136 MHz - FT8 calling frequency
     
     - name: "20m"
       start: 14000000         # 14.0 MHz
@@ -273,6 +278,7 @@ noisefloor:
       center_frequency: 14175000
       bin_count: 1000
       bin_bandwidth: 350      # 350 Hz resolution
+      ft8_frequency: 14074000 # 14.074 MHz - FT8 calling frequency
     
     - name: "17m"
       start: 18068000         # 18.068 MHz
@@ -280,6 +286,7 @@ noisefloor:
       center_frequency: 18118000
       bin_count: 500
       bin_bandwidth: 200      # 200 Hz resolution
+      ft8_frequency: 18100000 # 18.100 MHz - FT8 calling frequency
     
     - name: "15m"
       start: 21000000         # 21.0 MHz
@@ -287,6 +294,7 @@ noisefloor:
       center_frequency: 21225000
       bin_count: 1000
       bin_bandwidth: 450      # 450 Hz resolution
+      ft8_frequency: 21074000 # 21.074 MHz - FT8 calling frequency
     
     - name: "12m"
       start: 24890000         # 24.89 MHz
@@ -294,6 +302,7 @@ noisefloor:
       center_frequency: 24940000
       bin_count: 500
       bin_bandwidth: 200      # 200 Hz resolution
+      ft8_frequency: 24915000 # 24.915 MHz - FT8 calling frequency
     
     - name: "10m"
       start: 28000000         # 28.0 MHz
@@ -301,3 +310,4 @@ noisefloor:
       center_frequency: 28850000
       bin_count: 1000
       bin_bandwidth: 1700     # 1.7 kHz resolution (wide band)
+      ft8_frequency: 28074000 # 28.074 MHz - FT8 calling frequency

@@ -252,16 +252,26 @@ type BandMeasurement struct {
 	P95DB        float32   `json:"p95_db"`        // 95th percentile - signal peak
 	DynamicRange float32   `json:"dynamic_range"` // P95 - P5
 	OccupancyPct float32   `json:"occupancy_pct"` // % of bins above noise + 10dB
+	FT8SNR       float32   `json:"ft8_snr"`       // FT8 SNR in dB (signal power - noise floor)
+}
+
+// FrequencyMarker represents a frequency marker to display on the FFT graph
+type FrequencyMarker struct {
+	DisplayName string `json:"display_name"` // Name to display (e.g., "FT8")
+	Frequency   uint64 `json:"frequency"`    // Center frequency in Hz
+	Bandwidth   uint64 `json:"bandwidth"`    // Bandwidth in Hz
+	Sideband    string `json:"sideband"`     // "upper", "lower", or "both"
 }
 
 // BandFFT contains the raw FFT data for a band
 type BandFFT struct {
-	Timestamp time.Time `json:"timestamp"`
-	Band      string    `json:"band"`
-	StartFreq uint64    `json:"start_freq"` // Start frequency in Hz
-	EndFreq   uint64    `json:"end_freq"`   // End frequency in Hz
-	BinWidth  float64   `json:"bin_width"`  // Frequency width per bin in Hz
-	Data      []float32 `json:"data"`       // FFT bin data in dB
+	Timestamp time.Time         `json:"timestamp"`
+	Band      string            `json:"band"`
+	StartFreq uint64            `json:"start_freq"` // Start frequency in Hz
+	EndFreq   uint64            `json:"end_freq"`   // End frequency in Hz
+	BinWidth  float64           `json:"bin_width"`  // Frequency width per bin in Hz
+	Data      []float32         `json:"data"`       // FFT bin data in dB
+	Markers   []FrequencyMarker `json:"markers"`    // Frequency markers to display
 }
 
 // NewNoiseFloorMonitor creates a new noise floor monitor
@@ -637,7 +647,84 @@ func (nfm *NoiseFloorMonitor) calculateStatistics(timestamp time.Time, bandName 
 	}
 	measurement.OccupancyPct = float32(aboveThreshold) * 100.0 / float32(n)
 
+	// Calculate FT8 SNR if FT8 frequency is configured
+	measurement.FT8SNR = nfm.calculateFT8SNR(bandName, data)
+
 	return measurement
+}
+
+// calculateFT8SNR calculates the SNR for FT8 signals in a 3 kHz bandwidth
+func (nfm *NoiseFloorMonitor) calculateFT8SNR(bandName string, data []float32) float32 {
+	// Find the band configuration
+	var bandConfig *NoiseFloorBand
+	for i := range nfm.config.NoiseFloor.Bands {
+		if nfm.config.NoiseFloor.Bands[i].Name == bandName {
+			bandConfig = &nfm.config.NoiseFloor.Bands[i]
+			break
+		}
+	}
+
+	// If no band config or FT8 frequency not set, return 0
+	if bandConfig == nil || bandConfig.FT8Frequency == 0 {
+		return 0
+	}
+
+	// Calculate which bins cover the FT8 frequency + 3 kHz bandwidth
+	// FT8 signals occupy approximately 50 Hz, but we measure over 3 kHz for better SNR estimation
+	ft8StartFreq := bandConfig.FT8Frequency
+	ft8EndFreq := bandConfig.FT8Frequency + 3000 // 3 kHz bandwidth
+
+	// Calculate bin indices
+	// Bins are arranged from start frequency to end frequency after unwrapping
+	totalBandwidth := float64(bandConfig.End - bandConfig.Start)
+	binsPerHz := float64(len(data)) / totalBandwidth
+
+	// Calculate start and end bin indices for FT8 bandwidth
+	startBin := int((float64(ft8StartFreq) - float64(bandConfig.Start)) * binsPerHz)
+	endBin := int((float64(ft8EndFreq) - float64(bandConfig.Start)) * binsPerHz)
+
+	// Clamp to valid range
+	if startBin < 0 {
+		startBin = 0
+	}
+	if endBin >= len(data) {
+		endBin = len(data) - 1
+	}
+	if startBin >= endBin {
+		return 0 // Invalid range
+	}
+
+	// Calculate average power in FT8 bandwidth (in dB)
+	// We need to convert to linear, average, then back to dB
+	var linearSum float64
+	count := 0
+	for i := startBin; i <= endBin; i++ {
+		// Convert dB to linear power: power = 10^(dB/10)
+		linearPower := math.Pow(10.0, float64(data[i])/10.0)
+		linearSum += linearPower
+		count++
+	}
+
+	if count == 0 {
+		return 0
+	}
+
+	// Average linear power and convert back to dB
+	avgLinearPower := linearSum / float64(count)
+	ft8SignalDB := float32(10.0 * math.Log10(avgLinearPower))
+
+	// Calculate noise floor from P5 (5th percentile)
+	sorted := make([]float32, len(data))
+	copy(sorted, data)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
+	})
+	noiseFloorDB := sorted[len(sorted)*5/100]
+
+	// SNR = Signal - Noise (in dB)
+	snr := ft8SignalDB - noiseFloorDB
+
+	return snr
 }
 
 // logMeasurement writes a measurement to the band-specific CSV file
@@ -671,6 +758,7 @@ func (nfm *NoiseFloorMonitor) logMeasurement(m *BandMeasurement) error {
 		fmt.Sprintf("%.1f", m.P95DB),
 		fmt.Sprintf("%.1f", m.DynamicRange),
 		fmt.Sprintf("%.1f", m.OccupancyPct),
+		fmt.Sprintf("%.1f", m.FT8SNR),
 	}
 
 	if err := writer.Write(record); err != nil {
@@ -729,7 +817,7 @@ func (nfm *NoiseFloorMonitor) rotateFile(band, dateStr string) error {
 	if needsHeader {
 		header := []string{
 			"timestamp", "min_db", "max_db", "mean_db", "median_db",
-			"p5_db", "p10_db", "p95_db", "dynamic_range", "occupancy_pct",
+			"p5_db", "p10_db", "p95_db", "dynamic_range", "occupancy_pct", "ft8_snr",
 		}
 		if err := nfm.csvWriters[band].Write(header); err != nil {
 			return fmt.Errorf("failed to write CSV header: %w", err)
@@ -763,32 +851,242 @@ func (nfm *NoiseFloorMonitor) GetLatestMeasurements() map[string]*BandMeasuremen
 }
 
 // GetHistoricalData reads historical data from band-specific CSV files
+// Automatically includes previous day's data if needed to provide a full 24-hour window
 func (nfm *NoiseFloorMonitor) GetHistoricalData(date string, band string) ([]*BandMeasurement, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
 
-	// If band is specified, read only that band's file
+	// Parse the requested date
+	requestedDate, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return nil, fmt.Errorf("invalid date format: %w", err)
+	}
+
+	// Calculate 24 hours ago from the start of the requested date
+	startTime := requestedDate.Add(-24 * time.Hour)
+	endTime := requestedDate.Add(24 * time.Hour) // Include full requested day
+
+	// Determine which dates we need to read (current and possibly previous day)
+	datesToRead := []string{date}
+	prevDate := requestedDate.AddDate(0, 0, -1).Format("2006-01-02")
+	datesToRead = append([]string{prevDate}, datesToRead...) // Prepend previous day
+
+	var allMeasurements []*BandMeasurement
+
+	// If band is specified, read only that band's files
 	if band != "" {
-		return nfm.readBandFile(band, date)
-	}
-
-	// If no band specified, read all band files for this date
-	measurements := make([]*BandMeasurement, 0)
-	for _, bandConfig := range nfm.config.NoiseFloor.Bands {
-		bandMeasurements, err := nfm.readBandFile(bandConfig.Name, date)
-		if err != nil {
-			// Skip bands that don't have data for this date
-			continue
+		for _, d := range datesToRead {
+			measurements, err := nfm.readBandFile(band, d)
+			if err != nil {
+				// Skip dates that don't have data (e.g., previous day might not exist)
+				continue
+			}
+			allMeasurements = append(allMeasurements, measurements...)
 		}
-		measurements = append(measurements, bandMeasurements...)
+	} else {
+		// Read all band files for the date range
+		for _, d := range datesToRead {
+			for _, bandConfig := range nfm.config.NoiseFloor.Bands {
+				measurements, err := nfm.readBandFile(bandConfig.Name, d)
+				if err != nil {
+					// Skip bands/dates that don't have data
+					continue
+				}
+				allMeasurements = append(allMeasurements, measurements...)
+			}
+		}
 	}
 
-	if len(measurements) == 0 {
+	if len(allMeasurements) == 0 {
 		return nil, fmt.Errorf("no data found for date %s", date)
 	}
 
-	return measurements, nil
+	// Filter measurements to only include those within the 24-hour window
+	// This ensures we get up to 24 hours of data leading up to and including the requested date
+	filteredMeasurements := make([]*BandMeasurement, 0, len(allMeasurements))
+	for _, m := range allMeasurements {
+		if (m.Timestamp.Equal(startTime) || m.Timestamp.After(startTime)) &&
+			m.Timestamp.Before(endTime) {
+			filteredMeasurements = append(filteredMeasurements, m)
+		}
+	}
+
+	// Sort by timestamp (oldest first) for consistent ordering
+	sort.Slice(filteredMeasurements, func(i, j int) bool {
+		return filteredMeasurements[i].Timestamp.Before(filteredMeasurements[j].Timestamp)
+	})
+
+	return filteredMeasurements, nil
+}
+
+// GetRecentData returns the last hour of data with all data points
+func (nfm *NoiseFloorMonitor) GetRecentData(band string) ([]*BandMeasurement, error) {
+	if nfm == nil {
+		return nil, fmt.Errorf("noise floor monitor not enabled")
+	}
+
+	// Calculate time range (last hour)
+	now := time.Now()
+	startTime := now.Add(-1 * time.Hour)
+
+	// Determine which dates we might need (current and possibly previous day)
+	currentDate := now.Format("2006-01-02")
+	startDate := startTime.Format("2006-01-02")
+
+	dates := []string{currentDate}
+
+	// If start time is on a different day than now, also read that day's file
+	if startDate != currentDate {
+		dates = append([]string{startDate}, dates...)
+	}
+
+	if DebugMode {
+		log.Printf("DEBUG: GetRecentData - now=%s, startTime=%s, dates=%v, band=%s",
+			now.Format(time.RFC3339), startTime.Format(time.RFC3339), dates, band)
+	}
+
+	var allMeasurements []*BandMeasurement
+
+	// Read data from relevant dates
+	if band != "" {
+		for _, d := range dates {
+			measurements, err := nfm.readBandFile(band, d)
+			if err != nil {
+				if DebugMode {
+					log.Printf("DEBUG: GetRecentData - failed to read band %s for date %s: %v", band, d, err)
+				}
+				continue
+			}
+			if DebugMode {
+				log.Printf("DEBUG: GetRecentData - read %d measurements from band %s for date %s", len(measurements), band, d)
+			}
+			allMeasurements = append(allMeasurements, measurements...)
+		}
+	} else {
+		// Read all bands
+		for _, d := range dates {
+			for _, bandConfig := range nfm.config.NoiseFloor.Bands {
+				measurements, err := nfm.readBandFile(bandConfig.Name, d)
+				if err != nil {
+					if DebugMode {
+						log.Printf("DEBUG: GetRecentData - failed to read band %s for date %s: %v", bandConfig.Name, d, err)
+					}
+					continue
+				}
+				if DebugMode {
+					log.Printf("DEBUG: GetRecentData - read %d measurements from band %s for date %s", len(measurements), bandConfig.Name, d)
+				}
+				allMeasurements = append(allMeasurements, measurements...)
+			}
+		}
+	}
+
+	if DebugMode {
+		log.Printf("DEBUG: GetRecentData - total measurements read: %d", len(allMeasurements))
+	}
+
+	// Filter to last hour
+	recentMeasurements := make([]*BandMeasurement, 0)
+	for _, m := range allMeasurements {
+		if (m.Timestamp.Equal(startTime) || m.Timestamp.After(startTime)) &&
+			(m.Timestamp.Before(now) || m.Timestamp.Equal(now)) {
+			recentMeasurements = append(recentMeasurements, m)
+		}
+	}
+
+	if DebugMode {
+		log.Printf("DEBUG: GetRecentData - filtered to %d recent measurements (last hour)", len(recentMeasurements))
+	}
+
+	// Sort by timestamp (oldest first)
+	sort.Slice(recentMeasurements, func(i, j int) bool {
+		return recentMeasurements[i].Timestamp.Before(recentMeasurements[j].Timestamp)
+	})
+
+	return recentMeasurements, nil
+}
+
+// GetTrendData returns 24 hours of data averaged in 10-minute chunks
+func (nfm *NoiseFloorMonitor) GetTrendData(date string, band string) ([]*BandMeasurement, error) {
+	if nfm == nil {
+		return nil, fmt.Errorf("noise floor monitor not enabled")
+	}
+
+	// Get full 24-hour window of raw data
+	rawData, err := nfm.GetHistoricalData(date, band)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rawData) == 0 {
+		return nil, fmt.Errorf("no data available")
+	}
+
+	// Group measurements into 10-minute buckets
+	bucketSize := 10 * time.Minute
+	buckets := make(map[int64]map[string][]*BandMeasurement)
+
+	for _, m := range rawData {
+		// Calculate bucket timestamp (rounded down to 10-minute boundary)
+		bucketTime := m.Timestamp.Truncate(bucketSize).Unix()
+
+		if buckets[bucketTime] == nil {
+			buckets[bucketTime] = make(map[string][]*BandMeasurement)
+		}
+
+		buckets[bucketTime][m.Band] = append(buckets[bucketTime][m.Band], m)
+	}
+
+	// Average each bucket
+	averaged := make([]*BandMeasurement, 0)
+
+	for bucketTime, bandData := range buckets {
+		for bandName, measurements := range bandData {
+			if len(measurements) == 0 {
+				continue
+			}
+
+			// Calculate averages
+			var sumMin, sumMax, sumMean, sumMedian, sumP5, sumP10, sumP95, sumDynRange, sumOccupancy, sumFT8SNR float32
+			count := float32(len(measurements))
+
+			for _, m := range measurements {
+				sumMin += m.MinDB
+				sumMax += m.MaxDB
+				sumMean += m.MeanDB
+				sumMedian += m.MedianDB
+				sumP5 += m.P5DB
+				sumP10 += m.P10DB
+				sumP95 += m.P95DB
+				sumDynRange += m.DynamicRange
+				sumOccupancy += m.OccupancyPct
+				sumFT8SNR += m.FT8SNR
+			}
+
+			averaged = append(averaged, &BandMeasurement{
+				Timestamp:    time.Unix(bucketTime, 0),
+				Band:         bandName,
+				MinDB:        sumMin / count,
+				MaxDB:        sumMax / count,
+				MeanDB:       sumMean / count,
+				MedianDB:     sumMedian / count,
+				P5DB:         sumP5 / count,
+				P10DB:        sumP10 / count,
+				P95DB:        sumP95 / count,
+				DynamicRange: sumDynRange / count,
+				OccupancyPct: sumOccupancy / count,
+				FT8SNR:       sumFT8SNR / count,
+			})
+		}
+	}
+
+	// Sort by timestamp (oldest first)
+	sort.Slice(averaged, func(i, j int) bool {
+		return averaged[i].Timestamp.Before(averaged[j].Timestamp)
+	})
+
+	return averaged, nil
 }
 
 // readBandFile reads a single band's CSV file for a specific date
@@ -819,6 +1117,8 @@ func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasuremen
 	}()
 
 	reader := csv.NewReader(file)
+	// Allow variable number of fields per record for backward compatibility
+	reader.FieldsPerRecord = -1
 	records, err := reader.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CSV: %w", err)
@@ -833,6 +1133,8 @@ func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasuremen
 
 	measurements := make([]*BandMeasurement, 0, len(records))
 	for _, record := range records {
+		// Need at least 10 columns (old format without FT8 SNR)
+		// New format has 11 columns (with FT8 SNR)
 		if len(record) < 10 {
 			continue
 		}
@@ -857,6 +1159,11 @@ func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasuremen
 		_, _ = fmt.Sscanf(record[7], "%f", &m.P95DB)
 		_, _ = fmt.Sscanf(record[8], "%f", &m.DynamicRange)
 		_, _ = fmt.Sscanf(record[9], "%f", &m.OccupancyPct)
+
+		// Parse FT8 SNR if available (for backward compatibility with old CSV files)
+		if len(record) >= 11 {
+			_, _ = fmt.Sscanf(record[10], "%f", &m.FT8SNR)
+		}
 
 		measurements = append(measurements, m)
 	}
@@ -964,12 +1271,43 @@ func (nfm *NoiseFloorMonitor) GetLatestFFT(band string) *BandFFT {
 		if fft == nil && DebugMode {
 			log.Printf("DEBUG: FFT max hold returned nil for band %s (may need more samples)", band)
 		}
+
+		// Add markers if FFT data is available
+		if fft != nil {
+			fft.Markers = nfm.getMarkersForBand(band)
+		}
+
 		return fft
 	}
 	if DebugMode {
 		log.Printf("DEBUG: No FFT buffer found for band %s", band)
 	}
 	return nil
+}
+
+// getMarkersForBand returns frequency markers for a specific band
+func (nfm *NoiseFloorMonitor) getMarkersForBand(bandName string) []FrequencyMarker {
+	markers := make([]FrequencyMarker, 0)
+
+	// Find the band configuration
+	for i := range nfm.config.NoiseFloor.Bands {
+		if nfm.config.NoiseFloor.Bands[i].Name == bandName {
+			bandConfig := &nfm.config.NoiseFloor.Bands[i]
+
+			// Add FT8 marker if configured
+			if bandConfig.FT8Frequency > 0 {
+				markers = append(markers, FrequencyMarker{
+					DisplayName: "FT8",
+					Frequency:   bandConfig.FT8Frequency,
+					Bandwidth:   3000, // 3 kHz bandwidth
+					Sideband:    "upper",
+				})
+			}
+			break
+		}
+	}
+
+	return markers
 }
 
 // GetAveragedFFT returns the averaged FFT data for a specific band over a custom duration

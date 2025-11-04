@@ -118,6 +118,8 @@ class NoiseFloorMonitor {
         document.getElementById('bandSelect').addEventListener('change', async (e) => {
             // Stop audio preview when changing bands
             if (this.audioPreview && this.audioPreviewEnabled) {
+                // Disconnect spectrum WebSocket first to prevent callbacks to destroyed charts
+                this.audioPreview.disconnectSpectrum();
                 await this.audioPreview.stopPreview();
                 this.audioPreviewEnabled = false;
                 this.audioPreviewFrequency = null;
@@ -136,6 +138,8 @@ class NoiseFloorMonitor {
         document.getElementById('allBandsBtn').addEventListener('click', async () => {
             // Stop audio preview when switching to all bands
             if (this.audioPreview && this.audioPreviewEnabled) {
+                // Disconnect spectrum WebSocket first
+                this.audioPreview.disconnectSpectrum();
                 await this.audioPreview.stopPreview();
                 this.audioPreviewEnabled = false;
                 this.audioPreviewFrequency = null;
@@ -2031,12 +2035,13 @@ class NoiseFloorMonitor {
                 }
             } else {
                 console.log('Disabling audio preview');
-                // Disconnect spectrum WebSocket
+                // Stop audio preview and disconnect spectrum WebSocket
                 if (this.audioPreview) {
                     this.audioPreview.disconnectSpectrum();
                     await this.audioPreview.stopPreview();
                 }
                 this.audioPreviewFrequency = null;
+                this.audioPreviewVisualFrequency = null;
 
                 // Remove visual indicator
                 this.removePreviewIndicator(band);
@@ -2263,9 +2268,12 @@ class NoiseFloorMonitor {
     cleanup() {
         // Stop audio preview if active
         if (this.audioPreview && this.audioPreviewEnabled) {
+            // Disconnect spectrum WebSocket first
+            this.audioPreview.disconnectSpectrum();
             this.audioPreview.stopPreview();
             this.audioPreviewEnabled = false;
             this.audioPreviewFrequency = null;
+            this.audioPreviewVisualFrequency = null;
 
             // Remove preview indicator
             if (this.currentBandData) {

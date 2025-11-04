@@ -389,6 +389,9 @@ func main() {
 	http.HandleFunc("/api/noisefloor/fft", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorFFT(w, r, noiseFloorMonitor)
 	}))
+	http.HandleFunc("/api/noisefloor/config", func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorConfig(w, r, config)
+	})
 
 	// Admin authentication endpoints (no auth required)
 	http.HandleFunc("/admin/login", adminHandler.HandleLogin)
@@ -1060,5 +1063,41 @@ func handleNoiseFloorFFT(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(fft); err != nil {
 		log.Printf("Error encoding FFT data: %v", err)
+	}
+}
+
+// handleNoiseFloorConfig serves the noise floor band configurations
+func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Config) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if !config.NoiseFloor.Enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Noise floor monitoring is not enabled",
+		})
+		return
+	}
+
+	// Build response with band configurations
+	bands := make([]map[string]interface{}, len(config.NoiseFloor.Bands))
+	for i, band := range config.NoiseFloor.Bands {
+		bands[i] = map[string]interface{}{
+			"name":             band.Name,
+			"start":            band.Start,
+			"end":              band.End,
+			"center_frequency": band.CenterFrequency,
+			"bin_count":        band.BinCount,
+			"bin_bandwidth":    band.BinBandwidth,
+			"total_bandwidth":  float64(band.BinCount) * band.BinBandwidth,
+		}
+	}
+
+	response := map[string]interface{}{
+		"bands": bands,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding noise floor config: %v", err)
 	}
 }

@@ -24,6 +24,12 @@ class MinimalRadio {
         this.bandwidthLow = 50;
         this.bandwidthHigh = 2850;
         
+        // Spectrum WebSocket state
+        this.spectrumWs = null;
+        this.spectrumConnected = false;
+        this.spectrumCallback = null;
+        this.spectrumConfig = null; // Store spectrum config (centerFreq, binCount, etc.)
+
         console.log('MinimalRadio initialized, session:', this.userSessionID);
     }
     
@@ -360,6 +366,180 @@ class MinimalRadio {
         
         source.start(this.nextPlayTime);
         this.nextPlayTime += buffer.duration;
+    }
+
+    // Connect to spectrum WebSocket for real-time FFT updates
+    async connectSpectrum(band, callback) {
+        if (this.spectrumWs && this.spectrumWs.readyState === WebSocket.OPEN) {
+            console.log('Spectrum WebSocket already connected');
+            return;
+        }
+
+        this.spectrumCallback = callback;
+
+        try {
+            // Check connection permission (reuse same session ID)
+            const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+            const connectionUrl = `${httpProtocol}//${window.location.host}/connection`;
+
+            console.log('Checking spectrum connection permission:', connectionUrl);
+
+            const response = await fetch(connectionUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_session_id: this.userSessionID })
+            });
+
+            if (!response.ok) {
+                let errorData;
+                try {
+                    errorData = await response.json();
+                } catch (e) {
+                    errorData = { reason: 'Server rejected connection' };
+                }
+
+                console.error('Spectrum connection not allowed:', response.status, errorData);
+                const errorMsg = errorData.reason || 'Server rejected connection';
+                throw new Error(errorMsg);
+            }
+
+            const result = await response.json();
+            console.log('Spectrum connection check result:', result);
+
+            if (!result.allowed) {
+                const errorMsg = 'Spectrum connection not allowed by server';
+                console.error(errorMsg, result);
+                throw new Error(errorMsg);
+            }
+
+            // Create spectrum WebSocket connection
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/user-spectrum?user_session_id=${encodeURIComponent(this.userSessionID)}`;
+
+            console.log('Connecting to spectrum WebSocket:', wsUrl);
+            this.spectrumWs = new WebSocket(wsUrl);
+
+            this.spectrumWs.onopen = () => {
+                console.log('Spectrum WebSocket connected');
+                this.spectrumConnected = true;
+
+                // Request spectrum for specific band
+                // We'll need to get band config (center freq, bandwidth) from noisefloor config
+                // For now, just log that we're connected
+            };
+
+            this.spectrumWs.onmessage = async (event) => {
+                try {
+                    let msg;
+
+                    // Check if message is binary (compressed) or text (uncompressed)
+                    if (event.data instanceof Blob) {
+                        // Binary message - decompress with gzip
+                        const compressedData = await event.data.arrayBuffer();
+
+                        // Decompress using DecompressionStream
+                        const decompressedStream = new Response(
+                            new Blob([compressedData]).stream().pipeThrough(new DecompressionStream('gzip'))
+                        );
+                        const decompressedText = await decompressedStream.text();
+                        msg = JSON.parse(decompressedText);
+                    } else {
+                        // Text message - parse directly
+                        msg = JSON.parse(event.data);
+                    }
+
+                    this.handleSpectrumMessage(msg);
+                } catch (err) {
+                    console.error('Error parsing spectrum message:', err);
+                }
+            };
+
+            this.spectrumWs.onerror = (error) => {
+                console.error('Spectrum WebSocket error:', error);
+            };
+
+            this.spectrumWs.onclose = () => {
+                console.log('Spectrum WebSocket closed');
+                this.spectrumConnected = false;
+
+                // Don't auto-reconnect - let the user control this
+            };
+
+        } catch (error) {
+            console.error('Failed to connect spectrum WebSocket:', error);
+            throw error;
+        }
+    }
+
+    // Handle spectrum WebSocket messages
+    handleSpectrumMessage(msg) {
+        switch (msg.type) {
+            case 'config':
+                // Store spectrum configuration
+                this.spectrumConfig = {
+                    centerFreq: msg.centerFreq,
+                    binCount: msg.binCount,
+                    binBandwidth: msg.binBandwidth,
+                    totalBandwidth: msg.totalBandwidth
+                };
+
+                console.log('Spectrum config received:', this.spectrumConfig);
+                break;
+
+            case 'spectrum':
+                // Unwrap FFT bin ordering from radiod
+                // radiod sends: [positive freqs (DC to +Nyquist), negative freqs (-Nyquist to DC)]
+                // We need: [negative freqs, positive freqs] for low-to-high frequency display
+                const rawData = msg.data;
+                const N = rawData.length;
+                const halfBins = Math.floor(N / 2);
+
+                const unwrappedData = new Float32Array(N);
+
+                // Put second half (negative frequencies) first
+                for (let i = 0; i < halfBins; i++) {
+                    unwrappedData[i] = rawData[halfBins + i];
+                }
+                // Put first half (positive frequencies) second
+                for (let i = 0; i < halfBins; i++) {
+                    unwrappedData[halfBins + i] = rawData[i];
+                }
+
+                // Call callback with unwrapped spectrum data
+                if (this.spectrumCallback) {
+                    this.spectrumCallback({
+                        data: unwrappedData,
+                        config: this.spectrumConfig,
+                        timestamp: msg.timestamp
+                    });
+                }
+                break;
+
+            case 'error':
+                console.error('Spectrum server error:', msg.error);
+                break;
+
+            case 'pong':
+                // Keepalive response
+                break;
+
+            default:
+                console.warn('Unknown spectrum message type:', msg.type);
+        }
+    }
+
+    // Disconnect spectrum WebSocket
+    disconnectSpectrum() {
+        if (this.spectrumWs) {
+            console.log('Disconnecting spectrum WebSocket');
+            if (this.spectrumWs.readyState === WebSocket.OPEN || this.spectrumWs.readyState === WebSocket.CONNECTING) {
+                this.spectrumWs.close();
+            }
+            this.spectrumWs = null;
+        }
+        this.spectrumConnected = false;
+        this.spectrumCallback = null;
+        this.spectrumConfig = null;
     }
 }
 

@@ -26,6 +26,9 @@ class NoiseFloorMonitor {
         this.tuneDebounceTimer = null; // Debounce timer for tune commands
         this.pendingTuneFrequency = null; // Pending frequency for debounced tune
 
+        // Band configurations for spectrum WebSocket
+        this.bandConfigs = null; // Will be loaded from /api/noisefloor/config
+
         // Tableau 10 color palette - designed for maximum distinction
         this.bandColors = {
             '160m': '#4E79A7',  // Blue
@@ -92,6 +95,7 @@ class NoiseFloorMonitor {
         this.setupEventListeners();
         this.loadAvailableDates();
         this.loadBands();
+        this.loadBandConfigs(); // Load band configurations for spectrum WebSocket
         this.loadFromURL();
 
         // Initialize button text based on default compact view state
@@ -226,6 +230,28 @@ class NoiseFloorMonitor {
             option.textContent = band;
             select.appendChild(option);
         });
+    }
+
+    async loadBandConfigs() {
+        try {
+            const response = await fetch('/api/noisefloor/config');
+            if (!response.ok) {
+                console.warn('Failed to load band configurations');
+                return;
+            }
+
+            const data = await response.json();
+            this.bandConfigs = {};
+
+            // Index by band name for easy lookup
+            data.bands.forEach(band => {
+                this.bandConfigs[band.name] = band;
+            });
+
+            console.log('Band configurations loaded:', this.bandConfigs);
+        } catch (error) {
+            console.error('Error loading band configurations:', error);
+        }
     }
 
     async loadData() {
@@ -1752,8 +1778,13 @@ class NoiseFloorMonitor {
             ? ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m']
             : [this.currentBand];
 
-        // Update FFT for each visible band
+        // Update FFT for each visible band, but skip if audio preview is active
         for (const band of bands) {
+            // Skip FFT updates if audio preview is enabled for this band
+            if (this.audioPreviewEnabled && this.currentBandData && this.currentBandData.band === band) {
+                continue;
+            }
+
             const canvasId = `fft-${band}`;
             const canvas = document.getElementById(canvasId);
             if (canvas) {
@@ -1782,8 +1813,26 @@ class NoiseFloorMonitor {
 
             const chart = Chart.getChart(canvas);
             if (chart) {
-                // Update the chart data
+                // Calculate frequency labels from static FFT data
+                const startFreq = fftData.start_freq / 1e6; // Convert to MHz
+                const endFreq = fftData.end_freq / 1e6;
+                const binWidthMHz = fftData.bin_width / 1e6;
+                const numBins = fftData.data.length;
+
+                // Create frequency labels
+                const frequencies = [];
+                for (let i = 0; i < numBins; i++) {
+                    const freq = startFreq + (i * binWidthMHz);
+                    frequencies.push(freq);
+                }
+
+                // Update chart data and labels
+                chart.data.labels = frequencies;
                 chart.data.datasets[0].data = fftData.data;
+
+                // Update X-axis range to original band frequency range
+                chart.options.scales.x.min = startFreq;
+                chart.options.scales.x.max = endFreq;
 
                 // Update Y-axis scaling
                 const dataMin = Math.min(...fftData.data);
@@ -1793,9 +1842,15 @@ class NoiseFloorMonitor {
                 chart.options.scales.y.min = Math.floor(dataMin - padding);
                 chart.options.scales.y.max = Math.ceil(dataMax + padding);
 
+                // Update chart title back to static
+                chart.options.plugins.title.text = 'Real-time Spectrum (10s)';
+
                 // Update marker annotations if they exist
                 if (fftData.markers && fftData.markers.length > 0) {
                     chart.options.plugins.annotation.annotations = this.createMarkerAnnotations(fftData.markers);
+                } else {
+                    // Clear any existing annotations (like preview indicators)
+                    chart.options.plugins.annotation.annotations = {};
                 }
 
                 chart.update('none'); // Update without animation
@@ -1915,6 +1970,13 @@ class NoiseFloorMonitor {
                 button.style.background = '#F44336'; // Red when active
                 button.textContent = '🔇 Stop Preview';
 
+                // Disable chart tooltip during audio preview
+                const chart = this.fftCharts[band];
+                if (chart) {
+                    chart.options.plugins.tooltip.enabled = false;
+                    chart.update('none');
+                }
+
                 // Start preview at center frequency (mode auto-detected by MinimalRadio)
                 const freq = Math.round(this.currentBandData.centerFreq / 1000) * 1000; // Round to nearest kHz
                 try {
@@ -1924,6 +1986,31 @@ class NoiseFloorMonitor {
 
                     // Add visual indicator
                     this.updatePreviewIndicator(band, freq);
+
+                    // Connect spectrum WebSocket for real-time FFT updates
+                    if (this.bandConfigs && this.bandConfigs[band]) {
+                        console.log('Connecting spectrum WebSocket for band:', band);
+                        const bandConfig = this.bandConfigs[band];
+
+                        // Connect spectrum WebSocket with callback to update FFT chart
+                        this.audioPreview.connectSpectrum(band, (spectrumData) => {
+                            this.updateFFTFromSpectrum(band, spectrumData);
+                        });
+
+                        // After connection, send spectrum request message
+                        // Wait a bit for WebSocket to connect
+                        setTimeout(() => {
+                            if (this.audioPreview.spectrumConnected) {
+                                const request = {
+                                    type: 'zoom',
+                                    frequency: bandConfig.center_frequency,
+                                    binBandwidth: bandConfig.bin_bandwidth
+                                };
+                                console.log('Sending spectrum request:', request);
+                                this.audioPreview.spectrumWs.send(JSON.stringify(request));
+                            }
+                        }, 500);
+                    }
 
                     console.log('Audio preview started successfully');
                 } catch (error) {
@@ -1935,14 +2022,26 @@ class NoiseFloorMonitor {
                 }
             } else {
                 console.log('Disabling audio preview');
-                // Stop preview
+                // Disconnect spectrum WebSocket
                 if (this.audioPreview) {
+                    this.audioPreview.disconnectSpectrum();
                     await this.audioPreview.stopPreview();
                 }
                 this.audioPreviewFrequency = null;
 
                 // Remove visual indicator
                 this.removePreviewIndicator(band);
+
+                // Re-enable chart tooltip
+                const chart = this.fftCharts[band];
+                if (chart) {
+                    chart.options.plugins.tooltip.enabled = true;
+                    chart.update('none');
+                }
+
+                // Restore original FFT spectrum from HTTP endpoint
+                const fftId = `fft-${band}`;
+                await this.updateSingleFFT(fftId, band);
 
                 // Update button appearance
                 button.style.background = '#4CAF50'; // Green when inactive
@@ -2091,6 +2190,63 @@ class NoiseFloorMonitor {
 
         delete chart.options.plugins.annotation.annotations.preview_line;
         delete chart.options.plugins.annotation.annotations.preview_box;
+        chart.update('none');
+    }
+
+    updateFFTFromSpectrum(band, spectrumData) {
+        const chart = this.fftCharts[band];
+        if (!chart) {
+            console.warn('FFT chart not found for band:', band);
+            return;
+        }
+
+        // spectrumData contains: { data: [...], config: { centerFreq, binCount, binBandwidth, totalBandwidth }, timestamp }
+        if (!spectrumData || !spectrumData.data || spectrumData.data.length === 0) {
+            console.warn('Invalid spectrum data received');
+            return;
+        }
+
+        const config = spectrumData.config;
+        if (!config) {
+            console.warn('No spectrum config available yet');
+            return;
+        }
+
+        // Calculate frequency labels based on spectrum config
+        // The unwrapped data goes from (centerFreq - totalBandwidth/2) to (centerFreq + totalBandwidth/2)
+        const numBins = spectrumData.data.length;
+        const startFreqHz = config.centerFreq - (config.totalBandwidth / 2);
+        const binWidthHz = config.binBandwidth;
+
+        // Create frequency labels in MHz
+        const frequencies = [];
+        for (let i = 0; i < numBins; i++) {
+            const freqHz = startFreqHz + (i * binWidthHz);
+            frequencies.push(freqHz / 1e6); // Convert to MHz
+        }
+
+        // Update chart data and labels
+        chart.data.labels = frequencies;
+        chart.data.datasets[0].data = Array.from(spectrumData.data);
+
+        // Update X-axis range
+        const startFreqMHz = startFreqHz / 1e6;
+        const endFreqMHz = (startFreqHz + (numBins * binWidthHz)) / 1e6;
+        chart.options.scales.x.min = startFreqMHz;
+        chart.options.scales.x.max = endFreqMHz;
+
+        // Update Y-axis scaling based on new data
+        const dataMin = Math.min(...spectrumData.data);
+        const dataMax = Math.max(...spectrumData.data);
+        const range = dataMax - dataMin;
+        const padding = range * 0.05;
+        chart.options.scales.y.min = Math.floor(dataMin - padding);
+        chart.options.scales.y.max = Math.ceil(dataMax + padding);
+
+        // Update chart title to show it's real-time
+        chart.options.plugins.title.text = 'Real-time Spectrum (WebSocket)';
+
+        // Update without animation for smooth real-time updates
         chart.update('none');
     }
 

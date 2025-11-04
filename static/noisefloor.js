@@ -1091,7 +1091,11 @@ class NoiseFloorMonitor {
                                 font: {
                                     size: 9
                                 },
-                                callback: (value) => value.toFixed(0)
+                                callback: (value) => {
+                                    // Pad to consistent width (4 chars: -100 to 100)
+                                    const str = value.toFixed(0);
+                                    return str.padStart(4, ' ');
+                                }
                             },
                             title: {
                                 display: true,

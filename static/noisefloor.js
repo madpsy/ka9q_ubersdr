@@ -15,6 +15,7 @@ class NoiseFloorMonitor {
         this.historicalDataCache = {}; // Cache historical data to avoid redundant API calls
         this.sparklineCharts = {}; // Store sparkline chart references by band
         this.fftCharts = {}; // Store FFT chart references by band
+        this.wasHistorical = false; // Track if we were viewing historical data
         
         // Tableau 10 color palette - designed for maximum distinction
         this.bandColors = {
@@ -185,8 +186,11 @@ class NoiseFloorMonitor {
         const liveDataSection = document.getElementById('liveData');
         liveDataSection.style.display = 'block';
         
-        // Force cleanup when switching to live mode to ensure charts are recreated
-        this.cleanup();
+        // Only cleanup when switching from historical to live mode
+        if (this.wasHistorical) {
+            this.cleanup();
+            this.wasHistorical = false;
+        }
         
         const response = await fetch('/api/noisefloor/latest');
         
@@ -253,6 +257,9 @@ class NoiseFloorMonitor {
         // Hide the live data dashboard when viewing historical data
         const liveDataSection = document.getElementById('liveData');
         liveDataSection.style.display = 'none';
+        
+        // Mark that we're viewing historical data
+        this.wasHistorical = true;
         
         // Use trend endpoint for 10-minute averaged data, just like live mode
         const url = `/api/noisefloor/trend?date=${this.currentDate}${this.currentBand !== 'all' ? '&band=' + this.currentBand : ''}`;
@@ -429,6 +436,8 @@ class NoiseFloorMonitor {
             bands.forEach(band => {
                 if (!data[band]) return;
                 this.updateBandCard(band, data[band], noiseFloorStats);
+                // Also update sparkline charts with new data
+                this.createSparkline(`sparkline-${band}`, band);
             });
         }
     }
@@ -644,45 +653,59 @@ class NoiseFloorMonitor {
     }
     
     updateBandCard(band, measurement, noiseFloorStats = null) {
-        // Find the card for this band
-        const card = document.querySelector(`.card[data-band="${band}"]`);
-        if (!card) return;
-        
         const timestamp = new Date(measurement.timestamp).toLocaleTimeString();
         const noiseFloorColor = noiseFloorStats
             ? this.getNoiseFloorColor(measurement.p5_db, noiseFloorStats)
             : '#4CAF50';
         
-        // Update card content without recreating - use safer selectors
-        const h3Spans = card.querySelectorAll('h3 span');
-        if (h3Spans.length >= 2) {
-            h3Spans[1].textContent = `${measurement.p5_db.toFixed(0)} dB`;
-            h3Spans[1].style.color = noiseFloorColor;
+        // In "all bands" view, find the card with data-band attribute
+        // In single band view, find all cards (they're children of a container with data-band)
+        let cards;
+        if (this.currentBand === 'all') {
+            const card = document.querySelector(`.card[data-band="${band}"]`);
+            if (!card) return;
+            cards = [card];
+        } else {
+            // In single band view, find the container and get all its card children
+            const container = document.querySelector(`[data-band="${band}"]`);
+            if (!container) return;
+            cards = Array.from(container.querySelectorAll('.card'));
         }
         
-        const metricValues = card.querySelectorAll('.metric-value');
-        if (metricValues.length >= 7) {
-            metricValues[0].textContent = timestamp;
-            metricValues[2].textContent = `${measurement.max_db.toFixed(1)} dB`;
-            metricValues[3].textContent = `${measurement.p95_db.toFixed(1)} dB`;
-            metricValues[5].textContent = `${measurement.median_db.toFixed(1)} dB`;
-            metricValues[6].textContent = `${measurement.occupancy_pct.toFixed(1)}%`;
-        }
-        
-        const noiseFloorEl = card.querySelector('.noise-floor');
-        if (noiseFloorEl) noiseFloorEl.textContent = `${measurement.p5_db.toFixed(1)} dB`;
-        
-        const signalPeakEl = card.querySelector('.signal-peak');
-        if (signalPeakEl) signalPeakEl.textContent = `${measurement.max_db.toFixed(1)} dB`;
-        
-        const dynamicRangeEl = card.querySelector('.dynamic-range');
-        if (dynamicRangeEl) dynamicRangeEl.textContent = `${measurement.dynamic_range.toFixed(1)} dB`;
-        
-        // Update FT8 SNR if present
-        const ft8SnrEl = card.querySelector('.ft8-snr');
-        if (ft8SnrEl && measurement.ft8_snr && measurement.ft8_snr > 0) {
-            ft8SnrEl.textContent = `${measurement.ft8_snr.toFixed(1)} dB`;
-        }
+        // Update all cards (in single band view there are 3, in all bands view there's 1)
+        cards.forEach(card => {
+            // Update h3 spans (noise floor value and color)
+            const h3Spans = card.querySelectorAll('h3 span');
+            if (h3Spans.length >= 2) {
+                h3Spans[1].textContent = `${measurement.p5_db.toFixed(0)} dB`;
+                h3Spans[1].style.color = noiseFloorColor;
+            }
+            
+            // Update metric values
+            const metricValues = card.querySelectorAll('.metric-value');
+            if (metricValues.length >= 7) {
+                metricValues[0].textContent = timestamp;
+                metricValues[2].textContent = `${measurement.max_db.toFixed(1)} dB`;
+                metricValues[3].textContent = `${measurement.p95_db.toFixed(1)} dB`;
+                metricValues[5].textContent = `${measurement.median_db.toFixed(1)} dB`;
+                metricValues[6].textContent = `${measurement.occupancy_pct.toFixed(1)}%`;
+            }
+            
+            const noiseFloorEl = card.querySelector('.noise-floor');
+            if (noiseFloorEl) noiseFloorEl.textContent = `${measurement.p5_db.toFixed(1)} dB`;
+            
+            const signalPeakEl = card.querySelector('.signal-peak');
+            if (signalPeakEl) signalPeakEl.textContent = `${measurement.max_db.toFixed(1)} dB`;
+            
+            const dynamicRangeEl = card.querySelector('.dynamic-range');
+            if (dynamicRangeEl) dynamicRangeEl.textContent = `${measurement.dynamic_range.toFixed(1)} dB`;
+            
+            // Update FT8 SNR if present
+            const ft8SnrEl = card.querySelector('.ft8-snr');
+            if (ft8SnrEl && measurement.ft8_snr && measurement.ft8_snr > 0) {
+                ft8SnrEl.textContent = `${measurement.ft8_snr.toFixed(1)} dB`;
+            }
+        });
     }
     
     async createSparkline(canvasId, band) {
@@ -1075,8 +1098,11 @@ class NoiseFloorMonitor {
             }
         }
         
+        // Update existing chart if it exists, otherwise create new one
         if (this.trendChart) {
-            this.trendChart.destroy();
+            this.trendChart.data.datasets = datasets;
+            this.trendChart.update('none');
+            return;
         }
         
         this.trendChart = new Chart(ctx, {
@@ -1179,9 +1205,20 @@ class NoiseFloorMonitor {
         
         const ctx = document.getElementById('dynamicRangeChart');
         
-        if (this.dynamicRangeChart) {
-            this.dynamicRangeChart.destroy();
+        // Update existing chart if it exists and canvas is still in DOM, otherwise create new one
+        if (this.dynamicRangeChart && ctx && ctx.parentElement) {
+            this.dynamicRangeChart.data.datasets = datasets;
+            this.dynamicRangeChart.update('none');
+            return;
         }
+        
+        // Destroy old chart if canvas was removed
+        if (this.dynamicRangeChart && (!ctx || !ctx.parentElement)) {
+            this.dynamicRangeChart.destroy();
+            this.dynamicRangeChart = null;
+        }
+        
+        if (!ctx) return;
         
         this.dynamicRangeChart = new Chart(ctx, {
             type: 'line',
@@ -1378,17 +1415,35 @@ class NoiseFloorMonitor {
         }
 
         const ctx = document.getElementById('ft8SnrChart');
+        if (!ctx) return;
 
-        if (this.ft8SnrChart) {
-            this.ft8SnrChart.destroy();
-        }
-
-        // Only create chart if we have data
+        // Only create/update chart if we have data
         if (datasets.length === 0) {
-            ctx.parentElement.style.display = 'none';
+            if (this.ft8SnrChart) {
+                this.ft8SnrChart.destroy();
+                this.ft8SnrChart = null;
+            }
+            if (ctx.parentElement) {
+                ctx.parentElement.style.display = 'none';
+            }
             return;
         } else {
-            ctx.parentElement.style.display = 'block';
+            if (ctx.parentElement) {
+                ctx.parentElement.style.display = 'block';
+            }
+        }
+
+        // Update existing chart if it exists and canvas is still in DOM, otherwise create new one
+        if (this.ft8SnrChart && ctx.parentElement) {
+            this.ft8SnrChart.data.datasets = datasets;
+            this.ft8SnrChart.update('none');
+            return;
+        }
+        
+        // Destroy old chart if canvas was removed
+        if (this.ft8SnrChart && !ctx.parentElement) {
+            this.ft8SnrChart.destroy();
+            this.ft8SnrChart = null;
         }
 
         this.ft8SnrChart = new Chart(ctx, {

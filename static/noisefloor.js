@@ -439,8 +439,10 @@ class NoiseFloorMonitor {
     }
 
     async updateTrendChartHistorical(data, comparisonData = null, comparisonDate = null) {
-        // Use a common reference date for time-of-day alignment
-        const referenceDate = new Date(this.currentDate + 'T00:00:00');
+        // Only normalize timestamps when doing a comparison
+        // Otherwise use actual timestamps for proper time display
+        const shouldNormalize = comparisonData && comparisonDate;
+        const referenceDate = shouldNormalize ? new Date(this.currentDate + 'T00:00:00') : null;
         
         // Group primary data by band
         const bandData = {};
@@ -448,13 +450,21 @@ class NoiseFloorMonitor {
             if (!bandData[m.band]) {
                 bandData[m.band] = [];
             }
-            // Extract time-of-day and apply to reference date
-            const timestamp = new Date(m.timestamp);
-            const normalizedTime = new Date(referenceDate);
-            normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+            
+            let timestamp;
+            if (shouldNormalize) {
+                // Extract time-of-day and apply to reference date for comparison overlay
+                const ts = new Date(m.timestamp);
+                const normalizedTime = new Date(referenceDate);
+                normalizedTime.setHours(ts.getHours(), ts.getMinutes(), ts.getSeconds(), ts.getMilliseconds());
+                timestamp = normalizedTime;
+            } else {
+                // Use actual timestamp for normal display
+                timestamp = new Date(m.timestamp);
+            }
             
             bandData[m.band].push({
-                x: normalizedTime,
+                x: timestamp,
                 y: m.p5_db
             });
         });
@@ -480,9 +490,9 @@ class NoiseFloorMonitor {
                     comparisonBandData[m.band] = [];
                 }
                 // Extract time-of-day and apply to same reference date for alignment
-                const timestamp = new Date(m.timestamp);
+                const ts = new Date(m.timestamp);
                 const normalizedTime = new Date(referenceDate);
-                normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+                normalizedTime.setHours(ts.getHours(), ts.getMinutes(), ts.getSeconds(), ts.getMilliseconds());
                 
                 comparisonBandData[m.band].push({
                     x: normalizedTime,
@@ -1504,8 +1514,10 @@ class NoiseFloorMonitor {
     }
 
     async updateDynamicRangeChartHistorical(data, comparisonData = null, comparisonDate = null) {
-        // Use a common reference date for time-of-day alignment
-        const referenceDate = new Date(this.currentDate + 'T00:00:00');
+        // Only normalize timestamps when doing a comparison
+        // Otherwise use actual timestamps for proper time display
+        const shouldNormalize = comparisonData && comparisonDate;
+        const referenceDate = shouldNormalize ? new Date(this.currentDate + 'T00:00:00') : null;
         
         // Group primary data by band
         const bandData = {};
@@ -1513,13 +1525,21 @@ class NoiseFloorMonitor {
             if (!bandData[m.band]) {
                 bandData[m.band] = [];
             }
-            // Extract time-of-day and apply to reference date
-            const timestamp = new Date(m.timestamp);
-            const normalizedTime = new Date(referenceDate);
-            normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+            
+            let timestamp;
+            if (shouldNormalize) {
+                // Extract time-of-day and apply to reference date for comparison overlay
+                const ts = new Date(m.timestamp);
+                const normalizedTime = new Date(referenceDate);
+                normalizedTime.setHours(ts.getHours(), ts.getMinutes(), ts.getSeconds(), ts.getMilliseconds());
+                timestamp = normalizedTime;
+            } else {
+                // Use actual timestamp for normal display
+                timestamp = new Date(m.timestamp);
+            }
             
             bandData[m.band].push({
-                x: normalizedTime,
+                x: timestamp,
                 y: m.dynamic_range
             });
         });
@@ -1545,9 +1565,9 @@ class NoiseFloorMonitor {
                     comparisonBandData[m.band] = [];
                 }
                 // Extract time-of-day and apply to same reference date for alignment
-                const timestamp = new Date(m.timestamp);
+                const ts = new Date(m.timestamp);
                 const normalizedTime = new Date(referenceDate);
-                normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+                normalizedTime.setHours(ts.getHours(), ts.getMinutes(), ts.getSeconds(), ts.getMilliseconds());
                 
                 comparisonBandData[m.band].push({
                     x: normalizedTime,
@@ -1783,8 +1803,10 @@ class NoiseFloorMonitor {
     }
 
     async updateFT8SnrChartHistorical(data, comparisonData = null, comparisonDate = null) {
-        // Use a common reference date for time-of-day alignment
-        const referenceDate = new Date(this.currentDate + 'T00:00:00');
+        // Only normalize timestamps when doing a comparison
+        // Otherwise use actual timestamps for proper time display
+        const shouldNormalize = comparisonData && comparisonDate;
+        const referenceDate = shouldNormalize ? new Date(this.currentDate + 'T00:00:00') : null;
         
         // Group primary data by band
         const bandData = {};
@@ -1794,13 +1816,21 @@ class NoiseFloorMonitor {
                 if (!bandData[m.band]) {
                     bandData[m.band] = [];
                 }
-                // Extract time-of-day and apply to reference date
-                const timestamp = new Date(m.timestamp);
-                const normalizedTime = new Date(referenceDate);
-                normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+                
+                let timestamp;
+                if (shouldNormalize) {
+                    // Extract time-of-day and apply to reference date for comparison overlay
+                    const ts = new Date(m.timestamp);
+                    const normalizedTime = new Date(referenceDate);
+                    normalizedTime.setHours(ts.getHours(), ts.getMinutes(), ts.getSeconds(), ts.getMilliseconds());
+                    timestamp = normalizedTime;
+                } else {
+                    // Use actual timestamp for normal display
+                    timestamp = new Date(m.timestamp);
+                }
                 
                 bandData[m.band].push({
-                    x: normalizedTime,
+                    x: timestamp,
                     y: m.ft8_snr
                 });
             }
@@ -1828,9 +1858,9 @@ class NoiseFloorMonitor {
                         comparisonBandData[m.band] = [];
                     }
                     // Extract time-of-day and apply to same reference date for alignment
-                    const timestamp = new Date(m.timestamp);
+                    const ts = new Date(m.timestamp);
                     const normalizedTime = new Date(referenceDate);
-                    normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+                    normalizedTime.setHours(ts.getHours(), ts.getMinutes(), ts.getSeconds(), ts.getMilliseconds());
                     
                     comparisonBandData[m.band].push({
                         x: normalizedTime,

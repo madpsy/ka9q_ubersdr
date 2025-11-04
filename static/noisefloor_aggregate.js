@@ -560,7 +560,7 @@ function createFieldChart(field, data, request) {
                 });
                 
                 datasets.push({
-                    label: `${band} (Primary)`,
+                    label: data.comparison ? `${band} (Primary)` : band,
                     data: bandData,
                     borderColor: BAND_COLORS[band],
                     backgroundColor: BAND_COLORS[band],
@@ -644,7 +644,7 @@ function createFieldChart(field, data, request) {
                 });
                 
                 datasets.push({
-                    label: `${band} (Primary)`,
+                    label: data.comparison ? `${band} (Primary)` : band,
                     data: bandData,
                     borderColor: BAND_COLORS[band],
                     backgroundColor: BAND_COLORS[band],
@@ -952,7 +952,7 @@ function createFieldChartData(field, data, request, ctx) {
                 });
                 
                 datasets.push({
-                    label: `${band} (Primary)`,
+                    label: data.comparison ? `${band} (Primary)` : band,
                     data: bandData,
                     borderColor: BAND_COLORS[band],
                     backgroundColor: BAND_COLORS[band],
@@ -1031,7 +1031,7 @@ function createFieldChartData(field, data, request, ctx) {
                 });
                 
                 datasets.push({
-                    label: `${band} (Primary)`,
+                    label: data.comparison ? `${band} (Primary)` : band,
                     data: bandData,
                     borderColor: BAND_COLORS[band],
                     backgroundColor: BAND_COLORS[band],

@@ -11,6 +11,7 @@ class NoiseFloorMonitor {
         this.currentDate = 'live';
         this.currentBand = 'all';
         this.compactView = false;
+        this.savedCompactView = false; // Save compact view state when switching to single band
         this.historicalDataCache = {}; // Cache historical data to avoid redundant API calls
         this.sparklineCharts = {}; // Store sparkline chart references by band
         this.fftCharts = {}; // Store FFT chart references by band
@@ -84,6 +85,11 @@ class NoiseFloorMonitor {
     }
     
     toggleCompactView() {
+        // Only allow compact view toggle in "all bands" mode
+        if (this.currentBand !== 'all') {
+            return;
+        }
+        
         this.compactView = !this.compactView;
         const btn = document.getElementById('viewToggleBtn');
         btn.textContent = this.compactView ? '📋 Full View' : '📊 Compact View';
@@ -175,6 +181,13 @@ class NoiseFloorMonitor {
     }
     
     async loadLiveData() {
+        // Show the live data dashboard when viewing live data
+        const liveDataSection = document.getElementById('liveData');
+        liveDataSection.style.display = 'block';
+        
+        // Force cleanup when switching to live mode to ensure charts are recreated
+        this.cleanup();
+        
         const response = await fetch('/api/noisefloor/latest');
         
         // Handle 204 No Content (no data available yet)
@@ -237,7 +250,12 @@ class NoiseFloorMonitor {
     }
     
     async loadHistoricalData() {
-        const url = `/api/noisefloor/history?date=${this.currentDate}${this.currentBand !== 'all' ? '&band=' + this.currentBand : ''}`;
+        // Hide the live data dashboard when viewing historical data
+        const liveDataSection = document.getElementById('liveData');
+        liveDataSection.style.display = 'none';
+        
+        // Use trend endpoint for 10-minute averaged data, just like live mode
+        const url = `/api/noisefloor/trend?date=${this.currentDate}${this.currentBand !== 'all' ? '&band=' + this.currentBand : ''}`;
         const response = await fetch(url);
         
         if (!response.ok) {
@@ -252,27 +270,141 @@ class NoiseFloorMonitor {
         }
         
         this.displayHistoricalData(data);
+        await this.updateTrendChartHistorical(data);
         await this.updateDynamicRangeChartHistorical(data);
         await this.updateFT8SnrChartHistorical(data);
     }
     
+    async updateTrendChartHistorical(data) {
+        // Group by band
+        const bandData = {};
+        data.forEach(m => {
+            if (!bandData[m.band]) {
+                bandData[m.band] = [];
+            }
+            bandData[m.band].push({
+                x: new Date(m.timestamp),
+                y: m.p5_db
+            });
+        });
+        
+        const bands = this.sortBands(Object.keys(bandData));
+        const datasets = bands.map(band => ({
+            label: band,
+            data: bandData[band],
+            borderColor: this.bandColors[band] || '#999',
+            backgroundColor: this.bandColors[band] || '#999',
+            borderWidth: 2,
+            pointRadius: 2,
+            tension: 0.4
+        }));
+        
+        const ctx = document.getElementById('trendChart');
+        
+        if (this.trendChart) {
+            this.trendChart.destroy();
+        }
+        
+        this.trendChart = new Chart(ctx, {
+            type: 'line',
+            data: { datasets },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2.5,
+                plugins: {
+                    title: {
+                        display: false
+                    },
+                    legend: {
+                        display: true,
+                        labels: { color: '#fff' }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false
+                                });
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Noise Floor (dB)',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
+                }
+            }
+        });
+    }
+    
     displayLiveData(data) {
         const dashboard = document.getElementById('dashboard');
+        const trendsContainer = document.getElementById('trendsContainer');
         
         // Filter by selected band if not "all"
         const bands = this.currentBand === 'all'
             ? this.sortBands(Object.keys(data))
             : [this.currentBand];
         
+        // Toggle layout classes based on view mode
+        if (this.currentBand === 'all') {
+            dashboard.classList.remove('single-band');
+            // Restore saved compact view state when returning to all bands
+            this.compactView = this.savedCompactView;
+            const btn = document.getElementById('viewToggleBtn');
+            btn.textContent = this.compactView ? '📋 Full View' : '📊 Compact View';
+        } else {
+            dashboard.classList.add('single-band');
+            // Save current compact view state before switching to single band
+            this.savedCompactView = this.compactView;
+            // Always show full view in single band mode
+            this.compactView = false;
+            const btn = document.getElementById('viewToggleBtn');
+            btn.textContent = '📊 Compact View';
+        }
+        
+        // Always use two-column layout for trend charts
+        trendsContainer.classList.add('two-column');
+        
         // Calculate noise floor statistics for color coding
         const noiseFloors = bands.map(band => data[band]?.p5_db).filter(v => v !== undefined);
         const noiseFloorStats = this.calculateNoiseFloorStats(noiseFloors);
         
-        // Check if we need to recreate cards (band selection changed)
-        const existingBands = Array.from(dashboard.querySelectorAll('.card')).map(card =>
-            card.querySelector('h3 span').textContent
+        // Check if we need to recreate cards (band selection changed or switching from historical)
+        const existingBands = Array.from(dashboard.querySelectorAll('[data-band]')).map(card =>
+            card.dataset.band
         );
-        const needsRecreate = JSON.stringify(existingBands) !== JSON.stringify(bands);
+        const needsRecreate = JSON.stringify(existingBands) !== JSON.stringify(bands) ||
+                              dashboard.children.length === 0 || // Force recreate if dashboard is empty
+                              Object.keys(this.sparklineCharts).length === 0; // Force recreate if no charts exist
         
         if (needsRecreate) {
             // Clean up old charts before recreating
@@ -328,13 +460,18 @@ class NoiseFloorMonitor {
     }
     
     createBandCard(band, measurement, noiseFloorStats = null) {
+        // In single band view, create three separate cards
+        if (this.currentBand !== 'all') {
+            return this.createSingleBandCards(band, measurement, noiseFloorStats);
+        }
+        
+        // Original card for "all bands" view
         const card = document.createElement('div');
         card.className = 'card';
         card.style.cursor = 'pointer';
         card.title = `Click to view ${band} only`;
-        card.dataset.band = band; // Store band name for easy lookup
+        card.dataset.band = band;
         
-        // Add click handler to switch to this band
         const clickHandler = () => {
             if (this.currentBand === 'all') {
                 this.currentBand = band;
@@ -345,7 +482,6 @@ class NoiseFloorMonitor {
             }
         };
         card.addEventListener('click', clickHandler);
-        // Store handler reference for cleanup
         card._clickHandler = clickHandler;
         
         const timestamp = new Date(measurement.timestamp).toLocaleTimeString();
@@ -356,7 +492,6 @@ class NoiseFloorMonitor {
             ? this.getNoiseFloorColor(measurement.p5_db, noiseFloorStats)
             : '#4CAF50';
         
-        // Determine FT8 SNR display (only show if > 0)
         const ft8SnrHtml = measurement.ft8_snr && measurement.ft8_snr > 0
             ? `<div class="metric">
                 <span class="metric-label">FT8 SNR:</span>
@@ -398,21 +533,114 @@ class NoiseFloorMonitor {
                 <span class="metric-value">${measurement.occupancy_pct.toFixed(1)}%</span>
             </div>
             ${ft8SnrHtml}
-            <div style="margin-top: 15px; height: ${this.currentBand === 'all' ? '100px' : '150px'};">
+            <div style="margin-top: 15px; height: 100px;">
                 <canvas id="${sparklineId}"></canvas>
             </div>
-            <div style="margin-top: 15px; height: ${this.currentBand === 'all' ? '200px' : '400px'};">
+            <div style="margin-top: 15px; height: 200px;">
                 <canvas id="${fftId}"></canvas>
             </div>
         `;
         
-        // Create sparkline and FFT spectrum after card is added to DOM
         setTimeout(() => {
             this.createSparkline(sparklineId, band);
             this.createFFTSpectrum(fftId, band);
         }, 0);
         
         return card;
+    }
+    
+    createSingleBandCards(band, measurement, noiseFloorStats = null) {
+        const container = document.createElement('div');
+        container.style.display = 'contents'; // Makes children act as direct grid items
+        container.dataset.band = band;
+        
+        const timestamp = new Date(measurement.timestamp).toLocaleTimeString();
+        const sparklineId = `sparkline-${band}`;
+        const fftId = `fft-${band}`;
+        
+        const noiseFloorColor = noiseFloorStats
+            ? this.getNoiseFloorColor(measurement.p5_db, noiseFloorStats)
+            : '#4CAF50';
+        
+        const ft8SnrHtml = measurement.ft8_snr && measurement.ft8_snr > 0
+            ? `<div class="metric">
+                <span class="metric-label">FT8 SNR:</span>
+                <span class="metric-value ft8-snr">${measurement.ft8_snr.toFixed(1)} dB</span>
+            </div>`
+            : '';
+        
+        // Card 1: Metrics
+        const metricsCard = document.createElement('div');
+        metricsCard.className = 'card';
+        metricsCard.innerHTML = `
+            <h3 style="display: flex; justify-content: space-between; align-items: center;">
+                <span>${band} Metrics</span>
+                <span style="color: ${noiseFloorColor}; font-size: 0.9em;">${measurement.p5_db.toFixed(0)} dB</span>
+            </h3>
+            <div class="metric">
+                <span class="metric-label">Last Update:</span>
+                <span class="metric-value">${timestamp}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Noise Floor (P5):</span>
+                <span class="metric-value noise-floor">${measurement.p5_db.toFixed(1)} dB</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Signal Peak (Max):</span>
+                <span class="metric-value signal-peak">${measurement.max_db.toFixed(1)} dB</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">P95:</span>
+                <span class="metric-value">${measurement.p95_db.toFixed(1)} dB</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Dynamic Range:</span>
+                <span class="metric-value dynamic-range">${measurement.dynamic_range.toFixed(1)} dB</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Median:</span>
+                <span class="metric-value">${measurement.median_db.toFixed(1)} dB</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Band Occupancy:</span>
+                <span class="metric-value">${measurement.occupancy_pct.toFixed(1)}%</span>
+            </div>
+            ${ft8SnrHtml}
+        `;
+        
+        // Card 2: Sparkline (1 hour noise floor)
+        const sparklineCard = document.createElement('div');
+        sparklineCard.className = 'card';
+        sparklineCard.style.display = 'flex';
+        sparklineCard.style.flexDirection = 'column';
+        sparklineCard.innerHTML = `
+            <h3>${band} Noise Floor (Last Hour)</h3>
+            <div style="margin-top: 15px; flex: 1; min-height: 0;">
+                <canvas id="${sparklineId}"></canvas>
+            </div>
+        `;
+        
+        // Card 3: FFT Spectrum
+        const fftCard = document.createElement('div');
+        fftCard.className = 'card';
+        fftCard.style.gridColumn = '1 / -1'; // Span both columns
+        fftCard.innerHTML = `
+            <h3>${band} Real-time Spectrum</h3>
+            <div style="margin-top: 15px; height: 300px;">
+                <canvas id="${fftId}"></canvas>
+            </div>
+        `;
+        
+        container.appendChild(metricsCard);
+        container.appendChild(sparklineCard);
+        container.appendChild(fftCard);
+        
+        setTimeout(() => {
+            this.createSparkline(sparklineId, band);
+            this.createFFTSpectrum(fftId, band);
+        }, 0);
+        
+        return container;
     }
     
     updateBandCard(band, measurement, noiseFloorStats = null) {

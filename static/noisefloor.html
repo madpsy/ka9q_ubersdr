@@ -117,6 +117,20 @@
             margin-bottom: 30px;
         }
 
+        .dashboard.single-band {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .trends-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+
+        .trends-container.two-column {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
         .card {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
@@ -294,20 +308,22 @@
             </div>
         </div>
 
-        <div class="chart-container">
-            <h2>📈 Noise Floor Trends (24 Hours)</h2>
-            <canvas id="trendChart"></canvas>
-            <div class="legend" id="legend"></div>
-        </div>
+        <div class="trends-container" id="trendsContainer">
+            <div class="chart-container">
+                <h2>📈 Noise Floor (24 Hours)</h2>
+                <canvas id="trendChart"></canvas>
+                <div class="legend" id="legend"></div>
+            </div>
 
-        <div class="chart-container">
-            <h2>📊 Dynamic Range Trends (24 Hours)</h2>
-            <canvas id="dynamicRangeChart"></canvas>
-        </div>
+            <div class="chart-container">
+                <h2>📊 Dynamic Range (24 Hours)</h2>
+                <canvas id="dynamicRangeChart"></canvas>
+            </div>
 
-        <div class="chart-container">
-            <h2>📻 FT8 SNR Trends (24 Hours)</h2>
-            <canvas id="ft8SnrChart"></canvas>
+            <div class="chart-container">
+                <h2>📻 FT8 SNR (24 Hours)</h2>
+                <canvas id="ft8SnrChart"></canvas>
+            </div>
         </div>
     </div>
 

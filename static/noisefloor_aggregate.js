@@ -1374,12 +1374,29 @@ async function loadVersion() {
         const response = await fetch('/api/description');
         if (response.ok) {
             const data = await response.json();
+
+            // Update version in footer
             const versionSpan = document.getElementById('footer-version');
             if (versionSpan && data.version) {
                 versionSpan.textContent = `v${data.version}`;
             }
+
+            // Update receiver name in subtitle
+            const receiverNameEl = document.getElementById('receiver-name');
+            if (receiverNameEl) {
+                if (data.receiver && data.receiver.name) {
+                    receiverNameEl.textContent = data.receiver.name;
+                } else {
+                    receiverNameEl.textContent = 'Long-term HF propagation analysis and comparison';
+                }
+            }
         }
     } catch (error) {
         console.error('Error loading version:', error);
+        // Set fallback text if fetch fails
+        const receiverNameEl = document.getElementById('receiver-name');
+        if (receiverNameEl) {
+            receiverNameEl.textContent = 'Long-term HF propagation analysis and comparison';
+        }
     }
 }

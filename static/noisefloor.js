@@ -2027,15 +2027,40 @@ class NoiseFloorMonitor {
 
     updatePreviewIndicator(band, frequency) {
         const chart = this.fftCharts[band];
-        if (!chart) return;
+        if (!chart || !this.audioPreview) return;
 
         const freqMHz = frequency / 1e6; // Convert Hz to MHz
+
+        // Get bandwidth from MinimalRadio (in Hz)
+        // For USB: bandwidthLow=50, bandwidthHigh=2850 (positive, shows right of center)
+        // For LSB: bandwidthLow=-2850, bandwidthHigh=-50 (negative, shows left of center)
+        const bandwidthLow = this.audioPreview.bandwidthLow / 1e6; // Convert to MHz
+        const bandwidthHigh = this.audioPreview.bandwidthHigh / 1e6; // Convert to MHz
+
+        // Calculate bandwidth edges - automatically correct for USB/LSB
+        const xMin = freqMHz + bandwidthLow;
+        const xMax = freqMHz + bandwidthHigh;
+
+        // Get current mode for label
+        const mode = this.audioPreview.currentMode.toUpperCase();
 
         // Create or update the preview indicator annotation
         if (!chart.options.plugins.annotation.annotations) {
             chart.options.plugins.annotation.annotations = {};
         }
 
+        // Add shaded box for bandwidth (similar to FT8 markers)
+        chart.options.plugins.annotation.annotations.preview_box = {
+            type: 'box',
+            xMin: xMin,
+            xMax: xMax,
+            backgroundColor: 'rgba(255, 0, 0, 0.15)', // Semi-transparent red
+            borderColor: 'rgba(255, 0, 0, 0.5)',
+            borderWidth: 1,
+            borderDash: [5, 5]
+        };
+
+        // Add center line at tuned frequency
         chart.options.plugins.annotation.annotations.preview_line = {
             type: 'line',
             xMin: freqMHz,
@@ -2045,9 +2070,9 @@ class NoiseFloorMonitor {
             borderDash: [5, 5],
             label: {
                 display: true,
-                content: `${(frequency / 1e6).toFixed(3)} MHz`,
+                content: `${(frequency / 1e6).toFixed(3)} MHz (${mode})`,
                 position: 'start',
-                backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                backgroundColor: 'rgba(255, 0, 0, 0.9)',
                 color: '#fff',
                 font: {
                     size: 10,
@@ -2065,6 +2090,7 @@ class NoiseFloorMonitor {
         if (!chart || !chart.options.plugins.annotation.annotations) return;
 
         delete chart.options.plugins.annotation.annotations.preview_line;
+        delete chart.options.plugins.annotation.annotations.preview_box;
         chart.update('none');
     }
 

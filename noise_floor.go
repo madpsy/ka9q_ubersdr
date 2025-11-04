@@ -851,7 +851,7 @@ func (nfm *NoiseFloorMonitor) GetLatestMeasurements() map[string]*BandMeasuremen
 }
 
 // GetHistoricalData reads historical data from band-specific CSV files
-// Automatically includes previous day's data if needed to provide a full 24-hour window
+// Returns only the requested day's data (00:00:00 to 23:59:59)
 func (nfm *NoiseFloorMonitor) GetHistoricalData(date string, band string) ([]*BandMeasurement, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
@@ -863,38 +863,28 @@ func (nfm *NoiseFloorMonitor) GetHistoricalData(date string, band string) ([]*Ba
 		return nil, fmt.Errorf("invalid date format: %w", err)
 	}
 
-	// Calculate 24 hours ago from the start of the requested date
-	startTime := requestedDate.Add(-24 * time.Hour)
-	endTime := requestedDate.Add(24 * time.Hour) // Include full requested day
-
-	// Determine which dates we need to read (current and possibly previous day)
-	datesToRead := []string{date}
-	prevDate := requestedDate.AddDate(0, 0, -1).Format("2006-01-02")
-	datesToRead = append([]string{prevDate}, datesToRead...) // Prepend previous day
+	// Set time boundaries for the requested day only
+	startTime := requestedDate                   // 00:00:00 of requested day
+	endTime := requestedDate.Add(24 * time.Hour) // 00:00:00 of next day
 
 	var allMeasurements []*BandMeasurement
 
-	// If band is specified, read only that band's files
+	// If band is specified, read only that band's file
 	if band != "" {
-		for _, d := range datesToRead {
-			measurements, err := nfm.readBandFile(band, d)
+		measurements, err := nfm.readBandFile(band, date)
+		if err != nil {
+			return nil, fmt.Errorf("no data found for band %s on date %s: %w", band, date, err)
+		}
+		allMeasurements = append(allMeasurements, measurements...)
+	} else {
+		// Read all band files for the requested date
+		for _, bandConfig := range nfm.config.NoiseFloor.Bands {
+			measurements, err := nfm.readBandFile(bandConfig.Name, date)
 			if err != nil {
-				// Skip dates that don't have data (e.g., previous day might not exist)
+				// Skip bands that don't have data
 				continue
 			}
 			allMeasurements = append(allMeasurements, measurements...)
-		}
-	} else {
-		// Read all band files for the date range
-		for _, d := range datesToRead {
-			for _, bandConfig := range nfm.config.NoiseFloor.Bands {
-				measurements, err := nfm.readBandFile(bandConfig.Name, d)
-				if err != nil {
-					// Skip bands/dates that don't have data
-					continue
-				}
-				allMeasurements = append(allMeasurements, measurements...)
-			}
 		}
 	}
 
@@ -902,8 +892,7 @@ func (nfm *NoiseFloorMonitor) GetHistoricalData(date string, band string) ([]*Ba
 		return nil, fmt.Errorf("no data found for date %s", date)
 	}
 
-	// Filter measurements to only include those within the 24-hour window
-	// This ensures we get up to 24 hours of data leading up to and including the requested date
+	// Filter measurements to only include those within the requested day
 	filteredMeasurements := make([]*BandMeasurement, 0, len(allMeasurements))
 	for _, m := range allMeasurements {
 		if (m.Timestamp.Equal(startTime) || m.Timestamp.After(startTime)) &&

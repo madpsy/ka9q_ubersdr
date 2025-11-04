@@ -20,6 +20,16 @@ class NoiseFloorMonitor {
         this.fftCharts = {}; // Store FFT chart references by band
         this.wasHistorical = false; // Track if we were viewing historical data
 
+        // Comparison dates for historical single-band view
+        this.comparisonDates = {
+            trend: null,
+            dynamicRange: null,
+            ft8Snr: null
+        };
+        this.availableDates = []; // Store available dates for date picker
+        this.datePicker = null; // Main date picker instance
+        this.comparisonPickers = {}; // Comparison date pickers by chart type
+
         // Audio preview
         this.audioPreview = null;
         this.audioPreviewEnabled = false;
@@ -48,6 +58,9 @@ class NoiseFloorMonitor {
 
         this.init();
         this.loadVersion();
+        
+        // Expose to window for date picker callbacks
+        window.noiseFloorMonitor = this;
     }
 
     // Generate unique session ID
@@ -120,11 +133,29 @@ class NoiseFloorMonitor {
     }
 
     setupEventListeners() {
-        document.getElementById('dateSelect').addEventListener('change', (e) => {
-            this.currentDate = e.target.value;
-            this.updateURL();
-            this.cleanup(); // Clean up before loading new data
-            this.loadData();
+        // Date mode selector (Live vs Historical)
+        document.getElementById('dateMode').addEventListener('change', (e) => {
+            const mode = e.target.value;
+            const datePickerBtn = document.getElementById('datePickerBtn');
+            
+            if (mode === 'live') {
+                datePickerBtn.style.display = 'none';
+                this.currentDate = 'live';
+                this.updateURL();
+                this.cleanup();
+                this.loadData();
+            } else {
+                datePickerBtn.style.display = 'block';
+                // Show date picker if no date selected yet
+                if (this.currentDate === 'live') {
+                    this.openDatePicker();
+                }
+            }
+        });
+
+        // Date picker button
+        document.getElementById('datePickerBtn').addEventListener('click', () => {
+            this.openDatePicker();
         });
 
         document.getElementById('bandSelect').addEventListener('change', async (e) => {
@@ -197,12 +228,25 @@ class NoiseFloorMonitor {
             this.currentBand = band;
             document.getElementById('bandSelect').value = band;
         }
+
+        // Check if there's a date in the URL (for direct links)
+        const date = params.get('date');
+        if (date && date !== 'live') {
+            // Set to historical mode
+            document.getElementById('dateMode').value = 'historical';
+            document.getElementById('datePickerBtn').style.display = 'block';
+            document.getElementById('selectedDateText').textContent = date;
+            this.currentDate = date;
+        }
     }
 
     updateURL() {
         const params = new URLSearchParams();
         if (this.currentBand !== 'all') {
             params.set('band', this.currentBand);
+        }
+        if (this.currentDate !== 'live') {
+            params.set('date', this.currentDate);
         }
         const newURL = params.toString() ? `?${params.toString()}` : window.location.pathname;
         window.history.replaceState({}, '', newURL);
@@ -216,20 +260,19 @@ class NoiseFloorMonitor {
             }
 
             const data = await response.json();
-            const select = document.getElementById('dateSelect');
+            
+            // Store available dates for date picker
+            this.availableDates = data.dates || [];
 
-            // Keep "Live Data" option
-            select.innerHTML = '<option value="live">Live Data</option>';
-
-            // Add historical dates
-            if (data.dates && data.dates.length > 0) {
-                data.dates.forEach(date => {
-                    const option = document.createElement('option');
-                    option.value = date;
-                    option.textContent = date;
-                    select.appendChild(option);
-                });
+            // Update date pickers if they exist
+            if (this.datePicker) {
+                this.datePicker.updateAvailableDates(this.availableDates);
             }
+            Object.values(this.comparisonPickers).forEach(picker => {
+                if (picker) {
+                    picker.updateAvailableDates(this.availableDates.filter(d => d !== this.currentDate));
+                }
+            });
         } catch (error) {
             console.error('Error loading dates:', error);
         }
@@ -290,6 +333,9 @@ class NoiseFloorMonitor {
         // Show the live data dashboard when viewing live data
         const liveDataSection = document.getElementById('liveData');
         liveDataSection.style.display = 'block';
+
+        // Remove any comparison dropdowns (live mode never shows comparisons)
+        this.removeComparisonDropdowns();
 
         // Only cleanup when switching from historical to live mode
         if (this.wasHistorical) {
@@ -366,6 +412,11 @@ class NoiseFloorMonitor {
         // Mark that we're viewing historical data
         this.wasHistorical = true;
 
+        // Remove comparison controls if switching to all bands view
+        if (this.currentBand === 'all') {
+            this.removeComparisonDropdowns();
+        }
+
         // Use trend endpoint for 10-minute averaged data, just like live mode
         const url = `/api/noisefloor/trend?date=${this.currentDate}${this.currentBand !== 'all' ? '&band=' + this.currentBand : ''}`;
         const response = await fetch(url);
@@ -387,29 +438,74 @@ class NoiseFloorMonitor {
         await this.updateFT8SnrChartHistorical(data);
     }
 
-    async updateTrendChartHistorical(data) {
-        // Group by band
+    async updateTrendChartHistorical(data, comparisonData = null, comparisonDate = null) {
+        // Use a common reference date for time-of-day alignment
+        const referenceDate = new Date(this.currentDate + 'T00:00:00');
+        
+        // Group primary data by band
         const bandData = {};
         data.forEach(m => {
             if (!bandData[m.band]) {
                 bandData[m.band] = [];
             }
+            // Extract time-of-day and apply to reference date
+            const timestamp = new Date(m.timestamp);
+            const normalizedTime = new Date(referenceDate);
+            normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+            
             bandData[m.band].push({
-                x: new Date(m.timestamp),
+                x: normalizedTime,
                 y: m.p5_db
             });
         });
 
         const bands = this.sortBands(Object.keys(bandData));
         const datasets = bands.map(band => ({
-            label: band,
+            label: `${band} (${this.currentDate})`,
             data: bandData[band],
             borderColor: this.bandColors[band] || '#999',
             backgroundColor: this.bandColors[band] || '#999',
             borderWidth: 2,
-            pointRadius: 2,
+            pointRadius: 0,
+            pointHoverRadius: 5,
             tension: 0.4
+            // Solid line for primary date (no borderDash)
         }));
+
+        // Add comparison data if provided
+        if (comparisonData && comparisonDate) {
+            const comparisonBandData = {};
+            comparisonData.forEach(m => {
+                if (!comparisonBandData[m.band]) {
+                    comparisonBandData[m.band] = [];
+                }
+                // Extract time-of-day and apply to same reference date for alignment
+                const timestamp = new Date(m.timestamp);
+                const normalizedTime = new Date(referenceDate);
+                normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+                
+                comparisonBandData[m.band].push({
+                    x: normalizedTime,
+                    y: m.p5_db
+                });
+            });
+
+            bands.forEach(band => {
+                if (comparisonBandData[band]) {
+                    datasets.push({
+                        label: `${band} (${comparisonDate})`,
+                        data: comparisonBandData[band],
+                        borderColor: this.bandColors[band] || '#999',
+                        backgroundColor: this.bandColors[band] || '#999',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 5,
+                        tension: 0.4,
+                        borderDash: [5, 5] // Dashed line for comparison date
+                    });
+                }
+            });
+        }
 
         const ctx = document.getElementById('trendChart');
 
@@ -475,6 +571,10 @@ class NoiseFloorMonitor {
                 }
             }
         });
+
+        // Add comparison dropdown if in historical single-band view
+        const chartContainer = ctx.parentElement;
+        this.createComparisonDropdown('trend', chartContainer);
     }
 
     displayLiveData(data) {
@@ -1200,7 +1300,8 @@ class NoiseFloorMonitor {
                     borderColor: this.bandColors[band] || '#999',
                     backgroundColor: this.bandColors[band] || '#999',
                     borderWidth: 2,
-                    pointRadius: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
                     tension: 0.4
                 });
             } catch (error) {
@@ -1316,7 +1417,8 @@ class NoiseFloorMonitor {
                     borderColor: this.bandColors[band] || '#999',
                     backgroundColor: this.bandColors[band] || '#999',
                     borderWidth: 2,
-                    pointRadius: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
                     tension: 0.4
                 });
             } catch (error) {
@@ -1401,29 +1503,74 @@ class NoiseFloorMonitor {
         });
     }
 
-    async updateDynamicRangeChartHistorical(data) {
-        // Group by band
+    async updateDynamicRangeChartHistorical(data, comparisonData = null, comparisonDate = null) {
+        // Use a common reference date for time-of-day alignment
+        const referenceDate = new Date(this.currentDate + 'T00:00:00');
+        
+        // Group primary data by band
         const bandData = {};
         data.forEach(m => {
             if (!bandData[m.band]) {
                 bandData[m.band] = [];
             }
+            // Extract time-of-day and apply to reference date
+            const timestamp = new Date(m.timestamp);
+            const normalizedTime = new Date(referenceDate);
+            normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+            
             bandData[m.band].push({
-                x: new Date(m.timestamp),
+                x: normalizedTime,
                 y: m.dynamic_range
             });
         });
 
         const bands = this.sortBands(Object.keys(bandData));
         const datasets = bands.map(band => ({
-            label: band,
+            label: `${band} (${this.currentDate})`,
             data: bandData[band],
             borderColor: this.bandColors[band] || '#999',
             backgroundColor: this.bandColors[band] || '#999',
             borderWidth: 2,
-            pointRadius: 2,
+            pointRadius: 0,
+            pointHoverRadius: 5,
             tension: 0.4
+            // Solid line for primary date (no borderDash)
         }));
+
+        // Add comparison data if provided
+        if (comparisonData && comparisonDate) {
+            const comparisonBandData = {};
+            comparisonData.forEach(m => {
+                if (!comparisonBandData[m.band]) {
+                    comparisonBandData[m.band] = [];
+                }
+                // Extract time-of-day and apply to same reference date for alignment
+                const timestamp = new Date(m.timestamp);
+                const normalizedTime = new Date(referenceDate);
+                normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+                
+                comparisonBandData[m.band].push({
+                    x: normalizedTime,
+                    y: m.dynamic_range
+                });
+            });
+
+            bands.forEach(band => {
+                if (comparisonBandData[band]) {
+                    datasets.push({
+                        label: `${band} (${comparisonDate})`,
+                        data: comparisonBandData[band],
+                        borderColor: this.bandColors[band] || '#999',
+                        backgroundColor: this.bandColors[band] || '#999',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 5,
+                        tension: 0.4,
+                        borderDash: [5, 5] // Dashed line for comparison date
+                    });
+                }
+            });
+        }
 
         const ctx = document.getElementById('dynamicRangeChart');
 
@@ -1489,6 +1636,10 @@ class NoiseFloorMonitor {
                 }
             }
         });
+
+        // Add comparison dropdown if in historical single-band view
+        const chartContainer = ctx.parentElement;
+        this.createComparisonDropdown('dynamicRange', chartContainer);
     }
 
     async updateFT8SnrChart(data) {
@@ -1527,7 +1678,8 @@ class NoiseFloorMonitor {
                     borderColor: this.bandColors[band] || '#999',
                     backgroundColor: this.bandColors[band] || '#999',
                     borderWidth: 2,
-                    pointRadius: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
                     tension: 0.4
                 });
             } catch (error) {
@@ -1555,14 +1707,14 @@ class NoiseFloorMonitor {
         }
 
         // Update existing chart if it exists and canvas is still in DOM, otherwise create new one
-        if (this.ft8SnrChart && ctx.parentElement) {
+        if (this.ft8SnrChart && ctx && ctx.parentElement) {
             this.ft8SnrChart.data.datasets = datasets;
             this.ft8SnrChart.update('none');
             return;
         }
 
         // Destroy old chart if canvas was removed
-        if (this.ft8SnrChart && !ctx.parentElement) {
+        if (this.ft8SnrChart && (!ctx || !ctx.parentElement)) {
             this.ft8SnrChart.destroy();
             this.ft8SnrChart = null;
         }
@@ -1630,8 +1782,11 @@ class NoiseFloorMonitor {
         });
     }
 
-    async updateFT8SnrChartHistorical(data) {
-        // Group by band
+    async updateFT8SnrChartHistorical(data, comparisonData = null, comparisonDate = null) {
+        // Use a common reference date for time-of-day alignment
+        const referenceDate = new Date(this.currentDate + 'T00:00:00');
+        
+        // Group primary data by band
         const bandData = {};
         data.forEach(m => {
             // Only include bands with FT8 data
@@ -1639,8 +1794,13 @@ class NoiseFloorMonitor {
                 if (!bandData[m.band]) {
                     bandData[m.band] = [];
                 }
+                // Extract time-of-day and apply to reference date
+                const timestamp = new Date(m.timestamp);
+                const normalizedTime = new Date(referenceDate);
+                normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+                
                 bandData[m.band].push({
-                    x: new Date(m.timestamp),
+                    x: normalizedTime,
                     y: m.ft8_snr
                 });
             }
@@ -1648,14 +1808,53 @@ class NoiseFloorMonitor {
 
         const bands = this.sortBands(Object.keys(bandData));
         const datasets = bands.map(band => ({
-            label: band,
+            label: `${band} (${this.currentDate})`,
             data: bandData[band],
             borderColor: this.bandColors[band] || '#999',
             backgroundColor: this.bandColors[band] || '#999',
             borderWidth: 2,
-            pointRadius: 2,
+            pointRadius: 0,
+            pointHoverRadius: 5,
             tension: 0.4
+            // Solid line for primary date (no borderDash)
         }));
+
+        // Add comparison data if provided
+        if (comparisonData && comparisonDate) {
+            const comparisonBandData = {};
+            comparisonData.forEach(m => {
+                if (m.ft8_snr && m.ft8_snr > 0) {
+                    if (!comparisonBandData[m.band]) {
+                        comparisonBandData[m.band] = [];
+                    }
+                    // Extract time-of-day and apply to same reference date for alignment
+                    const timestamp = new Date(m.timestamp);
+                    const normalizedTime = new Date(referenceDate);
+                    normalizedTime.setHours(timestamp.getHours(), timestamp.getMinutes(), timestamp.getSeconds(), timestamp.getMilliseconds());
+                    
+                    comparisonBandData[m.band].push({
+                        x: normalizedTime,
+                        y: m.ft8_snr
+                    });
+                }
+            });
+
+            bands.forEach(band => {
+                if (comparisonBandData[band]) {
+                    datasets.push({
+                        label: `${band} (${comparisonDate})`,
+                        data: comparisonBandData[band],
+                        borderColor: this.bandColors[band] || '#999',
+                        backgroundColor: this.bandColors[band] || '#999',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 5,
+                        tension: 0.4,
+                        borderDash: [5, 5] // Dashed line for comparison date
+                    });
+                }
+            });
+        }
 
         const ctx = document.getElementById('ft8SnrChart');
 
@@ -1732,6 +1931,121 @@ class NoiseFloorMonitor {
                 }
             }
         });
+
+        // Add comparison dropdown if in historical single-band view
+        const chartContainer = ctx.parentElement;
+        this.createComparisonDropdown('ft8Snr', chartContainer);
+    }
+
+    // Create comparison date picker button for a chart
+    createComparisonDropdown(chartType, chartContainer) {
+        // Only show in historical single-band view
+        if (this.currentDate === 'live' || this.currentBand === 'all') {
+            return;
+        }
+
+        // Check if controls already exist
+        let existingControls = chartContainer.querySelector('.comparison-controls');
+        if (existingControls) {
+            return; // Already exists
+        }
+
+        const controlsDiv = document.createElement('div');
+        controlsDiv.className = 'comparison-controls';
+
+        const label = document.createElement('label');
+        label.textContent = 'Compare with:';
+
+        // Create button to open date picker
+        const button = document.createElement('button');
+        button.id = `compare-btn-${chartType}`;
+        button.textContent = this.comparisonDates[chartType] || 'Select Date';
+        button.style.padding = '5px 10px';
+        button.style.fontSize = '0.9em';
+        button.onclick = () => this.openComparisonPicker(chartType);
+
+        // Create clear button
+        const clearBtn = document.createElement('button');
+        clearBtn.textContent = '✕';
+        clearBtn.style.padding = '5px 10px';
+        clearBtn.style.fontSize = '0.9em';
+        clearBtn.style.background = '#F44336';
+        clearBtn.onclick = async () => {
+            this.comparisonDates[chartType] = null;
+            button.textContent = 'Select Date';
+            await this.updateChartWithComparison(chartType);
+        };
+
+        controlsDiv.appendChild(label);
+        controlsDiv.appendChild(button);
+        controlsDiv.appendChild(clearBtn);
+        chartContainer.appendChild(controlsDiv);
+    }
+
+    // Update a chart with comparison data
+    async updateChartWithComparison(chartType) {
+        const comparisonDate = this.comparisonDates[chartType];
+
+        // Map chart type to chart instance and update method
+        const chartMap = {
+            'trend': {
+                chart: this.trendChart,
+                updateMethod: 'updateTrendChartHistorical'
+            },
+            'dynamicRange': {
+                chart: this.dynamicRangeChart,
+                updateMethod: 'updateDynamicRangeChartHistorical'
+            },
+            'ft8Snr': {
+                chart: this.ft8SnrChart,
+                updateMethod: 'updateFT8SnrChartHistorical'
+            }
+        };
+
+        const chartInfo = chartMap[chartType];
+        if (!chartInfo || !chartInfo.chart) {
+            return;
+        }
+
+        // Get primary data (current date)
+        const primaryData = await this.fetchTrendData(this.currentDate, this.currentBand);
+        if (!primaryData || primaryData.length === 0) {
+            return;
+        }
+
+        // If no comparison date, just show primary data
+        if (!comparisonDate) {
+            await this[chartInfo.updateMethod](primaryData);
+            return;
+        }
+
+        // Get comparison data
+        const comparisonData = await this.fetchTrendData(comparisonDate, this.currentBand);
+        if (!comparisonData || comparisonData.length === 0) {
+            console.warn(`No comparison data available for ${comparisonDate}`);
+            await this[chartInfo.updateMethod](primaryData);
+            return;
+        }
+
+        // Combine data for chart update
+        await this[chartInfo.updateMethod](primaryData, comparisonData, comparisonDate);
+    }
+
+    // Fetch trend data for a specific date and band
+    async fetchTrendData(date, band) {
+        try {
+            const url = `/api/noisefloor/trend?date=${date}${band !== 'all' ? '&band=' + band : ''}`;
+            const response = await fetch(url);
+
+            if (!response.ok) {
+                return null;
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error(`Error fetching trend data for ${date}:`, error);
+            return null;
+        }
     }
 
     updateLegend(bands) {
@@ -2366,9 +2680,77 @@ class NoiseFloorMonitor {
             }
         });
     }
-}
+    // Date Picker Methods
+    openDatePicker() {
+        if (!this.datePicker) {
+            this.datePicker = new DatePicker(
+                this.availableDates,
+                (date) => this.onDateSelected(date),
+                this.currentDate !== 'live' ? this.currentDate : null
+            );
+        } else {
+            this.datePicker.updateAvailableDates(this.availableDates);
+        }
+        this.datePicker.show();
+    }
+
+    closeDatePicker() {
+        if (this.datePicker) {
+            this.datePicker.close();
+        }
+    }
+
+    onDateSelected(date) {
+        this.currentDate = date;
+        document.getElementById('selectedDateText').textContent = date;
+        this.updateURL();
+        this.cleanup();
+        this.loadData();
+    }
+
+    openComparisonPicker(chartType) {
+        const currentComparison = this.comparisonDates[chartType];
+        
+        if (!this.comparisonPickers[chartType]) {
+            this.comparisonPickers[chartType] = new DatePicker(
+                this.availableDates.filter(d => d !== this.currentDate),
+                (date) => this.onComparisonDateSelected(chartType, date),
+                currentComparison
+            );
+        } else {
+            this.comparisonPickers[chartType].updateAvailableDates(
+                this.availableDates.filter(d => d !== this.currentDate)
+            );
+        }
+        this.comparisonPickers[chartType].show();
+    }
+
+    async onComparisonDateSelected(chartType, date) {
+        this.comparisonDates[chartType] = date;
+        const btn = document.getElementById(`compare-btn-${chartType}`);
+        if (btn) {
+            btn.textContent = date || 'Select Date';
+        }
+        await this.updateChartWithComparison(chartType);
+    }
+
+
+    // Remove all comparison dropdowns from charts
+    removeComparisonDropdowns() {
+        const comparisonControls = document.querySelectorAll('.comparison-controls');
+        comparisonControls.forEach(control => {
+            control.remove();
+        });
+
+        // Clear comparison state
+        this.comparisonDates = {
+            trend: null,
+            dynamicRange: null,
+            ft8Snr: null
+        };
+    }}
 
 // Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener("DOMContentLoaded", () => {
     new NoiseFloorMonitor();
 });

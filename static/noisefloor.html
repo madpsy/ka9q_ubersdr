@@ -81,6 +81,10 @@
             background: #4CAF50;
             color: white;
             font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
         }
 
         button:hover {
@@ -278,6 +282,159 @@
             color: #45a049;
             text-decoration: underline;
         }
+
+        .comparison-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        .comparison-controls label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .comparison-controls select {
+            padding: 5px 10px;
+            font-size: 0.9em;
+        }
+
+        /* Date Picker Styles */
+        .date-picker-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .date-picker-overlay.active {
+            display: flex;
+        }
+
+        .date-picker {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            max-width: 350px;
+            width: 90%;
+        }
+
+        .date-picker-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .date-picker-header h3 {
+            margin: 0;
+            font-size: 1.2em;
+        }
+
+        .date-picker-nav {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .date-picker-nav button {
+            padding: 5px 10px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 5px;
+            color: white;
+            cursor: pointer;
+            font-size: 1.2em;
+        }
+
+        .date-picker-nav button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .date-picker-nav button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .date-picker-month-year {
+            flex: 1;
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .date-picker-calendar {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+        }
+
+        .date-picker-day-header {
+            text-align: center;
+            font-weight: bold;
+            padding: 8px;
+            font-size: 0.9em;
+            opacity: 0.7;
+        }
+
+        .date-picker-day {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 5px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.1);
+            transition: all 0.2s;
+        }
+
+        .date-picker-day:hover:not(.disabled):not(.empty) {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.1);
+        }
+
+        .date-picker-day.disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .date-picker-day.empty {
+            background: transparent;
+            cursor: default;
+        }
+
+        .date-picker-day.selected {
+            background: #4CAF50;
+            font-weight: bold;
+        }
+
+        .date-picker-day.available {
+            background: rgba(76, 175, 80, 0.3);
+        }
+
+        .date-picker-footer {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .date-picker-footer button {
+            padding: 8px 16px;
+        }
     </style>
 </head>
 <body>
@@ -289,10 +446,16 @@
 
         <div class="controls">
             <div class="control-group">
-                <label for="dateSelect">Select Date:</label>
-                <select id="dateSelect">
-                    <option value="live">Live Data</option>
-                </select>
+                <label>Select Date:</label>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <select id="dateMode">
+                        <option value="live">Live Data</option>
+                        <option value="historical">Historical</option>
+                    </select>
+                    <button id="datePickerBtn" style="display: none; padding: 10px 15px;">
+                        <span id="selectedDateText">Select Date</span>
+                    </button>
+                </div>
             </div>
             <div class="control-group">
                 <label for="bandSelect">Select Band:</label>
@@ -347,6 +510,25 @@
         </div>
     </div>
 
+    <!-- Date Picker Overlay -->
+    <div id="datePickerOverlay" class="date-picker-overlay">
+        <div class="date-picker">
+            <div class="date-picker-header">
+                <h3>Select Date</h3>
+                <button onclick="window.noiseFloorMonitor.closeDatePicker()" style="background: transparent; padding: 5px 10px;">✕</button>
+            </div>
+            <div class="date-picker-nav">
+                <button id="prevMonth">‹</button>
+                <div class="date-picker-month-year" id="monthYearDisplay"></div>
+                <button id="nextMonth">›</button>
+            </div>
+            <div class="date-picker-calendar" id="datePickerCalendar"></div>
+            <div class="date-picker-footer">
+                <button onclick="window.noiseFloorMonitor.closeDatePicker()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer class="site-footer">
         <p>Download <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> <span id="footer-version"></span></p>
@@ -355,6 +537,7 @@
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="chartjs-plugin-annotation.min.js"></script>
+    <script src="date-picker.js"></script>
     <script src="minimal-radio.js"></script>
     <script src="noisefloor.js"></script>
 </body>

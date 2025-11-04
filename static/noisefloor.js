@@ -10,8 +10,8 @@ class NoiseFloorMonitor {
         this.fftRefreshInterval = null;
         this.currentDate = 'live';
         this.currentBand = 'all';
-        this.compactView = false;
-        this.savedCompactView = false; // Save compact view state when switching to single band
+        this.compactView = true;
+        this.savedCompactView = true; // Save compact view state when switching to single band
         this.historicalDataCache = {}; // Cache historical data to avoid redundant API calls
         this.sparklineCharts = {}; // Store sparkline chart references by band
         this.fftCharts = {}; // Store FFT chart references by band
@@ -84,6 +84,13 @@ class NoiseFloorMonitor {
         this.loadAvailableDates();
         this.loadBands();
         this.loadFromURL();
+
+        // Initialize button text based on default compact view state
+        const btn = document.getElementById('viewToggleBtn');
+        if (btn) {
+            btn.textContent = this.compactView ? '📋 Full View' : '📊 Compact View';
+        }
+
         this.startAutoRefresh();
     }
     

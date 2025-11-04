@@ -1002,10 +1002,57 @@ func (nfm *NoiseFloorMonitor) GetTrendData(date string, band string) ([]*BandMea
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
 
-	// Get full 24-hour window of raw data
-	rawData, err := nfm.GetHistoricalData(date, band)
-	if err != nil {
-		return nil, err
+	// Check if this is today - if so, use rolling 24-hour window
+	today := time.Now().Format("2006-01-02")
+	var rawData []*BandMeasurement
+
+	if date == today {
+		// For today (live mode), get rolling 24-hour window
+		now := time.Now()
+		startTime := now.Add(-24 * time.Hour)
+		startDate := startTime.Format("2006-01-02")
+
+		dates := []string{today}
+		if startDate != today {
+			dates = append([]string{startDate}, dates...)
+		}
+
+		// Read data from relevant dates
+		var allMeasurements []*BandMeasurement
+		if band != "" {
+			for _, d := range dates {
+				measurements, err := nfm.readBandFile(band, d)
+				if err != nil {
+					continue
+				}
+				allMeasurements = append(allMeasurements, measurements...)
+			}
+		} else {
+			for _, d := range dates {
+				for _, bandConfig := range nfm.config.NoiseFloor.Bands {
+					measurements, err := nfm.readBandFile(bandConfig.Name, d)
+					if err != nil {
+						continue
+					}
+					allMeasurements = append(allMeasurements, measurements...)
+				}
+			}
+		}
+
+		// Filter to last 24 hours
+		for _, m := range allMeasurements {
+			if (m.Timestamp.Equal(startTime) || m.Timestamp.After(startTime)) &&
+				(m.Timestamp.Before(now) || m.Timestamp.Equal(now)) {
+				rawData = append(rawData, m)
+			}
+		}
+	} else {
+		// For historical dates, get single day's data
+		var err error
+		rawData, err = nfm.GetHistoricalData(date, band)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if len(rawData) == 0 {

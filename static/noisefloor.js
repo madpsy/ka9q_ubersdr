@@ -1974,6 +1974,13 @@ class NoiseFloorMonitor {
             return;
         }
 
+        // Don't show comparison controls if viewing today's date
+        // (today uses rolling 24-hour window, not single-day data)
+        const today = new Date().toISOString().split('T')[0];
+        if (this.currentDate === today) {
+            return;
+        }
+
         // Check if controls already exist
         let existingControls = chartContainer.querySelector('.comparison-controls');
         if (existingControls) {
@@ -2740,17 +2747,22 @@ class NoiseFloorMonitor {
 
     openComparisonPicker(chartType) {
         const currentComparison = this.comparisonDates[chartType];
+        const today = new Date().toISOString().split('T')[0];
+        
+        // Filter out both the current date and today's date
+        // (today uses rolling window, not suitable for comparison)
+        const availableDates = this.availableDates.filter(d =>
+            d !== this.currentDate && d !== today
+        );
         
         if (!this.comparisonPickers[chartType]) {
             this.comparisonPickers[chartType] = new DatePicker(
-                this.availableDates.filter(d => d !== this.currentDate),
+                availableDates,
                 (date) => this.onComparisonDateSelected(chartType, date),
                 currentComparison
             );
         } else {
-            this.comparisonPickers[chartType].updateAvailableDates(
-                this.availableDates.filter(d => d !== this.currentDate)
-            );
+            this.comparisonPickers[chartType].updateAvailableDates(availableDates);
         }
         this.comparisonPickers[chartType].show();
     }

@@ -32,6 +32,22 @@ class NoiseFloorMonitor {
         };
         
         this.init();
+        this.loadVersion();
+    }
+    
+    async loadVersion() {
+        try {
+            const response = await fetch('/api/version');
+            if (response.ok) {
+                const data = await response.json();
+                const versionSpan = document.getElementById('footer-version');
+                if (versionSpan && data.version) {
+                    versionSpan.textContent = `• v${data.version}`;
+                }
+            }
+        } catch (error) {
+            console.error('Error loading version:', error);
+        }
     }
     
     sortBands(bands) {

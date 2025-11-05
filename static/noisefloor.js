@@ -9,6 +9,7 @@ class NoiseFloorMonitor {
         this.trendChart = null;
         this.dynamicRangeChart = null;
         this.ft8SnrChart = null;
+        this.bandStateChart = null;
         this.refreshInterval = null;
         this.fftRefreshInterval = null;
         this.currentDate = 'live';
@@ -24,7 +25,8 @@ class NoiseFloorMonitor {
         this.comparisonDates = {
             trend: null,
             dynamicRange: null,
-            ft8Snr: null
+            ft8Snr: null,
+            bandState: null
         };
         this.availableDates = []; // Store available dates for date picker
         this.datePicker = null; // Main date picker instance
@@ -403,6 +405,7 @@ class NoiseFloorMonitor {
         await this.updateTrendChart(data);
         await this.updateDynamicRangeChart(data);
         await this.updateFT8SnrChart(data);
+        await this.updateBandStateChart(data);
     }
 
     async loadHistoricalData() {
@@ -437,6 +440,7 @@ class NoiseFloorMonitor {
         await this.updateTrendChartHistorical(data);
         await this.updateDynamicRangeChartHistorical(data);
         await this.updateFT8SnrChartHistorical(data);
+        await this.updateBandStateChartHistorical(data);
     }
 
     async updateTrendChartHistorical(data, comparisonData = null, comparisonDate = null) {
@@ -1968,6 +1972,489 @@ class NoiseFloorMonitor {
         this.createComparisonDropdown('ft8Snr', chartContainer);
     }
 
+    async updateBandStateChart(data) {
+        const bands = this.currentBand === 'all'
+            ? this.sortBands(Object.keys(data))
+            : [this.currentBand];
+
+        // Prepare data for heatmap - we need time series of band states
+        const datasets = [];
+
+        for (const band of bands) {
+            if (!data[band]) continue;
+
+            try {
+                // Use cached trend data (24 hours, 10-min averages)
+                const trendData = this.trendDataCache[band] || [];
+
+                // Filter out bands with no FT8 frequency configured (ft8_snr = 0)
+                const hasValidFT8Data = trendData.some(d => d.ft8_snr && d.ft8_snr > 0);
+                if (!hasValidFT8Data && (!data[band].ft8_snr || data[band].ft8_snr <= 0)) {
+                    continue; // Skip bands without FT8 configured
+                }
+
+                // Convert FT8 SNR values to band states
+                // Normalize all timestamps to today's date (keeping time-of-day)
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                
+                const dataPoints = trendData.length > 0
+                    ? trendData.map(d => {
+                        const snr = d.ft8_snr || 0;
+                        let state;
+                        if (snr < 6) {
+                            state = 0; // CLOSED
+                        } else if (snr >= 6 && snr < 20) {
+                            state = 1; // MARGINAL
+                        } else {
+                            state = 2; // OPEN
+                        }
+                        
+                        // Normalize timestamp to today's date
+                        const originalTime = new Date(d.timestamp);
+                        const normalizedTime = new Date(today);
+                        normalizedTime.setHours(originalTime.getHours(), originalTime.getMinutes(), originalTime.getSeconds(), originalTime.getMilliseconds());
+                        
+                        return {
+                            x: normalizedTime,
+                            y: band,
+                            v: state,
+                            snr: snr
+                        };
+                    })
+                    : [{
+                        x: (() => {
+                            const originalTime = new Date(data[band].timestamp);
+                            const normalizedTime = new Date(today);
+                            normalizedTime.setHours(originalTime.getHours(), originalTime.getMinutes(), originalTime.getSeconds(), originalTime.getMilliseconds());
+                            return normalizedTime;
+                        })(),
+                        y: band,
+                        v: data[band].ft8_snr < 6 ? 0 : (data[band].ft8_snr < 20 ? 1 : 2),
+                        snr: data[band].ft8_snr || 0
+                    }];
+
+                datasets.push(...dataPoints);
+            } catch (error) {
+                console.error(`Error loading band state data for ${band}:`, error);
+            }
+        }
+
+        const ctx = document.getElementById('bandStateChart');
+        if (!ctx) return;
+
+        // Only create/update chart if we have data
+        if (datasets.length === 0) {
+            if (this.bandStateChart) {
+                this.bandStateChart.destroy();
+                this.bandStateChart = null;
+            }
+            if (ctx.parentElement) {
+                ctx.parentElement.style.display = 'none';
+            }
+            return;
+        } else {
+            if (ctx.parentElement) {
+                ctx.parentElement.style.display = 'block';
+            }
+        }
+
+        // Update existing chart if it exists and canvas is still in DOM, otherwise create new one
+        if (this.bandStateChart && ctx && ctx.parentElement) {
+            this.bandStateChart.data.datasets[0].data = datasets;
+            
+            // Update the "Now" indicator position (UTC time)
+            const now = new Date();
+            const startOfDay = new Date(now);
+            startOfDay.setUTCHours(0, 0, 0, 0);
+            const currentTimeNormalized = new Date(startOfDay);
+            currentTimeNormalized.setUTCHours(now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds(), now.getUTCMilliseconds());
+            
+            if (this.bandStateChart.options.plugins.annotation.annotations.currentTime) {
+                this.bandStateChart.options.plugins.annotation.annotations.currentTime.xMin = currentTimeNormalized;
+                this.bandStateChart.options.plugins.annotation.annotations.currentTime.xMax = currentTimeNormalized;
+            }
+            
+            this.bandStateChart.update('none');
+            return;
+        }
+
+        // Destroy old chart if canvas was removed
+        if (this.bandStateChart && (!ctx || !ctx.parentElement)) {
+            this.bandStateChart.destroy();
+            this.bandStateChart = null;
+        }
+
+        // Get unique bands for y-axis
+        const uniqueBands = [...new Set(datasets.map(d => d.y))];
+
+        // Calculate time range for x-axis (00:00 to 23:59 today UTC)
+        const now = new Date();
+        const startOfDay = new Date(now);
+        startOfDay.setUTCHours(0, 0, 0, 0);
+        const endOfDay = new Date(startOfDay);
+        endOfDay.setUTCHours(23, 59, 59, 999);
+
+        // Create annotation for current time indicator (normalized to today UTC)
+        const currentTimeNormalized = new Date(startOfDay);
+        currentTimeNormalized.setUTCHours(now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds(), now.getUTCMilliseconds());
+        
+        const currentTimeAnnotation = {
+            type: 'line',
+            xMin: currentTimeNormalized,
+            xMax: currentTimeNormalized,
+            borderColor: 'rgba(255, 255, 255, 0.8)',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            label: {
+                display: true,
+                content: 'Now',
+                position: 'start',
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                color: '#000',
+                font: {
+                    size: 10,
+                    weight: 'bold'
+                },
+                padding: 4
+            }
+        };
+
+        this.bandStateChart = new Chart(ctx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Band State',
+                    data: datasets,
+                    backgroundColor: (context) => {
+                        const value = context.raw.v;
+                        if (value === 0) return '#ef4444'; // CLOSED - red
+                        if (value === 1) return '#eab308'; // MARGINAL - yellow
+                        if (value === 2) return '#22c55e'; // OPEN - green
+                        return '#9ca3af'; // UNKNOWN - gray
+                    },
+                    borderColor: 'rgba(255, 255, 255, 0.3)',
+                    borderWidth: 1,
+                    pointStyle: 'rect',
+                    pointRadius: 8,
+                    pointHoverRadius: 10
+                }]
+            },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2.5,
+                plugins: {
+                    title: {
+                        display: false
+                    },
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        mode: 'point',
+                        intersect: false,
+                        callbacks: {
+                            title: (items) => {
+                                if (items.length === 0) return '';
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false
+                                });
+                            },
+                            beforeBody: (items) => {
+                                // Find all points at the same x coordinate
+                                if (items.length === 0) return [];
+                                const hoveredX = items[0].parsed.x;
+                                const threshold = 5 * 60 * 1000; // 5 minutes tolerance
+
+                                const chart = items[0].chart;
+                                const bandMap = new Map(); // Use Map to deduplicate by band
+
+                                // Collect all data points at this time, keeping only the most recent for each band
+                                chart.data.datasets[0].data.forEach((point) => {
+                                    if (Math.abs(point.x.getTime() - hoveredX) < threshold) {
+                                        const state = point.v === 0 ? 'CLOSED' : (point.v === 1 ? 'MARGINAL' : 'OPEN');
+                                        const snr = point.snr.toFixed(1);
+                                        const bandName = point.y;
+                                        
+                                        // Only keep if we haven't seen this band yet, or if this point is more recent
+                                        if (!bandMap.has(bandName)) {
+                                            bandMap.set(bandName, {
+                                                text: `${bandName}: ${state} (${snr} dB)`,
+                                                timestamp: point.x.getTime()
+                                            });
+                                        } else {
+                                            // Keep the more recent data point
+                                            const existing = bandMap.get(bandName);
+                                            if (point.x.getTime() > existing.timestamp) {
+                                                bandMap.set(bandName, {
+                                                    text: `${bandName}: ${state} (${snr} dB)`,
+                                                    timestamp: point.x.getTime()
+                                                });
+                                            }
+                                        }
+                                    }
+                                });
+
+                                // Convert to array and sort by band order
+                                const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+                                const allPointsAtTime = Array.from(bandMap.entries())
+                                    .sort((a, b) => bandOrder.indexOf(a[0]) - bandOrder.indexOf(b[0]))
+                                    .map(entry => entry[1].text);
+                                
+                                return allPointsAtTime;
+                            },
+                            label: () => {
+                                // Return empty since we're showing everything in beforeBody
+                                return '';
+                            }
+                        }
+                    },
+                    annotation: {
+                        annotations: {
+                            currentTime: currentTimeAnnotation
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        min: startOfDay,
+                        max: endOfDay,
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time (UTC)',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: {
+                        type: 'category',
+                        labels: uniqueBands,
+                        title: {
+                            display: true,
+                            text: 'Band',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
+                }
+            }
+        });
+    }
+
+    async updateBandStateChartHistorical(data, comparisonData = null, comparisonDate = null) {
+        // Only normalize timestamps when doing a comparison
+        const shouldNormalize = comparisonData && comparisonDate;
+        const referenceDate = shouldNormalize ? new Date(this.currentDate + 'T00:00:00') : null;
+        
+        // Prepare data for heatmap
+        const datasets = [];
+
+        data.forEach(m => {
+            // Only include bands with FT8 data
+            if (m.ft8_snr && m.ft8_snr > 0) {
+                let timestamp;
+                if (shouldNormalize) {
+                    const ts = new Date(m.timestamp);
+                    const normalizedTime = new Date(referenceDate);
+                    normalizedTime.setHours(ts.getHours(), ts.getMinutes(), ts.getSeconds(), ts.getMilliseconds());
+                    timestamp = normalizedTime;
+                } else {
+                    timestamp = new Date(m.timestamp);
+                }
+                
+                // Determine state based on SNR thresholds
+                let state;
+                if (m.ft8_snr < 6) {
+                    state = 0; // CLOSED
+                } else if (m.ft8_snr >= 6 && m.ft8_snr < 20) {
+                    state = 1; // MARGINAL
+                } else {
+                    state = 2; // OPEN
+                }
+                
+                datasets.push({
+                    x: timestamp,
+                    y: m.band,
+                    v: state,
+                    snr: m.ft8_snr,
+                    date: this.currentDate
+                });
+            }
+        });
+
+        // Add comparison data if provided
+        if (comparisonData && comparisonDate) {
+            comparisonData.forEach(m => {
+                if (m.ft8_snr && m.ft8_snr > 0) {
+                    const ts = new Date(m.timestamp);
+                    const normalizedTime = new Date(referenceDate);
+                    normalizedTime.setHours(ts.getHours(), ts.getMinutes(), ts.getSeconds(), ts.getMilliseconds());
+                    
+                    let state;
+                    if (m.ft8_snr < 6) {
+                        state = 0; // CLOSED
+                    } else if (m.ft8_snr >= 6 && m.ft8_snr < 20) {
+                        state = 1; // MARGINAL
+                    } else {
+                        state = 2; // OPEN
+                    }
+                    
+                    datasets.push({
+                        x: normalizedTime,
+                        y: m.band,
+                        v: state,
+                        snr: m.ft8_snr,
+                        date: comparisonDate
+                    });
+                }
+            });
+        }
+
+        const ctx = document.getElementById('bandStateChart');
+
+        if (this.bandStateChart) {
+            this.bandStateChart.destroy();
+        }
+
+        // Only create chart if we have data
+        if (datasets.length === 0) {
+            ctx.parentElement.style.display = 'none';
+            return;
+        } else {
+            ctx.parentElement.style.display = 'block';
+        }
+
+        // Get unique bands for y-axis
+        const uniqueBands = this.sortBands([...new Set(datasets.map(d => d.y))]);
+
+        // Calculate time range for x-axis (24 hours starting at 00:00 of the selected date)
+        const selectedDate = new Date(this.currentDate + 'T00:00:00');
+        const startOfDay = new Date(selectedDate);
+        const endOfDay = new Date(selectedDate);
+        endOfDay.setHours(24, 0, 0, 0);
+
+        this.bandStateChart = new Chart(ctx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Band State',
+                    data: datasets,
+                    backgroundColor: (context) => {
+                        const value = context.raw.v;
+                        if (value === 0) return '#ef4444'; // CLOSED - red
+                        if (value === 1) return '#eab308'; // MARGINAL - yellow
+                        if (value === 2) return '#22c55e'; // OPEN - green
+                        return '#9ca3af'; // UNKNOWN - gray
+                    },
+                    borderColor: (context) => {
+                        // Use different border for comparison data
+                        if (comparisonData && context.raw.date === comparisonDate) {
+                            return 'rgba(255, 255, 255, 0.8)';
+                        }
+                        return 'rgba(255, 255, 255, 0.3)';
+                    },
+                    borderWidth: (context) => {
+                        // Thicker border for comparison data
+                        if (comparisonData && context.raw.date === comparisonDate) {
+                            return 2;
+                        }
+                        return 1;
+                    },
+                    pointStyle: 'rect',
+                    pointRadius: 8,
+                    pointHoverRadius: 10
+                }]
+            },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2.5,
+                plugins: {
+                    title: {
+                        display: false
+                    },
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        axis: 'x',
+                        intersect: false,
+                        callbacks: {
+                            title: (items) => {
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false
+                                });
+                            },
+                            label: (item) => {
+                                const state = item.raw.v === 0 ? 'CLOSED' : (item.raw.v === 1 ? 'MARGINAL' : 'OPEN');
+                                const snr = item.raw.snr.toFixed(1);
+                                const dateLabel = item.raw.date ? ` (${item.raw.date})` : '';
+                                return `${item.raw.y}: ${state} (${snr} dB)${dateLabel}`;
+                            }
+                        }
+                    },
+                    annotation: {
+                        annotations: {}
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        min: startOfDay,
+                        max: endOfDay,
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time (Local)',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: {
+                        type: 'category',
+                        labels: uniqueBands,
+                        title: {
+                            display: true,
+                            text: 'Band',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
+                }
+            }
+        });
+
+        // Add comparison dropdown if in historical single-band view
+        const chartContainer = ctx.parentElement;
+        this.createComparisonDropdown('bandState', chartContainer);
+    }
+
     // Create comparison date picker button for a chart
     createComparisonDropdown(chartType, chartContainer) {
         // Only show in historical single-band view
@@ -2037,6 +2524,10 @@ class NoiseFloorMonitor {
             'ft8Snr': {
                 chart: this.ft8SnrChart,
                 updateMethod: 'updateFT8SnrChartHistorical'
+            },
+            'bandState': {
+                chart: this.bandStateChart,
+                updateMethod: 'updateBandStateChartHistorical'
             }
         };
 
@@ -2785,7 +3276,8 @@ class NoiseFloorMonitor {
         this.comparisonDates = {
             trend: null,
             dynamicRange: null,
-            ft8Snr: null
+            ft8Snr: null,
+            bandState: null
         };
     }}
 

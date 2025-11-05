@@ -205,7 +205,7 @@ dxcluster:
 noisefloor:
   # Enable or disable noise floor monitoring
   # When enabled, creates SEPARATE spectrum sessions for each band (better resolution!)
-  enabled: false
+  enabled: true
   
   # Polling interval in seconds (how often to collect measurements)
   # Lower values = more frequent updates but more CPU/disk usage

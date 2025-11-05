@@ -1488,22 +1488,23 @@ function updateStatus(msg) {
         const freqText = formatFrequency(msg.frequency);
         const bandName = findBandForFrequency(msg.frequency);
 
-        // Update frequency display with band name if available
+        // Update frequency display
         document.getElementById('current-freq').textContent = freqText;
 
-        // Update mode display with band name appended if in a band
+        // Update mode display (without band name)
         if (msg.mode) {
             const modeText = msg.mode.toUpperCase();
-            const modeElement = document.getElementById('current-mode');
-            if (bandName) {
-                modeElement.textContent = `${modeText} • ${bandName}`;
-            } else {
-                modeElement.textContent = modeText;
-            }
+            document.getElementById('current-mode').textContent = modeText;
         }
 
         // Update bandwidth display
         updateCurrentBandwidthDisplay(window.currentBandwidthLow, window.currentBandwidthHigh);
+
+        // Update band display
+        const bandElement = document.getElementById('current-band');
+        if (bandElement) {
+            bandElement.textContent = bandName || '-';
+        }
 
         updateBandButtons(msg.frequency);
         // Update spectrum display cursor - use window globals for latest values

@@ -258,8 +258,8 @@ noisefloor:
     
     - name: "40m"
       start: 7000000          # 7.0 MHz
-      end: 7300000            # 7.3 MHz
-      center_frequency: 7150000
+      end: 7200000            # 7.2 MHz
+      center_frequency: 7100000
       bin_count: 1000
       bin_bandwidth: 300      # 300 Hz resolution
       ft8_frequency: 7074000  # 7.074 MHz - FT8 calling frequency

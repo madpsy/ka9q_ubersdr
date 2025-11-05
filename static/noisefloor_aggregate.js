@@ -347,6 +347,12 @@ async function fetchData() {
         return;
     }
     
+    // Validate that primary date range overlaps with available data
+    if (!validateDateRange(primaryFrom, primaryTo)) {
+        showStatus('Primary date range has no available data. Please select dates with data.', 'error');
+        return;
+    }
+    
     // Build request
     const request = {
         primary: {
@@ -363,12 +369,18 @@ async function fetchData() {
     if (comparisonEnabled) {
         const comparisonFrom = selectedDates.comparisonFrom;
         const comparisonTo = selectedDates.comparisonTo;
-        
+
         if (!comparisonFrom || !comparisonTo) {
             showStatus('Please select comparison time range', 'error');
             return;
         }
-        
+
+        // Validate that comparison date range overlaps with available data
+        if (!validateDateRange(comparisonFrom, comparisonTo)) {
+            showStatus('Comparison date range has no available data. Please select dates with data.', 'error');
+            return;
+        }
+
         request.comparison = {
             from: new Date(comparisonFrom).toISOString(),
             to: new Date(comparisonTo).toISOString()
@@ -1420,4 +1432,25 @@ async function loadVersion() {
             receiverNameEl.textContent = 'Long-term HF propagation analysis and comparison';
         }
     }
+}
+
+// validateDateRange checks if a date range overlaps with available data dates
+function validateDateRange(fromDateTime, toDateTime) {
+    if (availableDates.length === 0) {
+        // If we haven't loaded dates yet, allow the request (backend will validate)
+        return true;
+    }
+
+    // Extract just the date part (YYYY-MM-DD) from the datetime strings
+    const fromDate = fromDateTime.split('T')[0];
+    const toDate = toDateTime.split('T')[0];
+
+    // Check if any available date falls within the range
+    for (const availableDate of availableDates) {
+        if (availableDate >= fromDate && availableDate <= toDate) {
+            return true; // Found at least one date with data in the range
+        }
+    }
+
+    return false; // No dates with data in this range
 }

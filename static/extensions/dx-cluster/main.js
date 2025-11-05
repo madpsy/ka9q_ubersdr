@@ -248,6 +248,43 @@ class DXClusterExtension extends DecoderExtension {
 
         // Update last update time
         this.updateLastUpdate();
+
+        // If this is a buffered spot (initial burst), schedule a marker redraw after a delay
+        // This ensures markers appear even if spectrum data hasn't arrived yet
+        if (!isNewSpot && this.spots.length <= 100) {
+            // Clear any existing timeout
+            if (this.initialMarkerTimeout) {
+                clearTimeout(this.initialMarkerTimeout);
+            }
+            // Schedule redraw after 1 second (after burst completes and spectrum data arrived)
+            this.initialMarkerTimeout = setTimeout(() => {
+                this.ensureMarkersDrawn();
+                this.initialMarkerTimeout = null;
+            }, 1000);
+        }
+    }
+
+    ensureMarkersDrawn() {
+        // Try to draw markers, retry if spectrum data isn't ready yet
+        if (!window.spectrumDisplay) {
+            return;
+        }
+
+        window.spectrumDisplay.invalidateMarkerCache();
+
+        // Check if spectrum has data
+        if (window.spectrumDisplay.spectrumData && window.spectrumDisplay.spectrumData.length > 0) {
+            // Spectrum data is ready, draw now
+            window.spectrumDisplay.draw();
+        } else {
+            // Spectrum data not ready yet, retry after 500ms
+            setTimeout(() => {
+                if (window.spectrumDisplay && window.spectrumDisplay.spectrumData && window.spectrumDisplay.spectrumData.length > 0) {
+                    window.spectrumDisplay.invalidateMarkerCache();
+                    window.spectrumDisplay.draw();
+                }
+            }, 500);
+        }
     }
 
     filterAndRenderSpots() {

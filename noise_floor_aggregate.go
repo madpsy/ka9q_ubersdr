@@ -29,6 +29,7 @@ type AggregateResponse struct {
 	Primary        map[string][]AggregatedMeasurement `json:"primary"`
 	Comparison     map[string][]AggregatedMeasurement `json:"comparison,omitempty"`
 	ProcessingTime float64                            `json:"processing_time_ms"` // Processing time in milliseconds
+	Info           string                             `json:"info,omitempty"`     // Informational message (e.g., interval adjustment)
 }
 
 // AggregatedMeasurement represents a single aggregated measurement
@@ -65,8 +66,11 @@ func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *Nois
 		return
 	}
 
-	// Process primary range
-	primaryData, err := nfm.GetAggregatedData(req.Primary, req.Bands, req.Fields, req.Interval)
+	// Calculate optimal interval to keep data points manageable
+	adjustedInterval, multiplier, infoMsg := calculateOptimalInterval(req.Primary, req.Interval)
+
+	// Process primary range with adjusted interval
+	primaryData, err := nfm.GetAggregatedData(req.Primary, req.Bands, req.Fields, adjustedInterval)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to get primary data: %v", err), http.StatusInternalServerError)
 		return
@@ -74,11 +78,14 @@ func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *Nois
 
 	response := AggregateResponse{
 		Primary: primaryData,
+		Info:    infoMsg,
 	}
 
 	// Process comparison range if provided
 	if req.Comparison != nil {
-		comparisonData, err := nfm.GetAggregatedData(*req.Comparison, req.Bands, req.Fields, req.Interval)
+		// Use same multiplier for comparison to keep intervals consistent
+		compAdjustedInterval := adjustIntervalByMultiplier(req.Interval, multiplier)
+		comparisonData, err := nfm.GetAggregatedData(*req.Comparison, req.Bands, req.Fields, compAdjustedInterval)
 		if err != nil {
 			log.Printf("Warning: Failed to get comparison data: %v", err)
 			// Don't fail the entire request if comparison fails
@@ -241,21 +248,36 @@ func (nfm *NoiseFloorMonitor) GetAggregatedData(timeRange TimeRange, bands []str
 }
 
 // getIntervalDuration converts interval string to time.Duration
+// Supports both simple intervals ("minute", "hour") and multiplied intervals ("10minute", "2hour")
 func getIntervalDuration(interval string) (time.Duration, error) {
-	switch interval {
+	// Try to parse multiplied interval (e.g., "10minute")
+	var multiplier int
+	var baseInterval string
+
+	n, err := fmt.Sscanf(interval, "%d%s", &multiplier, &baseInterval)
+	if err != nil || n != 2 {
+		// Not a multiplied interval, treat as simple interval
+		multiplier = 1
+		baseInterval = interval
+	}
+
+	var baseDuration time.Duration
+	switch baseInterval {
 	case "minute":
-		return time.Minute, nil
+		baseDuration = time.Minute
 	case "hour":
-		return time.Hour, nil
+		baseDuration = time.Hour
 	case "day":
-		return 24 * time.Hour, nil
+		baseDuration = 24 * time.Hour
 	case "week":
-		return 7 * 24 * time.Hour, nil
+		baseDuration = 7 * 24 * time.Hour
 	case "month":
-		return 30 * 24 * time.Hour, nil // Approximate
+		baseDuration = 30 * 24 * time.Hour // Approximate
 	default:
 		return 0, fmt.Errorf("invalid interval: %s", interval)
 	}
+
+	return time.Duration(multiplier) * baseDuration, nil
 }
 
 // getDateRange returns all dates between from and to (inclusive)
@@ -323,6 +345,94 @@ func aggregateMeasurements(measurements []*BandMeasurement, interval time.Durati
 	})
 
 	return aggregated
+}
+
+// calculateOptimalInterval determines if the requested interval would generate too many data points
+// and adjusts it if necessary. Returns the adjusted interval string, multiplier used, and an info message.
+func calculateOptimalInterval(timeRange TimeRange, requestedInterval string) (string, int, string) {
+	const maxDataPoints = 5000 // Maximum data points per band to keep charts responsive
+
+	// Parse time range
+	fromTime, err := time.Parse(time.RFC3339, timeRange.From)
+	if err != nil {
+		return requestedInterval, 1, fmt.Sprintf("Using %s interval", requestedInterval)
+	}
+
+	toTime, err := time.Parse(time.RFC3339, timeRange.To)
+	if err != nil {
+		return requestedInterval, 1, fmt.Sprintf("Using %s interval", requestedInterval)
+	}
+
+	// Calculate duration in minutes
+	duration := toTime.Sub(fromTime)
+	durationMinutes := duration.Minutes()
+
+	// Get base interval duration in minutes
+	var baseIntervalMinutes float64
+	switch requestedInterval {
+	case "minute":
+		baseIntervalMinutes = 1
+	case "hour":
+		baseIntervalMinutes = 60
+	case "day":
+		baseIntervalMinutes = 24 * 60
+	case "week":
+		baseIntervalMinutes = 7 * 24 * 60
+	case "month":
+		baseIntervalMinutes = 30 * 24 * 60
+	default:
+		return requestedInterval, 1, fmt.Sprintf("Using %s interval", requestedInterval)
+	}
+
+	// Calculate expected data points
+	expectedPoints := int(durationMinutes / baseIntervalMinutes)
+
+	// If within limit, return original interval with info message
+	if expectedPoints <= maxDataPoints {
+		infoMsg := fmt.Sprintf("Using %s interval (~%d data points per band)",
+			formatInterval(requestedInterval, 1),
+			expectedPoints)
+		return requestedInterval, 1, infoMsg
+	}
+
+	// Calculate required multiplier to bring points under limit
+	multiplier := (expectedPoints + maxDataPoints - 1) / maxDataPoints // Round up
+
+	// Adjust interval based on multiplier
+	adjustedInterval := adjustIntervalByMultiplier(requestedInterval, multiplier)
+
+	// Generate info message
+	infoMsg := fmt.Sprintf("Interval automatically adjusted from %s to %s to limit data points (would have been %d points, now ~%d points)",
+		formatInterval(requestedInterval, 1),
+		formatInterval(requestedInterval, multiplier),
+		expectedPoints,
+		expectedPoints/multiplier)
+
+	return adjustedInterval, multiplier, infoMsg
+}
+
+// adjustIntervalByMultiplier adjusts an interval by a multiplier
+// For example: "minute" with multiplier 10 becomes "10minute"
+func adjustIntervalByMultiplier(baseInterval string, multiplier int) string {
+	if multiplier <= 1 {
+		return baseInterval
+	}
+	return fmt.Sprintf("%d%s", multiplier, baseInterval)
+}
+
+// formatInterval formats an interval with multiplier for display
+func formatInterval(baseInterval string, multiplier int) string {
+	if multiplier <= 1 {
+		return baseInterval
+	}
+
+	// Format with proper pluralization
+	unit := baseInterval
+	if multiplier > 1 {
+		unit += "s"
+	}
+
+	return fmt.Sprintf("%d %s", multiplier, unit)
 }
 
 // getFieldValue extracts the specified field value from a measurement

@@ -8,6 +8,7 @@
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="chartjs-plugin-annotation.min.js"></script>
+    <script src="chartjs-plugin-zoom.min.js"></script>
     <script src="date-picker.js"></script>
     <style>
         * {
@@ -138,8 +139,9 @@
 
         .checkbox-group {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-            gap: 10px;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            row-gap: 5px;
+            column-gap: 10px;
             background: rgba(255, 255, 255, 0.05);
             padding: 15px;
             border-radius: 8px;
@@ -149,6 +151,8 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            padding: 2px;
+            white-space: nowrap;
         }
 
         .checkbox-item input[type="checkbox"] {

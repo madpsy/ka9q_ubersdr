@@ -4,15 +4,15 @@
 // Available bands and fields
 const BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
 const FIELDS = {
-    'p5_db': 'Noise Floor (P5)',
+    'p5_db': 'Noise Floor',
     'p10_db': 'P10',
     'median_db': 'Median',
     'mean_db': 'Mean',
-    'p95_db': 'Signal Peak (P95)',
+    'p95_db': 'Signal Peak',
     'max_db': 'Maximum',
     'min_db': 'Minimum',
     'dynamic_range': 'Dynamic Range',
-    'occupancy_pct': 'Band Occupancy %',
+    'occupancy_pct': 'Occupancy %',
     'ft8_snr': 'FT8 SNR'
 };
 
@@ -76,7 +76,7 @@ function initializeBandCheckboxes() {
     noneButton.textContent = 'None';
     noneButton.className = 'btn-secondary';
     noneButton.style.marginBottom = '10px';
-    noneButton.style.padding = '4px 12px';
+    noneButton.style.padding = '4px 8px';
     noneButton.style.fontSize = '0.9em';
     noneButton.onclick = () => {
         document.querySelectorAll('#bandsCheckboxes input[type="checkbox"]').forEach(cb => {
@@ -115,7 +115,7 @@ function initializeFieldCheckboxes() {
     noneButton.textContent = 'None';
     noneButton.className = 'btn-secondary';
     noneButton.style.marginBottom = '10px';
-    noneButton.style.padding = '4px 12px';
+    noneButton.style.padding = '4px 8px';
     noneButton.style.fontSize = '0.9em';
     noneButton.onclick = () => {
         document.querySelectorAll('#fieldsCheckboxes input[type="checkbox"]').forEach(cb => {
@@ -454,7 +454,10 @@ async function fetchData() {
         
         currentData = await response.json();
         displayData(currentData, request);
-        showStatus('Data loaded successfully', 'success');
+
+        // Show info message about interval used (always present now)
+        const statusMsg = currentData.info || 'Data loaded successfully';
+        showStatus(statusMsg, 'success');
         
     } catch (error) {
         console.error('Error fetching data:', error);
@@ -780,6 +783,23 @@ function createFieldChart(field, data, request) {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
+                zoom: {
+                    pan: {
+                        enabled: true,
+                        mode: 'x',
+                        modifierKey: 'ctrl',
+                    },
+                    zoom: {
+                        drag: {
+                            enabled: true,
+                            backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                        },
+                        mode: 'x',
+                    },
+                    limits: {
+                        x: {min: 'original', max: 'original'},
+                    }
+                },
                 legend: {
                     display: true,
                     labels: { color: '#fff' }
@@ -853,6 +873,17 @@ function createFieldChart(field, data, request) {
                     },
                     ticks: { color: '#fff' },
                     grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                }
+            },
+            onClick: function(event, activeElements, chart) {
+                // Check for double-click to reset zoom
+                const now = Date.now();
+                if (chart.lastClickTime && (now - chart.lastClickTime) < 300) {
+                    // Double-click detected - reset zoom
+                    chart.resetZoom();
+                    chart.lastClickTime = null;
+                } else {
+                    chart.lastClickTime = now;
                 }
             }
         }
@@ -1206,6 +1237,23 @@ function createFieldChartData(field, data, request, ctx) {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
+                zoom: {
+                    pan: {
+                        enabled: true,
+                        mode: 'x',
+                        modifierKey: 'ctrl',
+                    },
+                    zoom: {
+                        drag: {
+                            enabled: true,
+                            backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                        },
+                        mode: 'x',
+                    },
+                    limits: {
+                        x: {min: 'original', max: 'original'},
+                    }
+                },
                 legend: {
                     display: true,
                     labels: { color: '#fff' }
@@ -1279,6 +1327,17 @@ function createFieldChartData(field, data, request, ctx) {
                     },
                     ticks: { color: '#fff' },
                     grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                }
+            },
+            onClick: function(event, activeElements, chart) {
+                // Check for double-click to reset zoom
+                const now = Date.now();
+                if (chart.lastClickTime && (now - chart.lastClickTime) < 300) {
+                    // Double-click detected - reset zoom
+                    chart.resetZoom();
+                    chart.lastClickTime = null;
+                } else {
+                    chart.lastClickTime = now;
                 }
             }
         }

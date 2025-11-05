@@ -788,6 +788,7 @@ function createFieldChart(field, data, request) {
                         enabled: true,
                         mode: 'x',
                         modifierKey: 'ctrl',
+                        onPanComplete: ({chart}) => syncAllCharts(chart)
                     },
                     zoom: {
                         drag: {
@@ -795,6 +796,7 @@ function createFieldChart(field, data, request) {
                             backgroundColor: 'rgba(255, 255, 255, 0.3)',
                         },
                         mode: 'x',
+                        onZoomComplete: ({chart}) => syncAllCharts(chart)
                     },
                     limits: {
                         x: {min: 'original', max: 'original'},
@@ -876,11 +878,11 @@ function createFieldChart(field, data, request) {
                 }
             },
             onClick: function(event, activeElements, chart) {
-                // Check for double-click to reset zoom
+                // Check for double-click to reset zoom on ALL charts
                 const now = Date.now();
                 if (chart.lastClickTime && (now - chart.lastClickTime) < 300) {
-                    // Double-click detected - reset zoom
-                    chart.resetZoom();
+                    // Double-click detected - reset zoom on all charts
+                    Object.values(charts).forEach(c => c.resetZoom());
                     chart.lastClickTime = null;
                 } else {
                     chart.lastClickTime = now;
@@ -888,6 +890,28 @@ function createFieldChart(field, data, request) {
             }
         }
     });
+}
+
+// Helper function to synchronize zoom across all charts
+function syncAllCharts(sourceChart) {
+    // Prevent infinite loops by checking if we're already syncing
+    if (sourceChart._syncing) return;
+
+    const xMin = sourceChart.scales.x.min;
+    const xMax = sourceChart.scales.x.max;
+
+    // Mark all charts as syncing to prevent loops
+    Object.values(charts).forEach(chart => chart._syncing = true);
+
+    // Apply the same zoom to all other charts
+    Object.values(charts).forEach(chart => {
+        if (chart !== sourceChart) {
+            chart.zoomScale('x', {min: xMin, max: xMax}, 'none');
+        }
+    });
+
+    // Clear syncing flags
+    Object.values(charts).forEach(chart => chart._syncing = false);
 }
 
 function shouldUseTimeOfDayAlignment(data, request) {
@@ -1242,6 +1266,7 @@ function createFieldChartData(field, data, request, ctx) {
                         enabled: true,
                         mode: 'x',
                         modifierKey: 'ctrl',
+                        onPanComplete: ({chart}) => syncAllCharts(chart)
                     },
                     zoom: {
                         drag: {
@@ -1249,6 +1274,7 @@ function createFieldChartData(field, data, request, ctx) {
                             backgroundColor: 'rgba(255, 255, 255, 0.3)',
                         },
                         mode: 'x',
+                        onZoomComplete: ({chart}) => syncAllCharts(chart)
                     },
                     limits: {
                         x: {min: 'original', max: 'original'},
@@ -1330,11 +1356,11 @@ function createFieldChartData(field, data, request, ctx) {
                 }
             },
             onClick: function(event, activeElements, chart) {
-                // Check for double-click to reset zoom
+                // Check for double-click to reset zoom on ALL charts
                 const now = Date.now();
                 if (chart.lastClickTime && (now - chart.lastClickTime) < 300) {
-                    // Double-click detected - reset zoom
-                    chart.resetZoom();
+                    // Double-click detected - reset zoom on all charts
+                    Object.values(charts).forEach(c => c.resetZoom());
                     chart.lastClickTime = null;
                 } else {
                     chart.lastClickTime = now;

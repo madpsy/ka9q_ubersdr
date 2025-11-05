@@ -107,6 +107,8 @@ func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *Nois
 
 // validateAggregateRequest validates the aggregate request parameters
 func validateAggregateRequest(req *AggregateRequest) error {
+	const maxDuration = 365 * 24 * time.Hour // 1 year maximum
+
 	// Validate primary time range
 	if req.Primary.From == "" || req.Primary.To == "" {
 		return fmt.Errorf("primary time range must have both 'from' and 'to' fields")
@@ -124,6 +126,12 @@ func validateAggregateRequest(req *AggregateRequest) error {
 
 	if toTime.Before(fromTime) {
 		return fmt.Errorf("primary 'to' time must be after 'from' time")
+	}
+
+	// Check primary duration doesn't exceed 1 year
+	primaryDuration := toTime.Sub(fromTime)
+	if primaryDuration > maxDuration {
+		return fmt.Errorf("primary time range exceeds maximum of 1 year (requested: %.1f days)", primaryDuration.Hours()/24)
 	}
 
 	// Validate comparison time range if provided
@@ -144,6 +152,12 @@ func validateAggregateRequest(req *AggregateRequest) error {
 
 		if compToTime.Before(compFromTime) {
 			return fmt.Errorf("comparison 'to' time must be after 'from' time")
+		}
+
+		// Check comparison duration doesn't exceed 1 year
+		comparisonDuration := compToTime.Sub(compFromTime)
+		if comparisonDuration > maxDuration {
+			return fmt.Errorf("comparison time range exceeds maximum of 1 year (requested: %.1f days)", comparisonDuration.Hours()/24)
 		}
 	}
 

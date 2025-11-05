@@ -93,7 +93,7 @@ function initializeBandCheckboxes() {
 function initializeFieldCheckboxes() {
     const container = document.getElementById('fieldsCheckboxes');
     // Default selected fields
-    const defaultFields = ['p5_db', 'p95_db', 'dynamic_range'];
+    const defaultFields = ['p5_db', 'p95_db', 'dynamic_range', 'ft8_snr'];
     
     Object.entries(FIELDS).forEach(([key, label]) => {
         const div = document.createElement('div');
@@ -514,21 +514,49 @@ function createFieldChart(field, data, request) {
     title.style.margin = '0';
     header.appendChild(title);
     
-    // Add difference toggle button if comparison data exists and has data for at least one band
+    // Add control buttons if comparison data exists and has data for at least one band
     if (data.comparison) {
         // Check if any of the selected bands have comparison data
         const hasComparisonData = request.bands.some(band =>
             data.comparison[band] && data.comparison[band].length > 0
         );
-        
+
         if (hasComparisonData) {
+            // Create button container
+            const buttonContainer = document.createElement('div');
+            buttonContainer.style.display = 'flex';
+            buttonContainer.style.gap = '8px';
+
+            // Hide Primary button
+            const hidePrimaryButton = document.createElement('button');
+            hidePrimaryButton.textContent = '👁️ Hide Primary';
+            hidePrimaryButton.className = 'btn-secondary';
+            hidePrimaryButton.style.padding = '8px 16px';
+            hidePrimaryButton.style.fontSize = '0.9em';
+            hidePrimaryButton.dataset.showing = 'true';
+            hidePrimaryButton.onclick = () => toggleDatasetVisibility(field, 'primary', hidePrimaryButton);
+            buttonContainer.appendChild(hidePrimaryButton);
+
+            // Hide Comparison button
+            const hideComparisonButton = document.createElement('button');
+            hideComparisonButton.textContent = '👁️ Hide Comparison';
+            hideComparisonButton.className = 'btn-secondary';
+            hideComparisonButton.style.padding = '8px 16px';
+            hideComparisonButton.style.fontSize = '0.9em';
+            hideComparisonButton.dataset.showing = 'true';
+            hideComparisonButton.onclick = () => toggleDatasetVisibility(field, 'comparison', hideComparisonButton);
+            buttonContainer.appendChild(hideComparisonButton);
+
+            // Difference button
             const diffButton = document.createElement('button');
             diffButton.textContent = '📊 Show Difference';
             diffButton.className = 'btn-secondary';
             diffButton.style.padding = '8px 16px';
             diffButton.style.fontSize = '0.9em';
             diffButton.onclick = () => toggleDifferenceView(field, data, request, diffButton);
-            header.appendChild(diffButton);
+            buttonContainer.appendChild(diffButton);
+
+            header.appendChild(buttonContainer);
         }
     }
     
@@ -789,20 +817,31 @@ function createFieldChart(field, data, request) {
 
 function shouldUseTimeOfDayAlignment(data, request) {
     // Use time-of-day alignment when both ranges are relatively short (< 3 days)
-    // This is typical for day-to-day comparisons
-    
-    const primaryFrom = new Date(request.primary.from);
-    const primaryTo = new Date(request.primary.to);
-    const primaryDuration = (primaryTo - primaryFrom) / (1000 * 60 * 60 * 24); // days
-    
+    // This is for comparing the same time across different days
+
     if (!request.comparison) {
         return false;
     }
-    
+
+    const primaryFrom = new Date(request.primary.from);
+    const primaryTo = new Date(request.primary.to);
+    const primaryDuration = (primaryTo - primaryFrom) / (1000 * 60 * 60 * 24); // days
+
     const comparisonFrom = new Date(request.comparison.from);
     const comparisonTo = new Date(request.comparison.to);
     const comparisonDuration = (comparisonTo - comparisonFrom) / (1000 * 60 * 60 * 24); // days
-    
+
+    // Check if both periods are on the same calendar day
+    const primaryDate = primaryFrom.toISOString().split('T')[0];
+    const comparisonDate = comparisonFrom.toISOString().split('T')[0];
+    const sameDay = primaryDate === comparisonDate;
+
+    // Don't use time-of-day alignment for same-day comparisons
+    // (those should use relative time overlay instead)
+    if (sameDay) {
+        return false;
+    }
+
     // Use time-of-day alignment if both periods are less than 3 days
     return primaryDuration <= 3 && comparisonDuration <= 3;
 }
@@ -938,6 +977,36 @@ function toggleDifferenceView(field, data, request, button) {
         // Recreate chart with original data
         createFieldChartData(field, data, request, ctx);
     }
+}
+
+function toggleDatasetVisibility(field, datasetType, button) {
+    const chart = charts[field];
+    if (!chart) return;
+
+    const isShowing = button.dataset.showing === 'true';
+    const newState = !isShowing;
+
+    // Update button state and text
+    button.dataset.showing = newState.toString();
+    if (datasetType === 'primary') {
+        button.textContent = newState ? '👁️ Hide Primary' : '👁️‍🗨️ Show Primary';
+    } else {
+        button.textContent = newState ? '👁️ Hide Comparison' : '👁️‍🗨️ Show Comparison';
+    }
+
+    // Toggle visibility of matching datasets
+    chart.data.datasets.forEach(dataset => {
+        const isPrimary = dataset.label.includes('(Primary)') || (!dataset.label.includes('(Comparison)') && !dataset.label.includes('(Difference)'));
+        const isComparison = dataset.label.includes('(Comparison)');
+
+        if (datasetType === 'primary' && isPrimary) {
+            dataset.hidden = !newState;
+        } else if (datasetType === 'comparison' && isComparison) {
+            dataset.hidden = !newState;
+        }
+    });
+
+    chart.update();
 }
 
 function createFieldChartData(field, data, request, ctx) {

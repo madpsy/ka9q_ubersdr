@@ -1502,6 +1502,9 @@ function updateStatus(msg) {
             }
         }
 
+        // Update bandwidth display
+        updateCurrentBandwidthDisplay(window.currentBandwidthLow, window.currentBandwidthHigh);
+
         updateBandButtons(msg.frequency);
         // Update spectrum display cursor - use window globals for latest values
         if (spectrumDisplay) {
@@ -2540,6 +2543,9 @@ function setMode(mode, preserveBandwidth = false) {
         window.currentBandwidthLow = defaultLow;
         window.currentBandwidthHigh = defaultHigh;
 
+        // Update bandwidth display
+        updateCurrentBandwidthDisplay(defaultLow, defaultHigh);
+
         // Notify extension system of bandwidth change
         if (window.radioAPI) {
             window.radioAPI.notifyBandwidthChange(defaultLow, defaultHigh);
@@ -2557,6 +2563,9 @@ function setMode(mode, preserveBandwidth = false) {
         // Update global references
         window.currentBandwidthLow = currentBandwidthLow;
         window.currentBandwidthHigh = currentBandwidthHigh;
+
+        // Update bandwidth display
+        updateCurrentBandwidthDisplay(currentBandwidthLow, currentBandwidthHigh);
 
         // Notify extension system of bandwidth change
         if (window.radioAPI) {
@@ -2635,6 +2644,9 @@ function updateBandwidthDisplay() {
     document.getElementById('bandwidth-low-value').textContent = bandwidthLow;
     document.getElementById('bandwidth-high-value').textContent = bandwidthHigh;
 
+    // Update bandwidth display in status
+    updateCurrentBandwidthDisplay(bandwidthLow, bandwidthHigh);
+
     // Throttle tune updates to 4 per second (250ms interval) - same as Z/X keys
     const now = Date.now();
     const timeSinceLastUpdate = now - window.bandwidthSliderState.lastUpdateTime;
@@ -2710,6 +2722,9 @@ function updateBandwidth() {
     document.getElementById('bandwidth-low-value').textContent = bandwidthLow;
     document.getElementById('bandwidth-high-value').textContent = bandwidthHigh;
 
+    // Update bandwidth display in status
+    updateCurrentBandwidthDisplay(bandwidthLow, bandwidthHigh);
+
     // Notify extension system of bandwidth change
     if (window.radioAPI) {
         window.radioAPI.notifyBandwidthChange(bandwidthLow, bandwidthHigh);
@@ -2760,6 +2775,18 @@ function updateBandwidth() {
     updateURL();
 
     autoTune();
+}
+
+// Update current bandwidth display in status text
+function updateCurrentBandwidthDisplay(bandwidthLow, bandwidthHigh) {
+    const bandwidthElement = document.getElementById('current-bandwidth');
+    if (bandwidthElement) {
+        // Calculate total bandwidth (absolute difference)
+        const totalBandwidthHz = Math.abs(bandwidthHigh - bandwidthLow);
+        // Convert to kHz with 1 decimal place
+        const totalBandwidthKHz = (totalBandwidthHz / 1000).toFixed(1);
+        bandwidthElement.textContent = `${totalBandwidthKHz} kHz`;
+    }
 }
 
 // Auto-tune when frequency or mode changes

@@ -125,9 +125,19 @@ class BandStateMonitor {
             } else {
                 // Calculate average SNR
                 const avgSnr = totalSnr / totalSamples;
-                
+
+                // Determine status based on SNR thresholds
+                let status;
+                if (avgSnr < 6) {
+                    status = 'CLOSED';
+                } else if (avgSnr >= 6 && avgSnr < 20) {
+                    status = 'MARGINAL';
+                } else {
+                    status = 'OPEN';
+                }
+
                 states[band] = {
-                    status: avgSnr >= this.snrThreshold ? 'OPEN' : 'CLOSED',
+                    status: status,
                     snr: avgSnr,
                     timestamp: latestTimestamp,
                     sampleCount: totalSamples

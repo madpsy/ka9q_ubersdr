@@ -354,6 +354,12 @@ body {
     box-shadow: 0 0 8px rgba(40, 167, 69, 0.5);
 }
 
+.band-status-badge[data-status="MARGINAL"] {
+    background: #fd7e14;
+    border-color: #fd7e14;
+    box-shadow: 0 0 8px rgba(253, 126, 20, 0.5);
+}
+
 .band-status-badge[data-status="CLOSED"] {
     background: #dc3545;
     border-color: #dc3545;
@@ -370,6 +376,13 @@ body {
     background: #155724 !important;
     border-color: #155724 !important;
     box-shadow: 0 0 12px rgba(21, 87, 36, 0.8) !important;
+}
+
+/* Active state for MARGINAL bands - dark orange */
+.band-status-badge[data-status="MARGINAL"].active {
+    background: #dc6502 !important;
+    border-color: #dc6502 !important;
+    box-shadow: 0 0 12px rgba(220, 101, 2, 0.8) !important;
 }
 
 /* Active state for CLOSED bands - dark red */

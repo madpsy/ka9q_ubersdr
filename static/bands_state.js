@@ -18,15 +18,15 @@ class BandStateMonitor {
     }
 
     /**
-     * Get the current hour and previous hour in UTC
+     * Get the previous 10 minutes time range in UTC
      * @returns {Object} Object with 'from' and 'to' ISO timestamp strings
      */
     getTimeRange() {
         const now = new Date();
         const to = now.toISOString();
         
-        // Get the previous hour
-        const from = new Date(now.getTime() - (60 * 60 * 1000));
+        // Get the previous 10 minutes
+        const from = new Date(now.getTime() - (10 * 60 * 1000));
         
         return {
             from: from.toISOString(),
@@ -48,7 +48,7 @@ class BandStateMonitor {
             },
             bands: this.bands,
             fields: ['ft8_snr'],
-            interval: 'hour'
+            interval: 'minute'
         };
 
         try {
@@ -98,23 +98,39 @@ class BandStateMonitor {
                 continue;
             }
 
-            // Get the most recent data point
-            const latestData = bandData[0];
-            const snr = latestData.values?.ft8_snr;
+            // Calculate average SNR across all data points in the 10-minute window
+            let totalSnr = 0;
+            let totalSamples = 0;
+            let latestTimestamp = null;
             
-            if (snr !== null && snr !== undefined) {
-                states[band] = {
-                    status: snr >= this.snrThreshold ? 'OPEN' : 'CLOSED',
-                    snr: snr,
-                    timestamp: latestData.timestamp,
-                    sampleCount: latestData.sample_count || 0
-                };
-            } else {
+            for (const dataPoint of bandData) {
+                const snr = dataPoint.values?.ft8_snr;
+                if (snr !== null && snr !== undefined) {
+                    totalSnr += snr;
+                    totalSamples++;
+                    // Track the most recent timestamp
+                    if (!latestTimestamp || new Date(dataPoint.timestamp) > new Date(latestTimestamp)) {
+                        latestTimestamp = dataPoint.timestamp;
+                    }
+                }
+            }
+            
+            if (totalSamples === 0) {
                 states[band] = {
                     status: 'UNKNOWN',
                     snr: null,
-                    timestamp: latestData.timestamp,
-                    sampleCount: latestData.sample_count || 0
+                    timestamp: latestTimestamp,
+                    sampleCount: 0
+                };
+            } else {
+                // Calculate average SNR
+                const avgSnr = totalSnr / totalSamples;
+                
+                states[band] = {
+                    status: avgSnr >= this.snrThreshold ? 'OPEN' : 'CLOSED',
+                    snr: avgSnr,
+                    timestamp: latestTimestamp,
+                    sampleCount: totalSamples
                 };
             }
         }

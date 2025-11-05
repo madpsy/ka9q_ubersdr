@@ -35,17 +35,25 @@ initialize_configs() {
 
 # Function to update admin password in config.yaml
 update_admin_password() {
+    # Read current password from config
+    CURRENT_PASSWORD=$(grep "password:" /app/config/config.yaml | sed 's/.*password: *"\?\([^"]*\)"\?.*/\1/')
+
     if [ -n "$ADMIN_PASSWORD" ]; then
+        # Always use env var if provided
         echo "ADMIN_PASSWORD environment variable detected"
         echo "Updating admin password in config file..."
         sed -i "s/password:.*/password: \"$ADMIN_PASSWORD\"/" /app/config/config.yaml
         echo "Admin password updated successfully"
-    else
-        echo "No ADMIN_PASSWORD environment variable set, generating random password"
-        # Generate a random password to avoid security error
+    elif [ "$CURRENT_PASSWORD" = "mypassword" ] || [ -z "$CURRENT_PASSWORD" ]; then
+        # Only generate random password if it's still the default or empty
+        echo "Default password detected, generating random password for security"
         RANDOM_PASSWORD=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 16)
         sed -i "s/password:.*/password: \"$RANDOM_PASSWORD\"/" /app/config/config.yaml
-        echo "Generated random admin password (set ADMIN_PASSWORD env var to use custom password)"
+        echo "Generated random admin password: $RANDOM_PASSWORD"
+        echo "(Set ADMIN_PASSWORD env var to use a custom password)"
+    else
+        # Password has been manually changed, leave it alone
+        echo "Custom password detected in config, leaving unchanged"
     fi
 }
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -726,6 +727,16 @@ func handleBookmarks(w http.ResponseWriter, r *http.Request, config *Config) {
 			filteredBookmarks[i].Extension = ""
 		}
 	}
+
+	// Sort bookmarks alphabetically by name, then by frequency
+	sort.Slice(filteredBookmarks, func(i, j int) bool {
+		nameI := strings.ToLower(filteredBookmarks[i].Name)
+		nameJ := strings.ToLower(filteredBookmarks[j].Name)
+		if nameI == nameJ {
+			return filteredBookmarks[i].Frequency < filteredBookmarks[j].Frequency
+		}
+		return nameI < nameJ
+	})
 
 	if err := json.NewEncoder(w).Encode(filteredBookmarks); err != nil {
 		log.Printf("Error encoding bookmarks: %v", err)

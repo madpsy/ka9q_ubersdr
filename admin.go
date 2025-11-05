@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -495,6 +496,54 @@ func (ah *AdminHandler) handleGetBookmarks(w http.ResponseWriter, r *http.Reques
 	if err := yaml.Unmarshal(data, &bookmarksConfig); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to parse bookmarks: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Sort bookmarks alphabetically by name, then by frequency
+	if bookmarks, ok := bookmarksConfig["bookmarks"].([]interface{}); ok {
+		sort.Slice(bookmarks, func(i, j int) bool {
+			bookmarkI, okI := bookmarks[i].(map[string]interface{})
+			bookmarkJ, okJ := bookmarks[j].(map[string]interface{})
+			if !okI || !okJ {
+				return false
+			}
+			nameI, okI := bookmarkI["name"].(string)
+			nameJ, okJ := bookmarkJ["name"].(string)
+			if !okI || !okJ {
+				return false
+			}
+
+			// Compare names (case-insensitive)
+			lowerNameI := strings.ToLower(nameI)
+			lowerNameJ := strings.ToLower(nameJ)
+			if lowerNameI != lowerNameJ {
+				return lowerNameI < lowerNameJ
+			}
+
+			// If names are equal, compare frequencies
+			freqI, okI := bookmarkI["frequency"].(uint64)
+			freqJ, okJ := bookmarkJ["frequency"].(uint64)
+			if okI && okJ {
+				return freqI < freqJ
+			}
+			// Handle int type as well (YAML might parse as int)
+			if !okI {
+				if freqIntI, ok := bookmarkI["frequency"].(int); ok {
+					freqI = uint64(freqIntI)
+					okI = true
+				}
+			}
+			if !okJ {
+				if freqIntJ, ok := bookmarkJ["frequency"].(int); ok {
+					freqJ = uint64(freqIntJ)
+					okJ = true
+				}
+			}
+			if okI && okJ {
+				return freqI < freqJ
+			}
+			return false
+		})
+		bookmarksConfig["bookmarks"] = bookmarks
 	}
 
 	w.WriteHeader(http.StatusOK)

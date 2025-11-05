@@ -312,6 +312,8 @@ body {
 .band-status-bar {
     padding: 8px 30px;
     background: transparent;
+    position: relative;
+    z-index: 100;
 }
 
 .band-status-container {
@@ -321,6 +323,8 @@ body {
     gap: 8px;
     background: transparent;
     padding: 8px 15px;
+    position: relative;
+    z-index: 100;
 }
 
 .band-status-badge {
@@ -335,6 +339,8 @@ body {
     cursor: pointer;
     border: 2px solid transparent;
     user-select: none;
+    pointer-events: auto;
+    display: inline-block;
 }
 
 .band-status-badge:hover {

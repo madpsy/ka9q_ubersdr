@@ -160,6 +160,19 @@ class BandStateMonitor {
             return newStates;
         } catch (error) {
             console.error('Failed to update band states:', error);
+            // On error, set all bands to UNKNOWN and notify listeners
+            // This ensures the UI shows green (UNKNOWN is displayed as OPEN)
+            const unknownStates = {};
+            for (const band of this.bands) {
+                unknownStates[band] = {
+                    status: 'UNKNOWN',
+                    snr: null,
+                    timestamp: null,
+                    sampleCount: 0
+                };
+            }
+            this.bandStates = unknownStates;
+            this.notifyListeners(unknownStates);
             throw error;
         }
     }
@@ -324,11 +337,13 @@ function setupBandBadgeHandlers() {
     badges.forEach(badge => {
         const band = badge.getAttribute('data-band');
         badge.style.cursor = 'pointer';
-        badge.addEventListener('click', () => {
+        // Use onclick attribute for more reliable clicking
+        badge.onclick = function(e) {
+            e.stopPropagation();
             if (typeof setBand === 'function') {
                 setBand(band);
             }
-        });
+        };
     });
 }
 

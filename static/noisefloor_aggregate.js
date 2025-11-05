@@ -70,20 +70,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function initializeBandCheckboxes() {
     const container = document.getElementById('bandsCheckboxes');
+
+    // Add "None" button
+    const noneButton = document.createElement('button');
+    noneButton.textContent = 'None';
+    noneButton.className = 'btn-secondary';
+    noneButton.style.marginBottom = '10px';
+    noneButton.style.padding = '4px 12px';
+    noneButton.style.fontSize = '0.9em';
+    noneButton.onclick = () => {
+        document.querySelectorAll('#bandsCheckboxes input[type="checkbox"]').forEach(cb => {
+            cb.checked = false;
+        });
+    };
+    container.appendChild(noneButton);
+
     BANDS.forEach(band => {
         const div = document.createElement('div');
         div.className = 'checkbox-item';
-        
+
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.id = `band-${band}`;
         checkbox.value = band;
         checkbox.checked = true; // All bands selected by default
-        
+
         const label = document.createElement('label');
         label.htmlFor = `band-${band}`;
         label.textContent = band;
-        
+
         div.appendChild(checkbox);
         div.appendChild(label);
         container.appendChild(div);
@@ -94,21 +109,35 @@ function initializeFieldCheckboxes() {
     const container = document.getElementById('fieldsCheckboxes');
     // Default selected fields
     const defaultFields = ['p5_db', 'p95_db', 'dynamic_range', 'ft8_snr'];
-    
+
+    // Add "None" button
+    const noneButton = document.createElement('button');
+    noneButton.textContent = 'None';
+    noneButton.className = 'btn-secondary';
+    noneButton.style.marginBottom = '10px';
+    noneButton.style.padding = '4px 12px';
+    noneButton.style.fontSize = '0.9em';
+    noneButton.onclick = () => {
+        document.querySelectorAll('#fieldsCheckboxes input[type="checkbox"]').forEach(cb => {
+            cb.checked = false;
+        });
+    };
+    container.appendChild(noneButton);
+
     Object.entries(FIELDS).forEach(([key, label]) => {
         const div = document.createElement('div');
         div.className = 'checkbox-item';
-        
+
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.id = `field-${key}`;
         checkbox.value = key;
         checkbox.checked = defaultFields.includes(key);
-        
+
         const labelEl = document.createElement('label');
         labelEl.htmlFor = `field-${key}`;
         labelEl.textContent = label;
-        
+
         div.appendChild(checkbox);
         div.appendChild(labelEl);
         container.appendChild(div);
@@ -404,8 +433,23 @@ async function fetchData() {
         });
         
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Failed to fetch data');
+            // Try to get error message from response body
+            let errorMessage = 'Failed to fetch data';
+            try {
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const error = await response.json();
+                    errorMessage = error.error || errorMessage;
+                } else {
+                    // If not JSON, get the text body
+                    const textError = await response.text();
+                    errorMessage = textError || `HTTP ${response.status}: ${response.statusText}`;
+                }
+            } catch (parseError) {
+                // If parsing fails, use status text
+                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            }
+            throw new Error(errorMessage);
         }
         
         currentData = await response.json();

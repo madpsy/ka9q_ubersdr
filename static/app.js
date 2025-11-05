@@ -257,7 +257,9 @@ let nr2 = null; // NR2 processor instance
 
 // Amateur radio band ranges (in Hz) - UK RSGB allocations
 const bandRanges = {
+    '160m': { min: 1810000, max: 2000000 },  // UK: 1.81-2.0 MHz
     '80m': { min: 3500000, max: 3800000 },   // UK: 3.5-3.8 MHz
+    '60m': { min: 5258500, max: 5406500 },   // UK: 5.2585-5.4065 MHz
     '40m': { min: 7000000, max: 7200000 },   // UK: 7.0-7.2 MHz
     '30m': { min: 10100000, max: 10150000 }, // UK: 10.1-10.15 MHz (WARC band)
     '20m': { min: 14000000, max: 14350000 }, // UK: 14.0-14.35 MHz
@@ -266,6 +268,9 @@ const bandRanges = {
     '12m': { min: 24890000, max: 24990000 }, // UK: 24.89-24.99 MHz (WARC band)
     '10m': { min: 28000000, max: 29700000 }  // UK: 28.0-29.7 MHz
 };
+
+// Expose bandRanges globally for band state monitor
+window.bandRanges = bandRanges;
 
 // Bookmarks are now managed by bookmark-manager.js
 // Access via window.bookmarks and window.bookmarkPositions
@@ -281,6 +286,11 @@ function updateBandButtons(frequency) {
             btn.classList.remove('active');
         }
     });
+
+    // Also update band status badges if the function exists
+    if (window.updateBandBadgeActiveStates) {
+        window.updateBandBadgeActiveStates();
+    }
 }
 
 // Update page title with current frequency and mode
@@ -459,36 +469,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 setMode('cwu');
             }
         }
-        // Number keys 1-8: Set band
+        // Number keys 1-0: Set band (matches visual order left to right)
         else if (e.key === '1') {
             e.preventDefault();
-            setBand('80m');
+            setBand('160m');
         }
         else if (e.key === '2') {
             e.preventDefault();
-            setBand('40m');
+            setBand('80m');
         }
         else if (e.key === '3') {
             e.preventDefault();
-            setBand('30m');
+            setBand('60m');
         }
         else if (e.key === '4') {
             e.preventDefault();
-            setBand('20m');
+            setBand('40m');
         }
         else if (e.key === '5') {
             e.preventDefault();
-            setBand('17m');
+            setBand('30m');
         }
         else if (e.key === '6') {
             e.preventDefault();
-            setBand('15m');
+            setBand('20m');
         }
         else if (e.key === '7') {
             e.preventDefault();
-            setBand('12m');
+            setBand('17m');
         }
         else if (e.key === '8') {
+            e.preventDefault();
+            setBand('15m');
+        }
+        else if (e.key === '9') {
+            e.preventDefault();
+            setBand('12m');
+        }
+        else if (e.key === '0') {
             e.preventDefault();
             setBand('10m');
         }

@@ -332,13 +332,20 @@ body {
     font-weight: bold;
     text-transform: uppercase;
     transition: all 0.3s ease;
-    cursor: default;
+    cursor: pointer;
     border: 2px solid transparent;
+    user-select: none;
 }
 
 .band-status-badge:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    filter: brightness(1.2);
+}
+
+.band-status-badge:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .band-status-badge[data-status="OPEN"] {
@@ -356,6 +363,28 @@ body {
     background: #6c757d;
     border-color: #6c757d;
     opacity: 0.6;
+}
+
+/* Active state for OPEN bands - dark green */
+.band-status-badge[data-status="OPEN"].active {
+    background: #155724 !important;
+    border-color: #155724 !important;
+    box-shadow: 0 0 12px rgba(21, 87, 36, 0.8) !important;
+}
+
+/* Active state for CLOSED bands - dark red */
+.band-status-badge[data-status="CLOSED"].active {
+    background: #721c24 !important;
+    border-color: #721c24 !important;
+    box-shadow: 0 0 12px rgba(114, 28, 36, 0.8) !important;
+}
+
+/* Active state for UNKNOWN bands - darker gray */
+.band-status-badge[data-status="UNKNOWN"].active {
+    background: #495057 !important;
+    border-color: #495057 !important;
+    box-shadow: 0 0 12px rgba(73, 80, 87, 0.8) !important;
+    opacity: 1 !important;
 }
 
 

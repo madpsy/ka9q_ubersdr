@@ -138,18 +138,15 @@
                     <button onclick="adjustFrequency(100)" title="Up 100 Hz (D key)">►</button>
                     <button onclick="adjustFrequency(1000)" title="Up 1 kHz (Right Arrow →)">►►</button>
                 </div>
-                <div class="preset-buttons">
-                    <button onclick="setBand('80m')" class="band-btn" data-band="80m" title="80 meter band (1 key)">80m</button>
-                    <button onclick="setBand('40m')" class="band-btn" data-band="40m" title="40 meter band (2 key)">40m</button>
-                    <button onclick="setBand('30m')" class="band-btn" data-band="30m" title="30 meter band (3 key)">30m</button>
-                    <button onclick="setBand('20m')" class="band-btn" data-band="20m" title="20 meter band (4 key)">20m</button>
-                    <button onclick="setBand('17m')" class="band-btn" data-band="17m" title="17 meter band (5 key)">17m</button>
-                    <button onclick="setBand('15m')" class="band-btn" data-band="15m" title="15 meter band (6 key)">15m</button>
-                    <button onclick="setBand('12m')" class="band-btn" data-band="12m" title="12 meter band (7 key)">12m</button>
-                    <button onclick="setBand('10m')" class="band-btn" data-band="10m" title="10 meter band (8 key)">10m</button>
-                </div>
                 <select id="band-selector" onchange="selectBandFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
                     <option value="">Select Band...</option>
+                </select>
+                <select id="bookmark-selector" onchange="selectBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
+                    <option value="">Select Bookmark...</option>
+                </select>
+                <select id="extensions-dropdown" onchange="toggleExtension(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
+                    <option value="">Extensions...</option>
+                    <!-- Extensions populated dynamically by extension-loader.js -->
                 </select>
             </div>
 
@@ -177,13 +174,6 @@
                 <div class="current-settings-text">
                     <span id="current-freq">-</span> • <span id="current-mode">-</span>
                 </div>
-                <select id="bookmark-selector" onchange="selectBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px;">
-                    <option value="">Select Bookmark...</option>
-                </select>
-                <select id="extensions-dropdown" onchange="toggleExtension(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px;">
-                    <option value="">Extensions...</option>
-                    <!-- Extensions populated dynamically by extension-loader.js -->
-                </select>
             </div>
 
             <div class="control-group">

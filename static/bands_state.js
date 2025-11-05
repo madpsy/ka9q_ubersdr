@@ -250,6 +250,20 @@ if (typeof module !== 'undefined' && module.exports) {
 // UI Integration
 let bandStateMonitor = null;
 
+// Band to keyboard shortcut mapping (matches visual order left to right)
+const BAND_SHORTCUTS = {
+    '160m': '1',
+    '80m': '2',
+    '60m': '3',
+    '40m': '4',
+    '30m': '5',
+    '20m': '6',
+    '17m': '7',
+    '15m': '8',
+    '12m': '9',
+    '10m': '0'
+};
+
 /**
  * Initialize the band state monitor and UI
  */
@@ -267,7 +281,52 @@ function initBandStateUI() {
     // Start monitoring
     bandStateMonitor.start();
 
+    // Add click handlers to band badges
+    setupBandBadgeHandlers();
+
+    // Add keyboard shortcuts
+    setupBandKeyboardShortcuts();
+
     console.log('Band state monitor initialized');
+}
+
+/**
+ * Setup click handlers for band badges
+ */
+function setupBandBadgeHandlers() {
+    const badges = document.querySelectorAll('.band-status-badge');
+    badges.forEach(badge => {
+        const band = badge.getAttribute('data-band');
+        badge.style.cursor = 'pointer';
+        badge.addEventListener('click', () => {
+            if (typeof setBand === 'function') {
+                setBand(band);
+            }
+        });
+    });
+}
+
+/**
+ * Setup keyboard shortcuts for bands
+ */
+function setupBandKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        // Don't trigger if user is typing in an input field
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+            return;
+        }
+
+        // Find band for this key
+        for (const [band, key] of Object.entries(BAND_SHORTCUTS)) {
+            if (e.key === key) {
+                e.preventDefault();
+                if (typeof setBand === 'function') {
+                    setBand(band);
+                }
+                break;
+            }
+        }
+    });
 }
 
 /**
@@ -289,15 +348,60 @@ function updateBandStatusDisplay(states) {
         // Update data attribute for CSS styling
         bandBadge.setAttribute('data-status', displayStatus);
 
+        // Get keyboard shortcut for this band
+        const shortcut = BAND_SHORTCUTS[band] || '';
+        const shortcutText = shortcut ? `\nShortcut: ${shortcut} key` : '';
+
         // Add tooltip with FT8 SNR value if available
         if (state.snr !== null && state.snr !== undefined) {
-            bandBadge.title = `${band}: ${state.status}\nFT8 SNR: ${state.snr.toFixed(2)} dB`;
+            bandBadge.title = `${band}: ${state.status}\nFT8 SNR: ${state.snr.toFixed(2)} dB${shortcutText}`;
         } else {
-            bandBadge.title = `${band}: No data available`;
+            bandBadge.title = `${band}: No data available${shortcutText}`;
         }
     }
 
+    // Update active state based on current frequency
+    updateBandBadgeActiveStates();
+
     console.log('Band status display updated', states);
+}
+
+/**
+ * Update the active state of band badges based on current frequency
+ */
+function updateBandBadgeActiveStates() {
+    // Get current frequency from the frequency input
+    const freqInput = document.getElementById('frequency');
+    if (!freqInput) return;
+    
+    const currentFreq = parseInt(freqInput.value);
+    if (isNaN(currentFreq)) return;
+
+    // Get band ranges from app.js (if available)
+    const bandRanges = window.bandRanges || {
+        '160m': { min: 1810000, max: 2000000 },
+        '80m': { min: 3500000, max: 3800000 },
+        '60m': { min: 5258500, max: 5406500 },
+        '40m': { min: 7000000, max: 7200000 },
+        '30m': { min: 10100000, max: 10150000 },
+        '20m': { min: 14000000, max: 14350000 },
+        '17m': { min: 18068000, max: 18168000 },
+        '15m': { min: 21000000, max: 21450000 },
+        '12m': { min: 24890000, max: 24990000 },
+        '10m': { min: 28000000, max: 29700000 }
+    };
+
+    // Update each band badge
+    document.querySelectorAll('.band-status-badge').forEach(badge => {
+        const band = badge.getAttribute('data-band');
+        const range = bandRanges[band];
+        
+        if (range && currentFreq >= range.min && currentFreq <= range.max) {
+            badge.classList.add('active');
+        } else {
+            badge.classList.remove('active');
+        }
+    });
 }
 
 /**
@@ -352,3 +456,6 @@ window.bandStateUI = {
     getOpenBands,
     refreshBandStates
 };
+
+// Export updateBandBadgeActiveStates globally for use in app.js
+window.updateBandBadgeActiveStates = updateBandBadgeActiveStates;

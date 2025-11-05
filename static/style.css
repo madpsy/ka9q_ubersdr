@@ -308,6 +308,57 @@ body {
     color: white;
 }
 
+/* Band Status Bar */
+.band-status-bar {
+    padding: 8px 30px;
+    background: transparent;
+}
+
+.band-status-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    padding: 8px 15px;
+}
+
+.band-status-badge {
+    padding: 6px 14px;
+    background: #6c757d;
+    color: white;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-weight: bold;
+    text-transform: uppercase;
+    transition: all 0.3s ease;
+    cursor: default;
+    border: 2px solid transparent;
+}
+
+.band-status-badge:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.band-status-badge[data-status="OPEN"] {
+    background: #28a745;
+    border-color: #28a745;
+    box-shadow: 0 0 8px rgba(40, 167, 69, 0.5);
+}
+
+.band-status-badge[data-status="CLOSED"] {
+    background: #dc3545;
+    border-color: #dc3545;
+}
+
+.band-status-badge[data-status="UNKNOWN"] {
+    background: #6c757d;
+    border-color: #6c757d;
+    opacity: 0.6;
+}
+
+
 .controls {
     padding: 30px 12.5% 10px 12.5%; /* Use percentage padding for centering */
     display: grid;

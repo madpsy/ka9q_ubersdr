@@ -40,7 +40,24 @@ type AggregatedMeasurement struct {
 }
 
 // handleNoiseFloorAggregate handles POST requests for aggregated noise floor data
-func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager, rateLimiter *AggregateRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	// Check rate limit (1 request per 5 seconds per IP)
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 5 seconds between aggregate requests.",
+		})
+		log.Printf("Aggregate rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
 	startTime := time.Now()
 
 	if r.Method != http.MethodPost {

@@ -196,3 +196,136 @@ func (icrl *IPConnectionRateLimiter) GetStats() int {
 	defer icrl.mu.RUnlock()
 	return len(icrl.limiters)
 }
+
+// AggregateRateLimiter manages rate limiters for aggregate endpoint requests per IP
+// Limits to 1 request per 5 seconds per IP
+type AggregateRateLimiter struct {
+	limiters map[string]*RateLimiter
+	mu       sync.RWMutex
+}
+
+// NewAggregateRateLimiter creates a new aggregate endpoint rate limiter
+// Fixed at 1 request per 5 seconds (0.2 requests per second)
+func NewAggregateRateLimiter() *AggregateRateLimiter {
+	return &AggregateRateLimiter{
+		limiters: make(map[string]*RateLimiter),
+	}
+}
+
+// AllowRequest checks if an aggregate request is allowed for the given IP
+// Returns true if allowed, false if rate limit exceeded
+func (arl *AggregateRateLimiter) AllowRequest(ip string) bool {
+	arl.mu.Lock()
+	limiter, exists := arl.limiters[ip]
+	if !exists {
+		// Create a rate limiter with 1 token max, refilling at 0.2 tokens/sec (1 per 5 seconds)
+		limiter = &RateLimiter{
+			tokens:     1.0,
+			maxTokens:  1.0,
+			refillRate: 0.2, // 1 request per 5 seconds
+			lastRefill: time.Now(),
+		}
+		arl.limiters[ip] = limiter
+	}
+	arl.mu.Unlock()
+
+	return limiter.Allow()
+}
+
+// FFTRateLimiter manages rate limiters for FFT endpoint requests per IP per band
+// Limits to 1 request per 2 seconds per band per IP
+type FFTRateLimiter struct {
+	limiters map[string]map[string]*RateLimiter // map[ip]map[band]*RateLimiter
+	mu       sync.RWMutex
+}
+
+// NewFFTRateLimiter creates a new FFT endpoint rate limiter
+// Fixed at 1 request per 2 seconds per band (0.5 requests per second)
+func NewFFTRateLimiter() *FFTRateLimiter {
+	return &FFTRateLimiter{
+		limiters: make(map[string]map[string]*RateLimiter),
+	}
+}
+
+// AllowRequest checks if an FFT request is allowed for the given IP and band
+// Returns true if allowed, false if rate limit exceeded
+func (frl *FFTRateLimiter) AllowRequest(ip, band string) bool {
+	frl.mu.Lock()
+	ipLimiters, exists := frl.limiters[ip]
+	if !exists {
+		ipLimiters = make(map[string]*RateLimiter)
+		frl.limiters[ip] = ipLimiters
+	}
+
+	bandLimiter, exists := ipLimiters[band]
+	if !exists {
+		// Create a rate limiter with 1 token max, refilling at 0.5 tokens/sec (1 per 2 seconds)
+		bandLimiter = &RateLimiter{
+			tokens:     1.0,
+			maxTokens:  1.0,
+			refillRate: 0.5, // 1 request per 2 seconds
+			lastRefill: time.Now(),
+		}
+		ipLimiters[band] = bandLimiter
+	}
+	frl.mu.Unlock()
+
+	return bandLimiter.Allow()
+}
+
+// Cleanup removes rate limiters for IPs that haven't been used recently
+func (frl *FFTRateLimiter) Cleanup() {
+	frl.mu.Lock()
+	defer frl.mu.Unlock()
+
+	now := time.Now()
+	for ip, ipLimiters := range frl.limiters {
+		for band, limiter := range ipLimiters {
+			limiter.mu.Lock()
+			// Remove limiters that haven't been used in the last 15 minutes
+			if now.Sub(limiter.lastRefill) > 15*time.Minute {
+				delete(ipLimiters, band)
+			}
+			limiter.mu.Unlock()
+		}
+		// Remove IP entry if no bands left
+		if len(ipLimiters) == 0 {
+			delete(frl.limiters, ip)
+		}
+	}
+}
+
+// GetStats returns the current number of tracked IPs and total band limiters
+func (frl *FFTRateLimiter) GetStats() (int, int) {
+	frl.mu.RLock()
+	defer frl.mu.RUnlock()
+
+	totalBands := 0
+	for _, ipLimiters := range frl.limiters {
+		totalBands += len(ipLimiters)
+	}
+	return len(frl.limiters), totalBands
+}
+
+// Cleanup removes rate limiters for IPs that haven't been used recently
+func (arl *AggregateRateLimiter) Cleanup() {
+	arl.mu.Lock()
+	defer arl.mu.Unlock()
+
+	now := time.Now()
+	for ip, limiter := range arl.limiters {
+		limiter.mu.Lock()
+		// Remove limiters that haven't been used in the last 10 minutes
+		if now.Sub(limiter.lastRefill) > 10*time.Minute {
+			delete(arl.limiters, ip)
+		}
+		limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the current number of tracked IPs
+func (arl *AggregateRateLimiter) GetStats() int {
+	arl.mu.RLock()
+	defer arl.mu.RUnlock()
+	return len(arl.limiters)
+}

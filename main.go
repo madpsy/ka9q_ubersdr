@@ -322,12 +322,22 @@ func main() {
 	connRateLimiter := NewIPConnectionRateLimiter(config.Server.ConnRateLimit)
 	log.Printf("Connection rate limiting: %d connections/sec per IP (0 = unlimited)", config.Server.ConnRateLimit)
 
-	// Start periodic cleanup for connection rate limiter (every 5 minutes)
+	// Initialize aggregate endpoint rate limiter (1 request per 5 seconds per IP)
+	aggregateRateLimiter := NewAggregateRateLimiter()
+	log.Printf("Aggregate endpoint rate limiting: 1 request per 5 seconds per IP")
+
+	// Initialize FFT endpoint rate limiter (1 request per 2 seconds per band per IP)
+	fftRateLimiter := NewFFTRateLimiter()
+	log.Printf("FFT endpoint rate limiting: 1 request per 2 seconds per band per IP")
+
+	// Start periodic cleanup for rate limiters (every 5 minutes)
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			connRateLimiter.Cleanup()
+			aggregateRateLimiter.Cleanup()
+			fftRateLimiter.Cleanup()
 		}
 	}()
 
@@ -370,30 +380,30 @@ func main() {
 		handleStatus(w, r, config)
 	})
 
-	// Noise floor endpoints (with gzip compression)
+	// Noise floor endpoints (with gzip compression, IP ban checking, and rate limiting)
 	http.HandleFunc("/api/noisefloor/latest", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleNoiseFloorLatest(w, r, noiseFloorMonitor)
+		handleNoiseFloorLatest(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/noisefloor/recent", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleNoiseFloorRecent(w, r, noiseFloorMonitor)
+		handleNoiseFloorRecent(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/noisefloor/trend", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleNoiseFloorTrend(w, r, noiseFloorMonitor)
+		handleNoiseFloorTrend(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/noisefloor/history", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleNoiseFloorHistory(w, r, noiseFloorMonitor)
+		handleNoiseFloorHistory(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/noisefloor/dates", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleNoiseFloorDates(w, r, noiseFloorMonitor)
+		handleNoiseFloorDates(w, r, noiseFloorMonitor, ipBanManager)
 	}))
 	http.HandleFunc("/api/noisefloor/fft", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleNoiseFloorFFT(w, r, noiseFloorMonitor)
+		handleNoiseFloorFFT(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/noisefloor/config", func(w http.ResponseWriter, r *http.Request) {
-		handleNoiseFloorConfig(w, r, config)
+		handleNoiseFloorConfig(w, r, config, ipBanManager)
 	})
 	http.HandleFunc("/api/noisefloor/aggregate", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleNoiseFloorAggregate(w, r, noiseFloorMonitor)
+		handleNoiseFloorAggregate(w, r, noiseFloorMonitor, ipBanManager, aggregateRateLimiter)
 	}))
 
 	// Admin authentication endpoints (no auth required)
@@ -848,8 +858,67 @@ func handleStatus(w http.ResponseWriter, r *http.Request, config *Config) {
 	}
 }
 
+// getClientIP extracts the client IP from the request, handling proxies
+func getClientIP(r *http.Request) string {
+	// Get source IP address and strip port number
+	sourceIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
+		sourceIP = host
+	}
+
+	clientIP := sourceIP
+
+	// Check X-Forwarded-For header for true source IP (first IP in the list)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+		// We want the first one (the true client)
+		clientIP = strings.TrimSpace(xff)
+		if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
+			clientIP = strings.TrimSpace(clientIP[:commaIdx])
+		}
+		// Strip port if present in X-Forwarded-For
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
+		}
+	}
+
+	return clientIP
+}
+
+// checkIPBan checks if the client IP is banned and returns appropriate error if so
+func checkIPBan(w http.ResponseWriter, r *http.Request, ipBanManager *IPBanManager) bool {
+	clientIP := getClientIP(r)
+	if ipBanManager.IsBanned(clientIP) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Access denied",
+		})
+		log.Printf("Blocked request from banned IP: %s to %s", clientIP, r.URL.Path)
+		return true
+	}
+	return false
+}
+
 // handleNoiseFloorLatest serves the latest noise floor measurements
-func handleNoiseFloorLatest(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+func handleNoiseFloorLatest(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP, using "all" as band key)
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "latest") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Latest endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	if nfm == nil {
@@ -876,7 +945,12 @@ func handleNoiseFloorLatest(w http.ResponseWriter, r *http.Request, nfm *NoiseFl
 }
 
 // handleNoiseFloorHistory serves historical noise floor data
-func handleNoiseFloorHistory(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+func handleNoiseFloorHistory(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	if nfm == nil {
@@ -899,6 +973,18 @@ func handleNoiseFloorHistory(w http.ResponseWriter, r *http.Request, nfm *NoiseF
 		return
 	}
 
+	// Check rate limit (1 request per 2 seconds per band per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("history-%s-%s", date, band)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("History endpoint rate limit exceeded for IP: %s, date: %s, band: %s", clientIP, date, band)
+		return
+	}
+
 	measurements, err := nfm.GetHistoricalData(date, band)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -915,7 +1001,12 @@ func handleNoiseFloorHistory(w http.ResponseWriter, r *http.Request, nfm *NoiseF
 }
 
 // handleNoiseFloorRecent serves the last hour of noise floor data (all data points)
-func handleNoiseFloorRecent(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+func handleNoiseFloorRecent(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	if nfm == nil {
@@ -928,6 +1019,18 @@ func handleNoiseFloorRecent(w http.ResponseWriter, r *http.Request, nfm *NoiseFl
 
 	// Get optional band parameter
 	band := r.URL.Query().Get("band")
+
+	// Check rate limit (1 request per 2 seconds per band per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("recent-%s", band)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Recent endpoint rate limit exceeded for IP: %s, band: %s", clientIP, band)
+		return
+	}
 
 	measurements, err := nfm.GetRecentData(band)
 	if err != nil {
@@ -953,7 +1056,12 @@ func handleNoiseFloorRecent(w http.ResponseWriter, r *http.Request, nfm *NoiseFl
 }
 
 // handleNoiseFloorTrend serves 24 hours of noise floor data averaged in 10-minute chunks
-func handleNoiseFloorTrend(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+func handleNoiseFloorTrend(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	if nfm == nil {
@@ -973,6 +1081,18 @@ func handleNoiseFloorTrend(w http.ResponseWriter, r *http.Request, nfm *NoiseFlo
 		json.NewEncoder(w).Encode(map[string]string{
 			"error": "date parameter is required (format: YYYY-MM-DD)",
 		})
+		return
+	}
+
+	// Check rate limit (1 request per 2 seconds per band per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("trend-%s-%s", date, band)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Trend endpoint rate limit exceeded for IP: %s, date: %s, band: %s", clientIP, date, band)
 		return
 	}
 
@@ -1000,7 +1120,12 @@ func handleNoiseFloorTrend(w http.ResponseWriter, r *http.Request, nfm *NoiseFlo
 }
 
 // handleNoiseFloorDates serves the list of available dates
-func handleNoiseFloorDates(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+func handleNoiseFloorDates(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	if nfm == nil {
@@ -1032,7 +1157,12 @@ func handleNoiseFloorDates(w http.ResponseWriter, r *http.Request, nfm *NoiseFlo
 }
 
 // handleNoiseFloorFFT serves the latest FFT data for a specific band
-func handleNoiseFloorFFT(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor) {
+func handleNoiseFloorFFT(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	if nfm == nil {
@@ -1050,6 +1180,17 @@ func handleNoiseFloorFFT(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 		json.NewEncoder(w).Encode(map[string]string{
 			"error": "band parameter is required (e.g., 20m, 40m)",
 		})
+		return
+	}
+
+	// Check rate limit (1 request per 2 seconds per band per IP)
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, band) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Rate limit exceeded for band %s. Please wait 2 seconds between FFT requests for this band.", band),
+		})
+		log.Printf("FFT rate limit exceeded for IP: %s, band: %s", clientIP, band)
 		return
 	}
 
@@ -1073,7 +1214,12 @@ func handleNoiseFloorFFT(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 }
 
 // handleNoiseFloorConfig serves the noise floor band configurations
-func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Config) {
+func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Config, ipBanManager *IPBanManager) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	if !config.NoiseFloor.Enabled {

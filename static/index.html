@@ -101,6 +101,22 @@
                 </div>
             </div>
         </div>
+        <!-- Band Status Bar -->
+        <div class="band-status-bar">
+            <div class="band-status-container">
+                <div class="band-status-badge" data-band="160m" data-status="UNKNOWN">160m</div>
+                <div class="band-status-badge" data-band="80m" data-status="UNKNOWN">80m</div>
+                <div class="band-status-badge" data-band="60m" data-status="UNKNOWN">60m</div>
+                <div class="band-status-badge" data-band="40m" data-status="UNKNOWN">40m</div>
+                <div class="band-status-badge" data-band="30m" data-status="UNKNOWN">30m</div>
+                <div class="band-status-badge" data-band="20m" data-status="UNKNOWN">20m</div>
+                <div class="band-status-badge" data-band="17m" data-status="UNKNOWN">17m</div>
+                <div class="band-status-badge" data-band="15m" data-status="UNKNOWN">15m</div>
+                <div class="band-status-badge" data-band="12m" data-status="UNKNOWN">12m</div>
+                <div class="band-status-badge" data-band="10m" data-status="UNKNOWN">10m</div>
+            </div>
+        </div>
+
 
         <div class="controls">
             <div class="control-group">
@@ -796,6 +812,7 @@
         <p>Download <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/noisefloor.html" target="_blank">Noise Floor Graphs</a> <span id="footer-version"></span></p>
     </footer>
 
+    <script src="bands_state.js"></script>
     <script src="extensions.js"></script>
     <script src="extension-loader.js"></script>
     <script src="carrier-detector.js"></script>

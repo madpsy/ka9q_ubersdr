@@ -254,6 +254,15 @@ class DXClusterExtension extends DecoderExtension {
         const tbody = document.getElementById('dx-cluster-spots');
         if (!tbody) return;
 
+        // Invalidate spectrum marker cache when spots change
+        // This ensures DX spot markers are redrawn on the spectrum display
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.invalidateMarkerCache();
+            // Force immediate redraw of markers by calling draw()
+            // draw() will handle the case where spectrumData doesn't exist yet
+            window.spectrumDisplay.draw();
+        }
+
         // Start with all spots (backend already filters to 0-30 MHz)
         let filteredSpots = this.spots;
 

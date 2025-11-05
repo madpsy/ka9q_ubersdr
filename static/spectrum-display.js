@@ -2406,6 +2406,15 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         this.bandwidthLinesCtx.restore();
     }
 
+    // Invalidate marker cache to force redraw of bookmarks and DX spots
+    // This should be called when DX spots are added/removed or when bookmarks change
+    invalidateMarkerCache() {
+        this.markerCache = null;
+        this.lastMarkerCenterFreq = null;
+        this.lastMarkerTotalBandwidth = null;
+        this.lastMarkerDisplayMode = null;
+    }
+
     // Update auto-range based on current data
     updateAutoRange() {
         if (!this.spectrumData || this.spectrumData.length === 0) {

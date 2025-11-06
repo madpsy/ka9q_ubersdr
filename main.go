@@ -851,8 +851,9 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
 	response := map[string]interface{}{
 		"description": config.Admin.Description,
 		"receiver": map[string]interface{}{
-			"name":  config.Admin.Name,
-			"admin": config.Admin.Email,
+			"name":     config.Admin.Name,
+			"admin":    config.Admin.Email,
+			"callsign": config.Admin.Callsign,
 			"gps": map[string]interface{}{
 				"lat": config.Admin.GPS.Lat,
 				"lon": config.Admin.GPS.Lon,

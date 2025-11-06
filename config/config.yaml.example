@@ -11,6 +11,8 @@ admin:
   name: 'My SDR operated by myself!'
   # Admin email address
   email: "me@example.com"
+  # Callsign (optional)
+  callsign: "N0CALL"
   # GPS coordinates
   gps:
     lat: 51.507  # Latitude (London default)

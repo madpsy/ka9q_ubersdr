@@ -31,6 +31,7 @@ type AdminConfig struct {
 	Description string    `yaml:"description"`
 	Name        string    `yaml:"name"`
 	Email       string    `yaml:"email"`
+	Callsign    string    `yaml:"callsign"`
 	GPS         GPSConfig `yaml:"gps"`
 	ASL         int       `yaml:"asl"` // Altitude above sea level in meters
 	Location    string    `yaml:"location"`
@@ -236,6 +237,9 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Admin.Email == "" {
 		config.Admin.Email = "me@example.com"
+	}
+	if config.Admin.Callsign == "" {
+		config.Admin.Callsign = "N0CALL"
 	}
 	if config.Admin.GPS.Lat == 0 && config.Admin.GPS.Lon == 0 {
 		// Default to London coordinates

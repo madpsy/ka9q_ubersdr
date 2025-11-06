@@ -2059,8 +2059,14 @@ class NoiseFloorMonitor {
             }
         }
 
+        // Always destroy and recreate chart to ensure aspect ratio changes are applied
+        if (this.bandStateChart) {
+            this.bandStateChart.destroy();
+            this.bandStateChart = null;
+        }
+
         // Update existing chart if it exists and canvas is still in DOM, otherwise create new one
-        if (this.bandStateChart && ctx && ctx.parentElement) {
+        if (false && this.bandStateChart && ctx && ctx.parentElement) {
             this.bandStateChart.data.datasets[0].data = datasets;
             
             // Update the "Now" indicator position (UTC time)
@@ -2120,146 +2126,147 @@ class NoiseFloorMonitor {
             }
         };
 
+        // Use scatter plot for both single and multi-band
         this.bandStateChart = new Chart(ctx, {
             type: 'scatter',
-            data: {
-                datasets: [{
-                    label: 'Band State',
-                    data: datasets,
-                    backgroundColor: (context) => {
-                        const value = context.raw.v;
-                        if (value === 0) return '#ef4444'; // CLOSED - red
-                        if (value === 1) return '#eab308'; // MARGINAL - yellow
-                        if (value === 2) return '#22c55e'; // OPEN - green
-                        return '#9ca3af'; // UNKNOWN - gray
-                    },
-                    borderColor: 'rgba(255, 255, 255, 0.3)',
-                    borderWidth: 1,
-                    pointStyle: 'rect',
-                    pointRadius: 8,
-                    pointHoverRadius: 10
-                }]
-            },
-            options: {
-                animation: false,
-                responsive: true,
-                maintainAspectRatio: true,
-                aspectRatio: 2.5,
-                plugins: {
-                    title: {
-                        display: false
-                    },
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        mode: 'point',
-                        intersect: false,
-                        callbacks: {
-                            title: (items) => {
-                                if (items.length === 0) return '';
-                                const date = new Date(items[0].parsed.x);
-                                return date.toLocaleString('en-GB', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    hour12: false
-                                });
-                            },
-                            beforeBody: (items) => {
-                                // Find all points at the same x coordinate
-                                if (items.length === 0) return [];
-                                const hoveredX = items[0].parsed.x;
-                                const threshold = 5 * 60 * 1000; // 5 minutes tolerance
+                data: {
+                    datasets: [{
+                        label: 'Band State',
+                        data: datasets,
+                        backgroundColor: (context) => {
+                            const value = context.raw.v;
+                            if (value === 0) return '#ef4444'; // CLOSED - red
+                            if (value === 1) return '#eab308'; // MARGINAL - yellow
+                            if (value === 2) return '#22c55e'; // OPEN - green
+                            return '#9ca3af'; // UNKNOWN - gray
+                        },
+                        borderColor: 'rgba(255, 255, 255, 0.3)',
+                        borderWidth: 1,
+                        pointStyle: 'rect',
+                        pointRadius: 8,
+                        pointHoverRadius: 10
+                    }]
+                },
+                options: {
+                    animation: false,
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2.5,
+                    plugins: {
+                        title: {
+                            display: false
+                        },
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            mode: 'point',
+                            intersect: false,
+                            callbacks: {
+                                title: (items) => {
+                                    if (items.length === 0) return '';
+                                    const date = new Date(items[0].parsed.x);
+                                    return date.toLocaleString('en-GB', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        hour12: false
+                                    });
+                                },
+                                beforeBody: (items) => {
+                                    // Find all points at the same x coordinate
+                                    if (items.length === 0) return [];
+                                    const hoveredX = items[0].parsed.x;
+                                    const threshold = 5 * 60 * 1000; // 5 minutes tolerance
 
-                                const chart = items[0].chart;
-                                const bandMap = new Map(); // Use Map to deduplicate by band
+                                    const chart = items[0].chart;
+                                    const bandMap = new Map(); // Use Map to deduplicate by band
 
-                                // Collect all data points at this time, keeping only the most recent for each band
-                                chart.data.datasets[0].data.forEach((point) => {
-                                    if (Math.abs(point.x.getTime() - hoveredX) < threshold) {
-                                        const state = point.v === 0 ? 'CLOSED' : (point.v === 1 ? 'MARGINAL' : 'OPEN');
-                                        const snr = point.snr.toFixed(1);
-                                        const bandName = point.y;
-                                        
-                                        // Only keep if we haven't seen this band yet, or if this point is more recent
-                                        if (!bandMap.has(bandName)) {
-                                            bandMap.set(bandName, {
-                                                text: `${bandName}: ${state} (${snr} dB)`,
-                                                timestamp: point.x.getTime()
-                                            });
-                                        } else {
-                                            // Keep the more recent data point
-                                            const existing = bandMap.get(bandName);
-                                            if (point.x.getTime() > existing.timestamp) {
+                                    // Collect all data points at this time, keeping only the most recent for each band
+                                    chart.data.datasets[0].data.forEach((point) => {
+                                        if (Math.abs(point.x.getTime() - hoveredX) < threshold) {
+                                            const state = point.v === 0 ? 'CLOSED' : (point.v === 1 ? 'MARGINAL' : 'OPEN');
+                                            const snr = point.snr.toFixed(1);
+                                            const bandName = point.y;
+
+                                            // Only keep if we haven't seen this band yet, or if this point is more recent
+                                            if (!bandMap.has(bandName)) {
                                                 bandMap.set(bandName, {
                                                     text: `${bandName}: ${state} (${snr} dB)`,
                                                     timestamp: point.x.getTime()
                                                 });
+                                            } else {
+                                                // Keep the more recent data point
+                                                const existing = bandMap.get(bandName);
+                                                if (point.x.getTime() > existing.timestamp) {
+                                                    bandMap.set(bandName, {
+                                                        text: `${bandName}: ${state} (${snr} dB)`,
+                                                        timestamp: point.x.getTime()
+                                                    });
+                                                }
                                             }
                                         }
-                                    }
-                                });
+                                    });
 
-                                // Convert to array and sort by band order
-                                const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
-                                const allPointsAtTime = Array.from(bandMap.entries())
-                                    .sort((a, b) => bandOrder.indexOf(a[0]) - bandOrder.indexOf(b[0]))
-                                    .map(entry => entry[1].text);
-                                
-                                return allPointsAtTime;
+                                    // Convert to array and sort by band order
+                                    const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+                                    const allPointsAtTime = Array.from(bandMap.entries())
+                                        .sort((a, b) => bandOrder.indexOf(a[0]) - bandOrder.indexOf(b[0]))
+                                        .map(entry => entry[1].text);
+
+                                    return allPointsAtTime;
+                                },
+                                label: () => {
+                                    // Return empty since we're showing everything in beforeBody
+                                    return '';
+                                }
+                            }
+                        },
+                        annotation: {
+                            annotations: {
+                                currentTime: currentTimeAnnotation
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            min: startOfDay,
+                            max: endOfDay,
+                            time: {
+                                unit: 'hour',
+                                displayFormats: {
+                                    hour: 'HH:mm'
+                                }
                             },
-                            label: () => {
-                                // Return empty since we're showing everything in beforeBody
-                                return '';
-                            }
+                            title: {
+                                display: true,
+                                text: 'Time (UTC)',
+                                color: '#fff'
+                            },
+                            ticks: { color: '#fff' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y: {
+                            type: 'category',
+                            labels: uniqueBands,
+                            title: {
+                                display: true,
+                                text: 'Band',
+                                color: '#fff'
+                            },
+                            ticks: { color: '#fff' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
                         }
-                    },
-                    annotation: {
-                        annotations: {
-                            currentTime: currentTimeAnnotation
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        type: 'time',
-                        min: startOfDay,
-                        max: endOfDay,
-                        time: {
-                            unit: 'hour',
-                            displayFormats: {
-                                hour: 'HH:mm'
-                            }
-                        },
-                        title: {
-                            display: true,
-                            text: 'Time (UTC)',
-                            color: '#fff'
-                        },
-                        ticks: { color: '#fff' },
-                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
-                    },
-                    y: {
-                        type: 'category',
-                        labels: uniqueBands,
-                        title: {
-                            display: true,
-                            text: 'Band',
-                            color: '#fff'
-                        },
-                        ticks: { color: '#fff' },
-                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     }
                 }
-            }
-        });
+            });
     }
 
     async updateBandStateChartHistorical(data, comparisonData = null, comparisonDate = null) {
         // Only normalize timestamps when doing a comparison
         const shouldNormalize = comparisonData && comparisonDate;
         const referenceDate = shouldNormalize ? new Date(this.currentDate + 'T00:00:00') : null;
-        
+
         // Prepare data for heatmap
         const datasets = [];
 
@@ -2275,7 +2282,7 @@ class NoiseFloorMonitor {
                 } else {
                     timestamp = new Date(m.timestamp);
                 }
-                
+
                 // Determine state based on SNR thresholds
                 let state;
                 if (m.ft8_snr < 6) {
@@ -2285,7 +2292,7 @@ class NoiseFloorMonitor {
                 } else {
                     state = 2; // OPEN
                 }
-                
+
                 datasets.push({
                     x: timestamp,
                     y: m.band,
@@ -2303,7 +2310,7 @@ class NoiseFloorMonitor {
                     const ts = new Date(m.timestamp);
                     const normalizedTime = new Date(referenceDate);
                     normalizedTime.setHours(ts.getHours(), ts.getMinutes(), ts.getSeconds(), ts.getMilliseconds());
-                    
+
                     let state;
                     if (m.ft8_snr < 6) {
                         state = 0; // CLOSED
@@ -2312,7 +2319,7 @@ class NoiseFloorMonitor {
                     } else {
                         state = 2; // OPEN
                     }
-                    
+
                     datasets.push({
                         x: normalizedTime,
                         y: m.band,
@@ -2326,8 +2333,10 @@ class NoiseFloorMonitor {
 
         const ctx = document.getElementById('bandStateChart');
 
+        // Always destroy existing chart
         if (this.bandStateChart) {
             this.bandStateChart.destroy();
+            this.bandStateChart = null;
         }
 
         // Only create chart if we have data
@@ -2338,8 +2347,22 @@ class NoiseFloorMonitor {
             ctx.parentElement.style.display = 'block';
         }
 
-        // Get unique bands for y-axis
-        const uniqueBands = this.sortBands([...new Set(datasets.map(d => d.y))]);
+        // Handle comparison mode for single band
+        let yLabels = this.sortBands([...new Set(datasets.map(d => d.y))]);
+        if (this.currentBand !== 'all' && comparisonDate) {
+            // For single band with comparison, create two rows: one for current date, one for comparison
+            const bandName = yLabels[0];
+            yLabels = [`${bandName} (${this.currentDate})`, `${bandName} (${comparisonDate})`];
+
+            // Update datasets to use the new y-axis labels
+            datasets.forEach(d => {
+                if (d.date === this.currentDate) {
+                    d.y = yLabels[0];
+                } else if (d.date === comparisonDate) {
+                    d.y = yLabels[1];
+                }
+            });
+        }
 
         // Calculate time range for x-axis (24 hours starting at 00:00 of the selected date)
         const selectedDate = new Date(this.currentDate + 'T00:00:00');
@@ -2347,108 +2370,99 @@ class NoiseFloorMonitor {
         const endOfDay = new Date(selectedDate);
         endOfDay.setHours(24, 0, 0, 0);
 
+        // Adjust aspect ratio for single band mode to make chart shorter
+        const aspectRatio = this.currentBand !== 'all' ? 10.0 : 2.5;
+
         this.bandStateChart = new Chart(ctx, {
             type: 'scatter',
-            data: {
-                datasets: [{
-                    label: 'Band State',
-                    data: datasets,
-                    backgroundColor: (context) => {
-                        const value = context.raw.v;
-                        if (value === 0) return '#ef4444'; // CLOSED - red
-                        if (value === 1) return '#eab308'; // MARGINAL - yellow
-                        if (value === 2) return '#22c55e'; // OPEN - green
-                        return '#9ca3af'; // UNKNOWN - gray
-                    },
-                    borderColor: (context) => {
-                        // Use different border for comparison data
-                        if (comparisonData && context.raw.date === comparisonDate) {
-                            return 'rgba(255, 255, 255, 0.8)';
-                        }
-                        return 'rgba(255, 255, 255, 0.3)';
-                    },
-                    borderWidth: (context) => {
-                        // Thicker border for comparison data
-                        if (comparisonData && context.raw.date === comparisonDate) {
-                            return 2;
-                        }
-                        return 1;
-                    },
-                    pointStyle: 'rect',
-                    pointRadius: 8,
-                    pointHoverRadius: 10
-                }]
-            },
-            options: {
-                animation: false,
-                responsive: true,
-                maintainAspectRatio: true,
-                aspectRatio: 2.5,
-                plugins: {
-                    title: {
-                        display: false
-                    },
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        mode: 'index',
-                        axis: 'x',
-                        intersect: false,
-                        callbacks: {
-                            title: (items) => {
-                                const date = new Date(items[0].parsed.x);
-                                return date.toLocaleString('en-GB', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    hour12: false
-                                });
-                            },
-                            label: (item) => {
-                                const state = item.raw.v === 0 ? 'CLOSED' : (item.raw.v === 1 ? 'MARGINAL' : 'OPEN');
-                                const snr = item.raw.snr.toFixed(1);
-                                const dateLabel = item.raw.date ? ` (${item.raw.date})` : '';
-                                return `${item.raw.y}: ${state} (${snr} dB)${dateLabel}`;
-                            }
-                        }
-                    },
-                    annotation: {
-                        annotations: {}
-                    }
+                data: {
+                    datasets: [{
+                        label: 'Band State',
+                        data: datasets,
+                        backgroundColor: (context) => {
+                            const value = context.raw.v;
+                            if (value === 0) return '#ef4444'; // CLOSED - red
+                            if (value === 1) return '#eab308'; // MARGINAL - yellow
+                            if (value === 2) return '#22c55e'; // OPEN - green
+                            return '#9ca3af'; // UNKNOWN - gray
+                        },
+                        borderColor: 'rgba(255, 255, 255, 0.3)',
+                        borderWidth: 1,
+                        pointStyle: 'rect',
+                        pointRadius: 8,
+                        pointHoverRadius: 10
+                    }]
                 },
-                scales: {
-                    x: {
-                        type: 'time',
-                        min: startOfDay,
-                        max: endOfDay,
-                        time: {
-                            unit: 'hour',
-                            displayFormats: {
-                                hour: 'HH:mm'
+                options: {
+                    animation: false,
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: aspectRatio,
+                    plugins: {
+                        title: {
+                            display: false
+                        },
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            axis: 'x',
+                            intersect: false,
+                            callbacks: {
+                                title: (items) => {
+                                    const date = new Date(items[0].parsed.x);
+                                    return date.toLocaleString('en-GB', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        hour12: false
+                                    });
+                                },
+                                label: (item) => {
+                                    const state = item.raw.v === 0 ? 'CLOSED' : (item.raw.v === 1 ? 'MARGINAL' : 'OPEN');
+                                    const snr = item.raw.snr.toFixed(1);
+                                    const dateLabel = item.raw.date ? ` (${item.raw.date})` : '';
+                                    return `${item.raw.y}: ${state} (${snr} dB)${dateLabel}`;
+                                }
                             }
                         },
-                        title: {
-                            display: true,
-                            text: 'Time (Local)',
-                            color: '#fff'
-                        },
-                        ticks: { color: '#fff' },
-                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        annotation: {
+                            annotations: {}
+                        }
                     },
-                    y: {
-                        type: 'category',
-                        labels: uniqueBands,
-                        title: {
-                            display: true,
-                            text: 'Band',
-                            color: '#fff'
+                    scales: {
+                        x: {
+                            type: 'time',
+                            min: startOfDay,
+                            max: endOfDay,
+                            time: {
+                                unit: 'hour',
+                                displayFormats: {
+                                    hour: 'HH:mm'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time (Local)',
+                                color: '#fff'
+                            },
+                            ticks: { color: '#fff' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
                         },
-                        ticks: { color: '#fff' },
-                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        y: {
+                            type: 'category',
+                            labels: yLabels,
+                            title: {
+                                display: true,
+                                text: 'Band',
+                                color: '#fff'
+                            },
+                            ticks: { color: '#fff' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        }
                     }
                 }
-            }
-        });
+            });
 
         // Add comparison dropdown if in historical single-band view
         const chartContainer = ctx.parentElement;

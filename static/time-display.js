@@ -9,35 +9,27 @@ function updateTimeDisplay() {
 
     const now = new Date();
 
-    // Format UTC time as HH:MM:SS
-    const utcHours = String(now.getUTCHours()).padStart(2, '0');
-    const utcMinutes = String(now.getUTCMinutes()).padStart(2, '0');
-    const utcSeconds = String(now.getUTCSeconds()).padStart(2, '0');
-    const utcTime = `${utcHours}:${utcMinutes}:${utcSeconds} UTC`;
+    // Format UTC time as HH:MM:SS using ISO string (same logic as bandconditions.js)
+    const utcTime = now.toISOString().substr(11, 8) + ' UTC';
 
-    // Format local time as HH:MM:SS
-    const localHours = String(now.getHours()).padStart(2, '0');
-    const localMinutes = String(now.getMinutes()).padStart(2, '0');
-    const localSeconds = String(now.getSeconds()).padStart(2, '0');
-    const localTime = `${localHours}:${localMinutes}:${localSeconds} Local`;
+    // Format local time as HH:MM:SS using toLocaleTimeString for accuracy
+    const localTime = now.toLocaleTimeString('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    }) + ' Local';
 
     utcTimeEl.textContent = utcTime;
     localTimeEl.textContent = localTime;
 }
 
-function scheduleNextUpdate() {
-    const now = new Date();
-    const msUntilNextSecond = 1000 - now.getMilliseconds();
-
-    // Wait until 100ms into the next second to ensure we're past the boundary
-    setTimeout(() => {
-        updateTimeDisplay();
-        scheduleNextUpdate();
-    }, msUntilNextSecond + 100);
-}
-
 // Initialize time display
 document.addEventListener('DOMContentLoaded', () => {
+    // Update immediately
     updateTimeDisplay();
-    scheduleNextUpdate();
+    // Update every second using simple setInterval (same as bandconditions.js)
+    setInterval(() => {
+        updateTimeDisplay();
+    }, 1000);
 });

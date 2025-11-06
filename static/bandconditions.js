@@ -8,6 +8,9 @@ class BandConditionsMonitor {
         this.countdownInterval = null;
         this.nextRefreshTime = null;
         this.trendDataCache = {};
+        this.gpsCoordinates = null; // Store GPS coordinates for sunrise/sunset calculation
+        this.location = null; // Store location name if available
+        this.utcClockInterval = null; // Interval for UTC clock updates
 
         // Tableau 10 color palette
         this.bandColors = {
@@ -26,6 +29,7 @@ class BandConditionsMonitor {
         this.init();
         this.setupResizeHandler();
         this.loadVersion();
+        this.startUTCClock();
     }
 
     async loadVersion() {
@@ -33,6 +37,20 @@ class BandConditionsMonitor {
             const response = await fetch('/api/description');
             if (response.ok) {
                 const data = await response.json();
+
+                // Store GPS coordinates if available
+                if (data.receiver && data.receiver.gps &&
+                    data.receiver.gps.lat && data.receiver.gps.lon) {
+                    this.gpsCoordinates = {
+                        lat: data.receiver.gps.lat,
+                        lon: data.receiver.gps.lon
+                    };
+                }
+
+                // Store location name if available
+                if (data.receiver && data.receiver.location && data.receiver.location.trim() !== '') {
+                    this.location = data.receiver.location;
+                }
 
                 // Update receiver name in subtitle
                 const receiverNameEl = document.getElementById('receiver-name');
@@ -187,6 +205,32 @@ class BandConditionsMonitor {
         // Build compact display
         let html = '<div style="display: flex; flex-direction: column; gap: 12px;">';
 
+        // Sunrise/Sunset times (if GPS coordinates available)
+        if (this.gpsCoordinates && typeof SunCalc !== 'undefined') {
+            const times = SunCalc.getTimes(new Date(), this.gpsCoordinates.lat, this.gpsCoordinates.lon);
+            const sunrise = times.sunrise;
+            const sunset = times.sunset;
+            const now = new Date();
+            
+            // Determine if it's currently day or night
+            const isDaytime = now >= sunrise && now < sunset;
+            const dayNightIcon = isDaytime ? '☀️' : '🌙';
+            const dayNightText = isDaytime ? 'Day' : 'Night';
+            
+            // Add location if available
+            const locationText = this.location ? ` (${this.location})` : '';
+            
+            // Format times in UTC
+            const sunriseStr = sunrise.toISOString().substr(11, 5); // Extract HH:MM from ISO string
+            const sunsetStr = sunset.toISOString().substr(11, 5);
+            
+            html += `<div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                        <div style="font-size: 1.1em; font-weight: bold; margin-bottom: 5px;">${dayNightIcon} Currently: ${dayNightText}${locationText}</div>
+                        <div style="font-size: 0.9em; opacity: 0.8;">🌅 Sunrise: ${sunriseStr} UTC • 🌇 Sunset: ${sunsetStr} UTC</div>
+                        <div id="utc-clock" style="font-size: 0.95em; margin-top: 5px; font-weight: bold; opacity: 0.9;">🕐 UTC: --:--:--</div>
+                     </div>`;
+        }
+
         // Last update timestamp
         const lastUpdate = new Date(data.last_update);
         const now = new Date();
@@ -278,6 +322,11 @@ class BandConditionsMonitor {
         this.setStatus('Loading...', 'info');
 
         try {
+            // Ensure GPS coordinates are loaded first (if not already)
+            if (!this.gpsCoordinates) {
+                await this.loadVersion();
+            }
+
             // Load space weather data
             await this.loadSpaceWeather();
 
@@ -628,10 +677,31 @@ class BandConditionsMonitor {
         this.loadData();
     }
 
+    startUTCClock() {
+        // Update UTC clock every second
+        this.updateUTCClock();
+        this.utcClockInterval = setInterval(() => {
+            this.updateUTCClock();
+        }, 1000);
+    }
+
+    updateUTCClock() {
+        const clockEl = document.getElementById('utc-clock');
+        if (clockEl) {
+            const now = new Date();
+            const timeStr = now.toISOString().substr(11, 8); // Extract HH:MM:SS
+            clockEl.textContent = `🕐 UTC: ${timeStr}`;
+        }
+    }
+
     stopAutoRefresh() {
         if (this.refreshInterval) {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
+        }
+        if (this.utcClockInterval) {
+            clearInterval(this.utcClockInterval);
+            this.utcClockInterval = null;
         }
         this.stopCountdown();
     }

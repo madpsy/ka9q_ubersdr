@@ -22,6 +22,20 @@ class BandConditionsMonitor {
         };
 
         this.init();
+        this.setupResizeHandler();
+    }
+
+    setupResizeHandler() {
+        // Handle window resize
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                if (this.bandStateChart) {
+                    this.bandStateChart.resize();
+                }
+            }, 250);
+        });
     }
 
     sortBands(bands) {

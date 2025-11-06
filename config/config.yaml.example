@@ -6,7 +6,7 @@ admin:
   password: "mypassword"
   # Description HTML to display in the top right of the page
   # This can include HTML tags like links
-  description: 'Welcome! This SDR is running <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a>'
+  description: 'Welcome! This SDR is running <a href="https://ubersdr.org" target="_blank">UberSDR</a>'
   # Name - similar to description without any HTML
   name: 'My SDR operated by myself!'
   # Admin email address
@@ -17,8 +17,8 @@ admin:
   callsign: "N0CALL"
   # GPS coordinates
   gps:
-    lat: 51.507  # Latitude (London default)
-    lon: -0.128  # Longitude (London default)
+    lat: 51.507  # Latitude
+    lon: -0.128  # Longitude
   # Height above sea level (meters)
   asl: 30
   # Location description

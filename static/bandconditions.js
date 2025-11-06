@@ -43,6 +43,12 @@ class BandConditionsMonitor {
                         receiverNameEl.textContent = 'Band Conditions Monitor';
                     }
                 }
+
+                // Update version in footer
+                const versionSpan = document.getElementById('footer-version');
+                if (versionSpan && data.version) {
+                    versionSpan.textContent = `• v${data.version}`;
+                }
             }
         } catch (error) {
             console.error('Error loading version:', error);

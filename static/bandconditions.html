@@ -98,6 +98,26 @@
             font-size: 1.2em;
         }
 
+        .site-footer {
+            text-align: center;
+            padding: 20px;
+            margin-top: 40px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .site-footer a {
+            color: #4CAF50;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .site-footer a:hover {
+            color: #45a049;
+            text-decoration: underline;
+        }
+
         .info-box {
             background: rgba(33, 150, 243, 0.2);
             border-left: 4px solid #2196F3;
@@ -145,6 +165,11 @@
 
         <div id="status" class="status">Loading... <span id="countdown"></span></div>
     </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>Download <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/noisefloor.html" target="_blank">Full Monitor</a> <span id="footer-version"></span></p>
+    </footer>
 
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>

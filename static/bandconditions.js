@@ -175,6 +175,7 @@ class BandConditionsMonitor {
     displaySpaceWeather(data) {
         const summaryDiv = document.getElementById('spaceweather-summary');
         const contentDiv = document.getElementById('spaceweather-content');
+        const forecastSummaryDiv = document.getElementById('spaceweather-forecast-summary');
 
         if (!summaryDiv || !contentDiv) return;
 
@@ -258,18 +259,19 @@ class BandConditionsMonitor {
             html += '</div></div>';
         }
 
-        // Forecast in a compact alert box (if available)
-        if (data.forecast && data.forecast.summary !== "Quiet conditions expected for the next 24 hours.") {
-            html += '<div style="background: rgba(255, 152, 0, 0.15); padding: 10px; border-radius: 6px; border-left: 3px solid #ff9800; font-size: 0.9em;">';
-            html += `<div style="font-weight: bold; margin-bottom: 5px;">⚠️ Forecast: ${data.forecast.geomagnetic_storm}</div>`;
-            html += `<div style="opacity: 0.9;">${data.forecast.summary}</div>`;
-            html += '</div>';
-        }
-
         html += '</div>';
 
         contentDiv.innerHTML = html;
         summaryDiv.style.display = 'block';
+
+        // Also populate the compact forecast summary at the top (if available)
+        if (forecastSummaryDiv && data.forecast && data.forecast.summary !== "Quiet conditions expected for the next 24 hours.") {
+            forecastSummaryDiv.innerHTML = `<div style="font-weight: bold; margin-bottom: 5px;">⚠️ Forecast: ${data.forecast.geomagnetic_storm}</div>
+                <div style="opacity: 0.9;">${data.forecast.summary}</div>`;
+            forecastSummaryDiv.style.display = 'block';
+        } else if (forecastSummaryDiv) {
+            forecastSummaryDiv.style.display = 'none';
+        }
     }
 
     async loadData() {

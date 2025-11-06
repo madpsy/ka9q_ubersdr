@@ -2003,11 +2003,13 @@ class NoiseFloorMonitor {
                         const snr = d.ft8_snr || 0;
                         let state;
                         if (snr < 6) {
-                            state = 0; // CLOSED
+                            state = 0; // POOR
                         } else if (snr >= 6 && snr < 20) {
-                            state = 1; // MARGINAL
+                            state = 1; // FAIR
+                        } else if (snr >= 20 && snr < 30) {
+                            state = 2; // GOOD
                         } else {
-                            state = 2; // OPEN
+                            state = 3; // EXCELLENT
                         }
                         
                         // Normalize timestamp to today's date
@@ -2135,9 +2137,10 @@ class NoiseFloorMonitor {
                         data: datasets,
                         backgroundColor: (context) => {
                             const value = context.raw.v;
-                            if (value === 0) return '#ef4444'; // CLOSED - red
-                            if (value === 1) return '#eab308'; // MARGINAL - yellow
-                            if (value === 2) return '#22c55e'; // OPEN - green
+                            if (value === 0) return '#ef4444'; // POOR - red
+                            if (value === 1) return '#ff9800'; // FAIR - orange
+                            if (value === 2) return '#fbbf24'; // GOOD - yellow
+                            if (value === 3) return '#22c55e'; // EXCELLENT - green
                             return '#9ca3af'; // UNKNOWN - gray
                         },
                         borderColor: 'rgba(255, 255, 255, 0.3)',
@@ -2184,7 +2187,7 @@ class NoiseFloorMonitor {
                                     // Collect all data points at this time, keeping only the most recent for each band
                                     chart.data.datasets[0].data.forEach((point) => {
                                         if (Math.abs(point.x.getTime() - hoveredX) < threshold) {
-                                            const state = point.v === 0 ? 'CLOSED' : (point.v === 1 ? 'MARGINAL' : 'OPEN');
+                                            const state = point.v === 0 ? 'POOR' : (point.v === 1 ? 'FAIR' : (point.v === 2 ? 'GOOD' : 'EXCELLENT'));
                                             const snr = point.snr.toFixed(1);
                                             const bandName = point.y;
 
@@ -2286,11 +2289,13 @@ class NoiseFloorMonitor {
                 // Determine state based on SNR thresholds
                 let state;
                 if (m.ft8_snr < 6) {
-                    state = 0; // CLOSED
+                    state = 0; // POOR
                 } else if (m.ft8_snr >= 6 && m.ft8_snr < 20) {
-                    state = 1; // MARGINAL
+                    state = 1; // FAIR
+                } else if (m.ft8_snr >= 20 && m.ft8_snr < 30) {
+                    state = 2; // GOOD
                 } else {
-                    state = 2; // OPEN
+                    state = 3; // EXCELLENT
                 }
 
                 datasets.push({
@@ -2313,11 +2318,13 @@ class NoiseFloorMonitor {
 
                     let state;
                     if (m.ft8_snr < 6) {
-                        state = 0; // CLOSED
+                        state = 0; // POOR
                     } else if (m.ft8_snr >= 6 && m.ft8_snr < 20) {
-                        state = 1; // MARGINAL
+                        state = 1; // FAIR
+                    } else if (m.ft8_snr >= 20 && m.ft8_snr < 30) {
+                        state = 2; // GOOD
                     } else {
-                        state = 2; // OPEN
+                        state = 3; // EXCELLENT
                     }
 
                     datasets.push({
@@ -2381,9 +2388,10 @@ class NoiseFloorMonitor {
                         data: datasets,
                         backgroundColor: (context) => {
                             const value = context.raw.v;
-                            if (value === 0) return '#ef4444'; // CLOSED - red
-                            if (value === 1) return '#eab308'; // MARGINAL - yellow
-                            if (value === 2) return '#22c55e'; // OPEN - green
+                            if (value === 0) return '#ef4444'; // POOR - red
+                            if (value === 1) return '#ff9800'; // FAIR - orange
+                            if (value === 2) return '#fbbf24'; // GOOD - yellow
+                            if (value === 3) return '#22c55e'; // EXCELLENT - green
                             return '#9ca3af'; // UNKNOWN - gray
                         },
                         borderColor: 'rgba(255, 255, 255, 0.3)',
@@ -2419,7 +2427,7 @@ class NoiseFloorMonitor {
                                     });
                                 },
                                 label: (item) => {
-                                    const state = item.raw.v === 0 ? 'CLOSED' : (item.raw.v === 1 ? 'MARGINAL' : 'OPEN');
+                                    const state = item.raw.v === 0 ? 'POOR' : (item.raw.v === 1 ? 'FAIR' : (item.raw.v === 2 ? 'GOOD' : 'EXCELLENT'));
                                     const snr = item.raw.snr.toFixed(1);
                                     const dateLabel = item.raw.date ? ` (${item.raw.date})` : '';
                                     return `${item.raw.y}: ${state} (${snr} dB)${dateLabel}`;

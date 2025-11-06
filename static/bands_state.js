@@ -129,11 +129,13 @@ class BandStateMonitor {
                 // Determine status based on SNR thresholds
                 let status;
                 if (avgSnr < 6) {
-                    status = 'CLOSED';
+                    status = 'POOR';
                 } else if (avgSnr >= 6 && avgSnr < 20) {
-                    status = 'MARGINAL';
+                    status = 'FAIR';
+                } else if (avgSnr >= 20 && avgSnr < 30) {
+                    status = 'GOOD';
                 } else {
-                    status = 'OPEN';
+                    status = 'EXCELLENT';
                 }
 
                 states[band] = {
@@ -231,7 +233,7 @@ class BandStateMonitor {
      */
     getOpenBands() {
         return Object.keys(this.bandStates).filter(
-            band => this.bandStates[band].status === 'OPEN'
+            band => this.bandStates[band].status === 'GOOD' || this.bandStates[band].status === 'EXCELLENT'
         );
     }
 
@@ -241,7 +243,7 @@ class BandStateMonitor {
      */
     getClosedBands() {
         return Object.keys(this.bandStates).filter(
-            band => this.bandStates[band].status === 'CLOSED'
+            band => this.bandStates[band].status === 'POOR'
         );
     }
 
@@ -383,8 +385,8 @@ function updateBandStatusDisplay(states) {
         const bandBadge = document.querySelector(`.band-status-badge[data-band="${band}"]`);
         if (!bandBadge) continue;
 
-        // Treat UNKNOWN as OPEN (green) - assume band is open if no data
-        const displayStatus = state.status === 'UNKNOWN' ? 'OPEN' : state.status;
+        // Treat UNKNOWN as EXCELLENT (green) - assume band is open if no data
+        const displayStatus = state.status === 'UNKNOWN' ? 'EXCELLENT' : state.status;
         
         // Update data attribute for CSS styling
         bandBadge.setAttribute('data-status', displayStatus);
@@ -461,7 +463,7 @@ function getBandStates() {
 function isBandOpen(band) {
     if (!bandStateMonitor) return false;
     const state = bandStateMonitor.getBandState(band);
-    return state && state.status === 'OPEN';
+    return state && (state.status === 'GOOD' || state.status === 'EXCELLENT');
 }
 
 /**

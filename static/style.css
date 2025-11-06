@@ -405,21 +405,27 @@ body {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-.band-status-badge[data-status="OPEN"] {
-    background: #28a745;
-    border-color: #28a745;
-    box-shadow: 0 0 8px rgba(40, 167, 69, 0.5);
+.band-status-badge[data-status="EXCELLENT"] {
+    background: #22c55e;
+    border-color: #22c55e;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
 }
 
-.band-status-badge[data-status="MARGINAL"] {
-    background: #fd7e14;
-    border-color: #fd7e14;
-    box-shadow: 0 0 8px rgba(253, 126, 20, 0.5);
+.band-status-badge[data-status="GOOD"] {
+    background: #fbbf24;
+    border-color: #fbbf24;
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
 }
 
-.band-status-badge[data-status="CLOSED"] {
-    background: #dc3545;
-    border-color: #dc3545;
+.band-status-badge[data-status="FAIR"] {
+    background: #ff9800;
+    border-color: #ff9800;
+    box-shadow: 0 0 8px rgba(255, 152, 0, 0.5);
+}
+
+.band-status-badge[data-status="POOR"] {
+    background: #ef4444;
+    border-color: #ef4444;
 }
 
 .band-status-badge[data-status="UNKNOWN"] {
@@ -428,33 +434,13 @@ body {
     opacity: 0.6;
 }
 
-/* Active state for OPEN bands - dark green */
-.band-status-badge[data-status="OPEN"].active {
-    background: #155724 !important;
-    border-color: #155724 !important;
-    box-shadow: 0 0 12px rgba(21, 87, 36, 0.8) !important;
-}
-
-/* Active state for MARGINAL bands - dark orange */
-.band-status-badge[data-status="MARGINAL"].active {
-    background: #dc6502 !important;
-    border-color: #dc6502 !important;
-    box-shadow: 0 0 12px rgba(220, 101, 2, 0.8) !important;
-}
-
-/* Active state for CLOSED bands - dark red */
-.band-status-badge[data-status="CLOSED"].active {
-    background: #721c24 !important;
-    border-color: #721c24 !important;
-    box-shadow: 0 0 12px rgba(114, 28, 36, 0.8) !important;
-}
-
-/* Active state for UNKNOWN bands - darker gray */
-.band-status-badge[data-status="UNKNOWN"].active {
-    background: #495057 !important;
-    border-color: #495057 !important;
-    box-shadow: 0 0 12px rgba(73, 80, 87, 0.8) !important;
-    opacity: 1 !important;
+/* Active state - bright white border with glow (works for all status colors) */
+.band-status-badge.active {
+    border: 3px solid white !important;
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.8),
+                0 0 8px rgba(255, 255, 255, 0.6) inset !important;
+    transform: scale(1.1) translateY(-2px);
+    z-index: 10;
 }
 
 

@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/push"
 )
 
 // PrometheusMetrics holds all Prometheus metric collectors for noisefloor data and system metrics
@@ -69,6 +73,12 @@ type PrometheusMetrics struct {
 	memoryHeapBytes  prometheus.Gauge // Current heap memory in bytes
 	memoryStackBytes prometheus.Gauge // Current stack memory in bytes
 	gcPauseSeconds   prometheus.Gauge // Last GC pause duration in seconds
+
+	// Pushgateway metrics
+	pushgatewayPushesTotal   prometheus.Counter // Total push attempts to Pushgateway
+	pushgatewaySuccessTotal  prometheus.Counter // Successful pushes to Pushgateway
+	pushgatewayFailuresTotal prometheus.Counter // Failed pushes to Pushgateway
+	pushgatewayLastPushTime  prometheus.Gauge   // Unix timestamp of last successful push
 
 	mu sync.RWMutex // Protects metric updates
 }
@@ -368,7 +378,33 @@ func (pm *PrometheusMetrics) InitializeSystemMetrics() {
 		},
 	)
 
-	log.Println("Prometheus system metrics initialized (sessions, radiod channels, websockets, throughput, errors, resources)")
+	// Pushgateway metrics
+	pm.pushgatewayPushesTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "ubersdr_pushgateway_pushes_total",
+			Help: "Total number of push attempts to Pushgateway",
+		},
+	)
+	pm.pushgatewaySuccessTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "ubersdr_pushgateway_success_total",
+			Help: "Total number of successful pushes to Pushgateway",
+		},
+	)
+	pm.pushgatewayFailuresTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "ubersdr_pushgateway_failures_total",
+			Help: "Total number of failed pushes to Pushgateway",
+		},
+	)
+	pm.pushgatewayLastPushTime = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ubersdr_pushgateway_last_push_timestamp",
+			Help: "Unix timestamp of last successful push to Pushgateway",
+		},
+	)
+
+	log.Println("Prometheus system metrics initialized (sessions, radiod channels, websockets, throughput, errors, resources, pushgateway)")
 }
 
 // UpdateFromMeasurement updates all Prometheus metrics from a BandMeasurement
@@ -599,4 +635,114 @@ func (pm *PrometheusMetrics) RecordAggregateLatency(duration float64) {
 		return
 	}
 	pm.aggregateLatency.Observe(duration)
+}
+
+// StartPushgatewayWorker starts a goroutine that periodically pushes metrics to Pushgateway
+func (pm *PrometheusMetrics) StartPushgatewayWorker(ctx context.Context, config *Config) {
+	if pm == nil || !config.Prometheus.Pushgateway.Enabled {
+		return
+	}
+
+	pgConfig := config.Prometheus.Pushgateway
+
+	// Validate configuration - silently skip if instance or token not configured
+	// URL has a default value, so only check instance and token
+	if pgConfig.Instance == "" || pgConfig.Token == "" {
+		if DebugMode {
+			log.Println("DEBUG: Pushgateway not fully configured (instance or token missing), skipping push worker")
+		}
+		return
+	}
+
+	// Hardcoded values
+	const pushInterval = 60
+	const jobName = "ka9q_ubersdr"
+
+	log.Printf("Starting Pushgateway worker: URL=%s, Job=%s, Instance=%s, Interval=%ds",
+		pgConfig.URL, jobName, pgConfig.Instance, pushInterval)
+
+	// Start worker goroutine
+	go func() {
+		ticker := time.NewTicker(time.Duration(pushInterval) * time.Second)
+		defer ticker.Stop()
+
+		// Push immediately on start
+		pm.pushgatewayPushesTotal.Inc()
+		if err := pm.pushToGateway(config); err != nil {
+			pm.pushgatewayFailuresTotal.Inc()
+			log.Printf("ERROR: Failed to push metrics to Pushgateway: %v", err)
+		} else {
+			pm.pushgatewaySuccessTotal.Inc()
+			pm.pushgatewayLastPushTime.Set(float64(time.Now().Unix()))
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Pushgateway worker stopped")
+				return
+			case <-ticker.C:
+				// Record push attempt
+				pm.pushgatewayPushesTotal.Inc()
+
+				if err := pm.pushToGateway(config); err != nil {
+					pm.pushgatewayFailuresTotal.Inc()
+					log.Printf("ERROR: Failed to push metrics to Pushgateway: %v", err)
+				} else {
+					pm.pushgatewaySuccessTotal.Inc()
+					pm.pushgatewayLastPushTime.Set(float64(time.Now().Unix()))
+					if DebugMode {
+						log.Printf("DEBUG: Successfully pushed metrics to Pushgateway")
+					}
+				}
+			}
+		}
+	}()
+}
+
+// pushToGateway pushes all metrics to the Pushgateway with receiver info as labels
+func (pm *PrometheusMetrics) pushToGateway(config *Config) error {
+	if pm == nil {
+		return fmt.Errorf("prometheus metrics not initialized")
+	}
+
+	pgConfig := config.Prometheus.Pushgateway
+
+	// Hardcoded job name
+	const jobName = "ka9q_ubersdr"
+
+	// Create pusher with basic auth
+	pusher := push.New(pgConfig.URL, jobName).
+		Gatherer(prometheus.DefaultGatherer).
+		BasicAuth(pgConfig.Instance, pgConfig.Token)
+
+	// Use instance UUID as the Prometheus instance label
+	pusher = pusher.Grouping("instance", pgConfig.Instance)
+
+	// Add receiver information as grouping labels (always enabled)
+	// Add callsign
+	if config.Admin.Callsign != "" {
+		pusher = pusher.Grouping("callsign", config.Admin.Callsign)
+	}
+
+	// Add GPS coordinates as strings
+	if config.Admin.GPS.Lat != 0 || config.Admin.GPS.Lon != 0 {
+		pusher = pusher.Grouping("latitude", fmt.Sprintf("%.6f", config.Admin.GPS.Lat))
+		pusher = pusher.Grouping("longitude", fmt.Sprintf("%.6f", config.Admin.GPS.Lon))
+	}
+
+	// Add altitude
+	if config.Admin.ASL != 0 {
+		pusher = pusher.Grouping("altitude_m", fmt.Sprintf("%d", config.Admin.ASL))
+	}
+
+	// Add version
+	pusher = pusher.Grouping("version", Version)
+
+	// Push metrics
+	if err := pusher.Push(); err != nil {
+		return fmt.Errorf("failed to push to gateway: %w", err)
+	}
+
+	return nil
 }

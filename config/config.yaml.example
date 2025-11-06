@@ -11,6 +11,8 @@ admin:
   name: 'My SDR operated by myself!'
   # Admin email address
   email: "me@example.com"
+  # Public URL for this instance 
+  public_url:  https://example.com
   # Callsign (optional)
   callsign: "N0CALL"
   # GPS coordinates
@@ -229,6 +231,29 @@ prometheus:
   # Additional examples (uncomment to use):
   #   - "192.168.1.0/24"      # Local network
   #   - "10.0.0.0/8"          # Private network
+  
+  # UberSDR Pushgateway settings
+  # These settings are for sending metrics to the central ubersdr.org collector
+  pushgateway:
+    # Enable or disable pushing to Pushgateway
+    enabled: true
+    
+    # Pushgateway URL (required if enabled)
+    # Default: "https://push.ubersdr.org:9091"
+    url: "https://push.ubersdr.org:9091"
+    
+    # Instance UUID for basic auth username (required if enabled)
+    # This should be a unique UUID for this SDR instance
+    # Used as both the Prometheus instance label and basic auth username
+    # Generate with: uuidgen (Linux/Mac) or New-Guid (PowerShell)
+    # Example: "550e8400-e29b-41d4-a716-446655440000"
+    instance: ""
+    
+    # Token UUID for basic auth password (required if enabled)
+    # This should be a secret UUID used as the basic auth password
+    # Generate with: uuidgen (Linux/Mac) or New-Guid (PowerShell)
+    # Example: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+    token: ""
   
   # Metrics to expose (all enabled by default when prometheus.enabled = true)
   #

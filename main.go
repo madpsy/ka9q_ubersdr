@@ -2,6 +2,7 @@ package main
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -330,6 +331,18 @@ func main() {
 			handlePrometheusMetrics(w, r, config)
 		})
 		log.Printf("Prometheus metrics enabled at %s (allowed hosts: %v)", config.Prometheus.Path, config.Prometheus.AllowedHosts)
+
+		// Start Pushgateway worker if enabled
+		if config.Prometheus.Pushgateway.Enabled {
+			// Create context for graceful shutdown
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			prometheusMetrics.StartPushgatewayWorker(ctx, config)
+			log.Printf("Prometheus Pushgateway enabled: URL=%s, Job=ka9q_ubersdr, Instance=%s, Interval=60s",
+				config.Prometheus.Pushgateway.URL,
+				config.Prometheus.Pushgateway.Instance)
+		}
 	}
 
 	// Initialize DX cluster client
@@ -851,9 +864,10 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
 	response := map[string]interface{}{
 		"description": config.Admin.Description,
 		"receiver": map[string]interface{}{
-			"name":     config.Admin.Name,
-			"admin":    config.Admin.Email,
-			"callsign": config.Admin.Callsign,
+			"name":       config.Admin.Name,
+			"admin":      config.Admin.Email,
+			"callsign":   config.Admin.Callsign,
+			"public_url": config.Admin.PublicURL,
 			"gps": map[string]interface{}{
 				"lat": config.Admin.GPS.Lat,
 				"lon": config.Admin.GPS.Lon,

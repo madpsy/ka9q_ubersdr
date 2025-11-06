@@ -32,6 +32,7 @@ type AdminConfig struct {
 	Name        string    `yaml:"name"`
 	Email       string    `yaml:"email"`
 	Callsign    string    `yaml:"callsign"`
+	PublicURL   string    `yaml:"public_url"` // Public URL for this SDR
 	GPS         GPSConfig `yaml:"gps"`
 	ASL         int       `yaml:"asl"` // Altitude above sea level in meters
 	Location    string    `yaml:"location"`
@@ -159,11 +160,20 @@ type NoiseFloorBand struct {
 
 // PrometheusConfig contains Prometheus metrics settings
 type PrometheusConfig struct {
-	Enabled      bool     `yaml:"enabled"`       // Enable/disable Prometheus metrics endpoint
-	Path         string   `yaml:"path"`          // Metrics endpoint path (default: /metrics)
-	AllowedHosts []string `yaml:"allowed_hosts"` // List of IPs/CIDRs allowed to access metrics
+	Enabled      bool              `yaml:"enabled"`       // Enable/disable Prometheus metrics endpoint
+	Path         string            `yaml:"path"`          // Metrics endpoint path (default: /metrics)
+	AllowedHosts []string          `yaml:"allowed_hosts"` // List of IPs/CIDRs allowed to access metrics
+	Pushgateway  PushgatewayConfig `yaml:"pushgateway"`   // Pushgateway configuration
 
 	allowedNets []*net.IPNet // Parsed CIDR networks (internal use)
+}
+
+// PushgatewayConfig contains Prometheus Pushgateway settings
+type PushgatewayConfig struct {
+	Enabled  bool   `yaml:"enabled"`  // Enable/disable pushing to Pushgateway
+	URL      string `yaml:"url"`      // Pushgateway URL (e.g., http://pushgateway:9091)
+	Instance string `yaml:"instance"` // Instance UUID for basic auth username
+	Token    string `yaml:"token"`    // Token UUID for basic auth password
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -241,6 +251,9 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Admin.Callsign == "" {
 		config.Admin.Callsign = "N0CALL"
 	}
+	if config.Admin.PublicURL == "" {
+		config.Admin.PublicURL = "https://example.com"
+	}
 	if config.Admin.GPS.Lat == 0 && config.Admin.GPS.Lon == 0 {
 		// Default to London coordinates
 		config.Admin.GPS.Lat = 51.507
@@ -304,6 +317,11 @@ func LoadConfig(filename string) (*Config, error) {
 	// Set default allowed hosts if not specified (localhost only for security)
 	if config.Prometheus.Enabled && len(config.Prometheus.AllowedHosts) == 0 {
 		config.Prometheus.AllowedHosts = []string{"127.0.0.1", "::1"}
+	}
+
+	// Set Pushgateway defaults if not specified
+	if config.Prometheus.Pushgateway.URL == "" {
+		config.Prometheus.Pushgateway.URL = "https://push.ubersdr.org:9091"
 	}
 
 	// Set default amateur radio bands with per-band spectrum parameters if not specified

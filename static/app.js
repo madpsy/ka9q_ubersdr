@@ -2271,9 +2271,22 @@ function setBand(bandName) {
     updateBandButtons(centerFreq);
     updateBandSelector();
 
-    // Set mode based on frequency: LSB below 10 MHz (80m, 40m), USB at 10 MHz and above (30m+)
-    // This follows amateur radio convention where LSB is used on lower HF bands
-    const mode = centerFreq < 10000000 ? 'lsb' : 'usb';
+    // Check if band has a mode field in window.amateurBands
+    let mode = null;
+    if (window.amateurBands && window.amateurBands.length > 0) {
+        const bandData = window.amateurBands.find(b => b.label === bandName);
+        if (bandData && bandData.mode) {
+            mode = bandData.mode;
+            log(`Using band-specific mode: ${mode.toUpperCase()}`);
+        }
+    }
+
+    // If no mode specified in band data, use default based on frequency
+    // LSB below 10 MHz (80m, 40m), USB at 10 MHz and above (30m+)
+    if (!mode) {
+        mode = centerFreq < 10000000 ? 'lsb' : 'usb';
+    }
+
     setMode(mode);
 
     // Update URL with new frequency and mode
@@ -6124,7 +6137,9 @@ function populateBandSelector() {
                 start: band.start,
                 end: band.end
             });
-            option.textContent = band.label;
+            // Display mode in brackets after band name if specified
+            const displayText = band.mode ? `${band.label} (${band.mode.toUpperCase()})` : band.label;
+            option.textContent = displayText;
             optgroup.appendChild(option);
         });
 
@@ -6143,7 +6158,9 @@ function populateBandSelector() {
                 start: band.start,
                 end: band.end
             });
-            option.textContent = band.label;
+            // Display mode in brackets after band name if specified
+            const displayText = band.mode ? `${band.label} (${band.mode.toUpperCase()})` : band.label;
+            option.textContent = displayText;
             optgroup.appendChild(option);
         });
 

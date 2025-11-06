@@ -407,6 +407,20 @@
                             <input type="text" id="newBandGroup" placeholder="e.g., HF">
                             <small>Optional group name for organising bands</small>
                         </div>
+                        <div class="config-field">
+                            <label>Mode (Optional)</label>
+                            <select id="newBandMode">
+                                <option value="">None (don't change mode)</option>
+                                <option value="usb">USB</option>
+                                <option value="lsb">LSB</option>
+                                <option value="cwu">CW Upper</option>
+                                <option value="cwl">CW Lower</option>
+                                <option value="am">AM</option>
+                                <option value="fm">FM</option>
+                                <option value="nfm">NFM</option>
+                            </select>
+                            <small>Optional mode to set when this band is selected</small>
+                        </div>
                         <button class="btn" onclick="saveBand()">Save Band</button>
                         <button class="btn btn-secondary" onclick="cancelBandForm()">Cancel</button>
                     </div>
@@ -1312,6 +1326,7 @@
                         <th style="padding: 12px; text-align: left;">End Frequency (Hz)</th>
                         <th style="padding: 12px; text-align: left;">Bandwidth</th>
                         <th style="padding: 12px; text-align: left;">Group</th>
+                        <th style="padding: 12px; text-align: left;">Mode</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
                 </thead>
@@ -1326,12 +1341,14 @@
                 const bandwidth = band.end - band.start;
                 const bandwidthKHz = (bandwidth / 1000).toFixed(0);
                 const groupDisplay = band.group ? `<span style="color: #667eea; font-weight: bold;">${band.group}</span>` : '<em style="color: #999;">—</em>';
+                const modeDisplay = band.mode ? `<span style="color: #28a745; font-weight: bold;">${band.mode.toUpperCase()}</span>` : '<em style="color: #999;">—</em>';
                 row.innerHTML = `
                     <td style="padding: 12px;"><strong>${band.label}</strong></td>
                     <td style="padding: 12px;">${band.start.toLocaleString()}</td>
                     <td style="padding: 12px;">${band.end.toLocaleString()}</td>
                     <td style="padding: 12px;">${bandwidthKHz} kHz</td>
                     <td style="padding: 12px;">${groupDisplay}</td>
+                    <td style="padding: 12px;">${modeDisplay}</td>
                     <td style="padding: 12px; text-align: center;">
                         <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBand(${index})">Edit</button>
                         <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBand(${index})">Delete</button>
@@ -1349,6 +1366,7 @@
             document.getElementById('newBandStart').value = '';
             document.getElementById('newBandEnd').value = '';
             document.getElementById('newBandGroup').value = '';
+            document.getElementById('newBandMode').value = '';
         }
 
         function editBand(index) {
@@ -1360,6 +1378,7 @@
             document.getElementById('newBandStart').value = band.start;
             document.getElementById('newBandEnd').value = band.end;
             document.getElementById('newBandGroup').value = band.group || '';
+            document.getElementById('newBandMode').value = band.mode || '';
             
             // Scroll the form into view
             document.getElementById('addBandForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1375,6 +1394,7 @@
             const start = parseInt(document.getElementById('newBandStart').value);
             const end = parseInt(document.getElementById('newBandEnd').value);
             const group = document.getElementById('newBandGroup').value.trim();
+            const mode = document.getElementById('newBandMode').value.trim();
             const editIndex = parseInt(document.getElementById('editBandIndex').value);
 
             if (!label || !start || !end) {
@@ -1391,6 +1411,9 @@
             const bandData = { label, start, end };
             if (group) {
                 bandData.group = group;
+            }
+            if (mode) {
+                bandData.mode = mode;
             }
 
             try {
@@ -1471,6 +1494,9 @@
                 if (band.group) {
                     yamlContent += `    group: ${band.group}\n`;
                 }
+                if (band.mode) {
+                    yamlContent += `    mode: ${band.mode}\n`;
+                }
             });
 
             const blob = new Blob([yamlContent], { type: 'text/yaml' });
@@ -1524,6 +1550,8 @@
                                 currentBand.end = parseInt(trimmed.substring(4).trim());
                             } else if (trimmed.startsWith('group:')) {
                                 currentBand.group = trimmed.substring(6).trim().replace(/^["']|["']$/g, '');
+                            } else if (trimmed.startsWith('mode:')) {
+                                currentBand.mode = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
                             }
                         }
                     }

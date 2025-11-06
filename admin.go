@@ -881,6 +881,9 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 	if newBand.Group != "" {
 		bandMap["group"] = newBand.Group
 	}
+	if newBand.Mode != "" {
+		bandMap["mode"] = newBand.Mode
+	}
 	bands = append(bands, bandMap)
 	bandsConfig["bands"] = bands
 
@@ -997,6 +1000,9 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 	}
 	if updatedBand.Group != "" {
 		bandMap["group"] = updatedBand.Group
+	}
+	if updatedBand.Mode != "" {
+		bandMap["mode"] = updatedBand.Mode
 	}
 	bands[index] = bandMap
 	bandsConfig["bands"] = bands

@@ -1069,6 +1069,17 @@ async function fetchSiteDescription() {
                     const location = data.receiver.location || '';
                     const asl = data.receiver.asl || 0;
 
+                    // Calculate day/night status using SunCalc if available
+                    let dayNightStatus = '';
+                    if (typeof SunCalc !== 'undefined') {
+                        const times = SunCalc.getTimes(new Date(), lat, lon);
+                        const now = new Date();
+                        const isDaytime = now >= times.sunrise && now < times.sunset;
+                        const icon = isDaytime ? '☀️' : '🌙';
+                        const status = isDaytime ? 'Day' : 'Night';
+                        dayNightStatus = ` ${icon} ${status}`;
+                    }
+
                     // Load Leaflet CSS and JS dynamically
                     if (!document.getElementById('leaflet-css')) {
                         const leafletCSS = document.createElement('link');
@@ -1119,7 +1130,7 @@ async function fetchSiteDescription() {
                     if (location) {
                         tooltipContent += `<br>${location}`;
                     }
-                    tooltipContent += `<br>${asl}m ASL`;
+                    tooltipContent += `<br>${asl}m ASL${dayNightStatus}`;
                     marker.bindTooltip(tooltipContent, {
                         permanent: true,
                         direction: 'top',

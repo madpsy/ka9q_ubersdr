@@ -2911,6 +2911,16 @@ input[type="range"]::-moz-range-thumb {
 
 .decoder-extension-modal-body::-webkit-scrollbar-thumb:hover {
     background: #5568d3;
+}
+
+/* Leaflet Tooltip Line Height Fix */
+.leaflet-tooltip {
+    line-height: 1.2 !important;
+}
+
+.leaflet-tooltip br {
+    line-height: 1.2 !important;
+}
 
 /* Buffer Configuration Modal Button Styles */
 .buffer-preset-btn.active {
@@ -2925,5 +2935,4 @@ input[type="range"]::-moz-range-thumb {
     border-color: #667eea !important;
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
-}
 }

@@ -833,7 +833,7 @@ func (ah *AdminHandler) HandleBands(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleGetBands returns all bands
+// handleGetBands returns all bands sorted by group name, then by start frequency
 func (ah *AdminHandler) handleGetBands(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(ah.getConfigPath("bands.yaml"))
 	if err != nil {
@@ -847,6 +847,53 @@ func (ah *AdminHandler) handleGetBands(w http.ResponseWriter, r *http.Request) {
 	if err := yaml.Unmarshal(data, &bandsConfig); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to parse bands: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Sort bands by group name (case-insensitive), then by start frequency
+	if bands, ok := bandsConfig["bands"].([]interface{}); ok {
+		sort.Slice(bands, func(i, j int) bool {
+			bandI, okI := bands[i].(map[string]interface{})
+			bandJ, okJ := bands[j].(map[string]interface{})
+			if !okI || !okJ {
+				return false
+			}
+
+			// Get group names (empty string if not present)
+			groupI, _ := bandI["group"].(string)
+			groupJ, _ := bandJ["group"].(string)
+
+			// Compare groups (case-insensitive)
+			lowerGroupI := strings.ToLower(groupI)
+			lowerGroupJ := strings.ToLower(groupJ)
+			if lowerGroupI != lowerGroupJ {
+				return lowerGroupI < lowerGroupJ
+			}
+
+			// If groups are equal, compare start frequencies
+			startI, okI := bandI["start"].(uint64)
+			startJ, okJ := bandJ["start"].(uint64)
+			if okI && okJ {
+				return startI < startJ
+			}
+			// Handle int type as well (YAML might parse as int)
+			if !okI {
+				if startIntI, ok := bandI["start"].(int); ok {
+					startI = uint64(startIntI)
+					okI = true
+				}
+			}
+			if !okJ {
+				if startIntJ, ok := bandJ["start"].(int); ok {
+					startJ = uint64(startIntJ)
+					okJ = true
+				}
+			}
+			if okI && okJ {
+				return startI < startJ
+			}
+			return false
+		})
+		bandsConfig["bands"] = bands
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -1781,7 +1828,7 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 	// Build response message
 	message := fmt.Sprintf("Successfully imported %d band(s) from SDR# XML", len(bands))
 	if skippedCount > 0 {
-		message += fmt.Sprintf(" (skipped %d band(s) > 30 MHz)", skippedCount)
+		message += fmt.Sprintf(" (skipped %d band(s) outside 100 kHz - 30 MHz range)", skippedCount)
 	}
 
 	w.WriteHeader(http.StatusOK)

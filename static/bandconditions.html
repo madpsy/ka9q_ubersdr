@@ -97,13 +97,31 @@
             padding: 40px;
             font-size: 1.2em;
         }
+
+        .info-box {
+            background: rgba(33, 150, 243, 0.2);
+            border-left: 4px solid #2196F3;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+
+        .info-box strong {
+            color: #64B5F6;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🌐 Band Conditions</h1>
-        <div class="subtitle">Real-time HF Band Propagation Monitor</div>
+        <div class="subtitle" id="receiver-name">Band Conditions Monitor</div>
         
+        <div class="info-box">
+            ℹ️ This chart shows a rolling 24-hour window. Data to the <strong>left</strong> of the "Now" marker is from today, and data to the <strong>right</strong> is from yesterday.
+        </div>
+
         <div class="chart-container">
             <div class="chart-wrapper">
                 <canvas id="bandStateChart"></canvas>

@@ -23,6 +23,33 @@ class BandConditionsMonitor {
 
         this.init();
         this.setupResizeHandler();
+        this.loadVersion();
+    }
+
+    async loadVersion() {
+        try {
+            const response = await fetch('/api/description');
+            if (response.ok) {
+                const data = await response.json();
+
+                // Update receiver name in subtitle
+                const receiverNameEl = document.getElementById('receiver-name');
+                if (receiverNameEl) {
+                    if (data.receiver && data.receiver.name) {
+                        receiverNameEl.textContent = data.receiver.name;
+                    } else {
+                        receiverNameEl.textContent = 'Band Conditions Monitor';
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error loading version:', error);
+            // Set fallback text if fetch fails
+            const receiverNameEl = document.getElementById('receiver-name');
+            if (receiverNameEl) {
+                receiverNameEl.textContent = 'Band Conditions Monitor';
+            }
+        }
     }
 
     setupResizeHandler() {

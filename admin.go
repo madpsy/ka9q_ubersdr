@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -627,6 +629,19 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 			return
 		}
 
+		// Backup existing file with timestamp before replacing
+		bookmarksPath := ah.getConfigPath("bookmarks.yaml")
+		if _, err := os.Stat(bookmarksPath); err == nil {
+			// File exists, create backup with timestamp
+			timestamp := time.Now().Format("20060102-150405")
+			backupPath := fmt.Sprintf("%s.%s", bookmarksPath, timestamp)
+			if err := os.Rename(bookmarksPath, backupPath); err != nil {
+				log.Printf("Warning: Failed to backup bookmarks.yaml: %v", err)
+			} else {
+				log.Printf("Backed up bookmarks.yaml to %s", backupPath)
+			}
+		}
+
 		// Convert to YAML and write to file
 		yamlData, err := yaml.Marshal(bookmarksConfig)
 		if err != nil {
@@ -634,7 +649,7 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 			return
 		}
 
-		if err := os.WriteFile(ah.getConfigPath("bookmarks.yaml"), yamlData, 0644); err != nil {
+		if err := os.WriteFile(bookmarksPath, yamlData, 0644); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to write bookmarks file: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -923,6 +938,19 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 			return
 		}
 
+		// Backup existing file with timestamp before replacing
+		bandsPath := ah.getConfigPath("bands.yaml")
+		if _, err := os.Stat(bandsPath); err == nil {
+			// File exists, create backup with timestamp
+			timestamp := time.Now().Format("20060102-150405")
+			backupPath := fmt.Sprintf("%s.%s", bandsPath, timestamp)
+			if err := os.Rename(bandsPath, backupPath); err != nil {
+				log.Printf("Warning: Failed to backup bands.yaml: %v", err)
+			} else {
+				log.Printf("Backed up bands.yaml to %s", backupPath)
+			}
+		}
+
 		// Convert to YAML and write to file
 		yamlData, err := yaml.Marshal(bandsConfig)
 		if err != nil {
@@ -930,7 +958,7 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		if err := os.WriteFile(ah.getConfigPath("bands.yaml"), yamlData, 0644); err != nil {
+		if err := os.WriteFile(bandsPath, yamlData, 0644); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to write bands file: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -1489,4 +1517,152 @@ func (ah *AdminHandler) HandleAvailableExtensions(w http.ResponseWriter, r *http
 	}); err != nil {
 		log.Printf("Error encoding available extensions: %v", err)
 	}
+}
+
+// SDRSharpRangeEntry represents a single band entry in SDR# XML format
+type SDRSharpRangeEntry struct {
+	MinFrequency int    `xml:"minFrequency,attr"`
+	MaxFrequency int    `xml:"maxFrequency,attr"`
+	Mode         string `xml:"mode,attr"`
+	Label        string `xml:",chardata"`
+}
+
+// SDRSharpBands represents the root element of SDR# bands XML
+type SDRSharpBands struct {
+	XMLName xml.Name             `xml:"ArrayOfRangeEntry"`
+	Entries []SDRSharpRangeEntry `xml:"RangeEntry"`
+}
+
+// HandleSDRSharpImport handles POST requests to import SDR# XML bands
+func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Read the XML data from request body
+	xmlData, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parse XML
+	var sdrBands SDRSharpBands
+	if err := xml.Unmarshal(xmlData, &sdrBands); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse XML: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if len(sdrBands.Entries) == 0 {
+		http.Error(w, "No bands found in XML file", http.StatusBadRequest)
+		return
+	}
+
+	// Convert SDR# bands to our format
+	var bands []interface{}
+	skippedCount := 0
+	const maxFreq = 30000000  // 30 MHz in Hz
+	const cwCutoff = 10000000 // 10 MHz cutoff for CW mode conversion
+
+	for _, entry := range sdrBands.Entries {
+		// Skip bands that start above 30 MHz
+		if entry.MinFrequency > maxFreq {
+			skippedCount++
+			continue
+		}
+
+		// Skip if missing required fields
+		if entry.Label == "" || entry.MinFrequency == 0 || entry.MaxFrequency == 0 {
+			continue
+		}
+
+		// Clamp end frequency to 30 MHz if it exceeds the limit
+		endFreq := entry.MaxFrequency
+		if endFreq > maxFreq {
+			endFreq = maxFreq
+		}
+
+		// Create band map
+		bandMap := map[string]interface{}{
+			"label": strings.TrimSpace(entry.Label),
+			"start": entry.MinFrequency,
+			"end":   endFreq,
+		}
+
+		// Convert mode if present
+		if entry.Mode != "" {
+			modeLower := strings.ToLower(entry.Mode)
+			if modeLower == "cw" {
+				// Use 10 MHz cutoff for CW mode conversion
+				if entry.MinFrequency < cwCutoff {
+					bandMap["mode"] = "cwl"
+				} else {
+					bandMap["mode"] = "cwu"
+				}
+			} else {
+				// Pass through other modes (usb, lsb, am, fm, etc.)
+				bandMap["mode"] = modeLower
+			}
+		}
+
+		bands = append(bands, bandMap)
+	}
+
+	if len(bands) == 0 {
+		http.Error(w, "No valid bands found in XML file (all bands may be > 30 MHz)", http.StatusBadRequest)
+		return
+	}
+
+	// Backup existing file with timestamp before replacing
+	bandsPath := ah.getConfigPath("bands.yaml")
+	if _, err := os.Stat(bandsPath); err == nil {
+		// File exists, create backup with timestamp
+		timestamp := time.Now().Format("20060102-150405")
+		backupPath := fmt.Sprintf("%s.%s", bandsPath, timestamp)
+		if err := os.Rename(bandsPath, backupPath); err != nil {
+			log.Printf("Warning: Failed to backup bands.yaml: %v", err)
+		} else {
+			log.Printf("Backed up bands.yaml to %s", backupPath)
+		}
+	}
+
+	// Create bands config
+	bandsConfig := map[string]interface{}{
+		"bands": bands,
+	}
+
+	// Convert to YAML and write to file
+	yamlData, err := yaml.Marshal(bandsConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal bands: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(bandsPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write bands file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Reload bands into memory
+	if err := ah.reloadBands(); err != nil {
+		log.Printf("Warning: Failed to reload bands after SDR# import: %v", err)
+	}
+
+	// Build response message
+	message := fmt.Sprintf("Successfully imported %d band(s) from SDR# XML", len(bands))
+	if skippedCount > 0 {
+		message += fmt.Sprintf(" (skipped %d band(s) > 30 MHz)", skippedCount)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "success",
+		"message":       message,
+		"imported":      len(bands),
+		"skipped":       skippedCount,
+		"total_entries": len(sdrBands.Entries),
+	})
 }

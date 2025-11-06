@@ -461,7 +461,8 @@
                     <button class="btn" onclick="showAddBandForm()">Add New Band</button>
                     <button class="btn btn-secondary" onclick="loadBands()">Reload Bands</button>
                     <button class="btn btn-secondary" onclick="exportBands()">Export Bands</button>
-                    <button class="btn btn-secondary" onclick="importBands()">Import Bands</button>
+                    <button class="btn btn-secondary" onclick="importBands()">Import YAML/JSON</button>
+                    <button class="btn btn-secondary" onclick="importSDRSharpXML()">Import SDR# XML</button>
                 </div>
                 <div class="button-group" id="extensionButtons" style="display: none;">
                     <button class="btn" onclick="saveExtensions()">Save Changes</button>
@@ -470,6 +471,7 @@
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
                 <input type="file" id="bandsFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBandsImport(event)">
+                <input type="file" id="sdrsharpFileInput" accept=".xml" style="display: none;" onchange="handleSDRSharpImport(event)">
             </div>
         </div>
     </div>
@@ -1515,6 +1517,10 @@
             document.getElementById('bandsFileInput').click();
         }
 
+        function importSDRSharpXML() {
+            document.getElementById('sdrsharpFileInput').click();
+        }
+
         async function handleBandsImport(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -1595,6 +1601,42 @@
                 showAlert(`Successfully imported ${importedBands.length} band(s)`, 'success');
             } catch (error) {
                 showAlert('Error importing bands: ' + error.message, 'error');
+            }
+
+            // Reset file input
+            event.target.value = '';
+        }
+
+        async function handleSDRSharpImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                // Read file as text
+                const xmlText = await file.text();
+
+                // Send XML to backend for parsing
+                const response = await fetch('/admin/bands-import-sdrsharp', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/xml',
+                    },
+                    body: xmlText
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to import SDR# XML');
+                }
+
+                const result = await response.json();
+
+                // Reload bands to show imported data
+                await loadBands();
+
+                showAlert(result.message, 'success');
+            } catch (error) {
+                showAlert('Error importing SDR# XML: ' + error.message, 'error');
             }
 
             // Reset file input

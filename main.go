@@ -478,6 +478,7 @@ func main() {
 	http.HandleFunc("/admin/config", adminHandler.AuthMiddleware(adminHandler.HandleConfig))
 	http.HandleFunc("/admin/config/schema", adminHandler.AuthMiddleware(adminHandler.HandleConfigSchema))
 	http.HandleFunc("/admin/bands", adminHandler.AuthMiddleware(adminHandler.HandleBands))
+	http.HandleFunc("/admin/bands-import-sdrsharp", adminHandler.AuthMiddleware(adminHandler.HandleSDRSharpImport))
 	http.HandleFunc("/admin/bookmarks", adminHandler.AuthMiddleware(adminHandler.HandleBookmarks))
 	http.HandleFunc("/admin/extensions", adminHandler.AuthMiddleware(adminHandler.HandleExtensions))
 	http.HandleFunc("/admin/extensions-manage", adminHandler.AuthMiddleware(adminHandler.HandleExtensionsAdmin))

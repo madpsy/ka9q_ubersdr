@@ -43,8 +43,15 @@ function drawAmateurBandBackgrounds(spectrumDisplay) {
     const startFreq = spectrumDisplay.centerFreq - spectrumDisplay.totalBandwidth / 2;
     const endFreq = spectrumDisplay.centerFreq + spectrumDisplay.totalBandwidth / 2;
 
+    // Sort bands by width (widest first) so narrower bands are drawn on top
+    const sortedBands = [...amateurBands].sort((a, b) => {
+        const widthA = a.end - a.start;
+        const widthB = b.end - b.start;
+        return widthB - widthA; // Descending order (widest first)
+    });
+
     // Draw band backgrounds for each amateur band that's visible
-    amateurBands.forEach(band => {
+    sortedBands.forEach(band => {
         // Check if band overlaps with visible spectrum
         if (band.end >= startFreq && band.start <= endFreq) {
             // Calculate pixel positions
@@ -83,21 +90,32 @@ function drawAmateurBandBackgrounds(spectrumDisplay) {
                     ctx.fillText(labelText, clampedX, labelY + 1);
                 };
 
-                // Calculate optimal label spacing based on band width
-                // Aim for labels every 150-200 pixels for cleaner appearance
-                const minLabelSpacing = 150;
+                // Intelligent label spacing that adapts to text length
+                // For short labels (like "20m"), use default 180px spacing
+                // For long labels, increase spacing to prevent overlap
+                const baseSpacing = 180; // Base spacing for short labels
+                const minGap = 20; // Minimum gap between labels
+                const minRequiredSpacing = labelWidth + minGap;
 
-                if (bandWidth < 30) {
+                // Use the larger of base spacing or text-aware spacing
+                const intelligentSpacing = Math.max(baseSpacing, minRequiredSpacing);
+
+                // Minimum width thresholds
+                const minWidthForAnyLabel = 30;
+                const minWidthForMultipleLabels = intelligentSpacing;
+
+                if (bandWidth < minWidthForAnyLabel) {
                     // Too narrow for any labels
                     return;
-                } else if (bandWidth < minLabelSpacing) {
-                    // Single label in center
-                    drawLabel(bandStartX + bandWidth / 2);
+                } else if (bandWidth < minWidthForMultipleLabels) {
+                    // Single label in center (only if label fits)
+                    if (labelWidth <= bandWidth) {
+                        drawLabel(bandStartX + bandWidth / 2);
+                    }
                 } else {
-                    // Calculate number of labels based on band width
-                    // Space them evenly across the band with wider spacing
-                    const idealSpacing = 180; // pixels between labels (increased from 100)
-                    const numLabels = Math.max(2, Math.floor(bandWidth / idealSpacing) + 1);
+                    // Calculate number of labels based on intelligent spacing
+                    // This ensures labels never overlap, regardless of text length
+                    const numLabels = Math.max(2, Math.floor(bandWidth / intelligentSpacing) + 1);
                     const actualSpacing = bandWidth / (numLabels - 1);
 
                     // Draw labels at regular intervals

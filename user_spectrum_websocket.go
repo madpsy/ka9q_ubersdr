@@ -17,15 +17,17 @@ type UserSpectrumWebSocketHandler struct {
 	ipBanManager       *IPBanManager
 	rateLimiterManager *RateLimiterManager
 	connRateLimiter    *IPConnectionRateLimiter
+	prometheusMetrics  *PrometheusMetrics
 }
 
 // NewUserSpectrumWebSocketHandler creates a new per-user spectrum WebSocket handler
-func NewUserSpectrumWebSocketHandler(sessions *SessionManager, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager, connRateLimiter *IPConnectionRateLimiter) *UserSpectrumWebSocketHandler {
+func NewUserSpectrumWebSocketHandler(sessions *SessionManager, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager, connRateLimiter *IPConnectionRateLimiter, prometheusMetrics *PrometheusMetrics) *UserSpectrumWebSocketHandler {
 	return &UserSpectrumWebSocketHandler{
 		sessions:           sessions,
 		ipBanManager:       ipBanManager,
 		rateLimiterManager: rateLimiterManager,
 		connRateLimiter:    connRateLimiter,
+		prometheusMetrics:  prometheusMetrics,
 	}
 }
 
@@ -158,8 +160,20 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 
 	conn := &wsConn{conn: rawConn, aggregator: globalStatsSpectrum}
 	globalStatsSpectrum.addConnection()
+
+	// Record WebSocket connection in Prometheus
+	if swsh.prometheusMetrics != nil {
+		swsh.prometheusMetrics.RecordWSConnection("spectrum")
+	}
+
 	defer func() {
 		globalStatsSpectrum.removeConnection()
+
+		// Record WebSocket disconnection in Prometheus
+		if swsh.prometheusMetrics != nil {
+			swsh.prometheusMetrics.RecordWSDisconnect("spectrum")
+		}
+
 		conn.close()
 	}()
 
@@ -170,6 +184,12 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	session, err := swsh.sessions.CreateSpectrumSessionWithUserID(sourceIP, clientIP, userSessionID)
 	if err != nil {
 		log.Printf("Failed to create spectrum session: %v", err)
+
+		// Record session creation error in Prometheus
+		if swsh.prometheusMetrics != nil {
+			swsh.prometheusMetrics.RecordSessionCreationError()
+		}
+
 		swsh.sendError(conn, "Failed to create spectrum session: "+err.Error())
 		return
 	}
@@ -214,12 +234,23 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 			break
 		}
 
+		// Record message received in Prometheus
+		if swsh.prometheusMetrics != nil {
+			swsh.prometheusMetrics.RecordWSMessageReceived("spectrum")
+		}
+
 		// Update last active time
 		swsh.sessions.TouchSession(session.ID)
 
 		// Check rate limit for this UUID (skip ping messages)
 		if msg.Type != "ping" && !swsh.rateLimiterManager.AllowSpectrum(session.UserSessionID) {
 			log.Printf("Rate limit exceeded for spectrum command from user %s (type: %s)", session.UserSessionID, msg.Type)
+
+			// Record rate limit error in Prometheus
+			if swsh.prometheusMetrics != nil {
+				swsh.prometheusMetrics.RecordRateLimitError("spectrum")
+			}
+
 			swsh.sendErrorWithStatus(conn, "Rate limit exceeded. Please slow down.", 429)
 			continue // Don't close connection, just reject this command
 		}
@@ -404,6 +435,12 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 				log.Printf("Failed to send spectrum data: %v", err)
 				return
 			}
+
+			// Record spectrum packet sent in Prometheus
+			if swsh.prometheusMetrics != nil {
+				swsh.prometheusMetrics.RecordSpectrumPacket()
+				swsh.prometheusMetrics.RecordWSMessageSent("spectrum")
+			}
 		}
 	}
 }
@@ -448,7 +485,14 @@ func (swsh *UserSpectrumWebSocketHandler) sendErrorWithStatus(conn *wsConn, errM
 // sendMessage sends a message to the client
 func (swsh *UserSpectrumWebSocketHandler) sendMessage(conn *wsConn, msg UserSpectrumServerMessage) error {
 	conn.setWriteDeadline(time.Now().Add(10 * time.Second))
-	return conn.writeJSONCompressed(msg)
+	err := conn.writeJSONCompressed(msg)
+
+	// Record message sent in Prometheus (for non-spectrum messages)
+	if err == nil && swsh.prometheusMetrics != nil && msg.Type != "spectrum" {
+		swsh.prometheusMetrics.RecordWSMessageSent(msg.Type)
+	}
+
+	return err
 }
 
 // Helper function to convert spectrum data to JSON-friendly format

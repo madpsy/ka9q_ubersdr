@@ -59,8 +59,9 @@ type SessionManager struct {
 	radiod               *RadiodController
 	maxSessions          int
 	timeout              time.Duration
-	maxSessionTime       time.Duration // Maximum time a session can exist (0 = unlimited)
-	kickedUUIDTTL        time.Duration // How long to remember kicked UUIDs (default 1 hour)
+	maxSessionTime       time.Duration      // Maximum time a session can exist (0 = unlimited)
+	kickedUUIDTTL        time.Duration      // How long to remember kicked UUIDs (default 1 hour)
+	prometheusMetrics    *PrometheusMetrics // Prometheus metrics for tracking
 }
 
 // NewSessionManager creates a new session manager
@@ -81,6 +82,7 @@ func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager
 		timeout:              time.Duration(config.Server.SessionTimeout) * time.Second,
 		maxSessionTime:       time.Duration(config.Server.MaxSessionTime) * time.Second,
 		kickedUUIDTTL:        1 * time.Hour, // Remember kicked UUIDs for 1 hour
+		prometheusMetrics:    nil,           // Will be set later if Prometheus is enabled
 	}
 
 	// Start cleanup goroutine
@@ -92,6 +94,11 @@ func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager
 	}
 
 	return sm
+}
+
+// SetPrometheusMetrics sets the Prometheus metrics instance for this session manager
+func (sm *SessionManager) SetPrometheusMetrics(pm *PrometheusMetrics) {
+	sm.prometheusMetrics = pm
 }
 
 // translateModeForRadiod translates UI mode names to radiod preset names
@@ -860,15 +867,17 @@ func (sm *SessionManager) cleanupInactiveSessions() {
 	var toKick []string // UUIDs to kick
 
 	sm.mu.RLock()
-	// Track which UUIDs have inactive sessions
+	// Track which UUIDs have inactive sessions and their types
 	inactiveUUIDs := make(map[string]bool)
 	bypassedUUIDs := make(map[string]bool)
+	uuidSessionTypes := make(map[string]map[string]bool) // UUID -> set of session types (audio/spectrum)
 
 	for _, session := range sm.sessions {
 		session.mu.RLock()
 		inactive := now.Sub(session.LastActive)
 		userSessionID := session.UserSessionID
 		clientIP := session.ClientIP
+		isSpectrum := session.IsSpectrum
 		session.mu.RUnlock()
 
 		if userSessionID != "" {
@@ -879,6 +888,15 @@ func (sm *SessionManager) cleanupInactiveSessions() {
 
 			if inactive > sm.timeout {
 				inactiveUUIDs[userSessionID] = true
+				// Track session types for this UUID
+				if uuidSessionTypes[userSessionID] == nil {
+					uuidSessionTypes[userSessionID] = make(map[string]bool)
+				}
+				if isSpectrum {
+					uuidSessionTypes[userSessionID]["spectrum"] = true
+				} else {
+					uuidSessionTypes[userSessionID]["audio"] = true
+				}
 			}
 		}
 	}
@@ -891,10 +909,26 @@ func (sm *SessionManager) cleanupInactiveSessions() {
 		}
 	}
 
-	// Kick users that exceeded the inactivity timeout
+	// Kick users that exceeded the inactivity timeout and record metrics
 	for _, userSessionID := range toKick {
 		log.Printf("Session timeout reached for user %s (inactive for %v) - kicking",
 			userSessionID, sm.timeout)
+
+		// Determine session type for metrics
+		sessionTypes := uuidSessionTypes[userSessionID]
+		var metricType string
+		if sessionTypes["audio"] && sessionTypes["spectrum"] {
+			metricType = "mixed"
+		} else if sessionTypes["spectrum"] {
+			metricType = "spectrum"
+		} else {
+			metricType = "audio"
+		}
+
+		// Record idle timeout kick in Prometheus
+		if sm.prometheusMetrics != nil {
+			sm.prometheusMetrics.RecordIdleTimeoutKick(metricType)
+		}
 
 		if _, err := sm.KickUserBySessionID(userSessionID); err != nil {
 			log.Printf("Error kicking user %s for inactivity: %v", userSessionID, err)

@@ -201,6 +201,125 @@ dxcluster:
   # Keep-alive delay in seconds (time between keep-alive messages to prevent timeout)
   keepalive_delay: 300
 
+# Prometheus Metrics settings
+prometheus:
+  # Enable or disable Prometheus metrics endpoint
+  # When enabled, exposes metrics at /metrics endpoint for scraping
+  enabled: true
+  
+  # Metrics endpoint path (default: /metrics)
+  # This is the standard Prometheus endpoint path
+  path: "/metrics"
+  
+  # List of IP addresses or CIDR ranges allowed to access the metrics endpoint
+  # Only these IPs can scrape the /metrics endpoint
+  # Supports both IPv4 and IPv6 addresses with CIDR notation
+  # Examples:
+  #   - "127.0.0.1"           # Single IPv4 address (localhost)
+  #   - "192.168.1.0/24"      # IPv4 CIDR range
+  #   - "::1"                 # Single IPv6 address (localhost)
+  #   - "2001:db8::/32"       # IPv6 CIDR range
+  # By default, only localhost is allowed for security
+  allowed_hosts:
+    - "127.0.0.1"
+    - "::1"
+    - "172.20.0.1"
+  # Additional examples (uncomment to use):
+  #   - "192.168.1.0/24"      # Local network
+  #   - "10.0.0.0/8"          # Private network
+  
+  # Metrics to expose (all enabled by default when prometheus.enabled = true)
+  #
+  # Noisefloor metrics (with 'band' label):
+  #   - noisefloor_p5_db: 5th percentile (noise floor estimate)
+  #   - noisefloor_p10_db: 10th percentile
+  #   - noisefloor_median_db: Median power level
+  #   - noisefloor_mean_db: Mean power level
+  #   - noisefloor_p95_db: 95th percentile (signal peaks)
+  #   - noisefloor_max_db: Maximum power level
+  #   - noisefloor_min_db: Minimum power level
+  #   - noisefloor_dynamic_range_db: Dynamic range (P95 - P5)
+  #   - noisefloor_occupancy_percent: Percentage of bins above noise + 10dB
+  #   - noisefloor_ft8_snr_db: FT8 SNR estimate
+  #   - noisefloor_last_update_timestamp: Unix timestamp of last measurement
+  #
+  # System metrics (no labels):
+  #   - ubersdr_active_sessions_total: Total active sessions (audio + spectrum)
+  #   - ubersdr_active_users_total: Total unique users (by UUID)
+  #   - ubersdr_active_audio_sessions_total: Active audio sessions only
+  #   - ubersdr_active_spectrum_sessions_total: Active spectrum sessions only
+  #
+  # Radiod channel metrics:
+  #   - ubersdr_radiod_channels_total: Total active radiod channels (audio + spectrum)
+  #   - ubersdr_radiod_audio_channels_total: Active audio radiod channels
+  #   - ubersdr_radiod_spectrum_channels_total: Active spectrum radiod channels
+  #
+  # WebSocket metrics:
+  #   - ubersdr_websocket_connections_total{type}: Total WebSocket connections by type (audio, spectrum, dxcluster)
+  #   - ubersdr_websocket_disconnects_total{type}: Total WebSocket disconnections by type
+  #   - ubersdr_websocket_active_connections{type}: Currently active WebSocket connections by type
+  #   - ubersdr_websocket_messages_received_total{type}: Messages received (by type: audio, spectrum, dxcluster)
+  #   - ubersdr_websocket_messages_sent_total{type}: Messages sent (by type)
+  #
+  # Data throughput metrics:
+  #   - ubersdr_audio_bytes_total: Total audio bytes sent to clients
+  #   - ubersdr_spectrum_packets_total: Total spectrum packets sent to clients
+  #
+  # DX Cluster metrics:
+  #   - ubersdr_dx_spots_total{band}: Total DX spots received from cluster by band (160m-10m, 6m, other)
+  #   - ubersdr_dx_cluster_connections_total: Total DX cluster connection attempts
+  #   - ubersdr_dx_cluster_disconnects_total: Total DX cluster disconnections
+  #   - ubersdr_dx_cluster_connected: Current DX cluster connection status (1=connected, 0=disconnected)
+  #
+  # Error metrics:
+  #   - ubersdr_session_creation_errors_total: Failed session creations
+  #   - ubersdr_radiod_errors_total: Radiod communication errors
+  #   - ubersdr_rate_limit_errors_total{type}: HTTP 429 rate limit errors by type (audio, spectrum, aggregate)
+  #   - ubersdr_idle_timeout_kicks_total{type}: Users kicked due to idle timeout by session type (audio, spectrum, mixed)
+  #
+  # Performance metrics:
+  #   - ubersdr_session_duration_seconds{type}: Session duration histogram (by type: audio, spectrum)
+  #   - ubersdr_aggregate_request_duration_seconds: Aggregate endpoint request latency histogram
+  #
+  # Resource metrics:
+  #   - ubersdr_goroutines_total: Current number of goroutines
+  #   - ubersdr_memory_alloc_bytes: Current memory allocated in bytes
+  #   - ubersdr_memory_total_bytes: Total memory allocated (cumulative) in bytes
+  #   - ubersdr_memory_heap_bytes: Current heap memory in bytes
+  #   - ubersdr_memory_stack_bytes: Current stack memory in bytes
+  #   - ubersdr_gc_pause_seconds: Last garbage collection pause duration in seconds
+  #
+  # Note: The Prometheus Go client also automatically exports standard process metrics:
+  #   - process_cpu_seconds_total: Total CPU time consumed
+  #   - process_resident_memory_bytes: Resident memory size
+  #   - process_virtual_memory_bytes: Virtual memory size
+  #   - process_open_fds: Number of open file descriptors
+  #   - go_memstats_*: Detailed Go runtime memory statistics
+  #
+  # Example Prometheus queries:
+  #   - avg(noisefloor_p5_db)                    # Average noise floor across all bands
+  #   - noisefloor_p5_db{band="20m"}             # 20m band noise floor
+  #   - noisefloor_occupancy_percent > 50        # Bands with high occupancy
+  #   - ubersdr_active_users_total               # Current number of users
+  #   - rate(ubersdr_active_sessions_total[5m])  # Session creation rate
+  #   - rate(ubersdr_audio_bytes_total[5m])      # Audio throughput (bytes/sec)
+  #   - ubersdr_websocket_active_connections{type="audio"}     # Active audio WebSocket connections
+  #   - ubersdr_websocket_active_connections{type="spectrum"}  # Active spectrum WebSocket connections
+  #   - ubersdr_websocket_active_connections{type="dxcluster"} # Active DX cluster WebSocket connections
+  #   - sum(ubersdr_websocket_active_connections)              # Total active WebSocket connections
+  #   - rate(ubersdr_websocket_messages_sent_total{type="audio"}[1m]) # Audio message rate
+  #   - histogram_quantile(0.95, rate(ubersdr_session_duration_seconds_bucket[5m])) # 95th percentile session duration
+  #   - histogram_quantile(0.99, rate(ubersdr_aggregate_request_duration_seconds_bucket[5m])) # 99th percentile aggregate latency
+  #   - ubersdr_rate_limit_errors_total{type="audio"}     # Audio command rate limit errors
+  #   - ubersdr_rate_limit_errors_total{type="spectrum"}  # Spectrum command rate limit errors
+  #   - ubersdr_rate_limit_errors_total{type="aggregate"} # Aggregate endpoint rate limit errors
+  #   - ubersdr_idle_timeout_kicks_total{type="audio"}    # Audio session idle timeout kicks
+  #   - ubersdr_idle_timeout_kicks_total{type="spectrum"} # Spectrum session idle timeout kicks
+  #   - ubersdr_idle_timeout_kicks_total{type="mixed"}    # Mixed (audio+spectrum) idle timeout kicks
+  #   - ubersdr_goroutines_total                 # Current goroutine count
+  #   - ubersdr_memory_heap_bytes / 1024 / 1024  # Heap memory in MB
+  #   - rate(process_cpu_seconds_total[1m])      # CPU usage rate
+
 # Noise Floor Monitoring settings
 noisefloor:
   # Enable or disable noise floor monitoring

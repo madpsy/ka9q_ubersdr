@@ -18,24 +18,65 @@ type DXSpot struct {
 	Comment   string    `json:"comment"`   // Spot comment
 	Time      time.Time `json:"time"`      // Time of spot
 	Raw       string    `json:"raw"`       // Raw spot line
+	Band      string    `json:"band"`      // Amateur radio band (e.g., "20m", "40m")
+}
+
+// frequencyToBand converts a frequency in Hz to an amateur radio band name
+func frequencyToBand(freqHz float64) string {
+	// Convert to MHz for easier comparison
+	freqMHz := freqHz / 1000000.0
+
+	// Amateur radio bands from 160m to 10m
+	switch {
+	case freqMHz >= 1.8 && freqMHz <= 2.0:
+		return "160m"
+	case freqMHz >= 3.5 && freqMHz <= 4.0:
+		return "80m"
+	case freqMHz >= 5.3 && freqMHz <= 5.4:
+		return "60m"
+	case freqMHz >= 7.0 && freqMHz <= 7.3:
+		return "40m"
+	case freqMHz >= 10.1 && freqMHz <= 10.15:
+		return "30m"
+	case freqMHz >= 14.0 && freqMHz <= 14.35:
+		return "20m"
+	case freqMHz >= 18.068 && freqMHz <= 18.168:
+		return "17m"
+	case freqMHz >= 21.0 && freqMHz <= 21.45:
+		return "15m"
+	case freqMHz >= 24.89 && freqMHz <= 24.99:
+		return "12m"
+	case freqMHz >= 28.0 && freqMHz <= 29.7:
+		return "10m"
+	case freqMHz >= 50.0 && freqMHz <= 54.0:
+		return "6m"
+	default:
+		return "other"
+	}
+}
+
+// SetPrometheusMetrics sets the Prometheus metrics instance for this DX cluster client
+func (c *DXClusterClient) SetPrometheusMetrics(pm *PrometheusMetrics) {
+	c.prometheusMetrics = pm
 }
 
 // DXClusterClient manages connection to a DX cluster
 type DXClusterClient struct {
-	config           *DXClusterConfig
-	conn             net.Conn
-	reader           *bufio.Reader
-	mu               sync.RWMutex
-	connected        bool
-	stopChan         chan struct{}
-	reconnectTimer   *time.Timer
-	keepaliveTimer   *time.Timer
-	inactivityTimer  *time.Timer
-	lastActivityTime time.Time
-	spotHandlers     []func(DXSpot)
-	messageHandlers  []func(string)
-	spotBuffer       []DXSpot // Circular buffer for last N spots
-	bufferSize       int      // Maximum buffer size
+	config            *DXClusterConfig
+	conn              net.Conn
+	reader            *bufio.Reader
+	mu                sync.RWMutex
+	connected         bool
+	stopChan          chan struct{}
+	reconnectTimer    *time.Timer
+	keepaliveTimer    *time.Timer
+	inactivityTimer   *time.Timer
+	lastActivityTime  time.Time
+	spotHandlers      []func(DXSpot)
+	messageHandlers   []func(string)
+	spotBuffer        []DXSpot // Circular buffer for last N spots
+	bufferSize        int      // Maximum buffer size
+	prometheusMetrics *PrometheusMetrics
 }
 
 // NewDXClusterClient creates a new DX cluster client
@@ -151,6 +192,11 @@ func (c *DXClusterClient) connect() error {
 	c.lastActivityTime = time.Now()
 	c.mu.Unlock()
 
+	// Record connection in Prometheus
+	if c.prometheusMetrics != nil {
+		c.prometheusMetrics.RecordDXClusterConnection()
+	}
+
 	log.Printf("DX Cluster: Connected to %s", addr)
 
 	// Perform login
@@ -165,8 +211,7 @@ func (c *DXClusterClient) connect() error {
 // disconnect closes the connection
 func (c *DXClusterClient) disconnect() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	wasConnected := c.connected
 	c.connected = false
 	if c.keepaliveTimer != nil {
 		c.keepaliveTimer.Stop()
@@ -181,6 +226,12 @@ func (c *DXClusterClient) disconnect() {
 		c.conn = nil
 	}
 	c.reader = nil
+	c.mu.Unlock()
+
+	// Record disconnection in Prometheus (only if we were actually connected)
+	if wasConnected && c.prometheusMetrics != nil {
+		c.prometheusMetrics.RecordDXClusterDisconnect()
+	}
 
 	log.Println("DX Cluster: Disconnected")
 }
@@ -435,6 +486,9 @@ func (c *DXClusterClient) parseDXSpot(line string) (DXSpot, bool) {
 		return DXSpot{}, false
 	}
 	spot.Frequency = freqKHz * 1000 // Convert kHz to Hz
+
+	// Calculate band from frequency
+	spot.Band = frequencyToBand(spot.Frequency)
 
 	// DX callsign
 	spot.DXCall = fields[1]

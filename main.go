@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Global debug flag
@@ -299,15 +301,52 @@ func main() {
 		defer noiseFloorMonitor.Stop()
 	}
 
+	// Initialize Prometheus metrics if enabled
+	var prometheusMetrics *PrometheusMetrics
+	if config.Prometheus.Enabled {
+		prometheusMetrics = NewPrometheusMetrics()
+		// Initialize system metrics
+		prometheusMetrics.InitializeSystemMetrics()
+
+		// Connect Prometheus metrics to session manager
+		sessions.SetPrometheusMetrics(prometheusMetrics)
+
+		// Connect Prometheus metrics to noise floor monitor
+		if noiseFloorMonitor != nil {
+			noiseFloorMonitor.prometheusMetrics = prometheusMetrics
+		}
+
+		// Start periodic session metrics update (every 10 seconds)
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				prometheusMetrics.UpdateSessionMetrics(sessions)
+			}
+		}()
+
+		// Register Prometheus metrics endpoint with IP access control
+		http.HandleFunc(config.Prometheus.Path, func(w http.ResponseWriter, r *http.Request) {
+			handlePrometheusMetrics(w, r, config)
+		})
+		log.Printf("Prometheus metrics enabled at %s (allowed hosts: %v)", config.Prometheus.Path, config.Prometheus.AllowedHosts)
+	}
+
 	// Initialize DX cluster client
 	dxCluster := NewDXClusterClient(&config.DXCluster)
+
+	// Set Prometheus metrics if enabled
+	if prometheusMetrics != nil {
+		dxCluster.SetPrometheusMetrics(prometheusMetrics)
+	}
+
 	if err := dxCluster.Start(); err != nil {
 		log.Printf("Warning: Failed to start DX cluster client: %v", err)
 	}
 	defer dxCluster.Stop()
 
 	// Initialize DX cluster WebSocket handler
-	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager)
+	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics)
 
 	// Register DX spot handler for logging
 	dxCluster.OnSpot(func(spot DXSpot) {
@@ -343,9 +382,9 @@ func main() {
 	}()
 
 	// Initialize WebSocket handlers
-	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager, connRateLimiter)
+	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics)
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
-	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter) // New per-user spectrum
+	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics) // New per-user spectrum
 
 	// Initialize admin handler
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager)
@@ -404,7 +443,7 @@ func main() {
 		handleNoiseFloorConfig(w, r, config, ipBanManager)
 	})
 	http.HandleFunc("/api/noisefloor/aggregate", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleNoiseFloorAggregate(w, r, noiseFloorMonitor, ipBanManager, aggregateRateLimiter)
+		handleNoiseFloorAggregate(w, r, noiseFloorMonitor, ipBanManager, aggregateRateLimiter, prometheusMetrics)
 	}))
 
 	// Admin authentication endpoints (no auth required)
@@ -1263,4 +1302,23 @@ func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Conf
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding noise floor config: %v", err)
 	}
+}
+
+// handlePrometheusMetrics serves Prometheus metrics with IP-based access control
+func handlePrometheusMetrics(w http.ResponseWriter, r *http.Request, config *Config) {
+	// Get client IP using the same logic as other endpoints
+	clientIP := getClientIP(r)
+
+	// Check if IP is allowed
+	if !config.Prometheus.IsIPAllowed(clientIP) {
+		w.WriteHeader(http.StatusForbidden)
+		if _, err := w.Write([]byte("403 Forbidden: Access denied\n")); err != nil {
+			log.Printf("Error writing forbidden response: %v", err)
+		}
+		log.Printf("Prometheus metrics access denied for IP: %s", clientIP)
+		return
+	}
+
+	// IP is allowed, serve metrics
+	promhttp.Handler().ServeHTTP(w, r)
 }

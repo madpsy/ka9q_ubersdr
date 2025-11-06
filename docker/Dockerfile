@@ -11,6 +11,9 @@ RUN go mod download
 # Copy the entire project
 COPY . .
 
+# Ensure go.sum is up to date with dependencies
+RUN go mod tidy
+
 # Build ka9q_ubersdr
 RUN make
 

@@ -16,6 +16,7 @@ type Config struct {
 	Audio            AudioConfig      `yaml:"audio"`
 	Spectrum         SpectrumConfig   `yaml:"spectrum"`
 	NoiseFloor       NoiseFloorConfig `yaml:"noisefloor"`
+	Prometheus       PrometheusConfig `yaml:"prometheus"`
 	Logging          LoggingConfig    `yaml:"logging"`
 	DXCluster        DXClusterConfig  `yaml:"dxcluster"`
 	Bookmarks        []Bookmark       `yaml:"bookmarks"`
@@ -155,6 +156,15 @@ type NoiseFloorBand struct {
 	FT8Frequency    uint64  `yaml:"ft8_frequency"`    // FT8 frequency for SNR calculation (0 = disabled)
 }
 
+// PrometheusConfig contains Prometheus metrics settings
+type PrometheusConfig struct {
+	Enabled      bool     `yaml:"enabled"`       // Enable/disable Prometheus metrics endpoint
+	Path         string   `yaml:"path"`          // Metrics endpoint path (default: /metrics)
+	AllowedHosts []string `yaml:"allowed_hosts"` // List of IPs/CIDRs allowed to access metrics
+
+	allowedNets []*net.IPNet // Parsed CIDR networks (internal use)
+}
+
 // LoadConfig loads configuration from a YAML file
 func LoadConfig(filename string) (*Config, error) {
 	data, err := os.ReadFile(filename)
@@ -170,6 +180,13 @@ func LoadConfig(filename string) (*Config, error) {
 	// Parse timeout bypass IPs/CIDRs
 	if err := config.Server.parseTimeoutBypassIPs(); err != nil {
 		return nil, fmt.Errorf("failed to parse timeout_bypass_ips: %w", err)
+	}
+
+	// Parse Prometheus allowed hosts IPs/CIDRs
+	if config.Prometheus.Enabled {
+		if err := config.Prometheus.parseAllowedHosts(); err != nil {
+			return nil, fmt.Errorf("failed to parse prometheus.allowed_hosts: %w", err)
+		}
 	}
 
 	// Set defaults if not specified
@@ -275,6 +292,15 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	// Note: DataDir will be set relative to config directory in main.go
 	// Default is "noisefloor" subdirectory in config directory
+
+	// Set Prometheus defaults if not specified
+	if config.Prometheus.Path == "" {
+		config.Prometheus.Path = "/metrics" // Standard Prometheus endpoint
+	}
+	// Set default allowed hosts if not specified (localhost only for security)
+	if config.Prometheus.Enabled && len(config.Prometheus.AllowedHosts) == 0 {
+		config.Prometheus.AllowedHosts = []string{"127.0.0.1", "::1"}
+	}
 
 	// Set default amateur radio bands with per-band spectrum parameters if not specified
 	if len(config.NoiseFloor.Bands) == 0 {
@@ -383,6 +409,54 @@ func (sc *ServerConfig) IsIPTimeoutBypassed(ipStr string) bool {
 	}
 
 	for _, ipNet := range sc.timeoutBypassNets {
+		if ipNet.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// parseAllowedHosts parses the allowed_hosts list into CIDR networks
+func (pc *PrometheusConfig) parseAllowedHosts() error {
+	pc.allowedNets = make([]*net.IPNet, 0, len(pc.AllowedHosts))
+
+	for _, ipStr := range pc.AllowedHosts {
+		// Check if it's a CIDR notation
+		if _, ipNet, err := net.ParseCIDR(ipStr); err == nil {
+			pc.allowedNets = append(pc.allowedNets, ipNet)
+		} else {
+			// Try parsing as a single IP address
+			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				return fmt.Errorf("invalid IP or CIDR: %s", ipStr)
+			}
+			// Convert single IP to CIDR (/32 for IPv4, /128 for IPv6)
+			var ipNet *net.IPNet
+			if ip.To4() != nil {
+				_, ipNet, _ = net.ParseCIDR(ipStr + "/32")
+			} else {
+				_, ipNet, _ = net.ParseCIDR(ipStr + "/128")
+			}
+			pc.allowedNets = append(pc.allowedNets, ipNet)
+		}
+	}
+
+	return nil
+}
+
+// IsIPAllowed checks if an IP address is in the allowed hosts list
+func (pc *PrometheusConfig) IsIPAllowed(ipStr string) bool {
+	if len(pc.allowedNets) == 0 {
+		return false
+	}
+
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+
+	for _, ipNet := range pc.allowedNets {
 		if ipNet.Contains(ip) {
 			return true
 		}

@@ -58,6 +58,9 @@ type NoiseFloorMonitor struct {
 	// FFT sample buffers (rolling window for averaging)
 	fftBuffers map[string]*FFTBuffer
 	fftMu      sync.RWMutex
+
+	// Prometheus metrics (optional)
+	prometheusMetrics *PrometheusMetrics
 }
 
 // FFTSample represents a single FFT measurement with timestamp
@@ -592,6 +595,11 @@ func (nfm *NoiseFloorMonitor) calculateAndLogStatistics() {
 		nfm.measurementsMu.Lock()
 		nfm.latestMeasurements[band.Name] = measurement
 		nfm.measurementsMu.Unlock()
+
+		// Update Prometheus metrics if enabled
+		if nfm.prometheusMetrics != nil {
+			nfm.prometheusMetrics.UpdateFromMeasurement(measurement)
+		}
 
 		// Log to CSV
 		if err := nfm.logMeasurement(measurement); err != nil {

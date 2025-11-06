@@ -227,10 +227,11 @@ type WebSocketHandler struct {
 	ipBanManager       *IPBanManager
 	rateLimiterManager *RateLimiterManager
 	connRateLimiter    *IPConnectionRateLimiter
+	prometheusMetrics  *PrometheusMetrics
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
-func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager, connRateLimiter *IPConnectionRateLimiter) *WebSocketHandler {
+func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver, config *Config, ipBanManager *IPBanManager, rateLimiterManager *RateLimiterManager, connRateLimiter *IPConnectionRateLimiter, prometheusMetrics *PrometheusMetrics) *WebSocketHandler {
 	return &WebSocketHandler{
 		sessions:           sessions,
 		audioReceiver:      audioReceiver,
@@ -238,6 +239,7 @@ func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver,
 		ipBanManager:       ipBanManager,
 		rateLimiterManager: rateLimiterManager,
 		connRateLimiter:    connRateLimiter,
+		prometheusMetrics:  prometheusMetrics,
 	}
 }
 
@@ -324,8 +326,20 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	// Wrap connection with write mutex and aggregator
 	conn := &wsConn{conn: rawConn, aggregator: globalStatsAudio}
 	globalStatsAudio.addConnection()
+
+	// Record WebSocket connection in Prometheus
+	if wsh.prometheusMetrics != nil {
+		wsh.prometheusMetrics.RecordWSConnection("audio")
+	}
+
 	defer func() {
 		globalStatsAudio.removeConnection()
+
+		// Record WebSocket disconnection in Prometheus
+		if wsh.prometheusMetrics != nil {
+			wsh.prometheusMetrics.RecordWSDisconnect("audio")
+		}
+
 		conn.close()
 	}()
 
@@ -402,6 +416,12 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	session, err := wsh.sessions.CreateSessionWithUserID(frequency, mode, sourceIP, clientIP, userSessionID)
 	if err != nil {
 		log.Printf("Failed to create session: %v", err)
+
+		// Record session creation error in Prometheus
+		if wsh.prometheusMetrics != nil {
+			wsh.prometheusMetrics.RecordSessionCreationError()
+		}
+
 		if sendErr := wsh.sendError(conn, err.Error()); sendErr != nil {
 			log.Printf("Failed to send error message: %v", sendErr)
 		}
@@ -493,6 +513,11 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			break
 		}
 
+		// Record message received in Prometheus
+		if wsh.prometheusMetrics != nil {
+			wsh.prometheusMetrics.RecordWSMessageReceived("audio")
+		}
+
 		currentSession := sessionHolder.getSession()
 
 		// Update last active time
@@ -501,6 +526,12 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 		// Check rate limit for this UUID (skip ping messages)
 		if msg.Type != "ping" && !wsh.rateLimiterManager.AllowAudio(currentSession.UserSessionID) {
 			log.Printf("Rate limit exceeded for audio command from user %s (type: %s)", currentSession.UserSessionID, msg.Type)
+
+			// Record rate limit error in Prometheus
+			if wsh.prometheusMetrics != nil {
+				wsh.prometheusMetrics.RecordRateLimitError("audio")
+			}
+
 			wsh.sendErrorWithStatus(conn, "Rate limit exceeded. Please slow down.", 429)
 			continue // Don't close connection, just reject this command
 		}
@@ -756,6 +787,12 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				log.Printf("Failed to send audio: %v", err)
 				return
 			}
+
+			// Record audio bytes sent in Prometheus
+			if wsh.prometheusMetrics != nil {
+				wsh.prometheusMetrics.RecordAudioBytes(len(encoded))
+				wsh.prometheusMetrics.RecordWSMessageSent("audio")
+			}
 		}
 	}
 }
@@ -791,5 +828,12 @@ func (wsh *WebSocketHandler) sendErrorWithStatus(conn *wsConn, errMsg string, st
 // sendMessage sends a message to the client
 func (wsh *WebSocketHandler) sendMessage(conn *wsConn, msg ServerMessage) error {
 	conn.setWriteDeadline(time.Now().Add(10 * time.Second))
-	return conn.writeJSON(msg)
+	err := conn.writeJSON(msg)
+
+	// Record message sent in Prometheus (for non-audio messages)
+	if err == nil && wsh.prometheusMetrics != nil && msg.Type != "audio" {
+		wsh.prometheusMetrics.RecordWSMessageSent(msg.Type)
+	}
+
+	return err
 }

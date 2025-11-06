@@ -15,21 +15,23 @@ import (
 
 // DXClusterWebSocketHandler manages WebSocket connections for DX cluster spots
 type DXClusterWebSocketHandler struct {
-	clients      map[*websocket.Conn]*sync.Mutex // Each connection has its own write mutex
-	clientsMu    sync.RWMutex
-	dxCluster    *DXClusterClient
-	sessions     *SessionManager
-	ipBanManager *IPBanManager
-	upgrader     websocket.Upgrader
+	clients           map[*websocket.Conn]*sync.Mutex // Each connection has its own write mutex
+	clientsMu         sync.RWMutex
+	dxCluster         *DXClusterClient
+	sessions          *SessionManager
+	ipBanManager      *IPBanManager
+	prometheusMetrics *PrometheusMetrics
+	upgrader          websocket.Upgrader
 }
 
 // NewDXClusterWebSocketHandler creates a new DX cluster WebSocket handler
-func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionManager, ipBanManager *IPBanManager) *DXClusterWebSocketHandler {
+func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionManager, ipBanManager *IPBanManager, prometheusMetrics *PrometheusMetrics) *DXClusterWebSocketHandler {
 	handler := &DXClusterWebSocketHandler{
-		clients:      make(map[*websocket.Conn]*sync.Mutex),
-		dxCluster:    dxCluster,
-		sessions:     sessions,
-		ipBanManager: ipBanManager,
+		clients:           make(map[*websocket.Conn]*sync.Mutex),
+		dxCluster:         dxCluster,
+		sessions:          sessions,
+		ipBanManager:      ipBanManager,
+		prometheusMetrics: prometheusMetrics,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -107,6 +109,11 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 
 	log.Printf("DX Cluster WebSocket: Client connected, user_session_id: %s, source IP: %s, client IP: %s (total: %d)", userSessionID, sourceIP, clientIP, clientCount)
 
+	// Record connection in Prometheus
+	if h.prometheusMetrics != nil {
+		h.prometheusMetrics.RecordWSConnection("dxcluster")
+	}
+
 	// Send connection status
 	h.sendConnectionStatus(conn)
 
@@ -125,6 +132,11 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn) {
 		delete(h.clients, conn)
 		clientCount := len(h.clients)
 		h.clientsMu.Unlock()
+
+		// Record disconnection in Prometheus
+		if h.prometheusMetrics != nil {
+			h.prometheusMetrics.RecordWSDisconnect("dxcluster")
+		}
 
 		conn.Close()
 		log.Printf("DX Cluster WebSocket: Client disconnected (remaining: %d)", clientCount)
@@ -189,6 +201,11 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn) {
 
 // broadcastSpot broadcasts a DX spot to all connected clients
 func (h *DXClusterWebSocketHandler) broadcastSpot(spot DXSpot) {
+	// Record spot in Prometheus (by band)
+	if h.prometheusMetrics != nil {
+		h.prometheusMetrics.RecordDXSpot(spot.Band)
+	}
+
 	message := map[string]interface{}{
 		"type": "spot",
 		"data": spot,

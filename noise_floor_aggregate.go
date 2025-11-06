@@ -40,7 +40,7 @@ type AggregatedMeasurement struct {
 }
 
 // handleNoiseFloorAggregate handles POST requests for aggregated noise floor data
-func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager, rateLimiter *AggregateRateLimiter) {
+func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager, rateLimiter *AggregateRateLimiter, prometheusMetrics *PrometheusMetrics) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
 		return
@@ -55,6 +55,12 @@ func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *Nois
 			"error": "Rate limit exceeded. Please wait 5 seconds between aggregate requests.",
 		})
 		log.Printf("Aggregate rate limit exceeded for IP: %s", clientIP)
+
+		// Record rate limit error in Prometheus
+		if prometheusMetrics != nil {
+			prometheusMetrics.RecordRateLimitError("aggregate")
+		}
+
 		return
 	}
 
@@ -114,6 +120,11 @@ func handleNoiseFloorAggregate(w http.ResponseWriter, r *http.Request, nfm *Nois
 	// Calculate processing time
 	processingTime := time.Since(startTime).Seconds() * 1000 // Convert to milliseconds
 	response.ProcessingTime = processingTime
+
+	// Record latency in Prometheus (in seconds)
+	if prometheusMetrics != nil {
+		prometheusMetrics.RecordAggregateLatency(time.Since(startTime).Seconds())
+	}
 
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")

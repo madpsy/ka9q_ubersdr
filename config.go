@@ -161,7 +161,6 @@ type NoiseFloorBand struct {
 // PrometheusConfig contains Prometheus metrics settings
 type PrometheusConfig struct {
 	Enabled      bool              `yaml:"enabled"`       // Enable/disable Prometheus metrics endpoint
-	Path         string            `yaml:"path"`          // Metrics endpoint path (default: /metrics)
 	AllowedHosts []string          `yaml:"allowed_hosts"` // List of IPs/CIDRs allowed to access metrics
 	Pushgateway  PushgatewayConfig `yaml:"pushgateway"`   // Pushgateway configuration
 
@@ -310,10 +309,6 @@ func LoadConfig(filename string) (*Config, error) {
 	// Note: DataDir will be set relative to config directory in main.go
 	// Default is "noisefloor" subdirectory in config directory
 
-	// Set Prometheus defaults if not specified
-	if config.Prometheus.Path == "" {
-		config.Prometheus.Path = "/metrics" // Standard Prometheus endpoint
-	}
 	// Set default allowed hosts if not specified (localhost only for security)
 	if config.Prometheus.Enabled && len(config.Prometheus.AllowedHosts) == 0 {
 		config.Prometheus.AllowedHosts = []string{"127.0.0.1", "::1"}

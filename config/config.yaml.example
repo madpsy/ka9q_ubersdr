@@ -211,10 +211,6 @@ prometheus:
   # When enabled, exposes metrics at /metrics endpoint for scraping
   enabled: true
   
-  # Metrics endpoint path (default: /metrics)
-  # This is the standard Prometheus endpoint path
-  path: "/metrics"
-  
   # List of IP addresses or CIDR ranges allowed to access the metrics endpoint
   # Only these IPs can scrape the /metrics endpoint
   # Supports both IPv4 and IPv6 addresses with CIDR notation

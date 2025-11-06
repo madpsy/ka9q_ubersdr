@@ -327,10 +327,11 @@ func main() {
 		}()
 
 		// Register Prometheus metrics endpoint with IP access control
-		http.HandleFunc(config.Prometheus.Path, func(w http.ResponseWriter, r *http.Request) {
+		// Path is hardcoded to /metrics
+		http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 			handlePrometheusMetrics(w, r, config)
 		})
-		log.Printf("Prometheus metrics enabled at %s (allowed hosts: %v)", config.Prometheus.Path, config.Prometheus.AllowedHosts)
+		log.Printf("Prometheus metrics enabled at /metrics (allowed hosts: %v)", config.Prometheus.AllowedHosts)
 
 		// Start Pushgateway worker if enabled
 		if config.Prometheus.Pushgateway.Enabled {

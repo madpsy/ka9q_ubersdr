@@ -191,9 +191,10 @@ func (swm *SpaceWeatherMonitor) fetchData() error {
 	}
 
 	// Calculate propagation quality and band conditions (day and night)
-	data.PropagationQuality = calculatePropagationQuality(data.SolarFlux, data.KIndex)
-	data.BandConditionsDay = calculateBandConditions(data.SolarFlux, data.KIndex, true)
-	data.BandConditionsNight = calculateBandConditions(data.SolarFlux, data.KIndex, false)
+	// Pass forecast to adjust for predicted storms
+	data.PropagationQuality = calculatePropagationQuality(data.SolarFlux, data.KIndex, data.Forecast)
+	data.BandConditionsDay = calculateBandConditions(data.SolarFlux, data.KIndex, true, data.Forecast)
+	data.BandConditionsNight = calculateBandConditions(data.SolarFlux, data.KIndex, false, data.Forecast)
 
 	// Update cached data
 	swm.mu.Lock()
@@ -465,7 +466,7 @@ func getKIndexStatus(kIndex int) string {
 }
 
 // calculatePropagationQuality determines overall HF propagation quality
-func calculatePropagationQuality(solarFlux float64, kIndex int) string {
+func calculatePropagationQuality(solarFlux float64, kIndex int, forecast *ForecastData) string {
 	// High solar flux is good, low K-index is good
 	score := 0
 
@@ -489,6 +490,24 @@ func calculatePropagationQuality(solarFlux float64, kIndex int) string {
 		score += 1
 	}
 
+	// Degrade score based on forecast
+	if forecast != nil {
+		// Check for geomagnetic storm forecast (G-scale)
+		if forecast.GeomagneticStorm != "None expected" {
+			// G3+ storms significantly degrade conditions
+			if len(forecast.GeomagneticStorm) >= 2 && forecast.GeomagneticStorm[1] >= '3' {
+				score -= 2 // Major storm forecast
+			} else if len(forecast.GeomagneticStorm) >= 2 && forecast.GeomagneticStorm[1] >= '1' {
+				score -= 1 // Minor storm forecast
+			}
+		}
+	}
+
+	// Ensure score doesn't go negative
+	if score < 0 {
+		score = 0
+	}
+
 	// Convert score to quality
 	switch {
 	case score >= 5:
@@ -504,8 +523,33 @@ func calculatePropagationQuality(solarFlux float64, kIndex int) string {
 
 // calculateBandConditions determines propagation for each HF band
 // isDay parameter: true for daytime conditions, false for nighttime
-func calculateBandConditions(solarFlux float64, kIndex int, isDay bool) map[string]string {
+// forecast parameter: used to degrade conditions when storms are predicted
+func calculateBandConditions(solarFlux float64, kIndex int, isDay bool, forecast *ForecastData) map[string]string {
 	conditions := make(map[string]string)
+
+	// Check for storm forecast and adjust effective K-index
+	effectiveKIndex := kIndex
+	stormPenalty := 0
+
+	if forecast != nil && forecast.GeomagneticStorm != "None expected" {
+		// Extract G-scale number (G1, G2, G3, etc.)
+		if len(forecast.GeomagneticStorm) >= 2 {
+			gScale := forecast.GeomagneticStorm[1]
+			switch gScale {
+			case '1', '2':
+				stormPenalty = 1 // Minor/Moderate storm: degrade by 1 level
+			case '3', '4':
+				stormPenalty = 2 // Strong/Severe storm: degrade by 2 levels
+			case '5':
+				stormPenalty = 3 // Extreme storm: degrade by 3 levels
+			}
+		}
+		// Increase effective K-index to simulate worse conditions
+		effectiveKIndex = kIndex + stormPenalty
+		if effectiveKIndex > 9 {
+			effectiveKIndex = 9
+		}
+	}
 
 	// Lower bands (160m, 80m) - MUCH better at night, poor during day
 	// These are primarily nighttime bands
@@ -521,10 +565,10 @@ func calculateBandConditions(solarFlux float64, kIndex int, isDay bool) map[stri
 		}
 	} else {
 		// At night, these bands open up significantly
-		if kIndex <= 3 {
+		if effectiveKIndex <= 3 {
 			conditions["160m"] = "Excellent"
 			conditions["80m"] = "Excellent"
-		} else if kIndex <= 5 {
+		} else if effectiveKIndex <= 5 {
 			conditions["160m"] = "Good"
 			conditions["80m"] = "Good"
 		} else {
@@ -535,10 +579,10 @@ func calculateBandConditions(solarFlux float64, kIndex int, isDay bool) map[stri
 
 	// Mid-low bands (60m, 40m) - work both day and night, but better at night
 	if isDay {
-		if kIndex <= 3 {
+		if effectiveKIndex <= 3 {
 			conditions["60m"] = "Good"
 			conditions["40m"] = "Good"
-		} else if kIndex <= 5 {
+		} else if effectiveKIndex <= 5 {
 			conditions["60m"] = "Fair"
 			conditions["40m"] = "Fair"
 		} else {
@@ -547,10 +591,10 @@ func calculateBandConditions(solarFlux float64, kIndex int, isDay bool) map[stri
 		}
 	} else {
 		// Better at night
-		if kIndex <= 3 {
+		if effectiveKIndex <= 3 {
 			conditions["60m"] = "Excellent"
 			conditions["40m"] = "Excellent"
-		} else if kIndex <= 5 {
+		} else if effectiveKIndex <= 5 {
 			conditions["60m"] = "Good"
 			conditions["40m"] = "Good"
 		} else {
@@ -560,9 +604,9 @@ func calculateBandConditions(solarFlux float64, kIndex int, isDay bool) map[stri
 	}
 
 	// 30m band - transitional, works day and night but affected by conditions
-	if kIndex <= 3 {
+	if effectiveKIndex <= 3 {
 		conditions["30m"] = "Good"
-	} else if kIndex <= 5 {
+	} else if effectiveKIndex <= 5 {
 		conditions["30m"] = "Fair"
 	} else {
 		conditions["30m"] = "Poor"
@@ -572,11 +616,11 @@ func calculateBandConditions(solarFlux float64, kIndex int, isDay bool) map[stri
 	// These close or become very poor at night
 	if isDay {
 		// During day, solar flux matters a lot
-		if solarFlux >= 120 && kIndex <= 3 {
+		if solarFlux >= 120 && effectiveKIndex <= 3 {
 			conditions["20m"] = "Excellent"
 			conditions["17m"] = "Good"
 			conditions["15m"] = "Good"
-		} else if solarFlux >= 80 && kIndex <= 5 {
+		} else if solarFlux >= 80 && effectiveKIndex <= 5 {
 			conditions["20m"] = "Good"
 			conditions["17m"] = "Fair"
 			conditions["15m"] = "Fair"
@@ -588,7 +632,7 @@ func calculateBandConditions(solarFlux float64, kIndex int, isDay bool) map[stri
 	} else {
 		// At night, these bands are generally poor or closed
 		// 20m might have some gray-line propagation
-		if solarFlux >= 150 && kIndex <= 2 {
+		if solarFlux >= 150 && effectiveKIndex <= 2 {
 			conditions["20m"] = "Fair" // Gray-line propagation possible
 		} else {
 			conditions["20m"] = "Poor"
@@ -600,10 +644,10 @@ func calculateBandConditions(solarFlux float64, kIndex int, isDay bool) map[stri
 	// Highest bands (12m, 10m) - STRICTLY daytime bands, need high solar flux
 	// These are completely closed at night
 	if isDay {
-		if solarFlux >= 150 && kIndex <= 2 {
+		if solarFlux >= 150 && effectiveKIndex <= 2 {
 			conditions["12m"] = "Good"
 			conditions["10m"] = "Good"
-		} else if solarFlux >= 100 && kIndex <= 4 {
+		} else if solarFlux >= 100 && effectiveKIndex <= 4 {
 			conditions["12m"] = "Fair"
 			conditions["10m"] = "Fair"
 		} else {

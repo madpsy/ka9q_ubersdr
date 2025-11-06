@@ -159,17 +159,22 @@
             transform: translateY(-2px);
         }
 
-        .band-badge.closed {
+        .band-badge.poor {
             background: #ef4444;
             color: white;
         }
 
-        .band-badge.marginal {
-            background: #eab308;
-            color: #000;
+        .band-badge.fair {
+            background: #ff9800;
+            color: white;
         }
 
-        .band-badge.open {
+        .band-badge.good {
+            background: #eab308;
+            color: white;
+        }
+
+        .band-badge.excellent {
             background: #22c55e;
             color: white;
         }
@@ -207,15 +212,19 @@
             <div class="legend" id="legend">
                 <div class="legend-item">
                     <div class="legend-color" style="background-color: #ef4444;"></div>
-                    <span>CLOSED (SNR &lt; 6 dB)</span>
+                    <span>POOR (SNR &lt; 6 dB)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #ff9800;"></div>
+                    <span>FAIR (6-20 dB)</span>
                 </div>
                 <div class="legend-item">
                     <div class="legend-color" style="background-color: #eab308;"></div>
-                    <span>MARGINAL (6-20 dB)</span>
+                    <span>GOOD (20-30 dB)</span>
                 </div>
                 <div class="legend-item">
                     <div class="legend-color" style="background-color: #22c55e;"></div>
-                    <span>OPEN (SNR &gt; 20 dB)</span>
+                    <span>EXCELLENT (SNR &gt; 30 dB)</span>
                 </div>
             </div>
         </div>

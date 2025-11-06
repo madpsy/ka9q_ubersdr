@@ -232,9 +232,10 @@ class BandConditionsMonitor {
             bandOrder.forEach(band => {
                 if (data.band_conditions_day[band]) {
                     const condition = data.band_conditions_day[band];
-                    let emoji = '🔴';
-                    if (condition === 'Excellent' || condition === 'Good') emoji = '🟢';
-                    else if (condition === 'Fair') emoji = '🟡';
+                    let emoji = '🔴'; // Poor - red
+                    if (condition === 'Excellent') emoji = '🟢'; // Excellent - green
+                    else if (condition === 'Good') emoji = '🟡'; // Good - yellow
+                    else if (condition === 'Fair') emoji = '🟠'; // Fair - orange
                     html += `<span style="font-size: 0.85em; padding: 4px 8px; background: rgba(255,255,255,0.05); border-radius: 4px;" title="${band}: ${condition}">${emoji} ${band}</span>`;
                 }
             });
@@ -247,9 +248,10 @@ class BandConditionsMonitor {
             bandOrder.forEach(band => {
                 if (data.band_conditions_night[band]) {
                     const condition = data.band_conditions_night[band];
-                    let emoji = '🔴';
-                    if (condition === 'Excellent' || condition === 'Good') emoji = '🟢';
-                    else if (condition === 'Fair') emoji = '🟡';
+                    let emoji = '🔴'; // Poor - red
+                    if (condition === 'Excellent') emoji = '🟢'; // Excellent - green
+                    else if (condition === 'Good') emoji = '🟡'; // Good - yellow
+                    else if (condition === 'Fair') emoji = '🟠'; // Fair - orange
                     html += `<span style="font-size: 0.85em; padding: 4px 8px; background: rgba(255,255,255,0.05); border-radius: 4px;" title="${band}: ${condition}">${emoji} ${band}</span>`;
                 }
             });
@@ -353,11 +355,13 @@ class BandConditionsMonitor {
                         const snr = d.ft8_snr || 0;
                         let state;
                         if (snr < 6) {
-                            state = 0; // CLOSED
+                            state = 0; // POOR
                         } else if (snr >= 6 && snr < 20) {
-                            state = 1; // MARGINAL
+                            state = 1; // FAIR
+                        } else if (snr >= 20 && snr < 30) {
+                            state = 2; // GOOD
                         } else {
-                            state = 2; // OPEN
+                            state = 3; // EXCELLENT
                         }
 
                         const originalTime = new Date(d.timestamp);
@@ -379,7 +383,7 @@ class BandConditionsMonitor {
                             return normalizedTime;
                         })(),
                         y: band,
-                        v: data[band].ft8_snr < 6 ? 0 : (data[band].ft8_snr < 20 ? 1 : 2),
+                        v: data[band].ft8_snr < 6 ? 0 : (data[band].ft8_snr < 20 ? 1 : (data[band].ft8_snr < 30 ? 2 : 3)),
                         snr: data[band].ft8_snr || 0
                     }];
 
@@ -446,9 +450,10 @@ class BandConditionsMonitor {
                     data: datasets,
                     backgroundColor: (context) => {
                         const value = context.raw.v;
-                        if (value === 0) return '#ef4444'; // CLOSED - red
-                        if (value === 1) return '#eab308'; // MARGINAL - yellow
-                        if (value === 2) return '#22c55e'; // OPEN - green
+                        if (value === 0) return '#ef4444'; // POOR - red
+                        if (value === 1) return '#ff9800'; // FAIR - orange
+                        if (value === 2) return '#eab308'; // GOOD - yellow
+                        if (value === 3) return '#22c55e'; // EXCELLENT - green
                         return '#9ca3af'; // UNKNOWN - gray
                     },
                     borderColor: 'rgba(255, 255, 255, 0.3)',
@@ -493,7 +498,7 @@ class BandConditionsMonitor {
 
                                 chart.data.datasets[0].data.forEach((point) => {
                                     if (Math.abs(point.x.getTime() - hoveredX) < threshold) {
-                                        const state = point.v === 0 ? 'CLOSED' : (point.v === 1 ? 'MARGINAL' : 'OPEN');
+                                        const state = point.v === 0 ? 'POOR' : (point.v === 1 ? 'FAIR' : (point.v === 2 ? 'GOOD' : 'EXCELLENT'));
                                         const snr = point.snr.toFixed(1);
                                         const bandName = point.y;
 
@@ -590,14 +595,17 @@ class BandConditionsMonitor {
             // Determine state based on SNR
             let stateClass, stateText;
             if (snr < 6) {
-                stateClass = 'closed';
-                stateText = 'CLOSED';
+                stateClass = 'poor';
+                stateText = 'POOR';
             } else if (snr >= 6 && snr < 20) {
-                stateClass = 'marginal';
-                stateText = 'MARGINAL';
+                stateClass = 'fair';
+                stateText = 'FAIR';
+            } else if (snr >= 20 && snr < 30) {
+                stateClass = 'good';
+                stateText = 'GOOD';
             } else {
-                stateClass = 'open';
-                stateText = 'OPEN';
+                stateClass = 'excellent';
+                stateText = 'EXCELLENT';
             }
 
             const badge = document.createElement('div');

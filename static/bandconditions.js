@@ -5,6 +5,8 @@ class BandConditionsMonitor {
     constructor() {
         this.bandStateChart = null;
         this.refreshInterval = null;
+        this.countdownInterval = null;
+        this.nextRefreshTime = null;
         this.trendDataCache = {};
 
         // Tableau 10 color palette
@@ -82,12 +84,69 @@ class BandConditionsMonitor {
 
     setStatus(message, type = 'info') {
         const status = document.getElementById('status');
-        status.textContent = message;
+        const countdown = document.getElementById('countdown');
+
+        // Create a text node for the message
+        const messageNode = document.createTextNode(message + ' ');
+
+        // Clear and rebuild status content
+        status.innerHTML = '';
+        status.appendChild(messageNode);
+        status.appendChild(countdown);
+
         status.className = 'status';
         if (type === 'error') {
             status.classList.add('error');
         } else if (type === 'success') {
             status.classList.add('success');
+        }
+    }
+
+    updateCountdown() {
+        const countdown = document.getElementById('countdown');
+        if (!countdown || !this.nextRefreshTime) return;
+
+        const now = Date.now();
+        const remaining = Math.max(0, this.nextRefreshTime - now);
+        const seconds = Math.floor(remaining / 1000);
+
+        if (seconds > 60) {
+            const minutes = Math.floor(seconds / 60);
+            countdown.textContent = `(refreshing in ${minutes}m)`;
+        } else if (seconds > 0) {
+            countdown.textContent = `(refreshing in ${seconds}s)`;
+        } else {
+            countdown.textContent = '(refreshing...)';
+        }
+    }
+
+    startCountdown() {
+        // Set next refresh time
+        this.nextRefreshTime = Date.now() + 60000; // 60 seconds from now
+
+        // Clear any existing countdown interval
+        if (this.countdownInterval) {
+            clearInterval(this.countdownInterval);
+        }
+
+        // Update countdown every second
+        this.countdownInterval = setInterval(() => {
+            this.updateCountdown();
+        }, 1000);
+
+        // Initial update
+        this.updateCountdown();
+    }
+
+    stopCountdown() {
+        if (this.countdownInterval) {
+            clearInterval(this.countdownInterval);
+            this.countdownInterval = null;
+        }
+        this.nextRefreshTime = null;
+        const countdown = document.getElementById('countdown');
+        if (countdown) {
+            countdown.textContent = '';
         }
     }
 
@@ -135,9 +194,11 @@ class BandConditionsMonitor {
 
             await this.updateBandStateChart(data);
             this.setStatus('Data loaded successfully', 'success');
+            this.startCountdown();
         } catch (error) {
             console.error('Error loading data:', error);
             this.setStatus(`Error: ${error.message}`, 'error');
+            this.stopCountdown();
         }
     }
 
@@ -397,6 +458,7 @@ class BandConditionsMonitor {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
         }
+        this.stopCountdown();
     }
 }
 

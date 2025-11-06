@@ -131,6 +131,58 @@
         .info-box strong {
             color: #64B5F6;
         }
+
+        .band-status-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .band-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9em;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s;
+        }
+
+        .band-badge:hover {
+            transform: translateY(-2px);
+        }
+
+        .band-badge.closed {
+            background: #ef4444;
+            color: white;
+        }
+
+        .band-badge.marginal {
+            background: #eab308;
+            color: #000;
+        }
+
+        .band-badge.open {
+            background: #22c55e;
+            color: white;
+        }
+
+        .band-badge.unknown {
+            background: #9ca3af;
+            color: white;
+        }
+
+        .band-badge-snr {
+            font-size: 0.85em;
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
@@ -146,7 +198,11 @@
             <div class="chart-wrapper">
                 <canvas id="bandStateChart"></canvas>
             </div>
-            
+
+            <div id="bandStatusRow" class="band-status-row">
+                <!-- Band status badges will be inserted here -->
+            </div>
+
             <div class="legend" id="legend">
                 <div class="legend-item">
                     <div class="legend-color" style="background-color: #ef4444;"></div>

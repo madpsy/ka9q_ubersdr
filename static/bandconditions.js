@@ -199,6 +199,7 @@ class BandConditionsMonitor {
             }
 
             await this.updateBandStateChart(data);
+            this.updateBandStatusBadges(data);
             this.setStatus('Data loaded successfully', 'success');
             this.startCountdown();
         } catch (error) {
@@ -446,6 +447,47 @@ class BandConditionsMonitor {
                     }
                 }
             }
+        });
+    }
+
+    updateBandStatusBadges(data) {
+        const bandStatusRow = document.getElementById('bandStatusRow');
+        if (!bandStatusRow) return;
+
+        // Sort bands in order
+        const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+        const bands = Object.keys(data).sort((a, b) => {
+            return bandOrder.indexOf(a) - bandOrder.indexOf(b);
+        });
+
+        // Clear existing badges
+        bandStatusRow.innerHTML = '';
+
+        // Create badges for each band
+        bands.forEach(band => {
+            const bandData = data[band];
+            if (!bandData || !bandData.ft8_snr) return;
+
+            const snr = bandData.ft8_snr;
+
+            // Determine state based on SNR
+            let stateClass, stateText;
+            if (snr < 6) {
+                stateClass = 'closed';
+                stateText = 'CLOSED';
+            } else if (snr >= 6 && snr < 20) {
+                stateClass = 'marginal';
+                stateText = 'MARGINAL';
+            } else {
+                stateClass = 'open';
+                stateText = 'OPEN';
+            }
+
+            const badge = document.createElement('div');
+            badge.className = `band-badge ${stateClass}`;
+            badge.textContent = band;
+            badge.title = `${stateText} (${snr.toFixed(1)} dB)`; // Show details on hover
+            bandStatusRow.appendChild(badge);
         });
     }
 

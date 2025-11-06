@@ -886,8 +886,10 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
 			"asl":      config.Admin.ASL,
 			"location": config.Admin.Location,
 		},
-		"max_clients": config.Server.MaxSessions,
-		"version":     Version,
+		"max_clients":   config.Server.MaxSessions,
+		"version":       Version,
+		"space_weather": config.SpaceWeather.Enabled,
+		"noise_floor":   config.NoiseFloor.Enabled,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

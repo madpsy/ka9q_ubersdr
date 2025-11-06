@@ -1052,6 +1052,14 @@ async function fetchSiteDescription() {
                     }
                 }
 
+                // Show band conditions button if noise floor monitoring is enabled
+                if (data.noise_floor === true) {
+                    const bandConditionsBtn = document.getElementById('band-conditions-button');
+                    if (bandConditionsBtn) {
+                        bandConditionsBtn.style.display = 'block';
+                    }
+                }
+
                 // Add map if GPS coordinates are available
                 if (data.receiver && data.receiver.gps &&
                     data.receiver.gps.lat !== 0 && data.receiver.gps.lon !== 0) {

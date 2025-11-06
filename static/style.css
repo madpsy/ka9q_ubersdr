@@ -132,6 +132,30 @@
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
+.band-conditions-button {
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+    color: white;
+    font-size: 1em;
+    font-weight: bold;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    margin-top: 15px;
+}
+
+.band-conditions-button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(52, 152, 219, 0.5);
+}
+
+.band-conditions-button:active {
+    transform: scale(0.98);
+}
+
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background: #adb5bd;
@@ -208,9 +232,36 @@ body {
     height: 12px;
     background: rgba(44, 62, 80, 0.9);
     border-radius: 6px 0 0 0;
-    z-index: 10001;
+    z-index: 10002;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     overflow: hidden;
+}
+
+/* Space Weather Display under audio buffer */
+.space-weather-display {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    background: rgba(44, 62, 80, 0.9);
+    border-radius: 0 0 0 6px;
+    z-index: 10001;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+}
+
+.space-weather-text {
+    color: white;
+    font-size: 9px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    white-space: nowrap;
+    display: flex;
+    gap: 4px;
+}
+
+.space-weather-text span {
+    display: inline-block;
 }
 
 .audio-buffer-bar {

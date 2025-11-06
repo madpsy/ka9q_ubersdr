@@ -28,6 +28,9 @@
                 </svg>
                 <span>Click to Start</span>
             </button>
+            <button id="band-conditions-button" class="band-conditions-button" style="display: none;" onclick="window.open('/bandconditions.html', '_blank')">
+                <span>Band Conditions</span>
+            </button>
         </div>
     </div>
 
@@ -37,6 +40,11 @@
         <div id="audio-buffer-display" class="audio-buffer-display" title="Click to configure buffer threshold" onclick="openBufferConfigModal()" style="cursor: pointer;">
             <div id="audio-buffer-bar" class="audio-buffer-bar"></div>
             <span id="audio-buffer-text" class="audio-buffer-text">--</span>
+        </div>
+
+        <!-- Space Weather Display under audio buffer -->
+        <div id="space-weather-display" class="space-weather-display" style="display: none;">
+            <span id="space-weather-text" class="space-weather-text">--</span>
         </div>
 
         <!-- Time Display in bottom left -->
@@ -799,7 +807,7 @@
 
     <!-- Footer -->
     <footer class="site-footer">
-        <p>Download <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/noisefloor.html" target="_blank">Noise Floor Graphs</a> <span id="footer-version"></span></p>
+        <p>Download <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/noisefloor.html" target="_blank">Noise Floor Graphs</a> • <a href="/bandconditions.html" target="_blank">Band Conditions</a> <span id="footer-version"></span></p>
     </footer>
 
     <script src="bands_state.js"></script>
@@ -814,6 +822,7 @@
     <script src="idle-detector.js"></script>
     <script src="dxcluster-client.js"></script>
     <script src="time-display.js"></script>
+    <script src="space-weather-display.js"></script>
     <script type="module" src="app.js"></script>
 </body>
 </html>

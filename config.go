@@ -10,19 +10,20 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Admin            AdminConfig      `yaml:"admin"`
-	Radiod           RadiodConfig     `yaml:"radiod"`
-	Server           ServerConfig     `yaml:"server"`
-	Audio            AudioConfig      `yaml:"audio"`
-	Spectrum         SpectrumConfig   `yaml:"spectrum"`
-	NoiseFloor       NoiseFloorConfig `yaml:"noisefloor"`
-	Prometheus       PrometheusConfig `yaml:"prometheus"`
-	Logging          LoggingConfig    `yaml:"logging"`
-	DXCluster        DXClusterConfig  `yaml:"dxcluster"`
-	Bookmarks        []Bookmark       `yaml:"bookmarks"`
-	Bands            []Band           `yaml:"bands"`
-	Extensions       []string         `yaml:"extensions"`
-	DefaultExtension string           `yaml:"default_extension,omitempty"`
+	Admin            AdminConfig        `yaml:"admin"`
+	Radiod           RadiodConfig       `yaml:"radiod"`
+	Server           ServerConfig       `yaml:"server"`
+	Audio            AudioConfig        `yaml:"audio"`
+	Spectrum         SpectrumConfig     `yaml:"spectrum"`
+	NoiseFloor       NoiseFloorConfig   `yaml:"noisefloor"`
+	Prometheus       PrometheusConfig   `yaml:"prometheus"`
+	Logging          LoggingConfig      `yaml:"logging"`
+	DXCluster        DXClusterConfig    `yaml:"dxcluster"`
+	SpaceWeather     SpaceWeatherConfig `yaml:"spaceweather"`
+	Bookmarks        []Bookmark         `yaml:"bookmarks"`
+	Bands            []Band             `yaml:"bands"`
+	Extensions       []string           `yaml:"extensions"`
+	DefaultExtension string             `yaml:"default_extension,omitempty"`
 }
 
 // AdminConfig contains admin authentication settings
@@ -136,6 +137,12 @@ type DXClusterConfig struct {
 	Callsign       string `yaml:"callsign"`
 	ReconnectDelay int    `yaml:"reconnect_delay"` // Seconds between reconnection attempts
 	KeepAliveDelay int    `yaml:"keepalive_delay"` // Seconds between keep-alive messages
+}
+
+// SpaceWeatherConfig contains space weather monitoring settings
+type SpaceWeatherConfig struct {
+	Enabled         bool `yaml:"enabled"`           // Enable/disable space weather monitoring
+	PollIntervalSec int  `yaml:"poll_interval_sec"` // Seconds between API polls (recommended: 900 = 15 minutes)
 }
 
 // NoiseFloorConfig contains noise floor monitoring settings
@@ -300,6 +307,11 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.DXCluster.KeepAliveDelay == 0 {
 		config.DXCluster.KeepAliveDelay = 300 // 5 minutes default
+	}
+
+	// Set space weather defaults if not specified
+	if config.SpaceWeather.PollIntervalSec == 0 {
+		config.SpaceWeather.PollIntervalSec = 900 // 15 minutes default
 	}
 
 	// Set noise floor defaults if not specified

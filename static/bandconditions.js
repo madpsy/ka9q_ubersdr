@@ -156,10 +156,127 @@ class BandConditionsMonitor {
         }
     }
 
+    async loadSpaceWeather() {
+        try {
+            const response = await fetch('/api/spaceweather');
+            
+            if (!response.ok) {
+                console.error('Failed to load space weather data');
+                return;
+            }
+
+            const data = await response.json();
+            this.displaySpaceWeather(data);
+        } catch (error) {
+            console.error('Error loading space weather:', error);
+        }
+    }
+
+    displaySpaceWeather(data) {
+        const summaryDiv = document.getElementById('spaceweather-summary');
+        const contentDiv = document.getElementById('spaceweather-content');
+
+        if (!summaryDiv || !contentDiv) return;
+
+        // Determine overall quality color
+        const qualityColor = data.propagation_quality === 'Excellent' ? '#22c55e' :
+                            data.propagation_quality === 'Good' ? '#4ade80' :
+                            data.propagation_quality === 'Fair' ? '#eab308' : '#ef4444';
+
+        // Build compact display
+        let html = '<div style="display: flex; flex-direction: column; gap: 12px;">';
+
+        // Last update timestamp
+        const lastUpdate = new Date(data.last_update);
+        const now = new Date();
+        const minutesAgo = Math.floor((now - lastUpdate) / 60000);
+        const timeAgo = minutesAgo < 1 ? 'just now' :
+                       minutesAgo === 1 ? '1 minute ago' :
+                       minutesAgo < 60 ? `${minutesAgo} minutes ago` :
+                       `${Math.floor(minutesAgo / 60)} hours ago`;
+        
+        html += `<div style="text-align: center; font-size: 0.85em; opacity: 0.7;">Last updated: ${timeAgo}</div>`;
+
+        // Top row: Key metrics in a compact grid
+        html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;">';
+        html += `<div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                    <div style="font-size: 0.8em; opacity: 0.8;">Solar Flux</div>
+                    <div style="font-size: 1.3em; font-weight: bold;">${data.solar_flux.toFixed(0)} SFU</div>
+                 </div>`;
+        html += `<div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                    <div style="font-size: 0.8em; opacity: 0.8;">K-Index</div>
+                    <div style="font-size: 1.3em; font-weight: bold;">${data.k_index} <span style="font-size: 0.7em;">(${data.k_index_status})</span></div>
+                 </div>`;
+        html += `<div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                    <div style="font-size: 0.8em; opacity: 0.8;">A-Index</div>
+                    <div style="font-size: 1.3em; font-weight: bold;">${data.a_index}</div>
+                 </div>`;
+        html += `<div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                    <div style="font-size: 0.8em; opacity: 0.8;">Solar Wind Bz</div>
+                    <div style="font-size: 1.3em; font-weight: bold;">${data.solar_wind_bz.toFixed(1)} nT</div>
+                 </div>`;
+        html += `<div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                    <div style="font-size: 0.8em; opacity: 0.8;">Propagation</div>
+                    <div style="font-size: 1.3em; font-weight: bold; color: ${qualityColor};">${data.propagation_quality}</div>
+                 </div>`;
+        html += '</div>';
+
+        // Band conditions in two rows (day and night)
+        if (data.band_conditions_day && data.band_conditions_night) {
+            const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+            
+            // Day conditions
+            html += '<div style="margin-bottom: 8px;">';
+            html += '<div style="font-size: 0.8em; opacity: 0.7; margin-bottom: 4px; text-align: center;">☀️ Day</div>';
+            html += '<div style="display: flex; flex-wrap: wrap; gap: 5px; justify-content: center;">';
+            bandOrder.forEach(band => {
+                if (data.band_conditions_day[band]) {
+                    const condition = data.band_conditions_day[band];
+                    let emoji = '🔴';
+                    if (condition === 'Excellent' || condition === 'Good') emoji = '🟢';
+                    else if (condition === 'Fair') emoji = '🟡';
+                    html += `<span style="font-size: 0.85em; padding: 4px 8px; background: rgba(255,255,255,0.05); border-radius: 4px;" title="${band}: ${condition}">${emoji} ${band}</span>`;
+                }
+            });
+            html += '</div></div>';
+            
+            // Night conditions
+            html += '<div>';
+            html += '<div style="font-size: 0.8em; opacity: 0.7; margin-bottom: 4px; text-align: center;">🌙 Night</div>';
+            html += '<div style="display: flex; flex-wrap: wrap; gap: 5px; justify-content: center;">';
+            bandOrder.forEach(band => {
+                if (data.band_conditions_night[band]) {
+                    const condition = data.band_conditions_night[band];
+                    let emoji = '🔴';
+                    if (condition === 'Excellent' || condition === 'Good') emoji = '🟢';
+                    else if (condition === 'Fair') emoji = '🟡';
+                    html += `<span style="font-size: 0.85em; padding: 4px 8px; background: rgba(255,255,255,0.05); border-radius: 4px;" title="${band}: ${condition}">${emoji} ${band}</span>`;
+                }
+            });
+            html += '</div></div>';
+        }
+
+        // Forecast in a compact alert box (if available)
+        if (data.forecast && data.forecast.summary !== "Quiet conditions expected for the next 24 hours.") {
+            html += '<div style="background: rgba(255, 152, 0, 0.15); padding: 10px; border-radius: 6px; border-left: 3px solid #ff9800; font-size: 0.9em;">';
+            html += `<div style="font-weight: bold; margin-bottom: 5px;">⚠️ Forecast: ${data.forecast.geomagnetic_storm}</div>`;
+            html += `<div style="opacity: 0.9;">${data.forecast.summary}</div>`;
+            html += '</div>';
+        }
+
+        html += '</div>';
+
+        contentDiv.innerHTML = html;
+        summaryDiv.style.display = 'block';
+    }
+
     async loadData() {
         this.setStatus('Loading...', 'info');
 
         try {
+            // Load space weather data
+            await this.loadSpaceWeather();
+
             // Get latest data
             const response = await fetch('/api/noisefloor/latest');
 

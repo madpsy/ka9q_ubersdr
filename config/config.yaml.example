@@ -205,6 +205,18 @@ dxcluster:
   # Keep-alive delay in seconds (time between keep-alive messages to prevent timeout)
   keepalive_delay: 300
 
+# Space Weather settings
+spaceweather:
+  # Enable space weather monitoring from NOAA SWPC
+  # Provides solar flux, K-index, and propagation data for HF bands
+  enabled: true
+  
+  # Polling interval in seconds (how often to fetch data from NOAA)
+  # NOAA data updates approximately every 15 minutes
+  # Recommended: 900 seconds (15 minutes) to match NOAA update frequency
+  # Minimum recommended: 300 seconds (5 minutes) to avoid excessive API calls
+  poll_interval_sec: 900
+
 # Prometheus Metrics settings
 prometheus:
   # Enable or disable Prometheus metrics endpoint

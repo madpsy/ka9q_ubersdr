@@ -359,6 +359,13 @@ func main() {
 	}
 	defer dxCluster.Stop()
 
+	// Initialize space weather monitor
+	spaceWeatherMonitor := NewSpaceWeatherMonitor(&config.SpaceWeather)
+	if err := spaceWeatherMonitor.Start(); err != nil {
+		log.Printf("Warning: Failed to start space weather monitor: %v", err)
+	}
+	defer spaceWeatherMonitor.Stop()
+
 	// Initialize DX cluster WebSocket handler
 	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics)
 
@@ -432,6 +439,9 @@ func main() {
 	})
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(w, r, config)
+	})
+	http.HandleFunc("/api/spaceweather", func(w http.ResponseWriter, r *http.Request) {
+		handleSpaceWeather(w, r, spaceWeatherMonitor, ipBanManager)
 	})
 
 	// Noise floor endpoints (with gzip compression, IP ban checking, and rate limiting)
@@ -1317,6 +1327,40 @@ func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Conf
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding noise floor config: %v", err)
+	}
+}
+
+// handleSpaceWeather serves the current space weather data
+func handleSpaceWeather(w http.ResponseWriter, r *http.Request, swm *SpaceWeatherMonitor, ipBanManager *IPBanManager) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if swm == nil || !swm.config.Enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Space weather monitoring is not enabled",
+		})
+		return
+	}
+
+	data := swm.GetData()
+
+	// Check if we have valid data
+	if data.LastUpdate.IsZero() {
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Space weather data not yet available. Please try again in a moment.",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("Error encoding space weather data: %v", err)
 	}
 }
 

@@ -177,7 +177,7 @@ sudo systemctl enable cloudflared
 ```
 ### Update to Latest Version
 
-In order to update to the latest and greatest version, run the following commands within the directory you cloned this repo to:
+In order to update to the latest and greatest version, run the following commands within the directory you cloned this repo to (example: `cd ~/ubersdr/ka9q_ubersdr`):
 
 ```bash
 git pull

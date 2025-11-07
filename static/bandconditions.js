@@ -335,6 +335,7 @@ class BandConditionsMonitor {
 
             if (response.status === 204) {
                 this.setStatus('Collecting initial data... Please wait.', 'info');
+                this.showChartLoadingMessage(true);
                 return;
             }
 
@@ -346,6 +347,7 @@ class BandConditionsMonitor {
 
             if (!data || Object.keys(data).length === 0) {
                 this.setStatus('No measurements available yet', 'info');
+                this.showChartLoadingMessage(true);
                 return;
             }
 
@@ -370,6 +372,7 @@ class BandConditionsMonitor {
 
             await this.updateBandStateChart(data);
             this.updateBandStatusBadges(data);
+            this.showChartLoadingMessage(false);
             this.setStatus('Data loaded successfully', 'success');
             this.startCountdown();
         } catch (error) {
@@ -449,6 +452,7 @@ class BandConditionsMonitor {
 
         if (datasets.length === 0) {
             this.setStatus('No FT8 data available', 'info');
+            this.showChartLoadingMessage(true);
             return;
         }
 
@@ -665,6 +669,26 @@ class BandConditionsMonitor {
             badge.title = `${stateText} (${snr.toFixed(1)} dB)`; // Show details on hover
             bandStatusRow.appendChild(badge);
         });
+    }
+
+    showChartLoadingMessage(show) {
+        const loadingMessage = document.getElementById('chart-loading-message');
+        const chartWrapper = document.querySelector('.chart-wrapper');
+        const bandStatusRow = document.getElementById('bandStatusRow');
+        const legend = document.getElementById('legend');
+
+        if (loadingMessage) {
+            loadingMessage.style.display = show ? 'block' : 'none';
+        }
+        if (chartWrapper) {
+            chartWrapper.style.display = show ? 'none' : 'block';
+        }
+        if (bandStatusRow) {
+            bandStatusRow.style.display = show ? 'none' : 'flex';
+        }
+        if (legend) {
+            legend.style.display = show ? 'none' : 'flex';
+        }
     }
 
     startAutoRefresh() {

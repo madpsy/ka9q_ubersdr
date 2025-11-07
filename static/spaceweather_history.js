@@ -678,15 +678,19 @@ class SpaceWeatherHistory {
                     },
                     y: {
                         type: 'linear',
-                        min: 0.5,
-                        max: 10.5,
+                        min: 0,
+                        max: 11,
                         ticks: {
                             stepSize: 1,
                             color: '#fff',
+                            autoSkip: false,
                             callback: function(value) {
-                                // Map numeric values to band names
-                                const bands = ['', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
-                                return bands[Math.round(value)] || '';
+                                // Map numeric values to band names - must match bandToNumber mapping
+                                const numberToBand = {
+                                    1: '160m', 2: '80m', 3: '60m', 4: '40m', 5: '30m',
+                                    6: '20m', 7: '17m', 8: '15m', 9: '12m', 10: '10m'
+                                };
+                                return numberToBand[value] || '';
                             }
                         },
                         title: {
@@ -694,7 +698,10 @@ class SpaceWeatherHistory {
                             text: 'Band',
                             color: '#fff'
                         },
-                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)',
+                            drawTicks: true
+                        }
                     }
                 }
             }

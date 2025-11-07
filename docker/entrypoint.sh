@@ -4,6 +4,39 @@ set -e
 # Working directory is /app
 # Config files are in /app/config (mounted as a volume)
 
+# Function to merge missing keys from example config into user config
+merge_config_keys() {
+    local user_config="$1"
+    local example_config="$2"
+    local config_name="$3"
+
+    if [ -f "$user_config" ] && [ -f "$example_config" ]; then
+        echo "Checking $config_name for missing keys..."
+
+        # Create backup with timestamp
+        local backup_file="${user_config}.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$user_config" "$backup_file"
+        echo "Created backup: $backup_file"
+
+        # Merge configs: user config takes precedence, but add missing keys from example
+        # The '*' operator in yq merges objects, with the first file taking precedence
+        local temp_file="${user_config}.tmp"
+        if yq eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "$user_config" "$example_config" > "$temp_file" 2>/dev/null; then
+            # Verify the merged file is valid YAML
+            if yq eval '.' "$temp_file" > /dev/null 2>&1; then
+                mv "$temp_file" "$user_config"
+                echo "✓ $config_name updated with any missing keys from example"
+            else
+                echo "⚠ Warning: Merged config validation failed, keeping original"
+                rm -f "$temp_file"
+            fi
+        else
+            echo "⚠ Warning: Config merge failed for $config_name, keeping original"
+            rm -f "$temp_file"
+        fi
+    fi
+}
+
 # Function to initialize config files from examples if they don't exist
 initialize_configs() {
     echo "Checking configuration files in /app/config..."
@@ -15,21 +48,30 @@ initialize_configs() {
     if [ ! -f "/app/config/config.yaml" ]; then
         echo "Initializing config.yaml from example..."
         cp /etc/ka9q_ubersdr/config.yaml.example /app/config/config.yaml
+    else
+        # Merge missing keys from example into existing config
+        merge_config_keys "/app/config/config.yaml" "/etc/ka9q_ubersdr/config.yaml.example" "config.yaml"
     fi
     
     if [ ! -f "/app/config/bands.yaml" ]; then
         echo "Initializing bands.yaml from example..."
         cp /etc/ka9q_ubersdr/bands.yaml.example /app/config/bands.yaml
+    else
+        merge_config_keys "/app/config/bands.yaml" "/etc/ka9q_ubersdr/bands.yaml.example" "bands.yaml"
     fi
     
     if [ ! -f "/app/config/bookmarks.yaml" ]; then
         echo "Initializing bookmarks.yaml from example..."
         cp /etc/ka9q_ubersdr/bookmarks.yaml.example /app/config/bookmarks.yaml
+    else
+        merge_config_keys "/app/config/bookmarks.yaml" "/etc/ka9q_ubersdr/bookmarks.yaml.example" "bookmarks.yaml"
     fi
     
     if [ ! -f "/app/config/extensions.yaml" ]; then
         echo "Initializing extensions.yaml from example..."
         cp /etc/ka9q_ubersdr/extensions.yaml.example /app/config/extensions.yaml
+    else
+        merge_config_keys "/app/config/extensions.yaml" "/etc/ka9q_ubersdr/extensions.yaml.example" "extensions.yaml"
     fi
 }
 

@@ -23,11 +23,13 @@ FROM ubuntu:24.04
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install runtime dependencies
+# Install runtime dependencies including yq for YAML merging
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     wget \
     iproute2 \
+    && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq \
+    && chmod +x /usr/bin/yq \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

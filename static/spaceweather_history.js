@@ -5,9 +5,12 @@ class SpaceWeatherHistory {
     constructor() {
         this.currentMode = 'all';
         this.chart = null;
+        this.bandConditionsChart = null;
         this.selectedDate = null;
         this.availableDates = [];
         this.datePicker = null;
+        this.showingDayConditions = true;
+        this.currentData = null;
         this.init();
         this.loadVersion();
         this.loadAvailableDates();
@@ -255,13 +258,16 @@ class SpaceWeatherHistory {
 
         if (!container || !content) return;
 
+        // Store current data for toggling
+        this.currentData = data;
+
         // Update title based on mode and data count
         if (data.length === 1) {
             const timestamp = new Date(data[0].timestamp);
-            title.textContent = `Space Weather Data - ${timestamp.toLocaleString('en-GB', { 
-                dateStyle: 'medium', 
+            title.textContent = `Space Weather Data - ${timestamp.toLocaleString('en-GB', {
+                dateStyle: 'medium',
                 timeStyle: 'short',
-                hour12: false 
+                hour12: false
             })} UTC`;
         } else {
             title.textContent = `Space Weather Data - ${data.length} Records`;
@@ -397,8 +403,10 @@ class SpaceWeatherHistory {
         
         // Band conditions chart container
         html += '<div style="background: rgba(255,255,255,0.05); border-radius: 8px; padding: 20px;">';
-        html += '<h3 style="margin-bottom: 15px;">Band Conditions Over Time</h3>';
-        html += '<div style="margin-bottom: 10px; font-size: 0.9em; opacity: 0.8;">Day conditions (based on solar activity and propagation quality)</div>';
+        html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">';
+        html += '<h3 style="margin: 0;">Band Conditions Over Time</h3>';
+        html += '<button id="toggle-time-of-day" style="padding: 8px 16px; background: #2196F3; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: bold;">Show Night Conditions</button>';
+        html += '</div>';
         html += '<canvas id="band-conditions-chart"></canvas>';
         html += '</div>';
         
@@ -560,87 +568,92 @@ class SpaceWeatherHistory {
             this.bandConditionsChart = null;
         }
 
+        // Set up toggle button event listener (only once)
+        const toggleBtn = document.getElementById('toggle-time-of-day');
+        if (toggleBtn && !toggleBtn.dataset.listenerAttached) {
+            toggleBtn.addEventListener('click', () => {
+                this.toggleTimeOfDay();
+            });
+            toggleBtn.dataset.listenerAttached = 'true';
+        }
+
+        // Update toggle button text
+        if (toggleBtn) {
+            toggleBtn.textContent = this.showingDayConditions ? 'Show Night Conditions' : 'Show Day Conditions';
+        }
+
         // Band order from lowest to highest frequency
         const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
-        const bandToNumber = {
-            '160m': 1, '80m': 2, '60m': 3, '40m': 4, '30m': 5,
-            '20m': 6, '17m': 7, '15m': 8, '12m': 9, '10m': 10
-        };
 
-        // Quality to numeric value mapping
-        const qualityToValue = {
-            'poor': 1,
-            'fair': 2,
-            'good': 3,
-            'excellent': 4
-        };
+        // Prepare scatter plot data points
+        const datasets = [];
 
-        // Quality to color mapping
-        const qualityToColor = {
-            'poor': '#ef4444',
-            'fair': '#ff9800',
-            'good': '#fbbf24',
-            'excellent': '#22c55e'
-        };
+        // Determine which conditions to show
+        const conditionsKey = this.showingDayConditions ? 'band_conditions_day' : 'band_conditions_night';
 
-        // Prepare scatter plot data - one dataset per quality level
-        const datasets = {
-            'excellent': { label: 'Excellent', data: [], backgroundColor: qualityToColor.excellent },
-            'good': { label: 'Good', data: [], backgroundColor: qualityToColor.good },
-            'fair': { label: 'Fair', data: [], backgroundColor: qualityToColor.fair },
-            'poor': { label: 'Poor', data: [], backgroundColor: qualityToColor.poor }
-        };
-
-        // Process each record
         data.forEach(record => {
             const timestamp = new Date(record.timestamp);
-            
-            // Process day conditions
-            if (record.band_conditions_day) {
+
+            // Process selected time of day conditions
+            if (record[conditionsKey]) {
                 bandOrder.forEach(band => {
-                    const condition = record.band_conditions_day[band];
+                    const condition = record[conditionsKey][band];
                     if (condition) {
                         const quality = condition.toLowerCase();
-                        const bandNum = bandToNumber[band];
+                        let stateValue;
+                        if (quality === 'poor') stateValue = 0;
+                        else if (quality === 'fair') stateValue = 1;
+                        else if (quality === 'good') stateValue = 2;
+                        else if (quality === 'excellent') stateValue = 3;
+                        else stateValue = 0;
                         
-                        if (datasets[quality]) {
-                            datasets[quality].data.push({
-                                x: timestamp,
-                                y: bandNum
-                            });
-                        }
+                        datasets.push({
+                            x: timestamp,
+                            y: band,
+                            v: stateValue,
+                            condition: condition
+                        });
                     }
                 });
             }
         });
 
-        // Convert datasets object to array, filtering out empty datasets
-        const chartDatasets = Object.values(datasets)
-            .filter(ds => ds.data.length > 0)
-            .map(ds => ({
-                ...ds,
-                pointRadius: 4,
-                pointHoverRadius: 6
-            }));
-
         this.bandConditionsChart = new Chart(ctx, {
             type: 'scatter',
             data: {
-                datasets: chartDatasets
+                datasets: [{
+                    label: 'Band Conditions',
+                    data: datasets,
+                    backgroundColor: (context) => {
+                        const value = context.raw.v;
+                        if (value === 0) return '#ef4444'; // POOR - red
+                        if (value === 1) return '#ff9800'; // FAIR - orange
+                        if (value === 2) return '#fbbf24'; // GOOD - bright yellow
+                        if (value === 3) return '#22c55e'; // EXCELLENT - green
+                        return '#9ca3af'; // UNKNOWN - gray
+                    },
+                    borderColor: 'rgba(255, 255, 255, 0.3)',
+                    borderWidth: 1,
+                    pointStyle: 'rect',
+                    pointRadius: 8,
+                    pointHoverRadius: 10
+                }]
             },
             options: {
+                animation: false,
                 responsive: true,
                 maintainAspectRatio: true,
-                aspectRatio: 2.5,
-                interaction: {
-                    mode: 'nearest',
-                    intersect: true
-                },
+                aspectRatio: 5.0,
                 plugins: {
+                    title: {
+                        display: false
+                    },
                     legend: {
-                        labels: { color: '#fff' }
+                        display: false
                     },
                     tooltip: {
+                        mode: 'point',
+                        intersect: false,
                         callbacks: {
                             title: (items) => {
                                 if (items.length === 0) return '';
@@ -651,10 +664,44 @@ class SpaceWeatherHistory {
                                     hour12: false
                                 });
                             },
-                            label: (context) => {
-                                const bandNum = context.parsed.y;
-                                const band = Object.keys(bandToNumber).find(k => bandToNumber[k] === bandNum);
-                                return `${band}: ${context.dataset.label}`;
+                            beforeBody: (items) => {
+                                if (items.length === 0) return [];
+                                const hoveredX = items[0].parsed.x;
+                                const threshold = 5 * 60 * 1000; // 5 minutes tolerance
+
+                                const chart = items[0].chart;
+                                const bandMap = new Map();
+
+                                chart.data.datasets[0].data.forEach((point) => {
+                                    if (Math.abs(point.x.getTime() - hoveredX) < threshold) {
+                                        const state = point.v === 0 ? 'POOR' : (point.v === 1 ? 'FAIR' : (point.v === 2 ? 'GOOD' : 'EXCELLENT'));
+                                        const bandName = point.y;
+
+                                        if (!bandMap.has(bandName)) {
+                                            bandMap.set(bandName, {
+                                                text: `${bandName}: ${state}`,
+                                                timestamp: point.x.getTime()
+                                            });
+                                        } else {
+                                            const existing = bandMap.get(bandName);
+                                            if (point.x.getTime() > existing.timestamp) {
+                                                bandMap.set(bandName, {
+                                                    text: `${bandName}: ${state}`,
+                                                    timestamp: point.x.getTime()
+                                                });
+                                            }
+                                        }
+                                    }
+                                });
+
+                                const allPointsAtTime = Array.from(bandMap.entries())
+                                    .sort((a, b) => bandOrder.indexOf(a[0]) - bandOrder.indexOf(b[0]))
+                                    .map(entry => entry[1].text);
+
+                                return allPointsAtTime;
+                            },
+                            label: () => {
+                                return '';
                             }
                         }
                     }
@@ -663,9 +710,9 @@ class SpaceWeatherHistory {
                     x: {
                         type: 'time',
                         time: {
+                            unit: 'hour',
                             displayFormats: {
-                                hour: 'HH:mm',
-                                minute: 'HH:mm'
+                                hour: 'HH:mm'
                             }
                         },
                         title: {
@@ -677,37 +724,30 @@ class SpaceWeatherHistory {
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     y: {
-                        type: 'linear',
-                        min: 0,
-                        max: 11,
-                        ticks: {
-                            stepSize: 1,
-                            color: '#fff',
-                            autoSkip: false,
-                            callback: function(value) {
-                                // Map numeric values to band names - must match bandToNumber mapping
-                                const numberToBand = {
-                                    1: '160m', 2: '80m', 3: '60m', 4: '40m', 5: '30m',
-                                    6: '20m', 7: '17m', 8: '15m', 9: '12m', 10: '10m'
-                                };
-                                return numberToBand[value] || '';
-                            }
-                        },
+                        type: 'category',
+                        labels: bandOrder,
                         title: {
                             display: true,
                             text: 'Band',
                             color: '#fff'
                         },
-                        grid: {
-                            color: 'rgba(255, 255, 255, 0.1)',
-                            drawTicks: true
-                        }
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     }
                 }
             }
         });
     }
 
+    toggleTimeOfDay() {
+        // Toggle the state
+        this.showingDayConditions = !this.showingDayConditions;
+
+        // Recreate the chart with current data
+        if (this.currentData && Array.isArray(this.currentData) && this.currentData.length > 1) {
+            this.createBandConditionsChart(this.currentData);
+        }
+    }
 
     async downloadCSV() {
         if (!this.selectedDate) {

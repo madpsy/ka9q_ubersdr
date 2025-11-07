@@ -258,7 +258,7 @@ class BandConditionsMonitor {
                  </div>`;
         html += `<div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px;">
                     <div style="font-size: 0.8em; opacity: 0.8;">Solar Wind Bz</div>
-                    <div style="font-size: 1.3em; font-weight: bold;">${data.solar_wind_bz.toFixed(1)} nT</div>
+                    <div style="font-size: 1.3em; font-weight: bold;">${data.solar_wind_bz.toFixed(1)} nT <span style="font-size: 0.7em;">(${data.solar_wind_bz < 0 ? 'Southward' : 'Northward'})</span></div>
                  </div>`;
         html += `<div style="text-align: center; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px;">
                     <div style="font-size: 0.8em; opacity: 0.8;">Propagation</div>

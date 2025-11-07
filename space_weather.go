@@ -17,12 +17,13 @@ import (
 
 // SpaceWeatherMonitor fetches and caches space weather data from NOAA SWPC
 type SpaceWeatherMonitor struct {
-	config *SpaceWeatherConfig
-	mu     sync.RWMutex
-	data   *SpaceWeatherData
-	client *http.Client
-	ctx    context.Context
-	cancel context.CancelFunc
+	config            *SpaceWeatherConfig
+	mu                sync.RWMutex
+	data              *SpaceWeatherData
+	client            *http.Client
+	ctx               context.Context
+	cancel            context.CancelFunc
+	prometheusMetrics *PrometheusMetrics
 
 	// CSV logging
 	currentFile *os.File
@@ -104,11 +105,12 @@ type noaaSolarWindResponse struct {
 }
 
 // NewSpaceWeatherMonitor creates a new space weather monitor
-func NewSpaceWeatherMonitor(config *SpaceWeatherConfig) (*SpaceWeatherMonitor, error) {
+func NewSpaceWeatherMonitor(config *SpaceWeatherConfig, prometheusMetrics *PrometheusMetrics) (*SpaceWeatherMonitor, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	swm := &SpaceWeatherMonitor{
-		config: config,
+		config:            config,
+		prometheusMetrics: prometheusMetrics,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -244,6 +246,11 @@ func (swm *SpaceWeatherMonitor) fetchData() error {
 
 	log.Printf("Space weather updated: SFI=%.1f, K=%d (%s), Quality=%s",
 		data.SolarFlux, data.KIndex, data.KIndexStatus, data.PropagationQuality)
+
+	// Update Prometheus metrics if available
+	if swm.prometheusMetrics != nil {
+		swm.prometheusMetrics.UpdateSpaceWeather(data)
+	}
 
 	// Log to CSV if enabled
 	if swm.config.LogToCSV && swm.config.DataDir != "" {

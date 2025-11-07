@@ -368,7 +368,7 @@ func main() {
 		config.SpaceWeather.DataDir = *configDir + "/" + config.SpaceWeather.DataDir
 	}
 
-	spaceWeatherMonitor, err := NewSpaceWeatherMonitor(&config.SpaceWeather)
+	spaceWeatherMonitor, err := NewSpaceWeatherMonitor(&config.SpaceWeather, prometheusMetrics)
 	if err != nil {
 		log.Fatalf("Failed to initialize space weather monitor: %v", err)
 	}

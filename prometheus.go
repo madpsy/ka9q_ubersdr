@@ -74,6 +74,14 @@ type PrometheusMetrics struct {
 	memoryStackBytes prometheus.Gauge // Current stack memory in bytes
 	gcPauseSeconds   prometheus.Gauge // Last GC pause duration in seconds
 
+	// Space weather metrics
+	spaceWeatherSolarFlux      prometheus.Gauge     // Solar flux (10.7cm) in SFU
+	spaceWeatherKIndex         prometheus.Gauge     // Planetary K-index (0-9)
+	spaceWeatherAIndex         prometheus.Gauge     // Planetary A-index
+	spaceWeatherSolarWindBz    prometheus.Gauge     // Solar wind Bz component in nT
+	spaceWeatherBandConditions *prometheus.GaugeVec // Band conditions (1=Poor, 2=Fair, 3=Good, 4=Excellent) with band and time_of_day labels
+	spaceWeatherLastUpdate     prometheus.Gauge     // Unix timestamp of last space weather update
+
 	// Pushgateway metrics
 	pushgatewayPushesTotal   prometheus.Counter // Total push attempts to Pushgateway
 	pushgatewaySuccessTotal  prometheus.Counter // Successful pushes to Pushgateway
@@ -404,7 +412,46 @@ func (pm *PrometheusMetrics) InitializeSystemMetrics() {
 		},
 	)
 
-	log.Println("Prometheus system metrics initialized (sessions, radiod channels, websockets, throughput, errors, resources, pushgateway)")
+	// Space weather metrics
+	pm.spaceWeatherSolarFlux = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "spaceweather_solar_flux_sfu",
+			Help: "Solar flux (10.7cm) in Solar Flux Units (SFU)",
+		},
+	)
+	pm.spaceWeatherKIndex = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "spaceweather_k_index",
+			Help: "Planetary K-index (0-9 scale)",
+		},
+	)
+	pm.spaceWeatherAIndex = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "spaceweather_a_index",
+			Help: "Planetary A-index",
+		},
+	)
+	pm.spaceWeatherSolarWindBz = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "spaceweather_solar_wind_bz_nt",
+			Help: "Solar wind Bz component in nanoTesla (nT), negative values can trigger geomagnetic storms",
+		},
+	)
+	pm.spaceWeatherBandConditions = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "spaceweather_band_conditions",
+			Help: "HF band propagation conditions (1=Poor, 2=Fair, 3=Good, 4=Excellent)",
+		},
+		[]string{"band", "time_of_day"}, // band: 160m, 80m, etc.; time_of_day: day, night
+	)
+	pm.spaceWeatherLastUpdate = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "spaceweather_last_update_timestamp",
+			Help: "Unix timestamp of last space weather data update",
+		},
+	)
+
+	log.Println("Prometheus system metrics initialized (sessions, radiod channels, websockets, throughput, errors, resources, space weather, pushgateway)")
 }
 
 // UpdateFromMeasurement updates all Prometheus metrics from a BandMeasurement
@@ -635,6 +682,49 @@ func (pm *PrometheusMetrics) RecordAggregateLatency(duration float64) {
 		return
 	}
 	pm.aggregateLatency.Observe(duration)
+}
+
+// UpdateSpaceWeather updates space weather metrics from SpaceWeatherData
+func (pm *PrometheusMetrics) UpdateSpaceWeather(data *SpaceWeatherData) {
+	if pm == nil || data == nil {
+		return
+	}
+
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	pm.spaceWeatherSolarFlux.Set(data.SolarFlux)
+	pm.spaceWeatherKIndex.Set(float64(data.KIndex))
+	pm.spaceWeatherAIndex.Set(float64(data.AIndex))
+	pm.spaceWeatherSolarWindBz.Set(data.SolarWindBz)
+	pm.spaceWeatherLastUpdate.Set(float64(data.LastUpdate.Unix()))
+
+	// Update band conditions (convert text to numeric: Poor=1, Fair=2, Good=3, Excellent=4)
+	conditionToValue := map[string]float64{
+		"Poor":      1.0,
+		"Fair":      2.0,
+		"Good":      3.0,
+		"Excellent": 4.0,
+	}
+
+	// Update day conditions
+	for band, condition := range data.BandConditionsDay {
+		if value, ok := conditionToValue[condition]; ok {
+			pm.spaceWeatherBandConditions.WithLabelValues(band, "day").Set(value)
+		}
+	}
+
+	// Update night conditions
+	for band, condition := range data.BandConditionsNight {
+		if value, ok := conditionToValue[condition]; ok {
+			pm.spaceWeatherBandConditions.WithLabelValues(band, "night").Set(value)
+		}
+	}
+
+	if DebugMode {
+		log.Printf("DEBUG: Updated Prometheus space weather metrics: SolarFlux=%.1f, K=%d, A=%d, Bz=%.2f, Bands=%d day + %d night",
+			data.SolarFlux, data.KIndex, data.AIndex, data.SolarWindBz, len(data.BandConditionsDay), len(data.BandConditionsNight))
+	}
 }
 
 // StartPushgatewayWorker starts a goroutine that periodically pushes metrics to Pushgateway

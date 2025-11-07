@@ -184,3 +184,14 @@ git pull
 cd docker 
 sudo docker compose down ; sudo docker compose build ubersdr && sudo docker compose up -d ubersdr
 ```
+
+## Band Plans
+
+You can import SDR# XML formatted band plans to customise frequency allocations and labels in the interface. Band plan files are available from various sources, including:
+
+- [Arrin-KN1E's SDR Band Plans](https://github.com/Arrin-KN1E/SDR-Band-Plans/) - Comprehensive collection of band plans for different regions
+
+To import a band plan:
+1. Download the appropriate XML file for your region
+2. Import it through the Admin interface settings (Bands tab)
+3. The frequency labels and allocations will be updated accordingly

@@ -884,14 +884,8 @@ class SpaceWeatherHistory {
         // Note: Single time mode doesn't make sense for CSV download, so we download all data for that date
 
         try {
-            // Check if we can download (rate limit check)
-            const response = await fetch(url, { method: 'HEAD' });
-            if (response.status === 429) {
-                this.setStatus('Rate limit exceeded. Please wait 2.5 seconds and try again.', 'error');
-                return;
-            }
-
-            // Create a temporary link and trigger download
+            // Create a temporary link and trigger download directly
+            // (no HEAD check to avoid hitting rate limit twice)
             const link = document.createElement('a');
             link.href = url;
             const filename = this.selectedToDate && this.selectedToDate !== this.selectedDate

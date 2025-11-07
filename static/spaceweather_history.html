@@ -410,9 +410,16 @@
 
             <div class="control-row">
                 <div class="control-group">
-                    <label>Date:</label>
+                    <label id="date-label">Date:</label>
                     <button id="datePickerBtn" style="background: #2196F3;">
                         <span id="selectedDateText">Select Date</span>
+                    </button>
+                </div>
+
+                <div class="control-group hidden" id="to-date-control">
+                    <label>To Date:</label>
+                    <button id="toDatePickerBtn" style="background: #2196F3;">
+                        <span id="selectedToDateText">Select End Date</span>
                     </button>
                 </div>
 
@@ -451,11 +458,11 @@
         <div id="status" class="status">Select a date and click "Load Data" to begin</div>
     </div>
 
-    <!-- Date Picker Overlay -->
+    <!-- From Date Picker Overlay -->
     <div id="datePickerOverlay" class="date-picker-overlay">
         <div class="date-picker">
             <div class="date-picker-header">
-                <h3>Select Date</h3>
+                <h3 id="datePickerTitle">Select Date</h3>
                 <button id="closeDatePicker" style="background: transparent; padding: 5px 10px;">✕</button>
             </div>
             <div class="date-picker-nav">
@@ -466,6 +473,25 @@
             <div class="date-picker-calendar" id="datePickerCalendar"></div>
             <div class="date-picker-footer">
                 <button id="cancelDatePicker">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- To Date Picker Overlay -->
+    <div id="toDatePickerOverlay" class="date-picker-overlay">
+        <div class="date-picker">
+            <div class="date-picker-header">
+                <h3>Select End Date</h3>
+                <button id="closeToDatePicker" style="background: transparent; padding: 5px 10px;">✕</button>
+            </div>
+            <div class="date-picker-nav">
+                <button id="toPrevMonth">‹</button>
+                <div class="date-picker-month-year" id="toMonthYearDisplay"></div>
+                <button id="toNextMonth">›</button>
+            </div>
+            <div class="date-picker-calendar" id="toDatePickerCalendar"></div>
+            <div class="date-picker-footer">
+                <button id="cancelToDatePicker">Cancel</button>
             </div>
         </div>
     </div>

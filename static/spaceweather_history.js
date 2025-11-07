@@ -7,8 +7,10 @@ class SpaceWeatherHistory {
         this.chart = null;
         this.bandConditionsChart = null;
         this.selectedDate = null;
+        this.selectedToDate = null;
         this.availableDates = [];
         this.datePicker = null;
+        this.toDatePicker = null;
         this.showingDayConditions = true;
         this.currentData = null;
         this.init();
@@ -69,28 +71,62 @@ class SpaceWeatherHistory {
     }
 
     initDatePicker() {
-        // Initialize the date picker with available dates
+        // Initialize the FROM date picker with available dates
         this.datePicker = new DatePicker(
             this.availableDates,
             (date) => {
                 this.selectedDate = date;
                 this.updateDateDisplay();
+                // If in range mode and to date is before from date, clear it
+                if (this.currentMode === 'range' && this.selectedToDate && this.selectedToDate < date) {
+                    this.selectedToDate = null;
+                    this.updateToDateDisplay();
+                }
             },
             this.selectedDate
         );
 
-        // Set up date picker button
+        // Initialize the TO date picker with available dates
+        this.toDatePicker = new DatePicker(
+            this.availableDates,
+            (date) => {
+                this.selectedToDate = date;
+                this.updateToDateDisplay();
+            },
+            this.selectedToDate,
+            'toDatePickerOverlay',
+            'toDatePickerCalendar',
+            'toMonthYearDisplay',
+            'toPrevMonth',
+            'toNextMonth'
+        );
+
+        // Set up FROM date picker button
         const datePickerBtn = document.getElementById('datePickerBtn');
         datePickerBtn.addEventListener('click', () => {
             this.openDatePicker();
         });
 
-        // Set up close buttons
+        // Set up TO date picker button
+        const toDatePickerBtn = document.getElementById('toDatePickerBtn');
+        toDatePickerBtn.addEventListener('click', () => {
+            this.openToDatePicker();
+        });
+
+        // Set up close buttons for FROM date picker
         document.getElementById('closeDatePicker').addEventListener('click', () => {
             this.closeDatePicker();
         });
         document.getElementById('cancelDatePicker').addEventListener('click', () => {
             this.closeDatePicker();
+        });
+
+        // Set up close buttons for TO date picker
+        document.getElementById('closeToDatePicker').addEventListener('click', () => {
+            this.closeToDatePicker();
+        });
+        document.getElementById('cancelToDatePicker').addEventListener('click', () => {
+            this.closeToDatePicker();
         });
     }
 
@@ -106,8 +142,21 @@ class SpaceWeatherHistory {
         }
     }
 
+    openToDatePicker() {
+        if (this.toDatePicker) {
+            this.toDatePicker.show();
+        }
+    }
+
+    closeToDatePicker() {
+        if (this.toDatePicker) {
+            this.toDatePicker.close();
+        }
+    }
+
     updateDateDisplay() {
         const dateText = document.getElementById('selectedDateText');
+        const dateLabel = document.getElementById('date-label');
         if (dateText && this.selectedDate) {
             // Handle both date-only and date-time formats
             const dateStr = this.selectedDate.includes('T') ? this.selectedDate.split('T')[0] : this.selectedDate;
@@ -117,6 +166,27 @@ class SpaceWeatherHistory {
                 month: 'short',
                 day: 'numeric'
             });
+        }
+        // Update label based on mode
+        if (dateLabel) {
+            dateLabel.textContent = this.currentMode === 'range' ? 'From Date:' : 'Date:';
+        }
+    }
+
+    updateToDateDisplay() {
+        const dateText = document.getElementById('selectedToDateText');
+        if (dateText) {
+            if (this.selectedToDate) {
+                const dateStr = this.selectedToDate.includes('T') ? this.selectedToDate.split('T')[0] : this.selectedToDate;
+                const date = new Date(dateStr + 'T00:00:00');
+                dateText.textContent = date.toLocaleDateString('en-GB', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
+                });
+            } else {
+                dateText.textContent = 'Select End Date';
+            }
         }
     }
 
@@ -167,14 +237,25 @@ class SpaceWeatherHistory {
         const timeControl = document.getElementById('time-control');
         const fromTimeControl = document.getElementById('from-time-control');
         const toTimeControl = document.getElementById('to-time-control');
+        const toDateControl = document.getElementById('to-date-control');
 
         timeControl.classList.toggle('hidden', mode !== 'single');
         fromTimeControl.classList.toggle('hidden', mode !== 'range');
         toTimeControl.classList.toggle('hidden', mode !== 'range');
+        toDateControl.classList.toggle('hidden', mode !== 'range');
+
+        // Update date label
+        this.updateDateDisplay();
 
         // Update time input to current UTC when switching to single mode
         if (mode === 'single') {
             this.setCurrentUTCTime();
+        }
+
+        // Clear to date when not in range mode
+        if (mode !== 'range') {
+            this.selectedToDate = null;
+            this.updateToDateDisplay();
         }
     }
 
@@ -195,10 +276,23 @@ class SpaceWeatherHistory {
             return;
         }
 
+        // In range mode, validate to date
+        if (this.currentMode === 'range' && this.selectedToDate) {
+            if (this.selectedToDate < this.selectedDate) {
+                this.setStatus('End date must be after or equal to start date', 'error');
+                return;
+            }
+        }
+
         this.setStatus('Loading...', 'info');
 
         try {
-            let url = `/api/spaceweather/history?date=${this.selectedDate}`;
+            let url = `/api/spaceweather/history?from_date=${this.selectedDate}`;
+
+            // Add to_date for range mode if specified
+            if (this.currentMode === 'range' && this.selectedToDate) {
+                url += `&to_date=${this.selectedToDate}`;
+            }
 
             // Add query parameters based on mode
             if (this.currentMode === 'single') {
@@ -237,13 +331,16 @@ class SpaceWeatherHistory {
             const data = await response.json();
 
             if (!data || data.length === 0) {
-                this.setStatus('No data available for the selected date/time', 'info');
+                this.setStatus('No data available for the selected date/time range', 'info');
                 document.getElementById('data-container').style.display = 'none';
                 return;
             }
 
             this.displayData(data);
-            this.setStatus(`Loaded ${data.length} record${data.length > 1 ? 's' : ''}`, 'success');
+            const dateRange = this.selectedToDate && this.selectedToDate !== this.selectedDate
+                ? ` (${this.selectedDate} to ${this.selectedToDate})`
+                : '';
+            this.setStatus(`Loaded ${data.length} record${data.length > 1 ? 's' : ''}${dateRange}`, 'success');
         } catch (error) {
             console.error('Error loading data:', error);
             this.setStatus(`Error: ${error.message}`, 'error');
@@ -755,8 +852,21 @@ class SpaceWeatherHistory {
             return;
         }
 
+        // In range mode, validate to date
+        if (this.currentMode === 'range' && this.selectedToDate) {
+            if (this.selectedToDate < this.selectedDate) {
+                this.setStatus('End date must be after or equal to start date', 'error');
+                return;
+            }
+        }
+
         // Build URL with parameters
-        let url = `/api/spaceweather/csv?date=${this.selectedDate}`;
+        let url = `/api/spaceweather/csv?from_date=${this.selectedDate}`;
+
+        // Add to_date for range mode if specified
+        if (this.currentMode === 'range' && this.selectedToDate) {
+            url += `&to_date=${this.selectedToDate}`;
+        }
 
         // Add time range parameters if in range mode
         if (this.currentMode === 'range') {
@@ -784,7 +894,10 @@ class SpaceWeatherHistory {
             // Create a temporary link and trigger download
             const link = document.createElement('a');
             link.href = url;
-            link.download = `spaceweather-${this.selectedDate}.csv`;
+            const filename = this.selectedToDate && this.selectedToDate !== this.selectedDate
+                ? `spaceweather-${this.selectedDate}-to-${this.selectedToDate}.csv`
+                : `spaceweather-${this.selectedDate}.csv`;
+            link.download = filename;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);

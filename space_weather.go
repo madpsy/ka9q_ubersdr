@@ -871,70 +871,102 @@ func (swm *SpaceWeatherMonitor) rotateCSVFile(dateStr string) error {
 
 // GetHistoricalData reads historical space weather data from CSV and reconstructs it
 // Parameters:
-// - date: Required date in YYYY-MM-DD format
-// - targetTime: Optional time to find closest record (HH:MM:SS or HH:MM or RFC3339)
+// - fromDate: Required start date in YYYY-MM-DD format
+// - toDate: Optional end date in YYYY-MM-DD format (if empty, uses fromDate)
+// - targetTime: Optional time to find closest record (HH:MM:SS or HH:MM or RFC3339) - only works with single day
 // - fromTime: Optional start time for range query (RFC3339 or HH:MM:SS)
 // - toTime: Optional end time for range query (RFC3339 or HH:MM:SS)
 // Returns up to 10,000 records
-func (swm *SpaceWeatherMonitor) GetHistoricalData(date string, targetTime string, fromTime string, toTime string) ([]*SpaceWeatherData, error) {
+func (swm *SpaceWeatherMonitor) GetHistoricalData(fromDate string, toDate string, targetTime string, fromTime string, toTime string) ([]*SpaceWeatherData, error) {
 	if !swm.config.LogToCSV || swm.config.DataDir == "" {
 		return nil, fmt.Errorf("CSV logging is not enabled")
 	}
 
-	// Parse date to create file path
-	t, err := time.Parse("2006-01-02", date)
+	// If toDate is empty, use fromDate (single day query)
+	if toDate == "" {
+		toDate = fromDate
+	}
+
+	// Parse dates
+	startDate, err := time.Parse("2006-01-02", fromDate)
 	if err != nil {
-		return nil, fmt.Errorf("invalid date format (use YYYY-MM-DD): %w", err)
+		return nil, fmt.Errorf("invalid from_date format (use YYYY-MM-DD): %w", err)
 	}
 
-	// Build file path: base_dir/YYYY/MM/spaceweather-YYYY-MM-DD.csv
-	filename := filepath.Join(
-		swm.config.DataDir,
-		fmt.Sprintf("%04d", t.Year()),
-		fmt.Sprintf("%02d", t.Month()),
-		fmt.Sprintf("spaceweather-%s.csv", date),
-	)
-
-	// Open file
-	file, err := os.Open(filename)
+	endDate, err := time.Parse("2006-01-02", toDate)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	// Read CSV
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CSV: %w", err)
+		return nil, fmt.Errorf("invalid to_date format (use YYYY-MM-DD): %w", err)
 	}
 
-	if len(records) < 2 {
-		return nil, fmt.Errorf("no data in file")
+	// Ensure startDate <= endDate
+	if startDate.After(endDate) {
+		return nil, fmt.Errorf("from_date must be before or equal to to_date")
 	}
 
-	// Skip header
-	records = records[1:]
+	// Collect all records from date range
+	allRecords := make([]*SpaceWeatherData, 0)
 
-	// Parse each record
-	result := make([]*SpaceWeatherData, 0, len(records))
-	for _, record := range records {
-		if len(record) < 37 {
-			continue // Skip incomplete records
-		}
+	// Iterate through each date in the range
+	currentDate := startDate
+	for !currentDate.After(endDate) {
+		dateStr := currentDate.Format("2006-01-02")
 
-		data, err := swm.parseCSVRecord(record)
+		// Build file path for this date
+		filename := filepath.Join(
+			swm.config.DataDir,
+			fmt.Sprintf("%04d", currentDate.Year()),
+			fmt.Sprintf("%02d", currentDate.Month()),
+			fmt.Sprintf("spaceweather-%s.csv", dateStr),
+		)
+
+		// Try to open file (may not exist for all dates)
+		file, err := os.Open(filename)
 		if err != nil {
-			log.Printf("Warning: skipping invalid record: %v", err)
+			// Skip missing files silently
+			currentDate = currentDate.AddDate(0, 0, 1)
 			continue
 		}
 
-		result = append(result, data)
+		// Read CSV
+		reader := csv.NewReader(file)
+		records, err := reader.ReadAll()
+		file.Close()
+
+		if err != nil {
+			log.Printf("Warning: failed to read %s: %v", filename, err)
+			currentDate = currentDate.AddDate(0, 0, 1)
+			continue
+		}
+
+		if len(records) < 2 {
+			currentDate = currentDate.AddDate(0, 0, 1)
+			continue
+		}
+
+		// Skip header and parse records
+		for _, record := range records[1:] {
+			if len(record) < 37 {
+				continue
+			}
+
+			data, err := swm.parseCSVRecord(record)
+			if err != nil {
+				continue
+			}
+
+			allRecords = append(allRecords, data)
+		}
+
+		currentDate = currentDate.AddDate(0, 0, 1)
 	}
 
-	// If targetTime is specified, find the closest record
-	if targetTime != "" {
-		closest, err := swm.findClosestRecord(result, targetTime)
+	if len(allRecords) == 0 {
+		return nil, fmt.Errorf("no data found for date range")
+	}
+
+	// If targetTime is specified (only valid for single day), find the closest record
+	if targetTime != "" && fromDate == toDate {
+		closest, err := swm.findClosestRecord(allRecords, targetTime)
 		if err != nil {
 			return nil, err
 		}
@@ -943,19 +975,19 @@ func (swm *SpaceWeatherMonitor) GetHistoricalData(date string, targetTime string
 
 	// If fromTime and toTime are specified, filter by time range
 	if fromTime != "" || toTime != "" {
-		filtered, err := swm.filterByTimeRange(result, date, fromTime, toTime)
+		filtered, err := swm.filterByTimeRangeMultiDay(allRecords, fromDate, toDate, fromTime, toTime)
 		if err != nil {
 			return nil, err
 		}
-		result = filtered
+		allRecords = filtered
 	}
 
 	// Limit to 10,000 records
-	if len(result) > 10000 {
-		result = result[:10000]
+	if len(allRecords) > 10000 {
+		allRecords = allRecords[:10000]
 	}
 
-	return result, nil
+	return allRecords, nil
 }
 
 // findClosestRecord finds the record closest to the specified time
@@ -1005,7 +1037,7 @@ func (swm *SpaceWeatherMonitor) findClosestRecord(records []*SpaceWeatherData, t
 	return closest, nil
 }
 
-// filterByTimeRange filters records to those within the specified time range
+// filterByTimeRange filters records to those within the specified time range (single day)
 func (swm *SpaceWeatherMonitor) filterByTimeRange(records []*SpaceWeatherData, date string, fromTimeStr string, toTimeStr string) ([]*SpaceWeatherData, error) {
 	if len(records) == 0 {
 		return records, nil
@@ -1034,6 +1066,48 @@ func (swm *SpaceWeatherMonitor) filterByTimeRange(records []*SpaceWeatherData, d
 	} else {
 		// Default to end of day
 		toTime, _ = time.Parse("2006-01-02", date)
+		toTime = toTime.Add(24 * time.Hour).Add(-time.Second)
+	}
+
+	// Filter records within the time range
+	filtered := make([]*SpaceWeatherData, 0)
+	for _, record := range records {
+		if (record.LastUpdate.Equal(fromTime) || record.LastUpdate.After(fromTime)) &&
+			(record.LastUpdate.Equal(toTime) || record.LastUpdate.Before(toTime)) {
+			filtered = append(filtered, record)
+		}
+	}
+
+	return filtered, nil
+}
+
+// filterByTimeRangeMultiDay filters records across multiple days with optional time constraints
+func (swm *SpaceWeatherMonitor) filterByTimeRangeMultiDay(records []*SpaceWeatherData, fromDate string, toDate string, fromTimeStr string, toTimeStr string) ([]*SpaceWeatherData, error) {
+	if len(records) == 0 {
+		return records, nil
+	}
+
+	var fromTime, toTime time.Time
+	var err error
+
+	// Parse fromTime if provided, otherwise use start of fromDate
+	if fromTimeStr != "" {
+		fromTime, err = swm.parseTimeWithDate(fromTimeStr, fromDate)
+		if err != nil {
+			return nil, fmt.Errorf("invalid from_time format: %w", err)
+		}
+	} else {
+		fromTime, _ = time.Parse("2006-01-02", fromDate)
+	}
+
+	// Parse toTime if provided, otherwise use end of toDate
+	if toTimeStr != "" {
+		toTime, err = swm.parseTimeWithDate(toTimeStr, toDate)
+		if err != nil {
+			return nil, fmt.Errorf("invalid to_time format: %w", err)
+		}
+	} else {
+		toTime, _ = time.Parse("2006-01-02", toDate)
 		toTime = toTime.Add(24 * time.Hour).Add(-time.Second)
 	}
 
@@ -1228,87 +1302,136 @@ func (swm *SpaceWeatherMonitor) GetAvailableDates() ([]string, error) {
 	return dates, nil
 }
 
-// GetHistoricalCSV reads the raw CSV file for a given date and optionally filters by time range
+// GetHistoricalCSV reads the raw CSV file(s) for a given date range and optionally filters by time range
 // Returns the CSV content as a string with header
-func (swm *SpaceWeatherMonitor) GetHistoricalCSV(date string, fromTime string, toTime string) (string, error) {
+func (swm *SpaceWeatherMonitor) GetHistoricalCSV(fromDate string, toDate string, fromTime string, toTime string) (string, error) {
 	if !swm.config.LogToCSV || swm.config.DataDir == "" {
 		return "", fmt.Errorf("CSV logging is not enabled")
 	}
 
-	// Parse date to create file path
-	t, err := time.Parse("2006-01-02", date)
+	// If toDate is empty, use fromDate (single day query)
+	if toDate == "" {
+		toDate = fromDate
+	}
+
+	// Parse dates
+	startDate, err := time.Parse("2006-01-02", fromDate)
 	if err != nil {
-		return "", fmt.Errorf("invalid date format (use YYYY-MM-DD): %w", err)
+		return "", fmt.Errorf("invalid from_date format (use YYYY-MM-DD): %w", err)
 	}
 
-	// Build file path: base_dir/YYYY/MM/spaceweather-YYYY-MM-DD.csv
-	filename := filepath.Join(
-		swm.config.DataDir,
-		fmt.Sprintf("%04d", t.Year()),
-		fmt.Sprintf("%02d", t.Month()),
-		fmt.Sprintf("spaceweather-%s.csv", date),
-	)
-
-	// Open file
-	file, err := os.Open(filename)
+	endDate, err := time.Parse("2006-01-02", toDate)
 	if err != nil {
-		return "", fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	// Read CSV
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return "", fmt.Errorf("failed to read CSV: %w", err)
+		return "", fmt.Errorf("invalid to_date format (use YYYY-MM-DD): %w", err)
 	}
 
-	if len(records) < 1 {
-		return "", fmt.Errorf("no data in file")
+	// Ensure startDate <= endDate
+	if startDate.After(endDate) {
+		return "", fmt.Errorf("from_date must be before or equal to to_date")
 	}
 
-	// If no time filtering, return entire file
+	// Collect all records from date range
+	var allRecords [][]string
+	var header []string
+
+	// Iterate through each date in the range
+	currentDate := startDate
+	for !currentDate.After(endDate) {
+		dateStr := currentDate.Format("2006-01-02")
+
+		// Build file path for this date
+		filename := filepath.Join(
+			swm.config.DataDir,
+			fmt.Sprintf("%04d", currentDate.Year()),
+			fmt.Sprintf("%02d", currentDate.Month()),
+			fmt.Sprintf("spaceweather-%s.csv", dateStr),
+		)
+
+		// Try to open file
+		file, err := os.Open(filename)
+		if err != nil {
+			// Skip missing files silently
+			currentDate = currentDate.AddDate(0, 0, 1)
+			continue
+		}
+
+		// Read CSV
+		reader := csv.NewReader(file)
+		records, err := reader.ReadAll()
+		file.Close()
+
+		if err != nil {
+			log.Printf("Warning: failed to read %s: %v", filename, err)
+			currentDate = currentDate.AddDate(0, 0, 1)
+			continue
+		}
+
+		if len(records) < 1 {
+			currentDate = currentDate.AddDate(0, 0, 1)
+			continue
+		}
+
+		// Save header from first file
+		if header == nil {
+			header = records[0]
+		}
+
+		// Add data records (skip header)
+		if len(records) > 1 {
+			allRecords = append(allRecords, records[1:]...)
+		}
+
+		currentDate = currentDate.AddDate(0, 0, 1)
+	}
+
+	if len(allRecords) == 0 {
+		return "", fmt.Errorf("no data found for date range")
+	}
+
+	// If no time filtering, return all records
 	if fromTime == "" && toTime == "" {
-		return swm.recordsToCSV(records), nil
+		result := [][]string{header}
+		result = append(result, allRecords...)
+		return swm.recordsToCSV(result), nil
 	}
 
 	// Filter by time range
 	var fromTimeParsed, toTimeParsed time.Time
 
 	if fromTime != "" {
-		fromTimeParsed, err = swm.parseTimeWithDate(fromTime, date)
+		fromTimeParsed, err = swm.parseTimeWithDate(fromTime, fromDate)
 		if err != nil {
 			return "", fmt.Errorf("invalid from_time format: %w", err)
 		}
 	} else {
-		fromTimeParsed, _ = time.Parse("2006-01-02", date)
+		fromTimeParsed, _ = time.Parse("2006-01-02", fromDate)
 	}
 
 	if toTime != "" {
-		toTimeParsed, err = swm.parseTimeWithDate(toTime, date)
+		toTimeParsed, err = swm.parseTimeWithDate(toTime, toDate)
 		if err != nil {
 			return "", fmt.Errorf("invalid to_time format: %w", err)
 		}
 	} else {
-		toTimeParsed, _ = time.Parse("2006-01-02", date)
+		toTimeParsed, _ = time.Parse("2006-01-02", toDate)
 		toTimeParsed = toTimeParsed.Add(24 * time.Hour).Add(-time.Second)
 	}
 
 	// Filter records (keep header + filtered data)
-	filteredRecords := [][]string{records[0]} // Keep header
-	for i := 1; i < len(records); i++ {
-		if len(records[i]) < 1 {
+	filteredRecords := [][]string{header}
+	for _, record := range allRecords {
+		if len(record) < 1 {
 			continue
 		}
 
-		timestamp, err := time.Parse(time.RFC3339, records[i][0])
+		timestamp, err := time.Parse(time.RFC3339, record[0])
 		if err != nil {
 			continue
 		}
 
 		if (timestamp.Equal(fromTimeParsed) || timestamp.After(fromTimeParsed)) &&
 			(timestamp.Equal(toTimeParsed) || timestamp.Before(toTimeParsed)) {
-			filteredRecords = append(filteredRecords, records[i])
+			filteredRecords = append(filteredRecords, record)
 		}
 	}
 

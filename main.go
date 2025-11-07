@@ -1441,20 +1441,27 @@ func handleSpaceWeatherHistory(w http.ResponseWriter, r *http.Request, swm *Spac
 		return
 	}
 
-	// Get date parameter (required)
-	date := r.URL.Query().Get("date")
-	if date == "" {
+	// Get date parameters
+	fromDate := r.URL.Query().Get("date")  // For backward compatibility
+	toDate := r.URL.Query().Get("to_date") // Optional end date for range
+
+	// Also support from_date parameter
+	if fd := r.URL.Query().Get("from_date"); fd != "" {
+		fromDate = fd
+	}
+
+	if fromDate == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "date parameter is required (format: YYYY-MM-DD)",
+			"error": "date or from_date parameter is required (format: YYYY-MM-DD)",
 		})
 		return
 	}
 
 	// Get optional time parameters
-	targetTime := r.URL.Query().Get("time") // Single closest record
-	fromTime := r.URL.Query().Get("from")   // Range start
-	toTime := r.URL.Query().Get("to")       // Range end
+	targetTime := r.URL.Query().Get("time") // Single closest record (only for single day)
+	fromTime := r.URL.Query().Get("from")   // Time range start
+	toTime := r.URL.Query().Get("to")       // Time range end
 
 	// Validate that time and from/to are not used together
 	if targetTime != "" && (fromTime != "" || toTime != "") {
@@ -1466,7 +1473,7 @@ func handleSpaceWeatherHistory(w http.ResponseWriter, r *http.Request, swm *Spac
 	}
 
 	// Get historical data
-	data, err := swm.GetHistoricalData(date, targetTime, fromTime, toTime)
+	data, err := swm.GetHistoricalData(fromDate, toDate, targetTime, fromTime, toTime)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -1581,13 +1588,20 @@ func handleSpaceWeatherCSV(w http.ResponseWriter, r *http.Request, swm *SpaceWea
 		return
 	}
 
-	// Get date parameter (required)
-	date := r.URL.Query().Get("date")
-	if date == "" {
+	// Get date parameters
+	fromDate := r.URL.Query().Get("date")  // For backward compatibility
+	toDate := r.URL.Query().Get("to_date") // Optional end date for range
+
+	// Also support from_date parameter
+	if fd := r.URL.Query().Get("from_date"); fd != "" {
+		fromDate = fd
+	}
+
+	if fromDate == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "date parameter is required (format: YYYY-MM-DD)",
+			"error": "date or from_date parameter is required (format: YYYY-MM-DD)",
 		})
 		return
 	}
@@ -1597,7 +1611,7 @@ func handleSpaceWeatherCSV(w http.ResponseWriter, r *http.Request, swm *SpaceWea
 	toTime := r.URL.Query().Get("to")
 
 	// Get CSV data
-	csvData, err := swm.GetHistoricalCSV(date, fromTime, toTime)
+	csvData, err := swm.GetHistoricalCSV(fromDate, toDate, fromTime, toTime)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		w.Header().Set("Content-Type", "application/json")
@@ -1608,9 +1622,11 @@ func handleSpaceWeatherCSV(w http.ResponseWriter, r *http.Request, swm *SpaceWea
 	}
 
 	// Set headers for CSV download
-	filename := fmt.Sprintf("spaceweather-%s.csv", date)
-	if fromTime != "" || toTime != "" {
-		filename = fmt.Sprintf("spaceweather-%s-filtered.csv", date)
+	filename := fmt.Sprintf("spaceweather-%s.csv", fromDate)
+	if toDate != "" && toDate != fromDate {
+		filename = fmt.Sprintf("spaceweather-%s-to-%s.csv", fromDate, toDate)
+	} else if fromTime != "" || toTime != "" {
+		filename = fmt.Sprintf("spaceweather-%s-filtered.csv", fromDate)
 	}
 
 	w.Header().Set("Content-Type", "text/csv")

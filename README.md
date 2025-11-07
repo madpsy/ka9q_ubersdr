@@ -175,7 +175,7 @@ sudo cloudflared service install
 sudo systemctl start cloudflared
 sudo systemctl enable cloudflared
 ```
-### Update to latest version
+### Update to Latest Version
 
 In order to update to the latest and greatest version, run the following commands within the directory you cloned this repo to:
 

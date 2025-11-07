@@ -18,14 +18,20 @@ merge_config_keys() {
         cp "$user_config" "$backup_file"
         echo "Created backup: $backup_file"
 
-        # Merge configs: user config takes precedence, but add missing keys from example
-        # The '*' operator in yq merges objects, with the first file taking precedence
+        # Merge configs: example provides defaults, user config overrides
+        # Using yq's merge operator where example is base and user overrides it
         local temp_file="${user_config}.tmp"
-        if yq eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "$user_config" "$example_config" > "$temp_file" 2>/dev/null; then
+        if yq eval-all '. as $item ireduce ({}; . * $item)' "$example_config" "$user_config" > "$temp_file" 2>/dev/null; then
             # Verify the merged file is valid YAML
             if yq eval '.' "$temp_file" > /dev/null 2>&1; then
-                mv "$temp_file" "$user_config"
-                echo "✓ $config_name updated with any missing keys from example"
+                # Check if there are actual differences
+                if ! diff -q "$user_config" "$temp_file" > /dev/null 2>&1; then
+                    mv "$temp_file" "$user_config"
+                    echo "✓ $config_name updated with missing keys from example"
+                else
+                    rm -f "$temp_file"
+                    echo "✓ $config_name is up to date"
+                fi
             else
                 echo "⚠ Warning: Merged config validation failed, keeping original"
                 rm -f "$temp_file"
@@ -53,25 +59,27 @@ initialize_configs() {
         merge_config_keys "/app/config/config.yaml" "/etc/ka9q_ubersdr/config.yaml.example" "config.yaml"
     fi
     
+    # For array-based configs (bands, bookmarks, extensions), only initialize if missing
+    # Don't merge these as they contain user-defined lists that shouldn't be auto-updated
     if [ ! -f "/app/config/bands.yaml" ]; then
         echo "Initializing bands.yaml from example..."
         cp /etc/ka9q_ubersdr/bands.yaml.example /app/config/bands.yaml
     else
-        merge_config_keys "/app/config/bands.yaml" "/etc/ka9q_ubersdr/bands.yaml.example" "bands.yaml"
+        echo "✓ bands.yaml exists (user-managed, not auto-merged)"
     fi
-    
+
     if [ ! -f "/app/config/bookmarks.yaml" ]; then
         echo "Initializing bookmarks.yaml from example..."
         cp /etc/ka9q_ubersdr/bookmarks.yaml.example /app/config/bookmarks.yaml
     else
-        merge_config_keys "/app/config/bookmarks.yaml" "/etc/ka9q_ubersdr/bookmarks.yaml.example" "bookmarks.yaml"
+        echo "✓ bookmarks.yaml exists (user-managed, not auto-merged)"
     fi
-    
+
     if [ ! -f "/app/config/extensions.yaml" ]; then
         echo "Initializing extensions.yaml from example..."
         cp /etc/ka9q_ubersdr/extensions.yaml.example /app/config/extensions.yaml
     else
-        merge_config_keys "/app/config/extensions.yaml" "/etc/ka9q_ubersdr/extensions.yaml.example" "extensions.yaml"
+        echo "✓ extensions.yaml exists (user-managed, not auto-merged)"
     fi
 }
 

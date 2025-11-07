@@ -175,3 +175,12 @@ sudo cloudflared service install
 sudo systemctl start cloudflared
 sudo systemctl enable cloudflared
 ```
+### Update to latest version
+
+In order to update to the latest and greatest version, run the following commands within the directory you cloned this repo to:
+
+```bash
+git pull
+cd docker 
+sudo docker compose down ; sudo docker compose build ubersdr && sudo docker compose up -d ubersdr
+```

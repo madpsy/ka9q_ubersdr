@@ -305,6 +305,11 @@ class BandConditionsMonitor {
 
         html += '</div>';
 
+        // Add link to history page
+        html += '<div style="margin-top: 15px; text-align: center;">';
+        html += '<a href="/spaceweather_history.html" style="display: inline-block; padding: 10px 20px; background: rgba(255, 255, 255, 0.15); color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: all 0.3s; border: 1px solid rgba(255, 255, 255, 0.3);" onmouseover="this.style.background=\'rgba(255, 255, 255, 0.25)\'" onmouseout="this.style.background=\'rgba(255, 255, 255, 0.15)\'">View Space Weather History</a>';
+        html += '</div>';
+
         contentDiv.innerHTML = html;
         summaryDiv.style.display = 'block';
 

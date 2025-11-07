@@ -329,3 +329,87 @@ func (arl *AggregateRateLimiter) GetStats() int {
 	defer arl.mu.RUnlock()
 	return len(arl.limiters)
 }
+
+// SpaceWeatherRateLimiter manages rate limiters for space weather endpoint requests per IP
+// Different endpoints have different rate limits:
+// - Current data: 1 request per second (1.0 requests/sec)
+// - History/Dates/CSV: 1 request per 2.5 seconds (0.4 requests/sec)
+type SpaceWeatherRateLimiter struct {
+	limiters map[string]map[string]*RateLimiter // map[ip]map[endpoint]*RateLimiter
+	mu       sync.RWMutex
+}
+
+// NewSpaceWeatherRateLimiter creates a new space weather endpoint rate limiter
+func NewSpaceWeatherRateLimiter() *SpaceWeatherRateLimiter {
+	return &SpaceWeatherRateLimiter{
+		limiters: make(map[string]map[string]*RateLimiter),
+	}
+}
+
+// AllowRequest checks if a space weather request is allowed for the given IP and endpoint
+// endpoint should be "current", "history", "dates", or "csv"
+// Returns true if allowed, false if rate limit exceeded
+func (swrl *SpaceWeatherRateLimiter) AllowRequest(ip, endpoint string) bool {
+	swrl.mu.Lock()
+	ipLimiters, exists := swrl.limiters[ip]
+	if !exists {
+		ipLimiters = make(map[string]*RateLimiter)
+		swrl.limiters[ip] = ipLimiters
+	}
+
+	endpointLimiter, exists := ipLimiters[endpoint]
+	if !exists {
+		// Determine rate based on endpoint
+		var refillRate float64
+		if endpoint == "current" {
+			refillRate = 1.0 // 1 request per second
+		} else {
+			refillRate = 0.4 // 1 request per 2.5 seconds
+		}
+
+		endpointLimiter = &RateLimiter{
+			tokens:     1.0,
+			maxTokens:  1.0,
+			refillRate: refillRate,
+			lastRefill: time.Now(),
+		}
+		ipLimiters[endpoint] = endpointLimiter
+	}
+	swrl.mu.Unlock()
+
+	return endpointLimiter.Allow()
+}
+
+// Cleanup removes rate limiters for IPs that haven't been used recently
+func (swrl *SpaceWeatherRateLimiter) Cleanup() {
+	swrl.mu.Lock()
+	defer swrl.mu.Unlock()
+
+	now := time.Now()
+	for ip, ipLimiters := range swrl.limiters {
+		for endpoint, limiter := range ipLimiters {
+			limiter.mu.Lock()
+			// Remove limiters that haven't been used in the last 10 minutes
+			if now.Sub(limiter.lastRefill) > 10*time.Minute {
+				delete(ipLimiters, endpoint)
+			}
+			limiter.mu.Unlock()
+		}
+		// Remove IP entry if no endpoints left
+		if len(ipLimiters) == 0 {
+			delete(swrl.limiters, ip)
+		}
+	}
+}
+
+// GetStats returns the current number of tracked IPs and total endpoint limiters
+func (swrl *SpaceWeatherRateLimiter) GetStats() (int, int) {
+	swrl.mu.RLock()
+	defer swrl.mu.RUnlock()
+
+	totalEndpoints := 0
+	for _, ipLimiters := range swrl.limiters {
+		totalEndpoints += len(ipLimiters)
+	}
+	return len(swrl.limiters), totalEndpoints
+}

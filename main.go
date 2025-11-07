@@ -360,7 +360,18 @@ func main() {
 	defer dxCluster.Stop()
 
 	// Initialize space weather monitor
-	spaceWeatherMonitor := NewSpaceWeatherMonitor(&config.SpaceWeather)
+	// Set data directory relative to config directory
+	if config.SpaceWeather.LogToCSV && config.SpaceWeather.DataDir == "" {
+		config.SpaceWeather.DataDir = *configDir + "/spaceweather"
+	} else if config.SpaceWeather.LogToCSV && !strings.HasPrefix(config.SpaceWeather.DataDir, "/") {
+		// If relative path, make it relative to config directory
+		config.SpaceWeather.DataDir = *configDir + "/" + config.SpaceWeather.DataDir
+	}
+
+	spaceWeatherMonitor, err := NewSpaceWeatherMonitor(&config.SpaceWeather)
+	if err != nil {
+		log.Fatalf("Failed to initialize space weather monitor: %v", err)
+	}
 	if err := spaceWeatherMonitor.Start(); err != nil {
 		log.Printf("Warning: Failed to start space weather monitor: %v", err)
 	}
@@ -391,6 +402,10 @@ func main() {
 	fftRateLimiter := NewFFTRateLimiter()
 	log.Printf("FFT endpoint rate limiting: 1 request per 2 seconds per band per IP")
 
+	// Initialize space weather endpoint rate limiter
+	spaceWeatherRateLimiter := NewSpaceWeatherRateLimiter()
+	log.Printf("Space weather rate limiting: 1 req/sec (current), 1 req/2.5sec (history/dates/csv)")
+
 	// Start periodic cleanup for rate limiters (every 5 minutes)
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
@@ -399,6 +414,7 @@ func main() {
 			connRateLimiter.Cleanup()
 			aggregateRateLimiter.Cleanup()
 			fftRateLimiter.Cleanup()
+			spaceWeatherRateLimiter.Cleanup()
 		}
 	}()
 
@@ -440,9 +456,18 @@ func main() {
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(w, r, config)
 	})
-	http.HandleFunc("/api/spaceweather", func(w http.ResponseWriter, r *http.Request) {
-		handleSpaceWeather(w, r, spaceWeatherMonitor, ipBanManager)
-	})
+	http.HandleFunc("/api/spaceweather", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleSpaceWeather(w, r, spaceWeatherMonitor, ipBanManager, spaceWeatherRateLimiter)
+	}))
+	http.HandleFunc("/api/spaceweather/history", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleSpaceWeatherHistory(w, r, spaceWeatherMonitor, ipBanManager, spaceWeatherRateLimiter)
+	}))
+	http.HandleFunc("/api/spaceweather/dates", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleSpaceWeatherDates(w, r, spaceWeatherMonitor, ipBanManager, spaceWeatherRateLimiter)
+	}))
+	http.HandleFunc("/api/spaceweather/csv", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleSpaceWeatherCSV(w, r, spaceWeatherMonitor, ipBanManager, spaceWeatherRateLimiter)
+	}))
 
 	// Noise floor endpoints (with gzip compression, IP ban checking, and rate limiting)
 	http.HandleFunc("/api/noisefloor/latest", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
@@ -1334,9 +1359,21 @@ func handleNoiseFloorConfig(w http.ResponseWriter, r *http.Request, config *Conf
 }
 
 // handleSpaceWeather serves the current space weather data
-func handleSpaceWeather(w http.ResponseWriter, r *http.Request, swm *SpaceWeatherMonitor, ipBanManager *IPBanManager) {
+func handleSpaceWeather(w http.ResponseWriter, r *http.Request, swm *SpaceWeatherMonitor, ipBanManager *IPBanManager, rateLimiter *SpaceWeatherRateLimiter) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	// Check rate limit (1 request per second per IP)
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "current") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 1 second between requests.",
+		})
+		log.Printf("Space weather current endpoint rate limit exceeded for IP: %s", clientIP)
 		return
 	}
 
@@ -1364,6 +1401,225 @@ func handleSpaceWeather(w http.ResponseWriter, r *http.Request, swm *SpaceWeathe
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		log.Printf("Error encoding space weather data: %v", err)
+	}
+}
+
+// handleSpaceWeatherHistory serves historical space weather data from CSV
+func handleSpaceWeatherHistory(w http.ResponseWriter, r *http.Request, swm *SpaceWeatherMonitor, ipBanManager *IPBanManager, rateLimiter *SpaceWeatherRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	// Check rate limit (1 request per 2.5 seconds per IP)
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "history") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2.5 seconds between requests.",
+		})
+		log.Printf("Space weather history endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if swm == nil || !swm.config.Enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Space weather monitoring is not enabled",
+		})
+		return
+	}
+
+	if !swm.config.LogToCSV {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Space weather CSV logging is not enabled",
+		})
+		return
+	}
+
+	// Get date parameter (required)
+	date := r.URL.Query().Get("date")
+	if date == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "date parameter is required (format: YYYY-MM-DD)",
+		})
+		return
+	}
+
+	// Get optional time parameters
+	targetTime := r.URL.Query().Get("time") // Single closest record
+	fromTime := r.URL.Query().Get("from")   // Range start
+	toTime := r.URL.Query().Get("to")       // Range end
+
+	// Validate that time and from/to are not used together
+	if targetTime != "" && (fromTime != "" || toTime != "") {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Cannot use 'time' parameter with 'from'/'to' range parameters",
+		})
+		return
+	}
+
+	// Get historical data
+	data, err := swm.GetHistoricalData(date, targetTime, fromTime, toTime)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get historical data: %v", err),
+		})
+		return
+	}
+
+	if len(data) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "No data available for the specified date",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("Error encoding historical space weather data: %v", err)
+	}
+}
+
+// handleSpaceWeatherDates serves the list of available dates for historical data
+func handleSpaceWeatherDates(w http.ResponseWriter, r *http.Request, swm *SpaceWeatherMonitor, ipBanManager *IPBanManager, rateLimiter *SpaceWeatherRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	// Check rate limit (1 request per 2.5 seconds per IP)
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "dates") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2.5 seconds between requests.",
+		})
+		log.Printf("Space weather dates endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if swm == nil || !swm.config.Enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Space weather monitoring is not enabled",
+		})
+		return
+	}
+
+	if !swm.config.LogToCSV {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Space weather CSV logging is not enabled",
+		})
+		return
+	}
+
+	// Get available dates
+	dates, err := swm.GetAvailableDates()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get available dates: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"dates": dates,
+	}); err != nil {
+		log.Printf("Error encoding available dates: %v", err)
+	}
+}
+
+// handleSpaceWeatherCSV serves raw CSV download for historical data
+func handleSpaceWeatherCSV(w http.ResponseWriter, r *http.Request, swm *SpaceWeatherMonitor, ipBanManager *IPBanManager, rateLimiter *SpaceWeatherRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	// Check rate limit (1 request per 2.5 seconds per IP)
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "csv") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2.5 seconds between requests.",
+		})
+		log.Printf("Space weather CSV endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	if swm == nil || !swm.config.Enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Space weather monitoring is not enabled",
+		})
+		return
+	}
+
+	if !swm.config.LogToCSV {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Space weather CSV logging is not enabled",
+		})
+		return
+	}
+
+	// Get date parameter (required)
+	date := r.URL.Query().Get("date")
+	if date == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "date parameter is required (format: YYYY-MM-DD)",
+		})
+		return
+	}
+
+	// Get optional time range parameters
+	fromTime := r.URL.Query().Get("from")
+	toTime := r.URL.Query().Get("to")
+
+	// Get CSV data
+	csvData, err := swm.GetHistoricalCSV(date, fromTime, toTime)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get CSV data: %v", err),
+		})
+		return
+	}
+
+	// Set headers for CSV download
+	filename := fmt.Sprintf("spaceweather-%s.csv", date)
+	if fromTime != "" || toTime != "" {
+		filename = fmt.Sprintf("spaceweather-%s-filtered.csv", date)
+	}
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	w.WriteHeader(http.StatusOK)
+
+	// Write CSV data
+	if _, err := w.Write([]byte(csvData)); err != nil {
+		log.Printf("Error writing CSV data: %v", err)
 	}
 }
 

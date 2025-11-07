@@ -216,6 +216,17 @@ spaceweather:
   # Recommended: 900 seconds (15 minutes) to match NOAA update frequency
   # Minimum recommended: 300 seconds (5 minutes) to avoid excessive API calls
   poll_interval_sec: 900
+  
+  # Enable CSV logging of space weather data
+  # When enabled, stores all raw data to CSV files for historical analysis
+  log_to_csv: true
+  
+  # Directory to store CSV data files (one file per day)
+  # If relative path, will be created relative to config directory
+  # Default: "spaceweather" (creates <config_dir>/spaceweather/)
+  # Absolute paths are also supported
+  # Files are organized as: spaceweather/YYYY/MM/spaceweather-YYYY-MM-DD.csv
+  data_dir: "spaceweather"
 
 # Prometheus Metrics settings
 prometheus:

@@ -142,8 +142,10 @@ type DXClusterConfig struct {
 
 // SpaceWeatherConfig contains space weather monitoring settings
 type SpaceWeatherConfig struct {
-	Enabled         bool `yaml:"enabled"`           // Enable/disable space weather monitoring
-	PollIntervalSec int  `yaml:"poll_interval_sec"` // Seconds between API polls (recommended: 900 = 15 minutes)
+	Enabled         bool   `yaml:"enabled"`           // Enable/disable space weather monitoring
+	PollIntervalSec int    `yaml:"poll_interval_sec"` // Seconds between API polls (recommended: 900 = 15 minutes)
+	DataDir         string `yaml:"data_dir"`          // Directory to store CSV files
+	LogToCSV        bool   `yaml:"log_to_csv"`        // Enable CSV logging
 }
 
 // NoiseFloorConfig contains noise floor monitoring settings

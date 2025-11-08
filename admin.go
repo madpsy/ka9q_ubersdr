@@ -1840,3 +1840,328 @@ func (ah *AdminHandler) HandleSDRSharpImport(w http.ResponseWriter, r *http.Requ
 		"total_entries": len(sdrBands.Entries),
 	})
 }
+
+// HandleDecoderConfig handles GET, POST, PUT, DELETE requests for decoder configuration
+func (ah *AdminHandler) HandleDecoderConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		ah.handleGetDecoderConfig(w, r)
+	case http.MethodPut:
+		ah.handleUpdateDecoderConfig(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetDecoderConfig returns the decoder configuration
+func (ah *AdminHandler) handleGetDecoderConfig(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(ah.getConfigPath("decoder.yaml"))
+	if err != nil {
+		// If file doesn't exist, return default empty config
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"decoder": map[string]interface{}{
+				"enabled":             false,
+				"data_dir":            "decoder_data",
+				"jt9_path":            "/usr/local/bin/jt9",
+				"wsprd_path":          "/usr/local/bin/wsprd",
+				"keep_wav":            false,
+				"keep_logs":           false,
+				"include_dead_time":   false,
+				"receiver_callsign":   "N0CALL",
+				"receiver_locator":    "IO86ha",
+				"receiver_antenna":    "",
+				"pskreporter_enabled": false,
+				"wsprnet_enabled":     false,
+				"bands":               []interface{}{},
+			},
+		})
+		return
+	}
+
+	var decoderConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &decoderConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse decoder config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(decoderConfig)
+}
+
+// handleUpdateDecoderConfig updates the decoder configuration
+func (ah *AdminHandler) handleUpdateDecoderConfig(w http.ResponseWriter, r *http.Request) {
+	var decoderConfig map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&decoderConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Backup existing file with timestamp before replacing
+	decoderPath := ah.getConfigPath("decoder.yaml")
+	if _, err := os.Stat(decoderPath); err == nil {
+		timestamp := time.Now().Format("20060102-150405")
+		backupPath := fmt.Sprintf("%s.%s", decoderPath, timestamp)
+		if err := os.Rename(decoderPath, backupPath); err != nil {
+			log.Printf("Warning: Failed to backup decoder.yaml: %v", err)
+		} else {
+			log.Printf("Backed up decoder.yaml to %s", backupPath)
+		}
+	}
+
+	// Convert to YAML and write to file
+	yamlData, err := yaml.Marshal(decoderConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(decoderPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write decoder config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Decoder configuration updated. Restart server to apply changes.",
+	})
+}
+
+// HandleDecoderBands handles GET, POST, PUT, DELETE requests for decoder bands
+func (ah *AdminHandler) HandleDecoderBands(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		ah.handleGetDecoderBands(w, r)
+	case http.MethodPost:
+		ah.handleAddDecoderBand(w, r)
+	case http.MethodPut:
+		ah.handleUpdateDecoderBand(w, r)
+	case http.MethodDelete:
+		ah.handleDeleteDecoderBand(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetDecoderBands returns all decoder bands
+func (ah *AdminHandler) handleGetDecoderBands(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(ah.getConfigPath("decoder.yaml"))
+	if err != nil {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"bands": []interface{}{}})
+		return
+	}
+
+	var decoderConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &decoderConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse decoder config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	decoder, ok := decoderConfig["decoder"].(map[string]interface{})
+	if !ok {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"bands": []interface{}{}})
+		return
+	}
+
+	bands, ok := decoder["bands"].([]interface{})
+	if !ok {
+		bands = []interface{}{}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"bands": bands})
+}
+
+// handleAddDecoderBand adds a new decoder band
+func (ah *AdminHandler) handleAddDecoderBand(w http.ResponseWriter, r *http.Request) {
+	var newBand map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&newBand); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if newBand["name"] == "" || newBand["mode"] == "" || newBand["frequency"] == nil {
+		http.Error(w, "Name, mode, and frequency are required", http.StatusBadRequest)
+		return
+	}
+
+	// Read existing config
+	data, err := os.ReadFile(ah.getConfigPath("decoder.yaml"))
+	var decoderConfig map[string]interface{}
+	if err == nil {
+		yaml.Unmarshal(data, &decoderConfig)
+	} else {
+		decoderConfig = make(map[string]interface{})
+	}
+
+	decoder, ok := decoderConfig["decoder"].(map[string]interface{})
+	if !ok {
+		decoder = make(map[string]interface{})
+		decoderConfig["decoder"] = decoder
+	}
+
+	bands, ok := decoder["bands"].([]interface{})
+	if !ok {
+		bands = []interface{}{}
+	}
+
+	// Add new band
+	bands = append(bands, newBand)
+	decoder["bands"] = bands
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(decoderConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(ah.getConfigPath("decoder.yaml"), yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write decoder config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Decoder band added successfully. Restart server to apply changes.",
+	})
+}
+
+// handleUpdateDecoderBand updates a decoder band by index
+func (ah *AdminHandler) handleUpdateDecoderBand(w http.ResponseWriter, r *http.Request) {
+	indexStr := r.URL.Query().Get("index")
+	if indexStr == "" {
+		http.Error(w, "Index parameter required", http.StatusBadRequest)
+		return
+	}
+
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		http.Error(w, "Invalid index", http.StatusBadRequest)
+		return
+	}
+
+	var updatedBand map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&updatedBand); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Read existing config
+	data, err := os.ReadFile(ah.getConfigPath("decoder.yaml"))
+	if err != nil {
+		http.Error(w, "Failed to read decoder config file", http.StatusInternalServerError)
+		return
+	}
+
+	var decoderConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &decoderConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse decoder config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	decoder, ok := decoderConfig["decoder"].(map[string]interface{})
+	if !ok {
+		http.Error(w, "Invalid decoder config structure", http.StatusInternalServerError)
+		return
+	}
+
+	bands, ok := decoder["bands"].([]interface{})
+	if !ok || index < 0 || index >= len(bands) {
+		http.Error(w, "Invalid band index", http.StatusBadRequest)
+		return
+	}
+
+	// Update band at index
+	bands[index] = updatedBand
+	decoder["bands"] = bands
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(decoderConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(ah.getConfigPath("decoder.yaml"), yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write decoder config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Decoder band updated successfully. Restart server to apply changes.",
+	})
+}
+
+// handleDeleteDecoderBand deletes a decoder band by index
+func (ah *AdminHandler) handleDeleteDecoderBand(w http.ResponseWriter, r *http.Request) {
+	indexStr := r.URL.Query().Get("index")
+	if indexStr == "" {
+		http.Error(w, "Index parameter required", http.StatusBadRequest)
+		return
+	}
+
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		http.Error(w, "Invalid index", http.StatusBadRequest)
+		return
+	}
+
+	// Read existing config
+	data, err := os.ReadFile(ah.getConfigPath("decoder.yaml"))
+	if err != nil {
+		http.Error(w, "Failed to read decoder config file", http.StatusInternalServerError)
+		return
+	}
+
+	var decoderConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &decoderConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse decoder config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	decoder, ok := decoderConfig["decoder"].(map[string]interface{})
+	if !ok {
+		http.Error(w, "Invalid decoder config structure", http.StatusInternalServerError)
+		return
+	}
+
+	bands, ok := decoder["bands"].([]interface{})
+	if !ok || index < 0 || index >= len(bands) {
+		http.Error(w, "Invalid band index", http.StatusBadRequest)
+		return
+	}
+
+	// Remove band at index
+	bands = append(bands[:index], bands[index+1:]...)
+	decoder["bands"] = bands
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(decoderConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(ah.getConfigPath("decoder.yaml"), yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write decoder config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Decoder band deleted successfully. Restart server to apply changes.",
+	})
+}

@@ -1,0 +1,529 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"math/rand"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+// MultiDecoder manages multiple decoder bands and their sessions
+type MultiDecoder struct {
+	config   *DecoderConfig
+	radiod   *RadiodController
+	sessions *SessionManager
+
+	// Decoder bands
+	decoderBands map[string]*DecoderBand
+	bandsReady   bool
+
+	// Decoder spawner
+	spawner *DecoderSpawner
+
+	// Spot reporters
+	pskReporter *PSKReporter
+	wsprNet     *WSPRNet
+
+	// Statistics
+	stats *DecoderStats
+
+	// Control
+	running  bool
+	stopChan chan struct{}
+	wg       sync.WaitGroup
+}
+
+// NewMultiDecoder creates a new multi-decoder instance
+func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *SessionManager) (*MultiDecoder, error) {
+	if !config.Enabled {
+		return nil, nil
+	}
+
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid decoder configuration: %w", err)
+	}
+
+	// Create data directory
+	if err := os.MkdirAll(config.DataDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create decoder data directory: %w", err)
+	}
+
+	// Check decoder availability
+	modes := make([]DecoderMode, 0)
+	for _, band := range config.GetEnabledBands() {
+		modes = append(modes, band.Mode)
+	}
+	if err := CheckDecoderAvailability(config, modes); err != nil {
+		return nil, fmt.Errorf("decoder availability check failed: %w", err)
+	}
+
+	md := &MultiDecoder{
+		config:       config,
+		radiod:       radiod,
+		sessions:     sessions,
+		decoderBands: make(map[string]*DecoderBand),
+		spawner:      NewDecoderSpawner(config),
+		stats:        NewDecoderStats(),
+		stopChan:     make(chan struct{}),
+	}
+
+	// Initialize spot reporters if enabled
+	if config.PSKReporterEnabled {
+		programName := fmt.Sprintf("%s %s", "UberSDR", Version)
+		psk, err := NewPSKReporter(config.ReceiverCallsign, config.ReceiverLocator, programName, config.ReceiverAntenna)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize PSKReporter: %w", err)
+		}
+		md.pskReporter = psk
+	}
+
+	if config.WSPRNetEnabled {
+		wspr, err := NewWSPRNet(config.ReceiverCallsign, config.ReceiverLocator, "UberSDR", Version)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize WSPRNet: %w", err)
+		}
+		md.wsprNet = wspr
+	}
+
+	return md, nil
+}
+
+// Start begins the multi-decoder operation
+func (md *MultiDecoder) Start() error {
+	if md == nil {
+		return nil // Disabled
+	}
+
+	md.running = true
+
+	log.Printf("Creating decoder sessions for %d bands", len(md.config.GetEnabledBands()))
+
+	// Create audio sessions for each enabled band
+	for _, bandConfig := range md.config.GetEnabledBands() {
+		if err := md.createBandSession(bandConfig); err != nil {
+			return fmt.Errorf("failed to create session for %s: %w", bandConfig.Name, err)
+		}
+	}
+
+	md.bandsReady = true
+
+	// Connect spot reporters
+	if md.pskReporter != nil {
+		if err := md.pskReporter.Connect(); err != nil {
+			log.Printf("Warning: Failed to connect to PSKReporter: %v", err)
+		}
+	}
+
+	if md.wsprNet != nil {
+		if err := md.wsprNet.Connect(); err != nil {
+			log.Printf("Warning: Failed to connect to WSPRNet: %v", err)
+		}
+	}
+
+	// Start monitoring loops for each band
+	for _, band := range md.decoderBands {
+		md.wg.Add(1)
+		go md.bandMonitorLoop(band)
+	}
+
+	log.Printf("Multi-decoder started (%d bands active)", len(md.decoderBands))
+
+	return nil
+}
+
+// createBandSession creates an audio session for a decoder band
+func (md *MultiDecoder) createBandSession(bandConfig DecoderBandConfig) error {
+	// Generate unique SSRC
+	ssrc := uint32(rand.Int31())
+	if ssrc == 0 || ssrc == 0xffffffff {
+		ssrc = 1
+	}
+
+	// Ensure SSRC is unique
+	md.sessions.mu.RLock()
+	for {
+		if _, exists := md.sessions.ssrcToSession[ssrc]; !exists {
+			break
+		}
+		ssrc = uint32(rand.Int31())
+		if ssrc == 0 || ssrc == 0xffffffff {
+			ssrc = 1
+		}
+	}
+	md.sessions.mu.RUnlock()
+
+	// Create channel name
+	channelName := fmt.Sprintf("decoder-%s", bandConfig.Name)
+
+	// Get mode info
+	modeInfo := GetModeInfo(bandConfig.Mode)
+
+	// Create radiod channel (use USB preset, 12kHz sample rate for digital modes)
+	sampleRate := 12000
+	bandwidth := 3000 // 3 kHz bandwidth for digital modes
+
+	// Create the channel with the preset
+	if err := md.radiod.CreateChannelWithBandwidth(
+		channelName,
+		bandConfig.Frequency,
+		modeInfo.Preset,
+		sampleRate,
+		ssrc,
+		bandwidth, // 3000 Hz bandwidth
+	); err != nil {
+		return fmt.Errorf("failed to create radiod channel: %w", err)
+	}
+
+	// Wait for radiod to process the channel creation
+	time.Sleep(100 * time.Millisecond)
+
+	// Create session ID first (needed for UpdateSessionWithEdges)
+	sessionID := fmt.Sprintf("decoder-%s-%08x", bandConfig.Name, ssrc)
+
+	// Create audio channel for receiving data
+	audioChan := make(chan []byte, 100)
+
+	// Register session with session manager BEFORE updating bandwidth
+	session := &Session{
+		ID:          sessionID,
+		ChannelName: channelName,
+		SSRC:        ssrc,
+		Frequency:   bandConfig.Frequency,
+		Mode:        modeInfo.Preset,
+		SampleRate:  sampleRate,
+		AudioChan:   audioChan,
+		CreatedAt:   time.Now(),
+		LastActive:  time.Now(),
+		IsSpectrum:  false,
+	}
+
+	md.sessions.mu.Lock()
+	md.sessions.sessions[sessionID] = session
+	md.sessions.ssrcToSession[ssrc] = session
+	md.sessions.mu.Unlock()
+
+	// Now set the filter bandwidth using LOW_EDGE and HIGH_EDGE
+	// For USB digital modes (FT8/FT4/WSPR): 0 Hz to 3000 Hz
+	// This gives us the full 3 kHz bandwidth needed for digital mode decoding
+	// Use SessionManager's UpdateSessionWithEdges to properly set bandwidth
+	if err := md.sessions.UpdateSessionWithEdges(
+		sessionID,
+		0,         // don't change frequency
+		"",        // don't change mode
+		0,         // LOW_EDGE: 0 Hz (start of USB passband)
+		bandwidth, // HIGH_EDGE: 3000 Hz (end of USB passband)
+		true,      // send bandwidth parameters
+	); err != nil {
+		log.Printf("Warning: failed to set bandwidth for %s: %v", channelName, err)
+	}
+
+	log.Printf("Set decoder bandwidth for %s: 0 to %d Hz", channelName, bandwidth)
+
+	// Create decoder band
+	band := &DecoderBand{
+		Config:       bandConfig,
+		SSRC:         ssrc,
+		SessionID:    sessionID,
+		AudioChan:    audioChan,
+		LastDataTime: time.Now(),
+		DecoderSession: &DecoderSession{
+			SampleRate: sampleRate,
+			Channels:   1, // Mono
+			FileCycle:  -1,
+		},
+	}
+	band.DecoderSession.Band = band
+
+	md.decoderBands[bandConfig.Name] = band
+
+	log.Printf("Created decoder session for %s (SSRC: 0x%08x, freq: %.6f MHz, mode: %s)",
+		bandConfig.Name, ssrc, float64(bandConfig.Frequency)/1e6, bandConfig.Mode.String())
+
+	return nil
+}
+
+// bandMonitorLoop monitors audio data for a single band
+func (md *MultiDecoder) bandMonitorLoop(band *DecoderBand) {
+	defer md.wg.Done()
+
+	modeInfo := GetModeInfo(band.Config.Mode)
+	cycleTime := modeInfo.CycleTime
+	recordingTime := modeInfo.TransmissionTime
+	if md.config.IncludeDeadTime {
+		recordingTime = cycleTime
+	}
+
+	if DebugMode {
+		log.Printf("DEBUG: Monitor loop started for %s (cycle: %v, recording: %v)",
+			band.Config.Name, cycleTime, recordingTime)
+	}
+
+	for {
+		select {
+		case <-md.stopChan:
+			// Close any open file
+			if band.DecoderSession.WavFile != nil {
+				md.closeAndDecode(band)
+			}
+			return
+
+		case audioData := <-band.AudioChan:
+			// Update last data time
+			band.mu.Lock()
+			band.LastDataTime = time.Now()
+			band.mu.Unlock()
+
+			// Process audio packet
+			md.processAudioPacket(band, audioData, time.Now())
+		}
+	}
+}
+
+// processAudioPacket processes an audio packet for a band
+func (md *MultiDecoder) processAudioPacket(band *DecoderBand, audioData []byte, timestamp time.Time) {
+	ds := band.DecoderSession
+	modeInfo := GetModeInfo(band.Config.Mode)
+
+	// Calculate current cycle
+	cycleTime := modeInfo.CycleTime
+	recordingTime := modeInfo.TransmissionTime
+	if md.config.IncludeDeadTime {
+		recordingTime = cycleTime
+	}
+
+	currentCycle := timestamp.Unix() / int64(cycleTime.Seconds())
+	modTime := timestamp.Unix() % int64(cycleTime.Seconds())
+	modTimeSec := float64(modTime)
+
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+
+	ds.CurrentCycle = currentCycle
+
+	// State machine: Check if we need to close current file
+	if ds.WavFile != nil && ds.FileCycle != currentCycle {
+		// Cycle boundary - close and decode
+		ds.mu.Unlock()
+		md.closeAndDecode(band)
+		ds.mu.Lock()
+	}
+
+	// Check if we're past recording window
+	if ds.WavFile != nil && modTimeSec >= recordingTime.Seconds() {
+		// Past recording window - close and decode
+		ds.mu.Unlock()
+		md.closeAndDecode(band)
+		ds.mu.Lock()
+	}
+
+	// Check if we need to create a new file
+	if ds.WavFile == nil && modTimeSec < recordingTime.Seconds() {
+		// Calculate cycle start time
+		cycleStart := timestamp.Add(-time.Duration(modTime) * time.Second)
+		ds.mu.Unlock()
+		md.createNewFile(band, cycleStart)
+		ds.mu.Lock()
+	}
+
+	// Write audio data if file is open
+	if ds.WavFile != nil {
+		n, err := ds.WavFile.WriteBytes(audioData)
+		if err != nil {
+			log.Printf("Error writing audio data for %s: %v", band.Config.Name, err)
+		} else {
+			ds.SamplesWritten += int64(n)
+			ds.TotalSamples += int64(n)
+
+			// Log first few writes to confirm audio is flowing
+			if ds.SamplesWritten <= int64(5*len(audioData)) {
+				log.Printf("DECODER: %s wrote %d bytes to WAV (total: %d samples)",
+					band.Config.Name, len(audioData), ds.SamplesWritten)
+			}
+		}
+	}
+}
+
+// createNewFile creates a new WAV file for recording
+func (md *MultiDecoder) createNewFile(band *DecoderBand, cycleStart time.Time) {
+	ds := band.DecoderSession
+
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+
+	// Create directory for this band
+	bandDir := filepath.Join(md.config.DataDir, fmt.Sprintf("%d", band.Config.Frequency))
+	if err := os.MkdirAll(bandDir, 0755); err != nil {
+		log.Printf("Error creating band directory %s: %v", bandDir, err)
+		return
+	}
+
+	// Generate filename based on mode and time
+	var filename string
+	tm := cycleStart.UTC()
+
+	switch band.Config.Mode {
+	case ModeWSPR:
+		filename = filepath.Join(bandDir, fmt.Sprintf("%02d%02d%02d_%02d%02d.wav",
+			tm.Year()%100, tm.Month(), tm.Day(), tm.Hour(), tm.Minute()))
+	case ModeFT8, ModeFT4:
+		filename = filepath.Join(bandDir, fmt.Sprintf("%02d%02d%02d_%02d%02d%02d.wav",
+			tm.Year()%100, tm.Month(), tm.Day(), tm.Hour(), tm.Minute(), tm.Second()))
+	}
+
+	// Create WAV writer
+	wavWriter, err := NewWAVWriter(filename, ds.SampleRate, ds.Channels, 16)
+	if err != nil {
+		log.Printf("Error creating WAV file %s: %v", filename, err)
+		return
+	}
+
+	ds.WavFile = wavWriter
+	ds.Filename = filename
+	ds.FileCycle = ds.CurrentCycle
+	ds.SamplesWritten = 0
+
+	if DebugMode {
+		log.Printf("DEBUG: Created WAV file for %s: %s (cycle %d)",
+			band.Config.Name, filename, ds.CurrentCycle)
+	}
+}
+
+// closeAndDecode closes the current WAV file and spawns a decoder
+func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
+	ds := band.DecoderSession
+
+	ds.mu.Lock()
+	if ds.WavFile == nil {
+		ds.mu.Unlock()
+		return
+	}
+
+	filename := ds.Filename
+	dataSize := ds.WavFile.GetDataSize()
+	duration := ds.WavFile.GetDuration()
+
+	// Close WAV file
+	if err := ds.WavFile.Close(); err != nil {
+		log.Printf("Error closing WAV file %s: %v", filename, err)
+	}
+
+	ds.WavFile = nil
+	ds.FileCycle = -1
+	ds.mu.Unlock()
+
+	log.Printf("Closed WAV file for %s: %s (%.1f sec, %d bytes)",
+		band.Config.Name, filename, duration, dataSize)
+
+	// Spawn decoder in goroutine
+	go func() {
+		logFile, err := md.spawner.SpawnDecoder(filename, band)
+		if err != nil {
+			log.Printf("Error spawning decoder for %s: %v", band.Config.Name, err)
+			md.stats.IncrementErrors()
+			return
+		}
+
+		// Wait a moment for decoder to complete
+		time.Sleep(2 * time.Second)
+
+		// Process decoder output
+		decodes, err := md.spawner.ProcessDecoderOutput(logFile, band)
+		if err != nil {
+			log.Printf("Error processing decoder output for %s: %v", band.Config.Name, err)
+			md.stats.IncrementErrors()
+			return
+		}
+
+		// Update statistics
+		md.stats.IncrementDecodes(band.Config.Name, int64(len(decodes)))
+
+		if len(decodes) > 0 {
+			log.Printf("Decoded %d spots from %s", len(decodes), band.Config.Name)
+			for _, decode := range decodes {
+				log.Printf("  %s: %s %s SNR:%d @ %.6f MHz",
+					band.Config.Name, decode.Callsign, decode.Locator,
+					decode.SNR, float64(decode.Frequency)/1e6)
+			}
+
+			// Submit to PSKReporter/WSPRNet
+			for _, decode := range decodes {
+				// Submit to PSKReporter (FT8/FT4)
+				if md.pskReporter != nil && (decode.Mode == "FT8" || decode.Mode == "FT4") {
+					if err := md.pskReporter.Submit(decode); err != nil {
+						log.Printf("Warning: Failed to submit to PSKReporter: %v", err)
+					} else {
+						md.stats.IncrementPSKReporter(1)
+					}
+				}
+
+				// Submit to WSPRNet (WSPR only)
+				if md.wsprNet != nil && decode.Mode == "WSPR" {
+					if err := md.wsprNet.Submit(decode); err != nil {
+						log.Printf("Warning: Failed to submit to WSPRNet: %v", err)
+					} else {
+						md.stats.IncrementWSPRNet(1)
+					}
+				}
+			}
+
+			md.stats.IncrementSpots(band.Config.Name, int64(len(decodes)))
+		}
+
+		// Cleanup files
+		md.spawner.CleanupFiles(filename, logFile)
+	}()
+}
+
+// Stop shuts down the multi-decoder
+func (md *MultiDecoder) Stop() {
+	if md == nil || !md.running {
+		return
+	}
+
+	md.running = false
+	close(md.stopChan)
+	md.wg.Wait()
+
+	// Disable and remove all decoder channels
+	if md.bandsReady {
+		for bandName, band := range md.decoderBands {
+			// Disable radiod channel
+			channelName := fmt.Sprintf("decoder-%s", bandName)
+			if err := md.radiod.DisableChannel(channelName, band.SSRC); err != nil {
+				log.Printf("Warning: failed to disable %s channel: %v", bandName, err)
+			}
+
+			// Remove from session manager
+			md.sessions.mu.Lock()
+			delete(md.sessions.sessions, band.SessionID)
+			delete(md.sessions.ssrcToSession, band.SSRC)
+			md.sessions.mu.Unlock()
+
+			// Close audio channel
+			close(band.AudioChan)
+		}
+	}
+
+	// Stop spot reporters
+	if md.pskReporter != nil {
+		md.pskReporter.Stop()
+	}
+
+	if md.wsprNet != nil {
+		md.wsprNet.Stop()
+	}
+
+	log.Printf("Multi-decoder stopped (%d bands cleaned up)", len(md.decoderBands))
+}
+
+// GetStats returns current decoder statistics
+func (md *MultiDecoder) GetStats() map[string]interface{} {
+	if md == nil {
+		return nil
+	}
+	return md.stats.GetStats()
+}

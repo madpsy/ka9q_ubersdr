@@ -23,11 +23,12 @@ FROM ubuntu:24.04
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install runtime dependencies including yq for YAML merging
+# Install runtime dependencies including yq for YAML merging and WSJT-X
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     wget \
     iproute2 \
+    wsjtx \
     && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq \
     && chmod +x /usr/bin/yq \
     && rm -rf /var/lib/apt/lists/*
@@ -47,6 +48,7 @@ COPY --from=builder /build/config/config.yaml.example /etc/ka9q_ubersdr/config.y
 COPY --from=builder /build/config/bands.yaml.example /etc/ka9q_ubersdr/bands.yaml.example
 COPY --from=builder /build/config/bookmarks.yaml.example /etc/ka9q_ubersdr/bookmarks.yaml.example
 COPY --from=builder /build/config/extensions.yaml.example /etc/ka9q_ubersdr/extensions.yaml.example
+COPY --from=builder /build/config/decoder.yaml.example /etc/ka9q_ubersdr/decoder.yaml.example
 
 # Copy entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh

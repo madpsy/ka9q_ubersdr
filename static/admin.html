@@ -294,6 +294,7 @@
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
                     <button class="tab" onclick="switchTab('extensions')">Extensions</button>
+                    <button class="tab" onclick="switchTab('decoder')">Decoder</button>
                 </div>
 
                 <!-- Sessions Tab -->
@@ -437,6 +438,17 @@
                     </div>
                 </div>
 
+                <!-- Decoder Tab -->
+                <div id="decoderTab" class="tab-content">
+                    <div class="alert alert-info" style="margin-bottom: 20px;">
+                        ℹ️ <strong>Note:</strong> Decoder configuration changes require a server restart to take effect.
+                    </div>
+                    <div id="decoderConfig" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading decoder configuration...</p>
+                    </div>
+                </div>
+
                 <div class="button-group" id="sessionButtons" style="display: flex;">
                     <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
                 </div>
@@ -467,6 +479,10 @@
                 <div class="button-group" id="extensionButtons" style="display: none;">
                     <button class="btn" onclick="saveExtensions()">Save Changes</button>
                     <button class="btn btn-secondary" onclick="loadExtensions()">Reload Extensions</button>
+                </div>
+                <div class="button-group" id="decoderButtons" style="display: none;">
+                    <button class="btn" onclick="saveDecoderConfig()">Save Configuration</button>
+                    <button class="btn btn-secondary" onclick="loadDecoderConfig()">Reload</button>
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
@@ -567,6 +583,7 @@
             document.getElementById('bookmarkButtons').style.display = 'none';
             document.getElementById('bandButtons').style.display = 'none';
             document.getElementById('extensionButtons').style.display = 'none';
+            document.getElementById('decoderButtons').style.display = 'none';
             document.getElementById('sessionButtons').style.display = 'none';
             document.getElementById('bannedButtons').style.display = 'none';
 
@@ -605,6 +622,11 @@
                 document.getElementById('extensionsTab').classList.add('active');
                 document.getElementById('extensionButtons').style.display = 'flex';
                 loadAvailableExtensions();
+            } else if (tab === 'decoder') {
+                document.querySelector('.tab:nth-child(7)').classList.add('active');
+                document.getElementById('decoderTab').classList.add('active');
+                document.getElementById('decoderButtons').style.display = 'flex';
+                loadDecoderConfig();
             }
         }
 
@@ -2240,6 +2262,371 @@
                 await loadAvailableExtensions(); // Reload to confirm changes
             } catch (error) {
                 showAlert('Error saving extensions: ' + error.message, 'error');
+            }
+        }
+
+        // Decoder configuration management
+        let currentDecoderConfig = {};
+
+        async function loadDecoderConfig() {
+            try {
+                const response = await fetch('/admin/decoder-config');
+                if (!response.ok) throw new Error('Failed to load decoder config');
+
+                const data = await response.json();
+                currentDecoderConfig = data.decoder || {};
+                renderDecoderConfig();
+                showAlert('Decoder configuration loaded successfully', 'success');
+            } catch (error) {
+                showAlert('Error loading decoder configuration: ' + error.message, 'error');
+            }
+        }
+
+        function renderDecoderConfig() {
+            const container = document.getElementById('decoderConfig');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            // Global settings section
+            const globalSection = document.createElement('div');
+            globalSection.className = 'config-section';
+            globalSection.innerHTML = '<h3>Global Settings</h3>';
+
+            // Enabled checkbox
+            const enabledField = createConfigField('Enabled', 'checkbox', currentDecoderConfig.enabled || false, 'enabled');
+            globalSection.appendChild(enabledField);
+
+            // Data directory
+            const dataDirField = createConfigField('Data Directory', 'text', currentDecoderConfig.data_dir || 'decoder_data', 'data_dir');
+            dataDirField.querySelector('input').placeholder = 'e.g., decoder_data';
+            globalSection.appendChild(dataDirField);
+
+            // Binary paths
+            const jt9PathField = createConfigField('JT9 Binary Path', 'text', currentDecoderConfig.jt9_path || '/usr/local/bin/jt9', 'jt9_path');
+            jt9PathField.querySelector('input').placeholder = '/usr/local/bin/jt9';
+            const jt9Small = document.createElement('small');
+            jt9Small.textContent = 'Path to jt9 binary for FT8/FT4 decoding';
+            jt9PathField.appendChild(jt9Small);
+            globalSection.appendChild(jt9PathField);
+
+            const wsprdPathField = createConfigField('WSPRD Binary Path', 'text', currentDecoderConfig.wsprd_path || '/usr/local/bin/wsprd', 'wsprd_path');
+            wsprdPathField.querySelector('input').placeholder = '/usr/local/bin/wsprd';
+            const wsprdSmall = document.createElement('small');
+            wsprdSmall.textContent = 'Path to wsprd binary for WSPR decoding';
+            wsprdPathField.appendChild(wsprdSmall);
+            globalSection.appendChild(wsprdPathField);
+
+            // File retention options
+            const keepWavField = createConfigField('Keep WAV Files', 'checkbox', currentDecoderConfig.keep_wav || false, 'keep_wav');
+            globalSection.appendChild(keepWavField);
+
+            const keepLogsField = createConfigField('Keep Log Files', 'checkbox', currentDecoderConfig.keep_logs || false, 'keep_logs');
+            globalSection.appendChild(keepLogsField);
+
+            const includeDeadTimeField = createConfigField('Include Dead Time in WAV', 'checkbox', currentDecoderConfig.include_dead_time || false, 'include_dead_time');
+            globalSection.appendChild(includeDeadTimeField);
+
+            container.appendChild(globalSection);
+
+            // Station information section
+            const stationSection = document.createElement('div');
+            stationSection.className = 'config-section';
+            stationSection.innerHTML = '<h3>Station Information</h3>';
+
+            const callsignField = createConfigField('Receiver Callsign', 'text', currentDecoderConfig.receiver_callsign || 'N0CALL', 'receiver_callsign');
+            callsignField.querySelector('input').placeholder = 'e.g., W1ABC';
+            stationSection.appendChild(callsignField);
+
+            const locatorField = createConfigField('Receiver Locator', 'text', currentDecoderConfig.receiver_locator || 'IO86ha', 'receiver_locator');
+            locatorField.querySelector('input').placeholder = 'e.g., FN42';
+            const locatorSmall = document.createElement('small');
+            locatorSmall.textContent = 'Maidenhead grid locator';
+            locatorField.appendChild(locatorSmall);
+            stationSection.appendChild(locatorField);
+
+            const antennaField = createConfigField('Receiver Antenna', 'text', currentDecoderConfig.receiver_antenna || '', 'receiver_antenna');
+            antennaField.querySelector('input').placeholder = 'e.g., Dipole';
+            const antennaSmall = document.createElement('small');
+            antennaSmall.textContent = 'Optional antenna description';
+            antennaField.appendChild(antennaSmall);
+            stationSection.appendChild(antennaField);
+
+            container.appendChild(stationSection);
+
+            // Reporting section
+            const reportingSection = document.createElement('div');
+            reportingSection.className = 'config-section';
+            reportingSection.innerHTML = '<h3>Spot Reporting</h3>';
+
+            const pskReporterField = createConfigField('PSKReporter Enabled', 'checkbox', currentDecoderConfig.pskreporter_enabled || false, 'pskreporter_enabled');
+            const pskSmall = document.createElement('small');
+            pskSmall.textContent = 'Report FT8/FT4 spots to PSKReporter';
+            pskReporterField.appendChild(pskSmall);
+            reportingSection.appendChild(pskReporterField);
+
+            const wsprNetField = createConfigField('WSPRNet Enabled', 'checkbox', currentDecoderConfig.wsprnet_enabled || false, 'wsprnet_enabled');
+            const wsprSmall = document.createElement('small');
+            wsprSmall.textContent = 'Report WSPR spots to WSPRNet';
+            wsprNetField.appendChild(wsprSmall);
+            reportingSection.appendChild(wsprNetField);
+
+            container.appendChild(reportingSection);
+
+            // Bands section
+            const bandsSection = document.createElement('div');
+            bandsSection.className = 'config-section';
+            bandsSection.innerHTML = '<h3>Decoder Bands</h3>';
+
+            const bands = currentDecoderConfig.bands || [];
+            if (bands.length === 0) {
+                const noBands = document.createElement('p');
+                noBands.style.textAlign = 'center';
+                noBands.style.color = '#666';
+                noBands.style.padding = '20px';
+                noBands.innerHTML = '<em>No decoder bands configured. Add bands below.</em>';
+                bandsSection.appendChild(noBands);
+            } else {
+                const bandsTable = document.createElement('table');
+                bandsTable.style.width = '100%';
+                bandsTable.style.borderCollapse = 'collapse';
+                bandsTable.style.marginBottom = '15px';
+
+                const thead = document.createElement('thead');
+                thead.innerHTML = `
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 8px; text-align: left;">Name</th>
+                        <th style="padding: 8px; text-align: left;">Mode</th>
+                        <th style="padding: 8px; text-align: left;">Frequency (Hz)</th>
+                        <th style="padding: 8px; text-align: center;">Enabled</th>
+                        <th style="padding: 8px; text-align: center;">Actions</th>
+                    </tr>
+                `;
+                bandsTable.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+                bands.forEach((band, index) => {
+                    const row = document.createElement('tr');
+                    row.style.borderBottom = '1px solid #dee2e6';
+                    row.innerHTML = `
+                        <td style="padding: 8px;"><strong>${band.name}</strong></td>
+                        <td style="padding: 8px;"><span style="color: #667eea;">${band.mode}</span></td>
+                        <td style="padding: 8px;">${(band.frequency || 0).toLocaleString()}</td>
+                        <td style="padding: 8px; text-align: center;">${band.enabled ? '✓' : '—'}</td>
+                        <td style="padding: 8px; text-align: center;">
+                            <button class="btn" style="padding: 4px 8px; font-size: 11px; margin-right: 5px;" onclick="editDecoderBand(${index})">Edit</button>
+                            <button class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" onclick="deleteDecoderBand(${index})">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                bandsTable.appendChild(tbody);
+                bandsSection.appendChild(bandsTable);
+            }
+
+            // Add band button
+            const addBandBtn = document.createElement('button');
+            addBandBtn.className = 'btn';
+            addBandBtn.textContent = 'Add Decoder Band';
+            addBandBtn.onclick = showAddDecoderBandForm;
+            bandsSection.appendChild(addBandBtn);
+
+            container.appendChild(bandsSection);
+
+            // Add band form (hidden by default)
+            const addBandForm = document.createElement('div');
+            addBandForm.id = 'addDecoderBandForm';
+            addBandForm.style.display = 'none';
+            addBandForm.style.marginTop = '20px';
+            addBandForm.style.padding = '20px';
+            addBandForm.style.background = '#f8f9fa';
+            addBandForm.style.borderRadius = '5px';
+            addBandForm.innerHTML = `
+                <h3 id="decoderBandFormTitle">Add Decoder Band</h3>
+                <input type="hidden" id="editDecoderBandIndex" value="-1">
+                <div class="config-field">
+                    <label>Name</label>
+                    <input type="text" id="newDecoderBandName" placeholder="e.g., 20m FT8">
+                </div>
+                <div class="config-field">
+                    <label>Mode</label>
+                    <select id="newDecoderBandMode">
+                        <option value="FT8">FT8</option>
+                        <option value="FT4">FT4</option>
+                        <option value="WSPR">WSPR</option>
+                    </select>
+                </div>
+                <div class="config-field">
+                    <label>Frequency (Hz)</label>
+                    <input type="number" id="newDecoderBandFreq" placeholder="e.g., 14074000">
+                    <small>Center frequency for the decoder</small>
+                </div>
+                <div class="config-field">
+                    <label>Enabled</label>
+                    <select id="newDecoderBandEnabled">
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="saveDecoderBand()">Save Band</button>
+                <button class="btn btn-secondary" onclick="cancelDecoderBandForm()">Cancel</button>
+            `;
+            container.appendChild(addBandForm);
+        }
+
+        function createConfigField(label, type, value, key) {
+            const field = document.createElement('div');
+            field.className = 'config-field';
+
+            const labelEl = document.createElement('label');
+            labelEl.textContent = label;
+            field.appendChild(labelEl);
+
+            if (type === 'checkbox') {
+                const select = document.createElement('select');
+                select.innerHTML = '<option value="true">Yes</option><option value="false">No</option>';
+                select.value = value.toString();
+                select.dataset.key = key;
+                select.addEventListener('change', (e) => {
+                    currentDecoderConfig[e.target.dataset.key] = e.target.value === 'true';
+                });
+                field.appendChild(select);
+            } else {
+                const input = document.createElement('input');
+                input.type = type;
+                input.value = value;
+                input.dataset.key = key;
+                input.addEventListener('change', (e) => {
+                    currentDecoderConfig[e.target.dataset.key] = e.target.value;
+                });
+                field.appendChild(input);
+            }
+
+            return field;
+        }
+
+        function showAddDecoderBandForm() {
+            document.getElementById('decoderBandFormTitle').textContent = 'Add Decoder Band';
+            document.getElementById('editDecoderBandIndex').value = '-1';
+            document.getElementById('addDecoderBandForm').style.display = 'block';
+            document.getElementById('newDecoderBandName').value = '';
+            document.getElementById('newDecoderBandMode').value = 'FT8';
+            document.getElementById('newDecoderBandFreq').value = '';
+            document.getElementById('newDecoderBandEnabled').value = 'true';
+            document.getElementById('addDecoderBandForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function editDecoderBand(index) {
+            const bands = currentDecoderConfig.bands || [];
+            const band = bands[index];
+            document.getElementById('decoderBandFormTitle').textContent = 'Edit Decoder Band';
+            document.getElementById('editDecoderBandIndex').value = index;
+            document.getElementById('addDecoderBandForm').style.display = 'block';
+            document.getElementById('newDecoderBandName').value = band.name;
+            document.getElementById('newDecoderBandMode').value = band.mode;
+            document.getElementById('newDecoderBandFreq').value = band.frequency;
+            document.getElementById('newDecoderBandEnabled').value = band.enabled.toString();
+            document.getElementById('addDecoderBandForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function cancelDecoderBandForm() {
+            document.getElementById('addDecoderBandForm').style.display = 'none';
+            document.getElementById('editDecoderBandIndex').value = '-1';
+        }
+
+        async function saveDecoderBand() {
+            const name = document.getElementById('newDecoderBandName').value.trim();
+            const mode = document.getElementById('newDecoderBandMode').value;
+            const frequency = parseInt(document.getElementById('newDecoderBandFreq').value);
+            const enabled = document.getElementById('newDecoderBandEnabled').value === 'true';
+            const editIndex = parseInt(document.getElementById('editDecoderBandIndex').value);
+
+            if (!name || !frequency) {
+                showAlert('Please fill in all required fields', 'error');
+                return;
+            }
+
+            const bandData = { name, mode, frequency, enabled };
+
+            try {
+                if (editIndex >= 0) {
+                    // Update existing band
+                    const response = await fetch('/admin/decoder-bands?index=' + editIndex, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(bandData)
+                    });
+                    if (!response.ok) throw new Error('Failed to update decoder band');
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                } else {
+                    // Add new band
+                    const response = await fetch('/admin/decoder-bands', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(bandData)
+                    });
+                    if (!response.ok) throw new Error('Failed to add decoder band');
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                }
+
+                cancelDecoderBandForm();
+                await loadDecoderConfig();
+            } catch (error) {
+                showAlert('Error saving decoder band: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteDecoderBand(index) {
+            if (!confirm('Are you sure you want to delete this decoder band?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/decoder-bands?index=' + index, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) throw new Error('Failed to delete decoder band');
+
+                const result = await response.json();
+                showAlert(result.message, 'success');
+                await loadDecoderConfig();
+            } catch (error) {
+                showAlert('Error deleting decoder band: ' + error.message, 'error');
+            }
+        }
+
+        async function saveDecoderConfig() {
+            const saveButton = event?.target || document.querySelector('#decoderButtons .btn');
+            const originalText = saveButton?.textContent;
+            if (saveButton) {
+                saveButton.disabled = true;
+                saveButton.textContent = 'Saving...';
+            }
+
+            try {
+                showAlert('Saving decoder configuration...', 'info');
+
+                const response = await fetch('/admin/decoder-config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ decoder: currentDecoderConfig })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to save decoder config');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || 'Decoder configuration saved successfully', 'success');
+            } catch (error) {
+                showAlert('Error saving decoder configuration: ' + error.message, 'error');
+            } finally {
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.textContent = originalText;
+                }
             }
         }
     </script>

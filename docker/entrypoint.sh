@@ -81,6 +81,14 @@ initialize_configs() {
     else
         echo "✓ extensions.yaml exists (user-managed, not auto-merged)"
     fi
+
+    if [ ! -f "/app/config/decoder.yaml" ]; then
+        echo "Initializing decoder.yaml from example..."
+        cp /etc/ka9q_ubersdr/decoder.yaml.example /app/config/decoder.yaml
+    else
+        # Merge missing keys from example into existing config (like config.yaml)
+        merge_config_keys "/app/config/decoder.yaml" "/etc/ka9q_ubersdr/decoder.yaml.example" "decoder.yaml"
+    fi
 }
 
 # Function to update admin password in config.yaml

@@ -233,6 +233,20 @@ func main() {
 		log.Printf("No extensions.yaml found or error loading: %v", err)
 	}
 
+	// Load decoder configuration from decoder.yaml if it exists
+	decoderPath := "decoder.yaml"
+	if *configDir != "." {
+		decoderPath = *configDir + "/decoder.yaml"
+	}
+	decoderConfig, err := LoadConfig(decoderPath)
+	if err == nil {
+		config.Decoder = decoderConfig.Decoder
+		log.Printf("Loaded decoder configuration from decoder.yaml (enabled: %v, bands: %d)",
+			config.Decoder.Enabled, len(config.Decoder.GetEnabledBands()))
+	} else {
+		log.Printf("No decoder.yaml found or error loading: %v", err)
+	}
+
 	log.Printf("Starting ka9q_ubersdr server...")
 	log.Printf("Radiod status: %s", config.Radiod.StatusGroup)
 	log.Printf("Radiod data: %s", config.Radiod.DataGroup)
@@ -300,6 +314,31 @@ func main() {
 			log.Fatalf("Failed to start noise floor monitor: %v", err)
 		}
 		defer noiseFloorMonitor.Stop()
+	}
+
+	// Initialize multi-decoder
+	// Set data directory relative to config directory
+	if config.Decoder.Enabled && config.Decoder.DataDir == "" {
+		config.Decoder.DataDir = *configDir + "/decoder_data"
+	} else if config.Decoder.Enabled && !strings.HasPrefix(config.Decoder.DataDir, "/") {
+		// If relative path, make it relative to config directory
+		config.Decoder.DataDir = *configDir + "/" + config.Decoder.DataDir
+	}
+
+	multiDecoder, err := NewMultiDecoder(&config.Decoder, radiod, sessions)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize multi-decoder: %v", err)
+		log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
+		multiDecoder = nil
+	}
+	if multiDecoder != nil {
+		if err := multiDecoder.Start(); err != nil {
+			log.Printf("Warning: Failed to start multi-decoder: %v", err)
+			log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
+			multiDecoder = nil
+		} else {
+			defer multiDecoder.Stop()
+		}
 	}
 
 	// Initialize Prometheus metrics if enabled
@@ -529,6 +568,8 @@ func main() {
 	http.HandleFunc("/admin/ban", adminHandler.AuthMiddleware(adminHandler.HandleBanUser))
 	http.HandleFunc("/admin/unban", adminHandler.AuthMiddleware(adminHandler.HandleUnbanIP))
 	http.HandleFunc("/admin/banned-ips", adminHandler.AuthMiddleware(adminHandler.HandleBannedIPs))
+	http.HandleFunc("/admin/decoder-config", adminHandler.AuthMiddleware(adminHandler.HandleDecoderConfig))
+	http.HandleFunc("/admin/decoder-bands", adminHandler.AuthMiddleware(adminHandler.HandleDecoderBands))
 
 	// Open log file for HTTP request logging
 	// If LogFile is a relative path and we have a config directory, prepend it

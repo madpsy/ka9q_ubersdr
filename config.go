@@ -16,6 +16,7 @@ type Config struct {
 	Audio            AudioConfig        `yaml:"audio"`
 	Spectrum         SpectrumConfig     `yaml:"spectrum"`
 	NoiseFloor       NoiseFloorConfig   `yaml:"noisefloor"`
+	Decoder          DecoderConfig      `yaml:"decoder"`
 	Prometheus       PrometheusConfig   `yaml:"prometheus"`
 	MQTT             MQTTConfig         `yaml:"mqtt"`
 	Logging          LoggingConfig      `yaml:"logging"`
@@ -399,6 +400,17 @@ func LoadConfig(filename string) (*Config, error) {
 			// Calculate bin bandwidth to cover the band
 			bandwidth := float64(band.End - band.Start)
 			band.BinBandwidth = bandwidth / float64(band.BinCount)
+		}
+	}
+
+	// Note: Decoder defaults are NOT set here because decoder.yaml is loaded separately
+	// and should be the source of truth for all decoder configuration
+
+	// Parse decoder band modes
+	for i := range config.Decoder.Bands {
+		band := &config.Decoder.Bands[i]
+		if mode, err := ModeFromString(band.Mode.String()); err == nil {
+			band.Mode = mode
 		}
 	}
 

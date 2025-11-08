@@ -10,10 +10,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"runtime"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // MQTTPublisher manages MQTT publishing of metrics
@@ -145,118 +146,190 @@ func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) 
 	}
 }
 
-// publishAllMetrics publishes all metric categories
+// publishAllMetrics publishes all metric categories by gathering from Prometheus
 func (mp *MQTTPublisher) publishAllMetrics(config *Config) {
 	timestamp := time.Now().Unix()
 
-	// Publish noise floor metrics (per band)
-	mp.publishNoiseFloorMetrics(timestamp)
-
-	// Publish system metrics
-	mp.publishSystemMetrics(timestamp)
-
-	// Publish space weather metrics
-	mp.publishSpaceWeatherMetrics(timestamp)
-
-	// Publish resource metrics
-	mp.publishResourceMetrics(timestamp)
-}
-
-// publishNoiseFloorMetrics publishes noise floor data for each band
-func (mp *MQTTPublisher) publishNoiseFloorMetrics(timestamp int64) {
-	if mp.metrics == nil {
+	// Gather all metrics from Prometheus registry
+	metricFamilies, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to gather Prometheus metrics: %v", err)
 		return
 	}
 
-	// Get all configured bands
-	bands := []string{"160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"}
+	// Group metrics by category based on metric name prefix
+	noisefloorMetrics := make(map[string]map[string]interface{})
+	systemMetrics := make(map[string]interface{})
+	spaceweatherMetrics := make(map[string]interface{})
+	resourceMetrics := make(map[string]interface{})
+	websocketMetrics := make(map[string]interface{})
+	dxclusterMetrics := make(map[string]interface{})
+	pushgatewayMetrics := make(map[string]interface{})
 
-	for _, band := range bands {
-		metrics := make(map[string]float64)
+	// Process each metric family
+	for _, mf := range metricFamilies {
+		metricName := mf.GetName()
 
-		// Collect all noise floor metrics for this band
-		// Note: We can't directly read Prometheus metrics, so we'll need to track them
-		// For now, we'll publish what we can access
-		// In a production implementation, you'd want to cache these values
+		// Process each metric in the family
+		for _, m := range mf.GetMetric() {
+			value := extractMetricValue(m)
+			if value == nil {
+				continue
+			}
+
+			// Extract labels
+			labels := make(map[string]string)
+			for _, label := range m.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+
+			// Route to appropriate category based on metric name
+			switch {
+			case len(metricName) >= 10 && metricName[:10] == "noisefloor":
+				// Noise floor metrics - group by band
+				if band, ok := labels["band"]; ok {
+					if noisefloorMetrics[band] == nil {
+						noisefloorMetrics[band] = make(map[string]interface{})
+					}
+					noisefloorMetrics[band][metricName] = value
+				}
+
+			case len(metricName) >= 12 && metricName[:12] == "spaceweather":
+				// Space weather metrics
+				if len(labels) > 0 {
+					// For metrics with labels (like band_conditions), create a composite key
+					key := metricName
+					for k, v := range labels {
+						key += "_" + k + "_" + v
+					}
+					spaceweatherMetrics[key] = value
+				} else {
+					spaceweatherMetrics[metricName] = value
+				}
+
+			case len(metricName) >= 7 && metricName[:7] == "ubersdr":
+				// UberSDR system metrics
+				subCategory := ""
+				if len(metricName) >= 16 && metricName[8:16] == "websocket" {
+					subCategory = "websocket"
+				} else if len(metricName) >= 18 && metricName[8:18] == "dx_cluster" {
+					subCategory = "dxcluster"
+				} else if len(metricName) >= 19 && metricName[8:19] == "pushgateway" {
+					subCategory = "pushgateway"
+				}
+
+				if len(labels) > 0 {
+					// For metrics with labels, create a composite key
+					key := metricName
+					for k, v := range labels {
+						key += "_" + k + "_" + v
+					}
+					switch subCategory {
+					case "websocket":
+						websocketMetrics[key] = value
+					case "dxcluster":
+						dxclusterMetrics[key] = value
+					case "pushgateway":
+						pushgatewayMetrics[key] = value
+					default:
+						systemMetrics[key] = value
+					}
+				} else {
+					switch subCategory {
+					case "websocket":
+						websocketMetrics[metricName] = value
+					case "dxcluster":
+						dxclusterMetrics[metricName] = value
+					case "pushgateway":
+						pushgatewayMetrics[metricName] = value
+					default:
+						systemMetrics[metricName] = value
+					}
+				}
+
+			default:
+				// Other metrics (resource metrics, etc.)
+				if len(labels) > 0 {
+					key := metricName
+					for k, v := range labels {
+						key += "_" + k + "_" + v
+					}
+					resourceMetrics[key] = value
+				} else {
+					resourceMetrics[metricName] = value
+				}
+			}
+		}
+	}
+
+	// Publish each category
+	mp.publishMetricCategory("noisefloor", noisefloorMetrics, timestamp)
+	mp.publishMetricCategory("system", map[string]map[string]interface{}{"metrics": systemMetrics}, timestamp)
+	mp.publishMetricCategory("spaceweather", map[string]map[string]interface{}{"metrics": spaceweatherMetrics}, timestamp)
+	mp.publishMetricCategory("resources", map[string]map[string]interface{}{"metrics": resourceMetrics}, timestamp)
+	mp.publishMetricCategory("websocket", map[string]map[string]interface{}{"metrics": websocketMetrics}, timestamp)
+	mp.publishMetricCategory("dxcluster", map[string]map[string]interface{}{"metrics": dxclusterMetrics}, timestamp)
+	mp.publishMetricCategory("pushgateway", map[string]map[string]interface{}{"metrics": pushgatewayMetrics}, timestamp)
+}
+
+// extractMetricValue extracts the numeric value from a Prometheus metric
+func extractMetricValue(m *dto.Metric) interface{} {
+	if m.GetGauge() != nil {
+		return m.GetGauge().GetValue()
+	}
+	if m.GetCounter() != nil {
+		return m.GetCounter().GetValue()
+	}
+	if m.GetHistogram() != nil {
+		return m.GetHistogram().GetSampleSum()
+	}
+	if m.GetSummary() != nil {
+		return m.GetSummary().GetSampleSum()
+	}
+	return nil
+}
+
+// publishMetricCategory publishes a category of metrics
+func (mp *MQTTPublisher) publishMetricCategory(category string, data map[string]map[string]interface{}, timestamp int64) {
+	for subKey, metrics := range data {
+		if len(metrics) == 0 {
+			continue
+		}
+
+		// Convert interface{} map to float64 map for JSON serialization
+		floatMetrics := make(map[string]float64)
+		for k, v := range metrics {
+			switch val := v.(type) {
+			case float64:
+				floatMetrics[k] = val
+			case float32:
+				floatMetrics[k] = float64(val)
+			case int:
+				floatMetrics[k] = float64(val)
+			case int64:
+				floatMetrics[k] = float64(val)
+			}
+		}
+
+		if len(floatMetrics) == 0 {
+			continue
+		}
 
 		payload := MetricPayload{
 			Timestamp: timestamp,
-			Labels:    map[string]string{"band": band},
-			Metrics:   metrics,
+			Metrics:   floatMetrics,
 		}
 
-		topic := fmt.Sprintf("%s/noisefloor/%s", mp.config.TopicPrefix, band)
+		// Build topic based on category and subkey
+		var topic string
+		if subKey == "metrics" {
+			topic = fmt.Sprintf("%s/%s", mp.config.TopicPrefix, category)
+		} else {
+			topic = fmt.Sprintf("%s/%s/%s", mp.config.TopicPrefix, category, subKey)
+		}
+
 		mp.publish(topic, payload)
 	}
-}
-
-// publishSystemMetrics publishes system-level metrics
-func (mp *MQTTPublisher) publishSystemMetrics(timestamp int64) {
-	if mp.metrics == nil {
-		return
-	}
-
-	metrics := make(map[string]float64)
-
-	// System metrics would be collected here
-	// For a complete implementation, you'd need to expose these values
-	// from the PrometheusMetrics struct
-
-	payload := MetricPayload{
-		Timestamp: timestamp,
-		Metrics:   metrics,
-	}
-
-	topic := fmt.Sprintf("%s/system", mp.config.TopicPrefix)
-	mp.publish(topic, payload)
-}
-
-// publishSpaceWeatherMetrics publishes space weather data
-func (mp *MQTTPublisher) publishSpaceWeatherMetrics(timestamp int64) {
-	if mp.metrics == nil {
-		return
-	}
-
-	metrics := make(map[string]float64)
-
-	// Space weather metrics would be collected here
-
-	payload := MetricPayload{
-		Timestamp: timestamp,
-		Metrics:   metrics,
-	}
-
-	topic := fmt.Sprintf("%s/spaceweather", mp.config.TopicPrefix)
-	mp.publish(topic, payload)
-}
-
-// publishResourceMetrics publishes resource usage metrics
-func (mp *MQTTPublisher) publishResourceMetrics(timestamp int64) {
-	metrics := make(map[string]float64)
-
-	// Get runtime memory statistics
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-
-	metrics["goroutines_total"] = float64(runtime.NumGoroutine())
-	metrics["memory_alloc_bytes"] = float64(m.Alloc)
-	metrics["memory_total_bytes"] = float64(m.TotalAlloc)
-	metrics["memory_heap_bytes"] = float64(m.HeapAlloc)
-	metrics["memory_stack_bytes"] = float64(m.StackInuse)
-
-	// GC pause time
-	if len(m.PauseNs) > 0 {
-		lastPause := m.PauseNs[(m.NumGC+255)%256]
-		metrics["gc_pause_seconds"] = float64(lastPause) / 1e9
-	}
-
-	payload := MetricPayload{
-		Timestamp: timestamp,
-		Metrics:   metrics,
-	}
-
-	topic := fmt.Sprintf("%s/resources", mp.config.TopicPrefix)
-	mp.publish(topic, payload)
 }
 
 // publish sends a payload to an MQTT topic

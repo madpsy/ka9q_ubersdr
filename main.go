@@ -345,12 +345,7 @@ func main() {
 				config.Prometheus.Pushgateway.Instance)
 		}
 
-		// Start MQTT publisher if enabled
-		if config.MQTT.Enabled {
-			if err := prometheusMetrics.StartMQTTPublisher(ctx, config, noiseFloorMonitor); err != nil {
-				log.Printf("Warning: Failed to start MQTT publisher: %v", err)
-			}
-		}
+		// Note: MQTT publisher will be started after space weather monitor is initialized
 	}
 
 	// Initialize DX cluster client
@@ -383,6 +378,17 @@ func main() {
 		log.Printf("Warning: Failed to start space weather monitor: %v", err)
 	}
 	defer spaceWeatherMonitor.Stop()
+
+	// Start MQTT publisher if enabled (after space weather monitor is initialized)
+	if prometheusMetrics != nil && config.MQTT.Enabled {
+		// Get the context from Prometheus initialization
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		if err := prometheusMetrics.StartMQTTPublisher(ctx, config, noiseFloorMonitor, spaceWeatherMonitor); err != nil {
+			log.Printf("Warning: Failed to start MQTT publisher: %v", err)
+		}
+	}
 
 	// Initialize DX cluster WebSocket handler
 	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics)

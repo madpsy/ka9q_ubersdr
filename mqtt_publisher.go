@@ -19,10 +19,11 @@ import (
 
 // MQTTPublisher manages MQTT publishing of metrics
 type MQTTPublisher struct {
-	client            mqtt.Client
-	config            *MQTTConfig
-	metrics           *PrometheusMetrics
-	noiseFloorMonitor *NoiseFloorMonitor
+	client              mqtt.Client
+	config              *MQTTConfig
+	metrics             *PrometheusMetrics
+	noiseFloorMonitor   *NoiseFloorMonitor
+	spaceWeatherMonitor *SpaceWeatherMonitor
 }
 
 // MetricPayload represents a metric message for MQTT
@@ -73,7 +74,7 @@ func loadTLSConfig(tlsConfig MQTTTLSConfig) (*tls.Config, error) {
 }
 
 // NewMQTTPublisher creates a new MQTT publisher
-func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloorMonitor *NoiseFloorMonitor) (*MQTTPublisher, error) {
+func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloorMonitor *NoiseFloorMonitor, spaceWeatherMonitor *SpaceWeatherMonitor) (*MQTTPublisher, error) {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(config.Broker)
 	opts.SetClientID(generateClientID())
@@ -119,10 +120,11 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloor
 	log.Printf("MQTT: Successfully connected to broker: %s", config.Broker)
 
 	return &MQTTPublisher{
-		client:            client,
-		config:            config,
-		metrics:           metrics,
-		noiseFloorMonitor: noiseFloorMonitor,
+		client:              client,
+		config:              config,
+		metrics:             metrics,
+		noiseFloorMonitor:   noiseFloorMonitor,
+		spaceWeatherMonitor: spaceWeatherMonitor,
 	}, nil
 }
 
@@ -299,11 +301,13 @@ func (mp *MQTTPublisher) publishAllMetrics(config *Config) {
 	// Publish each category
 	mp.publishMetricCategory("noisefloor", noisefloorMetrics, timestamp)
 	mp.publishMetricCategory("system", map[string]map[string]interface{}{"metrics": systemMetrics}, timestamp)
-	mp.publishMetricCategory("spaceweather", map[string]map[string]interface{}{"metrics": spaceweatherMetrics}, timestamp)
 	mp.publishMetricCategory("resources", map[string]map[string]interface{}{"metrics": resourceMetrics}, timestamp)
 	mp.publishMetricCategory("websocket", map[string]map[string]interface{}{"metrics": websocketMetrics}, timestamp)
 	mp.publishMetricCategory("dxcluster", map[string]map[string]interface{}{"metrics": dxclusterMetrics}, timestamp)
 	mp.publishMetricCategory("pushgateway", map[string]map[string]interface{}{"metrics": pushgatewayMetrics}, timestamp)
+
+	// Publish space weather with text fields separately
+	mp.publishSpaceWeather(spaceweatherMetrics, timestamp)
 }
 
 // extractMetricValue extracts the numeric value from a Prometheus metric
@@ -448,6 +452,59 @@ func (mp *MQTTPublisher) publishSpectrumData(config *Config) {
 		if DebugMode {
 			log.Printf("MQTT DEBUG: Published spectrum to %s: %d bins", topic, len(fft.Data))
 		}
+	}
+}
+
+// publishSpaceWeather publishes space weather metrics with text fields
+func (mp *MQTTPublisher) publishSpaceWeather(numericMetrics map[string]interface{}, timestamp int64) {
+	// Start with numeric metrics from Prometheus
+	payload := make(map[string]interface{})
+
+	// Add numeric metrics
+	for k, v := range numericMetrics {
+		payload[k] = v
+	}
+
+	// Add text fields from SpaceWeatherMonitor if available
+	if mp.spaceWeatherMonitor != nil {
+		data := mp.spaceWeatherMonitor.GetData()
+		if data != nil {
+			// Add text status fields
+			payload["k_index_status"] = data.KIndexStatus
+			payload["propagation_quality"] = data.PropagationQuality
+
+			// Add forecast text fields if available
+			if data.Forecast != nil {
+				payload["forecast_geomagnetic_storm"] = data.Forecast.GeomagneticStorm
+				payload["forecast_radio_blackout"] = data.Forecast.RadioBlackout
+				payload["forecast_solar_radiation"] = data.Forecast.SolarRadiation
+				payload["forecast_summary"] = data.Forecast.Summary
+			}
+		}
+	}
+
+	// Publish to spaceweather topic
+	topic := fmt.Sprintf("%s/spaceweather", mp.config.TopicPrefix)
+
+	fullPayload := map[string]interface{}{
+		"timestamp": timestamp,
+		"data":      payload,
+	}
+
+	data, err := json.Marshal(fullPayload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal spaceweather payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	if token.Wait() && token.Error() != nil {
+		log.Printf("MQTT ERROR: Failed to publish spaceweather: %v", token.Error())
+		return
+	}
+
+	if DebugMode {
+		log.Printf("MQTT DEBUG: Published spaceweather with %d fields", len(payload))
 	}
 }
 

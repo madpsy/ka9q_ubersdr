@@ -841,7 +841,7 @@ func (pm *PrometheusMetrics) pushToGateway(config *Config) error {
 }
 
 // StartMQTTPublisher starts the MQTT publisher worker if enabled
-func (pm *PrometheusMetrics) StartMQTTPublisher(ctx context.Context, config *Config, noiseFloorMonitor *NoiseFloorMonitor) error {
+func (pm *PrometheusMetrics) StartMQTTPublisher(ctx context.Context, config *Config, noiseFloorMonitor *NoiseFloorMonitor, spaceWeatherMonitor *SpaceWeatherMonitor) error {
 	if pm == nil || !config.MQTT.Enabled {
 		return nil
 	}
@@ -858,7 +858,7 @@ func (pm *PrometheusMetrics) StartMQTTPublisher(ctx context.Context, config *Con
 		config.MQTT.Broker, config.MQTT.TopicPrefix, config.MQTT.PublishInterval)
 
 	// Create MQTT publisher
-	publisher, err := NewMQTTPublisher(&config.MQTT, pm, noiseFloorMonitor)
+	publisher, err := NewMQTTPublisher(&config.MQTT, pm, noiseFloorMonitor, spaceWeatherMonitor)
 	if err != nil {
 		return fmt.Errorf("failed to create MQTT publisher: %w", err)
 	}

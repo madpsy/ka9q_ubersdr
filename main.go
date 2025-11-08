@@ -333,16 +333,23 @@ func main() {
 		})
 		log.Printf("Prometheus metrics enabled at /metrics (allowed hosts: %v)", config.Prometheus.AllowedHosts)
 
+		// Create context for graceful shutdown (used by Pushgateway and MQTT)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		// Start Pushgateway worker if enabled
 		if config.Prometheus.Pushgateway.Enabled {
-			// Create context for graceful shutdown
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
 			prometheusMetrics.StartPushgatewayWorker(ctx, config)
 			log.Printf("Prometheus Pushgateway enabled: URL=%s, Job=ka9q_ubersdr, Instance=%s, Interval=60s",
 				config.Prometheus.Pushgateway.URL,
 				config.Prometheus.Pushgateway.Instance)
+		}
+
+		// Start MQTT publisher if enabled
+		if config.MQTT.Enabled {
+			if err := prometheusMetrics.StartMQTTPublisher(ctx, config); err != nil {
+				log.Printf("Warning: Failed to start MQTT publisher: %v", err)
+			}
 		}
 	}
 

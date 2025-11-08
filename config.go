@@ -17,6 +17,7 @@ type Config struct {
 	Spectrum         SpectrumConfig     `yaml:"spectrum"`
 	NoiseFloor       NoiseFloorConfig   `yaml:"noisefloor"`
 	Prometheus       PrometheusConfig   `yaml:"prometheus"`
+	MQTT             MQTTConfig         `yaml:"mqtt"`
 	Logging          LoggingConfig      `yaml:"logging"`
 	DXCluster        DXClusterConfig    `yaml:"dxcluster"`
 	SpaceWeather     SpaceWeatherConfig `yaml:"spaceweather"`
@@ -185,6 +186,27 @@ type PushgatewayConfig struct {
 	Token    string `yaml:"token"`    // Token UUID for basic auth password
 }
 
+// MQTTConfig contains MQTT broker settings
+type MQTTConfig struct {
+	Enabled         bool          `yaml:"enabled"`          // Enable/disable MQTT metrics publishing
+	Broker          string        `yaml:"broker"`           // MQTT broker URL (e.g., tcp://mqtt.example.com:1883)
+	Username        string        `yaml:"username"`         // MQTT authentication username
+	Password        string        `yaml:"password"`         // MQTT authentication password
+	TopicPrefix     string        `yaml:"topic_prefix"`     // Topic prefix for all metrics
+	PublishInterval int           `yaml:"publish_interval"` // Publishing interval in seconds
+	QoS             byte          `yaml:"qos"`              // MQTT Quality of Service level (0, 1, or 2)
+	Retain          bool          `yaml:"retain"`           // Retain flag for MQTT messages
+	TLS             MQTTTLSConfig `yaml:"tls"`              // TLS/SSL settings
+}
+
+// MQTTTLSConfig contains MQTT TLS/SSL settings
+type MQTTTLSConfig struct {
+	Enabled    bool   `yaml:"enabled"`     // Enable/disable TLS
+	CACert     string `yaml:"ca_cert"`     // Path to CA certificate file
+	ClientCert string `yaml:"client_cert"` // Path to client certificate file (optional)
+	ClientKey  string `yaml:"client_key"`  // Path to client key file (optional)
+}
+
 // LoadConfig loads configuration from a YAML file
 func LoadConfig(filename string) (*Config, error) {
 	data, err := os.ReadFile(filename)
@@ -332,6 +354,14 @@ func LoadConfig(filename string) (*Config, error) {
 	// Set Pushgateway defaults if not specified
 	if config.Prometheus.Pushgateway.URL == "" {
 		config.Prometheus.Pushgateway.URL = "https://push.ubersdr.org:9091"
+	}
+
+	// Set MQTT defaults if not specified
+	if config.MQTT.TopicPrefix == "" {
+		config.MQTT.TopicPrefix = "ubersdr/metrics"
+	}
+	if config.MQTT.PublishInterval == 0 {
+		config.MQTT.PublishInterval = 60 // 60 seconds default (matches Pushgateway)
 	}
 
 	// Set default amateur radio bands with per-band spectrum parameters if not specified

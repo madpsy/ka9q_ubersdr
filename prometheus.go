@@ -88,6 +88,9 @@ type PrometheusMetrics struct {
 	pushgatewayFailuresTotal prometheus.Counter // Failed pushes to Pushgateway
 	pushgatewayLastPushTime  prometheus.Gauge   // Unix timestamp of last successful push
 
+	// MQTT publisher
+	mqttPublisher *MQTTPublisher // MQTT publisher for metrics
+
 	mu sync.RWMutex // Protects metric updates
 }
 
@@ -833,6 +836,37 @@ func (pm *PrometheusMetrics) pushToGateway(config *Config) error {
 	if err := pusher.Push(); err != nil {
 		return fmt.Errorf("failed to push to gateway: %w", err)
 	}
+
+	return nil
+}
+
+// StartMQTTPublisher starts the MQTT publisher worker if enabled
+func (pm *PrometheusMetrics) StartMQTTPublisher(ctx context.Context, config *Config) error {
+	if pm == nil || !config.MQTT.Enabled {
+		return nil
+	}
+
+	// Validate configuration - silently skip if broker not configured
+	if config.MQTT.Broker == "" {
+		if DebugMode {
+			log.Println("DEBUG: MQTT broker not configured, skipping MQTT publisher")
+		}
+		return nil
+	}
+
+	log.Printf("Starting MQTT publisher: Broker=%s, Topic=%s, Interval=%ds",
+		config.MQTT.Broker, config.MQTT.TopicPrefix, config.MQTT.PublishInterval)
+
+	// Create MQTT publisher
+	publisher, err := NewMQTTPublisher(&config.MQTT, pm)
+	if err != nil {
+		return fmt.Errorf("failed to create MQTT publisher: %w", err)
+	}
+
+	pm.mqttPublisher = publisher
+
+	// Start publisher goroutine
+	go publisher.StartPublisher(ctx, config)
 
 	return nil
 }

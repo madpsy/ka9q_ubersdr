@@ -365,6 +365,47 @@ prometheus:
   #   - ubersdr_goroutines_total                 # Current goroutine count
   #   - ubersdr_memory_heap_bytes / 1024 / 1024  # Heap memory in MB
   #   - rate(process_cpu_seconds_total[1m])      # CPU usage rate
+# MQTT Metrics Publishing settings
+mqtt:
+  # Enable or disable MQTT metrics publishing
+  # When enabled, publishes metrics to an MQTT broker in JSON format
+  enabled: false
+  
+  # MQTT broker connection settings
+  broker: "tcp://mqtt.example.com:1883"  # MQTT broker URL (tcp:// or ssl://)
+  
+  # MQTT authentication (leave empty if not required)
+  username: ""
+  password: ""
+  
+  # Topic prefix for all metrics
+  # Metrics will be published to: {topic_prefix}/{category}/{band}
+  # Example: "ubersdr/metrics/noisefloor/40m"
+  topic_prefix: "ubersdr/metrics"
+  
+  # Publishing interval in seconds
+  # How often to publish metrics to MQTT broker
+  # Recommended: 60 seconds (matches Pushgateway default)
+  publish_interval: 60
+  
+  # MQTT Quality of Service level (0, 1, or 2)
+  # 0 = At most once (fire and forget)
+  # 1 = At least once (acknowledged delivery)
+  # 2 = Exactly once (assured delivery)
+  # Recommended: 1 for reliable delivery without overhead
+  qos: 1
+  
+  # Retain flag - if true, broker retains last message for new subscribers
+  # Recommended: false for time-series data
+  retain: false
+  
+  # TLS/SSL settings for secure connections
+  tls:
+    enabled: false
+    ca_cert: ""      # Path to CA certificate file
+    client_cert: ""  # Path to client certificate file (optional)
+    client_key: ""   # Path to client key file (optional)
+
 
 # Noise Floor Monitoring settings
 noisefloor:

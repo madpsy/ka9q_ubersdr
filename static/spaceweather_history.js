@@ -28,7 +28,7 @@ class SpaceWeatherHistory {
                 const receiverNameEl = document.getElementById('receiver-name');
                 if (receiverNameEl) {
                     if (data.receiver && data.receiver.name) {
-                        receiverNameEl.textContent = `${data.receiver.name} - Historical Space Weather`;
+                        receiverNameEl.textContent = `${data.receiver.name}`;
                     }
                 }
 

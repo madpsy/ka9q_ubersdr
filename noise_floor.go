@@ -1133,6 +1133,119 @@ func (nfm *NoiseFloorMonitor) GetTrendData(date string, band string) ([]*BandMea
 	return averaged, nil
 }
 
+// GetTrendDataAllBands returns 24 hours of data for all bands averaged in 10-minute chunks
+// This is more efficient than calling GetTrendData for each band individually
+func (nfm *NoiseFloorMonitor) GetTrendDataAllBands() (map[string][]*BandMeasurement, error) {
+	if nfm == nil {
+		return nil, fmt.Errorf("noise floor monitor not enabled")
+	}
+
+	// Get today's date for rolling 24-hour window
+	today := time.Now().Format("2006-01-02")
+	now := time.Now()
+	startTime := now.Add(-24 * time.Hour)
+	startDate := startTime.Format("2006-01-02")
+
+	dates := []string{today}
+	if startDate != today {
+		dates = append([]string{startDate}, dates...)
+	}
+
+	// Read data from relevant dates for all bands
+	var allMeasurements []*BandMeasurement
+	for _, d := range dates {
+		for _, bandConfig := range nfm.config.NoiseFloor.Bands {
+			measurements, err := nfm.readBandFile(bandConfig.Name, d)
+			if err != nil {
+				continue
+			}
+			allMeasurements = append(allMeasurements, measurements...)
+		}
+	}
+
+	// Filter to last 24 hours
+	var rawData []*BandMeasurement
+	for _, m := range allMeasurements {
+		if (m.Timestamp.Equal(startTime) || m.Timestamp.After(startTime)) &&
+			(m.Timestamp.Before(now) || m.Timestamp.Equal(now)) {
+			rawData = append(rawData, m)
+		}
+	}
+
+	if len(rawData) == 0 {
+		return nil, fmt.Errorf("no data available")
+	}
+
+	// Group measurements into 10-minute buckets by band
+	bucketSize := 10 * time.Minute
+	buckets := make(map[int64]map[string][]*BandMeasurement)
+
+	for _, m := range rawData {
+		// Calculate bucket timestamp (rounded down to 10-minute boundary)
+		bucketTime := m.Timestamp.Truncate(bucketSize).Unix()
+
+		if buckets[bucketTime] == nil {
+			buckets[bucketTime] = make(map[string][]*BandMeasurement)
+		}
+
+		buckets[bucketTime][m.Band] = append(buckets[bucketTime][m.Band], m)
+	}
+
+	// Average each bucket and organize by band
+	result := make(map[string][]*BandMeasurement)
+
+	for bucketTime, bandData := range buckets {
+		for bandName, measurements := range bandData {
+			if len(measurements) == 0 {
+				continue
+			}
+
+			// Calculate averages
+			var sumMin, sumMax, sumMean, sumMedian, sumP5, sumP10, sumP95, sumDynRange, sumOccupancy, sumFT8SNR float32
+			count := float32(len(measurements))
+
+			for _, m := range measurements {
+				sumMin += m.MinDB
+				sumMax += m.MaxDB
+				sumMean += m.MeanDB
+				sumMedian += m.MedianDB
+				sumP5 += m.P5DB
+				sumP10 += m.P10DB
+				sumP95 += m.P95DB
+				sumDynRange += m.DynamicRange
+				sumOccupancy += m.OccupancyPct
+				sumFT8SNR += m.FT8SNR
+			}
+
+			averaged := &BandMeasurement{
+				Timestamp:    time.Unix(bucketTime, 0),
+				Band:         bandName,
+				MinDB:        sumMin / count,
+				MaxDB:        sumMax / count,
+				MeanDB:       sumMean / count,
+				MedianDB:     sumMedian / count,
+				P5DB:         sumP5 / count,
+				P10DB:        sumP10 / count,
+				P95DB:        sumP95 / count,
+				DynamicRange: sumDynRange / count,
+				OccupancyPct: sumOccupancy / count,
+				FT8SNR:       sumFT8SNR / count,
+			}
+
+			result[bandName] = append(result[bandName], averaged)
+		}
+	}
+
+	// Sort each band's data by timestamp (oldest first)
+	for bandName := range result {
+		sort.Slice(result[bandName], func(i, j int) bool {
+			return result[bandName][i].Timestamp.Before(result[bandName][j].Timestamp)
+		})
+	}
+
+	return result, nil
+}
+
 // readBandFile reads a single band's CSV file for a specific date
 func (nfm *NoiseFloorMonitor) readBandFile(band, date string) ([]*BandMeasurement, error) {
 	// Parse date to create year/month/day directory structure

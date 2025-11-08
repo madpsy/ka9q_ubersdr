@@ -327,11 +327,6 @@ class BandConditionsMonitor {
         this.setStatus('Loading...', 'info');
 
         try {
-            // Ensure GPS coordinates are loaded first (if not already)
-            if (!this.gpsCoordinates) {
-                await this.loadVersion();
-            }
-
             // Load space weather data
             await this.loadSpaceWeather();
 
@@ -356,23 +351,21 @@ class BandConditionsMonitor {
                 return;
             }
 
-            // Load trend data for all bands
-            const today = new Date().toISOString().split('T')[0];
-            const bands = Object.keys(data).sort();
-
-            for (const band of bands) {
-                if (data[band]) {
-                    try {
-                        const trendResponse = await fetch(`/api/noisefloor/trend?date=${today}&band=${band}`);
-                        if (trendResponse.ok && trendResponse.status !== 204) {
-                            this.trendDataCache[band] = await trendResponse.json();
-                        } else if (trendResponse.status === 204) {
-                            this.trendDataCache[band] = [];
-                        }
-                    } catch (error) {
-                        console.error(`Error loading data for ${band}:`, error);
+            // Load trend data for all bands in a single API call
+            try {
+                const trendResponse = await fetch('/api/noisefloor/trends');
+                if (trendResponse.ok && trendResponse.status !== 204) {
+                    const allTrendData = await trendResponse.json();
+                    // Store the trend data for each band
+                    for (const band in allTrendData) {
+                        this.trendDataCache[band] = allTrendData[band];
                     }
+                } else if (trendResponse.status === 204) {
+                    // No data available yet
+                    this.trendDataCache = {};
                 }
+            } catch (error) {
+                console.error('Error loading trend data for all bands:', error);
             }
 
             await this.updateBandStateChart(data);

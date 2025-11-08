@@ -479,6 +479,9 @@ func main() {
 	http.HandleFunc("/api/noisefloor/trend", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorTrend(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
+	http.HandleFunc("/api/noisefloor/trends", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorTrends(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
+	}))
 	http.HandleFunc("/api/noisefloor/history", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorHistory(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
@@ -1220,6 +1223,58 @@ func handleNoiseFloorTrend(w http.ResponseWriter, r *http.Request, nfm *NoiseFlo
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(measurements); err != nil {
 		log.Printf("Error encoding trend noise floor data: %v", err)
+	}
+}
+
+// handleNoiseFloorTrends serves 24 hours of noise floor data for all bands averaged in 10-minute chunks
+// This is more efficient than calling /api/noisefloor/trend for each band individually
+func handleNoiseFloorTrends(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if nfm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Noise floor monitoring is not enabled",
+		})
+		return
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP, using "trends" as key)
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "trends") {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Trends endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	measurements, err := nfm.GetTrendDataAllBands()
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get trend data: %v", err),
+		})
+		return
+	}
+
+	if len(measurements) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "No trend data available",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(measurements); err != nil {
+		log.Printf("Error encoding trends noise floor data: %v", err)
 	}
 }
 

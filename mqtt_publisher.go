@@ -19,9 +19,10 @@ import (
 
 // MQTTPublisher manages MQTT publishing of metrics
 type MQTTPublisher struct {
-	client  mqtt.Client
-	config  *MQTTConfig
-	metrics *PrometheusMetrics
+	client            mqtt.Client
+	config            *MQTTConfig
+	metrics           *PrometheusMetrics
+	noiseFloorMonitor *NoiseFloorMonitor
 }
 
 // MetricPayload represents a metric message for MQTT
@@ -72,7 +73,7 @@ func loadTLSConfig(tlsConfig MQTTTLSConfig) (*tls.Config, error) {
 }
 
 // NewMQTTPublisher creates a new MQTT publisher
-func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics) (*MQTTPublisher, error) {
+func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics, noiseFloorMonitor *NoiseFloorMonitor) (*MQTTPublisher, error) {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(config.Broker)
 	opts.SetClientID(generateClientID())
@@ -118,18 +119,30 @@ func NewMQTTPublisher(config *MQTTConfig, metrics *PrometheusMetrics) (*MQTTPubl
 	log.Printf("MQTT: Successfully connected to broker: %s", config.Broker)
 
 	return &MQTTPublisher{
-		client:  client,
-		config:  config,
-		metrics: metrics,
+		client:            client,
+		config:            config,
+		metrics:           metrics,
+		noiseFloorMonitor: noiseFloorMonitor,
 	}, nil
 }
 
-// StartPublisher starts the background publishing goroutine
+// StartPublisher starts the background publishing goroutines
 func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) {
+	// Start metrics publisher
+	go mp.startMetricsPublisher(ctx, appConfig)
+
+	// Start spectrum publisher if enabled
+	if mp.config.SpectrumPublishEnabled && mp.noiseFloorMonitor != nil {
+		go mp.startSpectrumPublisher(ctx, appConfig)
+	}
+}
+
+// startMetricsPublisher publishes aggregate metrics at the configured interval
+func (mp *MQTTPublisher) startMetricsPublisher(ctx context.Context, appConfig *Config) {
 	ticker := time.NewTicker(time.Duration(mp.config.PublishInterval) * time.Second)
 	defer ticker.Stop()
 
-	log.Printf("MQTT: Publisher started with %d second interval", mp.config.PublishInterval)
+	log.Printf("MQTT: Metrics publisher started with %d second interval", mp.config.PublishInterval)
 
 	// Publish immediately on start
 	mp.publishAllMetrics(appConfig)
@@ -137,11 +150,32 @@ func (mp *MQTTPublisher) StartPublisher(ctx context.Context, appConfig *Config) 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("MQTT: Publisher stopped")
-			mp.client.Disconnect(250)
+			log.Println("MQTT: Metrics publisher stopped")
 			return
 		case <-ticker.C:
 			mp.publishAllMetrics(appConfig)
+		}
+	}
+}
+
+// startSpectrumPublisher publishes spectrum FFT data at the configured interval
+func (mp *MQTTPublisher) startSpectrumPublisher(ctx context.Context, appConfig *Config) {
+	ticker := time.NewTicker(time.Duration(mp.config.SpectrumPublishInterval) * time.Second)
+	defer ticker.Stop()
+
+	log.Printf("MQTT: Spectrum publisher started with %d second interval", mp.config.SpectrumPublishInterval)
+
+	// Publish immediately on start
+	mp.publishSpectrumData(appConfig)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("MQTT: Spectrum publisher stopped")
+			mp.client.Disconnect(250)
+			return
+		case <-ticker.C:
+			mp.publishSpectrumData(appConfig)
 		}
 	}
 }
@@ -353,6 +387,67 @@ func (mp *MQTTPublisher) publish(topic string, payload MetricPayload) {
 
 	if DebugMode {
 		log.Printf("MQTT DEBUG: Published to %s: %d metrics", topic, len(payload.Metrics))
+	}
+}
+
+// publishSpectrumData publishes FFT spectrum data for all bands
+func (mp *MQTTPublisher) publishSpectrumData(config *Config) {
+	if mp.noiseFloorMonitor == nil {
+		return
+	}
+
+	timestamp := time.Now().Unix()
+
+	// Get FFT data for each configured band
+	for _, band := range config.NoiseFloor.Bands {
+		fft := mp.noiseFloorMonitor.GetLatestFFT(band.Name)
+		if fft == nil || len(fft.Data) == 0 {
+			continue
+		}
+
+		// Create spectrum payload
+		spectrumPayload := map[string]interface{}{
+			"timestamp":  timestamp,
+			"band":       fft.Band,
+			"start_freq": fft.StartFreq,
+			"end_freq":   fft.EndFreq,
+			"bin_width":  fft.BinWidth,
+			"bin_count":  len(fft.Data),
+			"data":       fft.Data,
+		}
+
+		// Add markers if present
+		if len(fft.Markers) > 0 {
+			markers := make([]map[string]interface{}, len(fft.Markers))
+			for i, marker := range fft.Markers {
+				markers[i] = map[string]interface{}{
+					"display_name": marker.DisplayName,
+					"frequency":    marker.Frequency,
+					"bandwidth":    marker.Bandwidth,
+					"sideband":     marker.Sideband,
+				}
+			}
+			spectrumPayload["markers"] = markers
+		}
+
+		// Publish to band-specific spectrum topic
+		topic := fmt.Sprintf("%s/spectrum/%s", mp.config.TopicPrefix, band.Name)
+
+		data, err := json.Marshal(spectrumPayload)
+		if err != nil {
+			log.Printf("MQTT ERROR: Failed to marshal spectrum payload for band %s: %v", band.Name, err)
+			continue
+		}
+
+		token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+		if token.Wait() && token.Error() != nil {
+			log.Printf("MQTT ERROR: Failed to publish spectrum for band %s: %v", band.Name, token.Error())
+			continue
+		}
+
+		if DebugMode {
+			log.Printf("MQTT DEBUG: Published spectrum to %s: %d bins", topic, len(fft.Data))
+		}
 	}
 }
 

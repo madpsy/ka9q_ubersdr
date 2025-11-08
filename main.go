@@ -347,7 +347,7 @@ func main() {
 
 		// Start MQTT publisher if enabled
 		if config.MQTT.Enabled {
-			if err := prometheusMetrics.StartMQTTPublisher(ctx, config); err != nil {
+			if err := prometheusMetrics.StartMQTTPublisher(ctx, config, noiseFloorMonitor); err != nil {
 				log.Printf("Warning: Failed to start MQTT publisher: %v", err)
 			}
 		}

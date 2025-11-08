@@ -188,15 +188,17 @@ type PushgatewayConfig struct {
 
 // MQTTConfig contains MQTT broker settings
 type MQTTConfig struct {
-	Enabled         bool          `yaml:"enabled"`          // Enable/disable MQTT metrics publishing
-	Broker          string        `yaml:"broker"`           // MQTT broker URL (e.g., tcp://mqtt.example.com:1883)
-	Username        string        `yaml:"username"`         // MQTT authentication username
-	Password        string        `yaml:"password"`         // MQTT authentication password
-	TopicPrefix     string        `yaml:"topic_prefix"`     // Topic prefix for all metrics
-	PublishInterval int           `yaml:"publish_interval"` // Publishing interval in seconds
-	QoS             byte          `yaml:"qos"`              // MQTT Quality of Service level (0, 1, or 2)
-	Retain          bool          `yaml:"retain"`           // Retain flag for MQTT messages
-	TLS             MQTTTLSConfig `yaml:"tls"`              // TLS/SSL settings
+	Enabled                 bool          `yaml:"enabled"`                   // Enable/disable MQTT metrics publishing
+	Broker                  string        `yaml:"broker"`                    // MQTT broker URL (e.g., tcp://mqtt.example.com:1883)
+	Username                string        `yaml:"username"`                  // MQTT authentication username
+	Password                string        `yaml:"password"`                  // MQTT authentication password
+	TopicPrefix             string        `yaml:"topic_prefix"`              // Topic prefix for all metrics
+	PublishInterval         int           `yaml:"publish_interval"`          // Publishing interval for metrics in seconds
+	SpectrumPublishEnabled  bool          `yaml:"spectrum_publish_enabled"`  // Enable/disable spectrum data publishing
+	SpectrumPublishInterval int           `yaml:"spectrum_publish_interval"` // Publishing interval for spectrum data in seconds
+	QoS                     byte          `yaml:"qos"`                       // MQTT Quality of Service level (0, 1, or 2)
+	Retain                  bool          `yaml:"retain"`                    // Retain flag for MQTT messages
+	TLS                     MQTTTLSConfig `yaml:"tls"`                       // TLS/SSL settings
 }
 
 // MQTTTLSConfig contains MQTT TLS/SSL settings
@@ -362,6 +364,9 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.MQTT.PublishInterval == 0 {
 		config.MQTT.PublishInterval = 60 // 60 seconds default (matches Pushgateway)
+	}
+	if config.MQTT.SpectrumPublishInterval == 0 {
+		config.MQTT.SpectrumPublishInterval = 10 // 10 seconds default (matches HTTP endpoint)
 	}
 
 	// Set default amateur radio bands with per-band spectrum parameters if not specified

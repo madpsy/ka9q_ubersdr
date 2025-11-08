@@ -381,12 +381,25 @@ mqtt:
   # Topic prefix for all metrics
   # Metrics will be published to: {topic_prefix}/{category}/{band}
   # Example: "ubersdr/metrics/noisefloor/40m"
+  # Spectrum data will be published to: {topic_prefix}/spectrum/{band}
   topic_prefix: "ubersdr/metrics"
   
-  # Publishing interval in seconds
-  # How often to publish metrics to MQTT broker
+  # Publishing interval for aggregate metrics in seconds
+  # How often to publish Prometheus metrics to MQTT broker
   # Recommended: 60 seconds (matches Pushgateway default)
   publish_interval: 60
+  
+  # Spectrum data publishing settings
+  # Enable or disable spectrum FFT data publishing to MQTT
+  # When enabled, publishes raw FFT arrays as JSON to separate topics
+  # This is separate from aggregate metrics and uses a different interval
+  spectrum_publish_enabled: false
+  
+  # Publishing interval for spectrum data in seconds
+  # How often to publish spectrum FFT arrays to MQTT broker
+  # Recommended: 10 seconds (matches HTTP endpoint update rate)
+  # Lower values = more frequent updates but more bandwidth usage
+  spectrum_publish_interval: 10
   
   # MQTT Quality of Service level (0, 1, or 2)
   # 0 = At most once (fire and forget)

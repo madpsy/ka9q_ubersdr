@@ -20,6 +20,40 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// marshalYAMLWithIntegerFrequencies marshals a config map to YAML, ensuring frequency fields are integers
+func marshalYAMLWithIntegerFrequencies(config map[string]interface{}) ([]byte, error) {
+	// Walk through the config and convert float64 frequency values to uint64
+	convertFrequencies(config)
+	return yaml.Marshal(config)
+}
+
+// convertFrequencies recursively converts frequency fields from float64 to uint64
+func convertFrequencies(v interface{}) {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		// Check if this is a decoder band with a frequency field
+		if freq, ok := val["frequency"]; ok {
+			switch f := freq.(type) {
+			case float64:
+				val["frequency"] = uint64(f)
+			case int:
+				val["frequency"] = uint64(f)
+			case int64:
+				val["frequency"] = uint64(f)
+			}
+		}
+		// Recursively process all map values
+		for _, v2 := range val {
+			convertFrequencies(v2)
+		}
+	case []interface{}:
+		// Recursively process all slice elements
+		for _, v2 := range val {
+			convertFrequencies(v2)
+		}
+	}
+}
+
 // AdminSession represents an authenticated admin session
 type AdminSession struct {
 	Token     string
@@ -2017,8 +2051,8 @@ func (ah *AdminHandler) handleAddDecoderBand(w http.ResponseWriter, r *http.Requ
 	bands = append(bands, newBand)
 	decoder["bands"] = bands
 
-	// Write back to file
-	yamlData, err := yaml.Marshal(decoderConfig)
+	// Write back to file with proper number formatting
+	yamlData, err := marshalYAMLWithIntegerFrequencies(decoderConfig)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
 		return
@@ -2085,8 +2119,8 @@ func (ah *AdminHandler) handleUpdateDecoderBand(w http.ResponseWriter, r *http.R
 	bands[index] = updatedBand
 	decoder["bands"] = bands
 
-	// Write back to file
-	yamlData, err := yaml.Marshal(decoderConfig)
+	// Write back to file with proper number formatting
+	yamlData, err := marshalYAMLWithIntegerFrequencies(decoderConfig)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
 		return
@@ -2147,8 +2181,8 @@ func (ah *AdminHandler) handleDeleteDecoderBand(w http.ResponseWriter, r *http.R
 	bands = append(bands[:index], bands[index+1:]...)
 	decoder["bands"] = bands
 
-	// Write back to file
-	yamlData, err := yaml.Marshal(decoderConfig)
+	// Write back to file with proper number formatting
+	yamlData, err := marshalYAMLWithIntegerFrequencies(decoderConfig)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal decoder config: %v", err), http.StatusInternalServerError)
 		return

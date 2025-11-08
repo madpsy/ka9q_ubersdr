@@ -82,7 +82,7 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 	}
 
 	if config.WSPRNetEnabled {
-		wspr, err := NewWSPRNet(config.ReceiverCallsign, config.ReceiverLocator, "UberSDR", Version)
+		wspr, err := NewWSPRNet(config.ReceiverCallsign, config.ReceiverLocator, "UberSDR", "")
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize WSPRNet: %w", err)
 		}
@@ -420,6 +420,7 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 
 	// Spawn decoder in goroutine
 	go func() {
+		// SpawnDecoder now waits for the decoder process to complete before returning
 		logFile, err := md.spawner.SpawnDecoder(filename, band)
 		if err != nil {
 			log.Printf("Error spawning decoder for %s: %v", band.Config.Name, err)
@@ -427,10 +428,7 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 			return
 		}
 
-		// Wait a moment for decoder to complete
-		time.Sleep(2 * time.Second)
-
-		// Process decoder output
+		// Process decoder output (decoder has already completed)
 		decodes, err := md.spawner.ProcessDecoderOutput(logFile, band)
 		if err != nil {
 			log.Printf("Error processing decoder output for %s: %v", band.Config.Name, err)
@@ -474,7 +472,7 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 		}
 
 		// Cleanup files
-		md.spawner.CleanupFiles(filename, logFile)
+		md.spawner.CleanupFiles(filename, logFile, band.Config.Mode)
 	}()
 }
 

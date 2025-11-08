@@ -23,7 +23,7 @@ func NewDecoderSpawner(config *DecoderConfig) *DecoderSpawner {
 }
 
 // SpawnDecoder spawns a decoder process for the given WAV file
-// Returns the log file path where decoder output will be written
+// Returns the output file path where decoder results will be written
 func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (string, error) {
 	modeInfo := GetModeInfo(band.Config.Mode)
 
@@ -33,9 +33,19 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		return "", fmt.Errorf("failed to create work directory: %w", err)
 	}
 
-	// Create log file path
+	// Create log file path for stdout/stderr
 	logFile := filepath.Join(ds.config.DataDir,
 		fmt.Sprintf("%s_%d.log", band.Config.Mode.String(), band.Config.Frequency))
+
+	// Determine output file path based on mode
+	var outputFile string
+	if band.Config.Mode == ModeWSPR {
+		// wsprd writes to wspr_spots.txt in working directory
+		outputFile = filepath.Join(workDir, "wspr_spots.txt")
+	} else {
+		// jt9 writes to stdout (captured in log file)
+		outputFile = logFile
+	}
 
 	// Build decoder command
 	cmd := ds.buildDecoderCommand(modeInfo, wavFile, band.Config.Frequency, workDir, logFile)
@@ -44,6 +54,7 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		log.Printf("DEBUG: Spawning decoder: %s %v", cmd.Path, cmd.Args)
 		log.Printf("DEBUG: Working directory: %s", workDir)
 		log.Printf("DEBUG: Log file: %s", logFile)
+		log.Printf("DEBUG: Output file: %s", outputFile)
 	}
 
 	// Start the decoder process
@@ -51,17 +62,18 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		return "", fmt.Errorf("failed to start decoder: %w", err)
 	}
 
-	// Wait for decoder in a goroutine
-	go func() {
-		err := cmd.Wait()
-		if err != nil {
-			log.Printf("Decoder process for %s exited with error: %v", band.Config.Name, err)
-		} else if DebugMode {
-			log.Printf("DEBUG: Decoder process for %s completed successfully", band.Config.Name)
-		}
-	}()
+	log.Printf("Started decoder for %s, waiting for completion...", band.Config.Name)
 
-	return logFile, nil
+	// Wait for decoder to complete
+	err := cmd.Wait()
+	if err != nil {
+		log.Printf("Decoder process for %s exited with error: %v", band.Config.Name, err)
+		return "", fmt.Errorf("decoder process failed: %w", err)
+	}
+
+	log.Printf("Decoder for %s completed successfully", band.Config.Name)
+
+	return outputFile, nil
 }
 
 // buildDecoderCommand builds the command to execute the decoder
@@ -101,19 +113,20 @@ func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string,
 	return cmd
 }
 
-// ProcessDecoderOutput reads the decoder log file and extracts spots
-func (ds *DecoderSpawner) ProcessDecoderOutput(logFile string, band *DecoderBand) ([]*DecodeInfo, error) {
+// ProcessDecoderOutput reads the decoder output file and extracts spots
+// For WSPR, this reads wspr_spots.txt; for FT8/FT4, this reads the log file
+func (ds *DecoderSpawner) ProcessDecoderOutput(outputFile string, band *DecoderBand) ([]*DecodeInfo, error) {
 	// Wait a moment for the decoder to finish writing
 	time.Sleep(100 * time.Millisecond)
 
-	// Parse the log file
-	decodes, err := ParseDecoderLog(logFile, band.Config.Frequency, band.Config.Mode)
+	// Parse the output file
+	decodes, err := ParseDecoderLog(outputFile, band.Config.Frequency, band.Config.Mode)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse decoder log: %w", err)
+		return nil, fmt.Errorf("failed to parse decoder output: %w", err)
 	}
 
 	if DebugMode {
-		log.Printf("DEBUG: Parsed %d decodes from %s", len(decodes), logFile)
+		log.Printf("DEBUG: Parsed %d decodes from %s", len(decodes), outputFile)
 	}
 
 	// Deduplicate by callsign (keep strongest SNR)
@@ -127,7 +140,9 @@ func (ds *DecoderSpawner) ProcessDecoderOutput(logFile string, band *DecoderBand
 }
 
 // CleanupFiles removes temporary files if configured
-func (ds *DecoderSpawner) CleanupFiles(wavFile, logFile string) {
+// For WSPR, outputFile is wspr_spots.txt which should NOT be removed (wsprd overwrites it)
+// For FT8/FT4, outputFile is the log file which should be removed if keep_logs is false
+func (ds *DecoderSpawner) CleanupFiles(wavFile, outputFile string, mode DecoderMode) {
 	if !ds.config.KeepWav {
 		if err := os.Remove(wavFile); err != nil && !os.IsNotExist(err) {
 			log.Printf("Warning: failed to remove WAV file %s: %v", wavFile, err)
@@ -136,11 +151,13 @@ func (ds *DecoderSpawner) CleanupFiles(wavFile, logFile string) {
 		}
 	}
 
-	if !ds.config.KeepLogs {
-		if err := os.Remove(logFile); err != nil && !os.IsNotExist(err) {
-			log.Printf("Warning: failed to remove log file %s: %v", logFile, err)
+	// Only remove output file for non-WSPR modes (FT8/FT4 log files)
+	// WSPR's wspr_spots.txt should not be removed as wsprd overwrites it
+	if !ds.config.KeepLogs && mode != ModeWSPR {
+		if err := os.Remove(outputFile); err != nil && !os.IsNotExist(err) {
+			log.Printf("Warning: failed to remove output file %s: %v", outputFile, err)
 		} else if DebugMode {
-			log.Printf("DEBUG: Removed log file: %s", logFile)
+			log.Printf("DEBUG: Removed output file: %s", outputFile)
 		}
 	}
 }

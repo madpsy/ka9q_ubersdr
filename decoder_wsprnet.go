@@ -73,8 +73,8 @@ type WSPRNet struct {
 
 // NewWSPRNet creates a new WSPRNet instance
 func NewWSPRNet(callsign, locator, programName, programVersion string) (*WSPRNet, error) {
-	if callsign == "" || locator == "" || programName == "" || programVersion == "" {
-		return nil, fmt.Errorf("all parameters are required")
+	if callsign == "" || locator == "" || programName == "" {
+		return nil, fmt.Errorf("callsign, locator, and program name are required")
 	}
 
 	wspr := &WSPRNet{
@@ -296,7 +296,12 @@ func (w *WSPRNet) buildPostData(report *WSPRReport) string {
 	params.Set("tgrid", report.Locator)
 	params.Set("tqrg", fmt.Sprintf("%.6f", float64(report.Frequency)/1000000.0))
 	params.Set("dbm", fmt.Sprintf("%d", report.DBm))
-	params.Set("version", fmt.Sprintf("%s %s", w.programName, w.programVersion))
+	// Only include version if it's not empty
+	if w.programVersion != "" {
+		params.Set("version", fmt.Sprintf("%s %s", w.programName, w.programVersion))
+	} else {
+		params.Set("version", w.programName)
+	}
 	params.Set("mode", fmt.Sprintf("%d", modeCode))
 
 	return params.Encode()

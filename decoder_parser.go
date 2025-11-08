@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strconv"
@@ -17,9 +18,11 @@ var (
 	ft8Pattern = regexp.MustCompile(`^(\d{6})\s+(-?\d+)\s+([-\d.]+)\s+(\d+)\s+[~]?\s+(.+)$`)
 
 	// WSPR format varies by wsprd version, typically:
-	// Date Time SNR DT Freq Drift Call Grid dBm
-	// Example: 231208 0000  -15  0.4  10.140175  0  G4WGT  IO91  37
-	wsprPattern = regexp.MustCompile(`^(\d{6})\s+(\d{4})\s+(-?\d+)\s+([-\d.]+)\s+([\d.]+)\s+(-?\d+)\s+(\S+)\s+(\S+)\s+(\d+)`)
+	// Date Time Seq SNR DT Freq Call Grid dBm [optional extra columns]
+	// Example: 251108 1552   1 -17  0.5   7.040119  IV3JJO JN66 37          0   223    0
+	// Note: Seq is a sequence number, Grid can be 4 or 6 chars, or missing entirely (dBm comes right after call)
+	// The regex captures call and everything after it, then we parse grid/dBm separately
+	wsprPattern = regexp.MustCompile(`^(\d{6})\s+(\d{4})\s+\d+\s+(-?\d+)\s+([-\d.]+)\s+([\d.]+)\s+(\S+)\s+(.+)$`)
 
 	// Callsign pattern (basic validation)
 	callsignPattern = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z]$`)
@@ -89,9 +92,17 @@ func ParseFT8Line(line string, dialFreq uint64, mode DecoderMode) (*DecodeInfo, 
 
 // ParseWSPRLine parses a line of WSPR decoder output
 func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
-	matches := wsprPattern.FindStringSubmatch(strings.TrimSpace(line))
+	trimmed := strings.TrimSpace(line)
+	matches := wsprPattern.FindStringSubmatch(trimmed)
 	if matches == nil {
+		if DebugMode {
+			log.Printf("WSPR DEBUG: Line did not match regex: %q", trimmed)
+		}
 		return nil, fmt.Errorf("line does not match WSPR format")
+	}
+
+	if DebugMode {
+		log.Printf("WSPR DEBUG: Regex matched! Groups: %d", len(matches))
 	}
 
 	// Parse date and time (YYMMDD HHMM)
@@ -106,7 +117,7 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 
 	timestamp := time.Date(year, time.Month(month), day, hour, minute, 0, 0, time.UTC)
 
-	// Parse SNR
+	// Parse SNR (now matches[3] after skipping sequence number)
 	snr, err := strconv.Atoi(matches[3])
 	if err != nil {
 		return nil, fmt.Errorf("invalid SNR: %w", err)
@@ -125,20 +136,37 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 	}
 	txFrequency := uint64(freqMHz * 1e6)
 
-	// Parse drift
-	drift, err := strconv.Atoi(matches[6])
-	if err != nil {
-		return nil, fmt.Errorf("invalid drift: %w", err)
+	// Parse callsign (matches[6] now, drift removed from wsprd output)
+	callsign := strings.TrimSpace(matches[6])
+
+	// Parse the remaining fields (grid and dBm, with grid being optional)
+	remaining := strings.Fields(strings.TrimSpace(matches[7]))
+	if len(remaining) < 1 {
+		return nil, fmt.Errorf("missing dBm field")
 	}
 
-	// Parse callsign and grid
-	callsign := strings.TrimSpace(matches[7])
-	locator := strings.TrimSpace(matches[8])
+	var locator string
+	var dbm int
 
-	// Parse dBm
-	dbm, err := strconv.Atoi(matches[9])
-	if err != nil {
-		return nil, fmt.Errorf("invalid dBm: %w", err)
+	// Check if first field is a grid locator (4 or 6 chars, starts with letter)
+	// or if it's the dBm value (number)
+	if len(remaining) >= 2 && len(remaining[0]) >= 2 &&
+		remaining[0][0] >= 'A' && remaining[0][0] <= 'R' {
+		// First field looks like a grid locator
+		locator = remaining[0]
+		var dbmErr error
+		dbm, dbmErr = strconv.Atoi(remaining[1])
+		if dbmErr != nil {
+			return nil, fmt.Errorf("invalid dBm: %w", dbmErr)
+		}
+	} else {
+		// No grid locator, first field is dBm
+		locator = ""
+		var dbmErr error
+		dbm, dbmErr = strconv.Atoi(remaining[0])
+		if dbmErr != nil {
+			return nil, fmt.Errorf("invalid dBm: %w", dbmErr)
+		}
 	}
 
 	info := &DecodeInfo{
@@ -151,10 +179,10 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 		Mode:        "WSPR",
 		Message:     fmt.Sprintf("%s %s %d", callsign, locator, dbm),
 		DT:          float32(dt),
-		Drift:       drift,
+		Drift:       0, // Drift not in wsprd output format
 		DBm:         dbm,
 		HasCallsign: isValidCallsign(callsign),
-		HasLocator:  isValidGridLocator(locator),
+		HasLocator:  locator != "" && isValidGridLocator(locator),
 		IsWSPR:      true,
 	}
 
@@ -220,13 +248,18 @@ func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode) ([]*Dec
 
 	var decodes []*DecodeInfo
 	scanner := bufio.NewScanner(file)
+	lineCount := 0
+	skippedCount := 0
+	parsedCount := 0
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		lineCount++
 
 		// Skip empty lines and noise lines
 		if line == "" || strings.Contains(line, "EOF on input") ||
 			strings.Contains(line, "<DecodeFinished>") || strings.Contains(line, "****") {
+			skippedCount++
 			continue
 		}
 
@@ -242,17 +275,30 @@ func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode) ([]*Dec
 
 		if err != nil {
 			// Skip lines that don't parse (may be decoder status messages)
+			if DebugMode && mode == ModeWSPR {
+				log.Printf("WSPR DEBUG: Failed to parse line: %v", err)
+			}
+			skippedCount++
 			continue
 		}
+
+		parsedCount++
 
 		// Only include decodes with valid callsigns
 		if info.HasCallsign {
 			decodes = append(decodes, info)
+		} else if DebugMode && mode == ModeWSPR {
+			log.Printf("WSPR DEBUG: Skipping decode without valid callsign: %s", info.Callsign)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading log file: %w", err)
+	}
+
+	if DebugMode && mode == ModeWSPR {
+		log.Printf("WSPR DEBUG: ParseDecoderLog stats - Total lines: %d, Skipped: %d, Parsed: %d, Valid decodes: %d",
+			lineCount, skippedCount, parsedCount, len(decodes))
 	}
 
 	return decodes, nil

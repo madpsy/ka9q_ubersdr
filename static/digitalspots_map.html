@@ -347,7 +347,8 @@
 
     <div class="distance-legend">
         <div id="distance-ranges"></div>
-        <div class="distance-extremes" style="border-top: none; padding-top: 0; margin-top: 0;">
+        <div id="bearing-stats" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;"></div>
+        <div class="distance-extremes" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;">
             <div class="distance-extreme">
                 <span class="distance-extreme-label">Closest:</span>
                 <span id="closest-spot">-</span>
@@ -364,6 +365,7 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="suncalc.js"></script>
     <script src="digitalspots_map.js"></script>
 </body>
 </html>

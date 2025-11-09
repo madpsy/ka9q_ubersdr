@@ -9,6 +9,8 @@ class DigitalSpotsMap {
         this.markers = new Map(); // Store Leaflet markers
         this.receiverMarker = null;
         this.receiverLocation = null;
+        this.receiverInfo = null;
+        this.greylineLayer = null;
         this.maxSpots = 5000; // Maximum number of spots to display
         this.maxAge = 30 * 60 * 1000; // 30 minutes in milliseconds
         this.userSessionID = this.generateUserSessionID();
@@ -56,6 +58,10 @@ class DigitalSpotsMap {
 
         // Start cleanup interval
         this.startCleanup();
+
+        // Update greyline
+        this.updateGreyline();
+        setInterval(() => this.updateGreyline(), 60000);
     }
 
     initMap() {
@@ -154,6 +160,13 @@ class DigitalSpotsMap {
                     lon: data.receiver.gps.lon
                 };
 
+                // Store receiver info for tooltip
+                this.receiverInfo = {
+                    name: data.receiver.name || null,
+                    location: data.receiver.location || null,
+                    callsign: data.receiver.callsign || null
+                };
+
                 // Add receiver marker
                 this.addReceiverMarker();
 
@@ -181,7 +194,29 @@ class DigitalSpotsMap {
             { icon: receiverIcon }
         ).addTo(this.map);
 
-        this.receiverMarker.bindPopup('<b>Receiver Location</b>');
+        // Build popup content with receiver info
+        let popupContent = '<div style="font-family: monospace; font-size: 12px;"><b>Receiver Location</b><br>';
+        
+        if (this.receiverInfo) {
+            if (this.receiverInfo.name) {
+                popupContent += `<b>Name:</b> ${this.receiverInfo.name}<br>`;
+            }
+            if (this.receiverInfo.location) {
+                popupContent += `<b>Location:</b> ${this.receiverInfo.location}<br>`;
+            }
+            if (this.receiverInfo.callsign) {
+                popupContent += `<b>Callsign:</b> ${this.receiverInfo.callsign}<br>`;
+            }
+        }
+        
+        popupContent += `<b>Coordinates:</b> ${this.receiverLocation.lat.toFixed(4)}, ${this.receiverLocation.lon.toFixed(4)}</div>`;
+        
+        this.receiverMarker.bindPopup(popupContent);
+        this.receiverMarker.bindTooltip(popupContent, {
+            direction: 'top',
+            offset: [0, -15],
+            permanent: false
+        });
     }
 
     connectWebSocket() {
@@ -306,6 +341,10 @@ class DigitalSpotsMap {
         // Create popup content
         const popupContent = this.createPopupContent(spot);
         marker.bindPopup(popupContent);
+        marker.bindTooltip(popupContent, {
+            direction: 'top',
+            offset: [0, -10]
+        });
 
         // Add to map only if it passes all filters
         const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
@@ -534,18 +573,90 @@ class DigitalSpotsMap {
                 </div>
             `;
         });
-        
+
+        containerEl.innerHTML = html;
+    }
+
+    updateBearingStatistics(spots, containerEl) {
+        if (!containerEl) return;
+
+        // Count spots by cardinal direction
+        const directions = {
+            'N': 0,    // 337.5 - 22.5
+            'NE': 0,   // 22.5 - 67.5
+            'E': 0,    // 67.5 - 112.5
+            'SE': 0,   // 112.5 - 157.5
+            'S': 0,    // 157.5 - 202.5
+            'SW': 0,   // 202.5 - 247.5
+            'W': 0,    // 247.5 - 292.5
+            'NW': 0    // 292.5 - 337.5
+        };
+
+        let totalWithBearing = 0;
+
+        spots.forEach(spot => {
+            if (spot.bearing_deg !== undefined && spot.bearing_deg !== null) {
+                totalWithBearing++;
+                const bearing = spot.bearing_deg;
+
+                // Determine cardinal direction
+                if (bearing >= 337.5 || bearing < 22.5) {
+                    directions['N']++;
+                } else if (bearing >= 22.5 && bearing < 67.5) {
+                    directions['NE']++;
+                } else if (bearing >= 67.5 && bearing < 112.5) {
+                    directions['E']++;
+                } else if (bearing >= 112.5 && bearing < 157.5) {
+                    directions['SE']++;
+                } else if (bearing >= 157.5 && bearing < 202.5) {
+                    directions['S']++;
+                } else if (bearing >= 202.5 && bearing < 247.5) {
+                    directions['SW']++;
+                } else if (bearing >= 247.5 && bearing < 292.5) {
+                    directions['W']++;
+                } else if (bearing >= 292.5 && bearing < 337.5) {
+                    directions['NW']++;
+                }
+            }
+        });
+
+        if (totalWithBearing === 0) {
+            containerEl.innerHTML = '<div style="font-size: 11px; color: #aaa;">No bearing data</div>';
+            return;
+        }
+
+        // Build HTML
+        let html = '';
+        const directionOrder = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+
+        directionOrder.forEach(dir => {
+            const count = directions[dir];
+            const percentage = (count / totalWithBearing) * 100;
+            const color = count > 0 ? '#ccc' : '#555';
+
+            html += `
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 3px; color: ${color};">
+                    <span style="min-width: 25px;">${dir}</span>
+                    <div style="flex: 1; height: 12px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; margin: 0 8px; overflow: hidden;">
+                        <div style="height: 100%; background: linear-gradient(90deg, #4a9eff, #2d7dd2); width: ${percentage}%;"></div>
+                    </div>
+                    <span style="min-width: 50px; text-align: right; color: ${count > 0 ? '#4a9eff' : '#555'};">${count} (${percentage.toFixed(0)}%)</span>
+                </div>
+            `;
+        });
+
         containerEl.innerHTML = html;
     }
 
     updateDistanceStatistics() {
         const rangesEl = document.getElementById('distance-ranges');
+        const bearingStatsEl = document.getElementById('bearing-stats');
         const closestEl = document.getElementById('closest-spot');
         const farthestEl = document.getElementById('farthest-spot');
         const topCountriesEl = document.getElementById('top-countries');
         const topBandsEl = document.getElementById('top-bands');
-        
-        if (!rangesEl || !closestEl || !farthestEl || !topCountriesEl || !topBandsEl) {
+
+        if (!rangesEl || !bearingStatsEl || !closestEl || !farthestEl || !topCountriesEl || !topBandsEl) {
             return;
         }
         
@@ -587,7 +698,10 @@ class DigitalSpotsMap {
         // Update top countries and bands
         this.updateTopCountries(filteredSpots, topCountriesEl);
         this.updateTopBands(filteredSpots, topBandsEl);
-        
+
+        // Update bearing statistics
+        this.updateBearingStatistics(spotsWithDistance, bearingStatsEl);
+
         if (spotsWithDistance.length === 0) {
             rangesEl.innerHTML = '<div style="font-size: 11px; color: #aaa;">No distance data</div>';
             closestEl.textContent = '-';
@@ -681,6 +795,95 @@ class DigitalSpotsMap {
             farthestHtml += `<br><span style="font-size: 10px; color: #888;">${farthestDetails.join(' • ')}</span>`;
         }
         farthestEl.innerHTML = farthestHtml;
+    }
+
+    updateGreyline() {
+        // Remove existing greyline layer if present
+        if (this.greylineLayer) {
+            this.map.removeLayer(this.greylineLayer);
+        }
+
+        const now = new Date();
+        this.greylineLayer = L.layerGroup();
+
+        // Create night overlay using SunCalc library
+        const nightPolygon = this.createNightPolygon(now);
+
+        if (nightPolygon.length > 0) {
+            L.polygon(nightPolygon, {
+                color: 'transparent',
+                fillColor: '#000033',
+                fillOpacity: 0.3,
+                interactive: false
+            }).addTo(this.greylineLayer);
+        }
+
+        this.greylineLayer.addTo(this.map);
+    }
+
+    createNightPolygon(date) {
+        // Create polygon for night side using SunCalc
+        const polygon = [];
+        const resolution = 2; // degrees for smoother curve
+        
+        // Get sun position to find subsolar point (where sun is directly overhead)
+        // We need to find where the sun's declination and hour angle place it
+        const d = (date.valueOf() / 86400000) - 0.5 + 2440588 - 2451545; // Days since J2000
+        const M = (357.5291 + 0.98560028 * d) * Math.PI / 180; // Solar mean anomaly
+        const C = (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) * Math.PI / 180;
+        const L = M + C + (102.9372 * Math.PI / 180) + Math.PI; // Ecliptic longitude
+        const sunDec = Math.asin(Math.sin(L) * Math.sin(23.4397 * Math.PI / 180)); // Declination in radians
+        
+        // Calculate subsolar longitude (where sun is at zenith)
+        const gmst = (280.16 + 360.9856235 * d) * Math.PI / 180; // Greenwich mean sidereal time
+        const sunRA = Math.atan2(Math.sin(L) * Math.cos(23.4397 * Math.PI / 180), Math.cos(L)); // Right ascension
+        const sunLon = ((sunRA - gmst) * 180 / Math.PI + 180) % 360 - 180; // Subsolar longitude
+        
+        // Calculate terminator line (where sun altitude = 0)
+        const terminatorPoints = [];
+        for (let lon = -180; lon <= 180; lon += resolution) {
+            // At the terminator, the sun is at the horizon
+            // The latitude of the terminator at a given longitude can be calculated from:
+            // cos(zenith_angle) = sin(lat) * sin(dec) + cos(lat) * cos(dec) * cos(hour_angle)
+            // At terminator, zenith_angle = 90°, so cos(90°) = 0
+            // Therefore: 0 = sin(lat) * sin(dec) + cos(lat) * cos(dec) * cos(hour_angle)
+            // Solving for lat: tan(lat) = -cos(hour_angle) / tan(dec)
+            
+            const hourAngle = (lon - sunLon) * Math.PI / 180;
+            const tanLat = -Math.cos(hourAngle) / Math.tan(sunDec);
+            const lat = Math.atan(tanLat) * 180 / Math.PI;
+            
+            // Handle edge cases where tan(dec) approaches 0 (equinoxes)
+            if (!isNaN(lat) && isFinite(lat)) {
+                terminatorPoints.push([lat, lon]);
+            }
+        }
+        
+        if (terminatorPoints.length === 0) {
+            return polygon; // Return empty if calculation failed
+        }
+        
+        // Determine which pole is in darkness
+        // If sun declination is positive (northern summer), south pole is dark
+        const darkPole = sunDec > 0 ? -90 : 90;
+        
+        // Build the night polygon
+        // Start with the terminator line
+        terminatorPoints.forEach(point => {
+            polygon.push(point);
+        });
+        
+        // Close the polygon by going to the dark pole
+        polygon.push([darkPole, 180]);
+        
+        // Trace along the dark pole
+        for (let lon = 180; lon >= -180; lon -= resolution * 4) {
+            polygon.push([darkPole, lon]);
+        }
+        
+        polygon.push([darkPole, -180]);
+        
+        return polygon;
     }
 }
 

@@ -20,9 +20,16 @@ class DigitalSpotsMap {
         this.snrFilter = 'none'; // Current SNR filter (minimum SNR)
         this.reconnectAttempts = 0; // Track reconnection attempts
         this.reconnectTimeout = null; // Store timeout ID
+        this.liveMessages = []; // Store live messages
+        this.maxLiveMessages = 10000; // Maximum number of live messages to keep
+        this.liveMessagesPage = 1; // Current page
+        this.liveMessagesPerPage = 200; // Messages per page
+        this.liveMessagesCallsignFilter = ''; // Callsign filter
 
         // Band colors matching noisefloor.js
         this.bandColors = {
+            '2200m': '#8B4513', // Saddle Brown
+            '630m': '#A0522D',  // Sienna
             '160m': '#4E79A7',  // Blue
             '80m': '#F28E2B',   // Orange
             '60m': '#E15759',   // Red
@@ -62,6 +69,9 @@ class DigitalSpotsMap {
         // Update greyline
         this.updateGreyline();
         setInterval(() => this.updateGreyline(), 60000);
+
+        // Setup live messages panel
+        this.setupLiveMessagesPanel();
     }
 
     initMap() {
@@ -143,6 +153,7 @@ class DigitalSpotsMap {
         
         this.updateSpotCount();
         this.updateDistanceStatistics();
+        this.updateLiveMessagesDisplay(); // Update live messages when filters change
     }
 
     async loadReceiverLocation() {
@@ -308,9 +319,15 @@ class DigitalSpotsMap {
         // Add or update marker
         this.addOrUpdateMarker(key, spot);
 
+        // Add to live messages
+        this.addLiveMessage(spot);
+
         // Update spot count and distance statistics
         this.updateSpotCount();
         this.updateDistanceStatistics();
+        
+        // Update band legend
+        this.updateBandLegend();
 
         // Limit number of spots
         if (this.spots.size > this.maxSpots) {
@@ -539,8 +556,8 @@ class DigitalSpotsMap {
     updateTopBands(spots, containerEl) {
         if (!containerEl) return;
         
-        // Define all bands in order (160m through 10m)
-        const allBands = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+        // Define all bands in order (2200m through 10m)
+        const allBands = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
         
         // Count spots by band
         const bandCounts = {};
@@ -569,6 +586,47 @@ class DigitalSpotsMap {
             html += `
                 <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: ${color};">
                     <span>${band}</span>
+                    <span style="color: ${count > 0 ? '#4a9eff' : '#555'};">${count}</span>
+                </div>
+            `;
+        });
+
+        containerEl.innerHTML = html;
+    }
+
+    updateModeStats(spots, containerEl) {
+        if (!containerEl) return;
+        
+        // Define the modes we're tracking
+        const modes = ['FT8', 'FT4', 'WSPR'];
+        
+        // Count spots by mode
+        const modeCounts = {};
+        modes.forEach(mode => {
+            modeCounts[mode] = 0;
+        });
+        
+        spots.forEach(spot => {
+            if (spot.mode && modes.includes(spot.mode)) {
+                modeCounts[spot.mode]++;
+            }
+        });
+        
+        // Check if we have any data
+        const hasData = Object.values(modeCounts).some(count => count > 0);
+        if (!hasData) {
+            containerEl.innerHTML = '<div style="font-size: 11px; color: #aaa;">No data</div>';
+            return;
+        }
+        
+        // Build HTML showing all modes
+        let html = '';
+        modes.forEach(mode => {
+            const count = modeCounts[mode];
+            const color = count > 0 ? '#ccc' : '#555';
+            html += `
+                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: ${color};">
+                    <span>${mode}</span>
                     <span style="color: ${count > 0 ? '#4a9eff' : '#555'};">${count}</span>
                 </div>
             `;
@@ -655,8 +713,9 @@ class DigitalSpotsMap {
         const farthestEl = document.getElementById('farthest-spot');
         const topCountriesEl = document.getElementById('top-countries');
         const topBandsEl = document.getElementById('top-bands');
+        const modeStatsEl = document.getElementById('mode-stats');
 
-        if (!rangesEl || !bearingStatsEl || !closestEl || !farthestEl || !topCountriesEl || !topBandsEl) {
+        if (!rangesEl || !bearingStatsEl || !closestEl || !farthestEl || !topCountriesEl || !topBandsEl || !modeStatsEl) {
             return;
         }
         
@@ -695,9 +754,10 @@ class DigitalSpotsMap {
             }
         });
         
-        // Update top countries and bands
+        // Update top countries, bands, and mode stats
         this.updateTopCountries(filteredSpots, topCountriesEl);
         this.updateTopBands(filteredSpots, topBandsEl);
+        this.updateModeStats(filteredSpots, modeStatsEl);
 
         // Update bearing statistics
         this.updateBearingStatistics(spotsWithDistance, bearingStatsEl);
@@ -885,9 +945,266 @@ class DigitalSpotsMap {
         
         return polygon;
     }
+
+    setupLiveMessagesPanel() {
+        const header = document.getElementById('live-messages-header');
+        const toggle = document.getElementById('live-messages-toggle');
+        const content = document.getElementById('live-messages-content');
+        const filterInput = document.getElementById('live-messages-callsign-filter');
+        const prevBtn = document.getElementById('live-messages-prev');
+        const nextBtn = document.getElementById('live-messages-next');
+        const clearBtn = document.getElementById('clear-messages-btn');
+
+        if (header && toggle && content) {
+            header.addEventListener('click', (e) => {
+                // Don't toggle if clicking the clear button
+                if (e.target.id === 'clear-messages-btn' || e.target.closest('#clear-messages-btn')) {
+                    return;
+                }
+                content.classList.toggle('collapsed');
+                toggle.classList.toggle('collapsed');
+                const filterDiv = document.querySelector('.live-messages-filter');
+                const paginationDiv = document.getElementById('live-messages-pagination');
+                if (filterDiv) filterDiv.style.display = content.classList.contains('collapsed') ? 'none' : 'block';
+                if (paginationDiv) paginationDiv.style.display = content.classList.contains('collapsed') ? 'none' : 'flex';
+            });
+        }
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent header click event
+                if (confirm('Clear all live messages?')) {
+                    this.liveMessages = [];
+                    this.liveMessagesPage = 1;
+                    this.updateLiveMessagesDisplay();
+                }
+            });
+        }
+
+        if (filterInput) {
+            filterInput.addEventListener('input', (e) => {
+                this.liveMessagesCallsignFilter = e.target.value.toUpperCase();
+                this.liveMessagesPage = 1; // Reset to first page
+                this.updateLiveMessagesDisplay();
+            });
+        }
+
+        if (prevBtn) {
+            prevBtn.addEventListener('click', () => {
+                if (this.liveMessagesPage > 1) {
+                    this.liveMessagesPage--;
+                    this.updateLiveMessagesDisplay();
+                }
+            });
+        }
+
+        if (nextBtn) {
+            nextBtn.addEventListener('click', () => {
+                const filteredMessages = this.getFilteredMessages();
+                const totalPages = Math.ceil(filteredMessages.length / this.liveMessagesPerPage);
+                if (this.liveMessagesPage < totalPages) {
+                    this.liveMessagesPage++;
+                    this.updateLiveMessagesDisplay();
+                }
+            });
+        }
+    }
+
+    getFilteredMessages() {
+        const now = Date.now();
+        return this.liveMessages.filter(spot => {
+            // Apply callsign filter
+            if (this.liveMessagesCallsignFilter && !spot.callsign.toUpperCase().includes(this.liveMessagesCallsignFilter)) {
+                return false;
+            }
+
+            // Apply mode filter
+            if (this.modeFilter !== 'all' && spot.mode !== this.modeFilter) {
+                return false;
+            }
+
+            // Apply band filter
+            if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) {
+                return false;
+            }
+
+            // Apply SNR filter
+            if (this.snrFilter !== 'none' && spot.snr < parseFloat(this.snrFilter)) {
+                return false;
+            }
+
+            // Apply age filter
+            if (this.ageFilter !== 'none') {
+                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
+                const spotTime = new Date(spot.timestamp).getTime();
+                const age = now - spotTime;
+                if (age > maxAgeMs) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }
+
+    addLiveMessage(spot) {
+        // Add to beginning of array
+        this.liveMessages.unshift(spot);
+
+        // Limit number of messages
+        if (this.liveMessages.length > this.maxLiveMessages) {
+            this.liveMessages.pop();
+        }
+
+        // Update display
+        this.updateLiveMessagesDisplay();
+    }
+
+    updateLiveMessagesDisplay() {
+        const content = document.getElementById('live-messages-content');
+        const countEl = document.getElementById('live-message-count');
+        const paginationDiv = document.getElementById('live-messages-pagination');
+        const pageInfo = document.getElementById('live-messages-page-info');
+        const prevBtn = document.getElementById('live-messages-prev');
+        const nextBtn = document.getElementById('live-messages-next');
+
+        if (!content) return;
+
+        const filteredMessages = this.getFilteredMessages();
+
+        if (this.liveMessages.length === 0) {
+            content.innerHTML = '<div class="live-messages-empty">Waiting for spots...</div>';
+            if (countEl) countEl.textContent = '(0)';
+            if (paginationDiv) paginationDiv.style.display = 'none';
+            return;
+        }
+
+        if (filteredMessages.length === 0) {
+            content.innerHTML = '<div class="live-messages-empty">No matching callsigns</div>';
+            if (countEl) countEl.textContent = `(0 / ${this.liveMessages.length})`;
+            if (paginationDiv) paginationDiv.style.display = 'none';
+            return;
+        }
+
+        // Update count
+        if (countEl) {
+            if (this.liveMessagesCallsignFilter) {
+                countEl.textContent = `(${filteredMessages.length} / ${this.liveMessages.length})`;
+            } else {
+                countEl.textContent = `(${this.liveMessages.length})`;
+            }
+        }
+
+        // Calculate pagination
+        const totalPages = Math.ceil(filteredMessages.length / this.liveMessagesPerPage);
+        const startIdx = (this.liveMessagesPage - 1) * this.liveMessagesPerPage;
+        const endIdx = Math.min(startIdx + this.liveMessagesPerPage, filteredMessages.length);
+        const pageMessages = filteredMessages.slice(startIdx, endIdx);
+
+        // Update pagination controls
+        if (paginationDiv && totalPages > 1) {
+            paginationDiv.style.display = 'flex';
+            if (pageInfo) {
+                pageInfo.textContent = `Page ${this.liveMessagesPage} of ${totalPages}`;
+            }
+            if (prevBtn) {
+                prevBtn.disabled = this.liveMessagesPage === 1;
+                prevBtn.style.opacity = this.liveMessagesPage === 1 ? '0.5' : '1';
+                prevBtn.style.cursor = this.liveMessagesPage === 1 ? 'not-allowed' : 'pointer';
+            }
+            if (nextBtn) {
+                nextBtn.disabled = this.liveMessagesPage === totalPages;
+                nextBtn.style.opacity = this.liveMessagesPage === totalPages ? '0.5' : '1';
+                nextBtn.style.cursor = this.liveMessagesPage === totalPages ? 'not-allowed' : 'pointer';
+            }
+        } else if (paginationDiv) {
+            paginationDiv.style.display = 'none';
+        }
+
+        // Build HTML for current page
+        let html = '';
+        pageMessages.forEach(spot => {
+            const time = new Date(spot.timestamp).toLocaleTimeString('en-US', {
+                hour12: false,
+                timeZone: 'UTC'
+            });
+
+            const bandColor = this.bandColors[spot.band] || '#999';
+
+            const spotKey = `${spot.callsign}-${spot.band}-${spot.mode}`;
+            html += `
+                <div class="live-message">
+                    <div class="live-message-time">${time} UTC</div>
+                    <div>
+                        <span class="live-message-callsign" style="cursor: pointer; text-decoration: underline;"
+                              onclick="window.digitalSpotsMap.showSpotOnMap('${spotKey}')">${spot.callsign}</span>
+                        ${spot.country ? `<span style="color: #888; font-size: 10px;"> • ${spot.country}</span>` : ''}
+                    </div>
+                    <div class="live-message-details">
+                        <span class="live-message-mode">${spot.mode}</span>
+                        <span style="color: ${bandColor};">●</span> ${spot.band}
+                        ${spot.snr !== undefined ? ` • ${spot.snr >= 0 ? '+' : ''}${spot.snr} dB` : ''}
+                        ${spot.frequency ? ` • ${(spot.frequency / 1e6).toFixed(3)} MHz` : ''}
+                    </div>
+                    ${spot.message ? `<div style="color: #aaa; font-size: 10px; margin-top: 4px;">${spot.message}</div>` : ''}
+                </div>
+            `;
+        });
+
+        content.innerHTML = html;
+    }
+
+    showSpotOnMap(spotKey) {
+        // Find the marker for this spot
+        const marker = this.markers.get(spotKey);
+        if (marker) {
+            // Pan to the marker
+            const latLng = marker.getLatLng();
+            this.map.setView(latLng, Math.max(this.map.getZoom(), 5), {
+                animate: true,
+                duration: 0.5
+            });
+            
+            // Open the popup
+            marker.openPopup();
+        }
+    }
+
+    updateBandLegend() {
+        const legendContainer = document.getElementById('band-legend-items');
+        if (!legendContainer) return;
+
+        // Get unique bands from current spots
+        const activeBands = new Set();
+        this.spots.forEach(spot => {
+            if (spot.band) {
+                activeBands.add(spot.band);
+            }
+        });
+
+        // Sort bands in standard order
+        const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+        const sortedBands = Array.from(activeBands).sort((a, b) => {
+            return bandOrder.indexOf(a) - bandOrder.indexOf(b);
+        });
+
+        // Build legend HTML
+        let html = '';
+        sortedBands.forEach(band => {
+            const color = this.bandColors[band] || '#999';
+            html += `
+                <div class="band-legend-item">
+                    <span class="band-legend-color" style="background-color: ${color};"></span>
+                    <span class="band-legend-label">${band}</span>
+                </div>
+            `;
+        });
+
+        legendContainer.innerHTML = html || '<div style="color: #888; font-size: 11px;">No active bands</div>';
+    }
 }
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    new DigitalSpotsMap();
+    window.digitalSpotsMap = new DigitalSpotsMap();
 });

@@ -2423,12 +2423,43 @@
                 bandsSection.appendChild(bandsTable);
             }
 
-            // Add band button
+            // Add band buttons container
+            const bandButtonsContainer = document.createElement('div');
+            bandButtonsContainer.style.display = 'flex';
+            bandButtonsContainer.style.gap = '10px';
+            bandButtonsContainer.style.flexWrap = 'wrap';
+            
             const addBandBtn = document.createElement('button');
             addBandBtn.className = 'btn';
             addBandBtn.textContent = 'Add Decoder Band';
             addBandBtn.onclick = showAddDecoderBandForm;
-            bandsSection.appendChild(addBandBtn);
+            bandButtonsContainer.appendChild(addBandBtn);
+            
+            const disableAllBtn = document.createElement('button');
+            disableAllBtn.className = 'btn btn-secondary';
+            disableAllBtn.textContent = 'Disable All';
+            disableAllBtn.onclick = disableAllDecoderBands;
+            bandButtonsContainer.appendChild(disableAllBtn);
+            
+            const enableFT8Btn = document.createElement('button');
+            enableFT8Btn.className = 'btn btn-secondary';
+            enableFT8Btn.textContent = 'Enable All FT8';
+            enableFT8Btn.onclick = () => enableDecoderBandsByMode('FT8');
+            bandButtonsContainer.appendChild(enableFT8Btn);
+            
+            const enableFT4Btn = document.createElement('button');
+            enableFT4Btn.className = 'btn btn-secondary';
+            enableFT4Btn.textContent = 'Enable All FT4';
+            enableFT4Btn.onclick = () => enableDecoderBandsByMode('FT4');
+            bandButtonsContainer.appendChild(enableFT4Btn);
+            
+            const enableWSPRBtn = document.createElement('button');
+            enableWSPRBtn.className = 'btn btn-secondary';
+            enableWSPRBtn.textContent = 'Enable All WSPR';
+            enableWSPRBtn.onclick = () => enableDecoderBandsByMode('WSPR');
+            bandButtonsContainer.appendChild(enableWSPRBtn);
+            
+            bandsSection.appendChild(bandButtonsContainer);
 
             container.appendChild(bandsSection);
 
@@ -2594,6 +2625,41 @@
             } catch (error) {
                 showAlert('Error deleting decoder band: ' + error.message, 'error');
             }
+        }
+
+        function disableAllDecoderBands() {
+            if (!confirm('Disable all decoder bands?')) {
+                return;
+            }
+
+            const bands = currentDecoderConfig.bands || [];
+            bands.forEach(band => {
+                band.enabled = false;
+            });
+
+            renderDecoderConfig();
+            showAlert('All decoder bands disabled. Click "Save Configuration" to apply changes.', 'info');
+        }
+
+        function enableDecoderBandsByMode(mode) {
+            const bands = currentDecoderConfig.bands || [];
+            const matchingBands = bands.filter(band => band.mode === mode);
+
+            if (matchingBands.length === 0) {
+                showAlert(`No ${mode} bands found`, 'info');
+                return;
+            }
+
+            if (!confirm(`Enable all ${mode} bands (${matchingBands.length} band${matchingBands.length > 1 ? 's' : ''})?`)) {
+                return;
+            }
+
+            matchingBands.forEach(band => {
+                band.enabled = true;
+            });
+
+            renderDecoderConfig();
+            showAlert(`All ${mode} bands enabled. Click "Save Configuration" to apply changes.`, 'info');
         }
 
         async function saveDecoderConfig() {

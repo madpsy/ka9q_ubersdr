@@ -222,6 +222,25 @@
             border: 2px solid rgba(255, 255, 255, 0.8);
         }
 
+        .band-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .band-legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .band-legend-label {
+            color: #ccc;
+        }
+
         /* Custom marker styles */
         .custom-marker {
             border-radius: 50%;
@@ -232,6 +251,108 @@
             background: #ff0000;
             border: 3px solid rgba(255, 255, 255, 0.9);
             box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+        }
+        /* Live Messages Panel */
+        .live-messages-panel {
+            position: absolute;
+            top: 70px;
+            right: 20px;
+            width: 350px;
+            max-height: 500px;
+            background: rgba(26, 26, 26, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 8px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .live-messages-header {
+            padding: 12px 15px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .live-messages-header:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .live-messages-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #4a9eff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .live-messages-toggle {
+            font-size: 18px;
+            color: #aaa;
+            transition: transform 0.2s;
+        }
+
+        .live-messages-toggle.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .live-messages-content {
+            overflow-y: auto;
+            max-height: 450px;
+            padding: 10px;
+        }
+
+        .live-messages-content.collapsed {
+            display: none;
+        }
+
+        .live-message {
+            padding: 8px;
+            margin-bottom: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-left: 3px solid #4a9eff;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: monospace;
+        }
+
+        .live-message-time {
+            color: #888;
+            font-size: 10px;
+            margin-bottom: 4px;
+        }
+
+        .live-message-callsign {
+            color: #4a9eff;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .live-message-details {
+            color: #ccc;
+            margin-top: 4px;
+        }
+
+        .live-message-mode {
+            display: inline-block;
+            padding: 2px 6px;
+            background: rgba(74, 158, 255, 0.2);
+            border-radius: 3px;
+            color: #4a9eff;
+            font-size: 10px;
+            margin-right: 4px;
+        }
+
+        .live-messages-empty {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+            font-size: 12px;
         }
     </style>
 </head>
@@ -298,51 +419,12 @@
 
     <div id="map"></div>
 
-    <div class="legend">
+    <div class="legend" id="band-legend">
         <div class="legend-item">
             <div class="legend-receiver"></div>
             <span>Receiver</span>
         </div>
-        <div class="legend-item">
-            <div class="legend-color" style="background: #4E79A7;"></div>
-            <span>160m</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-color" style="background: #F28E2B;"></div>
-            <span>80m</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-color" style="background: #E15759;"></div>
-            <span>60m</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-color" style="background: #76B7B2;"></div>
-            <span>40m</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-color" style="background: #59A14F;"></div>
-            <span>30m</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-color" style="background: #EDC948;"></div>
-            <span>20m</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-color" style="background: #B07AA1;"></div>
-            <span>17m</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-color" style="background: #FF9DA7;"></div>
-            <span>15m</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-color" style="background: #9C755F;"></div>
-            <span>12m</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-color" style="background: #BAB0AC;"></div>
-            <span>10m</span>
-        </div>
+        <div id="band-legend-items" style="margin-top: 8px;"></div>
     </div>
 
     <div class="distance-legend">
@@ -360,9 +442,39 @@
         </div>
         <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333; display: flex; gap: 20px;">
             <div id="top-countries" style="flex: 1;"></div>
-            <div id="top-bands" style="flex: 1;"></div>
+            <div style="flex: 1;">
+                <div id="top-bands"></div>
+                <div id="mode-stats" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;"></div>
+            </div>
         </div>
     </div>
+    <div class="live-messages-panel" id="live-messages-panel">
+        <div class="live-messages-header" id="live-messages-header">
+            <div class="live-messages-title">
+                <span>📡</span>
+                <span>Live Messages</span>
+                <span id="live-message-count" style="color: #888; font-size: 11px;">(0)</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <button id="clear-messages-btn" style="padding: 4px 10px; background: rgba(220, 53, 69, 0.2); border: 1px solid #dc3545; border-radius: 4px; color: #dc3545; cursor: pointer; font-size: 11px; font-weight: 500;" title="Clear all messages">Clear</button>
+                <div class="live-messages-toggle" id="live-messages-toggle">▼</div>
+            </div>
+        </div>
+        <div class="live-messages-filter" style="padding: 10px; border-bottom: 1px solid #333;">
+            <input type="text" id="live-messages-callsign-filter" placeholder="Filter by callsign..."
+                   style="width: 100%; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border: 1px solid #444;
+                          border-radius: 4px; color: #fff; font-size: 12px; outline: none;">
+        </div>
+        <div class="live-messages-content" id="live-messages-content">
+            <div class="live-messages-empty">Waiting for spots...</div>
+        </div>
+        <div class="live-messages-pagination" id="live-messages-pagination" style="padding: 10px; border-top: 1px solid #333; display: none; justify-content: space-between; align-items: center;">
+            <button id="live-messages-prev" style="padding: 4px 12px; background: rgba(74, 158, 255, 0.2); border: 1px solid #4a9eff; border-radius: 4px; color: #4a9eff; cursor: pointer; font-size: 11px;">← Prev</button>
+            <span id="live-messages-page-info" style="font-size: 11px; color: #aaa;"></span>
+            <button id="live-messages-next" style="padding: 4px 12px; background: rgba(74, 158, 255, 0.2); border: 1px solid #4a9eff; border-radius: 4px; color: #4a9eff; cursor: pointer; font-size: 11px;">Next →</button>
+        </div>
+    </div>
+
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="suncalc.js"></script>

@@ -13,9 +13,13 @@ import (
 
 // Regex patterns for parsing decoder output
 var (
-	// FT8/FT4 format: HHMMSS  SNR  DT  Freq  [~]  Message
+	// FT8 format: HHMMSS  SNR  DT  Freq  [~]  Message
 	// Example: 203530   2  0.1 2535 ~  EI3CTB RT6C -16
 	ft8Pattern = regexp.MustCompile(`^(\d{6})\s+(-?\d+)\s+([-\d.]+)\s+(\d+)\s+[~]?\s+(.+)$`)
+
+	// FT4 format: Same as FT8 - HHMMSS  SNR  DT  Freq  [+~]  Message
+	// Example: 130637   1  0.4  477 +  CQ RC6OD KN87
+	ft4Pattern = regexp.MustCompile(`^(\d{6})\s+(-?\d+)\s+([-\d.]+)\s+(\d+)\s+[+~]?\s+(.+)$`)
 
 	// WSPR format varies by wsprd version, typically:
 	// Date Time Seq SNR DT Freq Call Grid dBm [optional extra columns]
@@ -33,9 +37,18 @@ var (
 
 // ParseFT8Line parses a line of FT8/FT4 decoder output
 func ParseFT8Line(line string, dialFreq uint64, mode DecoderMode) (*DecodeInfo, error) {
-	matches := ft8Pattern.FindStringSubmatch(strings.TrimSpace(line))
+	trimmed := strings.TrimSpace(line)
+
+	// Use appropriate regex pattern based on mode
+	var matches []string
+	if mode == ModeFT4 {
+		matches = ft4Pattern.FindStringSubmatch(trimmed)
+	} else {
+		matches = ft8Pattern.FindStringSubmatch(trimmed)
+	}
+
 	if matches == nil {
-		return nil, fmt.Errorf("line does not match FT8/FT4 format")
+		return nil, fmt.Errorf("line does not match %s format", mode.String())
 	}
 
 	// Parse time (HHMMSS)
@@ -60,7 +73,9 @@ func ParseFT8Line(line string, dialFreq uint64, mode DecoderMode) (*DecodeInfo, 
 	}
 
 	// Parse frequency offset (in Hz from dial frequency)
-	freqOffset, err := strconv.ParseUint(matches[4], 10, 64)
+	// For FT4, the frequency may have a decimal point (e.g., "319.")
+	freqStr := strings.TrimSuffix(matches[4], ".")
+	freqOffset, err := strconv.ParseUint(freqStr, 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid frequency: %w", err)
 	}
@@ -271,8 +286,15 @@ func isValidGridLocator(s string) bool {
 
 // ParseDecoderLog reads and parses a decoder log file
 func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode) ([]*DecodeInfo, error) {
+	if DebugMode || mode == ModeFT4 {
+		log.Printf("DEBUG: ParseDecoderLog called for %s mode, file: %s", mode.String(), filename)
+	}
+
 	file, err := os.Open(filename)
 	if err != nil {
+		if DebugMode || mode == ModeFT4 {
+			log.Printf("DEBUG: Failed to open file %s: %v", filename, err)
+		}
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 	defer file.Close()
@@ -306,8 +328,8 @@ func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode) ([]*Dec
 
 		if err != nil {
 			// Skip lines that don't parse (may be decoder status messages)
-			if DebugMode && mode == ModeWSPR {
-				log.Printf("WSPR DEBUG: Failed to parse line: %v", err)
+			if DebugMode || mode == ModeFT4 {
+				log.Printf("DEBUG: Failed to parse line %d for %s: %v - Line: %q", lineCount, mode.String(), err, line)
 			}
 			skippedCount++
 			continue
@@ -327,9 +349,9 @@ func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode) ([]*Dec
 		return nil, fmt.Errorf("error reading log file: %w", err)
 	}
 
-	if DebugMode && mode == ModeWSPR {
-		log.Printf("WSPR DEBUG: ParseDecoderLog stats - Total lines: %d, Skipped: %d, Parsed: %d, Valid decodes: %d",
-			lineCount, skippedCount, parsedCount, len(decodes))
+	if DebugMode || mode == ModeFT4 {
+		log.Printf("DEBUG: ParseDecoderLog stats for %s - File: %s, Total lines: %d, Skipped: %d, Parsed: %d, Valid decodes: %d",
+			mode.String(), filename, lineCount, skippedCount, parsedCount, len(decodes))
 	}
 
 	return decodes, nil

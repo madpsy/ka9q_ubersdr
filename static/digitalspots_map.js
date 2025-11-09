@@ -484,7 +484,7 @@ class DigitalSpotsMap {
         }
         
         // Build HTML
-        let html = '<div style="font-size: 11px; color: #4a9eff; margin-bottom: 6px; font-weight: 500;">Top 10 Countries:</div>';
+        let html = '';
         sortedCountries.forEach(([country, count], index) => {
             html += `
                 <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #ccc;">
@@ -523,7 +523,7 @@ class DigitalSpotsMap {
         }
         
         // Build HTML showing all bands in order
-        let html = '<div style="font-size: 11px; color: #4a9eff; margin-bottom: 6px; font-weight: 500;">Bands:</div>';
+        let html = '';
         allBands.forEach(band => {
             const count = bandCounts[band];
             const color = count > 0 ? '#ccc' : '#555';
@@ -648,8 +648,39 @@ class DigitalSpotsMap {
         });
         
         rangesEl.innerHTML = html;
-        closestEl.textContent = `${Math.round(closestSpot.distance_km)} km - ${closestSpot.callsign}`;
-        farthestEl.textContent = `${Math.round(farthestSpot.distance_km)} km - ${farthestSpot.callsign}`;
+        // Format closest spot with details on separate lines
+        let closestHtml = `${Math.round(closestSpot.distance_km)} km - ${closestSpot.callsign}`;
+        const closestDetails = [];
+        if (closestSpot.country && closestSpot.country !== 'Unknown') {
+            closestDetails.push(closestSpot.country);
+        }
+        if (closestSpot.mode) {
+            closestDetails.push(closestSpot.mode);
+        }
+        if (closestSpot.band) {
+            closestDetails.push(closestSpot.band);
+        }
+        if (closestDetails.length > 0) {
+            closestHtml += `<br><span style="font-size: 10px; color: #888;">${closestDetails.join(' • ')}</span>`;
+        }
+        closestEl.innerHTML = closestHtml;
+
+        // Format farthest spot with details on separate lines
+        let farthestHtml = `${Math.round(farthestSpot.distance_km)} km - ${farthestSpot.callsign}`;
+        const farthestDetails = [];
+        if (farthestSpot.country && farthestSpot.country !== 'Unknown') {
+            farthestDetails.push(farthestSpot.country);
+        }
+        if (farthestSpot.mode) {
+            farthestDetails.push(farthestSpot.mode);
+        }
+        if (farthestSpot.band) {
+            farthestDetails.push(farthestSpot.band);
+        }
+        if (farthestDetails.length > 0) {
+            farthestHtml += `<br><span style="font-size: 10px; color: #888;">${farthestDetails.join(' • ')}</span>`;
+        }
+        farthestEl.innerHTML = farthestHtml;
     }
 }
 

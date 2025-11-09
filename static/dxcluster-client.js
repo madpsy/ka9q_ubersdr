@@ -5,8 +5,10 @@ class DXClusterClient {
         this.reconnectDelay = 5000; // 5 seconds
         this.reconnectTimer = null;
         this.connected = false;
-        this.spotCallbacks = []; // Array of spot callbacks
-        this.receivedSpots = []; // Buffer for spots received before callbacks registered
+        this.spotCallbacks = []; // Array of DX spot callbacks
+        this.digitalSpotCallbacks = []; // Array of digital spot callbacks
+        this.receivedSpots = []; // Buffer for DX spots received before callbacks registered
+        this.receivedDigitalSpots = []; // Buffer for digital spots received before callbacks registered
         this.maxBufferedSpots = 100; // Maximum spots to buffer
     }
 
@@ -75,8 +77,8 @@ class DXClusterClient {
                 // Status update received
                 break;
 
-            case 'spot':
-                // Spot received
+            case 'dx_spot':
+                // DX Cluster spot received (not digital_spot)
                 if (message.data) {
                     // If no callbacks registered yet, buffer the spot
                     if (this.spotCallbacks.length === 0) {
@@ -98,6 +100,29 @@ class DXClusterClient {
                 }
                 break;
 
+            case 'digital_spot':
+                // Digital mode spot (FT8/FT4/WSPR)
+                if (message.data) {
+                    // If no callbacks registered yet, buffer the spot
+                    if (this.digitalSpotCallbacks.length === 0) {
+                        this.receivedDigitalSpots.push(message.data);
+                        // Limit buffer size
+                        if (this.receivedDigitalSpots.length > this.maxBufferedSpots) {
+                            this.receivedDigitalSpots.shift();
+                        }
+                    } else {
+                        // Notify all callbacks
+                        this.digitalSpotCallbacks.forEach(callback => {
+                            try {
+                                callback(message.data);
+                            } catch (error) {
+                                console.error('[DX Cluster] Error in digital spot callback:', error);
+                            }
+                        });
+                    }
+                }
+                break;
+
             case 'pong':
                 // Response to ping
                 break;
@@ -107,7 +132,7 @@ class DXClusterClient {
         }
     }
 
-    // Subscribe to spot notifications
+    // Subscribe to DX spot notifications
     onSpot(callback) {
         this.spotCallbacks.push(callback);
         
@@ -129,6 +154,32 @@ class DXClusterClient {
             const index = this.spotCallbacks.indexOf(callback);
             if (index > -1) {
                 this.spotCallbacks.splice(index, 1);
+            }
+        };
+    }
+
+    // Subscribe to digital spot notifications (FT8/FT4/WSPR)
+    onDigitalSpot(callback) {
+        this.digitalSpotCallbacks.push(callback);
+        
+        // Send any buffered digital spots to the new callback
+        if (this.receivedDigitalSpots.length > 0) {
+            this.receivedDigitalSpots.forEach(spot => {
+                try {
+                    callback(spot);
+                } catch (error) {
+                    console.error('[DX Cluster] Error sending buffered digital spot:', error);
+                }
+            });
+            // Clear the buffer after sending
+            this.receivedDigitalSpots = [];
+        }
+        
+        // Return unsubscribe function
+        return () => {
+            const index = this.digitalSpotCallbacks.indexOf(callback);
+            if (index > -1) {
+                this.digitalSpotCallbacks.splice(index, 1);
             }
         };
     }

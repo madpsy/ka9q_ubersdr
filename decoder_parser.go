@@ -74,9 +74,13 @@ func ParseFT8Line(line string, dialFreq uint64, mode DecoderMode) (*DecodeInfo, 
 	// Extract callsign and locator from message
 	callsign, locator := extractCallsignLocator(message)
 
+	// Lookup country from CTY database
+	country := GetCountryForCallsign(callsign)
+
 	info := &DecodeInfo{
 		Callsign:    callsign,
 		Locator:     locator,
+		Country:     country,
 		SNR:         snr,
 		Frequency:   frequency,
 		Timestamp:   timestamp,
@@ -169,9 +173,13 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 		}
 	}
 
+	// Lookup country from CTY database
+	country := GetCountryForCallsign(callsign)
+
 	info := &DecodeInfo{
 		Callsign:    callsign,
 		Locator:     locator,
+		Country:     country,
 		SNR:         snr,
 		Frequency:   dialFreq, // Receiver frequency
 		TxFrequency: txFrequency,
@@ -190,27 +198,42 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 }
 
 // extractCallsignLocator extracts callsign and grid locator from FT8/FT4 message
+// For messages with grid locators, we want the callsign immediately before the grid
+// (the transmitting station), not the first callsign in the message
 func extractCallsignLocator(message string) (string, string) {
 	fields := strings.Fields(message)
 	if len(fields) < 2 {
 		return "", ""
 	}
 
-	var callsign, locator string
-
-	// Look for callsign and grid in the message
-	for _, field := range fields {
-		// Check if it looks like a callsign
-		if callsign == "" && isValidCallsign(field) {
-			callsign = field
-		}
-		// Check if it looks like a grid locator
-		if locator == "" && isValidGridLocator(field) {
+	// First, find the grid locator
+	var locator string
+	var locatorIndex int = -1
+	for i, field := range fields {
+		if isValidGridLocator(field) {
 			locator = field
+			locatorIndex = i
+			break
 		}
 	}
 
-	return callsign, locator
+	// If we found a grid locator, look for the callsign immediately before it
+	if locatorIndex > 0 {
+		// Check the field before the grid locator
+		if isValidCallsign(fields[locatorIndex-1]) {
+			return fields[locatorIndex-1], locator
+		}
+	}
+
+	// Fallback: if no grid locator found, or no callsign before it,
+	// just find the first valid callsign in the message
+	for _, field := range fields {
+		if isValidCallsign(field) {
+			return field, locator
+		}
+	}
+
+	return "", locator
 }
 
 // isValidCallsign checks if a string looks like a valid amateur radio callsign
@@ -228,6 +251,14 @@ func isValidGridLocator(s string) bool {
 	if len(s) != 4 && len(s) != 6 && len(s) != 8 {
 		return false
 	}
+
+	// Exclude FT8 protocol messages that look like grid locators
+	upper := strings.ToUpper(s)
+	if upper == "RR73" || upper == "RRR" || strings.HasPrefix(upper, "R-") ||
+		strings.HasPrefix(upper, "R+") || upper == "73" {
+		return false
+	}
+
 	// Convert to proper case for pattern matching (uppercase letters, lowercase letters)
 	if len(s) >= 2 {
 		s = strings.ToUpper(s[0:2]) + s[2:]

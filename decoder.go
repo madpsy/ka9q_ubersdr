@@ -34,6 +34,10 @@ type MultiDecoder struct {
 	running  bool
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+
+	// Callback for decoded spots
+	onDecodeCallback func(DecodeInfo)
+	callbackMu       sync.RWMutex
 }
 
 // NewMultiDecoder creates a new multi-decoder instance
@@ -451,8 +455,11 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 				}
 			}
 
-			// Submit to PSKReporter/WSPRNet
+			// Submit to PSKReporter/WSPRNet and notify callback
 			for _, decode := range decodes {
+				// Notify callback for websocket broadcasting
+				md.notifyDecode(*decode)
+
 				// Submit to PSKReporter (all modes with valid locator)
 				// This matches ka9q_multidecoder behavior which sends FT8/FT4/WSPR to PSKReporter
 				if md.pskReporter != nil && decode.Locator != "" {
@@ -529,4 +536,26 @@ func (md *MultiDecoder) GetStats() map[string]interface{} {
 		return nil
 	}
 	return md.stats.GetStats()
+}
+
+// OnDecode registers a callback function to be called when a decode is completed
+func (md *MultiDecoder) OnDecode(callback func(DecodeInfo)) {
+	if md == nil {
+		return
+	}
+	md.callbackMu.Lock()
+	defer md.callbackMu.Unlock()
+	md.onDecodeCallback = callback
+}
+
+// notifyDecode calls the registered callback with a decode
+func (md *MultiDecoder) notifyDecode(decode DecodeInfo) {
+	md.callbackMu.RLock()
+	callback := md.onDecodeCallback
+	md.callbackMu.RUnlock()
+
+	if callback != nil {
+		// Run in goroutine to avoid blocking decoder processing
+		go callback(decode)
+	}
 }

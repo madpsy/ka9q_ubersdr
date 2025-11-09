@@ -13,6 +13,13 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// digitalSpotKey is used for deduplication of digital spots
+type digitalSpotKey struct {
+	callsign string
+	band     string
+	mode     string
+}
+
 // DXClusterWebSocketHandler manages WebSocket connections for DX cluster spots
 type DXClusterWebSocketHandler struct {
 	clients           map[*websocket.Conn]*sync.Mutex // Each connection has its own write mutex
@@ -22,16 +29,32 @@ type DXClusterWebSocketHandler struct {
 	ipBanManager      *IPBanManager
 	prometheusMetrics *PrometheusMetrics
 	upgrader          websocket.Upgrader
+
+	// Digital spot deduplication
+	digitalSpotCache   map[digitalSpotKey]time.Time
+	digitalSpotCacheMu sync.RWMutex
+
+	// Digital spot buffer for new connections
+	digitalSpotBuffer   []map[string]interface{}
+	digitalSpotBufferMu sync.RWMutex
+	maxDigitalSpots     int
+
+	// Receiver location for distance/bearing calculation
+	receiverLocator string
 }
 
 // NewDXClusterWebSocketHandler creates a new DX cluster WebSocket handler
-func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionManager, ipBanManager *IPBanManager, prometheusMetrics *PrometheusMetrics) *DXClusterWebSocketHandler {
+func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionManager, ipBanManager *IPBanManager, prometheusMetrics *PrometheusMetrics, receiverLocator string) *DXClusterWebSocketHandler {
 	handler := &DXClusterWebSocketHandler{
 		clients:           make(map[*websocket.Conn]*sync.Mutex),
 		dxCluster:         dxCluster,
 		sessions:          sessions,
 		ipBanManager:      ipBanManager,
 		prometheusMetrics: prometheusMetrics,
+		digitalSpotCache:  make(map[digitalSpotKey]time.Time),
+		digitalSpotBuffer: make([]map[string]interface{}, 0, 500),
+		maxDigitalSpots:   500,
+		receiverLocator:   receiverLocator,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -45,6 +68,9 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 	dxCluster.OnSpot(func(spot DXSpot) {
 		handler.broadcastSpot(spot)
 	})
+
+	// Start cleanup goroutine for digital spot cache
+	go handler.cleanupDigitalSpotCache()
 
 	return handler
 }
@@ -117,8 +143,11 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	// Send connection status
 	h.sendConnectionStatus(conn)
 
-	// Send buffered spots to new client
+	// Send buffered DX spots to new client
 	h.sendBufferedSpots(conn)
+
+	// Send buffered digital spots to new client
+	h.sendBufferedDigitalSpots(conn)
 
 	// Handle client messages (mainly for ping/pong)
 	go h.handleClient(conn)
@@ -207,13 +236,213 @@ func (h *DXClusterWebSocketHandler) broadcastSpot(spot DXSpot) {
 	}
 
 	message := map[string]interface{}{
-		"type": "spot",
+		"type": "dx_spot",
 		"data": spot,
 	}
 
+	h.broadcast(message)
+}
+
+// BroadcastDigitalSpot broadcasts a digital mode spot (FT8/FT4/WSPR) to all connected clients
+// with deduplication based on callsign/band/mode within a 2-minute window
+func (h *DXClusterWebSocketHandler) BroadcastDigitalSpot(decode DecodeInfo) {
+	// Determine band from frequency
+	band := h.frequencyToBand(float64(decode.Frequency))
+
+	// Create deduplication key
+	key := digitalSpotKey{
+		callsign: decode.Callsign,
+		band:     band,
+		mode:     decode.Mode,
+	}
+
+	// Check if we've seen this spot recently (within 2 minutes)
+	h.digitalSpotCacheMu.RLock()
+	lastSeen, exists := h.digitalSpotCache[key]
+	h.digitalSpotCacheMu.RUnlock()
+
+	now := time.Now()
+	if exists && now.Sub(lastSeen) < 2*time.Minute {
+		// Skip this spot - we've seen it recently
+		return
+	}
+
+	// Update cache with current time
+	h.digitalSpotCacheMu.Lock()
+	h.digitalSpotCache[key] = now
+	h.digitalSpotCacheMu.Unlock()
+
+	// Record spot in Prometheus if enabled
+	if h.prometheusMetrics != nil {
+		// Use mode as the band identifier for digital spots
+		h.prometheusMetrics.RecordDXSpot(decode.Mode)
+	}
+
+	// Calculate distance and bearing if we have both locators
+	var distanceKm *float64
+	var bearingDeg *float64
+	var spotLat *float64
+	var spotLon *float64
+
+	if h.receiverLocator != "" && decode.Locator != "" {
+		if IsValidMaidenheadLocator(h.receiverLocator) && IsValidMaidenheadLocator(decode.Locator) {
+			dist, bearing, err := CalculateDistanceAndBearingFromLocators(h.receiverLocator, decode.Locator)
+			if err == nil {
+				distanceKm = &dist
+				bearingDeg = &bearing
+			}
+		}
+	}
+
+	// Convert spot locator to lat/lon for map display with jitter
+	if decode.Locator != "" && IsValidMaidenheadLocator(decode.Locator) {
+		lat, lon, err := MaidenheadToLatLonWithJitter(decode.Locator)
+		if err == nil {
+			spotLat = &lat
+			spotLon = &lon
+		}
+	}
+
+	data := map[string]interface{}{
+		"mode":         decode.Mode,
+		"band":         band,
+		"callsign":     decode.Callsign,
+		"locator":      decode.Locator,
+		"country":      decode.Country,
+		"snr":          decode.SNR,
+		"frequency":    decode.Frequency,
+		"timestamp":    decode.Timestamp,
+		"message":      decode.Message,
+		"dt":           decode.DT,
+		"drift":        decode.Drift,
+		"dbm":          decode.DBm,
+		"tx_frequency": decode.TxFrequency,
+	}
+
+	// Add distance and bearing if calculated
+	if distanceKm != nil {
+		data["distance_km"] = *distanceKm
+	}
+	if bearingDeg != nil {
+		data["bearing_deg"] = *bearingDeg
+	}
+
+	// Add spot coordinates if available
+	if spotLat != nil && spotLon != nil {
+		data["latitude"] = *spotLat
+		data["longitude"] = *spotLon
+	}
+
+	message := map[string]interface{}{
+		"type": "digital_spot",
+		"data": data,
+	}
+
+	// Add to buffer for new connections
+	h.addDigitalSpotToBuffer(data)
+
+	h.broadcast(message)
+}
+
+// addDigitalSpotToBuffer adds a digital spot to the buffer, maintaining max size
+func (h *DXClusterWebSocketHandler) addDigitalSpotToBuffer(spotData map[string]interface{}) {
+	h.digitalSpotBufferMu.Lock()
+	defer h.digitalSpotBufferMu.Unlock()
+
+	// Add spot to buffer
+	h.digitalSpotBuffer = append(h.digitalSpotBuffer, spotData)
+
+	// If buffer exceeds max size, remove oldest spots
+	if len(h.digitalSpotBuffer) > h.maxDigitalSpots {
+		// Keep only the most recent maxDigitalSpots
+		h.digitalSpotBuffer = h.digitalSpotBuffer[len(h.digitalSpotBuffer)-h.maxDigitalSpots:]
+	}
+}
+
+// sendBufferedDigitalSpots sends all buffered digital spots to a newly connected client
+func (h *DXClusterWebSocketHandler) sendBufferedDigitalSpots(conn *websocket.Conn) {
+	h.digitalSpotBufferMu.RLock()
+	bufferedSpots := make([]map[string]interface{}, len(h.digitalSpotBuffer))
+	copy(bufferedSpots, h.digitalSpotBuffer)
+	h.digitalSpotBufferMu.RUnlock()
+
+	if len(bufferedSpots) == 0 {
+		return
+	}
+
+	log.Printf("DX Cluster WebSocket: Sending %d buffered digital spots to new client", len(bufferedSpots))
+
+	// Send each spot as an individual message
+	for _, spotData := range bufferedSpots {
+		message := map[string]interface{}{
+			"type": "digital_spot",
+			"data": spotData,
+		}
+
+		if err := h.sendMessage(conn, message); err != nil {
+			log.Printf("DX Cluster WebSocket: Failed to send buffered digital spot: %v", err)
+			// Continue sending other spots even if one fails
+		}
+	}
+}
+
+// frequencyToBand converts a frequency in Hz to a band name
+func (h *DXClusterWebSocketHandler) frequencyToBand(freqHz float64) string {
+	freq := freqHz / 1000000.0 // Convert to MHz
+
+	switch {
+	case freq >= 0.1357 && freq < 0.1378:
+		return "2200m"
+	case freq >= 0.472 && freq < 0.479:
+		return "630m"
+	case freq >= 1.8 && freq < 2.0:
+		return "160m"
+	case freq >= 3.5 && freq < 4.0:
+		return "80m"
+	case freq >= 5.3 && freq < 5.5:
+		return "60m"
+	case freq >= 7.0 && freq < 7.3:
+		return "40m"
+	case freq >= 10.1 && freq < 10.15:
+		return "30m"
+	case freq >= 14.0 && freq < 14.35:
+		return "20m"
+	case freq >= 18.068 && freq < 18.168:
+		return "17m"
+	case freq >= 21.0 && freq < 21.45:
+		return "15m"
+	case freq >= 24.89 && freq < 24.99:
+		return "12m"
+	case freq >= 28.0 && freq < 29.7:
+		return "10m"
+	default:
+		return "unknown"
+	}
+}
+
+// cleanupDigitalSpotCache periodically removes old entries from the cache
+func (h *DXClusterWebSocketHandler) cleanupDigitalSpotCache() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		h.digitalSpotCacheMu.Lock()
+		now := time.Now()
+		for key, lastSeen := range h.digitalSpotCache {
+			// Remove entries older than 3 minutes (1 minute buffer beyond the 2-minute window)
+			if now.Sub(lastSeen) > 3*time.Minute {
+				delete(h.digitalSpotCache, key)
+			}
+		}
+		h.digitalSpotCacheMu.Unlock()
+	}
+}
+
+// broadcast is a helper method to send messages to all clients
+func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 	messageJSON, err := json.Marshal(message)
 	if err != nil {
-		log.Printf("DX Cluster WebSocket: Failed to marshal spot: %v", err)
+		log.Printf("DX Cluster WebSocket: Failed to marshal message: %v", err)
 		return
 	}
 
@@ -232,7 +461,7 @@ func (h *DXClusterWebSocketHandler) broadcastSpot(spot DXSpot) {
 
 		if err != nil {
 			// Just log the error - the read handler will detect and clean up dead connections
-			log.Printf("DX Cluster WebSocket: Failed to send spot to client: %v", err)
+			log.Printf("DX Cluster WebSocket: Failed to send message to client: %v", err)
 		}
 	}
 }

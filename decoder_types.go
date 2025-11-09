@@ -10,6 +10,7 @@ type DecodeInfo struct {
 	// Common fields for all modes
 	Callsign  string
 	Locator   string
+	Country   string // DXCC country name from CTY.DAT
 	SNR       int
 	Frequency uint64 // Actual RF frequency in Hz
 	Timestamp time.Time

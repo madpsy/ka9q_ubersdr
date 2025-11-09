@@ -1,0 +1,327 @@
+/* Digital Spots Extension Styles */
+
+.digital-spots-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 10px;
+    background: #1a1a1a;
+    color: #e0e0e0;
+}
+
+.digital-spots-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #333;
+}
+
+.digital-spots-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.digital-spots-title h3 {
+    margin: 0;
+    font-size: 18px;
+    color: #4a9eff;
+}
+
+.digital-spots-info {
+    display: flex;
+    gap: 15px;
+    font-size: 12px;
+    color: #888;
+}
+
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.status-connected {
+    background: #28a745;
+    color: white;
+}
+
+.status-disconnected {
+    background: #dc3545;
+    color: white;
+}
+
+.digital-spots-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.control-group label {
+    font-size: 12px;
+    color: #aaa;
+}
+
+.control-group select,
+.control-group input[type="text"] {
+    padding: 4px 8px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 12px;
+}
+
+.control-group input[type="text"] {
+    width: 120px;
+}
+
+.btn-clear {
+    padding: 4px 12px;
+    background: #dc3545;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.btn-clear:hover {
+    background: #c82333;
+}
+
+.digital-spots-table-container {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid #333;
+    border-radius: 4px;
+}
+
+.digital-spots-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.digital-spots-table thead {
+    position: sticky;
+    top: 0;
+    background: #2a2a2a;
+    z-index: 1;
+}
+
+.digital-spots-table th {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 2px solid #444;
+    color: #4a9eff;
+    font-weight: bold;
+}
+
+/* Column widths */
+.digital-spots-table th:nth-child(1),
+.digital-spots-table td:nth-child(1) {
+    width: 80px; /* Time */
+}
+
+.digital-spots-table th:nth-child(2),
+.digital-spots-table td:nth-child(2) {
+    width: 60px; /* Age */
+}
+
+.digital-spots-table th:nth-child(3),
+.digital-spots-table td:nth-child(3) {
+    width: 60px; /* Mode */
+}
+
+.digital-spots-table th:nth-child(4),
+.digital-spots-table td:nth-child(4) {
+    width: 100px; /* Frequency */
+}
+
+.digital-spots-table th:nth-child(5),
+.digital-spots-table td:nth-child(5) {
+    width: 50px; /* Band */
+}
+
+.digital-spots-table th:nth-child(6),
+.digital-spots-table td:nth-child(6) {
+    width: 100px; /* Callsign */
+}
+
+.digital-spots-table th:nth-child(7),
+.digital-spots-table td:nth-child(7) {
+    width: 70px; /* Grid */
+}
+
+.digital-spots-table th:nth-child(8),
+.digital-spots-table td:nth-child(8) {
+    width: 80px; /* Distance */
+    text-align: right;
+}
+
+.digital-spots-table th:nth-child(9),
+.digital-spots-table td:nth-child(9) {
+    width: 60px; /* Bearing */
+    text-align: right;
+}
+
+.digital-spots-table th:nth-child(10),
+.digital-spots-table td:nth-child(10) {
+    width: 50px; /* SNR */
+    text-align: right;
+}
+
+.digital-spots-table th:nth-child(11),
+.digital-spots-table td:nth-child(11) {
+    width: auto; /* Message - takes remaining space */
+}
+
+.digital-spots-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.digital-spots-table tbody tr {
+    transition: background-color 0.2s;
+}
+
+.digital-spots-table tbody tr:hover {
+    background: #2a2a2a;
+    cursor: pointer;
+}
+
+.digital-spots-table tbody tr.no-spots {
+    text-align: center;
+    color: #888;
+}
+
+.digital-spots-table tbody tr.no-spots:hover {
+    background: transparent;
+    cursor: default;
+}
+
+.digital-spots-table tbody tr.spot-new {
+    animation: highlight-spot 0.5s ease-out;
+}
+
+@keyframes highlight-spot {
+    0% {
+        background-color: #4a9eff;
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+.spot-time {
+    color: #888;
+    font-family: monospace;
+}
+
+.spot-age {
+    color: #666;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.spot-mode {
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+.spot-mode-FT8 {
+    background: #28a745;
+    color: white;
+}
+
+.spot-mode-FT4 {
+    background: #17a2b8;
+    color: white;
+}
+
+.spot-mode-WSPR {
+    background: #ffc107;
+    color: black;
+}
+
+.spot-frequency {
+    font-family: monospace;
+    color: #4a9eff;
+    cursor: pointer;
+}
+
+.spot-frequency:hover {
+    text-decoration: underline;
+}
+
+.spot-callsign {
+    font-weight: bold;
+    color: #ffc107;
+    cursor: pointer;
+}
+
+.spot-callsign:hover {
+    text-decoration: underline;
+}
+
+.spot-band {
+    font-family: monospace;
+    color: #6c757d;
+    font-size: 11px;
+}
+
+.spot-grid {
+    font-family: monospace;
+    color: #17a2b8;
+}
+
+.spot-distance {
+    font-family: monospace;
+    color: #9c27b0;
+    text-align: right;
+    font-size: 11px;
+}
+
+.spot-bearing {
+    font-family: monospace;
+    color: #ff9800;
+    text-align: right;
+    font-size: 11px;
+}
+
+.spot-snr {
+    font-family: monospace;
+    text-align: right;
+}
+
+.spot-snr-positive {
+    color: #28a745;
+}
+
+.spot-snr-negative {
+    color: #dc3545;
+}
+
+.spot-message {
+    color: #aaa;
+    font-size: 11px;
+}
+
+.current-spot-indicator {
+    color: #ffc107;
+    font-size: 14px;
+    margin-left: 4px;
+}

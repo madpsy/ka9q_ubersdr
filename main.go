@@ -247,6 +247,18 @@ func main() {
 		log.Printf("No decoder.yaml found or error loading: %v", err)
 	}
 
+	// Initialize CTY.DAT database for country lookup
+	ctyPath := "cty/cty.dat"
+	if *configDir != "." {
+		ctyPath = *configDir + "/cty/cty.dat"
+	}
+	if err := InitCTYDatabase(ctyPath); err != nil {
+		log.Printf("Warning: Failed to load CTY.DAT database: %v", err)
+		log.Printf("Country lookup will be disabled for digital spots")
+	} else {
+		log.Printf("CTY.DAT database loaded successfully")
+	}
+
 	log.Printf("Starting ka9q_ubersdr server...")
 	log.Printf("Radiod status: %s", config.Radiod.StatusGroup)
 	log.Printf("Radiod data: %s", config.Radiod.DataGroup)
@@ -331,15 +343,7 @@ func main() {
 		log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
 		multiDecoder = nil
 	}
-	if multiDecoder != nil {
-		if err := multiDecoder.Start(); err != nil {
-			log.Printf("Warning: Failed to start multi-decoder: %v", err)
-			log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
-			multiDecoder = nil
-		} else {
-			defer multiDecoder.Stop()
-		}
-	}
+	// Note: multiDecoder.Start() will be called later after dxClusterWsHandler is initialized
 
 	// Initialize Prometheus metrics if enabled
 	var prometheusMetrics *PrometheusMetrics
@@ -430,13 +434,39 @@ func main() {
 	}
 
 	// Initialize DX cluster WebSocket handler
-	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics)
+	// Pass receiver locator from decoder config for distance/bearing calculation
+	receiverLocator := ""
+	if config.Decoder.Enabled {
+		receiverLocator = config.Decoder.ReceiverLocator
+	}
+	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, receiverLocator)
 
 	// Register DX spot handler for logging
 	dxCluster.OnSpot(func(spot DXSpot) {
-		log.Printf("DX Spot: %.1f kHz %s by %s - %s",
-			spot.Frequency/1000, spot.DXCall, spot.Spotter, spot.Comment)
+		if DebugMode {
+			log.Printf("DX Spot: %.1f kHz %s by %s - %s",
+				spot.Frequency/1000, spot.DXCall, spot.Spotter, spot.Comment)
+		}
 	})
+
+	// Start multi-decoder and register callback for digital spots
+	if multiDecoder != nil {
+		if err := multiDecoder.Start(); err != nil {
+			log.Printf("Warning: Failed to start multi-decoder: %v", err)
+			log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
+			multiDecoder = nil
+		} else {
+			// Register callback to broadcast digital spots via websocket
+			multiDecoder.OnDecode(func(decode DecodeInfo) {
+				dxClusterWsHandler.BroadcastDigitalSpot(decode)
+				if DebugMode {
+					log.Printf("Digital Spot: %s %s %s SNR:%d @ %.6f MHz",
+						decode.Mode, decode.Callsign, decode.Locator, decode.SNR, float64(decode.Frequency)/1e6)
+				}
+			})
+			defer multiDecoder.Stop()
+		}
+	}
 
 	// Initialize rate limiter manager
 	rateLimiterManager := NewRateLimiterManager(config.Server.CmdRateLimit)

@@ -89,6 +89,25 @@ initialize_configs() {
         # Merge missing keys from example into existing config (like config.yaml)
         merge_config_keys "/app/config/decoder.yaml" "/etc/ka9q_ubersdr/decoder.yaml.example" "decoder.yaml"
     fi
+
+    # Initialize CTY.DAT directory if it doesn't exist
+    if [ ! -d "/app/config/cty" ]; then
+        echo "Initializing cty directory..."
+        mkdir -p /app/config/cty
+        if [ -f "/etc/ka9q_ubersdr/cty/cty.dat" ]; then
+            cp /etc/ka9q_ubersdr/cty/cty.dat /app/config/cty/cty.dat
+            echo "✓ cty.dat copied from image"
+        fi
+    else
+        # Check if cty.dat exists, if not copy from image
+        if [ ! -f "/app/config/cty/cty.dat" ] && [ -f "/etc/ka9q_ubersdr/cty/cty.dat" ]; then
+            echo "Copying cty.dat from image..."
+            cp /etc/ka9q_ubersdr/cty/cty.dat /app/config/cty/cty.dat
+            echo "✓ cty.dat copied"
+        else
+            echo "✓ cty.dat exists"
+        fi
+    fi
 }
 
 # Function to update admin password in config.yaml

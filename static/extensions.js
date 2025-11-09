@@ -99,6 +99,17 @@ class RadioAPI {
         return window.dxClusterClient.onSpot(callback);
     }
 
+    onDigitalSpot(callback) {
+        // Subscribe to digital mode spots (FT8/FT4/WSPR) via the DX cluster websocket
+        if (!window.dxClusterClient) {
+            console.warn('DX Cluster client not available');
+            return null;
+        }
+
+        // Use the client's built-in subscription mechanism for digital spots
+        return window.dxClusterClient.onDigitalSpot(callback);
+    }
+
     // === RADIO CONTROLS ===
     
     setFrequency(freq) {

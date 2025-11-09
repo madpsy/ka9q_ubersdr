@@ -441,16 +441,21 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 
 		if len(decodes) > 0 {
 			log.Printf("Decoded %d spots from %s", len(decodes), band.Config.Name)
-			for _, decode := range decodes {
-				log.Printf("  %s: %s %s SNR:%d @ %.6f MHz",
-					band.Config.Name, decode.Callsign, decode.Locator,
-					decode.SNR, float64(decode.Frequency)/1e6)
+
+			// Log individual decodes only in debug mode
+			if DebugMode {
+				for _, decode := range decodes {
+					log.Printf("  %s: %s %s SNR:%d @ %.6f MHz",
+						band.Config.Name, decode.Callsign, decode.Locator,
+						decode.SNR, float64(decode.Frequency)/1e6)
+				}
 			}
 
 			// Submit to PSKReporter/WSPRNet
 			for _, decode := range decodes {
-				// Submit to PSKReporter (FT8/FT4)
-				if md.pskReporter != nil && (decode.Mode == "FT8" || decode.Mode == "FT4") {
+				// Submit to PSKReporter (all modes with valid locator)
+				// This matches ka9q_multidecoder behavior which sends FT8/FT4/WSPR to PSKReporter
+				if md.pskReporter != nil && decode.Locator != "" {
 					if err := md.pskReporter.Submit(decode); err != nil {
 						log.Printf("Warning: Failed to submit to PSKReporter: %v", err)
 					} else {

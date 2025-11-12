@@ -28,6 +28,10 @@ class DigitalSpotsMap {
         this.liveMessagesPerPage = 200; // Messages per page
         this.liveMessagesCallsignFilter = ''; // Callsign filter
 
+        // Track spots per minute
+        this.spotTimestamps = []; // Array of timestamps for rate calculation
+        this.lastSpotTime = null; // Timestamp of most recent spot
+
         // Track seen continent+band and country+band combinations for "new" detection
         this.seenContinentBands = new Set();
         this.seenCountryBands = new Set();
@@ -72,6 +76,26 @@ class DigitalSpotsMap {
         });
     }
 
+    hashCallsign(callsign) {
+        // Simple hash function that produces consistent pseudo-random values
+        let hash = 0;
+        for (let i = 0; i < callsign.length; i++) {
+            hash = ((hash << 5) - hash) + callsign.charCodeAt(i);
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        return Math.abs(hash);
+    }
+
+    getCallsignOffset(callsign) {
+        // Generate consistent offset within grid square based on callsign hash
+        const hash = this.hashCallsign(callsign);
+        // Maidenhead grid squares are approximately 1° latitude × 2° longitude
+        // Use smaller offsets to keep stations well within their grid square
+        const latOffset = ((hash % 1000) / 1000 - 0.5) * 0.8; // ±0.4 degrees
+        const lonOffset = (((hash / 1000) % 1000) / 1000 - 0.5) * 1.6; // ±0.8 degrees
+        return { lat: latOffset, lon: lonOffset };
+    }
+
     async init() {
         // Initialize map
         this.initMap();
@@ -91,6 +115,14 @@ class DigitalSpotsMap {
 
         // Setup live messages panel
         this.setupLiveMessagesPanel();
+
+        // Start time display updates
+        this.updateTimeDisplay();
+        setInterval(() => this.updateTimeDisplay(), 1000);
+
+        // Start last spot time updates
+        this.updateLastSpotTime();
+        setInterval(() => this.updateLastSpotTime(), 1000);
     }
 
     initMap() {
@@ -191,6 +223,7 @@ class DigitalSpotsMap {
         this.updateSpotCount();
         this.updateDistanceStatistics();
         this.updateLiveMessagesDisplay(); // Update live messages when filters change
+        this.updateRarestEntities(); // Update rarest entities when filters change
     }
 
     async loadReceiverLocation() {
@@ -350,6 +383,18 @@ class DigitalSpotsMap {
             spot.timestamp = new Date().toISOString();
         }
 
+        // Track spot for rate calculation
+        const now = Date.now();
+        this.spotTimestamps.push(now);
+        this.lastSpotTime = now;
+
+        // Remove timestamps older than 1 minute
+        const oneMinuteAgo = now - 60000;
+        this.spotTimestamps = this.spotTimestamps.filter(ts => ts > oneMinuteAgo);
+
+        // Update spots per minute display
+        this.updateSpotsPerMinute();
+
         // Store spot
         this.spots.set(key, spot);
 
@@ -372,6 +417,9 @@ class DigitalSpotsMap {
         // Update filter dropdowns
         this.updateFilterDropdowns();
 
+        // Update rarest entities
+        this.updateRarestEntities();
+
         // Limit number of spots
         if (this.spots.size > this.maxSpots) {
             this.removeOldestSpot();
@@ -387,6 +435,17 @@ class DigitalSpotsMap {
         // Get color for band
         const color = this.bandColors[spot.band] || '#999';
 
+        // Log unknown bands
+        if (!this.bandColors[spot.band]) {
+            console.warn('[Unknown Band]', {
+                band: spot.band,
+                callsign: spot.callsign,
+                frequency: spot.frequency,
+                mode: spot.mode,
+                spot: spot
+            });
+        }
+
         // Create custom icon
         const icon = L.divIcon({
             className: 'custom-marker',
@@ -395,8 +454,13 @@ class DigitalSpotsMap {
             iconAnchor: [6, 6]
         });
 
-        // Create marker
-        const marker = L.marker([spot.latitude, spot.longitude], { icon });
+        // Apply consistent offset based on callsign hash
+        const offset = this.getCallsignOffset(spot.callsign);
+        const adjustedLat = spot.latitude + offset.lat;
+        const adjustedLon = spot.longitude + offset.lon;
+
+        // Create marker with adjusted position
+        const marker = L.marker([adjustedLat, adjustedLon], { icon });
 
         // Create popup content
         const popupContent = this.createPopupContent(spot);
@@ -1394,6 +1458,15 @@ class DigitalSpotsMap {
         let html = '';
         sortedBands.forEach(band => {
             const color = this.bandColors[band] || '#999';
+
+            // Log unknown bands in legend
+            if (!this.bandColors[band]) {
+                console.warn('[Unknown Band in Legend]', {
+                    band: band,
+                    activeBands: Array.from(activeBands)
+                });
+            }
+
             html += `
                 <div class="band-legend-item">
                     <span class="band-legend-color" style="background-color: ${color};"></span>
@@ -1464,6 +1537,188 @@ class DigitalSpotsMap {
                     ${this.latestNewCountry.callsign} • ${this.latestNewCountry.mode} • ${snrStr}
                 </div>
             `;
+        }
+    }
+
+    updateRarestEntities() {
+        const rarestContinentEl = document.getElementById('rarest-continent-info');
+        const rarestCountryEl = document.getElementById('rarest-country-info');
+
+        if (!rarestContinentEl || !rarestCountryEl) return;
+
+        // Count spots by continent and country (considering current filters)
+        const continentCounts = {};
+        const countryCounts = {};
+        const continentSpots = {}; // Store a sample spot for each continent
+        const countrySpots = {}; // Store a sample spot for each country
+
+        const now = Date.now();
+
+        this.spots.forEach(spot => {
+            // Apply filters
+            const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
+            const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
+            const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
+            const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
+            const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
+
+            let ageMatch = true;
+            if (this.ageFilter !== 'none') {
+                const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
+                const spotTime = new Date(spot.timestamp).getTime();
+                const age = now - spotTime;
+                ageMatch = age <= maxAgeMs;
+            }
+
+            if (!modeMatch || !ageMatch || !bandMatch || !countryMatch || !continentMatch || !snrMatch) {
+                return;
+            }
+
+            // Count continents
+            if (spot.Continent && spot.Continent !== '') {
+                continentCounts[spot.Continent] = (continentCounts[spot.Continent] || 0) + 1;
+                if (!continentSpots[spot.Continent]) {
+                    continentSpots[spot.Continent] = spot;
+                }
+            }
+
+            // Count countries
+            if (spot.country && spot.country !== '' && spot.country !== 'Unknown') {
+                countryCounts[spot.country] = (countryCounts[spot.country] || 0) + 1;
+                if (!countrySpots[spot.country]) {
+                    countrySpots[spot.country] = spot;
+                }
+            }
+        });
+
+        // Find rarest continent (minimum count, but must have at least 1)
+        let rarestContinent = null;
+        let minContinentCount = Infinity;
+        for (const [continent, count] of Object.entries(continentCounts)) {
+            if (count > 0 && count < minContinentCount) {
+                minContinentCount = count;
+                rarestContinent = continent;
+            }
+        }
+
+        // Find rarest country (minimum count, but must have at least 1)
+        let rarestCountry = null;
+        let minCountryCount = Infinity;
+        for (const [country, count] of Object.entries(countryCounts)) {
+            if (count > 0 && count < minCountryCount) {
+                minCountryCount = count;
+                rarestCountry = country;
+            }
+        }
+
+        // Update rarest continent display
+        if (rarestContinent && continentSpots[rarestContinent]) {
+            const spot = continentSpots[rarestContinent];
+            const continentName = this.continentNames[rarestContinent] || rarestContinent;
+            const snrStr = spot.snr !== undefined ?
+                `${spot.snr >= 0 ? '+' : ''}${spot.snr}dB` : 'N/A';
+            rarestContinentEl.innerHTML = `
+                <div style="font-weight: bold;">${continentName} (${minContinentCount} spot${minContinentCount !== 1 ? 's' : ''})</div>
+                <div style="font-size: 10px; color: #888; margin-top: 2px;">
+                    ${spot.callsign} • ${spot.mode} • ${spot.band} • ${snrStr}
+                </div>
+            `;
+        } else {
+            rarestContinentEl.textContent = '-';
+        }
+
+        // Update rarest country display
+        if (rarestCountry && countrySpots[rarestCountry]) {
+            const spot = countrySpots[rarestCountry];
+            const snrStr = spot.snr !== undefined ?
+                `${spot.snr >= 0 ? '+' : ''}${spot.snr}dB` : 'N/A';
+            rarestCountryEl.innerHTML = `
+                <div style="font-weight: bold;">${rarestCountry} (${minCountryCount} spot${minCountryCount !== 1 ? 's' : ''})</div>
+                <div style="font-size: 10px; color: #888; margin-top: 2px;">
+                    ${spot.callsign} • ${spot.mode} • ${spot.band} • ${snrStr}
+                </div>
+            `;
+        } else {
+            rarestCountryEl.textContent = '-';
+        }
+    }
+
+    updateTimeDisplay() {
+        const utcTimeEl = document.getElementById('utc-time');
+        const localTimeEl = document.getElementById('local-time');
+        const localDateEl = document.getElementById('local-date');
+
+        if (!utcTimeEl || !localTimeEl || !localDateEl) return;
+
+        const now = new Date();
+
+        // Format UTC time with seconds
+        const utcTime = now.toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+            timeZone: 'UTC'
+        });
+        utcTimeEl.textContent = utcTime;
+
+        // Format local time with seconds
+        const localTime = now.toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        localTimeEl.textContent = localTime;
+
+        // Format local date as <day> <dom>-<month 3 chars>-<year>
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        const dayName = days[now.getDay()];
+        const dom = now.getDate();
+        const monthName = months[now.getMonth()];
+        const year = now.getFullYear();
+
+        const dateStr = `${dayName} ${dom}-${monthName}-${year}`;
+        localDateEl.textContent = dateStr;
+    }
+
+    updateSpotsPerMinute() {
+        const spotsPerMinEl = document.getElementById('spots-per-minute');
+        if (!spotsPerMinEl) return;
+
+        // Clean up old timestamps (older than 1 minute)
+        const now = Date.now();
+        const oneMinuteAgo = now - 60000;
+        this.spotTimestamps = this.spotTimestamps.filter(ts => ts > oneMinuteAgo);
+
+        // Calculate rate
+        const rate = this.spotTimestamps.length;
+        spotsPerMinEl.textContent = `${rate}/min`;
+    }
+
+    updateLastSpotTime() {
+        const lastSpotEl = document.getElementById('last-spot-time');
+        if (!lastSpotEl) return;
+
+        if (!this.lastSpotTime) {
+            lastSpotEl.textContent = '-';
+            return;
+        }
+
+        const now = Date.now();
+        const elapsed = now - this.lastSpotTime;
+        const seconds = Math.floor(elapsed / 1000);
+
+        if (seconds === 0) {
+            lastSpotEl.textContent = 'now';
+        } else if (seconds < 60) {
+            lastSpotEl.textContent = `${seconds}s ago`;
+        } else {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            lastSpotEl.textContent = `${minutes}m ${remainingSeconds}s ago`;
         }
     }
 }

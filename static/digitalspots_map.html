@@ -394,6 +394,10 @@
             <h1>📡 Digital Spots Map</h1>
             <span id="status-badge" class="status-badge status-disconnected">Disconnected</span>
             <span id="spot-count" class="spot-count">0 spots</span>
+            <span class="spot-count">•</span>
+            <span id="spots-per-minute" class="spot-count">0/min</span>
+            <span class="spot-count">•</span>
+            <span id="last-spot-time" class="spot-count">-</span>
         </div>
         <div class="header-right">
             <div class="filter-group">
@@ -475,10 +479,21 @@
         <div class="new-entity-column">
             <div style="font-size: 11px; color: #888; margin-bottom: 4px;">Latest Continent:</div>
             <div id="new-continent-info" style="font-size: 12px; color: #4a9eff;">-</div>
+            <div style="font-size: 11px; color: #888; margin-top: 12px; margin-bottom: 4px;">Rarest Continent:</div>
+            <div id="rarest-continent-info" style="font-size: 12px; color: #ff9da7;">-</div>
         </div>
         <div class="new-entity-column">
             <div style="font-size: 11px; color: #888; margin-bottom: 4px;">Latest Country:</div>
             <div id="new-country-info" style="font-size: 12px; color: #4a9eff;">-</div>
+            <div style="font-size: 11px; color: #888; margin-top: 12px; margin-bottom: 4px;">Rarest Country:</div>
+            <div id="rarest-country-info" style="font-size: 12px; color: #ff9da7;">-</div>
+        </div>
+        <div style="min-width: auto; flex: 0 0 auto; white-space: nowrap;">
+            <div style="font-size: 11px; color: #888; margin-bottom: 4px;">UTC:</div>
+            <div id="utc-time" style="font-size: 14px; color: #fff; font-family: monospace; font-weight: bold;">--:--:--</div>
+            <div style="font-size: 11px; color: #888; margin-top: 8px; margin-bottom: 4px;">Local Time:</div>
+            <div id="local-time" style="font-size: 14px; color: #fff; font-family: monospace; font-weight: bold;">--:--:--</div>
+            <div id="local-date" style="font-size: 11px; color: #aaa; margin-top: 4px;">---</div>
         </div>
     </div>
 

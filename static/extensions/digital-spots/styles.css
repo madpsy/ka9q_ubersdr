@@ -114,6 +114,11 @@
     background: #138496;
 }
 
+/* Push map button control group to far right */
+.digital-spots-container .control-group:has(#digital-spots-map-btn) {
+    margin-left: auto;
+}
+
 .digital-spots-table-container {
     flex: 1;
     overflow-y: auto;

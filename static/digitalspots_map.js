@@ -284,8 +284,9 @@ class DigitalSpotsMap {
         badgesDiv.innerHTML = '';
 
         let hasBandData = false;
+        const badgesToDisplay = [];
 
-        // Create compact badges for each band
+        // Collect badges to display
         bands.forEach(band => {
             const bandData = data[band];
             if (!bandData || !bandData.ft8_snr) return;
@@ -309,23 +310,41 @@ class DigitalSpotsMap {
                 stateText = 'EXCELLENT';
             }
 
-            const badge = document.createElement('div');
-            badge.style.cssText = `
-                display: inline-flex;
-                align-items: center;
-                gap: 3px;
-                padding: 3px 6px;
-                border-radius: 10px;
-                font-size: 0.7em;
-                font-weight: bold;
-                background: ${bgColor};
-                color: white;
-                cursor: help;
-            `;
-            badge.textContent = band;
-            badge.title = `${band}: ${stateText} (${snr.toFixed(1)} dB SNR)`;
-            badgesDiv.appendChild(badge);
+            badgesToDisplay.push({ band, bgColor, stateText, snr });
         });
+
+        // Create rows with 5 badges each
+        const badgesPerRow = 5;
+        for (let i = 0; i < badgesToDisplay.length; i += badgesPerRow) {
+            const rowDiv = document.createElement('div');
+            rowDiv.style.cssText = `
+                display: flex;
+                gap: 4px;
+                justify-content: center;
+                margin-bottom: 4px;
+            `;
+
+            const rowBadges = badgesToDisplay.slice(i, i + badgesPerRow);
+            rowBadges.forEach(({ band, bgColor, stateText, snr }) => {
+                const badge = document.createElement('div');
+                badge.style.cssText = `
+                    display: inline-flex;
+                    align-items: center;
+                    padding: 3px 6px;
+                    border-radius: 10px;
+                    font-size: 0.7em;
+                    font-weight: bold;
+                    background: ${bgColor};
+                    color: white;
+                    cursor: help;
+                `;
+                badge.textContent = band;
+                badge.title = `${band}: ${stateText} (${snr.toFixed(1)} dB SNR)`;
+                rowDiv.appendChild(badge);
+            });
+
+            badgesDiv.appendChild(rowDiv);
+        }
 
         // Show or hide section based on data availability
         sectionDiv.style.display = hasBandData ? 'block' : 'none';

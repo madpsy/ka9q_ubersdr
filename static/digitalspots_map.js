@@ -62,7 +62,8 @@ class DigitalSpotsMap {
             '17m': '#B07AA1',   // Purple
             '15m': '#FF9DA7',   // Pink
             '12m': '#9C755F',   // Brown
-            '10m': '#BAB0AC'    // Gray
+            '10m': '#BAB0AC',   // Gray
+            'unknown': '#FF0000' // Red for unknown bands
         };
 
         this.init();
@@ -435,14 +436,16 @@ class DigitalSpotsMap {
         // Get color for band
         const color = this.bandColors[spot.band] || '#999';
 
-        // Log unknown bands
-        if (!this.bandColors[spot.band]) {
-            console.warn('[Unknown Band]', {
+        // Log unknown or unrecognized bands
+        if (spot.band === 'unknown' || !this.bandColors[spot.band]) {
+            console.warn('[Unknown/Unrecognized Band]', {
                 band: spot.band,
                 callsign: spot.callsign,
                 frequency: spot.frequency,
+                frequencyMHz: spot.frequency ? (spot.frequency / 1e6).toFixed(3) : 'N/A',
                 mode: spot.mode,
-                spot: spot
+                locator: spot.locator,
+                timestamp: spot.timestamp
             });
         }
 

@@ -32,7 +32,7 @@ func frequencyToBand(freqHz float64) string {
 		return "160m"
 	case freqMHz >= 3.5 && freqMHz <= 4.0:
 		return "80m"
-	case freqMHz >= 5.3 && freqMHz <= 5.4:
+	case freqMHz >= 5.25 && freqMHz <= 5.45:
 		return "60m"
 	case freqMHz >= 7.0 && freqMHz <= 7.3:
 		return "40m"

@@ -15,7 +15,7 @@ class DigitalSpotsMap {
         this.maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
         this.userSessionID = this.generateUserSessionID();
         this.modeFilter = 'all'; // Current mode filter
-        this.ageFilter = 'none'; // Current age filter (max age in minutes)
+        this.ageFilter = '60'; // Current age filter (max age in minutes) - default 1 hour
         this.bandFilter = 'all'; // Current band filter
         this.countryFilter = 'all'; // Current country filter
         this.continentFilter = 'all'; // Current continent filter
@@ -27,6 +27,8 @@ class DigitalSpotsMap {
         this.liveMessagesPage = 1; // Current page
         this.liveMessagesPerPage = 200; // Messages per page
         this.liveMessagesCallsignFilter = ''; // Callsign filter
+        this.bandConditionsInterval = null; // Store band conditions update interval
+        this.bandConditionsAvailable = false; // Track if band conditions are available
 
         // Track spots per minute
         this.spotTimestamps = []; // Array of timestamps for rate calculation
@@ -124,6 +126,209 @@ class DigitalSpotsMap {
         // Start last spot time updates
         this.updateLastSpotTime();
         setInterval(() => this.updateLastSpotTime(), 1000);
+
+        // Load and update space weather
+        this.loadSpaceWeather();
+        setInterval(() => {
+            this.loadSpaceWeather();
+        }, 300000); // Update every 5 minutes
+
+        // Load band conditions with adaptive retry
+        this.startBandConditionsUpdates();
+    }
+
+    startBandConditionsUpdates() {
+        // Initial load
+        this.loadBandConditions();
+
+        // Clear any existing interval
+        if (this.bandConditionsInterval) {
+            clearInterval(this.bandConditionsInterval);
+        }
+
+        // Start with 60-second retry interval (will switch to 5 minutes once data is available)
+        this.bandConditionsInterval = setInterval(() => {
+            this.loadBandConditions();
+        }, 60000); // Check every 60 seconds
+    }
+
+    switchBandConditionsToNormalInterval() {
+        // Switch to 5-minute interval once data is available
+        if (this.bandConditionsInterval) {
+            clearInterval(this.bandConditionsInterval);
+        }
+
+        this.bandConditionsInterval = setInterval(() => {
+            this.loadBandConditions();
+        }, 300000); // Update every 5 minutes
+    }
+
+    async loadSpaceWeather() {
+        try {
+            const response = await fetch('/api/spaceweather');
+
+            if (!response.ok) {
+                console.error('Failed to load space weather data');
+                return;
+            }
+
+            const data = await response.json();
+            this.displaySpaceWeather(data);
+        } catch (error) {
+            console.error('Error loading space weather:', error);
+        }
+    }
+
+    async loadBandConditions() {
+        try {
+            const response = await fetch('/api/noisefloor/latest');
+
+            if (response.status === 204 || !response.ok) {
+                console.log('No band conditions data available yet, retrying in 60 seconds...');
+                this.bandConditionsAvailable = false;
+                this.hideBandConditions();
+                return;
+            }
+
+            const data = await response.json();
+
+            // Check if we have any valid band data
+            const hasValidData = Object.keys(data).some(band => {
+                return data[band] && data[band].ft8_snr;
+            });
+
+            if (hasValidData) {
+                // Data is now available, switch to normal 5-minute interval if not already
+                if (!this.bandConditionsAvailable) {
+                    console.log('Band conditions data now available, switching to 5-minute updates');
+                    this.bandConditionsAvailable = true;
+                    this.switchBandConditionsToNormalInterval();
+                }
+                this.displayBandConditions(data);
+            } else {
+                console.log('No valid FT8 SNR data in response, retrying in 60 seconds...');
+                this.bandConditionsAvailable = false;
+                this.hideBandConditions();
+            }
+        } catch (error) {
+            console.error('Error loading band conditions:', error);
+            this.bandConditionsAvailable = false;
+            this.hideBandConditions();
+        }
+    }
+
+    hideBandConditions() {
+        const sectionDiv = document.getElementById('band-conditions-section');
+        if (sectionDiv) {
+            sectionDiv.style.display = 'none';
+        }
+    }
+
+    displaySpaceWeather(data) {
+        const contentDiv = document.getElementById('space-weather-content');
+        if (!contentDiv) return;
+
+        // Determine propagation quality color
+        const qualityColor = data.propagation_quality === 'Excellent' ? '#22c55e' :
+                            data.propagation_quality === 'Good' ? '#fbbf24' :
+                            data.propagation_quality === 'Fair' ? '#ff9800' : '#ef4444';
+
+        let html = '';
+
+        // Solar Flux
+        html += `<div class="sw-metric">
+                    <span class="sw-metric-label">Solar Flux</span>
+                    <span class="sw-metric-value">${data.solar_flux.toFixed(0)} SFU</span>
+                 </div>`;
+
+        // K-Index
+        html += `<div class="sw-metric">
+                    <span class="sw-metric-label">K-Index</span>
+                    <span class="sw-metric-value">${data.k_index} (${data.k_index_status})</span>
+                 </div>`;
+
+        // A-Index
+        html += `<div class="sw-metric">
+                    <span class="sw-metric-label">A-Index</span>
+                    <span class="sw-metric-value">${data.a_index}</span>
+                 </div>`;
+
+        // Solar Wind Bz
+        const bzDirection = data.solar_wind_bz < 0 ? 'Southward' : 'Northward';
+        html += `<div class="sw-metric">
+                    <span class="sw-metric-label">Solar Wind Bz</span>
+                    <span class="sw-metric-value">${data.solar_wind_bz.toFixed(1)} nT (${bzDirection})</span>
+                 </div>`;
+
+        // Propagation
+        html += `<div class="sw-metric">
+                    <span class="sw-metric-label">Propagation</span>
+                    <span class="sw-metric-value" style="color: ${qualityColor};">${data.propagation_quality}</span>
+                 </div>`;
+
+        contentDiv.innerHTML = html;
+    }
+
+    displayBandConditions(data) {
+        const sectionDiv = document.getElementById('band-conditions-section');
+        const badgesDiv = document.getElementById('band-conditions-badges');
+        if (!sectionDiv || !badgesDiv) return;
+
+        // Sort bands in order
+        const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+        const bands = Object.keys(data).sort((a, b) => {
+            return bandOrder.indexOf(a) - bandOrder.indexOf(b);
+        });
+
+        // Clear existing badges
+        badgesDiv.innerHTML = '';
+
+        let hasBandData = false;
+
+        // Create compact badges for each band
+        bands.forEach(band => {
+            const bandData = data[band];
+            if (!bandData || !bandData.ft8_snr) return;
+
+            hasBandData = true;
+            const snr = bandData.ft8_snr;
+
+            // Determine state based on SNR
+            let bgColor, stateText;
+            if (snr < 6) {
+                bgColor = '#ef4444';
+                stateText = 'POOR';
+            } else if (snr >= 6 && snr < 20) {
+                bgColor = '#ff9800';
+                stateText = 'FAIR';
+            } else if (snr >= 20 && snr < 30) {
+                bgColor = '#fbbf24';
+                stateText = 'GOOD';
+            } else {
+                bgColor = '#22c55e';
+                stateText = 'EXCELLENT';
+            }
+
+            const badge = document.createElement('div');
+            badge.style.cssText = `
+                display: inline-flex;
+                align-items: center;
+                gap: 3px;
+                padding: 3px 6px;
+                border-radius: 10px;
+                font-size: 0.7em;
+                font-weight: bold;
+                background: ${bgColor};
+                color: white;
+                cursor: help;
+            `;
+            badge.textContent = band;
+            badge.title = `${band}: ${stateText} (${snr.toFixed(1)} dB SNR)`;
+            badgesDiv.appendChild(badge);
+        });
+
+        // Show or hide section based on data availability
+        sectionDiv.style.display = hasBandData ? 'block' : 'none';
     }
 
     initMap() {
@@ -225,6 +430,7 @@ class DigitalSpotsMap {
         this.updateDistanceStatistics();
         this.updateLiveMessagesDisplay(); // Update live messages when filters change
         this.updateRarestEntities(); // Update rarest entities when filters change
+        this.updateSpaceWeatherPosition(); // Update space weather panel position
     }
 
     async loadReceiverLocation() {
@@ -576,7 +782,18 @@ class DigitalSpotsMap {
                 const spotTime = new Date(spot.timestamp).getTime();
                 const age = now - spotTime;
 
-                if (age > this.maxAge) {
+                // Remove spots older than maxAge (24 hours) OR older than current age filter if set
+                let shouldRemove = age > this.maxAge;
+
+                // Also remove if age filter is active and spot exceeds it
+                if (this.ageFilter !== 'none') {
+                    const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
+                    if (age > maxAgeMs) {
+                        shouldRemove = true;
+                    }
+                }
+
+                if (shouldRemove) {
                     keysToRemove.push(key);
                 }
             }
@@ -585,6 +802,9 @@ class DigitalSpotsMap {
 
             if (keysToRemove.length > 0) {
                 this.updateSpotCount();
+                this.updateDistanceStatistics();
+                this.updateLiveMessagesDisplay();
+                this.updateRarestEntities();
             }
         }, 60000); // Every minute
     }
@@ -1087,6 +1307,22 @@ class DigitalSpotsMap {
             farthestHtml += `<br><span style="font-size: 10px; color: #888;">${farthestDetails.join(' • ')}</span>`;
         }
         farthestEl.innerHTML = farthestHtml;
+
+        // Update space weather panel position after distance legend changes
+        this.updateSpaceWeatherPosition();
+    }
+
+    updateSpaceWeatherPosition() {
+        const distanceLegend = document.querySelector('.distance-legend');
+        const spaceWeatherLegend = document.querySelector('.space-weather-legend');
+
+        if (distanceLegend && spaceWeatherLegend) {
+            // Get the actual height of the distance legend
+            const distanceHeight = distanceLegend.offsetHeight;
+            // Add some spacing (30px) between the panels
+            const newBottom = distanceHeight + 30;
+            spaceWeatherLegend.style.bottom = `${newBottom}px`;
+        }
     }
 
     updateGreyline() {
@@ -1674,7 +1910,7 @@ class DigitalSpotsMap {
         });
         localTimeEl.textContent = localTime;
 
-        // Format local date as <day> <dom>-<month 3 chars>-<year>
+        // Format local date with day name on one line, date on next line
         const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -1683,8 +1919,7 @@ class DigitalSpotsMap {
         const monthName = months[now.getMonth()];
         const year = now.getFullYear();
 
-        const dateStr = `${dayName} ${dom}-${monthName}-${year}`;
-        localDateEl.textContent = dateStr;
+        localDateEl.innerHTML = `${dayName}<br>${dom}-${monthName}-${year}`;
     }
 
     updateSpotsPerMinute() {

@@ -143,6 +143,20 @@
             color: #4a9eff;
         }
 
+        .space-weather-legend {
+            position: absolute;
+            bottom: 420px;
+            left: 20px;
+            background: rgba(26, 26, 26, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 10px 15px;
+            z-index: 1000;
+            min-width: 220px;
+            max-width: 280px;
+        }
+
         .distance-legend {
             position: absolute;
             bottom: 20px;
@@ -160,6 +174,23 @@
             margin: 0 0 10px 0;
             font-size: 14px;
             color: #4a9eff;
+        }
+
+        .sw-metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 11px;
+        }
+
+        .sw-metric-label {
+            color: #aaa;
+        }
+
+        .sw-metric-value {
+            color: #fff;
+            font-weight: bold;
         }
 
         .new-entities-legend {
@@ -415,7 +446,7 @@
                     <option value="none">None</option>
                     <option value="15">15 min</option>
                     <option value="30">30 min</option>
-                    <option value="60">1 hour</option>
+                    <option value="60" selected>1 hour</option>
                     <option value="180">3 hours</option>
                     <option value="360">6 hours</option>
                     <option value="1440">24 hours</option>
@@ -494,6 +525,20 @@
             <div style="font-size: 11px; color: #888; margin-top: 8px; margin-bottom: 4px;">Local Time:</div>
             <div id="local-time" style="font-size: 14px; color: #fff; font-family: monospace; font-weight: bold;">--:--:--</div>
             <div id="local-date" style="font-size: 11px; color: #aaa; margin-top: 4px;">---</div>
+        </div>
+    </div>
+
+    <div class="space-weather-legend">
+        <div id="space-weather-content">
+            <div style="text-align: center; color: #666; padding: 10px;">Loading...</div>
+        </div>
+
+        <!-- Band Conditions Section -->
+        <div id="band-conditions-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2); display: none;">
+            <div style="font-size: 0.75em; opacity: 0.7; margin-bottom: 5px; text-align: center;">Real-Time Band Conditions</div>
+            <div id="band-conditions-badges" style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: center;">
+                <!-- Band badges will be inserted here -->
+            </div>
         </div>
     </div>
 

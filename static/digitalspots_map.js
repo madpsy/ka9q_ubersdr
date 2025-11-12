@@ -12,7 +12,7 @@ class DigitalSpotsMap {
         this.receiverInfo = null;
         this.greylineLayer = null;
         this.maxSpots = 5000; // Maximum number of spots to display
-        this.maxAge = 30 * 60 * 1000; // 30 minutes in milliseconds
+        this.maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
         this.userSessionID = this.generateUserSessionID();
         this.modeFilter = 'all'; // Current mode filter
         this.ageFilter = 'none'; // Current age filter (max age in minutes)

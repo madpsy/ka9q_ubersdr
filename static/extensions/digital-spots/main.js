@@ -24,6 +24,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.spotIdCounter = 0;
         this.ageUpdateInterval = null;
         this.connectionCheckInterval = null;
+        this.renderPending = false; // Prevent multiple pending renders
 
         // Subscribe to digital spots immediately
         this.subscribeToDigitalSpots();
@@ -123,6 +124,8 @@ class DigitalSpotsExtension extends DecoderExtension {
         container.addEventListener('click', (e) => {
             if (e.target.id === 'digital-spots-clear') {
                 this.clearSpots();
+            } else if (e.target.id === 'digital-spots-map-btn') {
+                window.open('/digitalspots_map.html', '_blank');
             }
         });
 
@@ -201,6 +204,10 @@ class DigitalSpotsExtension extends DecoderExtension {
         const tbody = document.getElementById('digital-spots-tbody');
         if (!tbody) return;
 
+        // Prevent multiple pending renders to avoid blocking audio thread
+        if (this.renderPending) return;
+        this.renderPending = true;
+
         // Apply all filters in a single pass for better performance
         const now = new Date();
         const maxAgeMs = this.ageFilter !== null ? this.ageFilter * 60 * 1000 : null;
@@ -209,6 +216,11 @@ class DigitalSpotsExtension extends DecoderExtension {
         const callsignUpper = this.callsignFilter.toUpperCase();
         
         const filteredSpots = this.spots.filter(spot => {
+            // Filter out spots with empty Grid/locator
+            if (!spot.locator || spot.locator.trim() === '') {
+                return false;
+            }
+
             // Age filter
             if (maxAgeMs !== null) {
                 try {
@@ -257,144 +269,150 @@ class DigitalSpotsExtension extends DecoderExtension {
             return true;
         });
 
-        // Use DocumentFragment for faster DOM updates
-        const fragment = document.createDocumentFragment();
+        // DEFER DOM UPDATES TO NEXT ANIMATION FRAME
+        // This prevents blocking the audio thread during heavy spot activity
+        requestAnimationFrame(() => {
+            this.renderPending = false;
 
-        if (filteredSpots.length === 0) {
-            const row = document.createElement('tr');
-            row.className = 'no-spots';
-            const cell = document.createElement('td');
-            cell.colSpan = 12;
-            cell.textContent = this.spots.length === 0 ? 'Waiting for spots...' : 'No spots match filter';
-            row.appendChild(cell);
-            fragment.appendChild(row);
+            // Use DocumentFragment for faster DOM updates
+            const fragment = document.createDocumentFragment();
+
+            if (filteredSpots.length === 0) {
+                const row = document.createElement('tr');
+                row.className = 'no-spots';
+                const cell = document.createElement('td');
+                cell.colSpan = 12;
+                cell.textContent = this.spots.length === 0 ? 'Waiting for spots...' : 'No spots match filter';
+                row.appendChild(cell);
+                fragment.appendChild(row);
+                tbody.innerHTML = '';
+                tbody.appendChild(fragment);
+                this.updateCount(0, this.spots.length);
+                return;
+            }
+
+            let highlightedNewSpot = false;
+
+            // Render spots using DocumentFragment
+            filteredSpots.forEach((spot) => {
+                const row = document.createElement('tr');
+
+                if (this.newSpotId && spot._highlightId === this.newSpotId && this.highlightNew) {
+                    row.className = 'spot-new';
+                    highlightedNewSpot = true;
+                    setTimeout(() => {
+                        row.classList.remove('spot-new');
+                    }, 500);
+                }
+
+                row.style.cursor = 'pointer';
+                row.addEventListener('click', () => {
+                    this.tuneToSpot(spot);
+                });
+
+                // Time
+                const timeCell = document.createElement('td');
+                timeCell.className = 'spot-time';
+                timeCell.textContent = this.formatTime(spot.timestamp);
+                row.appendChild(timeCell);
+
+                // Age
+                const ageCell = document.createElement('td');
+                ageCell.className = 'spot-age';
+                ageCell.setAttribute('data-timestamp', spot.timestamp);
+                ageCell.textContent = this.formatAge(spot.timestamp);
+                row.appendChild(ageCell);
+
+                // Mode
+                const modeCell = document.createElement('td');
+                modeCell.className = `spot-mode spot-mode-${spot.mode}`;
+                modeCell.textContent = spot.mode;
+                row.appendChild(modeCell);
+
+                // Frequency
+                const freqCell = document.createElement('td');
+                freqCell.className = 'spot-frequency';
+                freqCell.textContent = this.formatFrequency(spot.frequency);
+                freqCell.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.tuneToSpot(spot);
+                });
+                row.appendChild(freqCell);
+
+                // Band
+                const bandCell = document.createElement('td');
+                bandCell.className = 'spot-band';
+                bandCell.textContent = spot.band || '';
+                row.appendChild(bandCell);
+
+                // Callsign
+                const callCell = document.createElement('td');
+                callCell.className = 'spot-callsign';
+                callCell.textContent = spot.callsign;
+                callCell.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.openQRZ(spot.callsign);
+                });
+                row.appendChild(callCell);
+
+                // Country
+                const countryCell = document.createElement('td');
+                countryCell.className = 'spot-country';
+                countryCell.textContent = spot.country || '';
+                row.appendChild(countryCell);
+
+                // Grid
+                const gridCell = document.createElement('td');
+                gridCell.className = 'spot-grid';
+                gridCell.textContent = spot.locator || '';
+                row.appendChild(gridCell);
+
+                // Distance
+                const distanceCell = document.createElement('td');
+                distanceCell.className = 'spot-distance';
+                if (spot.distance_km !== undefined && spot.distance_km !== null) {
+                    distanceCell.textContent = `${Math.round(spot.distance_km)} km`;
+                } else {
+                    distanceCell.textContent = '';
+                }
+                row.appendChild(distanceCell);
+
+                // Bearing
+                const bearingCell = document.createElement('td');
+                bearingCell.className = 'spot-bearing';
+                if (spot.bearing_deg !== undefined && spot.bearing_deg !== null) {
+                    distanceCell.title = `${Math.round(spot.bearing_deg)}°`;
+                    bearingCell.textContent = `${Math.round(spot.bearing_deg)}°`;
+                } else {
+                    bearingCell.textContent = '';
+                }
+                row.appendChild(bearingCell);
+
+                // SNR
+                const snrCell = document.createElement('td');
+                snrCell.className = `spot-snr ${spot.snr >= 0 ? 'spot-snr-positive' : 'spot-snr-negative'}`;
+                snrCell.textContent = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
+                row.appendChild(snrCell);
+
+                // Message
+                const msgCell = document.createElement('td');
+                msgCell.className = 'spot-message';
+                msgCell.textContent = spot.message || '';
+                row.appendChild(msgCell);
+
+                fragment.appendChild(row);
+            });
+
+            // Clear and append all at once for better performance
             tbody.innerHTML = '';
             tbody.appendChild(fragment);
-            this.updateCount(0, this.spots.length);
-            return;
-        }
 
-        let highlightedNewSpot = false;
-
-        // Render spots using DocumentFragment
-        filteredSpots.forEach((spot) => {
-            const row = document.createElement('tr');
-
-            if (this.newSpotId && spot._highlightId === this.newSpotId && this.highlightNew) {
-                row.className = 'spot-new';
-                highlightedNewSpot = true;
-                setTimeout(() => {
-                    row.classList.remove('spot-new');
-                }, 500);
+            if (highlightedNewSpot) {
+                this.newSpotId = null;
             }
 
-            row.style.cursor = 'pointer';
-            row.addEventListener('click', () => {
-                this.tuneToSpot(spot);
-            });
-
-            // Time
-            const timeCell = document.createElement('td');
-            timeCell.className = 'spot-time';
-            timeCell.textContent = this.formatTime(spot.timestamp);
-            row.appendChild(timeCell);
-
-            // Age
-            const ageCell = document.createElement('td');
-            ageCell.className = 'spot-age';
-            ageCell.setAttribute('data-timestamp', spot.timestamp);
-            ageCell.textContent = this.formatAge(spot.timestamp);
-            row.appendChild(ageCell);
-
-            // Mode
-            const modeCell = document.createElement('td');
-            modeCell.className = `spot-mode spot-mode-${spot.mode}`;
-            modeCell.textContent = spot.mode;
-            row.appendChild(modeCell);
-
-            // Frequency
-            const freqCell = document.createElement('td');
-            freqCell.className = 'spot-frequency';
-            freqCell.textContent = this.formatFrequency(spot.frequency);
-            freqCell.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.tuneToSpot(spot);
-            });
-            row.appendChild(freqCell);
-
-            // Band
-            const bandCell = document.createElement('td');
-            bandCell.className = 'spot-band';
-            bandCell.textContent = spot.band || '';
-            row.appendChild(bandCell);
-
-            // Callsign
-            const callCell = document.createElement('td');
-            callCell.className = 'spot-callsign';
-            callCell.textContent = spot.callsign;
-            callCell.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.openQRZ(spot.callsign);
-            });
-            row.appendChild(callCell);
-
-            // Country
-            const countryCell = document.createElement('td');
-            countryCell.className = 'spot-country';
-            countryCell.textContent = spot.country || '';
-            row.appendChild(countryCell);
-
-            // Grid
-            const gridCell = document.createElement('td');
-            gridCell.className = 'spot-grid';
-            gridCell.textContent = spot.locator || '';
-            row.appendChild(gridCell);
-
-            // Distance
-            const distanceCell = document.createElement('td');
-            distanceCell.className = 'spot-distance';
-            if (spot.distance_km !== undefined && spot.distance_km !== null) {
-                distanceCell.textContent = `${Math.round(spot.distance_km)} km`;
-            } else {
-                distanceCell.textContent = '';
-            }
-            row.appendChild(distanceCell);
-
-            // Bearing
-            const bearingCell = document.createElement('td');
-            bearingCell.className = 'spot-bearing';
-            if (spot.bearing_deg !== undefined && spot.bearing_deg !== null) {
-                distanceCell.title = `${Math.round(spot.bearing_deg)}°`;
-                bearingCell.textContent = `${Math.round(spot.bearing_deg)}°`;
-            } else {
-                bearingCell.textContent = '';
-            }
-            row.appendChild(bearingCell);
-
-            // SNR
-            const snrCell = document.createElement('td');
-            snrCell.className = `spot-snr ${spot.snr >= 0 ? 'spot-snr-positive' : 'spot-snr-negative'}`;
-            snrCell.textContent = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
-            row.appendChild(snrCell);
-
-            // Message
-            const msgCell = document.createElement('td');
-            msgCell.className = 'spot-message';
-            msgCell.textContent = spot.message || '';
-            row.appendChild(msgCell);
-            
-            fragment.appendChild(row);
+            this.updateCount(filteredSpots.length, this.spots.length);
         });
-
-        // Clear and append all at once for better performance
-        tbody.innerHTML = '';
-        tbody.appendChild(fragment);
-
-        if (highlightedNewSpot) {
-            this.newSpotId = null;
-        }
-
-        this.updateCount(filteredSpots.length, this.spots.length);
     }
 
     tuneToSpot(spot) {

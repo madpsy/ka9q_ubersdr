@@ -100,6 +100,20 @@
     background: #c82333;
 }
 
+.digital-spots-container .btn-map {
+    padding: 4px 12px;
+    background: #17a2b8;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.digital-spots-container .btn-map:hover {
+    background: #138496;
+}
+
 .digital-spots-table-container {
     flex: 1;
     overflow-y: auto;
@@ -161,29 +175,34 @@
 
 .digital-spots-table th:nth-child(7),
 .digital-spots-table td:nth-child(7) {
-    width: 70px; /* Grid */
+    width: 100px; /* Country */
 }
 
 .digital-spots-table th:nth-child(8),
 .digital-spots-table td:nth-child(8) {
-    width: 80px; /* Distance */
-    text-align: right;
+    width: 70px; /* Grid */
 }
 
 .digital-spots-table th:nth-child(9),
 .digital-spots-table td:nth-child(9) {
-    width: 60px; /* Bearing */
+    width: 80px; /* Distance */
     text-align: right;
 }
 
 .digital-spots-table th:nth-child(10),
 .digital-spots-table td:nth-child(10) {
-    width: 50px; /* SNR */
+    width: 60px; /* Bearing */
     text-align: right;
 }
 
 .digital-spots-table th:nth-child(11),
 .digital-spots-table td:nth-child(11) {
+    width: 50px; /* SNR */
+    text-align: right;
+}
+
+.digital-spots-table th:nth-child(12),
+.digital-spots-table td:nth-child(12) {
     width: auto; /* Message - takes remaining space */
 }
 

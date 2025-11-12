@@ -135,6 +135,36 @@ class DigitalSpotsMap {
 
         // Load band conditions with adaptive retry
         this.startBandConditionsUpdates();
+
+        // Start memory monitoring
+        this.startMemoryMonitoring();
+    }
+
+    startMemoryMonitoring() {
+        // Log memory metrics every 60 seconds
+        setInterval(() => {
+            const metrics = {
+                timestamp: new Date().toISOString(),
+                spots_size: this.spots.size,
+                markers_size: this.markers.size,
+                liveMessages_length: this.liveMessages.length,
+                seenContinentBands_size: this.seenContinentBands.size,
+                seenCountryBands_size: this.seenCountryBands.size,
+                spotTimestamps_length: this.spotTimestamps.length,
+                map_layers: this.map ? this.map._layers : 'N/A',
+                map_layers_count: this.map ? Object.keys(this.map._layers).length : 0
+            };
+
+            // Add browser memory info if available
+            if (performance.memory) {
+                metrics.memory_used_mb = (performance.memory.usedJSHeapSize / 1048576).toFixed(2);
+                metrics.memory_total_mb = (performance.memory.totalJSHeapSize / 1048576).toFixed(2);
+                metrics.memory_limit_mb = (performance.memory.jsHeapSizeLimit / 1048576).toFixed(2);
+                metrics.memory_usage_percent = ((performance.memory.usedJSHeapSize / performance.memory.jsHeapSizeLimit) * 100).toFixed(2);
+            }
+
+            console.log('[Memory Metrics]', metrics);
+        }, 60000); // Every 60 seconds
     }
 
     startBandConditionsUpdates() {

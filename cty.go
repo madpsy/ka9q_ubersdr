@@ -301,10 +301,93 @@ func (db *CTYDatabase) LookupCallsign(callsign string) string {
 	return ""
 }
 
+// CTYLookupResult contains all CTY information for a callsign
+type CTYLookupResult struct {
+	Country    string
+	CQZone     int
+	ITUZone    int
+	Continent  string
+	TimeOffset float64
+	Latitude   float64
+	Longitude  float64
+}
+
+// LookupCallsignFull finds all CTY information for a callsign, including overrides
+func (db *CTYDatabase) LookupCallsignFull(callsign string) *CTYLookupResult {
+	if db == nil {
+		return nil
+	}
+
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	callsign = strings.ToUpper(callsign)
+
+	// First, check for exact match
+	exactKey := "=" + callsign
+	if entry, ok := db.prefixes[exactKey]; ok {
+		return buildLookupResult(entry)
+	}
+
+	// Try progressively shorter prefixes
+	for i := len(callsign); i > 0; i-- {
+		prefix := callsign[:i]
+		if entry, ok := db.prefixes[prefix]; ok {
+			return buildLookupResult(entry)
+		}
+	}
+
+	return nil
+}
+
+// buildLookupResult creates a CTYLookupResult from a CTYEntry, applying overrides
+func buildLookupResult(entry *CTYEntry) *CTYLookupResult {
+	result := &CTYLookupResult{
+		Country:    entry.Entity.Name,
+		CQZone:     entry.Entity.CQZone,
+		ITUZone:    entry.Entity.ITUZone,
+		Continent:  entry.Entity.Continent,
+		TimeOffset: entry.Entity.TimeOffset,
+		Latitude:   entry.Entity.Latitude,
+		Longitude:  entry.Entity.Longitude,
+	}
+
+	// Apply prefix overrides if present
+	if entry.Prefix != nil {
+		if entry.Prefix.CQZone != 0 {
+			result.CQZone = entry.Prefix.CQZone
+		}
+		if entry.Prefix.ITUZone != 0 {
+			result.ITUZone = entry.Prefix.ITUZone
+		}
+		if entry.Prefix.Continent != "" {
+			result.Continent = entry.Prefix.Continent
+		}
+		if entry.Prefix.HasOffset {
+			result.TimeOffset = entry.Prefix.TimeOffset
+		}
+		if entry.Prefix.HasLatLon {
+			result.Latitude = entry.Prefix.Latitude
+			result.Longitude = entry.Prefix.Longitude
+		}
+	}
+
+	return result
+}
+
 // GetCountryForCallsign is a convenience function using the global database
+// Deprecated: Use GetCallsignInfo for full CTY information
 func GetCountryForCallsign(callsign string) string {
 	if globalCTY == nil {
 		return ""
 	}
 	return globalCTY.LookupCallsign(callsign)
+}
+
+// GetCallsignInfo returns full CTY information for a callsign using the global database
+func GetCallsignInfo(callsign string) *CTYLookupResult {
+	if globalCTY == nil {
+		return nil
+	}
+	return globalCTY.LookupCallsignFull(callsign)
 }

@@ -17,6 +17,8 @@ class DigitalSpotsMap {
         this.modeFilter = 'all'; // Current mode filter
         this.ageFilter = 'none'; // Current age filter (max age in minutes)
         this.bandFilter = 'all'; // Current band filter
+        this.countryFilter = 'all'; // Current country filter
+        this.continentFilter = 'all'; // Current continent filter
         this.snrFilter = 'none'; // Current SNR filter (minimum SNR)
         this.reconnectAttempts = 0; // Track reconnection attempts
         this.reconnectTimeout = null; // Store timeout ID
@@ -25,6 +27,17 @@ class DigitalSpotsMap {
         this.liveMessagesPage = 1; // Current page
         this.liveMessagesPerPage = 200; // Messages per page
         this.liveMessagesCallsignFilter = ''; // Callsign filter
+
+        // Continent code to name mapping
+        this.continentNames = {
+            'AF': 'Africa',
+            'AS': 'Asia',
+            'EU': 'Europe',
+            'NA': 'North America',
+            'OC': 'Oceania',
+            'SA': 'South America',
+            'AN': 'Antarctica'
+        };
 
         // Band colors matching noisefloor.js
         this.bandColors = {
@@ -115,6 +128,22 @@ class DigitalSpotsMap {
             });
         }
 
+        const countryFilter = document.getElementById('country-filter');
+        if (countryFilter) {
+            countryFilter.addEventListener('change', (e) => {
+                this.countryFilter = e.target.value;
+                this.applyFilters();
+            });
+        }
+
+        const continentFilter = document.getElementById('continent-filter');
+        if (continentFilter) {
+            continentFilter.addEventListener('change', (e) => {
+                this.continentFilter = e.target.value;
+                this.applyFilters();
+            });
+        }
+
         const snrFilter = document.getElementById('snr-filter');
         if (snrFilter) {
             snrFilter.addEventListener('change', (e) => {
@@ -125,7 +154,7 @@ class DigitalSpotsMap {
     }
 
     applyFilters() {
-        // Hide/show markers based on mode, age, band, and SNR filters
+        // Hide/show markers based on all filters
         const now = Date.now();
         this.markers.forEach((marker, key) => {
             const spot = this.spots.get(key);
@@ -133,6 +162,8 @@ class DigitalSpotsMap {
 
             const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
             const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
+            const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
+            const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
             const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
             
             // Age filter check
@@ -144,7 +175,7 @@ class DigitalSpotsMap {
                 ageMatch = age <= maxAgeMs;
             }
 
-            if (modeMatch && ageMatch && bandMatch && snrMatch) {
+            if (modeMatch && ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
                 marker.addTo(this.map);
             } else {
                 marker.remove();
@@ -328,6 +359,9 @@ class DigitalSpotsMap {
         
         // Update band legend
         this.updateBandLegend();
+        
+        // Update filter dropdowns
+        this.updateFilterDropdowns();
 
         // Limit number of spots
         if (this.spots.size > this.maxSpots) {
@@ -366,6 +400,8 @@ class DigitalSpotsMap {
         // Add to map only if it passes all filters
         const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
         const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
+        const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
+        const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
         const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
         
         // Age filter check
@@ -377,7 +413,7 @@ class DigitalSpotsMap {
             ageMatch = age <= maxAgeMs;
         }
         
-        if (modeMatch && ageMatch && bandMatch && snrMatch) {
+        if (modeMatch && ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
             marker.addTo(this.map);
         }
 
@@ -494,6 +530,8 @@ class DigitalSpotsMap {
             this.spots.forEach(spot => {
                 const modeMatch = this.modeFilter === 'all' || spot.mode === this.modeFilter;
                 const bandMatch = this.bandFilter === 'all' || spot.band === this.bandFilter;
+                const countryMatch = this.countryFilter === 'all' || spot.country === this.countryFilter;
+                const continentMatch = this.continentFilter === 'all' || spot.Continent === this.continentFilter;
                 const snrMatch = this.snrFilter === 'none' || spot.snr >= parseFloat(this.snrFilter);
                 
                 // Age filter check
@@ -505,12 +543,16 @@ class DigitalSpotsMap {
                     ageMatch = age <= maxAgeMs;
                 }
                 
-                if (modeMatch && ageMatch && bandMatch && snrMatch) {
+                if (modeMatch && ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
                     visibleCount++;
                 }
             });
             
-            if (this.modeFilter === 'all' && this.ageFilter === 'none' && this.bandFilter === 'all' && this.snrFilter === 'none') {
+            const allFiltersDefault = this.modeFilter === 'all' && this.ageFilter === 'none' &&
+                                     this.bandFilter === 'all' && this.countryFilter === 'all' &&
+                                     this.continentFilter === 'all' && this.snrFilter === 'none';
+            
+            if (allFiltersDefault) {
                 countEl.textContent = `${this.spots.size} spot${this.spots.size !== 1 ? 's' : ''}`;
             } else {
                 countEl.textContent = `${visibleCount} / ${this.spots.size} spot${this.spots.size !== 1 ? 's' : ''}`;
@@ -518,14 +560,91 @@ class DigitalSpotsMap {
         }
     }
 
+    updateFilterDropdowns() {
+        // Collect unique countries and continents from all spots
+        const countries = new Set();
+        const continents = new Set();
+        
+        this.spots.forEach(spot => {
+            if (spot.country && spot.country !== 'Unknown' && spot.country !== '') {
+                countries.add(spot.country);
+            }
+            if (spot.Continent && spot.Continent !== '') {
+                continents.add(spot.Continent);
+            }
+        });
+        
+        // Update country filter
+        const countryFilter = document.getElementById('country-filter');
+        if (countryFilter) {
+            const currentValue = countryFilter.value;
+            const sortedCountries = Array.from(countries).sort();
+            
+            // Rebuild options
+            countryFilter.innerHTML = '<option value="all">All</option>';
+            sortedCountries.forEach(country => {
+                const option = document.createElement('option');
+                option.value = country;
+                option.textContent = country;
+                countryFilter.appendChild(option);
+            });
+            
+            // Restore selection if it still exists
+            if (currentValue !== 'all' && countries.has(currentValue)) {
+                countryFilter.value = currentValue;
+            } else if (currentValue !== 'all') {
+                // Selected country no longer exists, reset to 'all'
+                countryFilter.value = 'all';
+                this.countryFilter = 'all';
+                this.applyFilters();
+            }
+        }
+        
+        // Update continent filter
+        const continentFilter = document.getElementById('continent-filter');
+        if (continentFilter) {
+            const currentValue = continentFilter.value;
+            const sortedContinents = Array.from(continents).sort();
+            
+            // Rebuild options
+            continentFilter.innerHTML = '<option value="all">All</option>';
+            sortedContinents.forEach(continent => {
+                const option = document.createElement('option');
+                option.value = continent;
+                // Use full continent name if available, otherwise use code
+                option.textContent = this.continentNames[continent] || continent;
+                continentFilter.appendChild(option);
+            });
+            
+            // Restore selection if it still exists
+            if (currentValue !== 'all' && continents.has(currentValue)) {
+                continentFilter.value = currentValue;
+            } else if (currentValue !== 'all') {
+                // Selected continent no longer exists, reset to 'all'
+                continentFilter.value = 'all';
+                this.continentFilter = 'all';
+                this.applyFilters();
+            }
+        }
+    }
+
     updateTopCountries(spots, containerEl) {
         if (!containerEl) return;
         
-        // Count spots by country
+        // Count spots by country, CQ zone, and continent
         const countryCounts = {};
+        const cqZones = new Set();
+        const continents = new Set();
+        
         spots.forEach(spot => {
             if (spot.country && spot.country !== 'Unknown') {
                 countryCounts[spot.country] = (countryCounts[spot.country] || 0) + 1;
+            }
+            if (spot.CQZone && spot.CQZone > 0) {
+                cqZones.add(spot.CQZone);
+            }
+            if (spot.Continent && spot.Continent !== '') {
+                continents.add(spot.Continent);
             }
         });
         
@@ -539,7 +658,7 @@ class DigitalSpotsMap {
             return;
         }
         
-        // Build HTML
+        // Build HTML for top 10 countries
         let html = '';
         sortedCountries.forEach(([country, count], index) => {
             html += `
@@ -549,6 +668,29 @@ class DigitalSpotsMap {
                 </div>
             `;
         });
+        
+        // Add separator line
+        html += '<div style="margin: 8px 0; border-top: 1px solid #333;"></div>';
+        
+        // Add totals
+        const totalCountries = Object.keys(countryCounts).length;
+        const totalCQZones = cqZones.size;
+        const totalContinents = continents.size;
+        
+        html += `
+            <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #ccc;">
+                <span>Countries:</span>
+                <span style="color: #4a9eff;">${totalCountries}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #ccc;">
+                <span>CQ Zones:</span>
+                <span style="color: #4a9eff;">${totalCQZones}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #ccc;">
+                <span>Continents:</span>
+                <span style="color: #4a9eff;">${totalContinents}</span>
+            </div>
+        `;
         
         containerEl.innerHTML = html;
     }
@@ -733,6 +875,14 @@ class DigitalSpotsMap {
             if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) {
                 return;
             }
+            // Apply country filter
+            if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
+                return;
+            }
+            // Apply continent filter
+            if (this.continentFilter !== 'all' && spot.Continent !== this.continentFilter) {
+                return;
+            }
             // Apply SNR filter
             if (this.snrFilter !== 'none' && spot.snr < parseFloat(this.snrFilter)) {
                 return;
@@ -834,6 +984,9 @@ class DigitalSpotsMap {
         if (closestSpot.band) {
             closestDetails.push(closestSpot.band);
         }
+        if (closestSpot.snr !== undefined) {
+            closestDetails.push(`${closestSpot.snr >= 0 ? '+' : ''}${closestSpot.snr}dB`);
+        }
         if (closestDetails.length > 0) {
             closestHtml += `<br><span style="font-size: 10px; color: #888;">${closestDetails.join(' • ')}</span>`;
         }
@@ -850,6 +1003,9 @@ class DigitalSpotsMap {
         }
         if (farthestSpot.band) {
             farthestDetails.push(farthestSpot.band);
+        }
+        if (farthestSpot.snr !== undefined) {
+            farthestDetails.push(`${farthestSpot.snr >= 0 ? '+' : ''}${farthestSpot.snr}dB`);
         }
         if (farthestDetails.length > 0) {
             farthestHtml += `<br><span style="font-size: 10px; color: #888;">${farthestDetails.join(' • ')}</span>`;
@@ -1028,6 +1184,16 @@ class DigitalSpotsMap {
                 return false;
             }
 
+            // Apply country filter
+            if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
+                return false;
+            }
+
+            // Apply continent filter
+            if (this.continentFilter !== 'all' && spot.Continent !== this.continentFilter) {
+                return false;
+            }
+
             // Apply SNR filter
             if (this.snrFilter !== 'none' && spot.snr < parseFloat(this.snrFilter)) {
                 return false;
@@ -1070,6 +1236,9 @@ class DigitalSpotsMap {
 
         if (!content) return;
 
+        // Check if panel is collapsed
+        const isCollapsed = content.classList.contains('collapsed');
+
         const filteredMessages = this.getFilteredMessages();
 
         if (this.liveMessages.length === 0) {
@@ -1086,9 +1255,17 @@ class DigitalSpotsMap {
             return;
         }
 
-        // Update count
+        // Update count - show filtered/total if any filters are active
         if (countEl) {
-            if (this.liveMessagesCallsignFilter) {
+            const hasActiveFilters = this.liveMessagesCallsignFilter ||
+                                    this.modeFilter !== 'all' ||
+                                    this.bandFilter !== 'all' ||
+                                    this.countryFilter !== 'all' ||
+                                    this.continentFilter !== 'all' ||
+                                    this.snrFilter !== 'none' ||
+                                    this.ageFilter !== 'none';
+            
+            if (hasActiveFilters && filteredMessages.length !== this.liveMessages.length) {
                 countEl.textContent = `(${filteredMessages.length} / ${this.liveMessages.length})`;
             } else {
                 countEl.textContent = `(${this.liveMessages.length})`;
@@ -1101,8 +1278,8 @@ class DigitalSpotsMap {
         const endIdx = Math.min(startIdx + this.liveMessagesPerPage, filteredMessages.length);
         const pageMessages = filteredMessages.slice(startIdx, endIdx);
 
-        // Update pagination controls
-        if (paginationDiv && totalPages > 1) {
+        // Update pagination controls - but keep hidden if panel is collapsed
+        if (paginationDiv && totalPages > 1 && !isCollapsed) {
             paginationDiv.style.display = 'flex';
             if (pageInfo) {
                 pageInfo.textContent = `Page ${this.liveMessagesPage} of ${totalPages}`;
@@ -1129,16 +1306,32 @@ class DigitalSpotsMap {
                 timeZone: 'UTC'
             });
 
+            // Calculate local time if TimeOffset is available
+            // Note: CTY.DAT stores offsets as negative for west of UTC, positive for east
+            // So we negate the offset when calculating local time
+            let localTimeStr = '';
+            if (spot.TimeOffset !== undefined && spot.TimeOffset !== null) {
+                const utcDate = new Date(spot.timestamp);
+                const localDate = new Date(utcDate.getTime() - (spot.TimeOffset * 3600000));
+                const localTime = localDate.toLocaleTimeString('en-US', {
+                    hour12: false,
+                    timeZone: 'UTC'
+                });
+                const offsetSign = -spot.TimeOffset >= 0 ? '+' : '';
+                localTimeStr = ` • ${localTime} GMT${offsetSign}${-spot.TimeOffset}`;
+            }
+
             const bandColor = this.bandColors[spot.band] || '#999';
 
             const spotKey = `${spot.callsign}-${spot.band}-${spot.mode}`;
             html += `
                 <div class="live-message">
-                    <div class="live-message-time">${time} UTC</div>
+                    <div class="live-message-time">${time} UTC${localTimeStr}</div>
                     <div>
                         <span class="live-message-callsign" style="cursor: pointer; text-decoration: underline;"
                               onclick="window.digitalSpotsMap.showSpotOnMap('${spotKey}')">${spot.callsign}</span>
                         ${spot.country ? `<span style="color: #888; font-size: 10px;"> • ${spot.country}</span>` : ''}
+                        ${spot.Continent ? `<span style="color: #888; font-size: 10px;"> • ${spot.Continent}</span>` : ''}
                     </div>
                     <div class="live-message-details">
                         <span class="live-message-mode">${spot.mode}</span>

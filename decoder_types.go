@@ -8,14 +8,18 @@ import (
 // DecodeInfo represents a decoded signal with all relevant information
 type DecodeInfo struct {
 	// Common fields for all modes
-	Callsign  string
-	Locator   string
-	Country   string // DXCC country name from CTY.DAT
-	SNR       int
-	Frequency uint64 // Actual RF frequency in Hz
-	Timestamp time.Time
-	Mode      string // "FT8", "FT4", "WSPR"
-	Message   string
+	Callsign   string
+	Locator    string
+	Country    string  // DXCC country name from CTY.DAT
+	CQZone     int     // CQ Zone from CTY.DAT
+	ITUZone    int     // ITU Zone from CTY.DAT
+	Continent  string  // Continent code from CTY.DAT (e.g., "NA", "EU", "AS")
+	TimeOffset float64 // UTC time offset from CTY.DAT
+	SNR        int
+	Frequency  uint64 // Actual RF frequency in Hz
+	Timestamp  time.Time
+	Mode       string // "FT8", "FT4", "WSPR"
+	Message    string
 
 	// WSPR-specific fields
 	DT          float32 // Time drift in seconds

@@ -89,13 +89,12 @@ func ParseFT8Line(line string, dialFreq uint64, mode DecoderMode) (*DecodeInfo, 
 	// Extract callsign and locator from message
 	callsign, locator := extractCallsignLocator(message)
 
-	// Lookup country from CTY database
-	country := GetCountryForCallsign(callsign)
+	// Lookup full CTY information from database
+	ctyInfo := GetCallsignInfo(callsign)
 
 	info := &DecodeInfo{
 		Callsign:    callsign,
 		Locator:     locator,
-		Country:     country,
 		SNR:         snr,
 		Frequency:   frequency,
 		Timestamp:   timestamp,
@@ -104,6 +103,15 @@ func ParseFT8Line(line string, dialFreq uint64, mode DecoderMode) (*DecodeInfo, 
 		HasCallsign: callsign != "",
 		HasLocator:  isValidGridLocator(locator),
 		IsWSPR:      false,
+	}
+
+	// Populate CTY information if available
+	if ctyInfo != nil {
+		info.Country = ctyInfo.Country
+		info.CQZone = ctyInfo.CQZone
+		info.ITUZone = ctyInfo.ITUZone
+		info.Continent = ctyInfo.Continent
+		info.TimeOffset = ctyInfo.TimeOffset
 	}
 
 	return info, nil
@@ -188,13 +196,12 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 		}
 	}
 
-	// Lookup country from CTY database
-	country := GetCountryForCallsign(callsign)
+	// Lookup full CTY information from database
+	ctyInfo := GetCallsignInfo(callsign)
 
 	info := &DecodeInfo{
 		Callsign:    callsign,
 		Locator:     locator,
-		Country:     country,
 		SNR:         snr,
 		Frequency:   dialFreq, // Receiver frequency
 		TxFrequency: txFrequency,
@@ -207,6 +214,15 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 		HasCallsign: isValidCallsign(callsign),
 		HasLocator:  locator != "" && isValidGridLocator(locator),
 		IsWSPR:      true,
+	}
+
+	// Populate CTY information if available
+	if ctyInfo != nil {
+		info.Country = ctyInfo.Country
+		info.CQZone = ctyInfo.CQZone
+		info.ITUZone = ctyInfo.ITUZone
+		info.Continent = ctyInfo.Continent
+		info.TimeOffset = ctyInfo.TimeOffset
 	}
 
 	return info, nil

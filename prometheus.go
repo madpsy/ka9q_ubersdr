@@ -28,6 +28,32 @@ type PrometheusMetrics struct {
 	ft8SNR           *prometheus.GaugeVec // FT8 SNR estimate
 	lastUpdate       *prometheus.GaugeVec // Unix timestamp of last measurement
 
+	// Digital decode metrics (with 'mode' and 'band' labels)
+	digitalDecodesPerCycle1m  *prometheus.GaugeVec // Average decodes per cycle (last 1 minute)
+	digitalDecodesPerCycle5m  *prometheus.GaugeVec // Average decodes per cycle (last 5 minutes)
+	digitalDecodesPerCycle15m *prometheus.GaugeVec // Average decodes per cycle (last 15 minutes)
+	digitalDecodesPerCycle30m *prometheus.GaugeVec // Average decodes per cycle (last 30 minutes)
+	digitalDecodesPerCycle60m *prometheus.GaugeVec // Average decodes per cycle (last 60 minutes)
+	digitalDecodesTotal1h     *prometheus.GaugeVec // Total decodes in last 1 hour
+	digitalDecodesTotal3h     *prometheus.GaugeVec // Total decodes in last 3 hours
+	digitalDecodesTotal6h     *prometheus.GaugeVec // Total decodes in last 6 hours
+	digitalDecodesTotal12h    *prometheus.GaugeVec // Total decodes in last 12 hours
+	digitalDecodesTotal24h    *prometheus.GaugeVec // Total decodes in last 24 hours
+	digitalUniqueCallsigns1h  *prometheus.GaugeVec // Unique callsigns in last 1 hour
+	digitalUniqueCallsigns3h  *prometheus.GaugeVec // Unique callsigns in last 3 hours
+	digitalUniqueCallsigns6h  *prometheus.GaugeVec // Unique callsigns in last 6 hours
+	digitalUniqueCallsigns12h *prometheus.GaugeVec // Unique callsigns in last 12 hours
+	digitalUniqueCallsigns24h *prometheus.GaugeVec // Unique callsigns in last 24 hours
+	digitalExecTime1mAvg      *prometheus.GaugeVec // Average decoder execution time (last 1 minute)
+	digitalExecTime1mMin      *prometheus.GaugeVec // Minimum decoder execution time (last 1 minute)
+	digitalExecTime1mMax      *prometheus.GaugeVec // Maximum decoder execution time (last 1 minute)
+	digitalExecTime5mAvg      *prometheus.GaugeVec // Average decoder execution time (last 5 minutes)
+	digitalExecTime5mMin      *prometheus.GaugeVec // Minimum decoder execution time (last 5 minutes)
+	digitalExecTime5mMax      *prometheus.GaugeVec // Maximum decoder execution time (last 5 minutes)
+	digitalExecTime10mAvg     *prometheus.GaugeVec // Average decoder execution time (last 10 minutes)
+	digitalExecTime10mMin     *prometheus.GaugeVec // Minimum decoder execution time (last 10 minutes)
+	digitalExecTime10mMax     *prometheus.GaugeVec // Maximum decoder execution time (last 10 minutes)
+
 	// System metrics
 	activeSessions         prometheus.Gauge // Total active sessions (audio + spectrum)
 	activeUsers            prometheus.Gauge // Total unique users (by UUID)
@@ -90,6 +116,9 @@ type PrometheusMetrics struct {
 
 	// MQTT publisher
 	mqttPublisher *MQTTPublisher // MQTT publisher for metrics
+
+	// Digital decode metrics tracker
+	digitalMetrics *DigitalDecodeMetrics
 
 	mu sync.RWMutex // Protects metric updates
 }
@@ -174,9 +203,178 @@ func NewPrometheusMetrics() *PrometheusMetrics {
 			},
 			[]string{"band"},
 		),
+		digitalDecodesPerCycle1m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decodes_per_cycle_avg_1m",
+				Help: "Average decodes per cycle for the last 1 minute by mode and band",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalDecodesPerCycle5m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decodes_per_cycle_avg_5m",
+				Help: "Average decodes per cycle for the last 5 minutes by mode and band",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalDecodesPerCycle15m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decodes_per_cycle_avg_15m",
+				Help: "Average decodes per cycle for the last 15 minutes by mode and band",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalDecodesPerCycle30m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decodes_per_cycle_avg_30m",
+				Help: "Average decodes per cycle for the last 30 minutes by mode and band",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalDecodesPerCycle60m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decodes_per_cycle_avg_60m",
+				Help: "Average decodes per cycle for the last 60 minutes by mode and band",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalDecodesTotal1h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decodes_total_1h",
+				Help: "Total decodes in the last 1 hour by mode and band",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalDecodesTotal3h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decodes_total_3h",
+				Help: "Total decodes in the last 3 hours by mode and band",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalDecodesTotal6h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decodes_total_6h",
+				Help: "Total decodes in the last 6 hours by mode and band",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalDecodesTotal12h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decodes_total_12h",
+				Help: "Total decodes in the last 12 hours by mode and band",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalDecodesTotal24h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decodes_total_24h",
+				Help: "Total decodes in the last 24 hours by mode and band",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalUniqueCallsigns1h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_unique_callsigns_1h",
+				Help: "Unique callsign+band+mode combinations in the last 1 hour",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalUniqueCallsigns3h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_unique_callsigns_3h",
+				Help: "Unique callsign+band+mode combinations in the last 3 hours",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalUniqueCallsigns6h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_unique_callsigns_6h",
+				Help: "Unique callsign+band+mode combinations in the last 6 hours",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalUniqueCallsigns12h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_unique_callsigns_12h",
+				Help: "Unique callsign+band+mode combinations in the last 12 hours",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalUniqueCallsigns24h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_unique_callsigns_24h",
+				Help: "Unique callsign+band+mode combinations in the last 24 hours",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalExecTime1mAvg: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decoder_exec_time_1m_avg_seconds",
+				Help: "Average decoder execution time in seconds (last 1 minute)",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalExecTime1mMin: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decoder_exec_time_1m_min_seconds",
+				Help: "Minimum decoder execution time in seconds (last 1 minute)",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalExecTime1mMax: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decoder_exec_time_1m_max_seconds",
+				Help: "Maximum decoder execution time in seconds (last 1 minute)",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalExecTime5mAvg: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decoder_exec_time_5m_avg_seconds",
+				Help: "Average decoder execution time in seconds (last 5 minutes)",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalExecTime5mMin: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decoder_exec_time_5m_min_seconds",
+				Help: "Minimum decoder execution time in seconds (last 5 minutes)",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalExecTime5mMax: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decoder_exec_time_5m_max_seconds",
+				Help: "Maximum decoder execution time in seconds (last 5 minutes)",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalExecTime10mAvg: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decoder_exec_time_10m_avg_seconds",
+				Help: "Average decoder execution time in seconds (last 10 minutes)",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalExecTime10mMin: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decoder_exec_time_10m_min_seconds",
+				Help: "Minimum decoder execution time in seconds (last 10 minutes)",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalExecTime10mMax: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "digital_decoder_exec_time_10m_max_seconds",
+				Help: "Maximum decoder execution time in seconds (last 10 minutes)",
+			},
+			[]string{"mode", "band"},
+		),
+		digitalMetrics: NewDigitalDecodeMetrics(),
 	}
 
-	log.Println("Prometheus metrics initialized for noisefloor monitoring and system stats")
+	log.Println("Prometheus metrics initialized for noisefloor monitoring, system stats, and digital decodes")
 	return pm
 }
 
@@ -869,4 +1067,117 @@ func (pm *PrometheusMetrics) StartMQTTPublisher(ctx context.Context, config *Con
 	go publisher.StartPublisher(ctx, config)
 
 	return nil
+}
+
+// RecordDigitalDecode records a digital decode event and updates metrics
+func (pm *PrometheusMetrics) RecordDigitalDecode(mode, band, callsign string, cycleSeconds int) {
+	if pm == nil || pm.digitalMetrics == nil {
+		return
+	}
+
+	// Record in the metrics tracker
+	pm.digitalMetrics.RecordDecode(mode, band, callsign)
+
+	// Update Prometheus metrics
+	pm.updateDigitalMetrics(mode, band, cycleSeconds)
+}
+
+// updateDigitalMetrics updates all digital decode Prometheus metrics for a mode/band
+func (pm *PrometheusMetrics) updateDigitalMetrics(mode, band string, cycleSeconds int) {
+	if pm == nil || pm.digitalMetrics == nil {
+		return
+	}
+
+	labels := prometheus.Labels{"mode": mode, "band": band}
+
+	// Average decodes per cycle for different time windows
+	pm.digitalDecodesPerCycle1m.With(labels).Set(pm.digitalMetrics.GetAverageDecodesPerCycle(mode, band, cycleSeconds, 1))
+	pm.digitalDecodesPerCycle5m.With(labels).Set(pm.digitalMetrics.GetAverageDecodesPerCycle(mode, band, cycleSeconds, 5))
+	pm.digitalDecodesPerCycle15m.With(labels).Set(pm.digitalMetrics.GetAverageDecodesPerCycle(mode, band, cycleSeconds, 15))
+	pm.digitalDecodesPerCycle30m.With(labels).Set(pm.digitalMetrics.GetAverageDecodesPerCycle(mode, band, cycleSeconds, 30))
+	pm.digitalDecodesPerCycle60m.With(labels).Set(pm.digitalMetrics.GetAverageDecodesPerCycle(mode, band, cycleSeconds, 60))
+
+	// Total decodes in time windows
+	pm.digitalDecodesTotal1h.With(labels).Set(float64(pm.digitalMetrics.GetTotalDecodes(mode, band, 1)))
+	pm.digitalDecodesTotal3h.With(labels).Set(float64(pm.digitalMetrics.GetTotalDecodes(mode, band, 3)))
+	pm.digitalDecodesTotal6h.With(labels).Set(float64(pm.digitalMetrics.GetTotalDecodes(mode, band, 6)))
+	pm.digitalDecodesTotal12h.With(labels).Set(float64(pm.digitalMetrics.GetTotalDecodes(mode, band, 12)))
+	pm.digitalDecodesTotal24h.With(labels).Set(float64(pm.digitalMetrics.GetTotalDecodes(mode, band, 24)))
+
+	// Unique callsigns in time windows
+	pm.digitalUniqueCallsigns1h.With(labels).Set(float64(pm.digitalMetrics.GetUniqueCallsigns(mode, band, 1)))
+	pm.digitalUniqueCallsigns3h.With(labels).Set(float64(pm.digitalMetrics.GetUniqueCallsigns(mode, band, 3)))
+	pm.digitalUniqueCallsigns6h.With(labels).Set(float64(pm.digitalMetrics.GetUniqueCallsigns(mode, band, 6)))
+	pm.digitalUniqueCallsigns12h.With(labels).Set(float64(pm.digitalMetrics.GetUniqueCallsigns(mode, band, 12)))
+	pm.digitalUniqueCallsigns24h.With(labels).Set(float64(pm.digitalMetrics.GetUniqueCallsigns(mode, band, 24)))
+
+	// Decoder execution times (min/max/average)
+	avg1m, min1m, max1m := pm.digitalMetrics.GetExecutionTimeStats(mode, band, 1)
+	pm.digitalExecTime1mAvg.With(labels).Set(avg1m)
+	pm.digitalExecTime1mMin.With(labels).Set(min1m)
+	pm.digitalExecTime1mMax.With(labels).Set(max1m)
+
+	avg5m, min5m, max5m := pm.digitalMetrics.GetExecutionTimeStats(mode, band, 5)
+	pm.digitalExecTime5mAvg.With(labels).Set(avg5m)
+	pm.digitalExecTime5mMin.With(labels).Set(min5m)
+	pm.digitalExecTime5mMax.With(labels).Set(max5m)
+
+	avg10m, min10m, max10m := pm.digitalMetrics.GetExecutionTimeStats(mode, band, 10)
+	pm.digitalExecTime10mAvg.With(labels).Set(avg10m)
+	pm.digitalExecTime10mMin.With(labels).Set(min10m)
+	pm.digitalExecTime10mMax.With(labels).Set(max10m)
+
+	if DebugMode {
+		log.Printf("DEBUG: Updated digital decode metrics for %s/%s: avg_per_cycle_1m=%.2f, avg_per_cycle_60m=%.2f, total_1h=%d, unique_1h=%d, exec_1m=%.3fs",
+			mode, band,
+			pm.digitalMetrics.GetAverageDecodesPerCycle(mode, band, cycleSeconds, 1),
+			pm.digitalMetrics.GetAverageDecodesPerCycle(mode, band, cycleSeconds, 60),
+			pm.digitalMetrics.GetTotalDecodes(mode, band, 1),
+			pm.digitalMetrics.GetUniqueCallsigns(mode, band, 1),
+			avg1m)
+	}
+}
+
+// UpdateAllDigitalMetrics updates metrics for all active mode/band combinations
+func (pm *PrometheusMetrics) UpdateAllDigitalMetrics(modeBandCycles map[string]map[string]int) {
+	if pm == nil || pm.digitalMetrics == nil {
+		return
+	}
+
+	// Get all active combinations
+	combinations := pm.digitalMetrics.GetAllModeBandCombinations()
+
+	for _, combo := range combinations {
+		cycleSeconds := 15 // Default for FT8
+		if cycles, ok := modeBandCycles[combo.Mode]; ok {
+			if cycle, ok := cycles[combo.Band]; ok {
+				cycleSeconds = cycle
+			}
+		}
+		pm.updateDigitalMetrics(combo.Mode, combo.Band, cycleSeconds)
+	}
+}
+
+// StartDigitalMetricsCleanup starts a goroutine to periodically clean old data
+func (pm *PrometheusMetrics) StartDigitalMetricsCleanup(ctx context.Context) {
+	if pm == nil || pm.digitalMetrics == nil {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				pm.digitalMetrics.CleanupOldData()
+				if DebugMode {
+					log.Println("DEBUG: Cleaned up old digital decode metrics data")
+				}
+			}
+		}
+	}()
 }

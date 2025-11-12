@@ -30,6 +30,9 @@ type MultiDecoder struct {
 	// Statistics
 	stats *DecoderStats
 
+	// Prometheus metrics
+	prometheusMetrics *PrometheusMetrics
+
 	// Control
 	running  bool
 	stopChan chan struct{}
@@ -41,7 +44,7 @@ type MultiDecoder struct {
 }
 
 // NewMultiDecoder creates a new multi-decoder instance
-func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *SessionManager) (*MultiDecoder, error) {
+func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *SessionManager, prometheusMetrics *PrometheusMetrics) (*MultiDecoder, error) {
 	if !config.Enabled {
 		return nil, nil
 	}
@@ -66,13 +69,14 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 	}
 
 	md := &MultiDecoder{
-		config:       config,
-		radiod:       radiod,
-		sessions:     sessions,
-		decoderBands: make(map[string]*DecoderBand),
-		spawner:      NewDecoderSpawner(config),
-		stats:        NewDecoderStats(),
-		stopChan:     make(chan struct{}),
+		config:            config,
+		radiod:            radiod,
+		sessions:          sessions,
+		decoderBands:      make(map[string]*DecoderBand),
+		spawner:           NewDecoderSpawner(config),
+		stats:             NewDecoderStats(),
+		prometheusMetrics: prometheusMetrics,
+		stopChan:          make(chan struct{}),
 	}
 
 	// Initialize spot reporters if enabled
@@ -425,7 +429,7 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 	// Spawn decoder in goroutine
 	go func() {
 		// SpawnDecoder now waits for the decoder process to complete before returning
-		logFile, err := md.spawner.SpawnDecoder(filename, band)
+		logFile, execTime, err := md.spawner.SpawnDecoder(filename, band)
 		if err != nil {
 			log.Printf("Error spawning decoder for %s: %v", band.Config.Name, err)
 			md.stats.IncrementErrors()
@@ -443,6 +447,11 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 		// Update statistics
 		md.stats.IncrementDecodes(band.Config.Name, int64(len(decodes)))
 
+		// Record raw decode count (before parsing) for average per cycle metric
+		if md.prometheusMetrics != nil && md.prometheusMetrics.digitalMetrics != nil {
+			md.prometheusMetrics.digitalMetrics.RecordRawCycleDecodes(band.Config.Mode.String(), band.Config.Name, len(decodes))
+		}
+
 		if len(decodes) > 0 {
 			log.Printf("Decoded %d spots from %s", len(decodes), band.Config.Name)
 
@@ -455,8 +464,17 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 				}
 			}
 
+			// Get cycle time for this mode
+			modeInfo := GetModeInfo(band.Config.Mode)
+			cycleSeconds := int(modeInfo.CycleTime.Seconds())
+
 			// Submit to PSKReporter/WSPRNet and notify callback
 			for _, decode := range decodes {
+				// Record individual decode with callsign for unique tracking and totals
+				if md.prometheusMetrics != nil {
+					md.prometheusMetrics.RecordDigitalDecode(decode.Mode, band.Config.Name, decode.Callsign, cycleSeconds)
+				}
+
 				// Notify callback for websocket broadcasting
 				md.notifyDecode(*decode)
 
@@ -481,6 +499,12 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 			}
 
 			md.stats.IncrementSpots(band.Config.Name, int64(len(decodes)))
+		}
+
+		// Record execution time metric (pass to prometheus metrics via global or through md)
+		// We'll need to add this to the MultiDecoder struct
+		if md.prometheusMetrics != nil {
+			md.prometheusMetrics.digitalMetrics.RecordExecutionTime(band.Config.Mode.String(), band.Config.Name, execTime)
 		}
 
 		// Cleanup files

@@ -201,6 +201,7 @@ func (mp *MQTTPublisher) publishAllMetrics(config *Config) {
 	websocketMetrics := make(map[string]interface{})
 	dxclusterMetrics := make(map[string]interface{})
 	pushgatewayMetrics := make(map[string]interface{})
+	digitalDecodeMetrics := make(map[string]map[string]interface{}) // mode_band -> metrics
 
 	// Process each metric family
 	for _, mf := range metricFamilies {
@@ -221,6 +222,20 @@ func (mp *MQTTPublisher) publishAllMetrics(config *Config) {
 
 			// Route to appropriate category based on metric name
 			switch {
+			case len(metricName) >= 7 && metricName[:7] == "digital":
+				// Digital decode metrics - group by mode and band
+				if mode, modeOk := labels["mode"]; modeOk {
+					if band, bandOk := labels["band"]; bandOk {
+						key := mode + "_" + band
+						if digitalDecodeMetrics[key] == nil {
+							digitalDecodeMetrics[key] = make(map[string]interface{})
+							digitalDecodeMetrics[key]["mode"] = mode
+							digitalDecodeMetrics[key]["band"] = band
+						}
+						digitalDecodeMetrics[key][metricName] = value
+					}
+				}
+
 			case len(metricName) >= 10 && metricName[:10] == "noisefloor":
 				// Noise floor metrics - group by band
 				if band, ok := labels["band"]; ok {
@@ -305,6 +320,7 @@ func (mp *MQTTPublisher) publishAllMetrics(config *Config) {
 	mp.publishMetricCategory("websocket", map[string]map[string]interface{}{"metrics": websocketMetrics}, timestamp)
 	mp.publishMetricCategory("dxcluster", map[string]map[string]interface{}{"metrics": dxclusterMetrics}, timestamp)
 	mp.publishMetricCategory("pushgateway", map[string]map[string]interface{}{"metrics": pushgatewayMetrics}, timestamp)
+	mp.publishDigitalDecodeMetrics(digitalDecodeMetrics, timestamp)
 
 	// Publish space weather with text fields separately
 	mp.publishSpaceWeather(spaceweatherMetrics, timestamp)
@@ -559,6 +575,59 @@ func (mp *MQTTPublisher) PublishDigitalDecode(decode DecodeInfo, bandName string
 	if DebugMode {
 		log.Printf("MQTT DEBUG: Published decode to %s: %s %s SNR:%d",
 			topic, decode.Callsign, decode.Locator, decode.SNR)
+	}
+}
+
+// publishDigitalDecodeMetrics publishes digital decode metrics grouped by mode and band
+func (mp *MQTTPublisher) publishDigitalDecodeMetrics(metrics map[string]map[string]interface{}, timestamp int64) {
+	for _, data := range metrics {
+		if len(data) == 0 {
+			continue
+		}
+
+		// Extract mode and band from the data
+		mode, modeOk := data["mode"].(string)
+		band, bandOk := data["band"].(string)
+		if !modeOk || !bandOk {
+			continue
+		}
+
+		// Convert interface{} map to float64 map for JSON serialization
+		floatMetrics := make(map[string]float64)
+		for k, v := range data {
+			// Skip the mode and band keys as they're used in the topic
+			if k == "mode" || k == "band" {
+				continue
+			}
+			switch val := v.(type) {
+			case float64:
+				floatMetrics[k] = val
+			case float32:
+				floatMetrics[k] = float64(val)
+			case int:
+				floatMetrics[k] = float64(val)
+			case int64:
+				floatMetrics[k] = float64(val)
+			}
+		}
+
+		if len(floatMetrics) == 0 {
+			continue
+		}
+
+		payload := MetricPayload{
+			Timestamp: timestamp,
+			Metrics:   floatMetrics,
+			Labels: map[string]string{
+				"mode": mode,
+				"band": band,
+			},
+		}
+
+		// Build topic: {prefix}/digital_decodes/{mode}/{band}
+		topic := fmt.Sprintf("%s/digital_decodes/%s/%s", mp.config.TopicPrefix, mode, band)
+
+		mp.publish(topic, payload)
 	}
 }
 

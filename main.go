@@ -328,6 +328,14 @@ func main() {
 		defer noiseFloorMonitor.Stop()
 	}
 
+	// Initialize Prometheus metrics if enabled (must be before multi-decoder)
+	var prometheusMetrics *PrometheusMetrics
+	if config.Prometheus.Enabled {
+		prometheusMetrics = NewPrometheusMetrics()
+		// Initialize system metrics
+		prometheusMetrics.InitializeSystemMetrics()
+	}
+
 	// Initialize multi-decoder
 	// Set data directory relative to config directory
 	if config.Decoder.Enabled && config.Decoder.DataDir == "" {
@@ -337,7 +345,7 @@ func main() {
 		config.Decoder.DataDir = *configDir + "/" + config.Decoder.DataDir
 	}
 
-	multiDecoder, err := NewMultiDecoder(&config.Decoder, radiod, sessions)
+	multiDecoder, err := NewMultiDecoder(&config.Decoder, radiod, sessions, prometheusMetrics)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize multi-decoder: %v", err)
 		log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
@@ -345,13 +353,8 @@ func main() {
 	}
 	// Note: multiDecoder.Start() will be called later after dxClusterWsHandler is initialized
 
-	// Initialize Prometheus metrics if enabled
-	var prometheusMetrics *PrometheusMetrics
-	if config.Prometheus.Enabled {
-		prometheusMetrics = NewPrometheusMetrics()
-		// Initialize system metrics
-		prometheusMetrics.InitializeSystemMetrics()
-
+	// Continue Prometheus setup if enabled
+	if prometheusMetrics != nil {
 		// Connect Prometheus metrics to session manager
 		sessions.SetPrometheusMetrics(prometheusMetrics)
 
@@ -376,9 +379,12 @@ func main() {
 		})
 		log.Printf("Prometheus metrics enabled at /metrics (allowed hosts: %v)", config.Prometheus.AllowedHosts)
 
-		// Create context for graceful shutdown (used by Pushgateway and MQTT)
+		// Create context for graceful shutdown (used by Pushgateway, MQTT, and digital metrics cleanup)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
+		// Start digital metrics cleanup goroutine (cleans up old data every 5 minutes)
+		prometheusMetrics.StartDigitalMetricsCleanup(ctx)
 
 		// Start Pushgateway worker if enabled
 		if config.Prometheus.Pushgateway.Enabled {

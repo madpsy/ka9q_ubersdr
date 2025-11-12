@@ -23,14 +23,14 @@ func NewDecoderSpawner(config *DecoderConfig) *DecoderSpawner {
 }
 
 // SpawnDecoder spawns a decoder process for the given WAV file
-// Returns the output file path where decoder results will be written
-func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (string, error) {
+// Returns the output file path where decoder results will be written and the execution duration
+func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (string, time.Duration, error) {
 	modeInfo := GetModeInfo(band.Config.Mode)
 
 	// Create working directory for this band (isolates decoder temp files)
 	workDir := filepath.Join(ds.config.DataDir, fmt.Sprintf("%d", band.Config.Frequency))
 	if err := os.MkdirAll(workDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create work directory: %w", err)
+		return "", 0, fmt.Errorf("failed to create work directory: %w", err)
 	}
 
 	// Create log file path for stdout/stderr
@@ -57,23 +57,26 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		log.Printf("DEBUG: Output file: %s", outputFile)
 	}
 
-	// Start the decoder process
+	// Start the decoder process and track execution time
+	startTime := time.Now()
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("failed to start decoder: %w", err)
+		return "", 0, fmt.Errorf("failed to start decoder: %w", err)
 	}
 
 	log.Printf("Started decoder for %s, waiting for completion...", band.Config.Name)
 
 	// Wait for decoder to complete
 	err := cmd.Wait()
+	executionTime := time.Since(startTime)
+
 	if err != nil {
 		log.Printf("Decoder process for %s exited with error: %v", band.Config.Name, err)
-		return "", fmt.Errorf("decoder process failed: %w", err)
+		return "", executionTime, fmt.Errorf("decoder process failed: %w", err)
 	}
 
-	log.Printf("Decoder for %s completed successfully", band.Config.Name)
+	log.Printf("Decoder for %s completed successfully in %.3f seconds", band.Config.Name, executionTime.Seconds())
 
-	return outputFile, nil
+	return outputFile, executionTime, nil
 }
 
 // buildDecoderCommand builds the command to execute the decoder

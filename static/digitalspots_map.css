@@ -298,7 +298,7 @@
         /* Custom marker styles */
         .custom-marker {
             border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.5);
+            border: none;
         }
 
         .receiver-marker {

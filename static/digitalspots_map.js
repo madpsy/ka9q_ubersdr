@@ -677,7 +677,7 @@ class DigitalSpotsMap {
         // Create custom icon
         const icon = L.divIcon({
             className: 'custom-marker',
-            html: `<div style="width: 12px; height: 12px; background: ${color}; border: 2px solid rgba(255, 255, 255, 0.5); border-radius: 50%;"></div>`,
+            html: `<div style="width: 12px; height: 12px; background: ${color}; border-radius: 50%;"></div>`,
             iconSize: [12, 12],
             iconAnchor: [6, 6]
         });
@@ -1035,9 +1035,17 @@ class DigitalSpotsMap {
             return;
         }
         
-        // Build HTML showing all bands in order
+        // Sort bands by count (highest to lowest), then by band order for ties
+        const sortedBands = allBands.sort((a, b) => {
+            const countDiff = bandCounts[b] - bandCounts[a];
+            if (countDiff !== 0) return countDiff;
+            // If counts are equal, maintain original band order
+            return allBands.indexOf(a) - allBands.indexOf(b);
+        });
+
+        // Build HTML showing bands sorted by count
         let html = '';
-        allBands.forEach(band => {
+        sortedBands.forEach(band => {
             const count = bandCounts[band];
             const color = count > 0 ? '#ccc' : '#555';
             html += `
@@ -1213,9 +1221,12 @@ class DigitalSpotsMap {
             }
             
             filteredSpots.push(spot);
-            
+
             if (spot.distance_km !== undefined && spot.distance_km !== null && spot.distance_km > 0) {
-                spotsWithDistance.push(spot);
+                // Only include spots with valid country names for distance statistics
+                if (spot.country && spot.country !== 'Unknown' && spot.country !== '') {
+                    spotsWithDistance.push(spot);
+                }
             }
         });
         

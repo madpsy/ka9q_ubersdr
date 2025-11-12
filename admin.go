@@ -2013,6 +2013,83 @@ func (ah *AdminHandler) handleGetDecoderBands(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(map[string]interface{}{"bands": bands})
 }
 
+// validateDecoderBandName validates that a decoder band name contains only alphanumeric, dash, and underscore
+func validateDecoderBandName(name string) error {
+	if name == "" {
+		return fmt.Errorf("name is required")
+	}
+
+	// Check if name contains only alphanumeric, dash, and underscore
+	for _, char := range name {
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_') {
+			return fmt.Errorf("name must contain only alphanumeric characters, dashes (-), and underscores (_)")
+		}
+	}
+
+	return nil
+}
+
+// checkDecoderBandDuplicates checks for duplicate names and frequencies in decoder bands
+func checkDecoderBandDuplicates(bands []interface{}, newName string, newFreq interface{}, skipIndex int) error {
+	// Convert newFreq to uint64 for comparison
+	var newFreqUint64 uint64
+	switch v := newFreq.(type) {
+	case float64:
+		newFreqUint64 = uint64(v)
+	case int:
+		newFreqUint64 = uint64(v)
+	case int64:
+		newFreqUint64 = uint64(v)
+	case uint64:
+		newFreqUint64 = v
+	default:
+		return fmt.Errorf("invalid frequency type")
+	}
+
+	for i, bandInterface := range bands {
+		// Skip the current band if we're editing
+		if i == skipIndex {
+			continue
+		}
+
+		band, ok := bandInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Check for duplicate name
+		if bandName, ok := band["name"].(string); ok && bandName == newName {
+			return fmt.Errorf("a decoder band with the name \"%s\" already exists", newName)
+		}
+
+		// Check for duplicate frequency
+		if bandFreq, ok := band["frequency"]; ok {
+			var bandFreqUint64 uint64
+			switch v := bandFreq.(type) {
+			case float64:
+				bandFreqUint64 = uint64(v)
+			case int:
+				bandFreqUint64 = uint64(v)
+			case int64:
+				bandFreqUint64 = uint64(v)
+			case uint64:
+				bandFreqUint64 = v
+			}
+
+			if bandFreqUint64 == newFreqUint64 {
+				existingName := "unknown"
+				if name, ok := band["name"].(string); ok {
+					existingName = name
+				}
+				return fmt.Errorf("frequency %d Hz is already used by decoder band \"%s\"", newFreqUint64, existingName)
+			}
+		}
+	}
+
+	return nil
+}
+
 // handleAddDecoderBand adds a new decoder band
 func (ah *AdminHandler) handleAddDecoderBand(w http.ResponseWriter, r *http.Request) {
 	var newBand map[string]interface{}
@@ -2024,6 +2101,18 @@ func (ah *AdminHandler) handleAddDecoderBand(w http.ResponseWriter, r *http.Requ
 	// Validate required fields
 	if newBand["name"] == "" || newBand["mode"] == "" || newBand["frequency"] == nil {
 		http.Error(w, "Name, mode, and frequency are required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate name format
+	name, ok := newBand["name"].(string)
+	if !ok {
+		http.Error(w, "Name must be a string", http.StatusBadRequest)
+		return
+	}
+
+	if err := validateDecoderBandName(name); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -2045,6 +2134,12 @@ func (ah *AdminHandler) handleAddDecoderBand(w http.ResponseWriter, r *http.Requ
 	bands, ok := decoder["bands"].([]interface{})
 	if !ok {
 		bands = []interface{}{}
+	}
+
+	// Check for duplicates (skipIndex = -1 means we're adding, not editing)
+	if err := checkDecoderBandDuplicates(bands, name, newBand["frequency"], -1); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	// Add new band
@@ -2090,6 +2185,24 @@ func (ah *AdminHandler) handleUpdateDecoderBand(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Validate required fields
+	if updatedBand["name"] == "" || updatedBand["mode"] == "" || updatedBand["frequency"] == nil {
+		http.Error(w, "Name, mode, and frequency are required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate name format
+	name, ok := updatedBand["name"].(string)
+	if !ok {
+		http.Error(w, "Name must be a string", http.StatusBadRequest)
+		return
+	}
+
+	if err := validateDecoderBandName(name); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// Read existing config
 	data, err := os.ReadFile(ah.getConfigPath("decoder.yaml"))
 	if err != nil {
@@ -2112,6 +2225,19 @@ func (ah *AdminHandler) handleUpdateDecoderBand(w http.ResponseWriter, r *http.R
 	bands, ok := decoder["bands"].([]interface{})
 	if !ok || index < 0 || index >= len(bands) {
 		http.Error(w, "Invalid band index", http.StatusBadRequest)
+		return
+	}
+
+	// Get the name from updatedBand for duplicate checking
+	bandName, ok := updatedBand["name"].(string)
+	if !ok {
+		http.Error(w, "Name must be a string", http.StatusBadRequest)
+		return
+	}
+
+	// Check for duplicates (pass the index we're editing to skip it in the check)
+	if err := checkDecoderBandDuplicates(bands, bandName, updatedBand["frequency"], index); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

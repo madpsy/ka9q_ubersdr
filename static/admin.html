@@ -2576,6 +2576,34 @@
                 return;
             }
 
+            // Validate name format: only alphanumeric, dash, and underscore
+            const namePattern = /^[a-zA-Z0-9_-]+$/;
+            if (!namePattern.test(name)) {
+                showAlert('Name must contain only alphanumeric characters, dashes (-), and underscores (_)', 'error');
+                return;
+            }
+
+            // Check for duplicate names and frequencies
+            const bands = currentDecoderConfig.bands || [];
+            for (let i = 0; i < bands.length; i++) {
+                // Skip the current band if we're editing
+                if (editIndex >= 0 && i === editIndex) {
+                    continue;
+                }
+
+                // Check for duplicate frequency
+                if (bands[i].frequency === frequency) {
+                    showAlert(`Frequency ${frequency.toLocaleString()} Hz is already used by decoder band "${bands[i].name}"`, 'error');
+                    return;
+                }
+
+                // Check for duplicate name
+                if (bands[i].name === name) {
+                    showAlert(`A decoder band with the name "${name}" already exists`, 'error');
+                    return;
+                }
+            }
+
             const bandData = { name, mode, frequency, enabled };
 
             try {

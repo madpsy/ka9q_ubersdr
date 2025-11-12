@@ -28,6 +28,12 @@ class DigitalSpotsMap {
         this.liveMessagesPerPage = 200; // Messages per page
         this.liveMessagesCallsignFilter = ''; // Callsign filter
 
+        // Track seen continent+band and country+band combinations for "new" detection
+        this.seenContinentBands = new Set();
+        this.seenCountryBands = new Set();
+        this.latestNewContinent = null;
+        this.latestNewCountry = null;
+
         // Continent code to name mapping
         this.continentNames = {
             'AF': 'Africa',
@@ -346,6 +352,9 @@ class DigitalSpotsMap {
 
         // Store spot
         this.spots.set(key, spot);
+
+        // Check for new continent or country
+        this.checkNewEntities(spot);
 
         // Add or update marker
         this.addOrUpdateMarker(key, spot);
@@ -1394,6 +1403,68 @@ class DigitalSpotsMap {
         });
 
         legendContainer.innerHTML = html || '<div style="color: #888; font-size: 11px;">No active bands</div>';
+    }
+
+    checkNewEntities(spot) {
+        // Check for new continent+band combination
+        if (spot.Continent && spot.Continent !== '' && spot.band) {
+            const continentBandKey = `${spot.Continent}-${spot.band}`;
+            if (!this.seenContinentBands.has(continentBandKey)) {
+                this.seenContinentBands.add(continentBandKey);
+                this.latestNewContinent = {
+                    continent: spot.Continent,
+                    mode: spot.mode,
+                    band: spot.band,
+                    callsign: spot.callsign,
+                    snr: spot.snr
+                };
+                this.updateNewEntitiesDisplay();
+            }
+        }
+
+        // Check for new country+band combination
+        if (spot.country && spot.country !== '' && spot.country !== 'Unknown' && spot.band) {
+            const countryBandKey = `${spot.country}-${spot.band}`;
+            if (!this.seenCountryBands.has(countryBandKey)) {
+                this.seenCountryBands.add(countryBandKey);
+                this.latestNewCountry = {
+                    country: spot.country,
+                    mode: spot.mode,
+                    band: spot.band,
+                    callsign: spot.callsign,
+                    snr: spot.snr
+                };
+                this.updateNewEntitiesDisplay();
+            }
+        }
+    }
+
+    updateNewEntitiesDisplay() {
+        const continentInfo = document.getElementById('new-continent-info');
+        const countryInfo = document.getElementById('new-country-info');
+
+        if (continentInfo && this.latestNewContinent) {
+            const continentName = this.continentNames[this.latestNewContinent.continent] || this.latestNewContinent.continent;
+            const snrStr = this.latestNewContinent.snr !== undefined ?
+                `${this.latestNewContinent.snr >= 0 ? '+' : ''}${this.latestNewContinent.snr}dB` : 'N/A';
+            continentInfo.innerHTML = `
+                <div style="font-weight: bold;">${continentName} • ${this.latestNewContinent.band}</div>
+                <div style="font-size: 10px; color: #888; margin-top: 2px;">
+                    ${this.latestNewContinent.callsign} • ${this.latestNewContinent.mode} • ${snrStr}
+                </div>
+            `;
+        }
+
+        if (countryInfo && this.latestNewCountry) {
+            const snrStr = this.latestNewCountry.snr !== undefined ?
+                `${this.latestNewCountry.snr >= 0 ? '+' : ''}${this.latestNewCountry.snr}dB` : 'N/A';
+            countryInfo.innerHTML = `
+                <div style="font-weight: bold;">${this.latestNewCountry.country} • ${this.latestNewCountry.band}</div>
+                <div style="font-size: 10px; color: #888; margin-top: 2px;">
+                    ${this.latestNewCountry.callsign} • ${this.latestNewCountry.mode} • ${snrStr}
+                </div>
+            `;
+        }
     }
 }
 

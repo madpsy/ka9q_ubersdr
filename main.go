@@ -456,9 +456,18 @@ func main() {
 			log.Printf("Multi-decoder will be disabled. Server will continue without decoder functionality.")
 			multiDecoder = nil
 		} else {
-			// Register callback to broadcast digital spots via websocket
+			// Register callback to broadcast digital spots via websocket and MQTT
 			multiDecoder.OnDecode(func(decode DecodeInfo) {
+				// Broadcast to websocket clients
 				dxClusterWsHandler.BroadcastDigitalSpot(decode)
+
+				// Publish to MQTT if enabled
+				if prometheusMetrics != nil && prometheusMetrics.mqttPublisher != nil {
+					// Determine band name from frequency using the same logic as DX cluster
+					bandName := frequencyToBand(float64(decode.Frequency))
+					prometheusMetrics.mqttPublisher.PublishDigitalDecode(decode, bandName)
+				}
+
 				if DebugMode {
 					log.Printf("Digital Spot: %s %s %s SNR:%d @ %.6f MHz",
 						decode.Mode, decode.Callsign, decode.Locator, decode.SNR, float64(decode.Frequency)/1e6)

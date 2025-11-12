@@ -157,6 +157,33 @@
             color: #4a9eff;
         }
 
+        .new-entities-legend {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(26, 26, 26, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            z-index: 1000;
+            display: flex;
+            gap: 20px;
+        }
+
+        .new-entities-legend h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #4a9eff;
+        }
+
+        .new-entity-column {
+            flex: 1;
+            min-width: 200px;
+            white-space: nowrap;
+        }
+
         .distance-range {
             display: flex;
             justify-content: space-between;
@@ -437,6 +464,17 @@
             <span>Receiver</span>
         </div>
         <div id="band-legend-items" style="margin-top: 8px;"></div>
+    </div>
+
+    <div class="new-entities-legend">
+        <div class="new-entity-column">
+            <div style="font-size: 11px; color: #888; margin-bottom: 4px;">Latest Continent:</div>
+            <div id="new-continent-info" style="font-size: 12px; color: #4a9eff;">-</div>
+        </div>
+        <div class="new-entity-column">
+            <div style="font-size: 11px; color: #888; margin-bottom: 4px;">Latest Country:</div>
+            <div id="new-country-info" style="font-size: 12px; color: #4a9eff;">-</div>
+        </div>
     </div>
 
     <div class="distance-legend">

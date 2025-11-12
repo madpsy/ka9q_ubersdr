@@ -508,6 +508,60 @@ func (mp *MQTTPublisher) publishSpaceWeather(numericMetrics map[string]interface
 	}
 }
 
+// PublishDigitalDecode publishes a digital mode decode to MQTT
+// Topic structure: {prefix}/digital_modes/{mode}/{band}
+// Uses the same JSON format as websocket messages for consistency
+func (mp *MQTTPublisher) PublishDigitalDecode(decode DecodeInfo, bandName string) {
+	if mp == nil || !mp.client.IsConnected() {
+		return
+	}
+
+	// Create decode payload matching websocket format (see dxcluster_websocket.go BroadcastDigitalSpot)
+	decodePayload := map[string]interface{}{
+		"mode":         decode.Mode,
+		"band":         bandName,
+		"callsign":     decode.Callsign,
+		"locator":      decode.Locator,
+		"country":      decode.Country,
+		"CQZone":       decode.CQZone,
+		"ITUZone":      decode.ITUZone,
+		"Continent":    decode.Continent,
+		"TimeOffset":   decode.TimeOffset,
+		"snr":          decode.SNR,
+		"frequency":    decode.Frequency,
+		"timestamp":    decode.Timestamp,
+		"message":      decode.Message,
+		"dt":           decode.DT,
+		"drift":        decode.Drift,
+		"dbm":          decode.DBm,
+		"tx_frequency": decode.TxFrequency,
+	}
+
+	// Build topic: {prefix}/digital_modes/{mode}/{band}
+	// e.g., ubersdr/metrics/digital_modes/FT8/40m
+	topic := fmt.Sprintf("%s/digital_modes/%s/%s",
+		mp.config.TopicPrefix,
+		decode.Mode,
+		bandName)
+
+	data, err := json.Marshal(decodePayload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal digital decode payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	if token.Wait() && token.Error() != nil {
+		log.Printf("MQTT ERROR: Failed to publish digital decode to %s: %v", topic, token.Error())
+		return
+	}
+
+	if DebugMode {
+		log.Printf("MQTT DEBUG: Published decode to %s: %s %s SNR:%d",
+			topic, decode.Callsign, decode.Locator, decode.SNR)
+	}
+}
+
 // Disconnect gracefully disconnects from the MQTT broker
 func (mp *MQTTPublisher) Disconnect() {
 	if mp.client != nil && mp.client.IsConnected() {

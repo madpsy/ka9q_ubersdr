@@ -80,7 +80,7 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 			CycleTime:        120 * time.Second,
 			TransmissionTime: 114 * time.Second,
 			DecoderCommand:   "wsprd",
-			DecoderArgs:      []string{"-f", "{freq}", "-d", "{depth}", "-w", "{file}"},
+			DecoderArgs:      []string{"-f", "{freq}", "-C", "{depth}", "-w", "{file}"},
 			Preset:           "usb",
 		}
 	case ModeFT8:
@@ -113,10 +113,18 @@ type DecoderBandConfig struct {
 	Depth     int         `yaml:"depth"`     // Decode depth (1-3, default 3)
 }
 
-// GetDepth returns the decode depth, defaulting to 3 if not set or invalid
+// GetDepth returns the decode depth/cycles, with mode-specific defaults and validation
 func (dbc *DecoderBandConfig) GetDepth() int {
+	if dbc.Mode == ModeWSPR {
+		// WSPR uses cycles (-C flag), default 10000
+		if dbc.Depth < 1 {
+			return 10000 // Default cycles for WSPR
+		}
+		return dbc.Depth
+	}
+	// FT8/FT4 use depth (-d flag), default 3
 	if dbc.Depth < 1 || dbc.Depth > 3 {
-		return 3 // Default depth
+		return 3 // Default depth for FT8/FT4
 	}
 	return dbc.Depth
 }
@@ -204,8 +212,18 @@ func (dc *DecoderConfig) Validate() error {
 			return fmt.Errorf("band %s: frequency cannot be zero", band.Name)
 		}
 		// Validate depth if specified (0 means use default)
-		if band.Depth != 0 && (band.Depth < 1 || band.Depth > 3) {
-			return fmt.Errorf("band %s: depth must be between 1 and 3 (got %d)", band.Name, band.Depth)
+		if band.Depth != 0 {
+			if band.Mode == ModeWSPR {
+				// WSPR uses cycles, should be positive
+				if band.Depth < 1 {
+					return fmt.Errorf("band %s: WSPR cycles must be positive (got %d)", band.Name, band.Depth)
+				}
+			} else {
+				// FT8/FT4 use depth 1-3
+				if band.Depth < 1 || band.Depth > 3 {
+					return fmt.Errorf("band %s: FT8/FT4 depth must be between 1 and 3 (got %d)", band.Name, band.Depth)
+				}
+			}
 		}
 	}
 

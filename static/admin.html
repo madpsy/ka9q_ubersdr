@@ -2470,7 +2470,7 @@
             `;
             depthControlsGrid.appendChild(ft4Control);
             
-            // WSPR depth control
+            // WSPR cycles control
             const wsprControl = document.createElement('div');
             wsprControl.style.display = 'flex';
             wsprControl.style.alignItems = 'center';
@@ -2478,9 +2478,10 @@
             wsprControl.innerHTML = `
                 <label style="font-weight: 500; min-width: 60px;">WSPR:</label>
                 <select id="bulkDepthWSPR" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
-                    <option value="1">Depth 1 (Fast)</option>
-                    <option value="2">Depth 2 (Balanced)</option>
-                    <option value="3" selected>Depth 3 (Deep)</option>
+                    <option value="5000">5000 cycles (Fast)</option>
+                    <option value="10000" selected>10000 cycles (Default)</option>
+                    <option value="20000">20000 cycles (Deep)</option>
+                    <option value="50000">50000 cycles (Very Deep)</option>
                 </select>
                 <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('WSPR')">Apply</button>
             `;
@@ -2492,7 +2493,7 @@
             depthNote.style.display = 'block';
             depthNote.style.marginTop = '10px';
             depthNote.style.color = '#666';
-            depthNote.textContent = 'Sets decode depth for all bands of the selected mode. Click "Save Configuration" to apply changes.';
+            depthNote.innerHTML = 'Sets decode depth/cycles for all bands of the selected mode. <strong>Note:</strong> WSPR uses cycles (not depth 1-3). Click "Save Configuration" to apply changes.';
             depthControlsSection.appendChild(depthNote);
             
             bandsSection.appendChild(depthControlsSection);
@@ -2554,7 +2555,7 @@
                 </div>
                 <div class="config-field">
                     <label>Mode</label>
-                    <select id="newDecoderBandMode">
+                    <select id="newDecoderBandMode" onchange="updateDepthFieldVisibility(this.value)">
                         <option value="FT8">FT8</option>
                         <option value="FT4">FT4</option>
                         <option value="WSPR">WSPR</option>
@@ -2572,10 +2573,15 @@
                         <option value="false">No</option>
                     </select>
                 </div>
-                <div class="config-field">
+                <div class="config-field" id="depthFieldFT">
                     <label>Decode Depth</label>
                     <input type="number" id="newDecoderBandDepth" placeholder="1-3" min="1" max="3" value="3">
                     <small>Decoder search depth (1=fast/shallow, 3=slow/deep, default: 3)</small>
+                </div>
+                <div class="config-field" id="depthFieldWSPR" style="display: none;">
+                    <label>Decoder Cycles</label>
+                    <input type="number" id="newDecoderBandCycles" placeholder="e.g., 10000" min="1" value="10000">
+                    <small>Maximum decoder cycles per bit (default: 10000, lower=faster, higher=deeper)</small>
                 </div>
                 <button class="btn" onclick="saveDecoderBand()">Save Band</button>
                 <button class="btn btn-secondary" onclick="cancelDecoderBandForm()">Cancel</button>
@@ -2622,7 +2628,9 @@
             document.getElementById('newDecoderBandMode').value = 'FT8';
             document.getElementById('newDecoderBandFreq').value = '';
             document.getElementById('newDecoderBandDepth').value = '3';
+            document.getElementById('newDecoderBandCycles').value = '10000';
             document.getElementById('newDecoderBandEnabled').value = 'true';
+            updateDepthFieldVisibility('FT8');
             document.getElementById('addDecoderBandForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
@@ -2635,9 +2643,26 @@
             document.getElementById('newDecoderBandName').value = band.name;
             document.getElementById('newDecoderBandMode').value = band.mode;
             document.getElementById('newDecoderBandFreq').value = band.frequency;
-            document.getElementById('newDecoderBandDepth').value = band.depth || 3;
+            if (band.mode === 'WSPR') {
+                document.getElementById('newDecoderBandCycles').value = band.depth || 10000;
+            } else {
+                document.getElementById('newDecoderBandDepth').value = band.depth || 3;
+            }
             document.getElementById('newDecoderBandEnabled').value = band.enabled.toString();
+            updateDepthFieldVisibility(band.mode);
             document.getElementById('addDecoderBandForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function updateDepthFieldVisibility(mode) {
+            const ftField = document.getElementById('depthFieldFT');
+            const wsprField = document.getElementById('depthFieldWSPR');
+            if (mode === 'WSPR') {
+                ftField.style.display = 'none';
+                wsprField.style.display = 'block';
+            } else {
+                ftField.style.display = 'block';
+                wsprField.style.display = 'none';
+            }
         }
 
         function cancelDecoderBandForm() {
@@ -2649,7 +2674,12 @@
             const name = document.getElementById('newDecoderBandName').value.trim();
             const mode = document.getElementById('newDecoderBandMode').value;
             const frequency = parseInt(document.getElementById('newDecoderBandFreq').value);
-            const depth = parseInt(document.getElementById('newDecoderBandDepth').value);
+            let depth;
+            if (mode === 'WSPR') {
+                depth = parseInt(document.getElementById('newDecoderBandCycles').value);
+            } else {
+                depth = parseInt(document.getElementById('newDecoderBandDepth').value);
+            }
             const enabled = document.getElementById('newDecoderBandEnabled').value === 'true';
             const editIndex = parseInt(document.getElementById('editDecoderBandIndex').value);
 
@@ -2665,9 +2695,17 @@
                 return;
             }
 
-            // Validate depth
-            if (isNaN(depth) || depth < 1 || depth > 3) {
-                showAlert('Depth must be between 1 and 3', 'error');
+            // Validate depth/cycles
+            if (isNaN(depth) || depth < 1) {
+                if (mode === 'WSPR') {
+                    showAlert('Cycles must be a positive number', 'error');
+                } else {
+                    showAlert('Depth must be between 1 and 3', 'error');
+                }
+                return;
+            }
+            if (mode !== 'WSPR' && depth > 3) {
+                showAlert('Depth must be between 1 and 3 for FT8/FT4', 'error');
                 return;
             }
 

@@ -33,9 +33,14 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		return "", 0, fmt.Errorf("failed to create work directory: %w", err)
 	}
 
-	// Create log file path for stdout/stderr
+	// Extract timestamp from WAV filename to make log file unique per cycle
+	// WAV filename format: YYMMDD_HHMMSS.wav or YYMMDD_HHMM.wav
+	wavBasename := filepath.Base(wavFile)
+	wavTimestamp := strings.TrimSuffix(wavBasename, ".wav")
+	
+	// Create unique log file path for this decode cycle
 	logFile := filepath.Join(ds.config.DataDir,
-		fmt.Sprintf("%s_%d.log", band.Config.Mode.String(), band.Config.Frequency))
+		fmt.Sprintf("%s_%d_%s.log", band.Config.Mode.String(), band.Config.Frequency, wavTimestamp))
 
 	// Determine output file path based on mode
 	var outputFile string

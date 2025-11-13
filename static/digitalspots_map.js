@@ -11,7 +11,7 @@ class DigitalSpotsMap {
         this.receiverLocation = null;
         this.receiverInfo = null;
         this.greylineLayer = null;
-        this.maxSpots = 5000; // Maximum number of spots to display
+        this.maxSpots = 10000; // Maximum number of spots to display
         this.maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
         this.userSessionID = this.generateUserSessionID();
         this.modeFilter = 'all'; // Current mode filter
@@ -1095,18 +1095,9 @@ class DigitalSpotsMap {
                 const spotTime = new Date(spot.timestamp).getTime();
                 const age = now - spotTime;
 
-                // Remove spots older than maxAge (24 hours) OR older than current age filter if set
-                let shouldRemove = age > this.maxAge;
-
-                // Also remove if age filter is active and spot exceeds it
-                if (this.ageFilter !== 'none') {
-                    const maxAgeMs = parseFloat(this.ageFilter) * 60 * 1000;
-                    if (age > maxAgeMs) {
-                        shouldRemove = true;
-                    }
-                }
-
-                if (shouldRemove) {
+                // Remove spots older than maxAge (24 hours) only
+                // Age filter should only affect visibility, not storage
+                if (age > this.maxAge) {
                     keysToRemove.push(key);
                 }
             }

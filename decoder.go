@@ -428,6 +428,12 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 
 	// Spawn decoder in goroutine
 	go func() {
+		// Ensure cleanup always happens, even if errors occur
+		defer func() {
+			// Cleanup files regardless of success or failure
+			md.spawner.CleanupFiles(filename, "", band.Config.Mode)
+		}()
+
 		// SpawnDecoder now waits for the decoder process to complete before returning
 		logFile, execTime, err := md.spawner.SpawnDecoder(filename, band)
 		if err != nil {
@@ -441,7 +447,8 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 		if err != nil {
 			log.Printf("Error processing decoder output for %s: %v", band.Config.Name, err)
 			md.stats.IncrementErrors()
-			return
+			// Don't return yet - we still want to clean up the log file
+			// Continue to cleanup section below
 		}
 
 		// Update statistics
@@ -501,14 +508,19 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 			md.stats.IncrementSpots(band.Config.Name, int64(len(decodes)))
 		}
 
-		// Record execution time metric (pass to prometheus metrics via global or through md)
-		// We'll need to add this to the MultiDecoder struct
-		if md.prometheusMetrics != nil {
+		// Record execution time metric only if we successfully got one
+		if err == nil && md.prometheusMetrics != nil {
 			md.prometheusMetrics.digitalMetrics.RecordExecutionTime(band.Config.Mode.String(), band.Config.Name, execTime)
 		}
 
-		// Cleanup files
-		md.spawner.CleanupFiles(filename, logFile, band.Config.Mode)
+		// Cleanup log file if we have one (WAV cleanup happens in defer)
+		if logFile != "" && !md.config.KeepLogs && band.Config.Mode != ModeWSPR {
+			if removeErr := os.Remove(logFile); removeErr != nil && !os.IsNotExist(removeErr) {
+				log.Printf("Warning: failed to remove log file %s: %v", logFile, removeErr)
+			} else if DebugMode {
+				log.Printf("DEBUG: Removed log file: %s", logFile)
+			}
+		}
 	}()
 }
 

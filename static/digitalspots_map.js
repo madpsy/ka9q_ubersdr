@@ -100,8 +100,11 @@ class DigitalSpotsMap {
     }
 
     async init() {
-        // Check screen resolution
-        this.checkResolution();
+        // Setup overlay close button
+        this.setupOverlay();
+
+        // Load saved preferences
+        this.loadPreferences();
 
         // Initialize map
         this.initMap();
@@ -143,20 +146,95 @@ class DigitalSpotsMap {
         this.startMemoryMonitoring();
     }
 
-    checkResolution() {
-        const width = window.screen.width;
-        const height = window.screen.height;
+    loadPreferences() {
+        // Load checkbox states
+        const showStats = localStorage.getItem('showStats');
+        const showSummary = localStorage.getItem('showSummary');
+        const showWeather = localStorage.getItem('showWeather');
+        const showLegend = localStorage.getItem('showLegend');
 
-        // Check if resolution is below 1080p (1920x1080)
-        if (width < 1920 || height < 1080) {
-            const message = `⚠️ Low Resolution Detected\n\nYour screen resolution is ${width}x${height}.\n\nThis page is optimized for 1080p (1920x1080) or higher.\nSome elements may overlap or be difficult to view at lower resolutions.`;
+        // Load filter values
+        const modeFilter = localStorage.getItem('modeFilter');
+        const ageFilter = localStorage.getItem('ageFilter');
+        const bandFilter = localStorage.getItem('bandFilter');
+        const countryFilter = localStorage.getItem('countryFilter');
+        const continentFilter = localStorage.getItem('continentFilter');
+        const snrFilter = localStorage.getItem('snrFilter');
 
-            // Show alert after a short delay to let the page load
-            setTimeout(() => {
-                alert(message);
-            }, 1000);
+        // Apply checkbox states (default to true/checked if not set, except weather which defaults to false)
+        if (showStats !== null) {
+            const checkbox = document.getElementById('show-stats-checkbox');
+            if (checkbox) checkbox.checked = showStats === 'true';
+        }
+        if (showSummary !== null) {
+            const checkbox = document.getElementById('show-summary-checkbox');
+            if (checkbox) checkbox.checked = showSummary === 'true';
+        }
+        if (showWeather !== null) {
+            const checkbox = document.getElementById('show-weather-checkbox');
+            if (checkbox) checkbox.checked = showWeather === 'true';
+        }
+        if (showLegend !== null) {
+            const checkbox = document.getElementById('show-legend-checkbox');
+            if (checkbox) checkbox.checked = showLegend === 'true';
+        }
 
-            console.warn(`[Resolution Warning] Current: ${width}x${height}, Recommended: 1920x1080 or higher`);
+        // Apply filter values
+        if (modeFilter) {
+            this.modeFilter = modeFilter;
+            const select = document.getElementById('mode-filter');
+            if (select) select.value = modeFilter;
+        }
+        if (ageFilter) {
+            this.ageFilter = ageFilter;
+            const select = document.getElementById('age-filter');
+            if (select) select.value = ageFilter;
+        }
+        if (bandFilter) {
+            this.bandFilter = bandFilter;
+            const select = document.getElementById('band-filter');
+            if (select) select.value = bandFilter;
+        }
+        if (countryFilter) {
+            this.countryFilter = countryFilter;
+            const select = document.getElementById('country-filter');
+            if (select) select.value = countryFilter;
+        }
+        if (continentFilter) {
+            this.continentFilter = continentFilter;
+            const select = document.getElementById('continent-filter');
+            if (select) select.value = continentFilter;
+        }
+        if (snrFilter) {
+            this.snrFilter = snrFilter;
+            const select = document.getElementById('snr-filter');
+            if (select) select.value = snrFilter;
+        }
+    }
+
+    savePreference(key, value) {
+        localStorage.setItem(key, value);
+    }
+
+    setupOverlay() {
+        const overlay = document.getElementById('resolution-overlay');
+        const closeBtn = document.getElementById('close-overlay-btn');
+
+        if (closeBtn && overlay) {
+            closeBtn.addEventListener('click', () => {
+                overlay.style.display = 'none';
+            });
+
+            // Add hover effect to button
+            closeBtn.addEventListener('mouseenter', () => {
+                closeBtn.style.background = '#3a8edf';
+                closeBtn.style.transform = 'scale(1.05)';
+            });
+
+            closeBtn.addEventListener('mouseleave', () => {
+                closeBtn.style.background = '#4a9eff';
+                closeBtn.style.transform = 'scale(1)';
+            });
         }
     }
 
@@ -432,10 +510,23 @@ class DigitalSpotsMap {
     }
 
     initializePanelVisibility() {
-        // Hide weather panel by default (checkbox is unchecked)
-        const spaceWeatherLegend = document.querySelector('.space-weather-legend');
-        if (spaceWeatherLegend) {
-            spaceWeatherLegend.style.display = 'none';
+        // Apply visibility based on checkbox states (which have been loaded from localStorage)
+        const statsCheckbox = document.getElementById('show-stats-checkbox');
+        const summaryCheckbox = document.getElementById('show-summary-checkbox');
+        const weatherCheckbox = document.getElementById('show-weather-checkbox');
+        const legendCheckbox = document.getElementById('show-legend-checkbox');
+
+        if (statsCheckbox) {
+            this.toggleStatsPanel(statsCheckbox.checked);
+        }
+        if (summaryCheckbox) {
+            this.toggleSummaryPanel(summaryCheckbox.checked);
+        }
+        if (weatherCheckbox) {
+            this.toggleWeatherPanels(weatherCheckbox.checked);
+        }
+        if (legendCheckbox) {
+            this.toggleLegendPanels(legendCheckbox.checked);
         }
     }
 
@@ -448,24 +539,28 @@ class DigitalSpotsMap {
         if (statsCheckbox) {
             statsCheckbox.addEventListener('change', (e) => {
                 this.toggleStatsPanel(e.target.checked);
+                this.savePreference('showStats', e.target.checked);
             });
         }
 
         if (summaryCheckbox) {
             summaryCheckbox.addEventListener('change', (e) => {
                 this.toggleSummaryPanel(e.target.checked);
+                this.savePreference('showSummary', e.target.checked);
             });
         }
 
         if (weatherCheckbox) {
             weatherCheckbox.addEventListener('change', (e) => {
                 this.toggleWeatherPanels(e.target.checked);
+                this.savePreference('showWeather', e.target.checked);
             });
         }
 
         if (legendCheckbox) {
             legendCheckbox.addEventListener('change', (e) => {
                 this.toggleLegendPanels(e.target.checked);
+                this.savePreference('showLegend', e.target.checked);
             });
         }
     }
@@ -507,6 +602,7 @@ class DigitalSpotsMap {
         if (modeFilter) {
             modeFilter.addEventListener('change', (e) => {
                 this.modeFilter = e.target.value;
+                this.savePreference('modeFilter', e.target.value);
                 this.applyFilters();
             });
         }
@@ -515,6 +611,7 @@ class DigitalSpotsMap {
         if (ageFilter) {
             ageFilter.addEventListener('change', (e) => {
                 this.ageFilter = e.target.value;
+                this.savePreference('ageFilter', e.target.value);
                 this.applyFilters();
             });
         }
@@ -523,6 +620,7 @@ class DigitalSpotsMap {
         if (bandFilter) {
             bandFilter.addEventListener('change', (e) => {
                 this.bandFilter = e.target.value;
+                this.savePreference('bandFilter', e.target.value);
                 this.applyFilters();
             });
         }
@@ -531,6 +629,7 @@ class DigitalSpotsMap {
         if (countryFilter) {
             countryFilter.addEventListener('change', (e) => {
                 this.countryFilter = e.target.value;
+                this.savePreference('countryFilter', e.target.value);
                 this.applyFilters();
             });
         }
@@ -539,6 +638,7 @@ class DigitalSpotsMap {
         if (continentFilter) {
             continentFilter.addEventListener('change', (e) => {
                 this.continentFilter = e.target.value;
+                this.savePreference('continentFilter', e.target.value);
                 this.applyFilters();
             });
         }
@@ -547,6 +647,7 @@ class DigitalSpotsMap {
         if (snrFilter) {
             snrFilter.addEventListener('change', (e) => {
                 this.snrFilter = e.target.value;
+                this.savePreference('snrFilter', e.target.value);
                 this.applyFilters();
             });
         }

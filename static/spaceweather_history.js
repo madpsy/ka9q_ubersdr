@@ -63,6 +63,9 @@ class SpaceWeatherHistory {
                     
                     // Initialize date picker after dates are loaded
                     this.initDatePicker();
+                    
+                    // Automatically load data on page load
+                    this.loadData();
                 }
             }
         } catch (error) {

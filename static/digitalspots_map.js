@@ -64,7 +64,7 @@ class DigitalSpotsMap {
             '17m': '#B07AA1',   // Purple
             '15m': '#FF9DA7',   // Pink
             '12m': '#9C755F',   // Brown
-            '10m': '#BAB0AC',   // Gray
+            '10m': '#00D9FF',   // Bright Cyan/Turquoise
             'unknown': '#FF0000' // Red for unknown bands
         };
 

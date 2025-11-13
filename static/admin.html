@@ -2425,6 +2425,78 @@
                 bandsSection.appendChild(bandsTable);
             }
 
+            // Add bulk depth controls section
+            const depthControlsSection = document.createElement('div');
+            depthControlsSection.style.marginBottom = '20px';
+            depthControlsSection.style.padding = '15px';
+            depthControlsSection.style.background = '#e9ecef';
+            depthControlsSection.style.borderRadius = '5px';
+            depthControlsSection.innerHTML = '<h4 style="margin-bottom: 15px; color: #333;">Set Decode Depth by Mode</h4>';
+            
+            const depthControlsGrid = document.createElement('div');
+            depthControlsGrid.style.display = 'grid';
+            depthControlsGrid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(250px, 1fr))';
+            depthControlsGrid.style.gap = '15px';
+            
+            // FT8 depth control
+            const ft8Control = document.createElement('div');
+            ft8Control.style.display = 'flex';
+            ft8Control.style.alignItems = 'center';
+            ft8Control.style.gap = '10px';
+            ft8Control.innerHTML = `
+                <label style="font-weight: 500; min-width: 60px;">FT8:</label>
+                <select id="bulkDepthFT8" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
+                    <option value="1">Depth 1 (Fast)</option>
+                    <option value="2">Depth 2 (Balanced)</option>
+                    <option value="3" selected>Depth 3 (Deep)</option>
+                </select>
+                <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('FT8')">Apply</button>
+            `;
+            depthControlsGrid.appendChild(ft8Control);
+            
+            // FT4 depth control
+            const ft4Control = document.createElement('div');
+            ft4Control.style.display = 'flex';
+            ft4Control.style.alignItems = 'center';
+            ft4Control.style.gap = '10px';
+            ft4Control.innerHTML = `
+                <label style="font-weight: 500; min-width: 60px;">FT4:</label>
+                <select id="bulkDepthFT4" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
+                    <option value="1">Depth 1 (Fast)</option>
+                    <option value="2">Depth 2 (Balanced)</option>
+                    <option value="3" selected>Depth 3 (Deep)</option>
+                </select>
+                <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('FT4')">Apply</button>
+            `;
+            depthControlsGrid.appendChild(ft4Control);
+            
+            // WSPR depth control
+            const wsprControl = document.createElement('div');
+            wsprControl.style.display = 'flex';
+            wsprControl.style.alignItems = 'center';
+            wsprControl.style.gap = '10px';
+            wsprControl.innerHTML = `
+                <label style="font-weight: 500; min-width: 60px;">WSPR:</label>
+                <select id="bulkDepthWSPR" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
+                    <option value="1">Depth 1 (Fast)</option>
+                    <option value="2">Depth 2 (Balanced)</option>
+                    <option value="3" selected>Depth 3 (Deep)</option>
+                </select>
+                <button class="btn" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" onclick="setBulkDepth('WSPR')">Apply</button>
+            `;
+            depthControlsGrid.appendChild(wsprControl);
+            
+            depthControlsSection.appendChild(depthControlsGrid);
+            
+            const depthNote = document.createElement('small');
+            depthNote.style.display = 'block';
+            depthNote.style.marginTop = '10px';
+            depthNote.style.color = '#666';
+            depthNote.textContent = 'Sets decode depth for all bands of the selected mode. Click "Save Configuration" to apply changes.';
+            depthControlsSection.appendChild(depthNote);
+            
+            bandsSection.appendChild(depthControlsSection);
+
             // Add band buttons container
             const bandButtonsContainer = document.createElement('div');
             bandButtonsContainer.style.display = 'flex';
@@ -2704,6 +2776,24 @@
 
             renderDecoderConfig();
             showAlert(`All ${mode} bands enabled. Click "Save Configuration" to apply changes.`, 'info');
+        }
+
+        function setBulkDepth(mode) {
+            const depth = parseInt(document.getElementById('bulkDepth' + mode).value);
+            const bands = currentDecoderConfig.bands || [];
+            const matchingBands = bands.filter(band => band.mode === mode);
+
+            if (matchingBands.length === 0) {
+                showAlert(`No ${mode} bands found`, 'info');
+                return;
+            }
+
+            matchingBands.forEach(band => {
+                band.depth = depth;
+            });
+
+            renderDecoderConfig();
+            showAlert(`Set depth to ${depth} for ${matchingBands.length} ${mode} band${matchingBands.length > 1 ? 's' : ''}. Click "Save Configuration" to apply changes.`, 'info');
         }
 
         async function saveDecoderConfig() {

@@ -514,7 +514,7 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 		}
 
 		// Cleanup log file if we have one (WAV cleanup happens in defer)
-		if logFile != "" && !md.config.KeepLogs && band.Config.Mode != ModeWSPR {
+		if logFile != "" && !md.config.KeepLogs {
 			if removeErr := os.Remove(logFile); removeErr != nil && !os.IsNotExist(removeErr) {
 				log.Printf("Warning: failed to remove log file %s: %v", logFile, removeErr)
 			} else if DebugMode {

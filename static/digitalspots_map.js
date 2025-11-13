@@ -1589,6 +1589,9 @@ class DigitalSpotsMap {
         rangesEl.innerHTML = html;
         // Format closest spot with details on separate lines
         let closestHtml = `${Math.round(closestSpot.distance_km)} km - ${closestSpot.callsign}`;
+        if (closestSpot.locator) {
+            closestHtml += ` (${closestSpot.locator})`;
+        }
         const closestDetails = [];
         if (closestSpot.country && closestSpot.country !== 'Unknown') {
             closestDetails.push(closestSpot.country);
@@ -1609,6 +1612,9 @@ class DigitalSpotsMap {
 
         // Format farthest spot with details on separate lines
         let farthestHtml = `${Math.round(farthestSpot.distance_km)} km - ${farthestSpot.callsign}`;
+        if (farthestSpot.locator) {
+            farthestHtml += ` (${farthestSpot.locator})`;
+        }
         const farthestDetails = [];
         if (farthestSpot.country && farthestSpot.country !== 'Unknown') {
             farthestDetails.push(farthestSpot.country);

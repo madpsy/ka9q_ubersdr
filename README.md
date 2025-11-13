@@ -127,7 +127,7 @@ You can expose your SDR web interface to the internet securely using Cloudflare 
 1. A Cloudflare account with a domain
 2. Install cloudflared:
    ```bash
-   wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
+   wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
    sudo dpkg -i cloudflared-linux-arm64.deb
    ```
 

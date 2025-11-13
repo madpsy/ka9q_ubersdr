@@ -5,7 +5,7 @@
   "description": "Display real-time FT8, FT4, and WSPR spots from the multi-decoder",
   "author": "UberSDR",
   "type": "display",
-  "icon": "📻",
+  "icon": "📶",
   "category": "decoder",
   "requiresAudio": false,
   "defaultEnabled": false,

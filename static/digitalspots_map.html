@@ -19,6 +19,26 @@
             <span id="last-spot-time" class="spot-count">-</span>
         </div>
         <div class="header-right">
+            <div class="filter-group" style="flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" id="show-stats-checkbox" checked style="margin: 0; cursor: pointer;">
+                    <span>Stats</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" id="show-summary-checkbox" checked style="margin: 0; cursor: pointer;">
+                    <span>Summary</span>
+                </label>
+            </div>
+            <div class="filter-group" style="flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" id="show-weather-checkbox" style="margin: 0; cursor: pointer;">
+                    <span>Weather</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" id="show-legend-checkbox" checked style="margin: 0; cursor: pointer;">
+                    <span>Legend</span>
+                </label>
+            </div>
             <div class="filter-group">
                 <label class="filter-label" for="mode-filter">Mode:</label>
                 <select id="mode-filter" class="filter-select">

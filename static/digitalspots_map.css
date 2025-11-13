@@ -118,8 +118,8 @@
 
         .legend {
             position: absolute;
-            bottom: 20px;
-            right: 20px;
+            bottom: 10px;
+            right: 10px;
             background: rgba(26, 26, 26, 0.95);
             backdrop-filter: blur(10px);
             border: 1px solid #333;
@@ -138,7 +138,7 @@
         .space-weather-legend {
             position: absolute;
             bottom: 420px;
-            left: 20px;
+            left: 10px;
             background: rgba(26, 26, 26, 0.95);
             backdrop-filter: blur(10px);
             border: 1px solid #333;
@@ -150,8 +150,8 @@
 
         .distance-legend {
             position: absolute;
-            bottom: 20px;
-            left: 20px;
+            bottom: 10px;
+            left: 10px;
             background: rgba(26, 26, 26, 0.95);
             backdrop-filter: blur(10px);
             border: 1px solid #333;
@@ -186,7 +186,7 @@
 
         .new-entities-legend {
             position: absolute;
-            bottom: 20px;
+            bottom: 10px;
             left: 50%;
             transform: translateX(-50%);
             background: rgba(26, 26, 26, 0.95);
@@ -310,7 +310,7 @@
         .live-messages-panel {
             position: absolute;
             top: 70px;
-            right: 20px;
+            right: 10px;
             width: 350px;
             max-height: 500px;
             background: rgba(26, 26, 26, 0.95);

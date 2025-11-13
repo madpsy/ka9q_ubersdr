@@ -100,6 +100,9 @@ class DigitalSpotsMap {
     }
 
     async init() {
+        // Check screen resolution
+        this.checkResolution();
+
         // Initialize map
         this.initMap();
 
@@ -138,6 +141,23 @@ class DigitalSpotsMap {
 
         // Start memory monitoring
         this.startMemoryMonitoring();
+    }
+
+    checkResolution() {
+        const width = window.screen.width;
+        const height = window.screen.height;
+
+        // Check if resolution is below 1080p (1920x1080)
+        if (width < 1920 || height < 1080) {
+            const message = `⚠️ Low Resolution Detected\n\nYour screen resolution is ${width}x${height}.\n\nThis page is optimized for 1080p (1920x1080) or higher.\nSome elements may overlap or be difficult to view at lower resolutions.`;
+
+            // Show alert after a short delay to let the page load
+            setTimeout(() => {
+                alert(message);
+            }, 1000);
+
+            console.warn(`[Resolution Warning] Current: ${width}x${height}, Recommended: 1920x1080 or higher`);
+        }
     }
 
     startMemoryMonitoring() {
@@ -264,6 +284,15 @@ class DigitalSpotsMap {
                             data.propagation_quality === 'Fair' ? '#ff9800' : '#ef4444';
 
         let html = '';
+
+        // Add forecast at the top if available and not quiet conditions
+        if (data.forecast && data.forecast.geomagnetic_storm &&
+            data.forecast.summary !== "Quiet conditions expected for the next 24 hours.") {
+            html += `<div class="sw-metric">
+                        <span class="sw-metric-label">Forecast</span>
+                        <span class="sw-metric-value">${data.forecast.geomagnetic_storm}</span>
+                     </div>`;
+        }
 
         // Solar Flux
         html += `<div class="sw-metric">
@@ -394,6 +423,83 @@ class DigitalSpotsMap {
 
         // Setup mode filter
         this.setupModeFilter();
+
+        // Setup visibility toggles
+        this.setupVisibilityToggles();
+
+        // Initialize panel visibility based on checkbox states
+        this.initializePanelVisibility();
+    }
+
+    initializePanelVisibility() {
+        // Hide weather panel by default (checkbox is unchecked)
+        const spaceWeatherLegend = document.querySelector('.space-weather-legend');
+        if (spaceWeatherLegend) {
+            spaceWeatherLegend.style.display = 'none';
+        }
+    }
+
+    setupVisibilityToggles() {
+        const statsCheckbox = document.getElementById('show-stats-checkbox');
+        const summaryCheckbox = document.getElementById('show-summary-checkbox');
+        const weatherCheckbox = document.getElementById('show-weather-checkbox');
+        const legendCheckbox = document.getElementById('show-legend-checkbox');
+
+        if (statsCheckbox) {
+            statsCheckbox.addEventListener('change', (e) => {
+                this.toggleStatsPanel(e.target.checked);
+            });
+        }
+
+        if (summaryCheckbox) {
+            summaryCheckbox.addEventListener('change', (e) => {
+                this.toggleSummaryPanel(e.target.checked);
+            });
+        }
+
+        if (weatherCheckbox) {
+            weatherCheckbox.addEventListener('change', (e) => {
+                this.toggleWeatherPanels(e.target.checked);
+            });
+        }
+
+        if (legendCheckbox) {
+            legendCheckbox.addEventListener('change', (e) => {
+                this.toggleLegendPanels(e.target.checked);
+            });
+        }
+    }
+
+    toggleStatsPanel(show) {
+        const distanceLegend = document.querySelector('.distance-legend');
+
+        if (distanceLegend) {
+            distanceLegend.style.display = show ? 'block' : 'none';
+        }
+    }
+
+    toggleSummaryPanel(show) {
+        const newEntitiesLegend = document.querySelector('.new-entities-legend');
+
+        if (newEntitiesLegend) {
+            newEntitiesLegend.style.display = show ? 'flex' : 'none';
+        }
+    }
+
+    toggleWeatherPanels(show) {
+        const spaceWeatherLegend = document.querySelector('.space-weather-legend');
+
+        if (spaceWeatherLegend) {
+            spaceWeatherLegend.style.display = show ? 'block' : 'none';
+        }
+    }
+
+    toggleLegendPanels(show) {
+        const legend = document.querySelector('.legend');
+
+        if (legend) {
+            legend.style.display = show ? 'block' : 'none';
+        }
     }
 
     setupModeFilter() {
@@ -1178,8 +1284,8 @@ class DigitalSpotsMap {
             return;
         }
 
-        // Build HTML
-        let html = '';
+        // Build HTML with 4-column grid layout (2 rows)
+        let html = '<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">';
         const directionOrder = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
         directionOrder.forEach(dir => {
@@ -1188,16 +1294,20 @@ class DigitalSpotsMap {
             const color = count > 0 ? '#ccc' : '#555';
 
             html += `
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 3px; color: ${color};">
-                    <span style="min-width: 25px;">${dir}</span>
-                    <div style="flex: 1; height: 12px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; margin: 0 8px; overflow: hidden;">
+                <div style="font-size: 10px; color: ${color};">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                        <span style="font-weight: 500;">${dir}</span>
+                        <span style="color: ${count > 0 ? '#4a9eff' : '#555'}; font-size: 9px;">${count}</span>
+                    </div>
+                    <div style="height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; overflow: hidden;">
                         <div style="height: 100%; background: linear-gradient(90deg, #4a9eff, #2d7dd2); width: ${percentage}%;"></div>
                     </div>
-                    <span style="min-width: 50px; text-align: right; color: ${count > 0 ? '#4a9eff' : '#555'};">${count} (${percentage.toFixed(0)}%)</span>
+                    <div style="font-size: 8px; color: #888; text-align: center; margin-top: 1px;">${percentage.toFixed(0)}%</div>
                 </div>
             `;
         });
 
+        html += '</div>';
         containerEl.innerHTML = html;
     }
 
@@ -1317,12 +1427,12 @@ class DigitalSpotsMap {
             const percentage = (range.count / spotsWithDistance.length) * 100;
             const label = `${Math.round(range.min)}-${Math.round(range.max)} km`;
             html += `
-                <div class="distance-range">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 3px; color: #ccc;">
                     <span style="min-width: 80px;">${label}</span>
-                    <div class="distance-bar-container">
-                        <div class="distance-bar" style="width: ${percentage}%"></div>
+                    <div style="flex: 1; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; margin: 0 8px; overflow: hidden;">
+                        <div style="height: 100%; background: linear-gradient(90deg, #4a9eff, #2d7dd2); width: ${percentage}%; transition: width 0.3s ease;"></div>
                     </div>
-                    <span style="min-width: 60px; text-align: right;">${range.count} (${percentage.toFixed(0)}%)</span>
+                    <span style="min-width: 60px; text-align: right; color: #4a9eff;">${range.count} (${percentage.toFixed(0)}%)</span>
                 </div>
             `;
         });
@@ -1379,8 +1489,8 @@ class DigitalSpotsMap {
         if (distanceLegend && spaceWeatherLegend) {
             // Get the actual height of the distance legend
             const distanceHeight = distanceLegend.offsetHeight;
-            // Add some spacing (30px) between the panels
-            const newBottom = distanceHeight + 30;
+            // Add some spacing (15px) between the panels
+            const newBottom = distanceHeight + 15;
             spaceWeatherLegend.style.bottom = `${newBottom}px`;
         }
     }

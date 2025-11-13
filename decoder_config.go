@@ -122,9 +122,9 @@ func (dbc *DecoderBandConfig) GetDepth() int {
 		}
 		return dbc.Depth
 	}
-	// FT8/FT4 use depth (-d flag), default 3
+	// FT8/FT4 use depth (-d flag), default 2
 	if dbc.Depth < 1 || dbc.Depth > 3 {
-		return 3 // Default depth for FT8/FT4
+		return 2 // Default depth for FT8/FT4
 	}
 	return dbc.Depth
 }

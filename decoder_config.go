@@ -80,7 +80,7 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 			CycleTime:        120 * time.Second,
 			TransmissionTime: 114 * time.Second,
 			DecoderCommand:   "wsprd",
-			DecoderArgs:      []string{"-f", "{freq}", "-w", "{file}"},
+			DecoderArgs:      []string{"-f", "{freq}", "-d", "{depth}", "-w", "{file}"},
 			Preset:           "usb",
 		}
 	case ModeFT8:
@@ -88,7 +88,7 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 			CycleTime:        15 * time.Second,
 			TransmissionTime: 12640 * time.Millisecond, // 12.64s
 			DecoderCommand:   "jt9",
-			DecoderArgs:      []string{"-8", "-d", "3", "{file}"},
+			DecoderArgs:      []string{"-8", "-d", "{depth}", "{file}"},
 			Preset:           "usb",
 		}
 	case ModeFT4:
@@ -96,7 +96,7 @@ func GetModeInfo(mode DecoderMode) ModeInfo {
 			CycleTime:        7500 * time.Millisecond, // 7.5s
 			TransmissionTime: 4480 * time.Millisecond, // 4.48s
 			DecoderCommand:   "jt9",
-			DecoderArgs:      []string{"-5", "-d", "3", "{file}"},
+			DecoderArgs:      []string{"-5", "-d", "{depth}", "{file}"},
 			Preset:           "usb",
 		}
 	default:
@@ -110,6 +110,15 @@ type DecoderBandConfig struct {
 	Mode      DecoderMode `yaml:"mode"`      // Decoder mode
 	Frequency uint64      `yaml:"frequency"` // Center frequency in Hz
 	Enabled   bool        `yaml:"enabled"`   // Whether this band is enabled
+	Depth     int         `yaml:"depth"`     // Decode depth (1-3, default 3)
+}
+
+// GetDepth returns the decode depth, defaulting to 3 if not set or invalid
+func (dbc *DecoderBandConfig) GetDepth() int {
+	if dbc.Depth < 1 || dbc.Depth > 3 {
+		return 3 // Default depth
+	}
+	return dbc.Depth
 }
 
 // DecoderConfig represents the complete decoder configuration
@@ -193,6 +202,10 @@ func (dc *DecoderConfig) Validate() error {
 		}
 		if band.Frequency == 0 {
 			return fmt.Errorf("band %s: frequency cannot be zero", band.Name)
+		}
+		// Validate depth if specified (0 means use default)
+		if band.Depth != 0 && (band.Depth < 1 || band.Depth > 3) {
+			return fmt.Errorf("band %s: depth must be between 1 and 3 (got %d)", band.Name, band.Depth)
 		}
 	}
 

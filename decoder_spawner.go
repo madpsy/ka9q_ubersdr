@@ -52,8 +52,11 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		outputFile = logFile
 	}
 
+	// Get decode depth from band config (defaults to 3)
+	depth := band.Config.GetDepth()
+	
 	// Build decoder command and get log file handle
-	cmd, logFileHandle := ds.buildDecoderCommand(modeInfo, wavFile, band.Config.Frequency, workDir, logFile)
+	cmd, logFileHandle := ds.buildDecoderCommand(modeInfo, wavFile, band.Config.Frequency, workDir, logFile, depth)
 	
 	// Ensure log file is closed after decoder completes
 	defer func() {
@@ -96,12 +99,13 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 }
 
 // buildDecoderCommand builds the command to execute the decoder
-func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string, frequency uint64, workDir, logFile string) (*exec.Cmd, *os.File) {
+func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string, frequency uint64, workDir, logFile string, depth int) (*exec.Cmd, *os.File) {
 	// Build arguments by replacing placeholders
 	args := make([]string, len(modeInfo.DecoderArgs))
 	for i, arg := range modeInfo.DecoderArgs {
 		arg = strings.ReplaceAll(arg, "{file}", wavFile)
 		arg = strings.ReplaceAll(arg, "{freq}", fmt.Sprintf("%.6f", float64(frequency)/1e6))
+		arg = strings.ReplaceAll(arg, "{depth}", fmt.Sprintf("%d", depth))
 		args[i] = arg
 	}
 

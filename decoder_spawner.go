@@ -83,6 +83,10 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 
 	log.Printf("Decoder for %s completed successfully in %.3f seconds", band.Config.Name, executionTime.Seconds())
 
+	// Give the decoder a moment to fully release file handles
+	// This is especially important for jt9 which may buffer writes
+	time.Sleep(200 * time.Millisecond)
+
 	return outputFile, executionTime, nil
 }
 

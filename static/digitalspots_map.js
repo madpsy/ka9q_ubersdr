@@ -161,6 +161,9 @@ class DigitalSpotsMap {
         const continentFilter = localStorage.getItem('continentFilter');
         const snrFilter = localStorage.getItem('snrFilter');
 
+        // Load live messages collapsed state
+        const liveMessagesCollapsed = localStorage.getItem('liveMessagesCollapsed');
+
         // Apply checkbox states (default to true/checked if not set, except weather which defaults to false)
         if (showStats !== null) {
             const checkbox = document.getElementById('show-stats-checkbox');
@@ -209,6 +212,21 @@ class DigitalSpotsMap {
             this.snrFilter = snrFilter;
             const select = document.getElementById('snr-filter');
             if (select) select.value = snrFilter;
+        }
+
+        // Apply live messages collapsed state
+        if (liveMessagesCollapsed !== null) {
+            const content = document.getElementById('live-messages-content');
+            const toggle = document.getElementById('live-messages-toggle');
+            const filterDiv = document.querySelector('.live-messages-filter');
+            const paginationDiv = document.getElementById('live-messages-pagination');
+
+            if (liveMessagesCollapsed === 'true') {
+                if (content) content.classList.add('collapsed');
+                if (toggle) toggle.classList.add('collapsed');
+                if (filterDiv) filterDiv.style.display = 'none';
+                if (paginationDiv) paginationDiv.style.display = 'none';
+            }
         }
     }
 
@@ -1706,6 +1724,9 @@ class DigitalSpotsMap {
                 const paginationDiv = document.getElementById('live-messages-pagination');
                 if (filterDiv) filterDiv.style.display = content.classList.contains('collapsed') ? 'none' : 'block';
                 if (paginationDiv) paginationDiv.style.display = content.classList.contains('collapsed') ? 'none' : 'flex';
+
+                // Save collapsed state to localStorage
+                this.savePreference('liveMessagesCollapsed', content.classList.contains('collapsed'));
             });
         }
 

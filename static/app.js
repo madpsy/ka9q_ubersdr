@@ -178,7 +178,7 @@ let nextPlayTime = 0;
 let audioStartTime = 0;
 
 // Audio buffer configuration (user-configurable)
-let maxBufferMs = 150; // Default 150ms, can be changed by user
+let maxBufferMs = 200; // Default 200ms, can be changed by user
 const MIN_BUFFER_MS = 40; // Minimum 40ms buffer for Chrome stability
 const BUFFER_PRESETS = [50, 100, 150, 200, 300, 500]; // Available preset values
 // Expose nextPlayTime globally for extensions

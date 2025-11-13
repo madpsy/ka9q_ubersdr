@@ -586,20 +586,20 @@ document.addEventListener('DOMContentLoaded', () => {
     vuMeterBarCompact = document.getElementById('vu-meter-bar-compact');
     vuMeterPeakCompact = document.getElementById('vu-meter-peak-compact');
 
-    // Set audio visualization as enabled by default (expanded)
-    audioVisualizationEnabled = true;
+    // Set audio visualization as disabled by default (collapsed)
+    audioVisualizationEnabled = false;
 
-    // Hide compact VU meter since full visualization is shown
+    // Show compact VU meter since full visualization is hidden
     const compactVU = document.getElementById('vu-meter-compact');
-    if (compactVU) compactVU.style.display = 'none';
+    if (compactVU) compactVU.style.display = 'flex';
 
-    // Show the full visualization content
+    // Hide the full visualization content
     const content = document.getElementById('audio-visualization-content');
-    if (content) content.style.display = 'block';
+    if (content) content.style.display = 'none';
 
-    // Add expanded class to toggle
+    // Remove expanded class from toggle
     const toggle = document.getElementById('audio-viz-toggle');
-    if (toggle) toggle.classList.add('expanded');
+    if (toggle) toggle.classList.remove('expanded');
 
     // Create tooltip for audio spectrum/waterfall immediately (before canvas initialization)
     audioSpectrumTooltip = document.createElement('div');

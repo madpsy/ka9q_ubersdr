@@ -71,7 +71,7 @@
                         <button onclick="spectrumZoomIn()" title="Zoom In (W key)">+</button>
                         <button onclick="spectrumMaxZoom()" title="Maximum Zoom (E key)">Max</button>
                         <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
-                            <input type="checkbox" id="spectrum-zoom-scroll-enable">
+                            <input type="checkbox" id="spectrum-zoom-scroll-enable" checked>
                             <span>Scroll</span>
                         </label>
                         <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
@@ -136,7 +136,7 @@
                         <span class="frequency-unit">Hz</span>
                     </div>
                     <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
-                        <input type="checkbox" id="spectrum-scroll-enable" checked>
+                        <input type="checkbox" id="spectrum-scroll-enable">
                         <span>Scroll</span>
                     </label>
                 </div>
@@ -287,7 +287,7 @@
                 <h3>Audio Visualisation</h3>
                 <span id="audio-viz-toggle" class="toggle-icon">▼</span>
             </div>
-            <div id="audio-visualization-content" class="audio-visualization-content" style="display: block;">
+            <div id="audio-visualization-content" class="audio-visualization-content" style="display: none;">
                 <div class="visualizer-panel">
                     <div class="top-visualizers">
                 <div class="vu-meter-container">

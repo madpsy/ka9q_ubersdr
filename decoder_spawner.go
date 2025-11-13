@@ -47,8 +47,15 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		outputFile = logFile
 	}
 
-	// Build decoder command
-	cmd := ds.buildDecoderCommand(modeInfo, wavFile, band.Config.Frequency, workDir, logFile)
+	// Build decoder command and get log file handle
+	cmd, logFileHandle := ds.buildDecoderCommand(modeInfo, wavFile, band.Config.Frequency, workDir, logFile)
+	
+	// Ensure log file is closed after decoder completes
+	defer func() {
+		if logFileHandle != nil {
+			logFileHandle.Close()
+		}
+	}()
 
 	if DebugMode {
 		log.Printf("DEBUG: Spawning decoder: %s %v", cmd.Path, cmd.Args)
@@ -80,7 +87,7 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 }
 
 // buildDecoderCommand builds the command to execute the decoder
-func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string, frequency uint64, workDir, logFile string) *exec.Cmd {
+func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string, frequency uint64, workDir, logFile string) (*exec.Cmd, *os.File) {
 	// Build arguments by replacing placeholders
 	args := make([]string, len(modeInfo.DecoderArgs))
 	for i, arg := range modeInfo.DecoderArgs {
@@ -108,12 +115,13 @@ func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string,
 	logF, err := os.Create(logFile)
 	if err != nil {
 		log.Printf("Warning: failed to create log file %s: %v", logFile, err)
-	} else {
-		cmd.Stdout = logF
-		cmd.Stderr = logF
+		return cmd, nil
 	}
+	
+	cmd.Stdout = logF
+	cmd.Stderr = logF
 
-	return cmd
+	return cmd, logF
 }
 
 // ProcessDecoderOutput reads the decoder output file and extracts spots

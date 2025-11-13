@@ -164,6 +164,11 @@ class DigitalSpotsMap {
         // Load live messages collapsed state
         const liveMessagesCollapsed = localStorage.getItem('liveMessagesCollapsed');
 
+        // Load map view state
+        const mapLat = localStorage.getItem('mapLat');
+        const mapLon = localStorage.getItem('mapLon');
+        const mapZoom = localStorage.getItem('mapZoom');
+
         // Apply checkbox states (default to true/checked if not set, except weather which defaults to false)
         if (showStats !== null) {
             const checkbox = document.getElementById('show-stats-checkbox');
@@ -227,6 +232,16 @@ class DigitalSpotsMap {
                 if (filterDiv) filterDiv.style.display = 'none';
                 if (paginationDiv) paginationDiv.style.display = 'none';
             }
+        }
+
+        // Store map view preferences for later use in initMap
+        this.savedMapView = null;
+        if (mapLat !== null && mapLon !== null && mapZoom !== null) {
+            this.savedMapView = {
+                lat: parseFloat(mapLat),
+                lon: parseFloat(mapLon),
+                zoom: parseInt(mapZoom)
+            };
         }
     }
 
@@ -506,9 +521,19 @@ class DigitalSpotsMap {
     }
 
     initMap() {
-        // Initialize Leaflet map with world view
+        // Initialize Leaflet map with saved view or default world view
         // Zoom level 3 shows the world once without duplication
-        this.map = L.map('map').setView([20, 0], 3);
+        let initialLat = 20;
+        let initialLon = 0;
+        let initialZoom = 3;
+
+        if (this.savedMapView) {
+            initialLat = this.savedMapView.lat;
+            initialLon = this.savedMapView.lon;
+            initialZoom = this.savedMapView.zoom;
+        }
+
+        this.map = L.map('map').setView([initialLat, initialLon], initialZoom);
 
         // Add OpenStreetMap tiles
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -525,6 +550,20 @@ class DigitalSpotsMap {
 
         // Initialize panel visibility based on checkbox states
         this.initializePanelVisibility();
+
+        // Setup map view state saving
+        this.setupMapViewSaving();
+    }
+
+    setupMapViewSaving() {
+        // Save map view state when user moves or zooms the map
+        this.map.on('moveend', () => {
+            const center = this.map.getCenter();
+            const zoom = this.map.getZoom();
+            this.savePreference('mapLat', center.lat);
+            this.savePreference('mapLon', center.lng);
+            this.savePreference('mapZoom', zoom);
+        });
     }
 
     initializePanelVisibility() {

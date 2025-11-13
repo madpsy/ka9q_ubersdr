@@ -385,8 +385,8 @@ class SpectrumDisplay {
         this.dragStartFreq = 0;
         this.lastPanTime = 0;
         this.panThrottleMs = 150; // Throttle pan requests to avoid backend rounding issues
-        this.scrollEnabled = true; // Mouse scroll wheel enabled by default
-        this.zoomScrollEnabled = false; // Zoom scroll wheel disabled by default
+        this.scrollEnabled = false; // Mouse scroll wheel disabled by default
+        this.zoomScrollEnabled = true; // Zoom scroll wheel enabled by default
         this.smoothingEnabled = false; // Temporal smoothing disabled by default
         this.snapEnabled = true; // 1 KHz snap enabled by default (matches checkbox)
         this.setupMouseHandlers();

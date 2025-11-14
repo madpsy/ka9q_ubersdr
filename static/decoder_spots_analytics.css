@@ -73,6 +73,12 @@ h1 {
     transition: all 0.3s ease;
 }
 
+/* Ensure dropdown options always have black text on white background */
+.control-group select option {
+    background: white;
+    color: black;
+}
+
 .control-group input:focus,
 .control-group select:focus {
     outline: none;

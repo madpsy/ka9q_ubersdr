@@ -5,6 +5,7 @@
     let currentData = null;
     let allCountries = [];
     let allContinents = [];
+    let showGraphs = false;
 
     // Continent name mapping
     const continentNames = {
@@ -30,9 +31,16 @@
         const clearFiltersBtn = document.getElementById('clear-filters-btn');
         const countrySearch = document.getElementById('country-search');
         const continentSelect = document.getElementById('continent-select');
+        const showGraphsToggle = document.getElementById('show-graphs-toggle');
 
         loadBtn.addEventListener('click', loadAnalytics);
         clearFiltersBtn.addEventListener('click', clearFilters);
+
+        // Handle graph toggle
+        showGraphsToggle.addEventListener('change', function() {
+            showGraphs = this.checked;
+            toggleGraphsVisibility();
+        });
 
         // Clear country when continent is selected
         continentSelect.addEventListener('change', function() {
@@ -321,7 +329,7 @@
                             }).join('')}
                         </div>
                     </div>
-                    ${createHourlyChart(band.hourly_distribution)}
+                    ${showGraphs ? createHourlyChart(band.hourly_distribution) : ''}
                 </div>
             `;
         });
@@ -384,6 +392,22 @@
             }
         } catch (error) {
             console.error('Error fetching receiver info:', error);
+        }
+    }
+
+    function toggleGraphsVisibility() {
+        const charts = document.querySelectorAll('.hourly-chart');
+        charts.forEach(chart => {
+            if (showGraphs) {
+                chart.classList.remove('hidden');
+            } else {
+                chart.classList.add('hidden');
+            }
+        });
+
+        // If data is already loaded, refresh the display
+        if (currentData) {
+            displayAnalytics(currentData);
         }
     }
 })();

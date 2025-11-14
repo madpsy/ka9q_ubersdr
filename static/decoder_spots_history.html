@@ -149,8 +149,8 @@
                 </div>
             </div>
 
-            <div class="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
+            <div class="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; flex-wrap: wrap; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                     <label for="records-per-page">Records per page:</label>
                     <select id="records-per-page" style="padding: 5px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
                         <option value="25">25</option>
@@ -161,6 +161,12 @@
                         <option value="1000">1000</option>
                         <option value="all">All</option>
                     </select>
+                    <span style="color: rgba(255,255,255,0.3); margin: 0 5px;">|</span>
+                    <button id="filter-multiple-bands" style="padding: 5px 10px; background: rgba(76, 175, 80, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.9em;">Multiple Bands</button>
+                    <button id="filter-multiple-modes" style="padding: 5px 10px; background: rgba(156, 39, 176, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.9em;">Multiple Modes</button>
+                    <button id="filter-least-country" style="padding: 5px 10px; background: rgba(255, 152, 0, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.9em;">Least Common Country</button>
+                    <button id="filter-least-continent" style="padding: 5px 10px; background: rgba(233, 30, 99, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.9em;">Least Common Continent</button>
+                    <button id="filter-show-all" style="padding: 5px 10px; background: rgba(33, 150, 243, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.9em; font-weight: bold;">Show All</button>
                     <span id="pagination-info" style="color: rgba(255,255,255,0.7);"></span>
                 </div>
                 <div id="pagination-buttons" style="display: flex; gap: 5px;">

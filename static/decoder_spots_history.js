@@ -6,6 +6,8 @@
     let availableDates = [];
     let availableNames = [];
     let currentData = null;
+    let filteredData = null; // Stores filtered spots
+    let activeFilter = null; // Tracks which filter is active
     let currentPage = 1;
     let recordsPerPage = 100;
     let sortColumn = 'timestamp';
@@ -61,7 +63,21 @@
         const locatorInput = document.getElementById('locator-input');
         const recordsPerPageSelect = document.getElementById('records-per-page');
 
+        // Client-side filter buttons
+        const filterMultipleBands = document.getElementById('filter-multiple-bands');
+        const filterMultipleModes = document.getElementById('filter-multiple-modes');
+        const filterLeastCountry = document.getElementById('filter-least-country');
+        const filterLeastContinent = document.getElementById('filter-least-continent');
+        const filterShowAll = document.getElementById('filter-show-all');
+
         loadBtn.addEventListener('click', loadSpots);
+
+        // Add filter button handlers
+        filterMultipleBands.addEventListener('click', () => applyClientFilter('multiple-bands'));
+        filterMultipleModes.addEventListener('click', () => applyClientFilter('multiple-modes'));
+        filterLeastCountry.addEventListener('click', () => applyClientFilter('least-country'));
+        filterLeastContinent.addEventListener('click', () => applyClientFilter('least-continent'));
+        filterShowAll.addEventListener('click', () => applyClientFilter(null));
         clearFiltersBtn.addEventListener('click', clearFilters);
         downloadBtn.addEventListener('click', downloadCSV);
 
@@ -417,6 +433,11 @@
                 return;
             }
 
+            // Reset filters when loading new data
+            filteredData = null;
+            activeFilter = null;
+            updateFilterButtonStates();
+            
             displaySpots(data);
             showStatus(`Loaded ${data.count} spots`, 'success');
         } catch (error) {
@@ -434,14 +455,17 @@
         const statsGrid = document.getElementById('stats-grid');
         const tbody = document.getElementById('spots-tbody');
 
+        // Use filtered data if a filter is active, otherwise use all data
+        const spotsToDisplay = filteredData ? filteredData : data.spots;
+
         // Sort the data
-        const sortedSpots = sortSpots([...data.spots], sortColumn, sortDirection);
+        const sortedSpots = sortSpots([...spotsToDisplay], sortColumn, sortDirection);
 
         // Update sort indicators in table headers
         updateSortIndicators();
 
         // Calculate pagination
-        const totalRecords = data.spots.length;
+        const totalRecords = spotsToDisplay.length;
         const totalPages = recordsPerPage === Infinity ? 1 : Math.ceil(totalRecords / recordsPerPage);
         
         // Ensure current page is valid
@@ -475,7 +499,7 @@
         titleParts.push(selectedDate);
         title.textContent = `${titleParts.join(' - ')}`;
 
-        // Calculate statistics
+        // Calculate statistics (always use full dataset for stats)
         const stats = calculateStats(data.spots);
         
         // Display statistics
@@ -676,13 +700,199 @@
                 }
             });
             
+    function applyClientFilter(filterType) {
+        if (!currentData || !currentData.spots) {
+            showStatus('No data loaded to filter', 'error');
+            return;
+        }
+
+        activeFilter = filterType;
+        currentPage = 1; // Reset to first page
+
+        if (!filterType) {
+            // Show all - clear filter
+            filteredData = null;
+            updateFilterButtonStates();
+            displaySpots(currentData);
+            showStatus('Showing all spots', 'success');
+            return;
+        }
+
+        const spots = currentData.spots;
+
+        switch(filterType) {
+            case 'multiple-bands':
+                filteredData = filterCallsignsMultipleBands(spots);
+                showStatus(`Filtered to ${filteredData.length} spots from callsigns on multiple bands`, 'success');
+                break;
+
+            case 'multiple-modes':
+                filteredData = filterCallsignsMultipleModes(spots);
+                showStatus(`Filtered to ${filteredData.length} spots from callsigns on multiple modes`, 'success');
+                break;
+
+            case 'least-country':
+                filteredData = filterLeastCommonCountry(spots);
+                if (filteredData.length > 0) {
+                    showStatus(`Filtered to ${filteredData.length} spots from least common country`, 'success');
+                } else {
+                    showStatus('No country data available to filter', 'error');
+                    filteredData = null;
+                    activeFilter = null;
+                }
+                break;
+
+            case 'least-continent':
+                filteredData = filterLeastCommonContinent(spots);
+                if (filteredData.length > 0) {
+                    showStatus(`Filtered to ${filteredData.length} spots from least common continent`, 'success');
+                } else {
+                    showStatus('No continent data available to filter', 'error');
+                    filteredData = null;
+                    activeFilter = null;
+                }
+                break;
+        }
+
+        updateFilterButtonStates();
+        displaySpots(currentData);
+    }
+
+    function filterCallsignsMultipleBands(spots) {
+        // Build map of callsigns to bands
+        const callsignBands = new Map();
+        spots.forEach(spot => {
+            if (!callsignBands.has(spot.callsign)) {
+                callsignBands.set(spot.callsign, new Set());
+            }
+            callsignBands.get(spot.callsign).add(spot.band);
+        });
+
+        // Filter to only callsigns with multiple bands
+        const multipleBandCallsigns = new Set();
+        for (const [callsign, bands] of callsignBands.entries()) {
+            if (bands.size > 1) {
+                multipleBandCallsigns.add(callsign);
+            }
+        }
+
+        return spots.filter(spot => multipleBandCallsigns.has(spot.callsign));
+    }
+
+    function filterCallsignsMultipleModes(spots) {
+        // Build map of callsigns to modes
+        const callsignModes = new Map();
+        spots.forEach(spot => {
+            if (!callsignModes.has(spot.callsign)) {
+                callsignModes.set(spot.callsign, new Set());
+            }
+            callsignModes.get(spot.callsign).add(spot.mode);
+        });
+
+        // Filter to only callsigns with multiple modes
+        const multipleModeCallsigns = new Set();
+        for (const [callsign, modes] of callsignModes.entries()) {
+            if (modes.size > 1) {
+                multipleModeCallsigns.add(callsign);
+            }
+        }
+
+        return spots.filter(spot => multipleModeCallsigns.has(spot.callsign));
+    }
+
+    function filterLeastCommonCountry(spots) {
+        // Count countries
+        const countryCounts = new Map();
+        spots.forEach(spot => {
+            if (spot.country) {
+                countryCounts.set(spot.country, (countryCounts.get(spot.country) || 0) + 1);
+            }
+        });
+
+        if (countryCounts.size === 0) {
+            return [];
+        }
+
+        // Find least common country
+        let minCount = Infinity;
+        let leastCommonCountry = null;
+        for (const [country, count] of countryCounts.entries()) {
+            if (count < minCount) {
+                minCount = count;
+                leastCommonCountry = country;
+            }
+        }
+
+        return spots.filter(spot => spot.country === leastCommonCountry);
+    }
+
+    function filterLeastCommonContinent(spots) {
+        // Count continents
+        const continentCounts = new Map();
+        spots.forEach(spot => {
+            if (spot.continent) {
+                continentCounts.set(spot.continent, (continentCounts.get(spot.continent) || 0) + 1);
+            }
+        });
+
+        if (continentCounts.size === 0) {
+            return [];
+        }
+
+        // Find least common continent
+        let minCount = Infinity;
+        let leastCommonContinent = null;
+        for (const [continent, count] of continentCounts.entries()) {
+            if (count < minCount) {
+                minCount = count;
+                leastCommonContinent = continent;
+            }
+        }
+
+        return spots.filter(spot => spot.continent === leastCommonContinent);
+    }
+
+    function updateFilterButtonStates() {
+        const buttons = {
+            'filter-multiple-bands': 'multiple-bands',
+            'filter-multiple-modes': 'multiple-modes',
+            'filter-least-country': 'least-country',
+            'filter-least-continent': 'least-continent'
+        };
+
+        for (const [buttonId, filterType] of Object.entries(buttons)) {
+            const button = document.getElementById(buttonId);
+            if (button) {
+                if (activeFilter === filterType) {
+                    button.style.fontWeight = 'bold';
+                    button.style.boxShadow = '0 0 10px rgba(255,255,255,0.5)';
+                } else {
+                    button.style.fontWeight = 'normal';
+                    button.style.boxShadow = 'none';
+                }
+            }
+        }
+
+        // Update Show All button
+        const showAllBtn = document.getElementById('filter-show-all');
+        if (showAllBtn) {
+            if (!activeFilter) {
+                showAllBtn.style.fontWeight = 'bold';
+                showAllBtn.style.boxShadow = '0 0 10px rgba(255,255,255,0.5)';
+            } else {
+                showAllBtn.style.fontWeight = 'bold';
+                showAllBtn.style.boxShadow = 'none';
+            }
+        }
+    }
+
             tbody.appendChild(row);
         });
 
         container.style.display = 'block';
 
-        // Update map with spots
-        updateMap(data.spots);
+        // Update map with filtered or all spots
+        updateMap(spotsToDisplay);
     }
 
     function updateMap(spots) {

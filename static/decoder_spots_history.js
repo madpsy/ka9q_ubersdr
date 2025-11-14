@@ -203,6 +203,23 @@
         clearFiltersBtn.addEventListener('click', clearFilters);
         downloadBtn.addEventListener('click', downloadCSV);
 
+        // Add client-side filter button event listeners
+        document.getElementById('filter-multiple-bands').addEventListener('click', () => {
+            applyClientFilter('multiple-bands');
+        });
+        document.getElementById('filter-multiple-modes').addEventListener('click', () => {
+            applyClientFilter('multiple-modes');
+        });
+        document.getElementById('filter-least-country').addEventListener('click', () => {
+            applyClientFilter('least-country');
+        });
+        document.getElementById('filter-least-continent').addEventListener('click', () => {
+            applyClientFilter('least-continent');
+        });
+        document.getElementById('filter-show-all').addEventListener('click', () => {
+            applyClientFilter(null);
+        });
+
         // Add Enter key handler to all form inputs to trigger load
         const formInputs = [
             modeSelect, bandSelect, nameSelect, callsignInput, locatorInput,
@@ -1053,142 +1070,6 @@
         nextBtn.addEventListener('click', () => {
             if (currentPage < totalPages) {
                 currentPage++;
-    function applyClientFilter(filterType) {
-        if (!currentData || !currentData.spots) {
-            showStatus('No data loaded to filter', 'error');
-            return;
-        }
-
-        activeFilter = filterType;
-        currentPage = 1;
-
-        if (!filterType) {
-            filteredData = null;
-            updateFilterButtonStates();
-            displaySpots(currentData);
-            showStatus('Showing all spots', 'success');
-            return;
-        }
-
-        const spots = currentData.spots;
-
-        switch(filterType) {
-            case 'multiple-bands':
-                filteredData = filterCallsignsMultipleBands(spots);
-                showStatus(`Filtered to ${filteredData.length} spots from callsigns on multiple bands`, 'success');
-                break;
-            case 'multiple-modes':
-                filteredData = filterCallsignsMultipleModes(spots);
-                showStatus(`Filtered to ${filteredData.length} spots from callsigns on multiple modes`, 'success');
-                break;
-            case 'least-country':
-                filteredData = filterLeastCommonCountry(spots);
-                if (filteredData.length > 0) {
-                    showStatus(`Filtered to ${filteredData.length} spots from least common country`, 'success');
-                } else {
-                    showStatus('No country data available to filter', 'error');
-                    filteredData = null;
-                    activeFilter = null;
-                }
-                break;
-            case 'least-continent':
-                filteredData = filterLeastCommonContinent(spots);
-                if (filteredData.length > 0) {
-                    showStatus(`Filtered to ${filteredData.length} spots from least common continent`, 'success');
-                } else {
-                    showStatus('No continent data available to filter', 'error');
-                    filteredData = null;
-                    activeFilter = null;
-                }
-                break;
-        }
-
-        updateFilterButtonStates();
-        displaySpots(currentData);
-    }
-
-    function filterCallsignsMultipleBands(spots) {
-        const callsignBands = new Map();
-        spots.forEach(spot => {
-            if (!callsignBands.has(spot.callsign)) {
-                callsignBands.set(spot.callsign, new Set());
-            }
-            callsignBands.get(spot.callsign).add(spot.band);
-        });
-
-        const multipleBandCallsigns = new Set();
-        for (const [callsign, bands] of callsignBands.entries()) {
-            if (bands.size > 1) {
-                multipleBandCallsigns.add(callsign);
-            }
-        }
-
-        return spots.filter(spot => multipleBandCallsigns.has(spot.callsign));
-    }
-
-    function filterCallsignsMultipleModes(spots) {
-        const callsignModes = new Map();
-        spots.forEach(spot => {
-            if (!callsignModes.has(spot.callsign)) {
-                callsignModes.set(spot.callsign, new Set());
-            }
-            callsignModes.get(spot.callsign).add(spot.mode);
-        });
-
-        const multipleModeCallsigns = new Set();
-        for (const [callsign, modes] of callsignModes.entries()) {
-            if (modes.size > 1) {
-                multipleModeCallsigns.add(callsign);
-            }
-        }
-
-        return spots.filter(spot => multipleModeCallsigns.has(spot.callsign));
-    }
-
-    function filterLeastCommonCountry(spots) {
-        const countryCounts = new Map();
-        spots.forEach(spot => {
-            if (spot.country) {
-                countryCounts.set(spot.country, (countryCounts.get(spot.country) || 0) + 1);
-            }
-        });
-
-        if (countryCounts.size === 0) return [];
-
-        let minCount = Infinity;
-        let leastCommonCountry = null;
-        for (const [country, count] of countryCounts.entries()) {
-            if (count < minCount) {
-                minCount = count;
-                leastCommonCountry = country;
-            }
-        }
-
-        return spots.filter(spot => spot.country === leastCommonCountry);
-    }
-
-    function filterLeastCommonContinent(spots) {
-        const continentCounts = new Map();
-        spots.forEach(spot => {
-            if (spot.continent) {
-                continentCounts.set(spot.continent, (continentCounts.get(spot.continent) || 0) + 1);
-            }
-        });
-
-        if (continentCounts.size === 0) return [];
-
-        let minCount = Infinity;
-        let leastCommonContinent = null;
-        for (const [continent, count] of continentCounts.entries()) {
-            if (count < minCount) {
-                minCount = count;
-                leastCommonContinent = continent;
-            }
-        }
-
-        return spots.filter(spot => spot.continent === leastCommonContinent);
-    }
-
                 displaySpots(currentData);
             }
         });

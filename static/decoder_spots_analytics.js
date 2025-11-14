@@ -304,15 +304,20 @@
         entity.bands.forEach(band => {
             const isBestBand = band.spots === maxBandSpots;
             const avgSNR = band.avg_snr >= 0 ? `+${band.avg_snr.toFixed(1)}` : band.avg_snr.toFixed(1);
-            
-            // Find the hour with most spots
+
+            // Get sorted hours by spot count
             const hourCounts = Object.entries(band.hourly_distribution).map(([hour, count]) => ({
                 hour: parseInt(hour),
                 count: count
-            }));
-            const maxCount = Math.max(...hourCounts.map(h => h.count));
-            const bestHour = hourCounts.find(h => h.count === maxCount)?.hour;
-            
+            })).sort((a, b) => b.count - a.count);
+
+            // Get top 3 hours for "Best Hours"
+            const top3Hours = hourCounts.slice(0, 3).map(h => h.hour).sort((a, b) => a - b);
+
+            // Collate contiguous hours for "Active Hours"
+            const activeHours = band.best_hours_utc.sort((a, b) => a - b);
+            const hourRanges = collateContiguousHours(activeHours);
+
             bandsHTML += `
                 <div class="band-info${isBestBand ? ' band-info-best' : ''}">
                     <div class="band-header">
@@ -323,9 +328,16 @@
                     <div class="best-hours">
                         <strong>Best Hours (UTC):</strong>
                         <div class="hour-badges">
-                            ${band.best_hours_utc.map(hour => {
-                                const isBest = hour === bestHour;
-                                return `<span class="hour-badge${isBest ? ' hour-badge-best' : ''}">${String(hour).padStart(2, '0')}:00</span>`;
+                            ${top3Hours.map(hour => {
+                                return `<span class="hour-badge hour-badge-best">${String(hour).padStart(2, '0')}:00</span>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="active-hours">
+                        <strong>Active Hours (UTC):</strong>
+                        <div class="hour-badges">
+                            ${hourRanges.map(range => {
+                                return `<span class="hour-badge">${range}</span>`;
                             }).join('')}
                         </div>
                     </div>
@@ -366,6 +378,39 @@
         
         chartHTML += '</div>';
         return chartHTML;
+    }
+
+    function collateContiguousHours(hours) {
+        if (hours.length === 0) return [];
+
+        const ranges = [];
+        let start = hours[0];
+        let end = hours[0];
+
+        for (let i = 1; i < hours.length; i++) {
+            if (hours[i] === end + 1) {
+                // Contiguous hour
+                end = hours[i];
+            } else {
+                // Gap found, save current range
+                if (start === end) {
+                    ranges.push(`${String(start).padStart(2, '0')}:00`);
+                } else {
+                    ranges.push(`${String(start).padStart(2, '0')}:00-${String(end).padStart(2, '0')}:00`);
+                }
+                start = hours[i];
+                end = hours[i];
+            }
+        }
+
+        // Add the last range
+        if (start === end) {
+            ranges.push(`${String(start).padStart(2, '0')}:00`);
+        } else {
+            ranges.push(`${String(start).padStart(2, '0')}:00-${String(end).padStart(2, '0')}:00`);
+        }
+
+        return ranges;
     }
 
     function showStatus(message, type) {

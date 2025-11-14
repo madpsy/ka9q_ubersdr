@@ -292,13 +292,19 @@ h1 {
     margin-bottom: 8px;
 }
 
-.best-hours {
+.best-hours,
+.active-hours {
     font-size: 0.9em;
     opacity: 0.9;
+    margin-bottom: 8px;
 }
 
 .best-hours strong {
     color: #FFC107;
+}
+
+.active-hours strong {
+    color: #4CAF50;
 }
 
 .hour-badges {

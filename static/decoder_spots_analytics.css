@@ -45,6 +45,10 @@ h1 {
     align-items: flex-end;
 }
 
+.control-row:not(:first-child) {
+    margin-top: 15px;
+}
+
 .control-group {
     display: flex;
     flex-direction: column;

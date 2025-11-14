@@ -4,12 +4,12 @@
 
     let selectedDate = null;
     let availableDates = [];
+    let availableNames = [];
     let currentData = null;
 
-    // Common band names
+    // Common HF band names (excluding VHF/UHF)
     const commonBands = [
-        '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m',
-        '6m', '4m', '2m', '70cm'
+        '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'
     ];
 
     // Initialize
@@ -37,8 +37,30 @@
             bandSelect.appendChild(option);
         });
 
-        // Name select will be populated dynamically based on available data
-        // For now, leave it empty - could be enhanced to fetch available names from API
+        // Fetch and populate available names
+        loadAvailableNames();
+    }
+
+    async function loadAvailableNames() {
+        try {
+            const response = await fetch('/api/decoder/spots/names');
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            availableNames = data.names || [];
+            
+            // Populate name select
+            const nameSelect = document.getElementById('name-select');
+            availableNames.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                nameSelect.appendChild(option);
+            });
+        } catch (error) {
+            console.error('Error loading available names:', error);
+        }
     }
 
     function initializeDatePicker() {

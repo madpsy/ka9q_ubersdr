@@ -610,6 +610,9 @@ func main() {
 	http.HandleFunc("/api/decoder/spots/dates", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleDecoderSpotsDates(w, r, multiDecoder, ipBanManager)
 	}))
+	http.HandleFunc("/api/decoder/spots/names", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleDecoderSpotsNames(w, r, multiDecoder, ipBanManager)
+	}))
 
 	// Admin authentication endpoints (no auth required)
 	http.HandleFunc("/admin/login", adminHandler.HandleLogin)
@@ -1921,6 +1924,41 @@ func handleDecoderSpotsDates(w http.ResponseWriter, r *http.Request, md *MultiDe
 		"dates": dates,
 	}); err != nil {
 		log.Printf("Error encoding available dates: %v", err)
+	}
+}
+
+// handleDecoderSpotsNames serves the list of available decoder config names
+func handleDecoderSpotsNames(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if md == nil || md.spotsLogger == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decoder spots logging is not enabled",
+		})
+		return
+	}
+
+	// Get available names
+	names, err := md.spotsLogger.GetAvailableNames()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get available names: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"names": names,
+	}); err != nil {
+		log.Printf("Error encoding available names: %v", err)
 	}
 }
 

@@ -452,3 +452,91 @@ func (sl *SpotsLogger) GetAvailableDates() ([]string, error) {
 
 	return dates, nil
 }
+
+// GetAvailableNames returns a list of unique decoder config names that have spot data
+func (sl *SpotsLogger) GetAvailableNames() ([]string, error) {
+	if !sl.enabled {
+		return nil, fmt.Errorf("spots logging is not enabled")
+	}
+
+	nameMap := make(map[string]bool)
+
+	// Check all modes
+	modes := []string{"FT8", "FT4", "WSPR"}
+	for _, mode := range modes {
+		modePath := filepath.Join(sl.dataDir, mode)
+
+		// Check if mode directory exists
+		if _, err := os.Stat(modePath); os.IsNotExist(err) {
+			continue
+		}
+
+		// Walk through year directories
+		yearDirs, err := os.ReadDir(modePath)
+		if err != nil {
+			continue
+		}
+
+		for _, yearDir := range yearDirs {
+			if !yearDir.IsDir() {
+				continue
+			}
+			year := yearDir.Name()
+
+			// Walk through month directories
+			monthPath := filepath.Join(modePath, year)
+			monthDirs, err := os.ReadDir(monthPath)
+			if err != nil {
+				continue
+			}
+
+			for _, monthDir := range monthDirs {
+				if !monthDir.IsDir() {
+					continue
+				}
+				month := monthDir.Name()
+
+				// Walk through day directories
+				dayPath := filepath.Join(monthPath, month)
+				dayDirs, err := os.ReadDir(dayPath)
+				if err != nil {
+					continue
+				}
+
+				for _, dayDir := range dayDirs {
+					if !dayDir.IsDir() {
+						continue
+					}
+					day := dayDir.Name()
+
+					// Read CSV files in this day directory
+					csvPath := filepath.Join(dayPath, day)
+					csvFiles, err := os.ReadDir(csvPath)
+					if err != nil {
+						continue
+					}
+
+					for _, csvFile := range csvFiles {
+						if csvFile.IsDir() || filepath.Ext(csvFile.Name()) != ".csv" {
+							continue
+						}
+						// Extract name from filename (remove .csv extension)
+						name := csvFile.Name()[:len(csvFile.Name())-4]
+						nameMap[name] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Convert map to sorted slice
+	names := make([]string, 0, len(nameMap))
+	for name := range nameMap {
+		names = append(names, name)
+	}
+
+	// Sort names alphabetically
+	sort.Strings(names)
+
+	return names, nil
+}

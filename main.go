@@ -871,7 +871,8 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 
 	for _, session := range sessions.sessions {
 		// Skip spectrum sessions, only include audio channels
-		if !session.IsSpectrum {
+		// Also skip sessions without a ClientIP address
+		if !session.IsSpectrum && session.ClientIP != "" {
 			session.mu.RLock()
 			sessionInfo := map[string]interface{}{
 				"frequency":      session.Frequency,

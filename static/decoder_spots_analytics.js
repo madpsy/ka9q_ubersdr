@@ -136,6 +136,7 @@
         const countryInput = document.getElementById('country-search');
         let country = countryInput.value.trim();
         const continent = document.getElementById('continent-select').value;
+        const mode = document.getElementById('mode-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
         const hours = document.getElementById('hours-select').value;
 
@@ -160,6 +161,7 @@
             let url = `/api/decoder/spots/analytics?hours=${hours}`;
             if (country) url += `&country=${encodeURIComponent(country)}`;
             if (continent) url += `&continent=${continent}`;
+            if (mode) url += `&mode=${mode}`;
             if (minSNR && parseInt(minSNR) !== -999) {
                 url += `&min_snr=${minSNR}`;
             }

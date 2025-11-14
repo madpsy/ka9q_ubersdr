@@ -2134,6 +2134,7 @@ func handleDecoderSpotsAnalytics(w http.ResponseWriter, r *http.Request, md *Mul
 	// Get query parameters
 	country := r.URL.Query().Get("country")
 	continent := r.URL.Query().Get("continent")
+	mode := r.URL.Query().Get("mode")
 	minSNRStr := r.URL.Query().Get("min_snr")
 	hoursStr := r.URL.Query().Get("hours")
 
@@ -2145,17 +2146,17 @@ func handleDecoderSpotsAnalytics(w http.ResponseWriter, r *http.Request, md *Mul
 		}
 	}
 
-	// Parse hours (default 24)
+	// Parse hours (default 24, max 48)
 	hours := 24
 	if hoursStr != "" {
-		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 168 { // Max 1 week
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 48 { // Max 48 hours
 			hours = h
 		}
 	}
 
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
-	rateLimitKey := fmt.Sprintf("analytics-%s-%s-%d-%d", country, continent, minSNR, hours)
+	rateLimitKey := fmt.Sprintf("analytics-%s-%s-%s-%d-%d", country, continent, mode, minSNR, hours)
 	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -2166,7 +2167,7 @@ func handleDecoderSpotsAnalytics(w http.ResponseWriter, r *http.Request, md *Mul
 	}
 
 	// Get analytics
-	analytics, err := md.spotsLogger.GetSpotsAnalytics(country, continent, minSNR, hours)
+	analytics, err := md.spotsLogger.GetSpotsAnalytics(country, continent, mode, minSNR, hours)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{

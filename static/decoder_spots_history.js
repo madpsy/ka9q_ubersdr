@@ -438,6 +438,11 @@
             activeFilter = null;
             updateFilterButtonStates();
             
+            // Reset filters when loading new data
+            filteredData = null;
+            activeFilter = null;
+            updateFilterButtonStates();
+
             displaySpots(data);
             showStatus(`Loaded ${data.count} spots`, 'success');
         } catch (error) {

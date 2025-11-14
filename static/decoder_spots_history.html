@@ -14,10 +14,6 @@
     <div class="container">
         <h1>📡 Decoder Spots History</h1>
         <div class="subtitle" id="receiver-name">Historical FT8/FT4/WSPR Spots</div>
-        
-        <div class="info-box">
-            ℹ️ View historical decoder spots from FT8, FT4, and WSPR modes. Filter by date, mode, and band. Shows unique callsign/locator combinations with valid grid locators only.
-        </div>
 
         <div class="controls">
             <div class="control-row">
@@ -172,6 +168,14 @@
                 <div id="pagination-buttons" style="display: flex; gap: 5px;">
                     <!-- Pagination buttons will be inserted here -->
                 </div>
+            </div>
+
+            <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; flex-wrap: wrap; gap: 10px;">
+                <button id="filter-multiple-bands" style="padding: 8px 15px; background: rgba(76, 175, 80, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em;">Multiple Bands</button>
+                <button id="filter-multiple-modes" style="padding: 8px 15px; background: rgba(156, 39, 176, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em;">Multiple Modes</button>
+                <button id="filter-least-country" style="padding: 8px 15px; background: rgba(255, 152, 0, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em;">Least Common Country</button>
+                <button id="filter-least-continent" style="padding: 8px 15px; background: rgba(233, 30, 99, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em;">Least Common Continent</button>
+                <button id="filter-show-all" style="padding: 8px 15px; background: rgba(33, 150, 243, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em; font-weight: bold;">Show All</button>
             </div>
 
             <div class="spots-table-container">

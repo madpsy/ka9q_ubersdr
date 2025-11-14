@@ -626,10 +626,19 @@
                 if (e.target.closest('.callsign-link')) {
                     return;
                 }
-                
+
                 // Open the spot on the map
                 if (spotsMap && spot.locator) {
-                    spotsMap.openSpotPopup(spot.callsign, spot.band, spot.mode);
+                    // Scroll to map section
+                    const mapSection = document.getElementById('map-section');
+                    if (mapSection) {
+                        mapSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+
+                    // Open popup after scroll animation
+                    setTimeout(() => {
+                        spotsMap.openSpotPopup(spot.callsign, spot.band, spot.mode);
+                    }, 500);
                 }
             });
             

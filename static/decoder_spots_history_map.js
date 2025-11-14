@@ -280,7 +280,7 @@ class DecoderSpotsHistoryMap {
 
         let content = `
             <div style="font-family: monospace; font-size: 12px;">
-                <b>${spot.callsign}</b><br>
+                <b><a href="https://www.qrz.com/db/${spot.callsign}" target="_blank" style="color: #fff; text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${spot.callsign}</a></b><br>
         `;
 
         if (spot.country) {

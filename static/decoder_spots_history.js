@@ -307,7 +307,7 @@
             if (minDistance && parseFloat(minDistance) > 0) {
                 url += `&min_distance=${minDistance}`;
             }
-            if (minSNR && parseInt(minSNR) > -999) {
+            if (minSNR && parseInt(minSNR) !== -999) {
                 url += `&min_snr=${minSNR}`;
             }
 
@@ -461,6 +461,15 @@
                 <div class="stat-card">
                     <div class="stat-value">${stats.mostCommonBand.value}</div>
                     <div class="stat-label">Most Common Band (${stats.mostCommonBand.count})</div>
+                </div>
+            `;
+        }
+
+        if (stats.leastCommonBand && stats.uniqueBands > 1) {
+            statsHTML += `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.leastCommonBand.value}</div>
+                    <div class="stat-label">Least Common Band (${stats.leastCommonBand.count})</div>
                 </div>
             `;
         }

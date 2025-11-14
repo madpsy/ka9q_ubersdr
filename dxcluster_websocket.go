@@ -386,7 +386,7 @@ func (h *DXClusterWebSocketHandler) frequencyToBand(freqHz float64) string {
 	switch {
 	case freq >= 0.1357 && freq < 0.1378:
 		return "2200m"
-	case freq >= 0.472 && freq < 0.479:
+	case freq >= 0.470 && freq < 0.480:
 		return "630m"
 	case freq >= 1.8 && freq < 2.0:
 		return "160m"

@@ -207,6 +207,7 @@
         const band = document.getElementById('band-select').value;
         const name = document.getElementById('name-select').value;
         const dedup = document.getElementById('dedup-checkbox').checked;
+        const locatorsOnly = document.getElementById('locators-only-checkbox').checked;
 
         showStatus('Loading spots...', '');
         document.getElementById('load-btn').disabled = true;
@@ -217,6 +218,7 @@
             if (band) url += `&band=${band}`;
             if (name) url += `&name=${name}`;
             if (dedup) url += `&dedup=true`;
+            if (locatorsOnly) url += `&locators_only=true`;
 
             const response = await fetch(url);
             if (!response.ok) {
@@ -309,6 +311,7 @@
                 <td class="${snrClass}">${snrText} dB</td>
                 <td>${freqMHz} MHz</td>
                 <td>${spot.country || '-'}</td>
+                <td>${spot.continent || '-'}</td>
                 <td style="font-family: monospace; font-size: 0.9em;">${spot.message || '-'}</td>
             `;
             tbody.appendChild(row);

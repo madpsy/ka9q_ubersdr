@@ -199,7 +199,8 @@ func (sl *SpotsLogger) Close() error {
 // - fromDate: Start date (YYYY-MM-DD)
 // - toDate: End date (YYYY-MM-DD) - empty for single day
 // - deduplicate: If true, only return unique callsign/locator combinations per day
-func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, fromDate, toDate string, deduplicate bool) ([]SpotRecord, error) {
+// - locatorsOnly: If true, only return spots that have a locator
+func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, fromDate, toDate string, deduplicate, locatorsOnly bool) ([]SpotRecord, error) {
 	if !sl.enabled {
 		return nil, fmt.Errorf("spots logging is not enabled")
 	}

@@ -1830,12 +1830,13 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	}
 
 	// Get query parameters
-	mode := r.URL.Query().Get("mode")       // FT8, FT4, WSPR, or empty for all
-	band := r.URL.Query().Get("band")       // Calculated band (e.g., "20m", "40m") or empty for all
-	name := r.URL.Query().Get("name")       // Decoder config name or empty for all
-	fromDate := r.URL.Query().Get("date")   // For backward compatibility
-	toDate := r.URL.Query().Get("to_date")  // Optional end date
-	dedupStr := r.URL.Query().Get("dedup")  // "true" to deduplicate
+	mode := r.URL.Query().Get("mode")              // FT8, FT4, WSPR, or empty for all
+	band := r.URL.Query().Get("band")              // Calculated band (e.g., "20m", "40m") or empty for all
+	name := r.URL.Query().Get("name")              // Decoder config name or empty for all
+	fromDate := r.URL.Query().Get("date")          // For backward compatibility
+	toDate := r.URL.Query().Get("to_date")         // Optional end date
+	dedupStr := r.URL.Query().Get("dedup")         // "true" to deduplicate
+	locatorsOnlyStr := r.URL.Query().Get("locators_only") // "true" to only return spots with locators
 
 	// Also support from_date parameter
 	if fd := r.URL.Query().Get("from_date"); fd != "" {
@@ -1850,8 +1851,9 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 		return
 	}
 
-	// Parse deduplication flag
+	// Parse deduplication and locators only flags
 	deduplicate := dedupStr == "true" || dedupStr == "1"
+	locatorsOnly := locatorsOnlyStr == "true" || locatorsOnlyStr == "1"
 
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
@@ -1866,7 +1868,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	}
 
 	// Get historical spots
-	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, fromDate, toDate, deduplicate)
+	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, fromDate, toDate, deduplicate, locatorsOnly)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{

@@ -101,7 +101,7 @@ func ParseFT8Line(line string, dialFreq uint64, mode DecoderMode) (*DecodeInfo, 
 		Mode:        mode.String(),
 		Message:     message,
 		HasCallsign: callsign != "",
-		HasLocator:  isValidGridLocator(locator),
+		HasLocator:  isValidGridLocatorForMode(locator, mode),
 		IsWSPR:      false,
 	}
 
@@ -241,7 +241,7 @@ func extractCallsignLocator(message string) (string, string) {
 	var locator string
 	var locatorIndex int = -1
 	for i, field := range fields {
-		if isValidGridLocator(field) {
+		if isValidGridLocatorForMode(field, ModeFT8) {
 			locator = field
 			locatorIndex = i
 			break
@@ -278,6 +278,7 @@ func isValidCallsign(s string) bool {
 }
 
 // isValidGridLocator checks if a string looks like a valid Maidenhead grid locator
+// Accepts 4, 6, or 8 character locators (used for WSPR)
 func isValidGridLocator(s string) bool {
 	if len(s) != 4 && len(s) != 6 && len(s) != 8 {
 		return false
@@ -298,6 +299,19 @@ func isValidGridLocator(s string) bool {
 		s = s[0:4] + strings.ToLower(s[4:6]) + s[6:]
 	}
 	return gridPattern.MatchString(s)
+}
+
+// isValidGridLocatorForMode checks if a string is a valid grid locator for the given mode
+// FT8/FT4 only accept 4-character locators, WSPR accepts 4 or 6 characters
+func isValidGridLocatorForMode(s string, mode DecoderMode) bool {
+	// FT8 and FT4 only support 4-character grid locators
+	if mode == ModeFT8 || mode == ModeFT4 {
+		if len(s) != 4 {
+			return false
+		}
+	}
+	
+	return isValidGridLocator(s)
 }
 
 // ParseDecoderLog reads and parses a decoder log file

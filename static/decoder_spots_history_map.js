@@ -273,9 +273,9 @@ class DecoderSpotsHistoryMap {
      * @returns {string} - HTML content
      */
     createPopupContent(spot) {
-        const time = new Date(spot.timestamp).toLocaleTimeString('en-US', { 
-            hour12: false, 
-            timeZone: 'UTC' 
+        const time = new Date(spot.timestamp).toLocaleTimeString('en-US', {
+            hour12: false,
+            timeZone: 'UTC'
         });
 
         let content = `
@@ -285,6 +285,10 @@ class DecoderSpotsHistoryMap {
 
         if (spot.country) {
             content += `<b>Country:</b> ${spot.country}<br>`;
+        }
+
+        if (spot.name) {
+            content += `<b>Name:</b> ${spot.name}<br>`;
         }
 
         content += `

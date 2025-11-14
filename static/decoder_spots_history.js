@@ -56,13 +56,30 @@
         const modeSelect = document.getElementById('mode-select');
         const bandSelect = document.getElementById('band-select');
         const nameSelect = document.getElementById('name-select');
-        const dedupCheckbox = document.getElementById('dedup-checkbox');
         const callsignInput = document.getElementById('callsign-input');
         const locatorInput = document.getElementById('locator-input');
         const recordsPerPageSelect = document.getElementById('records-per-page');
 
         loadBtn.addEventListener('click', loadSpots);
         downloadBtn.addEventListener('click', downloadCSV);
+
+        // Add Enter key handler to all form inputs to trigger load
+        const formInputs = [
+            modeSelect, bandSelect, nameSelect, callsignInput, locatorInput,
+            document.getElementById('continent-select'),
+            document.getElementById('direction-select'),
+            document.getElementById('min-distance-select'),
+            document.getElementById('min-snr-select')
+        ];
+        
+        formInputs.forEach(input => {
+            input.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    loadSpots();
+                }
+            });
+        });
 
         // Handle records per page change
         recordsPerPageSelect.addEventListener('change', function() {
@@ -659,6 +676,9 @@
 
         // Show map section
         spotsMap.show();
+
+        // Clear existing markers first to ensure clean state
+        spotsMap.clearMarkers();
 
         // Add spots to map
         spotsMap.addSpots(spots);

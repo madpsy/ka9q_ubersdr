@@ -289,7 +289,7 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 
 	// Collect all spots
 	allSpots := make([]SpotRecord, 0)
-	seenSpots := make(map[string]bool) // For deduplication: key = callsign+locator+date
+	seenSpots := make(map[string]SpotRecord) // For deduplication: key = callsign+locator+date, value = latest spot
 
 	// Iterate through each date in the range
 	currentDate := startDate
@@ -355,16 +355,33 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 				if deduplicate {
 					// Create dedup key: callsign+locator+date
 					dedupKey := fmt.Sprintf("%s|%s|%s", spot.Callsign, spot.Locator, dateStr)
-					if seenSpots[dedupKey] {
-						continue // Skip duplicate
+
+					// Check if we've seen this combination before
+					if existingSpot, exists := seenSpots[dedupKey]; exists {
+						// Keep the one with the later timestamp
+						if spot.Timestamp > existingSpot.Timestamp {
+							seenSpots[dedupKey] = spot
+						}
+						// Skip adding to allSpots - we'll add deduplicated spots later
+						continue
+					} else {
+						// First time seeing this combination
+						seenSpots[dedupKey] = spot
+						continue
 					}
-					seenSpots[dedupKey] = true
 				}
 				allSpots = append(allSpots, spot)
 			}
 		}
 
 		currentDate = currentDate.AddDate(0, 0, 1)
+	}
+
+	// If deduplication was enabled, add the deduplicated spots to allSpots
+	if deduplicate {
+		for _, spot := range seenSpots {
+			allSpots = append(allSpots, spot)
+		}
 	}
 
 	// Sort spots by timestamp in descending order (newest first)

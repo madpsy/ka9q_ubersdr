@@ -140,6 +140,9 @@
         const countrySelect = document.getElementById('client-country-filter');
         if (!countrySelect) return;
 
+        // Save current selection
+        const currentSelection = countrySelect.value;
+
         // Get unique countries
         const countries = new Set();
         spots.forEach(spot => {
@@ -161,6 +164,11 @@
             option.textContent = country;
             countrySelect.appendChild(option);
         });
+
+        // Restore previous selection if it still exists
+        if (currentSelection && sortedCountries.includes(currentSelection)) {
+            countrySelect.value = currentSelection;
+        }
     }
 
     function filterCallsignsMultipleBands(spots) {

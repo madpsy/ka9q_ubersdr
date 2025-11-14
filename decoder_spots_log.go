@@ -32,13 +32,14 @@ type SpotRecord struct {
 	Locator   string `json:"locator"`
 	SNR       int    `json:"snr"`
 	Frequency uint64 `json:"frequency"`
+	Band      string `json:"band"`      // Calculated from frequency (e.g., "20m", "40m")
 	Message   string `json:"message"`
 	Country   string `json:"country"`
 	CQZone    int    `json:"cq_zone"`
 	ITUZone   int    `json:"itu_zone"`
 	Continent string `json:"continent"`
 	Mode      string `json:"mode"`
-	Band      string `json:"band"`
+	Name      string `json:"name"` // Decoder config band name
 }
 
 // NewSpotsLogger creates a new spots logger
@@ -77,6 +78,9 @@ func (sl *SpotsLogger) LogSpot(decode *DecodeInfo) error {
 		return err
 	}
 
+	// Calculate band from frequency
+	band := frequencyToBand(float64(decode.Frequency))
+
 	// Write CSV record
 	record := []string{
 		decode.Timestamp.Format(time.RFC3339),
@@ -84,6 +88,7 @@ func (sl *SpotsLogger) LogSpot(decode *DecodeInfo) error {
 		decode.Locator,
 		fmt.Sprintf("%d", decode.SNR),
 		fmt.Sprintf("%d", decode.Frequency),
+		band,
 		decode.Message,
 		decode.Country,
 		fmt.Sprintf("%d", decode.CQZone),
@@ -151,7 +156,7 @@ func (sl *SpotsLogger) getOrCreateWriter(decode *DecodeInfo) (*csv.Writer, error
 	// Write header if new file
 	if needsHeader {
 		header := []string{
-			"timestamp", "callsign", "locator", "snr", "frequency",
+			"timestamp", "callsign", "locator", "snr", "frequency", "band",
 			"message", "country", "cq_zone", "itu_zone", "continent",
 		}
 		if err := writer.Write(header); err != nil {
@@ -189,11 +194,12 @@ func (sl *SpotsLogger) Close() error {
 // GetHistoricalSpots reads historical spots from CSV files
 // Parameters:
 // - mode: Filter by mode (FT8, FT4, WSPR) - empty for all modes
-// - band: Filter by band name - empty for all bands
+// - band: Filter by calculated band (e.g., "20m", "40m") - empty for all bands
+// - name: Filter by decoder config name - empty for all names
 // - fromDate: Start date (YYYY-MM-DD)
 // - toDate: End date (YYYY-MM-DD) - empty for single day
 // - deduplicate: If true, only return unique callsign/locator combinations per day
-func (sl *SpotsLogger) GetHistoricalSpots(mode, band, fromDate, toDate string, deduplicate bool) ([]SpotRecord, error) {
+func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, fromDate, toDate string, deduplicate bool) ([]SpotRecord, error) {
 	if !sl.enabled {
 		return nil, fmt.Errorf("spots logging is not enabled")
 	}
@@ -236,14 +242,19 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, fromDate, toDate string, d
 
 		// Query each mode
 		for _, m := range modes {
-			spots, err := sl.readSpotsForDate(m, band, dateStr)
+			spots, err := sl.readSpotsForDate(m, name, dateStr)
 			if err != nil {
 				// Skip if file doesn't exist
 				continue
 			}
 
-			// Add spots with deduplication if requested
+			// Add spots with filtering and deduplication
 			for _, spot := range spots {
+				// Filter by calculated band if specified
+				if band != "" && spot.Band != band {
+					continue
+				}
+
 				if deduplicate {
 					// Create dedup key: callsign+locator+date
 					dedupKey := fmt.Sprintf("%s|%s|%s", spot.Callsign, spot.Locator, dateStr)
@@ -263,7 +274,8 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, fromDate, toDate string, d
 }
 
 // readSpotsForDate reads spots for a specific mode and date
-func (sl *SpotsLogger) readSpotsForDate(mode, band, dateStr string) ([]SpotRecord, error) {
+// The 'name' parameter filters by decoder config name (directory name in file structure)
+func (sl *SpotsLogger) readSpotsForDate(mode, name, dateStr string) ([]SpotRecord, error) {
 	// Parse date to get year/month/day
 	t, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
@@ -284,9 +296,9 @@ func (sl *SpotsLogger) readSpotsForDate(mode, band, dateStr string) ([]SpotRecor
 		return nil, fmt.Errorf("no data for date %s", dateStr)
 	}
 
-	// If band is specified, read only that band's file
-	if band != "" {
-		return sl.readBandFile(dirPath, band, mode)
+	// If name is specified, read only that name's file
+	if name != "" {
+		return sl.readNameFile(dirPath, name, mode)
 	}
 
 	// Otherwise, read all CSV files in the directory
@@ -301,8 +313,8 @@ func (sl *SpotsLogger) readSpotsForDate(mode, band, dateStr string) ([]SpotRecor
 			continue
 		}
 
-		bandName := file.Name()[:len(file.Name())-4] // Remove .csv extension
-		spots, err := sl.readBandFile(dirPath, bandName, mode)
+		configName := file.Name()[:len(file.Name())-4] // Remove .csv extension
+		spots, err := sl.readNameFile(dirPath, configName, mode)
 		if err != nil {
 			continue
 		}
@@ -312,9 +324,9 @@ func (sl *SpotsLogger) readSpotsForDate(mode, band, dateStr string) ([]SpotRecor
 	return allSpots, nil
 }
 
-// readBandFile reads a single band CSV file
-func (sl *SpotsLogger) readBandFile(dirPath, bandName, mode string) ([]SpotRecord, error) {
-	filename := filepath.Join(dirPath, fmt.Sprintf("%s.csv", bandName))
+// readNameFile reads a single decoder config name CSV file
+func (sl *SpotsLogger) readNameFile(dirPath, configName, mode string) ([]SpotRecord, error) {
+	filename := filepath.Join(dirPath, fmt.Sprintf("%s.csv", configName))
 
 	file, err := os.Open(filename)
 	if err != nil {
@@ -335,7 +347,7 @@ func (sl *SpotsLogger) readBandFile(dirPath, bandName, mode string) ([]SpotRecor
 	// Parse records (skip header)
 	spots := make([]SpotRecord, 0, len(records)-1)
 	for _, record := range records[1:] {
-		if len(record) < 10 {
+		if len(record) < 11 {
 			continue
 		}
 
@@ -343,18 +355,19 @@ func (sl *SpotsLogger) readBandFile(dirPath, bandName, mode string) ([]SpotRecor
 			Timestamp: record[0],
 			Callsign:  record[1],
 			Locator:   record[2],
-			Message:   record[5],
-			Country:   record[6],
-			Continent: record[9],
+			Band:      record[5], // Calculated band from frequency
+			Message:   record[6],
+			Country:   record[7],
+			Continent: record[10],
 			Mode:      mode,
-			Band:      bandName,
+			Name:      configName, // Decoder config band name
 		}
 
 		// Parse numeric fields
 		fmt.Sscanf(record[3], "%d", &spot.SNR)
 		fmt.Sscanf(record[4], "%d", &spot.Frequency)
-		fmt.Sscanf(record[7], "%d", &spot.CQZone)
-		fmt.Sscanf(record[8], "%d", &spot.ITUZone)
+		fmt.Sscanf(record[8], "%d", &spot.CQZone)
+		fmt.Sscanf(record[9], "%d", &spot.ITUZone)
 
 		spots = append(spots, spot)
 	}

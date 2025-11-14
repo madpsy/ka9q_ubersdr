@@ -24,6 +24,7 @@
         const loadBtn = document.getElementById('load-btn');
         const modeSelect = document.getElementById('mode-select');
         const bandSelect = document.getElementById('band-select');
+        const nameSelect = document.getElementById('name-select');
         const dedupCheckbox = document.getElementById('dedup-checkbox');
 
         loadBtn.addEventListener('click', loadSpots);
@@ -35,6 +36,9 @@
             option.textContent = band;
             bandSelect.appendChild(option);
         });
+
+        // Name select will be populated dynamically based on available data
+        // For now, leave it empty - could be enhanced to fetch available names from API
     }
 
     function initializeDatePicker() {
@@ -179,6 +183,7 @@
 
         const mode = document.getElementById('mode-select').value;
         const band = document.getElementById('band-select').value;
+        const name = document.getElementById('name-select').value;
         const dedup = document.getElementById('dedup-checkbox').checked;
 
         showStatus('Loading spots...', '');
@@ -188,6 +193,7 @@
             let url = `/api/decoder/spots?date=${selectedDate}`;
             if (mode) url += `&mode=${mode}`;
             if (band) url += `&band=${band}`;
+            if (name) url += `&name=${name}`;
             if (dedup) url += `&dedup=true`;
 
             const response = await fetch(url);
@@ -224,7 +230,12 @@
         // Update title
         const mode = document.getElementById('mode-select').value || 'All Modes';
         const band = document.getElementById('band-select').value || 'All Bands';
-        title.textContent = `${mode} Spots - ${band} - ${selectedDate}`;
+        const name = document.getElementById('name-select').value || 'All Names';
+        let titleParts = [mode];
+        if (band !== 'All Bands') titleParts.push(band);
+        if (name !== 'All Names') titleParts.push(`(${name})`);
+        titleParts.push(selectedDate);
+        title.textContent = `${titleParts.join(' - ')}`;
 
         // Calculate statistics
         const stats = calculateStats(data.spots);
@@ -270,6 +281,7 @@
                 <td>${time}</td>
                 <td><span class="mode-badge mode-${spot.mode.toLowerCase()}">${spot.mode}</span></td>
                 <td>${spot.band}</td>
+                <td>${spot.name || '-'}</td>
                 <td><strong>${spot.callsign}</strong></td>
                 <td>${spot.locator || '-'}</td>
                 <td class="${snrClass}">${snrText} dB</td>
@@ -317,7 +329,7 @@
                 const data = await response.json();
                 if (data.receiver && data.receiver.name) {
                     document.getElementById('receiver-name').textContent = 
-                        `${data.receiver.name} - Historical Decoder Spots`;
+                        `${data.receiver.name}`;
                 }
                 if (data.version) {
                     document.getElementById('footer-version').textContent = `• v${data.version}`;

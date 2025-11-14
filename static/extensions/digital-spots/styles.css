@@ -150,7 +150,7 @@
 /* Column widths */
 .digital-spots-table th:nth-child(1),
 .digital-spots-table td:nth-child(1) {
-    width: 80px; /* Time */
+    width: 90px; /* Time */
 }
 
 .digital-spots-table th:nth-child(2),

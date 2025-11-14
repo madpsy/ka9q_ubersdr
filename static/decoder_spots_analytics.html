@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decoder Spots Analytics</title>
+    <link rel="stylesheet" href="decoder_spots_analytics.css">
+    <!-- Chart.js for visualizations -->
+    <script src="chart.umd.min.js"></script>
+    <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Decoder Spots Analytics</h1>
+        <div class="subtitle" id="receiver-name">Propagation Analysis by Country & Continent</div>
+
+        <div class="controls">
+            <div class="control-row">
+                <div class="control-group">
+                    <label for="country-search">Country:</label>
+                    <input type="text" 
+                           id="country-search" 
+                           list="countries-datalist"
+                           placeholder="Start typing country name..."
+                           autocomplete="off">
+                    <datalist id="countries-datalist">
+                        <!-- Populated via /api/cty/countries -->
+                    </datalist>
+                </div>
+
+                <div class="control-group">
+                    <label for="continent-select">Continent:</label>
+                    <select id="continent-select">
+                        <option value="">All Continents</option>
+                        <!-- Populated via /api/cty/continents -->
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="min-snr-select">Min SNR (dB):</label>
+                    <select id="min-snr-select">
+                        <option value="-999">No Minimum</option>
+                        <option value="-20">-20 dB</option>
+                        <option value="-10">-10 dB</option>
+                        <option value="0" selected>0 dB</option>
+                        <option value="10">+10 dB</option>
+                        <option value="20">+20 dB</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="hours-select">Time Window:</label>
+                    <select id="hours-select">
+                        <option value="6">Last 6 hours</option>
+                        <option value="12">Last 12 hours</option>
+                        <option value="24" selected>Last 24 hours</option>
+                        <option value="48">Last 48 hours</option>
+                        <option value="72">Last 3 days</option>
+                        <option value="168">Last 7 days</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <button id="clear-filters-btn" style="background: #FF9800;">Clear Filters</button>
+                </div>
+
+                <div class="control-group">
+                    <button id="load-btn">Load Analytics</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="data-container" class="data-container" style="display: none;">
+            <h2 style="margin-bottom: 15px; font-size: 1.3em;" id="data-title">Analytics Results</h2>
+            
+            <!-- Summary Stats -->
+            <div class="stats-grid" id="stats-grid">
+                <!-- Stats will be inserted here -->
+            </div>
+
+            <!-- Country Analytics Section -->
+            <div id="country-section" class="analytics-section">
+                <h2>📍 By Country</h2>
+                <div id="country-list" class="country-list">
+                    <!-- Country cards will be inserted here -->
+                </div>
+            </div>
+
+            <!-- Continent Analytics Section -->
+            <div id="continent-section" class="analytics-section">
+                <h2>🌍 By Continent</h2>
+                <div id="continent-list" class="continent-list">
+                    <!-- Continent cards will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <div id="status" class="status">Select filters and click "Load Analytics" to begin</div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>Download <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/decoder_spots_history.html" target="_blank">Spots History</a> • <a href="/bandconditions.html" target="_blank">Live Conditions</a> <span id="footer-version"></span></p>
+    </footer>
+
+    <script src="decoder_spots_analytics.js"></script>
+</body>
+</html>

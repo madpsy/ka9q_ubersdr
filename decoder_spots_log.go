@@ -744,3 +744,311 @@ func escapeCSVField(field string) string {
 	}
 	return field
 }
+
+// BandAnalytics represents analytics for a specific band
+type BandAnalytics struct {
+	Band               string         `json:"band"`
+	Spots              int            `json:"spots"`
+	AvgSNR             float64        `json:"avg_snr"`
+	BestHoursUTC       []int          `json:"best_hours_utc"`
+	HourlyDistribution map[string]int `json:"hourly_distribution"`
+}
+
+// CountryAnalytics represents analytics for a specific country
+type CountryAnalytics struct {
+	Country    string          `json:"country"`
+	Continent  string          `json:"continent"`
+	TotalSpots int             `json:"total_spots"`
+	Bands      []BandAnalytics `json:"bands"`
+}
+
+// ContinentAnalytics represents analytics for a specific continent
+type ContinentAnalytics struct {
+	Continent      string          `json:"continent"`
+	ContinentName  string          `json:"continent_name"`
+	TotalSpots     int             `json:"total_spots"`
+	CountriesCount int             `json:"countries_count"`
+	Bands          []BandAnalytics `json:"bands"`
+}
+
+// AnalyticsResponse represents the complete analytics response
+type AnalyticsResponse struct {
+	TimeRange struct {
+		From  string `json:"from"`
+		To    string `json:"to"`
+		Hours int    `json:"hours"`
+	} `json:"time_range"`
+	Filters struct {
+		MinSNR    int    `json:"min_snr"`
+		Country   string `json:"country,omitempty"`
+		Continent string `json:"continent,omitempty"`
+	} `json:"filters"`
+	ByCountry   []CountryAnalytics   `json:"by_country"`
+	ByContinent []ContinentAnalytics `json:"by_continent"`
+}
+
+// GetSpotsAnalytics aggregates spots data for analytics
+func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent string, minSNR, hours int) (*AnalyticsResponse, error) {
+	if !sl.enabled {
+		return nil, fmt.Errorf("spots logging is not enabled")
+	}
+
+	// Calculate date range
+	now := time.Now()
+	toDate := now.Format("2006-01-02")
+	fromTime := now.Add(-time.Duration(hours) * time.Hour)
+	fromDate := fromTime.Format("2006-01-02")
+
+	// Get spots using existing method
+	spots, err := sl.GetHistoricalSpots(
+		"",              // mode - all modes
+		"",              // band - all bands
+		"",              // name - all names
+		"",              // callsign - all callsigns
+		"",              // locator - all locators
+		filterContinent, // continent filter
+		"",              // direction - all directions
+		fromDate,
+		toDate,
+		false, // deduplicate
+		true,  // locatorsOnly
+		0,     // minDistanceKm
+		minSNR,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter by country if specified
+	if filterCountry != "" {
+		filtered := make([]SpotRecord, 0)
+		for _, spot := range spots {
+			if spot.Country == filterCountry {
+				filtered = append(filtered, spot)
+			}
+		}
+		spots = filtered
+	}
+
+	// Filter by time window (only keep spots within the hours range)
+	cutoffTime := fromTime
+	filtered := make([]SpotRecord, 0)
+	for _, spot := range spots {
+		spotTime, err := time.Parse(time.RFC3339, spot.Timestamp)
+		if err != nil {
+			continue
+		}
+		if spotTime.After(cutoffTime) || spotTime.Equal(cutoffTime) {
+			filtered = append(filtered, spot)
+		}
+	}
+	spots = filtered
+
+	// Build analytics response
+	response := &AnalyticsResponse{}
+	response.TimeRange.From = fromTime.Format(time.RFC3339)
+	response.TimeRange.To = now.Format(time.RFC3339)
+	response.TimeRange.Hours = hours
+	response.Filters.MinSNR = minSNR
+	response.Filters.Country = filterCountry
+	response.Filters.Continent = filterContinent
+
+	// Aggregate by country and band
+	countryData := make(map[string]map[string]*bandAggregator)
+	continentData := make(map[string]map[string]*bandAggregator)
+	continentCountries := make(map[string]map[string]bool)
+
+	for _, spot := range spots {
+		// Skip spots without country info
+		if spot.Country == "" {
+			continue
+		}
+
+		// Initialize country map if needed
+		if countryData[spot.Country] == nil {
+			countryData[spot.Country] = make(map[string]*bandAggregator)
+		}
+		if countryData[spot.Country][spot.Band] == nil {
+			countryData[spot.Country][spot.Band] = &bandAggregator{
+				hourly: make(map[int]int),
+			}
+		}
+
+		// Initialize continent map if needed
+		if spot.Continent != "" {
+			if continentData[spot.Continent] == nil {
+				continentData[spot.Continent] = make(map[string]*bandAggregator)
+				continentCountries[spot.Continent] = make(map[string]bool)
+			}
+			if continentData[spot.Continent][spot.Band] == nil {
+				continentData[spot.Continent][spot.Band] = &bandAggregator{
+					hourly: make(map[int]int),
+				}
+			}
+			continentCountries[spot.Continent][spot.Country] = true
+		}
+
+		// Parse timestamp to get hour
+		spotTime, err := time.Parse(time.RFC3339, spot.Timestamp)
+		if err != nil {
+			continue
+		}
+		hour := spotTime.UTC().Hour()
+
+		// Aggregate country data
+		agg := countryData[spot.Country][spot.Band]
+		agg.count++
+		agg.totalSNR += float64(spot.SNR)
+		agg.hourly[hour]++
+
+		// Aggregate continent data
+		if spot.Continent != "" {
+			contAgg := continentData[spot.Continent][spot.Band]
+			contAgg.count++
+			contAgg.totalSNR += float64(spot.SNR)
+			contAgg.hourly[hour]++
+		}
+	}
+
+	// Build country analytics
+	continentNames := map[string]string{
+		"AF": "Africa",
+		"AS": "Asia",
+		"EU": "Europe",
+		"NA": "North America",
+		"OC": "Oceania",
+		"SA": "South America",
+		"AN": "Antarctica",
+	}
+
+	for country, bands := range countryData {
+		countryAnalytics := CountryAnalytics{
+			Country: country,
+			Bands:   make([]BandAnalytics, 0),
+		}
+
+		// Find continent for this country (from first spot)
+		for _, spot := range spots {
+			if spot.Country == country {
+				countryAnalytics.Continent = spot.Continent
+				break
+			}
+		}
+
+		totalSpots := 0
+		for band, agg := range bands {
+			bandAnalytics := BandAnalytics{
+				Band:               band,
+				Spots:              agg.count,
+				AvgSNR:             agg.totalSNR / float64(agg.count),
+				BestHoursUTC:       findBestHours(agg.hourly, 5),
+				HourlyDistribution: formatHourlyDistribution(agg.hourly),
+			}
+			countryAnalytics.Bands = append(countryAnalytics.Bands, bandAnalytics)
+			totalSpots += agg.count
+		}
+
+		// Sort bands by spot count (descending)
+		sort.Slice(countryAnalytics.Bands, func(i, j int) bool {
+			return countryAnalytics.Bands[i].Spots > countryAnalytics.Bands[j].Spots
+		})
+
+		countryAnalytics.TotalSpots = totalSpots
+		response.ByCountry = append(response.ByCountry, countryAnalytics)
+	}
+
+	// Sort countries by total spots (descending)
+	sort.Slice(response.ByCountry, func(i, j int) bool {
+		return response.ByCountry[i].TotalSpots > response.ByCountry[j].TotalSpots
+	})
+
+	// Build continent analytics
+	for continent, bands := range continentData {
+		continentAnalytics := ContinentAnalytics{
+			Continent:      continent,
+			ContinentName:  continentNames[continent],
+			CountriesCount: len(continentCountries[continent]),
+			Bands:          make([]BandAnalytics, 0),
+		}
+
+		if continentAnalytics.ContinentName == "" {
+			continentAnalytics.ContinentName = continent
+		}
+
+		totalSpots := 0
+		for band, agg := range bands {
+			bandAnalytics := BandAnalytics{
+				Band:               band,
+				Spots:              agg.count,
+				AvgSNR:             agg.totalSNR / float64(agg.count),
+				BestHoursUTC:       findBestHours(agg.hourly, 5),
+				HourlyDistribution: formatHourlyDistribution(agg.hourly),
+			}
+			continentAnalytics.Bands = append(continentAnalytics.Bands, bandAnalytics)
+			totalSpots += agg.count
+		}
+
+		// Sort bands by spot count (descending)
+		sort.Slice(continentAnalytics.Bands, func(i, j int) bool {
+			return continentAnalytics.Bands[i].Spots > continentAnalytics.Bands[j].Spots
+		})
+
+		continentAnalytics.TotalSpots = totalSpots
+		response.ByContinent = append(response.ByContinent, continentAnalytics)
+	}
+
+	// Sort continents by total spots (descending)
+	sort.Slice(response.ByContinent, func(i, j int) bool {
+		return response.ByContinent[i].TotalSpots > response.ByContinent[j].TotalSpots
+	})
+
+	return response, nil
+}
+
+// bandAggregator helps aggregate band statistics
+type bandAggregator struct {
+	count    int
+	totalSNR float64
+	hourly   map[int]int
+}
+
+// findBestHours returns the top N hours with most spots
+func findBestHours(hourly map[int]int, topN int) []int {
+	type hourCount struct {
+		hour  int
+		count int
+	}
+
+	hours := make([]hourCount, 0, len(hourly))
+	for hour, count := range hourly {
+		hours = append(hours, hourCount{hour, count})
+	}
+
+	// Sort by count descending
+	sort.Slice(hours, func(i, j int) bool {
+		if hours[i].count == hours[j].count {
+			return hours[i].hour < hours[j].hour
+		}
+		return hours[i].count > hours[j].count
+	})
+
+	// Get top N hours
+	result := make([]int, 0, topN)
+	for i := 0; i < len(hours) && i < topN; i++ {
+		result = append(result, hours[i].hour)
+	}
+
+	// Sort result by hour
+	sort.Ints(result)
+	return result
+}
+
+// formatHourlyDistribution converts hourly map to string-keyed map for JSON
+func formatHourlyDistribution(hourly map[int]int) map[string]int {
+	result := make(map[string]int)
+	for hour := 0; hour < 24; hour++ {
+		key := fmt.Sprintf("%02d", hour)
+		result[key] = hourly[hour]
+	}
+	return result
+}

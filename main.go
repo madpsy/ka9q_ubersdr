@@ -627,6 +627,9 @@ func main() {
 	http.HandleFunc("/api/decoder/spots/csv", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleDecoderSpotsCSV(w, r, multiDecoder, ipBanManager, fftRateLimiter)
 	}))
+	http.HandleFunc("/api/decoder/spots/analytics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleDecoderSpotsAnalytics(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+	}))
 
 	// CTY API endpoints (with IP ban checking)
 	RegisterCTYAPIHandlers(ipBanManager)
@@ -2108,6 +2111,73 @@ func handleDecoderSpotsCSV(w http.ResponseWriter, r *http.Request, md *MultiDeco
 	// Write CSV data
 	if _, err := w.Write([]byte(csvData)); err != nil {
 		log.Printf("Error writing CSV data: %v", err)
+	}
+}
+
+// handleDecoderSpotsAnalytics serves aggregated analytics about decoder spots
+func handleDecoderSpotsAnalytics(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if md == nil || md.spotsLogger == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decoder spots logging is not enabled",
+		})
+		return
+	}
+
+	// Get query parameters
+	country := r.URL.Query().Get("country")
+	continent := r.URL.Query().Get("continent")
+	minSNRStr := r.URL.Query().Get("min_snr")
+	hoursStr := r.URL.Query().Get("hours")
+
+	// Parse minimum SNR (default -999 = no filter)
+	minSNR := -999
+	if minSNRStr != "" {
+		if snr, err := strconv.Atoi(minSNRStr); err == nil {
+			minSNR = snr
+		}
+	}
+
+	// Parse hours (default 24)
+	hours := 24
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 168 { // Max 1 week
+			hours = h
+		}
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("analytics-%s-%s-%d-%d", country, continent, minSNR, hours)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Decoder spots analytics endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	// Get analytics
+	analytics, err := md.spotsLogger.GetSpotsAnalytics(country, continent, minSNR, hours)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get analytics: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(analytics); err != nil {
+		log.Printf("Error encoding decoder spots analytics: %v", err)
 	}
 }
 

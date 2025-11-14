@@ -185,8 +185,8 @@ class DecoderSpotsHistoryMap {
      * Clear all spot markers from map
      */
     clearMarkers() {
-        this.markers.forEach(marker => {
-            this.map.removeLayer(marker);
+        this.markers.forEach(data => {
+            this.map.removeLayer(data.marker);
         });
         this.markers.clear();
     }
@@ -258,9 +258,9 @@ class DecoderSpotsHistoryMap {
             // Add to map
             marker.addTo(this.map);
 
-            // Store marker
+            // Store marker with spot data
             const key = `${spot.callsign}-${spot.band}-${spot.mode}`;
-            this.markers.set(key, marker);
+            this.markers.set(key, { marker, spot, coords: [adjustedLat, adjustedLon] });
         });
 
         // Update legend with active bands
@@ -333,7 +333,7 @@ class DecoderSpotsHistoryMap {
 
         // Get unique bands from current markers
         const activeBands = new Set();
-        this.markers.forEach((marker, key) => {
+        this.markers.forEach((data, key) => {
             const band = key.split('-')[1]; // Extract band from key
             if (band) {
                 activeBands.add(band);
@@ -384,6 +384,30 @@ class DecoderSpotsHistoryMap {
         const mapSection = document.getElementById('map-section');
         if (mapSection) {
             mapSection.style.display = 'none';
+        }
+    }
+
+    /**
+     * Open popup for a specific spot
+     * @param {string} callsign - Station callsign
+     * @param {string} band - Band
+     * @param {string} mode - Mode
+     */
+    openSpotPopup(callsign, band, mode) {
+        const key = `${callsign}-${band}-${mode}`;
+        const data = this.markers.get(key);
+        
+        if (data && data.marker) {
+            // Pan to marker and open popup
+            this.map.setView(data.coords, Math.max(this.map.getZoom(), 6), {
+                animate: true,
+                duration: 0.5
+            });
+            
+            // Open popup after animation
+            setTimeout(() => {
+                data.marker.openPopup();
+            }, 500);
         }
     }
 }

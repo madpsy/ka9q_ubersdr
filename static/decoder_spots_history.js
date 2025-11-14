@@ -52,6 +52,7 @@
 
     function initializeControls() {
         const loadBtn = document.getElementById('load-btn');
+        const downloadBtn = document.getElementById('download-csv-btn');
         const modeSelect = document.getElementById('mode-select');
         const bandSelect = document.getElementById('band-select');
         const nameSelect = document.getElementById('name-select');
@@ -61,6 +62,7 @@
         const recordsPerPageSelect = document.getElementById('records-per-page');
 
         loadBtn.addEventListener('click', loadSpots);
+        downloadBtn.addEventListener('click', downloadCSV);
 
         // Handle records per page change
         recordsPerPageSelect.addEventListener('change', function() {
@@ -585,7 +587,7 @@
         pageSpots.forEach(spot => {
             const row = document.createElement('tr');
             
-            const time = new Date(spot.timestamp).toLocaleTimeString('en-US', { 
+            const time = new Date(spot.timestamp).toLocaleTimeString('en-US', {
                 hour12: false,
                 hour: '2-digit',
                 minute: '2-digit',
@@ -606,7 +608,7 @@
                 <td><span class="mode-badge mode-${spot.mode.toLowerCase()}">${spot.mode}</span></td>
                 <td>${spot.band}</td>
                 <td>${spot.name || '-'}</td>
-                <td><strong>${spot.callsign}</strong></td>
+                <td><strong><a href="https://www.qrz.com/db/${spot.callsign}" target="_blank" class="callsign-link" style="color: inherit; text-decoration: none; cursor: pointer;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${spot.callsign}</a></strong></td>
                 <td>${spot.locator || '-'}</td>
                 <td class="${snrClass}">${snrText} dB</td>
                 <td>${freqMHz} MHz</td>
@@ -616,6 +618,21 @@
                 <td>${spot.continent ? (continentNames[spot.continent] || spot.continent) : '-'}</td>
                 <td style="font-family: monospace; font-size: 0.9em;">${spot.message || '-'}</td>
             `;
+            
+            // Add click handler to row (but not on callsign link)
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', function(e) {
+                // Don't trigger if clicking on the callsign link
+                if (e.target.closest('.callsign-link')) {
+                    return;
+                }
+                
+                // Open the spot on the map
+                if (spotsMap && spot.locator) {
+                    spotsMap.openSpotPopup(spot.callsign, spot.band, spot.mode);
+                }
+            });
+            
             tbody.appendChild(row);
         });
 
@@ -981,13 +998,73 @@
         }
     }
 
+    async function downloadCSV() {
+        if (!selectedDate) {
+            showStatus('Please select a date first', 'error');
+            return;
+        }
+
+        // Build URL with all current filter parameters
+        const mode = document.getElementById('mode-select').value;
+        const band = document.getElementById('band-select').value;
+        const name = document.getElementById('name-select').value;
+        const callsign = document.getElementById('callsign-input').value.trim().toUpperCase();
+        const locator = document.getElementById('locator-input').value.trim().toUpperCase();
+        const continent = document.getElementById('continent-select').value;
+        const direction = document.getElementById('direction-select').value;
+        const dedup = document.getElementById('dedup-checkbox').checked;
+        const locatorsOnly = document.getElementById('locators-only-checkbox').checked;
+        const minDistance = document.getElementById('min-distance-select').value;
+        const minSNR = document.getElementById('min-snr-select').value;
+
+        let url = `/api/decoder/spots/csv?date=${selectedDate}`;
+        if (mode) url += `&mode=${mode}`;
+        if (band) url += `&band=${band}`;
+        if (name) url += `&name=${name}`;
+        if (callsign) url += `&callsign=${encodeURIComponent(callsign)}`;
+        if (locator) url += `&locator=${encodeURIComponent(locator)}`;
+        if (continent) url += `&continent=${continent}`;
+        if (direction) url += `&direction=${direction}`;
+        if (dedup) url += `&dedup=true`;
+        if (locatorsOnly) url += `&locators_only=true`;
+        if (minDistance && parseFloat(minDistance) > 0) {
+            url += `&min_distance=${minDistance}`;
+        }
+        if (minSNR && parseInt(minSNR) !== -999) {
+            url += `&min_snr=${minSNR}`;
+        }
+
+        try {
+            // Create a temporary link and trigger download
+            const link = document.createElement('a');
+            link.href = url;
+            
+            // Build filename based on filters
+            let filename = `decoder-spots-${selectedDate}`;
+            if (mode) filename += `-${mode}`;
+            if (band) filename += `-${band}`;
+            if (name) filename += `-${name}`;
+            filename += '.csv';
+            
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            showStatus('CSV download started', 'success');
+        } catch (error) {
+            console.error('Error downloading CSV:', error);
+            showStatus('Error starting CSV download', 'error');
+        }
+    }
+
     async function fetchReceiverInfo() {
         try {
             const response = await fetch('/api/description');
             if (response.ok) {
                 const data = await response.json();
                 if (data.receiver && data.receiver.name) {
-                    document.getElementById('receiver-name').textContent = 
+                    document.getElementById('receiver-name').textContent =
                         `${data.receiver.name}`;
                 }
                 if (data.version) {

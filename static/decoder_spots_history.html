@@ -135,6 +135,10 @@
                 <div class="control-group">
                     <button id="load-btn">Load Spots</button>
                 </div>
+
+                <div class="control-group">
+                    <button id="download-csv-btn" style="background: #2196F3;">Download CSV</button>
+                </div>
             </div>
         </div>
 
@@ -143,6 +147,18 @@
             
             <div class="stats-grid" id="stats-grid">
                 <!-- Stats will be inserted here -->
+            </div>
+
+            <!-- Map Section -->
+            <div id="map-section" class="map-section" style="display: none;">
+                <h2>📍 Spots Map</h2>
+                <div id="spots-map"></div>
+                <div class="map-legend">
+                    <h3>Band Legend</h3>
+                    <div class="band-legend-items" id="map-band-legend-items">
+                        <!-- Legend items will be inserted here -->
+                    </div>
+                </div>
             </div>
 
             <div class="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
@@ -192,18 +208,6 @@
             <div class="pagination-controls" style="display: flex; justify-content: center; align-items: center; margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
                 <div id="pagination-buttons-bottom" style="display: flex; gap: 5px;">
                     <!-- Pagination buttons will be inserted here -->
-                </div>
-            </div>
-        </div>
-
-        <!-- Map Section -->
-        <div id="map-section" class="map-section" style="display: none;">
-            <h2>📍 Spots Map</h2>
-            <div id="spots-map"></div>
-            <div class="map-legend">
-                <h3>Band Legend</h3>
-                <div class="band-legend-items" id="map-band-legend-items">
-                    <!-- Legend items will be inserted here -->
                 </div>
             </div>
         </div>

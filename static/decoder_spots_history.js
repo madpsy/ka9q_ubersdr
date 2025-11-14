@@ -27,7 +27,10 @@
     document.addEventListener('DOMContentLoaded', function() {
         initializeDatePicker();
         initializeControls();
-        loadAvailableDates();
+        loadAvailableDates().then(() => {
+            // Auto-select today's date if available
+            autoSelectTodayAndLoad();
+        });
         fetchReceiverInfo();
     });
 
@@ -208,6 +211,29 @@
         }
     }
 
+    function autoSelectTodayAndLoad() {
+        // Get today's date in YYYY-MM-DD format
+        const today = new Date();
+        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        
+        // Check if today's date is available
+        if (availableDates.includes(todayStr)) {
+            selectDate(todayStr);
+            // Auto-load spots after a short delay to ensure UI is ready
+            setTimeout(() => {
+                loadSpots();
+            }, 100);
+        } else if (availableDates.length > 0) {
+            // If today is not available, select the most recent date
+            selectDate(availableDates[0]);
+            setTimeout(() => {
+                loadSpots();
+            }, 100);
+        } else {
+            showStatus('No spot data available yet', 'error');
+        }
+    }
+
     async function loadSpots() {
         if (!selectedDate) {
             showStatus('Please select a date first', 'error');
@@ -218,6 +244,7 @@
         const band = document.getElementById('band-select').value;
         const name = document.getElementById('name-select').value;
         const continent = document.getElementById('continent-select').value;
+        const direction = document.getElementById('direction-select').value;
         const dedup = document.getElementById('dedup-checkbox').checked;
         const locatorsOnly = document.getElementById('locators-only-checkbox').checked;
         const minDistance = document.getElementById('min-distance-select').value;
@@ -231,6 +258,7 @@
             if (band) url += `&band=${band}`;
             if (name) url += `&name=${name}`;
             if (continent) url += `&continent=${continent}`;
+            if (direction) url += `&direction=${direction}`;
             if (dedup) url += `&dedup=true`;
             if (locatorsOnly) url += `&locators_only=true`;
             if (minDistance && parseFloat(minDistance) > 0) {
@@ -238,6 +266,21 @@
             }
 
             const response = await fetch(url);
+            
+            // Handle 204 No Content response (no spots found)
+            if (response.status === 204) {
+                showStatus('No spots found for the selected criteria', 'error');
+                document.getElementById('data-container').style.display = 'none';
+                return;
+            }
+            
+            // Handle 429 Too Many Requests response (rate limited)
+            if (response.status === 429) {
+                showStatus('Rate limit exceeded. Please wait a moment before trying again.', 'error');
+                document.getElementById('data-container').style.display = 'none';
+                return;
+            }
+            
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -282,7 +325,7 @@
         const stats = calculateStats(data.spots);
         
         // Display statistics
-        statsGrid.innerHTML = `
+        let statsHTML = `
             <div class="stat-card">
                 <div class="stat-value">${data.count}</div>
                 <div class="stat-label">Total Spots</div>
@@ -303,7 +346,91 @@
                 <div class="stat-value">${stats.avgSNR > 0 ? '+' : ''}${stats.avgSNR}</div>
                 <div class="stat-label">Avg SNR (dB)</div>
             </div>
+            <div class="stat-card">
+                <div class="stat-value">${stats.minSNR > 0 ? '+' : ''}${stats.minSNR}</div>
+                <div class="stat-label">Min SNR (dB)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${stats.maxSNR > 0 ? '+' : ''}${stats.maxSNR}</div>
+                <div class="stat-label">Max SNR (dB)</div>
+            </div>
         `;
+
+        // Add distance statistics if available
+        if (stats.hasDistance) {
+            statsHTML += `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.minDistance.toFixed(0)} km</div>
+                    <div class="stat-label">Min Distance</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.maxDistance.toFixed(0)} km</div>
+                    <div class="stat-label">Max Distance</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.avgDistance.toFixed(0)} km</div>
+                    <div class="stat-label">Avg Distance</div>
+                </div>
+            `;
+        }
+
+        // Add most common statistics
+        if (stats.mostCommonLocator) {
+            statsHTML += `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.mostCommonLocator.value}</div>
+                    <div class="stat-label">Most Common Locator (${stats.mostCommonLocator.count})</div>
+                </div>
+            `;
+        }
+
+        if (stats.mostCommonCountry) {
+            statsHTML += `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.mostCommonCountry.value}</div>
+                    <div class="stat-label">Most Common Country (${stats.mostCommonCountry.count})</div>
+                </div>
+            `;
+        }
+
+        if (stats.mostCommonContinent) {
+            statsHTML += `
+                <div class="stat-card">
+                    <div class="stat-value">${continentNames[stats.mostCommonContinent.value] || stats.mostCommonContinent.value}</div>
+                    <div class="stat-label">Most Common Continent (${stats.mostCommonContinent.count})</div>
+                </div>
+            `;
+        }
+
+        // Add least common statistics (only if there are multiple)
+        if (stats.leastCommonLocator && stats.uniqueLocators > 1) {
+            statsHTML += `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.leastCommonLocator.value}</div>
+                    <div class="stat-label">Least Common Locator (${stats.leastCommonLocator.count})</div>
+                </div>
+            `;
+        }
+
+        if (stats.leastCommonCountry && stats.uniqueCountries > 1) {
+            statsHTML += `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.leastCommonCountry.value}</div>
+                    <div class="stat-label">Least Common Country (${stats.leastCommonCountry.count})</div>
+                </div>
+            `;
+        }
+
+        if (stats.leastCommonContinent && stats.uniqueContinents > 1) {
+            statsHTML += `
+                <div class="stat-card">
+                    <div class="stat-value">${continentNames[stats.leastCommonContinent.value] || stats.leastCommonContinent.value}</div>
+                    <div class="stat-label">Least Common Continent (${stats.leastCommonContinent.count})</div>
+                </div>
+            `;
+        }
+
+        statsGrid.innerHTML = statsHTML;
 
         // Display spots table
         tbody.innerHTML = '';
@@ -349,23 +476,98 @@
 
     function calculateStats(spots) {
         const callsigns = new Set();
-        const countries = new Set();
-        const continents = new Set();
+        const countries = new Map();
+        const continents = new Map();
+        const locators = new Map();
         let totalSNR = 0;
+        let minSNR = Infinity;
+        let maxSNR = -Infinity;
+        let totalDistance = 0;
+        let minDistance = Infinity;
+        let maxDistance = -Infinity;
+        let distanceCount = 0;
 
         spots.forEach(spot => {
             callsigns.add(spot.callsign);
-            if (spot.country) countries.add(spot.country);
-            if (spot.continent) continents.add(spot.continent);
             totalSNR += spot.snr;
+            minSNR = Math.min(minSNR, spot.snr);
+            maxSNR = Math.max(maxSNR, spot.snr);
+
+            // Count countries
+            if (spot.country) {
+                countries.set(spot.country, (countries.get(spot.country) || 0) + 1);
+            }
+
+            // Count continents
+            if (spot.continent) {
+                continents.set(spot.continent, (continents.get(spot.continent) || 0) + 1);
+            }
+
+            // Count locators
+            if (spot.locator) {
+                locators.set(spot.locator, (locators.get(spot.locator) || 0) + 1);
+            }
+
+            // Calculate distance statistics
+            if (spot.distance_km != null) {
+                totalDistance += spot.distance_km;
+                minDistance = Math.min(minDistance, spot.distance_km);
+                maxDistance = Math.max(maxDistance, spot.distance_km);
+                distanceCount++;
+            }
         });
 
-        return {
+        // Find most and least common items
+        const getMostCommon = (map) => {
+            if (map.size === 0) return null;
+            let maxCount = 0;
+            let maxValue = null;
+            for (const [value, count] of map.entries()) {
+                if (count > maxCount) {
+                    maxCount = count;
+                    maxValue = value;
+                }
+            }
+            return { value: maxValue, count: maxCount };
+        };
+
+        const getLeastCommon = (map) => {
+            if (map.size === 0) return null;
+            let minCount = Infinity;
+            let minValue = null;
+            for (const [value, count] of map.entries()) {
+                if (count < minCount) {
+                    minCount = count;
+                    minValue = value;
+                }
+            }
+            return { value: minValue, count: minCount };
+        };
+
+        const stats = {
             uniqueCallsigns: callsigns.size,
             uniqueCountries: countries.size,
             uniqueContinents: continents.size,
-            avgSNR: spots.length > 0 ? Math.round(totalSNR / spots.length) : 0
+            uniqueLocators: locators.size,
+            avgSNR: spots.length > 0 ? Math.round(totalSNR / spots.length) : 0,
+            minSNR: spots.length > 0 ? minSNR : 0,
+            maxSNR: spots.length > 0 ? maxSNR : 0,
+            hasDistance: distanceCount > 0,
+            mostCommonLocator: getMostCommon(locators),
+            mostCommonCountry: getMostCommon(countries),
+            mostCommonContinent: getMostCommon(continents),
+            leastCommonLocator: getLeastCommon(locators),
+            leastCommonCountry: getLeastCommon(countries),
+            leastCommonContinent: getLeastCommon(continents)
         };
+
+        if (distanceCount > 0) {
+            stats.minDistance = minDistance;
+            stats.maxDistance = maxDistance;
+            stats.avgDistance = totalDistance / distanceCount;
+        }
+
+        return stats;
     }
 
     function showStatus(message, type) {

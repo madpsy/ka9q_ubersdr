@@ -52,6 +52,41 @@ func formatOptionalFloat(val *float64) string {
 	return fmt.Sprintf("%.1f", *val)
 }
 
+// matchesDirection checks if a bearing matches a cardinal direction
+// Directions are divided into 45-degree sectors:
+// N: 337.5-22.5, NE: 22.5-67.5, E: 67.5-112.5, SE: 112.5-157.5
+// S: 157.5-202.5, SW: 202.5-247.5, W: 247.5-292.5, NW: 292.5-337.5
+func matchesDirection(bearing float64, direction string) bool {
+	// Normalize bearing to 0-360 range
+	for bearing < 0 {
+		bearing += 360
+	}
+	for bearing >= 360 {
+		bearing -= 360
+	}
+
+	switch direction {
+	case "N":
+		return bearing >= 337.5 || bearing < 22.5
+	case "NE":
+		return bearing >= 22.5 && bearing < 67.5
+	case "E":
+		return bearing >= 67.5 && bearing < 112.5
+	case "SE":
+		return bearing >= 112.5 && bearing < 157.5
+	case "S":
+		return bearing >= 157.5 && bearing < 202.5
+	case "SW":
+		return bearing >= 202.5 && bearing < 247.5
+	case "W":
+		return bearing >= 247.5 && bearing < 292.5
+	case "NW":
+		return bearing >= 292.5 && bearing < 337.5
+	default:
+		return false
+	}
+}
+
 // NewSpotsLogger creates a new spots logger
 func NewSpotsLogger(dataDir string, enabled bool) (*SpotsLogger, error) {
 	if !enabled {
@@ -210,12 +245,13 @@ func (sl *SpotsLogger) Close() error {
 // - band: Filter by calculated band (e.g., "20m", "40m") - empty for all bands
 // - name: Filter by decoder config name - empty for all names
 // - continent: Filter by continent code (AF, AS, EU, NA, OC, SA, AN) - empty for all
+// - direction: Filter by cardinal direction (N, NE, E, SE, S, SW, W, NW) - empty for all
 // - fromDate: Start date (YYYY-MM-DD)
 // - toDate: End date (YYYY-MM-DD) - empty for single day
 // - deduplicate: If true, only return unique callsign/locator combinations per day
 // - locatorsOnly: If true, only return spots that have a locator
 // - minDistanceKm: Minimum distance in km (0 = no filter)
-func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, continent, fromDate, toDate string, deduplicate, locatorsOnly bool, minDistanceKm float64) ([]SpotRecord, error) {
+func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, continent, direction, fromDate, toDate string, deduplicate, locatorsOnly bool, minDistanceKm float64) ([]SpotRecord, error) {
 	if !sl.enabled {
 		return nil, fmt.Errorf("spots logging is not enabled")
 	}
@@ -284,6 +320,13 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, continent, fromDate,
 				// Filter by minimum distance if specified
 				if minDistanceKm > 0 {
 					if spot.DistanceKm == nil || *spot.DistanceKm < minDistanceKm {
+						continue
+					}
+				}
+
+				// Filter by direction if specified
+				if direction != "" {
+					if spot.BearingDeg == nil || !matchesDirection(*spot.BearingDeg, direction) {
 						continue
 					}
 				}

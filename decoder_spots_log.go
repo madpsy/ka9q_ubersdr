@@ -125,8 +125,13 @@ func (sl *SpotsLogger) getOrCreateWriter(decode *DecodeInfo) (*csv.Writer, error
 
 	// Create file: base_dir/MODE/YYYY/MM/DD/bandname.csv
 	filename := filepath.Join(dirPath, fmt.Sprintf("%s.csv", decode.BandName))
+	
+	// Get absolute path for logging
+	absPath, _ := filepath.Abs(filename)
+	
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		log.Printf("ERROR: Failed to create/open CSV file %s: %v", absPath, err)
 		return nil, err
 	}
 
@@ -151,9 +156,9 @@ func (sl *SpotsLogger) getOrCreateWriter(decode *DecodeInfo) (*csv.Writer, error
 			return nil, fmt.Errorf("failed to write CSV header: %w", err)
 		}
 		writer.Flush()
-		log.Printf("Created new spots CSV file: %s", filename)
+		log.Printf("Created new spots CSV file: %s", absPath)
 	} else {
-		log.Printf("Opened existing spots CSV file: %s", filename)
+		log.Printf("Opened existing spots CSV file: %s", absPath)
 	}
 
 	return writer, nil

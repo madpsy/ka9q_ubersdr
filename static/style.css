@@ -707,12 +707,12 @@ button:disabled {
     transform: none;
 }
 
-button:not(.primary-btn):not(:disabled) {
+button:not(.primary-btn):not(:disabled):not(.band-conditions-button):not(.digital-spots-button) {
     background: #28a745;
     color: white;
 }
 
-button:not(.primary-btn):not(:disabled):hover {
+button:not(.primary-btn):not(:disabled):not(.band-conditions-button):not(.digital-spots-button):hover {
     background: #218838;
     transform: translateY(-2px);
 }

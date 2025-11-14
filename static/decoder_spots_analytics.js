@@ -326,7 +326,7 @@
             `;
         });
 
-        card.innerHTML = headerHTML + bandsHTML;
+        card.innerHTML = headerHTML + '<div class="bands-container">' + bandsHTML + '</div>';
         return card;
     }
 

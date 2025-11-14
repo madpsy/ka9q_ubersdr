@@ -180,30 +180,21 @@ h1 {
 }
 
 /* When showing single entity, display bands in a grid */
-.entity-card:only-child .band-info {
-    display: inline-block;
-    width: calc(50% - 10px);
-    margin-right: 10px;
-    vertical-align: top;
-}
-
-.entity-card:only-child .band-info:nth-child(2n) {
-    margin-right: 0;
+.entity-card:only-child .bands-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
 }
 
 @media (min-width: 1200px) {
-    .entity-card:only-child .band-info {
-        width: calc(33.333% - 14px);
-        margin-right: 14px;
+    .entity-card:only-child .bands-container {
+        grid-template-columns: repeat(3, 1fr);
     }
-    
-    .entity-card:only-child .band-info:nth-child(2n) {
-        margin-right: 14px;
-    }
-    
-    .entity-card:only-child .band-info:nth-child(3n) {
-        margin-right: 0;
-    }
+}
+
+/* Reset band-info margin when in grid */
+.entity-card:only-child .band-info {
+    margin-bottom: 0;
 }
 
 .entity-card {

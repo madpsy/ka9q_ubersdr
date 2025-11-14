@@ -213,6 +213,14 @@ h1 {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 6px;
     border-left: 3px solid #2196F3;
+    transition: all 0.3s ease;
+}
+
+.band-info-best {
+    background: rgba(76, 175, 80, 0.15);
+    border-left: 4px solid #4CAF50;
+    box-shadow: 0 0 12px rgba(76, 175, 80, 0.3);
+    transform: scale(1.02);
 }
 
 .band-header {
@@ -262,6 +270,15 @@ h1 {
     border-radius: 4px;
     font-size: 0.85em;
     font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.hour-badge-best {
+    background: rgba(255, 193, 7, 0.5);
+    border: 2px solid rgba(255, 193, 7, 1);
+    font-weight: 700;
+    box-shadow: 0 0 8px rgba(255, 193, 7, 0.6);
+    transform: scale(1.05);
 }
 
 /* Hourly Chart */

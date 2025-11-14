@@ -282,12 +282,24 @@
             </div>
         `;
 
+        // Find the band with most spots
+        const maxBandSpots = Math.max(...entity.bands.map(b => b.spots));
+
         let bandsHTML = '';
         entity.bands.forEach(band => {
+            const isBestBand = band.spots === maxBandSpots;
             const avgSNR = band.avg_snr >= 0 ? `+${band.avg_snr.toFixed(1)}` : band.avg_snr.toFixed(1);
             
+            // Find the hour with most spots
+            const hourCounts = Object.entries(band.hourly_distribution).map(([hour, count]) => ({
+                hour: parseInt(hour),
+                count: count
+            }));
+            const maxCount = Math.max(...hourCounts.map(h => h.count));
+            const bestHour = hourCounts.find(h => h.count === maxCount)?.hour;
+            
             bandsHTML += `
-                <div class="band-info">
+                <div class="band-info${isBestBand ? ' band-info-best' : ''}">
                     <div class="band-header">
                         <span class="band-name">${band.band}</span>
                         <span class="band-spots">${band.spots.toLocaleString()} spots</span>
@@ -296,9 +308,10 @@
                     <div class="best-hours">
                         <strong>Best Hours (UTC):</strong>
                         <div class="hour-badges">
-                            ${band.best_hours_utc.map(hour => 
-                                `<span class="hour-badge">${String(hour).padStart(2, '0')}:00</span>`
-                            ).join('')}
+                            ${band.best_hours_utc.map(hour => {
+                                const isBest = hour === bestHour;
+                                return `<span class="hour-badge${isBest ? ' hour-badge-best' : ''}">${String(hour).padStart(2, '0')}:00</span>`;
+                            }).join('')}
                         </div>
                     </div>
                     ${createHourlyChart(band.hourly_distribution)}
@@ -356,7 +369,7 @@
                 const data = await response.json();
                 if (data.receiver && data.receiver.name) {
                     document.getElementById('receiver-name').textContent =
-                        `${data.receiver.name} - Propagation Analysis`;
+                        `${data.receiver.name}`;
                 }
                 if (data.version) {
                     document.getElementById('footer-version').textContent = `• v${data.version}`;

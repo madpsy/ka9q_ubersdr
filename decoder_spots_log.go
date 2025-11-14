@@ -353,8 +353,9 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 				}
 
 				if deduplicate {
-					// Create dedup key: callsign+locator+date
-					dedupKey := fmt.Sprintf("%s|%s|%s", spot.Callsign, spot.Locator, dateStr)
+					// Create dedup key: callsign+locator+band+mode+date
+					// This allows the same callsign/locator to appear on different bands/modes
+					dedupKey := fmt.Sprintf("%s|%s|%s|%s|%s", spot.Callsign, spot.Locator, spot.Band, spot.Mode, dateStr)
 
 					// Check if we've seen this combination before
 					if existingSpot, exists := seenSpots[dedupKey]; exists {

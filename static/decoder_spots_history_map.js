@@ -187,14 +187,11 @@ class DecoderSpotsHistoryMap {
     clearMarkers() {
         if (!this.map) return;
 
-        console.log('[Map] Clearing markers, current count:', this.markers.size);
-
         // Remove all markers from map
         this.markers.forEach((data, key) => {
             if (data.marker) {
                 try {
                     this.map.removeLayer(data.marker);
-                    console.log('[Map] Removed marker:', key);
                 } catch (e) {
                     console.warn('[Map] Error removing marker:', key, e);
                 }
@@ -213,13 +210,10 @@ class DecoderSpotsHistoryMap {
             // Remove everything else (spot markers)
             try {
                 this.map.removeLayer(layer);
-                console.log('[Map] Removed orphaned layer');
             } catch (e) {
                 console.warn('[Map] Error removing orphaned layer:', e);
             }
         });
-
-        console.log('[Map] Markers cleared, remaining count:', this.markers.size);
     }
 
     /**
@@ -232,14 +226,11 @@ class DecoderSpotsHistoryMap {
             return;
         }
 
-        console.log('[Map] addSpots called with', spots.length, 'spots');
-
         // Clear existing markers
         this.clearMarkers();
 
         // Add new markers
         spots.forEach(spot => {
-            console.log('[Map] Adding spot:', spot.callsign, spot.band, spot.mode);
             if (!spot.locator) return;
 
             // Convert grid locator to coordinates

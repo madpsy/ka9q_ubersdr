@@ -244,6 +244,8 @@ func (sl *SpotsLogger) Close() error {
 // - mode: Filter by mode (FT8, FT4, WSPR) - empty for all modes
 // - band: Filter by calculated band (e.g., "20m", "40m") - empty for all bands
 // - name: Filter by decoder config name - empty for all names
+// - callsign: Filter by exact callsign match - empty for all callsigns
+// - locator: Filter by exact locator match - empty for all locators
 // - continent: Filter by continent code (AF, AS, EU, NA, OC, SA, AN) - empty for all
 // - direction: Filter by cardinal direction (N, NE, E, SE, S, SW, W, NW) - empty for all
 // - fromDate: Start date (YYYY-MM-DD)
@@ -251,7 +253,7 @@ func (sl *SpotsLogger) Close() error {
 // - deduplicate: If true, only return unique callsign/locator combinations per day
 // - locatorsOnly: If true, only return spots that have a locator
 // - minDistanceKm: Minimum distance in km (0 = no filter)
-func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, continent, direction, fromDate, toDate string, deduplicate, locatorsOnly bool, minDistanceKm float64) ([]SpotRecord, error) {
+func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate string, deduplicate, locatorsOnly bool, minDistanceKm float64) ([]SpotRecord, error) {
 	if !sl.enabled {
 		return nil, fmt.Errorf("spots logging is not enabled")
 	}
@@ -304,6 +306,16 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, continent, direction
 			for _, spot := range spots {
 				// Filter by calculated band if specified
 				if band != "" && spot.Band != band {
+					continue
+				}
+
+				// Filter by exact callsign match if specified
+				if callsign != "" && spot.Callsign != callsign {
+					continue
+				}
+
+				// Filter by exact locator match if specified
+				if locator != "" && spot.Locator != locator {
 					continue
 				}
 

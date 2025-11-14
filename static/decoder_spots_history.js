@@ -40,8 +40,32 @@
         const bandSelect = document.getElementById('band-select');
         const nameSelect = document.getElementById('name-select');
         const dedupCheckbox = document.getElementById('dedup-checkbox');
+        const callsignInput = document.getElementById('callsign-input');
+        const locatorInput = document.getElementById('locator-input');
 
         loadBtn.addEventListener('click', loadSpots);
+
+        // Add callsign input validation
+        callsignInput.addEventListener('input', function(e) {
+            // Convert to uppercase and remove non-alphanumeric characters
+            let value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            // Limit to 6 characters
+            if (value.length > 6) {
+                value = value.substring(0, 6);
+            }
+            e.target.value = value;
+        });
+
+        // Add locator input validation (Maidenhead grid locator format)
+        locatorInput.addEventListener('input', function(e) {
+            // Convert to uppercase and remove non-alphanumeric characters
+            let value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            // Limit to 6 characters
+            if (value.length > 6) {
+                value = value.substring(0, 6);
+            }
+            e.target.value = value;
+        });
 
         // Populate band select with common bands
         commonBands.forEach(band => {
@@ -243,11 +267,27 @@
         const mode = document.getElementById('mode-select').value;
         const band = document.getElementById('band-select').value;
         const name = document.getElementById('name-select').value;
+        const callsign = document.getElementById('callsign-input').value.trim().toUpperCase();
+        const locator = document.getElementById('locator-input').value.trim().toUpperCase();
         const continent = document.getElementById('continent-select').value;
         const direction = document.getElementById('direction-select').value;
         const dedup = document.getElementById('dedup-checkbox').checked;
         const locatorsOnly = document.getElementById('locators-only-checkbox').checked;
         const minDistance = document.getElementById('min-distance-select').value;
+
+        // Validate callsign if provided
+        if (callsign && !/^[A-Z0-9]{1,6}$/.test(callsign)) {
+            showStatus('Invalid callsign format. Use 1-6 alphanumeric characters only.', 'error');
+            document.getElementById('load-btn').disabled = false;
+            return;
+        }
+
+        // Validate locator if provided (Maidenhead format: 2 letters, 2 digits, optional 2 letters)
+        if (locator && !/^[A-R]{2}[0-9]{2}([A-X]{2})?$/.test(locator)) {
+            showStatus('Invalid locator format. Use Maidenhead grid format (e.g., FN20, FN20xr).', 'error');
+            document.getElementById('load-btn').disabled = false;
+            return;
+        }
 
         showStatus('Loading spots...', '');
         document.getElementById('load-btn').disabled = true;
@@ -257,6 +297,8 @@
             if (mode) url += `&mode=${mode}`;
             if (band) url += `&band=${band}`;
             if (name) url += `&name=${name}`;
+            if (callsign) url += `&callsign=${encodeURIComponent(callsign)}`;
+            if (locator) url += `&locator=${encodeURIComponent(locator)}`;
             if (continent) url += `&continent=${continent}`;
             if (direction) url += `&direction=${direction}`;
             if (dedup) url += `&dedup=true`;

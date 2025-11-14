@@ -74,6 +74,7 @@
     function clearFilters() {
         document.getElementById('country-search').value = '';
         document.getElementById('continent-select').value = '';
+        document.getElementById('mode-select').value = 'FT8';
         document.getElementById('min-snr-select').value = '0';
         document.getElementById('hours-select').value = '24';
         showStatus('Filters cleared', 'success');

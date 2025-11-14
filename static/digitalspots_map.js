@@ -1887,33 +1887,21 @@ class DigitalSpotsMap {
 
         if (this.liveMessages.length === 0) {
             content.innerHTML = '<div class="live-messages-empty">Waiting for spots...</div>';
-            if (countEl) countEl.textContent = '(0)';
+            if (countEl) countEl.textContent = '0';
             if (paginationDiv) paginationDiv.style.display = 'none';
             return;
         }
 
         if (filteredMessages.length === 0) {
             content.innerHTML = '<div class="live-messages-empty">No matching callsigns</div>';
-            if (countEl) countEl.textContent = `(0 / ${this.liveMessages.length})`;
+            if (countEl) countEl.textContent = '0';
             if (paginationDiv) paginationDiv.style.display = 'none';
             return;
         }
 
-        // Update count - show filtered/total if any filters are active
+        // Update count - show only the filtered count
         if (countEl) {
-            const hasActiveFilters = this.liveMessagesCallsignFilter ||
-                                    this.modeFilter !== 'all' ||
-                                    this.bandFilter !== 'all' ||
-                                    this.countryFilter !== 'all' ||
-                                    this.continentFilter !== 'all' ||
-                                    this.snrFilter !== 'none' ||
-                                    this.ageFilter !== 'none';
-            
-            if (hasActiveFilters && filteredMessages.length !== this.liveMessages.length) {
-                countEl.textContent = `(${filteredMessages.length} / ${this.liveMessages.length})`;
-            } else {
-                countEl.textContent = `(${this.liveMessages.length})`;
-            }
+            countEl.textContent = `${filteredMessages.length}`;
         }
 
         // Calculate pagination

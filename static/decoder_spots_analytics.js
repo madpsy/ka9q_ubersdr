@@ -151,6 +151,8 @@
             country = normalizedCountry; // Use the exact name from the list
         }
 
+        // Hide data container and show loading spinner
+        document.getElementById('data-container').style.display = 'none';
         showStatus('Loading analytics...', '', true);
         document.getElementById('load-btn').disabled = true;
 

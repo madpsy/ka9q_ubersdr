@@ -661,6 +661,8 @@
             return;
         }
 
+        // Hide data container and show loading spinner
+        document.getElementById('data-container').style.display = 'none';
         showStatus('Loading spots...', '', true);
         document.getElementById('load-btn').disabled = true;
 

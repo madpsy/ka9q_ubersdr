@@ -749,7 +749,9 @@ func escapeCSVField(field string) string {
 type BandAnalytics struct {
 	Band               string         `json:"band"`
 	Spots              int            `json:"spots"`
+	MinSNR             float64        `json:"min_snr"`
 	AvgSNR             float64        `json:"avg_snr"`
+	MaxSNR             float64        `json:"max_snr"`
 	BestHoursUTC       []int          `json:"best_hours_utc"`
 	HourlyDistribution map[string]int `json:"hourly_distribution"`
 }
@@ -871,6 +873,8 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent string, 
 		if countryData[spot.Country][spot.Band] == nil {
 			countryData[spot.Country][spot.Band] = &bandAggregator{
 				hourly: make(map[int]int),
+				minSNR: float64(spot.SNR),
+				maxSNR: float64(spot.SNR),
 			}
 		}
 
@@ -883,6 +887,8 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent string, 
 			if continentData[spot.Continent][spot.Band] == nil {
 				continentData[spot.Continent][spot.Band] = &bandAggregator{
 					hourly: make(map[int]int),
+					minSNR: float64(spot.SNR),
+					maxSNR: float64(spot.SNR),
 				}
 			}
 			continentCountries[spot.Continent][spot.Country] = true
@@ -899,6 +905,12 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent string, 
 		agg := countryData[spot.Country][spot.Band]
 		agg.count++
 		agg.totalSNR += float64(spot.SNR)
+		if float64(spot.SNR) < agg.minSNR {
+			agg.minSNR = float64(spot.SNR)
+		}
+		if float64(spot.SNR) > agg.maxSNR {
+			agg.maxSNR = float64(spot.SNR)
+		}
 		agg.hourly[hour]++
 
 		// Aggregate continent data
@@ -906,6 +918,12 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent string, 
 			contAgg := continentData[spot.Continent][spot.Band]
 			contAgg.count++
 			contAgg.totalSNR += float64(spot.SNR)
+			if float64(spot.SNR) < contAgg.minSNR {
+				contAgg.minSNR = float64(spot.SNR)
+			}
+			if float64(spot.SNR) > contAgg.maxSNR {
+				contAgg.maxSNR = float64(spot.SNR)
+			}
 			contAgg.hourly[hour]++
 		}
 	}
@@ -940,7 +958,9 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent string, 
 			bandAnalytics := BandAnalytics{
 				Band:               band,
 				Spots:              agg.count,
+				MinSNR:             agg.minSNR,
 				AvgSNR:             agg.totalSNR / float64(agg.count),
+				MaxSNR:             agg.maxSNR,
 				BestHoursUTC:       findBestHours(agg.hourly, 5),
 				HourlyDistribution: formatHourlyDistribution(agg.hourly),
 			}
@@ -980,7 +1000,9 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent string, 
 			bandAnalytics := BandAnalytics{
 				Band:               band,
 				Spots:              agg.count,
+				MinSNR:             agg.minSNR,
 				AvgSNR:             agg.totalSNR / float64(agg.count),
+				MaxSNR:             agg.maxSNR,
 				BestHoursUTC:       findBestHours(agg.hourly, 5),
 				HourlyDistribution: formatHourlyDistribution(agg.hourly),
 			}
@@ -1009,10 +1031,12 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent string, 
 type bandAggregator struct {
 	count    int
 	totalSNR float64
+	minSNR   float64
+	maxSNR   float64
 	hourly   map[int]int
 }
 
-// findBestHours returns the top N hours with most spots
+// findBestHours returns the top N hours with most spots (only hours with count > 0)
 func findBestHours(hourly map[int]int, topN int) []int {
 	type hourCount struct {
 		hour  int
@@ -1021,7 +1045,10 @@ func findBestHours(hourly map[int]int, topN int) []int {
 
 	hours := make([]hourCount, 0, len(hourly))
 	for hour, count := range hourly {
-		hours = append(hours, hourCount{hour, count})
+		// Only include hours that have spots
+		if count > 0 {
+			hours = append(hours, hourCount{hour, count})
+		}
 	}
 
 	// Sort by count descending
@@ -1032,7 +1059,7 @@ func findBestHours(hourly map[int]int, topN int) []int {
 		return hours[i].count > hours[j].count
 	})
 
-	// Get top N hours
+	// Get top N hours (or fewer if there aren't N hours with spots)
 	result := make([]int, 0, topN)
 	for i := 0; i < len(hours) && i < topN; i++ {
 		result = append(result, hours[i].hour)

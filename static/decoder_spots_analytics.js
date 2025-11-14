@@ -303,22 +303,19 @@
         let bandsHTML = '';
         entity.bands.forEach(band => {
             const isBestBand = band.spots === maxBandSpots;
+            const minSNR = band.min_snr >= 0 ? `+${band.min_snr.toFixed(1)}` : band.min_snr.toFixed(1);
             const avgSNR = band.avg_snr >= 0 ? `+${band.avg_snr.toFixed(1)}` : band.avg_snr.toFixed(1);
+            const maxSNR = band.max_snr >= 0 ? `+${band.max_snr.toFixed(1)}` : band.max_snr.toFixed(1);
 
-            // Get sorted hours by spot count
-            const hourCounts = Object.entries(band.hourly_distribution).map(([hour, count]) => ({
-                hour: parseInt(hour),
-                count: count
-            })).sort((a, b) => b.count - a.count);
+            // Use backend's best_hours_utc (top 5) and collate into ranges for "Best Hours"
+            const bestHourRanges = collateContiguousHours(band.best_hours_utc);
 
-            // Get top 3 hours for "Best Hours"
-            const top3Hours = hourCounts.slice(0, 3).map(h => h.hour).sort((a, b) => a - b);
-
-            // Collate contiguous hours for "Active Hours"
-            const activeHours = band.best_hours_utc.sort((a, b) => a - b);
-            console.log(`Band ${band.band} - Active hours:`, activeHours);
-            const hourRanges = collateContiguousHours(activeHours);
-            console.log(`Band ${band.band} - Hour ranges:`, hourRanges);
+            // Get ALL hours with activity for "Active Hours" from hourly_distribution
+            const activeHours = Object.entries(band.hourly_distribution)
+                .filter(([hour, count]) => count > 0)
+                .map(([hour, count]) => parseInt(hour))
+                .sort((a, b) => a - b);
+            const activeHourRanges = collateContiguousHours(activeHours);
 
             bandsHTML += `
                 <div class="band-info${isBestBand ? ' band-info-best' : ''}">
@@ -326,19 +323,19 @@
                         <span class="band-name">${band.band}</span>
                         <span class="band-spots">${band.spots.toLocaleString()} spots</span>
                     </div>
-                    <div class="band-snr">Avg SNR: ${avgSNR} dB</div>
+                    <div class="band-snr">SNR: Min ${minSNR} dB • Avg ${avgSNR} dB • Max ${maxSNR} dB</div>
                     <div class="best-hours">
                         <strong>Best Hours (UTC):</strong>
                         <div class="hour-badges">
-                            ${top3Hours.map(hour => {
-                                return `<span class="hour-badge hour-badge-best">${String(hour).padStart(2, '0')}:00</span>`;
+                            ${bestHourRanges.map(range => {
+                                return `<span class="hour-badge hour-badge-best">${range}</span>`;
                             }).join('')}
                         </div>
                     </div>
                     <div class="active-hours">
                         <strong>Active Hours (UTC):</strong>
                         <div class="hour-badges">
-                            ${hourRanges.map(range => {
+                            ${activeHourRanges.map(range => {
                                 return `<span class="hour-badge">${range}</span>`;
                             }).join('')}
                         </div>

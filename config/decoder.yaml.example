@@ -31,6 +31,13 @@ decoder:
   pskreporter_enabled: false  # Enable PSKReporter spot reporting
   wsprnet_enabled: false      # Enable WSPRNet spot reporting
   
+  # CSV Logging (independent of reporting services)
+  # Logs all decoded spots to daily CSV files in YYYY/MM/DD/spots.csv format
+  spots_log_enabled: true           # Enable CSV logging of all spots
+  spots_log_data_dir: "decoder_spots"  # Directory for CSV files (relative or absolute, default: data_dir/spots)
+                                    # If relative path, created relative to config directory
+                                    # Files organized as: decoder_spots/YYYY/MM/DD/spots.csv
+  
   # Band configurations
   # Each band creates a dedicated audio channel for decoding
   bands:
@@ -193,10 +200,10 @@ decoder:
 # 2. Each enabled band creates a dedicated audio channel
 #    consuming ~12 kHz bandwidth
 #
-# 3. Decoded spots are logged to:
-#    - decoder_data/FT8_<frequency>.log
-#    - decoder_data/FT4_<frequency>.log
-#    - decoder_data/WSPR_<frequency>.log
+# 3. CSV logging (if enabled):
+#    - Logs all spots to: spots_log_dir/YYYY/MM/DD/spots.csv
+#    - Independent of PSKReporter/WSPRNet reporting
+#    - Includes: timestamp, mode, callsign, locator, SNR, frequency, message, country, zones
 #
 # 4. WAV files are stored in:
 #    - decoder_data/<frequency>/YYMMDD_HHMMSS.wav

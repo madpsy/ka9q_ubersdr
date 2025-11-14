@@ -20,6 +20,7 @@ type DecodeInfo struct {
 	Timestamp  time.Time
 	Mode       string // "FT8", "FT4", "WSPR"
 	Message    string
+	BandName   string // Name of the decoder band (e.g., "20m_FT8")
 
 	// WSPR-specific fields
 	DT          float32 // Time drift in seconds

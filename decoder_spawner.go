@@ -144,7 +144,7 @@ func (ds *DecoderSpawner) ProcessDecoderOutput(outputFile string, band *DecoderB
 	time.Sleep(100 * time.Millisecond)
 
 	// Parse the output file
-	decodes, err := ParseDecoderLog(outputFile, band.Config.Frequency, band.Config.Mode)
+	decodes, err := ParseDecoderLog(outputFile, band.Config.Frequency, band.Config.Mode, band.Config.Name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse decoder output: %w", err)
 	}

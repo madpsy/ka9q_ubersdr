@@ -152,6 +152,10 @@ type DecoderConfig struct {
 	PSKReporterEnabled bool `yaml:"pskreporter_enabled"`
 	WSPRNetEnabled     bool `yaml:"wsprnet_enabled"`
 
+	// CSV Logging (independent of reporting)
+	SpotsLogEnabled bool   `yaml:"spots_log_enabled"` // Enable CSV logging of all spots
+	SpotsLogDataDir string `yaml:"spots_log_data_dir"` // Directory for spots CSV files (relative or absolute, default: data_dir/spots)
+
 	// Band configurations
 	Bands []DecoderBandConfig `yaml:"bands"`
 }

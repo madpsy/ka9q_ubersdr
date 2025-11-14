@@ -315,7 +315,7 @@ func isValidGridLocatorForMode(s string, mode DecoderMode) bool {
 }
 
 // ParseDecoderLog reads and parses a decoder log file
-func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode) ([]*DecodeInfo, error) {
+func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode, bandName string) ([]*DecodeInfo, error) {
 	if DebugMode || mode == ModeFT4 {
 		log.Printf("DEBUG: ParseDecoderLog called for %s mode, file: %s", mode.String(), filename)
 	}
@@ -366,6 +366,9 @@ func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode) ([]*Dec
 		}
 
 		parsedCount++
+
+		// Set band name for all decoded spots
+		info.BandName = bandName
 
 		// Only include decodes with valid callsigns
 		if info.HasCallsign {

@@ -2370,6 +2370,27 @@
             wsprNetField.appendChild(wsprSmall);
             reportingSection.appendChild(wsprNetField);
 
+            // CSV Logging subsection
+            const csvLoggingTitle = document.createElement('h4');
+            csvLoggingTitle.textContent = 'CSV Logging';
+            csvLoggingTitle.style.marginTop = '20px';
+            csvLoggingTitle.style.marginBottom = '10px';
+            csvLoggingTitle.style.color = '#555';
+            reportingSection.appendChild(csvLoggingTitle);
+
+            const spotsLogEnabledField = createConfigField('CSV Logging Enabled', 'checkbox', currentDecoderConfig.spots_log_enabled || false, 'spots_log_enabled');
+            const spotsLogSmall = document.createElement('small');
+            spotsLogSmall.textContent = 'Log all decoded spots to daily CSV files (independent of PSKReporter/WSPRNet)';
+            spotsLogEnabledField.appendChild(spotsLogSmall);
+            reportingSection.appendChild(spotsLogEnabledField);
+
+            const spotsLogDataDirField = createConfigField('CSV Log Directory', 'text', currentDecoderConfig.spots_log_data_dir || '', 'spots_log_data_dir');
+            spotsLogDataDirField.querySelector('input').placeholder = 'e.g., decoder_spots (relative) or /var/log/spots (absolute)';
+            const spotsLogDirSmall = document.createElement('small');
+            spotsLogDirSmall.textContent = 'Directory for CSV log files. Can be relative (to config directory) or absolute path. Leave empty to use data_dir/spots';
+            spotsLogDataDirField.appendChild(spotsLogDirSmall);
+            reportingSection.appendChild(spotsLogDataDirField);
+
             container.appendChild(reportingSection);
 
             // Bands section

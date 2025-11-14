@@ -27,6 +27,9 @@ type MultiDecoder struct {
 	pskReporter *PSKReporter
 	wsprNet     *WSPRNet
 
+	// CSV logger
+	spotsLogger *SpotsLogger
+
 	// Statistics
 	stats *DecoderStats
 
@@ -95,6 +98,24 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 			return nil, fmt.Errorf("failed to initialize WSPRNet: %w", err)
 		}
 		md.wsprNet = wspr
+	}
+
+	// Initialize spots logger (independent of reporting)
+	if config.SpotsLogEnabled {
+		// spots_log_data_dir can be relative or absolute (like spaceweather data_dir)
+		logDir := config.SpotsLogDataDir
+		if logDir == "" {
+			logDir = filepath.Join(config.DataDir, "spots")
+		} else if !filepath.IsAbs(logDir) {
+			// If relative path, make it relative to config directory (like spaceweather)
+			logDir = filepath.Join(filepath.Dir(config.DataDir), logDir)
+		}
+		logger, err := NewSpotsLogger(logDir, true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize spots logger: %w", err)
+		}
+		md.spotsLogger = logger
+		log.Printf("Spots CSV logging enabled: %s", logDir)
 	}
 
 	return md, nil
@@ -482,6 +503,13 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 					md.prometheusMetrics.RecordDigitalDecode(decode.Mode, band.Config.Name, decode.Callsign, cycleSeconds)
 				}
 
+				// Log to CSV (independent of reporting)
+				if md.spotsLogger != nil {
+					if err := md.spotsLogger.LogSpot(decode); err != nil {
+						log.Printf("Warning: Failed to log spot to CSV: %v", err)
+					}
+				}
+
 				// Notify callback for websocket broadcasting
 				md.notifyDecode(*decode)
 
@@ -561,6 +589,13 @@ func (md *MultiDecoder) Stop() {
 
 	if md.wsprNet != nil {
 		md.wsprNet.Stop()
+	}
+
+	// Close spots logger
+	if md.spotsLogger != nil {
+		if err := md.spotsLogger.Close(); err != nil {
+			log.Printf("Warning: Failed to close spots logger: %v", err)
+		}
 	}
 
 	log.Printf("Multi-decoder stopped (%d bands cleaned up)", len(md.decoderBands))

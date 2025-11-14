@@ -327,8 +327,19 @@
 
             // Use backend's best_hours_utc (top 3) and collate into ranges for "Best Hours"
             const bestHourRanges = collateContiguousHours(band.best_hours_utc);
-            // Get the top hour (first in the sorted array) for special highlighting
-            const topHour = band.best_hours_utc.length > 0 ? band.best_hours_utc[0] : null;
+            // Find the actual top hour by checking which has the most spots in hourly_distribution
+            let topHour = null;
+            let maxSpots = 0;
+            if (band.best_hours_utc.length > 0) {
+                band.best_hours_utc.forEach(hour => {
+                    const hourKey = String(hour).padStart(2, '0');
+                    const spots = band.hourly_distribution[hourKey] || 0;
+                    if (spots > maxSpots) {
+                        maxSpots = spots;
+                        topHour = hour;
+                    }
+                });
+            }
 
             // Get ALL hours with activity for "Active Hours" from hourly_distribution
             const activeHours = Object.entries(band.hourly_distribution)

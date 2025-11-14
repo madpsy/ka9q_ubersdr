@@ -167,6 +167,44 @@ h1 {
     border-bottom: 2px solid rgba(255, 255, 255, 0.2);
 }
 
+.spots-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    transition: background 0.2s;
+}
+
+.spots-table th.sortable:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.spots-table th.sortable .sort-arrows {
+    opacity: 0.3;
+    font-size: 0.8em;
+    margin-left: 5px;
+}
+
+.spots-table th.sortable:hover .sort-arrows {
+    opacity: 0.6;
+}
+
+.spots-table th.sortable.sort-asc .sort-arrows::before {
+    content: '▲';
+    opacity: 1;
+    color: #4CAF50;
+}
+
+.spots-table th.sortable.sort-desc .sort-arrows::before {
+    content: '▼';
+    opacity: 1;
+    color: #4CAF50;
+}
+
+.spots-table th.sortable.sort-asc .sort-arrows,
+.spots-table th.sortable.sort-desc .sort-arrows {
+    opacity: 1;
+}
+
 .spots-table td {
     padding: 10px 12px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);

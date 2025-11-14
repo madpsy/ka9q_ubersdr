@@ -366,6 +366,11 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 		currentDate = currentDate.AddDate(0, 0, 1)
 	}
 
+	// Sort spots by timestamp in descending order (newest first)
+	sort.Slice(allSpots, func(i, j int) bool {
+		return allSpots[i].Timestamp > allSpots[j].Timestamp
+	})
+
 	return allSpots, nil
 }
 

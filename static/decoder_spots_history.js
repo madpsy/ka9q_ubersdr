@@ -8,6 +8,8 @@
     let currentData = null;
     let currentPage = 1;
     let recordsPerPage = 100;
+    let sortColumn = 'timestamp';
+    let sortDirection = 'desc'; // Start with newest first
 
     // Common HF band names (excluding VHF/UHF)
     const commonBands = [
@@ -54,6 +56,24 @@
             recordsPerPage = value === 'all' ? Infinity : parseInt(value);
             currentPage = 1;
             if (currentData) {
+                displaySpots(currentData);
+            }
+        });
+
+        // Add click handlers to sortable table headers
+        document.addEventListener('click', function(e) {
+            const th = e.target.closest('th.sortable');
+            if (th && currentData) {
+                const column = th.dataset.column;
+                if (sortColumn === column) {
+                    // Toggle direction if same column
+                    sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    // New column, default to ascending
+                    sortColumn = column;
+                    sortDirection = 'asc';
+                }
+                currentPage = 1; // Reset to first page when sorting
                 displaySpots(currentData);
             }
         });
@@ -370,6 +390,12 @@
         const statsGrid = document.getElementById('stats-grid');
         const tbody = document.getElementById('spots-tbody');
 
+        // Sort the data
+        const sortedSpots = sortSpots([...data.spots], sortColumn, sortDirection);
+
+        // Update sort indicators in table headers
+        updateSortIndicators();
+
         // Calculate pagination
         const totalRecords = data.spots.length;
         const totalPages = recordsPerPage === Infinity ? 1 : Math.ceil(totalRecords / recordsPerPage);
@@ -382,7 +408,7 @@
         // Calculate start and end indices for current page
         const startIndex = (currentPage - 1) * recordsPerPage;
         const endIndex = recordsPerPage === Infinity ? totalRecords : Math.min(startIndex + recordsPerPage, totalRecords);
-        const pageSpots = data.spots.slice(startIndex, endIndex);
+        const pageSpots = sortedSpots.slice(startIndex, endIndex);
 
         // Update pagination info
         const paginationInfo = document.getElementById('pagination-info');
@@ -584,13 +610,106 @@
         container.style.display = 'block';
     }
 
+    function sortSpots(spots, column, direction) {
+        return spots.sort((a, b) => {
+            let aVal, bVal;
+
+            // Get values based on column
+            switch(column) {
+                case 'timestamp':
+                    aVal = a.timestamp;
+                    bVal = b.timestamp;
+                    break;
+                case 'mode':
+                    aVal = a.mode;
+                    bVal = b.mode;
+                    break;
+                case 'band':
+                    aVal = a.band;
+                    bVal = b.band;
+                    break;
+                case 'name':
+                    aVal = a.name || '';
+                    bVal = b.name || '';
+                    break;
+                case 'callsign':
+                    aVal = a.callsign;
+                    bVal = b.callsign;
+                    break;
+                case 'locator':
+                    aVal = a.locator || '';
+                    bVal = b.locator || '';
+                    break;
+                case 'snr':
+                    aVal = a.snr;
+                    bVal = b.snr;
+                    break;
+                case 'frequency':
+                    aVal = a.frequency;
+                    bVal = b.frequency;
+                    break;
+                case 'distance_km':
+                    aVal = a.distance_km || 0;
+                    bVal = b.distance_km || 0;
+                    break;
+                case 'bearing_deg':
+                    aVal = a.bearing_deg || 0;
+                    bVal = b.bearing_deg || 0;
+                    break;
+                case 'country':
+                    aVal = a.country || '';
+                    bVal = b.country || '';
+                    break;
+                case 'continent':
+                    aVal = a.continent || '';
+                    bVal = b.continent || '';
+                    break;
+                default:
+                    return 0;
+            }
+
+            // Compare values
+            let comparison = 0;
+            if (typeof aVal === 'string') {
+                comparison = aVal.localeCompare(bVal);
+            } else {
+                comparison = aVal - bVal;
+            }
+
+            return direction === 'asc' ? comparison : -comparison;
+        });
+    }
+
+    function updateSortIndicators() {
+        // Remove all sort classes
+        document.querySelectorAll('th.sortable').forEach(th => {
+            th.classList.remove('sort-asc', 'sort-desc');
+        });
+
+        // Add sort class to current column
+        const currentTh = document.querySelector(`th.sortable[data-column="${sortColumn}"]`);
+        if (currentTh) {
+            currentTh.classList.add(sortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    }
+
     function renderPaginationButtons(totalPages) {
-        const buttonsContainer = document.getElementById('pagination-buttons');
-        buttonsContainer.innerHTML = '';
+        const buttonsContainerTop = document.getElementById('pagination-buttons');
+        const buttonsContainerBottom = document.getElementById('pagination-buttons-bottom');
+        
+        buttonsContainerTop.innerHTML = '';
+        buttonsContainerBottom.innerHTML = '';
 
         if (totalPages <= 1) {
             return; // No pagination needed
         }
+
+        // Render buttons in both locations
+        renderPaginationButtonsInContainer(buttonsContainerTop, totalPages);
+        renderPaginationButtonsInContainer(buttonsContainerBottom, totalPages);
+    }
+
+    function renderPaginationButtonsInContainer(buttonsContainer, totalPages) {
 
         // Previous button
         const prevBtn = document.createElement('button');

@@ -164,18 +164,18 @@
                 <table class="spots-table" id="spots-table">
                     <thead>
                         <tr>
-                            <th>Time</th>
-                            <th>Mode</th>
-                            <th>Band</th>
-                            <th>Name</th>
-                            <th>Callsign</th>
-                            <th>Locator</th>
-                            <th>SNR</th>
-                            <th>Frequency</th>
-                            <th>Distance</th>
-                            <th>Bearing</th>
-                            <th>Country</th>
-                            <th>Continent</th>
+                            <th class="sortable" data-column="timestamp">Time <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="mode">Mode <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="band">Band <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="name">Name <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="callsign">Callsign <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="locator">Locator <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="snr">SNR <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="frequency">Frequency <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="distance_km">Distance <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="bearing_deg">Bearing <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="country">Country <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="continent">Continent <span class="sort-arrows">⇅</span></th>
                             <th>Message</th>
                         </tr>
                     </thead>
@@ -183,6 +183,12 @@
                         <!-- Spots will be inserted here -->
                     </tbody>
                 </table>
+            </div>
+
+            <div class="pagination-controls" style="display: flex; justify-content: center; align-items: center; margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                <div id="pagination-buttons-bottom" style="display: flex; gap: 5px;">
+                    <!-- Pagination buttons will be inserted here -->
+                </div>
             </div>
         </div>
 

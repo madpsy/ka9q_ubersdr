@@ -220,6 +220,7 @@
         const continent = document.getElementById('continent-select').value;
         const dedup = document.getElementById('dedup-checkbox').checked;
         const locatorsOnly = document.getElementById('locators-only-checkbox').checked;
+        const minDistance = document.getElementById('min-distance-select').value;
 
         showStatus('Loading spots...', '');
         document.getElementById('load-btn').disabled = true;
@@ -232,6 +233,9 @@
             if (continent) url += `&continent=${continent}`;
             if (dedup) url += `&dedup=true`;
             if (locatorsOnly) url += `&locators_only=true`;
+            if (minDistance && parseFloat(minDistance) > 0) {
+                url += `&min_distance=${minDistance}`;
+            }
 
             const response = await fetch(url);
             if (!response.ok) {

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -1838,6 +1839,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	toDate := r.URL.Query().Get("to_date")         // Optional end date
 	dedupStr := r.URL.Query().Get("dedup")         // "true" to deduplicate
 	locatorsOnlyStr := r.URL.Query().Get("locators_only") // "true" to only return spots with locators
+	minDistanceStr := r.URL.Query().Get("min_distance")   // Minimum distance in km
 
 	// Also support from_date parameter
 	if fd := r.URL.Query().Get("from_date"); fd != "" {
@@ -1855,6 +1857,14 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	// Parse deduplication and locators only flags
 	deduplicate := dedupStr == "true" || dedupStr == "1"
 	locatorsOnly := locatorsOnlyStr == "true" || locatorsOnlyStr == "1"
+	
+	// Parse minimum distance (default 0 = no filter)
+	var minDistanceKm float64
+	if minDistanceStr != "" {
+		if dist, err := strconv.ParseFloat(minDistanceStr, 64); err == nil && dist >= 0 {
+			minDistanceKm = dist
+		}
+	}
 
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
@@ -1869,7 +1879,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	}
 
 	// Get historical spots
-	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, continent, fromDate, toDate, deduplicate, locatorsOnly)
+	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, continent, fromDate, toDate, deduplicate, locatorsOnly, minDistanceKm)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{

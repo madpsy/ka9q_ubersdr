@@ -214,7 +214,8 @@ func (sl *SpotsLogger) Close() error {
 // - toDate: End date (YYYY-MM-DD) - empty for single day
 // - deduplicate: If true, only return unique callsign/locator combinations per day
 // - locatorsOnly: If true, only return spots that have a locator
-func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, continent, fromDate, toDate string, deduplicate, locatorsOnly bool) ([]SpotRecord, error) {
+// - minDistanceKm: Minimum distance in km (0 = no filter)
+func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, continent, fromDate, toDate string, deduplicate, locatorsOnly bool, minDistanceKm float64) ([]SpotRecord, error) {
 	if !sl.enabled {
 		return nil, fmt.Errorf("spots logging is not enabled")
 	}
@@ -278,6 +279,13 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, continent, fromDate,
 				// Filter by locators only if specified
 				if locatorsOnly && spot.Locator == "" {
 					continue
+				}
+
+				// Filter by minimum distance if specified
+				if minDistanceKm > 0 {
+					if spot.DistanceKm == nil || *spot.DistanceKm < minDistanceKm {
+						continue
+					}
 				}
 
 				if deduplicate {

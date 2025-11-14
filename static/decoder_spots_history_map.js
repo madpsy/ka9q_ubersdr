@@ -320,6 +320,17 @@ class DecoderSpotsHistoryMap {
         const legendContainer = document.getElementById('map-band-legend-items');
         if (!legendContainer) return;
 
+        // Build legend HTML starting with receiver marker
+        let html = '';
+        
+        // Add receiver marker legend item first
+        html += `
+            <div class="band-legend-item">
+                <span class="band-legend-color" style="background-color: #ff0000; border: 2px solid rgba(255, 255, 255, 0.9); box-sizing: border-box;"></span>
+                <span class="band-legend-label">Receiver</span>
+            </div>
+        `;
+
         // Get unique bands from current markers
         const activeBands = new Set();
         this.markers.forEach((marker, key) => {
@@ -329,25 +340,27 @@ class DecoderSpotsHistoryMap {
             }
         });
 
-        // Sort bands in standard order
-        const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
-        const sortedBands = Array.from(activeBands).sort((a, b) => {
-            return bandOrder.indexOf(a) - bandOrder.indexOf(b);
-        });
+        // Only show legend if we have active bands
+        if (activeBands.size > 0) {
+            // Sort bands in standard order
+            const bandOrder = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+            const sortedBands = Array.from(activeBands).sort((a, b) => {
+                return bandOrder.indexOf(a) - bandOrder.indexOf(b);
+            });
 
-        // Build legend HTML
-        let html = '';
-        sortedBands.forEach(band => {
-            const color = this.bandColors[band] || this.bandColors['unknown'];
-            html += `
-                <div class="band-legend-item">
-                    <span class="band-legend-color" style="background-color: ${color};"></span>
-                    <span class="band-legend-label">${band}</span>
-                </div>
-            `;
-        });
+            // Add band legend items
+            sortedBands.forEach(band => {
+                const color = this.bandColors[band] || this.bandColors['unknown'];
+                html += `
+                    <div class="band-legend-item">
+                        <span class="band-legend-color" style="background-color: ${color};"></span>
+                        <span class="band-legend-label">${band}</span>
+                    </div>
+                `;
+            });
+        }
 
-        legendContainer.innerHTML = html || '<div style="color: #888; font-size: 11px;">No active bands</div>';
+        legendContainer.innerHTML = html;
     }
 
     /**

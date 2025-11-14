@@ -10,6 +10,7 @@
     let recordsPerPage = 100;
     let sortColumn = 'timestamp';
     let sortDirection = 'desc'; // Start with newest first
+    let spotsMap = null; // Map instance
 
     // Common HF band names (excluding VHF/UHF)
     const commonBands = [
@@ -31,12 +32,23 @@
     document.addEventListener('DOMContentLoaded', function() {
         initializeDatePicker();
         initializeControls();
+        initializeMap();
         loadAvailableDates().then(() => {
             // Auto-select today's date if available
             autoSelectTodayAndLoad();
         });
         fetchReceiverInfo();
     });
+
+    async function initializeMap() {
+        // Initialize the map module
+        if (typeof DecoderSpotsHistoryMap !== 'undefined') {
+            spotsMap = new DecoderSpotsHistoryMap();
+            await spotsMap.initMap();
+        } else {
+            console.warn('DecoderSpotsHistoryMap not loaded');
+        }
+    }
 
     function initializeControls() {
         const loadBtn = document.getElementById('load-btn');
@@ -608,6 +620,22 @@
         });
 
         container.style.display = 'block';
+
+        // Update map with spots
+        updateMap(data.spots);
+    }
+
+    function updateMap(spots) {
+        if (!spotsMap) {
+            console.warn('Map not initialized');
+            return;
+        }
+
+        // Show map section
+        spotsMap.show();
+
+        // Add spots to map
+        spotsMap.addSpots(spots);
     }
 
     function sortSpots(spots, column, direction) {

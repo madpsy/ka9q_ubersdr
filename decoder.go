@@ -101,25 +101,14 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 	}
 
 	// Initialize spots logger (independent of reporting)
+	// Path resolution is handled in main.go before this is called
 	if config.SpotsLogEnabled {
-		// spots_log_data_dir works like spaceweather data_dir:
-		// - If empty, defaults to subdirectory "spots" under decoder data_dir
-		// - If relative path, it's used as-is (relative to current working directory)
-		// - If absolute path, it's used as-is
-		logDir := config.SpotsLogDataDir
-		if logDir == "" {
-			// Default: create "spots" subdirectory in decoder data directory
-			logDir = filepath.Join(config.DataDir, "spots")
-		}
-		// If logDir is relative, it will be relative to current working directory
-		// If logDir is absolute, it will be used as-is
-		// This matches the spaceweather behavior exactly
-		logger, err := NewSpotsLogger(logDir, true)
+		logger, err := NewSpotsLogger(config.SpotsLogDataDir, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize spots logger: %w", err)
 		}
 		md.spotsLogger = logger
-		log.Printf("Spots CSV logging enabled: %s", logDir)
+		log.Printf("Spots CSV logging enabled: %s", config.SpotsLogDataDir)
 	}
 
 	return md, nil

@@ -345,6 +345,14 @@ func main() {
 		config.Decoder.DataDir = *configDir + "/" + config.Decoder.DataDir
 	}
 
+	// Set spots log data directory relative to config directory (same pattern as spaceweather/noisefloor)
+	if config.Decoder.Enabled && config.Decoder.SpotsLogEnabled && config.Decoder.SpotsLogDataDir == "" {
+		config.Decoder.SpotsLogDataDir = *configDir + "/decoder_spots"
+	} else if config.Decoder.Enabled && config.Decoder.SpotsLogEnabled && !strings.HasPrefix(config.Decoder.SpotsLogDataDir, "/") {
+		// If relative path, make it relative to config directory
+		config.Decoder.SpotsLogDataDir = *configDir + "/" + config.Decoder.SpotsLogDataDir
+	}
+
 	multiDecoder, err := NewMultiDecoder(&config.Decoder, radiod, sessions, prometheusMetrics)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize multi-decoder: %v", err)

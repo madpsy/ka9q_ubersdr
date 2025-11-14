@@ -134,17 +134,21 @@
 
     async function loadAnalytics() {
         const countryInput = document.getElementById('country-search');
-        const country = countryInput.value.trim();
+        let country = countryInput.value.trim();
         const continent = document.getElementById('continent-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
         const hours = document.getElementById('hours-select').value;
 
-        // Validate country input if provided
-        if (country && !isValidCountry(country)) {
-            showStatus('Please select a valid country from the dropdown list', 'error');
-            document.getElementById('load-btn').disabled = false;
-            countryInput.focus();
-            return;
+        // Validate and normalize country input if provided
+        if (country) {
+            const normalizedCountry = getNormalizedCountryName(country);
+            if (!normalizedCountry) {
+                showStatus('Please select a valid country from the dropdown list', 'error');
+                document.getElementById('load-btn').disabled = false;
+                countryInput.focus();
+                return;
+            }
+            country = normalizedCountry; // Use the exact name from the list
         }
 
         showStatus('Loading analytics...', '');
@@ -448,11 +452,12 @@
         }
     }
 
-    function isValidCountry(countryName) {
-        // Check if the entered country name exists in our countries list
-        return allCountries.some(country =>
+    function getNormalizedCountryName(countryName) {
+        // Find the country in our list (case-insensitive) and return the exact name
+        const found = allCountries.find(country =>
             country.name.toLowerCase() === countryName.toLowerCase()
         );
+        return found ? found.name : null;
     }
 
     function toggleGraphsVisibility() {

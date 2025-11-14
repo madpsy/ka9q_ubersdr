@@ -459,6 +459,10 @@
                 <div class="stat-label">Unique Callsigns</div>
             </div>
             <div class="stat-card">
+                <div class="stat-value">${stats.uniqueLocators}</div>
+                <div class="stat-label">Unique Locators</div>
+            </div>
+            <div class="stat-card">
                 <div class="stat-value">${stats.callsignsMultipleBands}</div>
                 <div class="stat-label">Callsigns on Multiple Bands</div>
             </div>

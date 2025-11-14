@@ -1066,6 +1066,12 @@ async function fetchSiteDescription() {
                     if (digitalSpotsBtn) {
                         digitalSpotsBtn.style.display = 'block';
                     }
+
+                    // Also show footer link to live map
+                    const footerLink = document.getElementById('footer-digitalspots-link');
+                    if (footerLink) {
+                        footerLink.style.display = 'inline';
+                    }
                 }
 
                 // Add map if GPS coordinates are available

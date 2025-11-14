@@ -151,7 +151,7 @@
             country = normalizedCountry; // Use the exact name from the list
         }
 
-        showStatus('Loading analytics...', '');
+        showStatus('Loading analytics...', '', true);
         document.getElementById('load-btn').disabled = true;
 
         try {
@@ -425,12 +425,17 @@
         return ranges;
     }
 
-    function showStatus(message, type) {
+    function showStatus(message, type, showSpinner = false) {
         const status = document.getElementById('status');
-        status.textContent = message;
         status.className = 'status';
         if (type) {
             status.classList.add(type);
+        }
+
+        if (showSpinner) {
+            status.innerHTML = message + '<span class="spinner"></span>';
+        } else {
+            status.textContent = message;
         }
     }
 

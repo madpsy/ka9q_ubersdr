@@ -661,7 +661,7 @@
             return;
         }
 
-        showStatus('Loading spots...', '');
+        showStatus('Loading spots...', '', true);
         document.getElementById('load-btn').disabled = true;
 
         try {
@@ -1341,12 +1341,17 @@
         return stats;
     }
 
-    function showStatus(message, type) {
+    function showStatus(message, type, showSpinner = false) {
         const status = document.getElementById('status');
-        status.textContent = message;
         status.className = 'status';
         if (type) {
             status.classList.add(type);
+        }
+
+        if (showSpinner) {
+            status.innerHTML = message + '<span class="spinner"></span>';
+        } else {
+            status.textContent = message;
         }
     }
 

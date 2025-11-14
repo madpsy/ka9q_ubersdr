@@ -270,8 +270,17 @@ class BandConditionsMonitor {
         if (data.band_conditions_day && data.band_conditions_night) {
             const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
             
-            // Day conditions
-            html += '<div style="margin-bottom: 8px;">';
+            // Determine if it's currently day or night (reuse calculation from above)
+            let isDaytime = false;
+            if (this.gpsCoordinates && typeof SunCalc !== 'undefined') {
+                const times = SunCalc.getTimes(new Date(), this.gpsCoordinates.lat, this.gpsCoordinates.lon);
+                const now = new Date();
+                isDaytime = now >= times.sunrise && now < times.sunset;
+            }
+
+            // Day conditions - add white border if currently daytime
+            const dayBorderStyle = isDaytime ? 'border: 2px solid white; padding: 8px; border-radius: 6px;' : '';
+            html += `<div style="margin-bottom: 8px; ${dayBorderStyle}">`;
             html += '<div style="font-size: 0.8em; opacity: 0.7; margin-bottom: 4px; text-align: center;">☀️ Day</div>';
             html += '<div style="display: flex; flex-wrap: wrap; gap: 5px; justify-content: center;">';
             bandOrder.forEach(band => {
@@ -286,8 +295,9 @@ class BandConditionsMonitor {
             });
             html += '</div></div>';
             
-            // Night conditions
-            html += '<div>';
+            // Night conditions - add white border if currently nighttime
+            const nightBorderStyle = !isDaytime ? 'border: 2px solid white; padding: 8px; border-radius: 6px;' : '';
+            html += `<div style="${nightBorderStyle}">`;
             html += '<div style="font-size: 0.8em; opacity: 0.7; margin-bottom: 4px; text-align: center;">🌙 Night</div>';
             html += '<div style="display: flex; flex-wrap: wrap; gap: 5px; justify-content: center;">';
             bandOrder.forEach(band => {

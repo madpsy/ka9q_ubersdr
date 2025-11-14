@@ -296,13 +296,18 @@ class DecoderSpotsHistoryMap {
 
         // Auto-zoom to fit all spots (excluding receiver marker)
         if (bounds.length > 0) {
-            // Fit map to bounds with padding
-            this.map.fitBounds(bounds, {
-                padding: [50, 50],
-                maxZoom: 6, // Limit maximum zoom to avoid zooming in too far on single spots
-                animate: true,
-                duration: 0.5
-            });
+            // Delay fitBounds to ensure map container is properly sized
+            // This prevents issues on initial page load
+            setTimeout(() => {
+                if (this.map) {
+                    this.map.fitBounds(bounds, {
+                        padding: [50, 50],
+                        maxZoom: 6, // Limit maximum zoom to avoid zooming in too far on single spots
+                        animate: true,
+                        duration: 0.5
+                    });
+                }
+            }, 200);
         } else if (this.receiverLocation) {
             // If no spots but receiver location exists, center on receiver
             this.map.setView([this.receiverLocation.lat, this.receiverLocation.lon], 6);

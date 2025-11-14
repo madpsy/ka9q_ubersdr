@@ -614,6 +614,9 @@ func main() {
 	http.HandleFunc("/api/decoder/spots/names", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleDecoderSpotsNames(w, r, multiDecoder, ipBanManager)
 	}))
+	http.HandleFunc("/api/decoder/spots/csv", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleDecoderSpotsCSV(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+	}))
 
 	// Admin authentication endpoints (no auth required)
 	http.HandleFunc("/admin/login", adminHandler.HandleLogin)
@@ -1831,16 +1834,16 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	}
 
 	// Get query parameters
-	mode := r.URL.Query().Get("mode")              // FT8, FT4, WSPR, or empty for all
-	band := r.URL.Query().Get("band")              // Calculated band (e.g., "20m", "40m") or empty for all
-	name := r.URL.Query().Get("name")              // Decoder config name or empty for all
-	callsign := r.URL.Query().Get("callsign")      // Exact callsign match or empty for all
-	locator := r.URL.Query().Get("locator")        // Exact locator match or empty for all
-	continent := r.URL.Query().Get("continent")    // Continent code (AF, AS, EU, NA, OC, SA, AN) or empty for all
-	direction := r.URL.Query().Get("direction")    // Cardinal direction (N, NE, E, SE, S, SW, W, NW) or empty for all
-	fromDate := r.URL.Query().Get("date")          // For backward compatibility
-	toDate := r.URL.Query().Get("to_date")         // Optional end date
-	dedupStr := r.URL.Query().Get("dedup")         // "true" to deduplicate
+	mode := r.URL.Query().Get("mode")                     // FT8, FT4, WSPR, or empty for all
+	band := r.URL.Query().Get("band")                     // Calculated band (e.g., "20m", "40m") or empty for all
+	name := r.URL.Query().Get("name")                     // Decoder config name or empty for all
+	callsign := r.URL.Query().Get("callsign")             // Exact callsign match or empty for all
+	locator := r.URL.Query().Get("locator")               // Exact locator match or empty for all
+	continent := r.URL.Query().Get("continent")           // Continent code (AF, AS, EU, NA, OC, SA, AN) or empty for all
+	direction := r.URL.Query().Get("direction")           // Cardinal direction (N, NE, E, SE, S, SW, W, NW) or empty for all
+	fromDate := r.URL.Query().Get("date")                 // For backward compatibility
+	toDate := r.URL.Query().Get("to_date")                // Optional end date
+	dedupStr := r.URL.Query().Get("dedup")                // "true" to deduplicate
 	locatorsOnlyStr := r.URL.Query().Get("locators_only") // "true" to only return spots with locators
 	minDistanceStr := r.URL.Query().Get("min_distance")   // Minimum distance in km
 	minSNRStr := r.URL.Query().Get("min_snr")             // Minimum SNR in dB
@@ -1861,7 +1864,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	// Parse deduplication and locators only flags
 	deduplicate := dedupStr == "true" || dedupStr == "1"
 	locatorsOnly := locatorsOnlyStr == "true" || locatorsOnlyStr == "1"
-	
+
 	// Parse minimum distance (default 0 = no filter)
 	var minDistanceKm float64
 	if minDistanceStr != "" {
@@ -1984,6 +1987,118 @@ func handleDecoderSpotsNames(w http.ResponseWriter, r *http.Request, md *MultiDe
 		"names": names,
 	}); err != nil {
 		log.Printf("Error encoding available names: %v", err)
+	}
+}
+
+// handleDecoderSpotsCSV serves raw CSV download for decoder spots
+func handleDecoderSpotsCSV(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	if md == nil || md.spotsLogger == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decoder spots logging is not enabled",
+		})
+		return
+	}
+
+	// Get query parameters (same as JSON endpoint)
+	mode := r.URL.Query().Get("mode")
+	band := r.URL.Query().Get("band")
+	name := r.URL.Query().Get("name")
+	callsign := r.URL.Query().Get("callsign")
+	locator := r.URL.Query().Get("locator")
+	continent := r.URL.Query().Get("continent")
+	direction := r.URL.Query().Get("direction")
+	fromDate := r.URL.Query().Get("date")
+	toDate := r.URL.Query().Get("to_date")
+	dedupStr := r.URL.Query().Get("dedup")
+	locatorsOnlyStr := r.URL.Query().Get("locators_only")
+	minDistanceStr := r.URL.Query().Get("min_distance")
+	minSNRStr := r.URL.Query().Get("min_snr")
+
+	// Also support from_date parameter
+	if fd := r.URL.Query().Get("from_date"); fd != "" {
+		fromDate = fd
+	}
+
+	if fromDate == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "date or from_date parameter is required (format: YYYY-MM-DD)",
+		})
+		return
+	}
+
+	// Parse flags
+	deduplicate := dedupStr == "true" || dedupStr == "1"
+	locatorsOnly := locatorsOnlyStr == "true" || locatorsOnlyStr == "1"
+
+	// Parse minimum distance (default 0 = no filter)
+	var minDistanceKm float64
+	if minDistanceStr != "" {
+		if dist, err := strconv.ParseFloat(minDistanceStr, 64); err == nil && dist >= 0 {
+			minDistanceKm = dist
+		}
+	}
+
+	// Parse minimum SNR (default -999 = no filter)
+	minSNR := -999
+	if minSNRStr != "" {
+		if snr, err := strconv.Atoi(minSNRStr); err == nil {
+			minSNR = snr
+		}
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("spots-csv-%s-%s-%s-%s-%s-%s-%s-%s-%d", mode, band, name, callsign, locator, continent, direction, fromDate, minSNR)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Decoder spots CSV endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	// Get CSV data
+	csvData, err := md.spotsLogger.GetHistoricalCSV(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, deduplicate, locatorsOnly, minDistanceKm, minSNR)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get CSV data: %v", err),
+		})
+		return
+	}
+
+	// Build filename
+	filename := fmt.Sprintf("decoder-spots-%s.csv", fromDate)
+	if toDate != "" && toDate != fromDate {
+		filename = fmt.Sprintf("decoder-spots-%s-to-%s.csv", fromDate, toDate)
+	}
+	if mode != "" {
+		filename = fmt.Sprintf("decoder-spots-%s-%s.csv", mode, fromDate)
+	}
+	if band != "" {
+		filename = fmt.Sprintf("decoder-spots-%s-%s.csv", band, fromDate)
+	}
+
+	// Set headers for CSV download
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	w.WriteHeader(http.StatusOK)
+
+	// Write CSV data
+	if _, err := w.Write([]byte(csvData)); err != nil {
+		log.Printf("Error writing CSV data: %v", err)
 	}
 }
 

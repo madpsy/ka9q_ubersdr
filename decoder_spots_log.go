@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -32,7 +33,7 @@ type SpotRecord struct {
 	Locator    string   `json:"locator"`
 	SNR        int      `json:"snr"`
 	Frequency  uint64   `json:"frequency"`
-	Band       string   `json:"band"`      // Calculated from frequency (e.g., "20m", "40m")
+	Band       string   `json:"band"` // Calculated from frequency (e.g., "20m", "40m")
 	Message    string   `json:"message"`
 	Country    string   `json:"country"`
 	CQZone     int      `json:"cq_zone"`
@@ -657,4 +658,71 @@ func (sl *SpotsLogger) GetAvailableNames() ([]string, error) {
 	sort.Strings(names)
 
 	return names, nil
+}
+
+// GetHistoricalCSV returns historical spots data as CSV string
+// Parameters match GetHistoricalSpots for filtering
+func (sl *SpotsLogger) GetHistoricalCSV(mode, band, name, callsign, locator, continent, direction, fromDate, toDate string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) (string, error) {
+	// Get the spots data using existing method
+	spots, err := sl.GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, deduplicate, locatorsOnly, minDistanceKm, minSNR)
+	if err != nil {
+		return "", err
+	}
+
+	if len(spots) == 0 {
+		return "", fmt.Errorf("no data available for the specified parameters")
+	}
+
+	// Build CSV string
+	var csvBuilder strings.Builder
+
+	// Write header
+	csvBuilder.WriteString("timestamp,callsign,locator,snr,frequency,band,message,country,cq_zone,itu_zone,continent,distance_km,bearing_deg,mode,name\n")
+
+	// Write data rows
+	for _, spot := range spots {
+		// Format distance and bearing
+		distStr := ""
+		if spot.DistanceKm != nil {
+			distStr = fmt.Sprintf("%.1f", *spot.DistanceKm)
+		}
+		bearingStr := ""
+		if spot.BearingDeg != nil {
+			bearingStr = fmt.Sprintf("%.1f", *spot.BearingDeg)
+		}
+
+		// Escape fields that might contain commas or quotes
+		message := escapeCSVField(spot.Message)
+		country := escapeCSVField(spot.Country)
+
+		csvBuilder.WriteString(fmt.Sprintf("%s,%s,%s,%d,%d,%s,%s,%s,%d,%d,%s,%s,%s,%s,%s\n",
+			spot.Timestamp,
+			spot.Callsign,
+			spot.Locator,
+			spot.SNR,
+			spot.Frequency,
+			spot.Band,
+			message,
+			country,
+			spot.CQZone,
+			spot.ITUZone,
+			spot.Continent,
+			distStr,
+			bearingStr,
+			spot.Mode,
+			spot.Name,
+		))
+	}
+
+	return csvBuilder.String(), nil
+}
+
+// escapeCSVField escapes a field for CSV output
+func escapeCSVField(field string) string {
+	// If field contains comma, quote, or newline, wrap in quotes and escape quotes
+	if strings.ContainsAny(field, ",\"\n\r") {
+		field = strings.ReplaceAll(field, "\"", "\"\"")
+		return "\"" + field + "\""
+	}
+	return field
 }

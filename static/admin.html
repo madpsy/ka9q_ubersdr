@@ -2391,17 +2391,11 @@
             spotsLogDataDirField.appendChild(spotsLogDirSmall);
             reportingSection.appendChild(spotsLogDataDirField);
 
-            const spotsLogLocatorsOnlyField = createConfigField('CSV Logging: Locators Only', 'checkbox', currentDecoderConfig.spots_log_locators_only !== false, 'spots_log_locators_only');
+            const spotsLogLocatorsOnlyField = createConfigField('Locators Only', 'checkbox', currentDecoderConfig.spots_log_locators_only !== false, 'spots_log_locators_only');
             const spotsLogLocatorsSmall = document.createElement('small');
-            spotsLogLocatorsSmall.textContent = 'When enabled, only spots with valid grid locators will be logged to CSV files (default: enabled)';
+            spotsLogLocatorsSmall.textContent = 'When enabled, only spots with valid grid locators will be logged to CSV and shown in history view (default: enabled)';
             spotsLogLocatorsOnlyField.appendChild(spotsLogLocatorsSmall);
             reportingSection.appendChild(spotsLogLocatorsOnlyField);
-
-            const spotsHistoryLocatorsOnlyField = createConfigField('History View: Locators Only', 'checkbox', currentDecoderConfig.spots_history_locators_only !== false, 'spots_history_locators_only');
-            const spotsHistorySmall = document.createElement('small');
-            spotsHistorySmall.textContent = 'When enabled, the spots history view will only show spots with valid grid locators (default: enabled)';
-            spotsHistoryLocatorsOnlyField.appendChild(spotsHistorySmall);
-            reportingSection.appendChild(spotsHistoryLocatorsOnlyField);
 
             container.appendChild(reportingSection);
 

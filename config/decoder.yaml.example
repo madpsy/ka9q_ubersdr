@@ -39,10 +39,9 @@ decoder:
                                        # If absolute: used as-is (e.g., /var/log/decoder_spots)
                                        # Files organized as: decoder_spots/MODE/YYYY/MM/DD/bandname.csv
                                        # Example: decoder_spots/FT8/2024/11/14/20m_FT8.csv
-  spots_log_locators_only: true        # Only log spots with valid grid locators to CSV (default: true)
-                                       # When false, logs all spots including those without locators
-  spots_history_locators_only: true    # Only show spots with valid grid locators in history view (default: true)
-                                       # When false, shows all spots including those without locators
+  spots_log_locators_only: true        # Only log/show spots with valid grid locators (default: true)
+                                       # When false, logs and shows all spots including those without locators
+                                       # Applies to both CSV logging and history view
   
   # Band configurations
   # Each band creates a dedicated audio channel for decoding

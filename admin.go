@@ -620,9 +620,7 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 		"name":      newBookmark.Name,
 		"frequency": newBookmark.Frequency,
 		"mode":      newBookmark.Mode,
-	}
-	if newBookmark.Extension != "" {
-		bookmarkMap["extension"] = newBookmark.Extension
+		"extension": newBookmark.Extension, // Always set extension, even if empty
 	}
 	bookmarks = append(bookmarks, bookmarkMap)
 	bookmarksConfig["bookmarks"] = bookmarks
@@ -740,14 +738,57 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Sort bookmarks the same way as in GET to ensure index consistency
+	sort.Slice(bookmarks, func(i, j int) bool {
+		bookmarkI, okI := bookmarks[i].(map[string]interface{})
+		bookmarkJ, okJ := bookmarks[j].(map[string]interface{})
+		if !okI || !okJ {
+			return false
+		}
+		nameI, okI := bookmarkI["name"].(string)
+		nameJ, okJ := bookmarkJ["name"].(string)
+		if !okI || !okJ {
+			return false
+		}
+
+		// Compare names (case-insensitive)
+		lowerNameI := strings.ToLower(nameI)
+		lowerNameJ := strings.ToLower(nameJ)
+		if lowerNameI != lowerNameJ {
+			return lowerNameI < lowerNameJ
+		}
+
+		// If names are equal, compare frequencies
+		freqI, okI := bookmarkI["frequency"].(uint64)
+		freqJ, okJ := bookmarkJ["frequency"].(uint64)
+		if okI && okJ {
+			return freqI < freqJ
+		}
+		// Handle int type as well (YAML might parse as int)
+		if !okI {
+			if freqIntI, ok := bookmarkI["frequency"].(int); ok {
+				freqI = uint64(freqIntI)
+				okI = true
+			}
+		}
+		if !okJ {
+			if freqIntJ, ok := bookmarkJ["frequency"].(int); ok {
+				freqJ = uint64(freqIntJ)
+				okJ = true
+			}
+		}
+		if okI && okJ {
+			return freqI < freqJ
+		}
+		return false
+	})
+
 	// Update bookmark at index
 	bookmarkMap := map[string]interface{}{
 		"name":      updatedBookmark.Name,
 		"frequency": updatedBookmark.Frequency,
 		"mode":      updatedBookmark.Mode,
-	}
-	if updatedBookmark.Extension != "" {
-		bookmarkMap["extension"] = updatedBookmark.Extension
+		"extension": updatedBookmark.Extension, // Always set extension, even if empty
 	}
 	bookmarks[index] = bookmarkMap
 	bookmarksConfig["bookmarks"] = bookmarks

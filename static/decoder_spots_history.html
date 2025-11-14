@@ -172,6 +172,25 @@
                 <button id="filter-show-all" style="padding: 8px 15px; background: rgba(33, 150, 243, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em; font-weight: bold;">Show All</button>
             </div>
 
+            <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; flex-wrap: wrap; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label for="client-search-input" style="color: rgba(255,255,255,0.9); font-size: 0.95em;">Search:</label>
+                    <input type="text" id="client-search-input" placeholder="Callsign/Locator/Country/Continent/Message" style="padding: 6px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; min-width: 280px;">
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label for="client-country-filter" style="color: rgba(255,255,255,0.9); font-size: 0.95em;">Country:</label>
+                    <select id="client-country-filter" style="padding: 6px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; min-width: 150px;">
+                        <option value="">All</option>
+                    </select>
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; color: rgba(255,255,255,0.9); font-size: 0.95em;">
+                        <input type="checkbox" id="client-cq-only" style="cursor: pointer;">
+                        <span>CQ Only</span>
+                    </label>
+                </div>
+            </div>
+
             <div class="spots-table-container">
                 <table class="spots-table" id="spots-table">
                     <thead>

@@ -8,6 +8,9 @@
     let currentData = null;
     let filteredData = null; // Stores filtered spots
     let activeFilter = null; // Tracks which filter is active
+    let clientSearchText = ''; // Client-side search text
+    let clientCountryFilter = ''; // Client-side country filter
+    let clientCQOnly = false; // Client-side CQ only filter
     let currentPage = 1;
     let recordsPerPage = 100;
     let sortColumn = 'timestamp';
@@ -103,6 +106,61 @@
 
         updateFilterButtonStates();
         displaySpots(currentData);
+    }
+
+    function applyAdditionalClientFilters(spots) {
+        let filtered = spots;
+
+        // Apply search filter (searches callsign, locator, country, continent, and message)
+        if (clientSearchText) {
+            const searchLower = clientSearchText.toLowerCase();
+            filtered = filtered.filter(spot => {
+                return (spot.callsign && spot.callsign.toLowerCase().includes(searchLower)) ||
+                       (spot.locator && spot.locator.toLowerCase().includes(searchLower)) ||
+                       (spot.country && spot.country.toLowerCase().includes(searchLower)) ||
+                       (spot.continent && spot.continent.toLowerCase().includes(searchLower)) ||
+                       (spot.message && spot.message.toLowerCase().includes(searchLower));
+            });
+        }
+
+        // Apply country filter
+        if (clientCountryFilter) {
+            filtered = filtered.filter(spot => spot.country === clientCountryFilter);
+        }
+
+        // Apply CQ only filter
+        if (clientCQOnly) {
+            filtered = filtered.filter(spot => spot.message && spot.message.startsWith('CQ '));
+        }
+
+        return filtered;
+    }
+
+    function populateCountryFilter(spots) {
+        const countrySelect = document.getElementById('client-country-filter');
+        if (!countrySelect) return;
+
+        // Get unique countries
+        const countries = new Set();
+        spots.forEach(spot => {
+            if (spot.country) {
+                countries.add(spot.country);
+            }
+        });
+
+        // Sort countries alphabetically
+        const sortedCountries = Array.from(countries).sort();
+
+        // Clear existing options except "All"
+        countrySelect.innerHTML = '<option value="">All</option>';
+
+        // Add country options
+        sortedCountries.forEach(country => {
+            const option = document.createElement('option');
+            option.value = country;
+            option.textContent = country;
+            countrySelect.appendChild(option);
+        });
     }
 
     function filterCallsignsMultipleBands(spots) {
@@ -218,6 +276,35 @@
         });
         document.getElementById('filter-show-all').addEventListener('click', () => {
             applyClientFilter(null);
+        });
+
+        // Add event listeners for additional client-side filters
+        const clientSearchInput = document.getElementById('client-search-input');
+        const clientCountrySelect = document.getElementById('client-country-filter');
+        const clientCQOnlyCheckbox = document.getElementById('client-cq-only');
+
+        clientSearchInput.addEventListener('input', function() {
+            clientSearchText = this.value.trim();
+            if (currentData) {
+                currentPage = 1;
+                displaySpots(currentData);
+            }
+        });
+
+        clientCountrySelect.addEventListener('change', function() {
+            clientCountryFilter = this.value;
+            if (currentData) {
+                currentPage = 1;
+                displaySpots(currentData);
+            }
+        });
+
+        clientCQOnlyCheckbox.addEventListener('change', function() {
+            clientCQOnly = this.checked;
+            if (currentData) {
+                currentPage = 1;
+                displaySpots(currentData);
+            }
         });
 
         // Add Enter key handler to all form inputs to trigger load
@@ -627,8 +714,14 @@
         const statsGrid = document.getElementById('stats-grid');
         const tbody = document.getElementById('spots-tbody');
 
+        // Populate country filter dropdown with all available countries
+        populateCountryFilter(data.spots);
+
         // Use filtered data if a filter is active, otherwise use all data
-        const spotsToDisplay = filteredData ? filteredData : data.spots;
+        let spotsToDisplay = filteredData ? filteredData : data.spots;
+
+        // Apply additional client-side filters (search, country, CQ only)
+        spotsToDisplay = applyAdditionalClientFilters(spotsToDisplay);
 
         // Sort the data
         const sortedSpots = sortSpots([...spotsToDisplay], sortColumn, sortDirection);

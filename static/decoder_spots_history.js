@@ -355,6 +355,39 @@
         }
     }
 
+    function updateFilterButtonStates() {
+        const buttons = {
+            'filter-multiple-bands': 'multiple-bands',
+            'filter-multiple-modes': 'multiple-modes',
+            'filter-least-country': 'least-country',
+            'filter-least-continent': 'least-continent'
+        };
+
+        for (const [buttonId, filterType] of Object.entries(buttons)) {
+            const button = document.getElementById(buttonId);
+            if (button) {
+                if (activeFilter === filterType) {
+                    button.style.fontWeight = 'bold';
+                    button.style.boxShadow = '0 0 10px rgba(255,255,255,0.5)';
+                } else {
+                    button.style.fontWeight = 'normal';
+                    button.style.boxShadow = 'none';
+                }
+            }
+        }
+
+        const showAllBtn = document.getElementById('filter-show-all');
+        if (showAllBtn) {
+            if (!activeFilter) {
+                showAllBtn.style.fontWeight = 'bold';
+                showAllBtn.style.boxShadow = '0 0 10px rgba(255,255,255,0.5)';
+            } else {
+                showAllBtn.style.fontWeight = 'bold';
+                showAllBtn.style.boxShadow = 'none';
+            }
+        }
+    }
+
     async function loadSpots() {
         if (!selectedDate) {
             showStatus('Please select a date first', 'error');

@@ -144,6 +144,10 @@ class DigitalSpotsMap {
 
         // Start memory monitoring
         this.startMemoryMonitoring();
+
+        // Periodically re-apply filters to handle aging spots
+        // This ensures markers are hidden as they age past the filter threshold
+        setInterval(() => this.applyFilters(), 60000); // Every 60 seconds
     }
 
     loadPreferences() {

@@ -139,12 +139,12 @@ func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string,
 
 // ProcessDecoderOutput reads the decoder output file and extracts spots
 // For WSPR, this reads wspr_spots.txt; for FT8/FT4, this reads the log file
-func (ds *DecoderSpawner) ProcessDecoderOutput(outputFile string, band *DecoderBand) ([]*DecodeInfo, error) {
+func (ds *DecoderSpawner) ProcessDecoderOutput(outputFile string, band *DecoderBand, receiverLocator string) ([]*DecodeInfo, error) {
 	// Wait a moment for the decoder to finish writing
 	time.Sleep(100 * time.Millisecond)
 
 	// Parse the output file
-	decodes, err := ParseDecoderLog(outputFile, band.Config.Frequency, band.Config.Mode, band.Config.Name)
+	decodes, err := ParseDecoderLog(outputFile, band.Config.Frequency, band.Config.Mode, band.Config.Name, receiverLocator)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse decoder output: %w", err)
 	}

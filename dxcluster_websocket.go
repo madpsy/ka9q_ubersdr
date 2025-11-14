@@ -278,21 +278,10 @@ func (h *DXClusterWebSocketHandler) BroadcastDigitalSpot(decode DecodeInfo) {
 		h.prometheusMetrics.RecordDXSpot(decode.Mode)
 	}
 
-	// Calculate distance and bearing if we have both locators
-	var distanceKm *float64
-	var bearingDeg *float64
+	// Use pre-calculated distance and bearing from DecodeInfo
+	// These were calculated once during parsing to avoid duplication
 	var spotLat *float64
 	var spotLon *float64
-
-	if h.receiverLocator != "" && decode.Locator != "" {
-		if IsValidMaidenheadLocator(h.receiverLocator) && IsValidMaidenheadLocator(decode.Locator) {
-			dist, bearing, err := CalculateDistanceAndBearingFromLocators(h.receiverLocator, decode.Locator)
-			if err == nil {
-				distanceKm = &dist
-				bearingDeg = &bearing
-			}
-		}
-	}
 
 	// Convert spot locator to lat/lon for map display with jitter
 	if decode.Locator != "" && IsValidMaidenheadLocator(decode.Locator) {
@@ -323,12 +312,12 @@ func (h *DXClusterWebSocketHandler) BroadcastDigitalSpot(decode DecodeInfo) {
 		"tx_frequency": decode.TxFrequency,
 	}
 
-	// Add distance and bearing if calculated
-	if distanceKm != nil {
-		data["distance_km"] = *distanceKm
+	// Add distance and bearing if available (pre-calculated during parsing)
+	if decode.DistanceKm != nil {
+		data["distance_km"] = *decode.DistanceKm
 	}
-	if bearingDeg != nil {
-		data["bearing_deg"] = *bearingDeg
+	if decode.BearingDeg != nil {
+		data["bearing_deg"] = *decode.BearingDeg
 	}
 
 	// Add spot coordinates if available

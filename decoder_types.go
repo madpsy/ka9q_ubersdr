@@ -22,6 +22,10 @@ type DecodeInfo struct {
 	Message    string
 	BandName   string // Name of the decoder band (e.g., "20m_FT8")
 
+	// Distance and bearing (calculated if receiver locator is configured)
+	DistanceKm *float64 `json:"distance_km,omitempty"`
+	BearingDeg *float64 `json:"bearing_deg,omitempty"`
+
 	// WSPR-specific fields
 	DT          float32 // Time drift in seconds
 	Drift       int     // Frequency drift in Hz

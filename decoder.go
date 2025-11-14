@@ -457,7 +457,7 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 		}
 
 		// Process decoder output (decoder has already completed)
-		decodes, err := md.spawner.ProcessDecoderOutput(logFile, band)
+		decodes, err := md.spawner.ProcessDecoderOutput(logFile, band, md.config.ReceiverLocator)
 		if err != nil {
 			log.Printf("Error processing decoder output for %s: %v", band.Config.Name, err)
 			md.stats.IncrementErrors()

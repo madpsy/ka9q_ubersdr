@@ -315,7 +315,7 @@ func isValidGridLocatorForMode(s string, mode DecoderMode) bool {
 }
 
 // ParseDecoderLog reads and parses a decoder log file
-func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode, bandName string) ([]*DecodeInfo, error) {
+func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode, bandName string, receiverLocator string) ([]*DecodeInfo, error) {
 	if DebugMode || mode == ModeFT4 {
 		log.Printf("DEBUG: ParseDecoderLog called for %s mode, file: %s", mode.String(), filename)
 	}
@@ -369,6 +369,17 @@ func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode, bandNam
 
 		// Set band name for all decoded spots
 		info.BandName = bandName
+
+		// Calculate distance and bearing if we have both locators
+		if receiverLocator != "" && info.Locator != "" {
+			if IsValidMaidenheadLocator(receiverLocator) && IsValidMaidenheadLocator(info.Locator) {
+				dist, bearing, err := CalculateDistanceAndBearingFromLocators(receiverLocator, info.Locator)
+				if err == nil {
+					info.DistanceKm = &dist
+					info.BearingDeg = &bearing
+				}
+			}
+		}
 
 		// Only include decodes with valid callsigns
 		if info.HasCallsign {

@@ -27,19 +27,29 @@ type SpotsLogger struct {
 
 // SpotRecord represents a decoded spot from CSV
 type SpotRecord struct {
-	Timestamp string `json:"timestamp"`
-	Callsign  string `json:"callsign"`
-	Locator   string `json:"locator"`
-	SNR       int    `json:"snr"`
-	Frequency uint64 `json:"frequency"`
-	Band      string `json:"band"`      // Calculated from frequency (e.g., "20m", "40m")
-	Message   string `json:"message"`
-	Country   string `json:"country"`
-	CQZone    int    `json:"cq_zone"`
-	ITUZone   int    `json:"itu_zone"`
-	Continent string `json:"continent"`
-	Mode      string `json:"mode"`
-	Name      string `json:"name"` // Decoder config band name
+	Timestamp  string   `json:"timestamp"`
+	Callsign   string   `json:"callsign"`
+	Locator    string   `json:"locator"`
+	SNR        int      `json:"snr"`
+	Frequency  uint64   `json:"frequency"`
+	Band       string   `json:"band"`      // Calculated from frequency (e.g., "20m", "40m")
+	Message    string   `json:"message"`
+	Country    string   `json:"country"`
+	CQZone     int      `json:"cq_zone"`
+	ITUZone    int      `json:"itu_zone"`
+	Continent  string   `json:"continent"`
+	DistanceKm *float64 `json:"distance_km,omitempty"` // Distance from receiver in km
+	BearingDeg *float64 `json:"bearing_deg,omitempty"` // Bearing from receiver in degrees
+	Mode       string   `json:"mode"`
+	Name       string   `json:"name"` // Decoder config band name
+}
+
+// formatOptionalFloat formats an optional float64 pointer for CSV output
+func formatOptionalFloat(val *float64) string {
+	if val == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.1f", *val)
 }
 
 // NewSpotsLogger creates a new spots logger
@@ -94,6 +104,8 @@ func (sl *SpotsLogger) LogSpot(decode *DecodeInfo) error {
 		fmt.Sprintf("%d", decode.CQZone),
 		fmt.Sprintf("%d", decode.ITUZone),
 		decode.Continent,
+		formatOptionalFloat(decode.DistanceKm),
+		formatOptionalFloat(decode.BearingDeg),
 	}
 
 	if err := writer.Write(record); err != nil {
@@ -158,6 +170,7 @@ func (sl *SpotsLogger) getOrCreateWriter(decode *DecodeInfo) (*csv.Writer, error
 		header := []string{
 			"timestamp", "callsign", "locator", "snr", "frequency", "band",
 			"message", "country", "cq_zone", "itu_zone", "continent",
+			"distance_km", "bearing_deg",
 		}
 		if err := writer.Write(header); err != nil {
 			return nil, fmt.Errorf("failed to write CSV header: %w", err)
@@ -196,11 +209,12 @@ func (sl *SpotsLogger) Close() error {
 // - mode: Filter by mode (FT8, FT4, WSPR) - empty for all modes
 // - band: Filter by calculated band (e.g., "20m", "40m") - empty for all bands
 // - name: Filter by decoder config name - empty for all names
+// - continent: Filter by continent code (AF, AS, EU, NA, OC, SA, AN) - empty for all
 // - fromDate: Start date (YYYY-MM-DD)
 // - toDate: End date (YYYY-MM-DD) - empty for single day
 // - deduplicate: If true, only return unique callsign/locator combinations per day
 // - locatorsOnly: If true, only return spots that have a locator
-func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, fromDate, toDate string, deduplicate, locatorsOnly bool) ([]SpotRecord, error) {
+func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, continent, fromDate, toDate string, deduplicate, locatorsOnly bool) ([]SpotRecord, error) {
 	if !sl.enabled {
 		return nil, fmt.Errorf("spots logging is not enabled")
 	}
@@ -253,6 +267,16 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, fromDate, toDate str
 			for _, spot := range spots {
 				// Filter by calculated band if specified
 				if band != "" && spot.Band != band {
+					continue
+				}
+
+				// Filter by continent if specified
+				if continent != "" && spot.Continent != continent {
+					continue
+				}
+
+				// Filter by locators only if specified
+				if locatorsOnly && spot.Locator == "" {
 					continue
 				}
 
@@ -348,6 +372,7 @@ func (sl *SpotsLogger) readNameFile(dirPath, configName, mode string) ([]SpotRec
 	// Parse records (skip header)
 	spots := make([]SpotRecord, 0, len(records)-1)
 	for _, record := range records[1:] {
+		// Support both old format (11 columns) and new format (13 columns)
 		if len(record) < 11 {
 			continue
 		}
@@ -369,6 +394,22 @@ func (sl *SpotsLogger) readNameFile(dirPath, configName, mode string) ([]SpotRec
 		fmt.Sscanf(record[4], "%d", &spot.Frequency)
 		fmt.Sscanf(record[8], "%d", &spot.CQZone)
 		fmt.Sscanf(record[9], "%d", &spot.ITUZone)
+
+		// Parse distance and bearing if present (new format with 13 columns)
+		if len(record) >= 13 {
+			if record[11] != "" {
+				var dist float64
+				if _, err := fmt.Sscanf(record[11], "%f", &dist); err == nil {
+					spot.DistanceKm = &dist
+				}
+			}
+			if record[12] != "" {
+				var bearing float64
+				if _, err := fmt.Sscanf(record[12], "%f", &bearing); err == nil {
+					spot.BearingDeg = &bearing
+				}
+			}
+		}
 
 		spots = append(spots, spot)
 	}

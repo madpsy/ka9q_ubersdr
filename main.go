@@ -1833,6 +1833,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	mode := r.URL.Query().Get("mode")              // FT8, FT4, WSPR, or empty for all
 	band := r.URL.Query().Get("band")              // Calculated band (e.g., "20m", "40m") or empty for all
 	name := r.URL.Query().Get("name")              // Decoder config name or empty for all
+	continent := r.URL.Query().Get("continent")    // Continent code (AF, AS, EU, NA, OC, SA, AN) or empty for all
 	fromDate := r.URL.Query().Get("date")          // For backward compatibility
 	toDate := r.URL.Query().Get("to_date")         // Optional end date
 	dedupStr := r.URL.Query().Get("dedup")         // "true" to deduplicate
@@ -1857,7 +1858,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
-	rateLimitKey := fmt.Sprintf("spots-%s-%s-%s-%s", mode, band, name, fromDate)
+	rateLimitKey := fmt.Sprintf("spots-%s-%s-%s-%s-%s", mode, band, name, continent, fromDate)
 	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -1868,7 +1869,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	}
 
 	// Get historical spots
-	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, fromDate, toDate, deduplicate, locatorsOnly)
+	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, continent, fromDate, toDate, deduplicate, locatorsOnly)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{

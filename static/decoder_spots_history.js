@@ -12,6 +12,17 @@
         '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'
     ];
 
+    // Continent name mapping
+    const continentNames = {
+        'AF': 'Africa',
+        'AS': 'Asia',
+        'EU': 'Europe',
+        'NA': 'North America',
+        'OC': 'Oceania',
+        'SA': 'South America',
+        'AN': 'Antarctica'
+    };
+
     // Initialize
     document.addEventListener('DOMContentLoaded', function() {
         initializeDatePicker();
@@ -206,6 +217,7 @@
         const mode = document.getElementById('mode-select').value;
         const band = document.getElementById('band-select').value;
         const name = document.getElementById('name-select').value;
+        const continent = document.getElementById('continent-select').value;
         const dedup = document.getElementById('dedup-checkbox').checked;
         const locatorsOnly = document.getElementById('locators-only-checkbox').checked;
 
@@ -217,6 +229,7 @@
             if (mode) url += `&mode=${mode}`;
             if (band) url += `&band=${band}`;
             if (name) url += `&name=${name}`;
+            if (continent) url += `&continent=${continent}`;
             if (dedup) url += `&dedup=true`;
             if (locatorsOnly) url += `&locators_only=true`;
 
@@ -279,6 +292,10 @@
                 <div class="stat-label">Countries</div>
             </div>
             <div class="stat-card">
+                <div class="stat-value">${stats.uniqueContinents}</div>
+                <div class="stat-label">Continents</div>
+            </div>
+            <div class="stat-card">
                 <div class="stat-value">${stats.avgSNR > 0 ? '+' : ''}${stats.avgSNR}</div>
                 <div class="stat-label">Avg SNR (dB)</div>
             </div>
@@ -301,6 +318,10 @@
 
             const freqMHz = (spot.frequency / 1000000).toFixed(6);
 
+            // Format distance and bearing
+            const distanceText = spot.distance_km ? `${spot.distance_km.toFixed(0)} km` : '-';
+            const bearingText = spot.bearing_deg ? `${spot.bearing_deg.toFixed(0)}°` : '-';
+            
             row.innerHTML = `
                 <td>${time}</td>
                 <td><span class="mode-badge mode-${spot.mode.toLowerCase()}">${spot.mode}</span></td>
@@ -310,8 +331,10 @@
                 <td>${spot.locator || '-'}</td>
                 <td class="${snrClass}">${snrText} dB</td>
                 <td>${freqMHz} MHz</td>
+                <td>${distanceText}</td>
+                <td>${bearingText}</td>
                 <td>${spot.country || '-'}</td>
-                <td>${spot.continent || '-'}</td>
+                <td>${spot.continent ? (continentNames[spot.continent] || spot.continent) : '-'}</td>
                 <td style="font-family: monospace; font-size: 0.9em;">${spot.message || '-'}</td>
             `;
             tbody.appendChild(row);
@@ -323,17 +346,20 @@
     function calculateStats(spots) {
         const callsigns = new Set();
         const countries = new Set();
+        const continents = new Set();
         let totalSNR = 0;
 
         spots.forEach(spot => {
             callsigns.add(spot.callsign);
             if (spot.country) countries.add(spot.country);
+            if (spot.continent) continents.add(spot.continent);
             totalSNR += spot.snr;
         });
 
         return {
             uniqueCallsigns: callsigns.size,
             uniqueCountries: countries.size,
+            uniqueContinents: continents.size,
             avgSNR: spots.length > 0 ? Math.round(totalSNR / spots.length) : 0
         };
     }

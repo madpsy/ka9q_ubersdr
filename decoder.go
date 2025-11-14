@@ -442,14 +442,27 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 
 	// Spawn decoder in goroutine
 	go func() {
+		var outputFile, logFile string
+
 		// Ensure cleanup always happens, even if errors occur
 		defer func() {
-			// Cleanup files regardless of success or failure
+			// Cleanup WAV file
 			md.spawner.CleanupFiles(filename, "", band.Config.Mode)
+
+			// Cleanup log file separately if we have one and keep_logs is false
+			if logFile != "" && !md.config.KeepLogs {
+				if removeErr := os.Remove(logFile); removeErr != nil && !os.IsNotExist(removeErr) {
+					log.Printf("Warning: failed to remove log file %s: %v", logFile, removeErr)
+				} else if DebugMode {
+					log.Printf("DEBUG: Removed log file: %s", logFile)
+				}
+			}
 		}()
 
 		// SpawnDecoder now waits for the decoder process to complete before returning
-		logFile, execTime, err := md.spawner.SpawnDecoder(filename, band)
+		var execTime time.Duration
+		var err error
+		outputFile, logFile, execTime, err = md.spawner.SpawnDecoder(filename, band)
 		if err != nil {
 			log.Printf("Error spawning decoder for %s: %v", band.Config.Name, err)
 			md.stats.IncrementErrors()
@@ -457,7 +470,7 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 		}
 
 		// Process decoder output (decoder has already completed)
-		decodes, err := md.spawner.ProcessDecoderOutput(logFile, band, md.config.ReceiverLocator)
+		decodes, err := md.spawner.ProcessDecoderOutput(outputFile, band, md.config.ReceiverLocator)
 		if err != nil {
 			log.Printf("Error processing decoder output for %s: %v", band.Config.Name, err)
 			md.stats.IncrementErrors()
@@ -540,15 +553,6 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 		// Record execution time metric only if we successfully got one
 		if err == nil && md.prometheusMetrics != nil {
 			md.prometheusMetrics.digitalMetrics.RecordExecutionTime(band.Config.Mode.String(), band.Config.Name, execTime)
-		}
-
-		// Cleanup log file if we have one (WAV cleanup happens in defer)
-		if logFile != "" && !md.config.KeepLogs {
-			if removeErr := os.Remove(logFile); removeErr != nil && !os.IsNotExist(removeErr) {
-				log.Printf("Warning: failed to remove log file %s: %v", logFile, removeErr)
-			} else if DebugMode {
-				log.Printf("DEBUG: Removed log file: %s", logFile)
-			}
 		}
 	}()
 }

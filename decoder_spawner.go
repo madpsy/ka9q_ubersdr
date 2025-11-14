@@ -23,21 +23,21 @@ func NewDecoderSpawner(config *DecoderConfig) *DecoderSpawner {
 }
 
 // SpawnDecoder spawns a decoder process for the given WAV file
-// Returns the output file path where decoder results will be written and the execution duration
-func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (string, time.Duration, error) {
+// Returns the output file path where decoder results will be written, the log file path, and the execution duration
+func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (string, string, time.Duration, error) {
 	modeInfo := GetModeInfo(band.Config.Mode)
 
 	// Create working directory for this band (isolates decoder temp files)
 	workDir := filepath.Join(ds.config.DataDir, fmt.Sprintf("%d", band.Config.Frequency))
 	if err := os.MkdirAll(workDir, 0755); err != nil {
-		return "", 0, fmt.Errorf("failed to create work directory: %w", err)
+		return "", "", 0, fmt.Errorf("failed to create work directory: %w", err)
 	}
 
 	// Extract timestamp from WAV filename to make log file unique per cycle
 	// WAV filename format: YYMMDD_HHMMSS.wav or YYMMDD_HHMM.wav
 	wavBasename := filepath.Base(wavFile)
 	wavTimestamp := strings.TrimSuffix(wavBasename, ".wav")
-	
+
 	// Create unique log file path for this decode cycle
 	logFile := filepath.Join(ds.config.DataDir,
 		fmt.Sprintf("%s_%d_%s.log", band.Config.Mode.String(), band.Config.Frequency, wavTimestamp))
@@ -54,10 +54,10 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 
 	// Get decode depth from band config (defaults to 3)
 	depth := band.Config.GetDepth()
-	
+
 	// Build decoder command and get log file handle
 	cmd, logFileHandle := ds.buildDecoderCommand(modeInfo, wavFile, band.Config.Frequency, workDir, logFile, depth)
-	
+
 	// Ensure log file is closed after decoder completes
 	defer func() {
 		if logFileHandle != nil {
@@ -75,7 +75,7 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 	// Start the decoder process and track execution time
 	startTime := time.Now()
 	if err := cmd.Start(); err != nil {
-		return "", 0, fmt.Errorf("failed to start decoder: %w", err)
+		return "", "", 0, fmt.Errorf("failed to start decoder: %w", err)
 	}
 
 	log.Printf("Started decoder for %s, waiting for completion...", band.Config.Name)
@@ -86,7 +86,7 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 
 	if err != nil {
 		log.Printf("Decoder process for %s exited with error: %v", band.Config.Name, err)
-		return "", executionTime, fmt.Errorf("decoder process failed: %w", err)
+		return "", "", executionTime, fmt.Errorf("decoder process failed: %w", err)
 	}
 
 	log.Printf("Decoder for %s completed successfully in %.3f seconds", band.Config.Name, executionTime.Seconds())
@@ -95,7 +95,7 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 	// This is especially important for jt9 which may buffer writes
 	time.Sleep(200 * time.Millisecond)
 
-	return outputFile, executionTime, nil
+	return outputFile, logFile, executionTime, nil
 }
 
 // buildDecoderCommand builds the command to execute the decoder
@@ -130,7 +130,7 @@ func (ds *DecoderSpawner) buildDecoderCommand(modeInfo ModeInfo, wavFile string,
 		log.Printf("Warning: failed to create log file %s: %v", logFile, err)
 		return cmd, nil
 	}
-	
+
 	cmd.Stdout = logF
 	cmd.Stderr = logF
 

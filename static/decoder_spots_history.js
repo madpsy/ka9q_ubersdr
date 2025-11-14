@@ -6,6 +6,8 @@
     let availableDates = [];
     let availableNames = [];
     let currentData = null;
+    let currentPage = 1;
+    let recordsPerPage = 100;
 
     // Common HF band names (excluding VHF/UHF)
     const commonBands = [
@@ -42,8 +44,19 @@
         const dedupCheckbox = document.getElementById('dedup-checkbox');
         const callsignInput = document.getElementById('callsign-input');
         const locatorInput = document.getElementById('locator-input');
+        const recordsPerPageSelect = document.getElementById('records-per-page');
 
         loadBtn.addEventListener('click', loadSpots);
+
+        // Handle records per page change
+        recordsPerPageSelect.addEventListener('change', function() {
+            const value = this.value;
+            recordsPerPage = value === 'all' ? Infinity : parseInt(value);
+            currentPage = 1;
+            if (currentData) {
+                displaySpots(currentData);
+            }
+        });
 
         // Add callsign input validation
         callsignInput.addEventListener('input', function(e) {
@@ -357,6 +370,31 @@
         const statsGrid = document.getElementById('stats-grid');
         const tbody = document.getElementById('spots-tbody');
 
+        // Calculate pagination
+        const totalRecords = data.spots.length;
+        const totalPages = recordsPerPage === Infinity ? 1 : Math.ceil(totalRecords / recordsPerPage);
+        
+        // Ensure current page is valid
+        if (currentPage > totalPages) {
+            currentPage = totalPages || 1;
+        }
+
+        // Calculate start and end indices for current page
+        const startIndex = (currentPage - 1) * recordsPerPage;
+        const endIndex = recordsPerPage === Infinity ? totalRecords : Math.min(startIndex + recordsPerPage, totalRecords);
+        const pageSpots = data.spots.slice(startIndex, endIndex);
+
+        // Update pagination info
+        const paginationInfo = document.getElementById('pagination-info');
+        if (recordsPerPage === Infinity) {
+            paginationInfo.textContent = `Showing all ${totalRecords} records`;
+        } else {
+            paginationInfo.textContent = `Showing ${startIndex + 1}-${endIndex} of ${totalRecords} records`;
+        }
+
+        // Render pagination buttons
+        renderPaginationButtons(totalPages);
+
         // Update title
         const mode = document.getElementById('mode-select').value || 'All Modes';
         const band = document.getElementById('band-select').value || 'All Bands';
@@ -504,9 +542,9 @@
 
         statsGrid.innerHTML = statsHTML;
 
-        // Display spots table
+        // Display spots table (only current page)
         tbody.innerHTML = '';
-        data.spots.forEach(spot => {
+        pageSpots.forEach(spot => {
             const row = document.createElement('tr');
             
             const time = new Date(spot.timestamp).toLocaleTimeString('en-US', { 
@@ -544,6 +582,110 @@
         });
 
         container.style.display = 'block';
+    }
+
+    function renderPaginationButtons(totalPages) {
+        const buttonsContainer = document.getElementById('pagination-buttons');
+        buttonsContainer.innerHTML = '';
+
+        if (totalPages <= 1) {
+            return; // No pagination needed
+        }
+
+        // Previous button
+        const prevBtn = document.createElement('button');
+        prevBtn.textContent = '‹ Previous';
+        prevBtn.disabled = currentPage === 1;
+        prevBtn.style.padding = '5px 10px';
+        prevBtn.style.background = currentPage === 1 ? 'rgba(255,255,255,0.1)' : 'rgba(33, 150, 243, 0.8)';
+        prevBtn.style.border = '1px solid rgba(255,255,255,0.2)';
+        prevBtn.style.borderRadius = '4px';
+        prevBtn.style.color = 'white';
+        prevBtn.style.cursor = currentPage === 1 ? 'not-allowed' : 'pointer';
+        prevBtn.addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                displaySpots(currentData);
+            }
+        });
+        buttonsContainer.appendChild(prevBtn);
+
+        // Page number buttons (show first, last, current, and nearby pages)
+        const maxButtons = 7;
+        let startPage = Math.max(1, currentPage - 2);
+        let endPage = Math.min(totalPages, currentPage + 2);
+
+        // Adjust if we're near the start or end
+        if (currentPage <= 3) {
+            endPage = Math.min(totalPages, maxButtons);
+        } else if (currentPage >= totalPages - 2) {
+            startPage = Math.max(1, totalPages - maxButtons + 1);
+        }
+
+        // First page button
+        if (startPage > 1) {
+            addPageButton(1, buttonsContainer);
+            if (startPage > 2) {
+                const ellipsis = document.createElement('span');
+                ellipsis.textContent = '...';
+                ellipsis.style.padding = '5px 10px';
+                ellipsis.style.color = 'rgba(255,255,255,0.5)';
+                buttonsContainer.appendChild(ellipsis);
+            }
+        }
+
+        // Page number buttons
+        for (let i = startPage; i <= endPage; i++) {
+            addPageButton(i, buttonsContainer);
+        }
+
+        // Last page button
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                const ellipsis = document.createElement('span');
+                ellipsis.textContent = '...';
+                ellipsis.style.padding = '5px 10px';
+                ellipsis.style.color = 'rgba(255,255,255,0.5)';
+                buttonsContainer.appendChild(ellipsis);
+            }
+            addPageButton(totalPages, buttonsContainer);
+        }
+
+        // Next button
+        const nextBtn = document.createElement('button');
+        nextBtn.textContent = 'Next ›';
+        nextBtn.disabled = currentPage === totalPages;
+        nextBtn.style.padding = '5px 10px';
+        nextBtn.style.background = currentPage === totalPages ? 'rgba(255,255,255,0.1)' : 'rgba(33, 150, 243, 0.8)';
+        nextBtn.style.border = '1px solid rgba(255,255,255,0.2)';
+        nextBtn.style.borderRadius = '4px';
+        nextBtn.style.color = 'white';
+        nextBtn.style.cursor = currentPage === totalPages ? 'not-allowed' : 'pointer';
+        nextBtn.addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                currentPage++;
+                displaySpots(currentData);
+            }
+        });
+        buttonsContainer.appendChild(nextBtn);
+    }
+
+    function addPageButton(pageNum, container) {
+        const btn = document.createElement('button');
+        btn.textContent = pageNum;
+        btn.style.padding = '5px 10px';
+        btn.style.minWidth = '35px';
+        btn.style.background = pageNum === currentPage ? 'rgba(33, 150, 243, 1)' : 'rgba(255,255,255,0.1)';
+        btn.style.border = '1px solid rgba(255,255,255,0.2)';
+        btn.style.borderRadius = '4px';
+        btn.style.color = 'white';
+        btn.style.cursor = 'pointer';
+        btn.style.fontWeight = pageNum === currentPage ? 'bold' : 'normal';
+        btn.addEventListener('click', () => {
+            currentPage = pageNum;
+            displaySpots(currentData);
+        });
+        container.appendChild(btn);
     }
 
     function calculateStats(spots) {

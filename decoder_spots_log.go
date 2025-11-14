@@ -344,6 +344,13 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 					}
 				}
 
+				// Filter by minimum SNR if specified
+				if minSNR > -999 {
+					if spot.SNR < minSNR {
+						continue
+					}
+				}
+
 				if deduplicate {
 					// Create dedup key: callsign+locator+date
 					dedupKey := fmt.Sprintf("%s|%s|%s", spot.Callsign, spot.Locator, dateStr)

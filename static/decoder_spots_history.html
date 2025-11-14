@@ -141,6 +141,25 @@
                 <!-- Stats will be inserted here -->
             </div>
 
+            <div class="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label for="records-per-page">Records per page:</label>
+                    <select id="records-per-page" style="padding: 5px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="250">250</option>
+                        <option value="500">500</option>
+                        <option value="1000">1000</option>
+                        <option value="all">All</option>
+                    </select>
+                    <span id="pagination-info" style="color: rgba(255,255,255,0.7);"></span>
+                </div>
+                <div id="pagination-buttons" style="display: flex; gap: 5px;">
+                    <!-- Pagination buttons will be inserted here -->
+                </div>
+            </div>
+
             <div class="spots-table-container">
                 <table class="spots-table" id="spots-table">
                     <thead>

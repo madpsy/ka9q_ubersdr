@@ -981,7 +981,7 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 				MinSNR:             agg.minSNR,
 				AvgSNR:             agg.totalSNR / float64(agg.count),
 				MaxSNR:             agg.maxSNR,
-				BestHoursUTC:       findBestHours(agg.hourly, 5),
+				BestHoursUTC:       findBestHours(agg.hourly, 3),
 				HourlyDistribution: formatHourlyDistribution(agg.hourly),
 			}
 			countryAnalytics.Bands = append(countryAnalytics.Bands, bandAnalytics)
@@ -1023,7 +1023,7 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 				MinSNR:             agg.minSNR,
 				AvgSNR:             agg.totalSNR / float64(agg.count),
 				MaxSNR:             agg.maxSNR,
-				BestHoursUTC:       findBestHours(agg.hourly, 5),
+				BestHoursUTC:       findBestHours(agg.hourly, 3),
 				HourlyDistribution: formatHourlyDistribution(agg.hourly),
 			}
 			continentAnalytics.Bands = append(continentAnalytics.Bands, bandAnalytics)

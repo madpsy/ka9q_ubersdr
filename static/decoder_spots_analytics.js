@@ -325,8 +325,10 @@
             const avgSNR = band.avg_snr >= 0 ? `+${band.avg_snr.toFixed(1)}` : band.avg_snr.toFixed(1);
             const maxSNR = band.max_snr >= 0 ? `+${band.max_snr.toFixed(1)}` : band.max_snr.toFixed(1);
 
-            // Use backend's best_hours_utc (top 5) and collate into ranges for "Best Hours"
+            // Use backend's best_hours_utc (top 3) and collate into ranges for "Best Hours"
             const bestHourRanges = collateContiguousHours(band.best_hours_utc);
+            // Get the top hour (first in the sorted array) for special highlighting
+            const topHour = band.best_hours_utc.length > 0 ? band.best_hours_utc[0] : null;
 
             // Get ALL hours with activity for "Active Hours" from hourly_distribution
             const activeHours = Object.entries(band.hourly_distribution)
@@ -345,8 +347,10 @@
                     <div class="best-hours">
                         <strong>Best Hours (UTC):</strong>
                         <div class="hour-badges">
-                            ${bestHourRanges.map(range => {
-                                return `<span class="hour-badge hour-badge-best">${range}</span>`;
+                            ${band.best_hours_utc.map(hour => {
+                                const hourStr = String(hour).padStart(2, '0') + ':00';
+                                const isTopHour = hour === topHour;
+                                return `<span class="hour-badge${isTopHour ? ' hour-badge-best' : ''}">${hourStr}</span>`;
                             }).join('')}
                         </div>
                     </div>

@@ -52,6 +52,7 @@
 
     function initializeControls() {
         const loadBtn = document.getElementById('load-btn');
+        const clearFiltersBtn = document.getElementById('clear-filters-btn');
         const downloadBtn = document.getElementById('download-csv-btn');
         const modeSelect = document.getElementById('mode-select');
         const bandSelect = document.getElementById('band-select');
@@ -61,6 +62,7 @@
         const recordsPerPageSelect = document.getElementById('records-per-page');
 
         loadBtn.addEventListener('click', loadSpots);
+        clearFiltersBtn.addEventListener('click', clearFilters);
         downloadBtn.addEventListener('click', downloadCSV);
 
         // Add Enter key handler to all form inputs to trigger load
@@ -141,6 +143,21 @@
 
         // Fetch and populate available names
         loadAvailableNames();
+    }
+
+    function clearFilters() {
+        // Clear all filters except date
+        document.getElementById('mode-select').value = '';
+        document.getElementById('band-select').value = '';
+        document.getElementById('name-select').value = '';
+        document.getElementById('callsign-input').value = '';
+        document.getElementById('locator-input').value = '';
+        document.getElementById('continent-select').value = '';
+        document.getElementById('direction-select').value = '';
+        document.getElementById('min-distance-select').value = '0';
+        document.getElementById('min-snr-select').value = '-999';
+
+        showStatus('Filters cleared', 'success');
     }
 
     async function loadAvailableNames() {

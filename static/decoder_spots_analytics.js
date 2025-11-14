@@ -133,10 +133,19 @@
     }
 
     async function loadAnalytics() {
-        const country = document.getElementById('country-search').value.trim();
+        const countryInput = document.getElementById('country-search');
+        const country = countryInput.value.trim();
         const continent = document.getElementById('continent-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
         const hours = document.getElementById('hours-select').value;
+
+        // Validate country input if provided
+        if (country && !isValidCountry(country)) {
+            showStatus('Please select a valid country from the dropdown list', 'error');
+            document.getElementById('load-btn').disabled = false;
+            countryInput.focus();
+            return;
+        }
 
         showStatus('Loading analytics...', '');
         document.getElementById('load-btn').disabled = true;
@@ -437,6 +446,13 @@
         } catch (error) {
             console.error('Error fetching receiver info:', error);
         }
+    }
+
+    function isValidCountry(countryName) {
+        // Check if the entered country name exists in our countries list
+        return allCountries.some(country =>
+            country.name.toLowerCase() === countryName.toLowerCase()
+        );
     }
 
     function toggleGraphsVisibility() {

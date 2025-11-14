@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decoder Spots History</title>
+    <link rel="stylesheet" href="decoder_spots_history.css">
+</head>
+<body>
+    <div class="container">
+        <h1>📡 Decoder Spots History</h1>
+        <div class="subtitle" id="receiver-name">Historical FT8/FT4/WSPR Spots</div>
+        
+        <div class="info-box">
+            ℹ️ View historical decoder spots from FT8, FT4, and WSPR modes. Filter by date, mode, and band. Enable deduplication to show only unique callsign/locator combinations per day.
+        </div>
+
+        <div class="controls">
+            <div class="control-row">
+                <div class="control-group">
+                    <label>Date:</label>
+                    <button id="datePickerBtn" style="background: #2196F3;">
+                        <span id="selectedDateText">Select Date</span>
+                    </button>
+                </div>
+
+                <div class="control-group">
+                    <label for="mode-select">Mode:</label>
+                    <select id="mode-select">
+                        <option value="">All Modes</option>
+                        <option value="FT8">FT8</option>
+                        <option value="FT4">FT4</option>
+                        <option value="WSPR">WSPR</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="band-select">Band:</label>
+                    <select id="band-select">
+                        <option value="">All Bands</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>&nbsp;</label>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="dedup-checkbox">
+                        <label for="dedup-checkbox">Deduplicate</label>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <button id="load-btn">Load Spots</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="data-container" class="data-container" style="display: none;">
+            <h2 style="margin-bottom: 15px; font-size: 1.3em;" id="data-title">Decoder Spots</h2>
+            
+            <div class="stats-grid" id="stats-grid">
+                <!-- Stats will be inserted here -->
+            </div>
+
+            <div class="spots-table-container">
+                <table class="spots-table" id="spots-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Mode</th>
+                            <th>Band</th>
+                            <th>Callsign</th>
+                            <th>Locator</th>
+                            <th>SNR</th>
+                            <th>Frequency</th>
+                            <th>Country</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody id="spots-tbody">
+                        <!-- Spots will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="status" class="status">Select a date and click "Load Spots" to begin</div>
+    </div>
+
+    <!-- Date Picker Overlay -->
+    <div id="datePickerOverlay" class="date-picker-overlay">
+        <div class="date-picker">
+            <div class="date-picker-header">
+                <h3>Select Date</h3>
+                <button id="closeDatePicker" style="background: transparent; padding: 5px 10px;">✕</button>
+            </div>
+            <div class="date-picker-nav">
+                <button id="prevMonth">‹</button>
+                <div class="date-picker-month-year" id="monthYearDisplay"></div>
+                <button id="nextMonth">›</button>
+            </div>
+            <div class="date-picker-calendar" id="datePickerCalendar"></div>
+            <div class="date-picker-footer">
+                <button id="cancelDatePicker">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>Download <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/bandconditions.html" target="_blank">Live Conditions</a> <span id="footer-version"></span></p>
+    </footer>
+
+    <script src="date-picker.js"></script>
+    <script src="decoder_spots_history.js"></script>
+</body>
+</html>

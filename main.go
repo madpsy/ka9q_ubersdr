@@ -603,6 +603,14 @@ func main() {
 		handleNoiseFloorAggregate(w, r, noiseFloorMonitor, ipBanManager, aggregateRateLimiter, prometheusMetrics)
 	}))
 
+	// Decoder spots endpoints (with gzip compression, IP ban checking, and rate limiting)
+	http.HandleFunc("/api/decoder/spots", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleDecoderSpots(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+	}))
+	http.HandleFunc("/api/decoder/spots/dates", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleDecoderSpotsDates(w, r, multiDecoder, ipBanManager)
+	}))
+
 	// Admin authentication endpoints (no auth required)
 	http.HandleFunc("/admin/login", adminHandler.HandleLogin)
 	http.HandleFunc("/admin/logout", adminHandler.HandleLogout)
@@ -1798,6 +1806,120 @@ func handleSpaceWeatherCSV(w http.ResponseWriter, r *http.Request, swm *SpaceWea
 	// Write CSV data
 	if _, err := w.Write([]byte(csvData)); err != nil {
 		log.Printf("Error writing CSV data: %v", err)
+	}
+}
+
+// handleDecoderSpots serves historical decoder spots data
+func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if md == nil || md.spotsLogger == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decoder spots logging is not enabled",
+		})
+		return
+	}
+
+	// Get query parameters
+	mode := r.URL.Query().Get("mode")       // FT8, FT4, WSPR, or empty for all
+	band := r.URL.Query().Get("band")       // Band name or empty for all
+	fromDate := r.URL.Query().Get("date")   // For backward compatibility
+	toDate := r.URL.Query().Get("to_date")  // Optional end date
+	dedupStr := r.URL.Query().Get("dedup")  // "true" to deduplicate
+
+	// Also support from_date parameter
+	if fd := r.URL.Query().Get("from_date"); fd != "" {
+		fromDate = fd
+	}
+
+	if fromDate == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "date or from_date parameter is required (format: YYYY-MM-DD)",
+		})
+		return
+	}
+
+	// Parse deduplication flag
+	deduplicate := dedupStr == "true" || dedupStr == "1"
+
+	// Check rate limit (1 request per 2 seconds per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("spots-%s-%s-%s", mode, band, fromDate)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Decoder spots endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	// Get historical spots
+	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, fromDate, toDate, deduplicate)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get spots: %v", err),
+		})
+		return
+	}
+
+	if len(spots) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "No spots available for the specified parameters",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"spots": spots,
+		"count": len(spots),
+	}); err != nil {
+		log.Printf("Error encoding decoder spots: %v", err)
+	}
+}
+
+// handleDecoderSpotsDates serves the list of available dates for decoder spots
+func handleDecoderSpotsDates(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if md == nil || md.spotsLogger == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decoder spots logging is not enabled",
+		})
+		return
+	}
+
+	// Get available dates
+	dates, err := md.spotsLogger.GetAvailableDates()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get available dates: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"dates": dates,
+	}); err != nil {
+		log.Printf("Error encoding available dates: %v", err)
 	}
 }
 

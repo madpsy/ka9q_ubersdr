@@ -68,6 +68,7 @@
             updateFilterButtonStates();
             displaySpots(currentData);
             showStatus('Showing all spots', 'success');
+            scrollToMap();
             return;
         }
 
@@ -106,6 +107,14 @@
 
         updateFilterButtonStates();
         displaySpots(currentData);
+        scrollToMap();
+    }
+
+    function scrollToMap() {
+        const mapSection = document.getElementById('map-section');
+        if (mapSection && mapSection.style.display !== 'none') {
+            mapSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
     }
 
     function applyAdditionalClientFilters(spots) {

@@ -299,7 +299,7 @@ class DecoderSpotsHistoryMap {
             // Fit map to bounds with padding
             this.map.fitBounds(bounds, {
                 padding: [50, 50],
-                maxZoom: 12,
+                maxZoom: 6, // Limit maximum zoom to avoid zooming in too far on single spots
                 animate: true,
                 duration: 0.5
             });

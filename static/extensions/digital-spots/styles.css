@@ -180,7 +180,7 @@
 
 .digital-spots-table th:nth-child(7),
 .digital-spots-table td:nth-child(7) {
-    width: 100px; /* Country */
+    width: 200px; /* Country */
 }
 
 .digital-spots-table th:nth-child(8),

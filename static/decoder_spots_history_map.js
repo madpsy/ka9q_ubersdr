@@ -185,10 +185,17 @@ class DecoderSpotsHistoryMap {
      * Clear all spot markers from map
      */
     clearMarkers() {
+        if (!this.map) return;
+
         this.markers.forEach(data => {
-            this.map.removeLayer(data.marker);
+            if (data.marker) {
+                this.map.removeLayer(data.marker);
+            }
         });
         this.markers.clear();
+
+        // Force map refresh
+        this.map.invalidateSize();
     }
 
     /**

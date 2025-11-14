@@ -337,6 +337,11 @@ class BandConditionsMonitor {
         this.setStatus('Loading...', 'info');
 
         try {
+            // Ensure GPS coordinates are loaded before space weather
+            if (!this.gpsCoordinates) {
+                await this.loadVersion();
+            }
+
             // Load space weather data
             await this.loadSpaceWeather();
 

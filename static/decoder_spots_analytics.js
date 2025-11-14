@@ -316,7 +316,9 @@
 
             // Collate contiguous hours for "Active Hours"
             const activeHours = band.best_hours_utc.sort((a, b) => a - b);
+            console.log(`Band ${band.band} - Active hours:`, activeHours);
             const hourRanges = collateContiguousHours(activeHours);
+            console.log(`Band ${band.band} - Hour ranges:`, hourRanges);
 
             bandsHTML += `
                 <div class="band-info${isBestBand ? ' band-info-best' : ''}">

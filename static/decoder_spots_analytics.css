@@ -173,6 +173,39 @@ h1 {
     gap: 20px;
 }
 
+/* Single entity - use full width for better band card layout */
+.country-list:has(.entity-card:only-child),
+.continent-list:has(.entity-card:only-child) {
+    grid-template-columns: 1fr;
+}
+
+/* When showing single entity, display bands in a grid */
+.entity-card:only-child .band-info {
+    display: inline-block;
+    width: calc(50% - 10px);
+    margin-right: 10px;
+    vertical-align: top;
+}
+
+.entity-card:only-child .band-info:nth-child(2n) {
+    margin-right: 0;
+}
+
+@media (min-width: 1200px) {
+    .entity-card:only-child .band-info {
+        width: calc(33.333% - 14px);
+        margin-right: 14px;
+    }
+    
+    .entity-card:only-child .band-info:nth-child(2n) {
+        margin-right: 14px;
+    }
+    
+    .entity-card:only-child .band-info:nth-child(3n) {
+        margin-right: 0;
+    }
+}
+
 .entity-card {
     background: rgba(255, 255, 255, 0.08);
     border-radius: 10px;

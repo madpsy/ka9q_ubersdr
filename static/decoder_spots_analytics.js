@@ -252,12 +252,19 @@
             countryList.appendChild(card);
         });
 
-        // Display continent analytics
-        continentList.innerHTML = '';
-        data.by_continent.forEach(continent => {
-            const card = createEntityCard(continent, 'continent');
-            continentList.appendChild(card);
-        });
+        // Display continent analytics (only if no specific country was selected)
+        const continentSection = document.getElementById('continent-section');
+        if (data.filters.country) {
+            // Hide continent section when a specific country is selected
+            continentSection.style.display = 'none';
+        } else {
+            continentSection.style.display = 'block';
+            continentList.innerHTML = '';
+            data.by_continent.forEach(continent => {
+                const card = createEntityCard(continent, 'continent');
+                continentList.appendChild(card);
+            });
+        }
 
         container.style.display = 'block';
     }

@@ -274,6 +274,7 @@
         const dedup = document.getElementById('dedup-checkbox').checked;
         const locatorsOnly = document.getElementById('locators-only-checkbox').checked;
         const minDistance = document.getElementById('min-distance-select').value;
+        const minSNR = document.getElementById('min-snr-select').value;
 
         // Validate callsign if provided
         if (callsign && !/^[A-Z0-9]{1,6}$/.test(callsign)) {
@@ -305,6 +306,9 @@
             if (locatorsOnly) url += `&locators_only=true`;
             if (minDistance && parseFloat(minDistance) > 0) {
                 url += `&min_distance=${minDistance}`;
+            }
+            if (minSNR && parseInt(minSNR) > -999) {
+                url += `&min_snr=${minSNR}`;
             }
 
             const response = await fetch(url);
@@ -375,6 +379,14 @@
             <div class="stat-card">
                 <div class="stat-value">${stats.uniqueCallsigns}</div>
                 <div class="stat-label">Unique Callsigns</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${stats.callsignsMultipleBands}</div>
+                <div class="stat-label">Callsigns on Multiple Bands</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${stats.callsignsMultipleModes}</div>
+                <div class="stat-label">Callsigns on Multiple Modes</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">${stats.uniqueCountries}</div>
@@ -615,8 +627,26 @@
             return { value: minValue, count: minCount };
         };
 
+        // Count callsigns on multiple bands
+        let callsignsMultipleBands = 0;
+        for (const [callsign, bandSet] of callsignBands.entries()) {
+            if (bandSet.size > 1) {
+                callsignsMultipleBands++;
+            }
+        }
+
+        // Count callsigns on multiple modes
+        let callsignsMultipleModes = 0;
+        for (const [callsign, modeSet] of callsignModes.entries()) {
+            if (modeSet.size > 1) {
+                callsignsMultipleModes++;
+            }
+        }
+
         const stats = {
             uniqueCallsigns: callsigns.size,
+            callsignsMultipleBands: callsignsMultipleBands,
+            callsignsMultipleModes: callsignsMultipleModes,
             uniqueCountries: countries.size,
             uniqueContinents: continents.size,
             uniqueLocators: locators.size,

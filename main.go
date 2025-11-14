@@ -1843,6 +1843,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	dedupStr := r.URL.Query().Get("dedup")         // "true" to deduplicate
 	locatorsOnlyStr := r.URL.Query().Get("locators_only") // "true" to only return spots with locators
 	minDistanceStr := r.URL.Query().Get("min_distance")   // Minimum distance in km
+	minSNRStr := r.URL.Query().Get("min_snr")             // Minimum SNR in dB
 
 	// Also support from_date parameter
 	if fd := r.URL.Query().Get("from_date"); fd != "" {
@@ -1869,9 +1870,17 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 		}
 	}
 
+	// Parse minimum SNR (default -999 = no filter)
+	minSNR := -999
+	if minSNRStr != "" {
+		if snr, err := strconv.Atoi(minSNRStr); err == nil {
+			minSNR = snr
+		}
+	}
+
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
-	rateLimitKey := fmt.Sprintf("spots-%s-%s-%s-%s-%s-%s-%s-%s", mode, band, name, callsign, locator, continent, direction, fromDate)
+	rateLimitKey := fmt.Sprintf("spots-%s-%s-%s-%s-%s-%s-%s-%s-%d", mode, band, name, callsign, locator, continent, direction, fromDate, minSNR)
 	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -1882,7 +1891,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	}
 
 	// Get historical spots
-	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, deduplicate, locatorsOnly, minDistanceKm)
+	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, deduplicate, locatorsOnly, minDistanceKm, minSNR)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{

@@ -251,11 +251,13 @@ func (sl *SpotsLogger) Close() error {
 // - direction: Filter by cardinal direction (N, NE, E, SE, S, SW, W, NW) - empty for all
 // - fromDate: Start date (YYYY-MM-DD)
 // - toDate: End date (YYYY-MM-DD) - empty for single day
+// - startTime: Start time (HH:MM) - empty for no time filter
+// - endTime: End time (HH:MM) - empty for no time filter
 // - deduplicate: If true, only return unique callsign/locator combinations per day
 // - locatorsOnly: If true, only return spots that have a locator
 // - minDistanceKm: Minimum distance in km (0 = no filter)
 // - minSNR: Minimum SNR in dB (-999 = no filter)
-func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) ([]SpotRecord, error) {
+func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, startTime, endTime string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) ([]SpotRecord, error) {
 	if !sl.enabled {
 		return nil, fmt.Errorf("spots logging is not enabled")
 	}
@@ -306,6 +308,22 @@ func (sl *SpotsLogger) GetHistoricalSpots(mode, band, name, callsign, locator, c
 
 			// Add spots with filtering and deduplication
 			for _, spot := range spots {
+				// Filter by time range if specified
+				if startTime != "" || endTime != "" {
+					spotTime, err := time.Parse(time.RFC3339, spot.Timestamp)
+					if err != nil {
+						continue
+					}
+					spotHourMin := spotTime.Format("15:04")
+
+					if startTime != "" && spotHourMin < startTime {
+						continue
+					}
+					if endTime != "" && spotHourMin > endTime {
+						continue
+					}
+				}
+
 				// Filter by calculated band if specified
 				if band != "" && spot.Band != band {
 					continue
@@ -680,9 +698,9 @@ func (sl *SpotsLogger) GetAvailableNames() ([]string, error) {
 
 // GetHistoricalCSV returns historical spots data as CSV string
 // Parameters match GetHistoricalSpots for filtering
-func (sl *SpotsLogger) GetHistoricalCSV(mode, band, name, callsign, locator, continent, direction, fromDate, toDate string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) (string, error) {
+func (sl *SpotsLogger) GetHistoricalCSV(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, startTime, endTime string, deduplicate, locatorsOnly bool, minDistanceKm float64, minSNR int) (string, error) {
 	// Get the spots data using existing method
-	spots, err := sl.GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, deduplicate, locatorsOnly, minDistanceKm, minSNR)
+	spots, err := sl.GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR)
 	if err != nil {
 		return "", err
 	}
@@ -812,6 +830,8 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 		"",              // direction - all directions
 		fromDate,
 		toDate,
+		"",    // startTime - no time filter
+		"",    // endTime - no time filter
 		false, // deduplicate
 		true,  // locatorsOnly
 		0,     // minDistanceKm

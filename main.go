@@ -1859,6 +1859,8 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	direction := r.URL.Query().Get("direction")         // Cardinal direction (N, NE, E, SE, S, SW, W, NW) or empty for all
 	fromDate := r.URL.Query().Get("date")               // For backward compatibility
 	toDate := r.URL.Query().Get("to_date")              // Optional end date
+	startTime := r.URL.Query().Get("start_time")        // Start time (HH:MM) - optional
+	endTime := r.URL.Query().Get("end_time")            // End time (HH:MM) - optional
 	minDistanceStr := r.URL.Query().Get("min_distance") // Minimum distance in km
 	minSNRStr := r.URL.Query().Get("min_snr")           // Minimum SNR in dB
 
@@ -1908,7 +1910,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	}
 
 	// Get historical spots
-	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, deduplicate, locatorsOnly, minDistanceKm, minSNR)
+	spots, err := md.spotsLogger.GetHistoricalSpots(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -2030,6 +2032,8 @@ func handleDecoderSpotsCSV(w http.ResponseWriter, r *http.Request, md *MultiDeco
 	direction := r.URL.Query().Get("direction")
 	fromDate := r.URL.Query().Get("date")
 	toDate := r.URL.Query().Get("to_date")
+	startTime := r.URL.Query().Get("start_time")
+	endTime := r.URL.Query().Get("end_time")
 	minDistanceStr := r.URL.Query().Get("min_distance")
 	minSNRStr := r.URL.Query().Get("min_snr")
 
@@ -2081,7 +2085,7 @@ func handleDecoderSpotsCSV(w http.ResponseWriter, r *http.Request, md *MultiDeco
 	}
 
 	// Get CSV data
-	csvData, err := md.spotsLogger.GetHistoricalCSV(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, deduplicate, locatorsOnly, minDistanceKm, minSNR)
+	csvData, err := md.spotsLogger.GetHistoricalCSV(mode, band, name, callsign, locator, continent, direction, fromDate, toDate, startTime, endTime, deduplicate, locatorsOnly, minDistanceKm, minSNR)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		w.Header().Set("Content-Type", "application/json")

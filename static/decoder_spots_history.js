@@ -272,6 +272,8 @@
         const nameSelect = document.getElementById('name-select');
         const callsignInput = document.getElementById('callsign-input');
         const locatorInput = document.getElementById('locator-input');
+        const startTimeInput = document.getElementById('start-time-input');
+        const endTimeInput = document.getElementById('end-time-input');
         const recordsPerPageSelect = document.getElementById('records-per-page');
 
         loadBtn.addEventListener('click', loadSpots);
@@ -327,6 +329,7 @@
         // Add Enter key handler to all form inputs to trigger load
         const formInputs = [
             modeSelect, bandSelect, nameSelect, callsignInput, locatorInput,
+            startTimeInput, endTimeInput,
             document.getElementById('continent-select'),
             document.getElementById('direction-select'),
             document.getElementById('min-distance-select'),
@@ -411,6 +414,8 @@
         document.getElementById('name-select').value = '';
         document.getElementById('callsign-input').value = '';
         document.getElementById('locator-input').value = '';
+        document.getElementById('start-time-input').value = '';
+        document.getElementById('end-time-input').value = '';
         document.getElementById('continent-select').value = '';
         document.getElementById('direction-select').value = '';
         document.getElementById('min-distance-select').value = '0';
@@ -642,6 +647,8 @@
         const name = document.getElementById('name-select').value;
         const callsign = document.getElementById('callsign-input').value.trim().toUpperCase();
         const locator = document.getElementById('locator-input').value.trim().toUpperCase();
+        const startTime = document.getElementById('start-time-input').value.trim();
+        const endTime = document.getElementById('end-time-input').value.trim();
         const continent = document.getElementById('continent-select').value;
         const direction = document.getElementById('direction-select').value;
         const minDistance = document.getElementById('min-distance-select').value;
@@ -673,6 +680,8 @@
             if (name) url += `&name=${name}`;
             if (callsign) url += `&callsign=${encodeURIComponent(callsign)}`;
             if (locator) url += `&locator=${encodeURIComponent(locator)}`;
+            if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
+            if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
             if (continent) url += `&continent=${continent}`;
             if (direction) url += `&direction=${direction}`;
             if (minDistance && parseFloat(minDistance) > 0) {
@@ -1369,6 +1378,8 @@
         const name = document.getElementById('name-select').value;
         const callsign = document.getElementById('callsign-input').value.trim().toUpperCase();
         const locator = document.getElementById('locator-input').value.trim().toUpperCase();
+        const startTime = document.getElementById('start-time-input').value.trim();
+        const endTime = document.getElementById('end-time-input').value.trim();
         const continent = document.getElementById('continent-select').value;
         const direction = document.getElementById('direction-select').value;
         const minDistance = document.getElementById('min-distance-select').value;
@@ -1380,6 +1391,8 @@
         if (name) url += `&name=${name}`;
         if (callsign) url += `&callsign=${encodeURIComponent(callsign)}`;
         if (locator) url += `&locator=${encodeURIComponent(locator)}`;
+        if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
+        if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
         if (continent) url += `&continent=${continent}`;
         if (direction) url += `&direction=${direction}`;
         if (minDistance && parseFloat(minDistance) > 0) {

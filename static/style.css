@@ -132,28 +132,70 @@
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
+.overlay-buttons-container {
+    display: flex;
+    gap: 15px;
+    margin-top: 20px;
+    justify-content: center;
+    align-items: center;
+}
+
 .band-conditions-button {
     padding: 12px 24px;
-    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
     border: none;
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.3s ease;
-    box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
     color: white;
     font-size: 1em;
     font-weight: bold;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    margin-top: 15px;
 }
 
 .band-conditions-button:hover {
     transform: scale(1.05);
-    box-shadow: 0 6px 20px rgba(52, 152, 219, 0.5);
 }
 
 .band-conditions-button:active {
     transform: scale(0.98);
+}
+
+.blue-button {
+    background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+    box-shadow: 0 4px 15px rgba(33, 150, 243, 0.4);
+}
+
+.blue-button:hover {
+    box-shadow: 0 6px 20px rgba(33, 150, 243, 0.6);
+}
+
+.digital-spots-button {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: white;
+    font-size: 1em;
+    font-weight: bold;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.digital-spots-button:hover {
+    transform: scale(1.05);
+}
+
+.digital-spots-button:active {
+    transform: scale(0.98);
+}
+
+.orange-button {
+    background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+    box-shadow: 0 4px 15px rgba(255, 152, 0, 0.4);
+}
+
+.orange-button:hover {
+    box-shadow: 0 6px 20px rgba(255, 152, 0, 0.6);
 }
 
 body {

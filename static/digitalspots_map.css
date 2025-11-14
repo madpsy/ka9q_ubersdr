@@ -342,7 +342,7 @@
             color: #4a9eff;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 4px;
         }
 
         .live-messages-toggle {

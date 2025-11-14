@@ -1053,10 +1053,11 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
 			"asl":      config.Admin.ASL,
 			"location": config.Admin.Location,
 		},
-		"max_clients":   config.Server.MaxSessions,
-		"version":       Version,
-		"space_weather": config.SpaceWeather.Enabled,
-		"noise_floor":   config.NoiseFloor.Enabled,
+		"max_clients":     config.Server.MaxSessions,
+		"version":         Version,
+		"space_weather":   config.SpaceWeather.Enabled,
+		"noise_floor":     config.NoiseFloor.Enabled,
+		"digital_decodes": config.Decoder.Enabled,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

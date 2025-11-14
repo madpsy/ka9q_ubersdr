@@ -1060,6 +1060,14 @@ async function fetchSiteDescription() {
                     }
                 }
 
+                // Show live map button if digital decodes are enabled
+                if (data.digital_decodes === true) {
+                    const digitalSpotsBtn = document.getElementById('digital-spots-button');
+                    if (digitalSpotsBtn) {
+                        digitalSpotsBtn.style.display = 'block';
+                    }
+                }
+
                 // Add map if GPS coordinates are available
                 if (data.receiver && data.receiver.gps &&
                     data.receiver.gps.lat !== 0 && data.receiver.gps.lon !== 0) {

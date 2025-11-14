@@ -32,11 +32,13 @@ decoder:
   wsprnet_enabled: false      # Enable WSPRNet spot reporting
   
   # CSV Logging (independent of reporting services)
-  # Logs all decoded spots to daily CSV files in YYYY/MM/DD/spots.csv format
+  # Logs all decoded spots to CSV files organized by mode/date/band
   spots_log_enabled: true           # Enable CSV logging of all spots
   spots_log_data_dir: "decoder_spots"  # Directory for CSV files (relative or absolute, default: data_dir/spots)
-                                    # If relative path, created relative to config directory
-                                    # Files organized as: decoder_spots/YYYY/MM/DD/spots.csv
+                                    # If relative: relative to current working directory
+                                    # If absolute: used as-is (e.g., /var/log/decoder_spots)
+                                    # Files organized as: decoder_spots/MODE/YYYY/MM/DD/bandname.csv
+                                    # Example: decoder_spots/FT8/2024/11/14/20m_FT8.csv
   
   # Band configurations
   # Each band creates a dedicated audio channel for decoding

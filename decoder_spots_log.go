@@ -57,6 +57,7 @@ func (sl *SpotsLogger) LogSpot(decode *DecodeInfo) error {
 	// Get or create the CSV writer for this mode/date/band combination
 	writer, err := sl.getOrCreateWriter(decode)
 	if err != nil {
+		log.Printf("ERROR: Failed to get CSV writer for %s/%s: %v", decode.Mode, decode.BandName, err)
 		return err
 	}
 
@@ -75,12 +76,22 @@ func (sl *SpotsLogger) LogSpot(decode *DecodeInfo) error {
 	}
 
 	if err := writer.Write(record); err != nil {
+		log.Printf("ERROR: Failed to write CSV record for %s/%s: %v", decode.Mode, decode.BandName, err)
 		return err
 	}
 
 	// Flush after each write to ensure data is saved
 	writer.Flush()
-	return writer.Error()
+	if err := writer.Error(); err != nil {
+		log.Printf("ERROR: CSV flush error for %s/%s: %v", decode.Mode, decode.BandName, err)
+		return err
+	}
+
+	if DebugMode {
+		log.Printf("DEBUG: Logged spot to CSV: %s/%s - %s", decode.Mode, decode.BandName, decode.Callsign)
+	}
+
+	return nil
 }
 
 // getOrCreateWriter gets or creates a CSV writer for the given decode
@@ -140,7 +151,9 @@ func (sl *SpotsLogger) getOrCreateWriter(decode *DecodeInfo) (*csv.Writer, error
 			return nil, fmt.Errorf("failed to write CSV header: %w", err)
 		}
 		writer.Flush()
-		log.Printf("Created new spots log file: %s", filename)
+		log.Printf("Created new spots CSV file: %s", filename)
+	} else {
+		log.Printf("Opened existing spots CSV file: %s", filename)
 	}
 
 	return writer, nil

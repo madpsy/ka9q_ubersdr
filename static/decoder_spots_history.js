@@ -444,6 +444,15 @@
             `;
         }
 
+        if (stats.mostCommonBand) {
+            statsHTML += `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.mostCommonBand.value}</div>
+                    <div class="stat-label">Most Common Band (${stats.mostCommonBand.count})</div>
+                </div>
+            `;
+        }
+
         // Add least common statistics (only if there are multiple)
         if (stats.leastCommonLocator && stats.uniqueLocators > 1) {
             statsHTML += `
@@ -521,6 +530,9 @@
         const countries = new Map();
         const continents = new Map();
         const locators = new Map();
+        const bands = new Map();
+        const callsignBands = new Map(); // Track bands per callsign
+        const callsignModes = new Map(); // Track modes per callsign
         let totalSNR = 0;
         let minSNR = Infinity;
         let maxSNR = -Infinity;
@@ -535,6 +547,18 @@
             minSNR = Math.min(minSNR, spot.snr);
             maxSNR = Math.max(maxSNR, spot.snr);
 
+            // Track bands per callsign
+            if (!callsignBands.has(spot.callsign)) {
+                callsignBands.set(spot.callsign, new Set());
+            }
+            callsignBands.get(spot.callsign).add(spot.band);
+
+            // Track modes per callsign
+            if (!callsignModes.has(spot.callsign)) {
+                callsignModes.set(spot.callsign, new Set());
+            }
+            callsignModes.get(spot.callsign).add(spot.mode);
+
             // Count countries
             if (spot.country) {
                 countries.set(spot.country, (countries.get(spot.country) || 0) + 1);
@@ -548,6 +572,11 @@
             // Count locators
             if (spot.locator) {
                 locators.set(spot.locator, (locators.get(spot.locator) || 0) + 1);
+            }
+
+            // Count bands
+            if (spot.band) {
+                bands.set(spot.band, (bands.get(spot.band) || 0) + 1);
             }
 
             // Calculate distance statistics
@@ -591,6 +620,7 @@
             uniqueCountries: countries.size,
             uniqueContinents: continents.size,
             uniqueLocators: locators.size,
+            uniqueBands: bands.size,
             avgSNR: spots.length > 0 ? Math.round(totalSNR / spots.length) : 0,
             minSNR: spots.length > 0 ? minSNR : 0,
             maxSNR: spots.length > 0 ? maxSNR : 0,
@@ -598,9 +628,11 @@
             mostCommonLocator: getMostCommon(locators),
             mostCommonCountry: getMostCommon(countries),
             mostCommonContinent: getMostCommon(continents),
+            mostCommonBand: getMostCommon(bands),
             leastCommonLocator: getLeastCommon(locators),
             leastCommonCountry: getLeastCommon(countries),
-            leastCommonContinent: getLeastCommon(continents)
+            leastCommonContinent: getLeastCommon(continents),
+            leastCommonBand: getLeastCommon(bands)
         };
 
         if (distanceCount > 0) {

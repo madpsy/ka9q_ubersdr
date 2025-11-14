@@ -26,8 +26,12 @@ func frequencyToBand(freqHz float64) string {
 	// Convert to MHz for easier comparison
 	freqMHz := freqHz / 1000000.0
 
-	// Amateur radio bands from 160m to 10m
+	// Amateur radio bands from 2200m to 6m
 	switch {
+	case freqMHz >= 0.1357 && freqMHz <= 0.1378:
+		return "2200m"
+	case freqMHz >= 0.472 && freqMHz <= 0.479:
+		return "630m"
 	case freqMHz >= 1.8 && freqMHz <= 2.0:
 		return "160m"
 	case freqMHz >= 3.5 && freqMHz <= 4.0:

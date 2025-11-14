@@ -33,12 +33,16 @@ decoder:
   
   # CSV Logging (independent of reporting services)
   # Logs all decoded spots to CSV files organized by mode/date/band
-  spots_log_enabled: true           # Enable CSV logging of all spots
-  spots_log_data_dir: "decoder_spots"  # Directory for CSV files (relative or absolute, default: data_dir/spots)
-                                    # If relative: relative to current working directory
-                                    # If absolute: used as-is (e.g., /var/log/decoder_spots)
-                                    # Files organized as: decoder_spots/MODE/YYYY/MM/DD/bandname.csv
-                                    # Example: decoder_spots/FT8/2024/11/14/20m_FT8.csv
+  spots_log_enabled: true              # Enable CSV logging of all spots
+  spots_log_data_dir: "decoder_spots" # Directory for CSV files (relative or absolute, default: data_dir/spots)
+                                       # If relative: relative to current working directory
+                                       # If absolute: used as-is (e.g., /var/log/decoder_spots)
+                                       # Files organized as: decoder_spots/MODE/YYYY/MM/DD/bandname.csv
+                                       # Example: decoder_spots/FT8/2024/11/14/20m_FT8.csv
+  spots_log_locators_only: true        # Only log spots with valid grid locators to CSV (default: true)
+                                       # When false, logs all spots including those without locators
+  spots_history_locators_only: true    # Only show spots with valid grid locators in history view (default: true)
+                                       # When false, shows all spots including those without locators
   
   # Band configurations
   # Each band creates a dedicated audio channel for decoding

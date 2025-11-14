@@ -153,8 +153,10 @@ type DecoderConfig struct {
 	WSPRNetEnabled     bool `yaml:"wsprnet_enabled"`
 
 	// CSV Logging (independent of reporting)
-	SpotsLogEnabled bool   `yaml:"spots_log_enabled"` // Enable CSV logging of all spots
-	SpotsLogDataDir string `yaml:"spots_log_data_dir"` // Directory for spots CSV files (relative or absolute, default: data_dir/spots)
+	SpotsLogEnabled          bool   `yaml:"spots_log_enabled"`           // Enable CSV logging of all spots
+	SpotsLogDataDir          string `yaml:"spots_log_data_dir"`          // Directory for spots CSV files (relative or absolute, default: data_dir/spots)
+	SpotsLogLocatorsOnly     bool   `yaml:"spots_log_locators_only"`     // Only log spots with valid locators to CSV (default: true)
+	SpotsHistoryLocatorsOnly bool   `yaml:"spots_history_locators_only"` // Only show spots with valid locators in history view (default: true)
 
 	// Band configurations
 	Bands []DecoderBandConfig `yaml:"bands"`

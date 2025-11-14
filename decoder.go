@@ -498,8 +498,16 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 
 				// Log to CSV (independent of reporting)
 				if md.spotsLogger != nil {
-					if err := md.spotsLogger.LogSpot(decode); err != nil {
-						log.Printf("Warning: Failed to log spot to CSV: %v", err)
+					// Check if we should only log spots with valid locators
+					shouldLog := true
+					if md.config.SpotsLogLocatorsOnly && !decode.HasLocator {
+						shouldLog = false
+					}
+
+					if shouldLog {
+						if err := md.spotsLogger.LogSpot(decode); err != nil {
+							log.Printf("Warning: Failed to log spot to CSV: %v", err)
+						}
 					}
 				}
 

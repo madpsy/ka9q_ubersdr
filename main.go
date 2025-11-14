@@ -354,6 +354,19 @@ func main() {
 		config.Decoder.SpotsLogDataDir = *configDir + "/" + config.Decoder.SpotsLogDataDir
 	}
 
+	// Set default values for spots filtering if not explicitly set
+	// Default to true (only log/show spots with valid locators)
+	// Users must explicitly set to false in config to log/see all spots
+	if config.Decoder.Enabled && config.Decoder.SpotsLogEnabled {
+		// Since bool defaults to false in Go/YAML, we set it to true if it's false
+		if !config.Decoder.SpotsLogLocatorsOnly {
+			config.Decoder.SpotsLogLocatorsOnly = true
+		}
+		if !config.Decoder.SpotsHistoryLocatorsOnly {
+			config.Decoder.SpotsHistoryLocatorsOnly = true
+		}
+	}
+
 	multiDecoder, err := NewMultiDecoder(&config.Decoder, radiod, sessions, prometheusMetrics)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize multi-decoder: %v", err)
@@ -1861,7 +1874,7 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 
 	// Hardcode deduplication and locators only to true
 	deduplicate := true
-	locatorsOnly := true
+	locatorsOnly := md.config.SpotsHistoryLocatorsOnly
 
 	// Parse minimum distance (default 0 = no filter)
 	var minDistanceKm float64
@@ -2033,7 +2046,7 @@ func handleDecoderSpotsCSV(w http.ResponseWriter, r *http.Request, md *MultiDeco
 
 	// Hardcode deduplication and locators only to true
 	deduplicate := true
-	locatorsOnly := true
+	locatorsOnly := md.config.SpotsHistoryLocatorsOnly
 
 	// Parse minimum distance (default 0 = no filter)
 	var minDistanceKm float64

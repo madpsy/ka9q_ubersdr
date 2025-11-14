@@ -318,8 +318,6 @@
         const locator = document.getElementById('locator-input').value.trim().toUpperCase();
         const continent = document.getElementById('continent-select').value;
         const direction = document.getElementById('direction-select').value;
-        const dedup = document.getElementById('dedup-checkbox').checked;
-        const locatorsOnly = document.getElementById('locators-only-checkbox').checked;
         const minDistance = document.getElementById('min-distance-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
 
@@ -349,8 +347,6 @@
             if (locator) url += `&locator=${encodeURIComponent(locator)}`;
             if (continent) url += `&continent=${continent}`;
             if (direction) url += `&direction=${direction}`;
-            if (dedup) url += `&dedup=true`;
-            if (locatorsOnly) url += `&locators_only=true`;
             if (minDistance && parseFloat(minDistance) > 0) {
                 url += `&min_distance=${minDistance}`;
             }
@@ -1025,8 +1021,6 @@
         const locator = document.getElementById('locator-input').value.trim().toUpperCase();
         const continent = document.getElementById('continent-select').value;
         const direction = document.getElementById('direction-select').value;
-        const dedup = document.getElementById('dedup-checkbox').checked;
-        const locatorsOnly = document.getElementById('locators-only-checkbox').checked;
         const minDistance = document.getElementById('min-distance-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
 
@@ -1038,8 +1032,6 @@
         if (locator) url += `&locator=${encodeURIComponent(locator)}`;
         if (continent) url += `&continent=${continent}`;
         if (direction) url += `&direction=${direction}`;
-        if (dedup) url += `&dedup=true`;
-        if (locatorsOnly) url += `&locators_only=true`;
         if (minDistance && parseFloat(minDistance) > 0) {
             url += `&min_distance=${minDistance}`;
         }

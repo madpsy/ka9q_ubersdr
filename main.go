@@ -1834,19 +1834,17 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 	}
 
 	// Get query parameters
-	mode := r.URL.Query().Get("mode")                     // FT8, FT4, WSPR, or empty for all
-	band := r.URL.Query().Get("band")                     // Calculated band (e.g., "20m", "40m") or empty for all
-	name := r.URL.Query().Get("name")                     // Decoder config name or empty for all
-	callsign := r.URL.Query().Get("callsign")             // Exact callsign match or empty for all
-	locator := r.URL.Query().Get("locator")               // Exact locator match or empty for all
-	continent := r.URL.Query().Get("continent")           // Continent code (AF, AS, EU, NA, OC, SA, AN) or empty for all
-	direction := r.URL.Query().Get("direction")           // Cardinal direction (N, NE, E, SE, S, SW, W, NW) or empty for all
-	fromDate := r.URL.Query().Get("date")                 // For backward compatibility
-	toDate := r.URL.Query().Get("to_date")                // Optional end date
-	dedupStr := r.URL.Query().Get("dedup")                // "true" to deduplicate
-	locatorsOnlyStr := r.URL.Query().Get("locators_only") // "true" to only return spots with locators
-	minDistanceStr := r.URL.Query().Get("min_distance")   // Minimum distance in km
-	minSNRStr := r.URL.Query().Get("min_snr")             // Minimum SNR in dB
+	mode := r.URL.Query().Get("mode")                   // FT8, FT4, WSPR, or empty for all
+	band := r.URL.Query().Get("band")                   // Calculated band (e.g., "20m", "40m") or empty for all
+	name := r.URL.Query().Get("name")                   // Decoder config name or empty for all
+	callsign := r.URL.Query().Get("callsign")           // Exact callsign match or empty for all
+	locator := r.URL.Query().Get("locator")             // Exact locator match or empty for all
+	continent := r.URL.Query().Get("continent")         // Continent code (AF, AS, EU, NA, OC, SA, AN) or empty for all
+	direction := r.URL.Query().Get("direction")         // Cardinal direction (N, NE, E, SE, S, SW, W, NW) or empty for all
+	fromDate := r.URL.Query().Get("date")               // For backward compatibility
+	toDate := r.URL.Query().Get("to_date")              // Optional end date
+	minDistanceStr := r.URL.Query().Get("min_distance") // Minimum distance in km
+	minSNRStr := r.URL.Query().Get("min_snr")           // Minimum SNR in dB
 
 	// Also support from_date parameter
 	if fd := r.URL.Query().Get("from_date"); fd != "" {
@@ -1861,9 +1859,9 @@ func handleDecoderSpots(w http.ResponseWriter, r *http.Request, md *MultiDecoder
 		return
 	}
 
-	// Parse deduplication and locators only flags
-	deduplicate := dedupStr == "true" || dedupStr == "1"
-	locatorsOnly := locatorsOnlyStr == "true" || locatorsOnlyStr == "1"
+	// Hardcode deduplication and locators only to true
+	deduplicate := true
+	locatorsOnly := true
 
 	// Parse minimum distance (default 0 = no filter)
 	var minDistanceKm float64
@@ -2016,8 +2014,6 @@ func handleDecoderSpotsCSV(w http.ResponseWriter, r *http.Request, md *MultiDeco
 	direction := r.URL.Query().Get("direction")
 	fromDate := r.URL.Query().Get("date")
 	toDate := r.URL.Query().Get("to_date")
-	dedupStr := r.URL.Query().Get("dedup")
-	locatorsOnlyStr := r.URL.Query().Get("locators_only")
 	minDistanceStr := r.URL.Query().Get("min_distance")
 	minSNRStr := r.URL.Query().Get("min_snr")
 
@@ -2035,9 +2031,9 @@ func handleDecoderSpotsCSV(w http.ResponseWriter, r *http.Request, md *MultiDeco
 		return
 	}
 
-	// Parse flags
-	deduplicate := dedupStr == "true" || dedupStr == "1"
-	locatorsOnly := locatorsOnlyStr == "true" || locatorsOnlyStr == "1"
+	// Hardcode deduplication and locators only to true
+	deduplicate := true
+	locatorsOnly := true
 
 	// Parse minimum distance (default 0 = no filter)
 	var minDistanceKm float64

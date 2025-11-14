@@ -294,13 +294,8 @@ class DecoderSpotsHistoryMap {
             this.markers.set(key, { marker, spot, coords: [adjustedLat, adjustedLon] });
         });
 
-        // Auto-zoom to fit all spots
+        // Auto-zoom to fit all spots (excluding receiver marker)
         if (bounds.length > 0) {
-            // Include receiver location in bounds if available
-            if (this.receiverLocation) {
-                bounds.push([this.receiverLocation.lat, this.receiverLocation.lon]);
-            }
-
             // Fit map to bounds with padding
             this.map.fitBounds(bounds, {
                 padding: [50, 50],

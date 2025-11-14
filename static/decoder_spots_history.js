@@ -63,21 +63,7 @@
         const locatorInput = document.getElementById('locator-input');
         const recordsPerPageSelect = document.getElementById('records-per-page');
 
-        // Client-side filter buttons
-        const filterMultipleBands = document.getElementById('filter-multiple-bands');
-        const filterMultipleModes = document.getElementById('filter-multiple-modes');
-        const filterLeastCountry = document.getElementById('filter-least-country');
-        const filterLeastContinent = document.getElementById('filter-least-continent');
-        const filterShowAll = document.getElementById('filter-show-all');
-
         loadBtn.addEventListener('click', loadSpots);
-
-        // Add filter button handlers
-        filterMultipleBands.addEventListener('click', () => applyClientFilter('multiple-bands'));
-        filterMultipleModes.addEventListener('click', () => applyClientFilter('multiple-modes'));
-        filterLeastCountry.addEventListener('click', () => applyClientFilter('least-country'));
-        filterLeastContinent.addEventListener('click', () => applyClientFilter('least-continent'));
-        filterShowAll.addEventListener('click', () => applyClientFilter(null));
         clearFiltersBtn.addEventListener('click', clearFilters);
         downloadBtn.addEventListener('click', downloadCSV);
 

@@ -229,6 +229,9 @@ class DecoderSpotsHistoryMap {
         // Clear existing markers
         this.clearMarkers();
 
+        // Track bounds for auto-zoom
+        const bounds = [];
+
         // Add new markers
         spots.forEach(spot => {
             if (!spot.locator) return;
@@ -244,6 +247,9 @@ class DecoderSpotsHistoryMap {
             const offset = this.getCallsignOffset(spot.callsign);
             const adjustedLat = coords.lat + offset.lat;
             const adjustedLon = coords.lon + offset.lon;
+
+            // Add to bounds for auto-zoom
+            bounds.push([adjustedLat, adjustedLon]);
 
             // Get color for band
             const color = this.bandColors[spot.band] || '#999';
@@ -287,6 +293,25 @@ class DecoderSpotsHistoryMap {
             const key = `${spot.callsign}-${spot.band}-${spot.mode}`;
             this.markers.set(key, { marker, spot, coords: [adjustedLat, adjustedLon] });
         });
+
+        // Auto-zoom to fit all spots
+        if (bounds.length > 0) {
+            // Include receiver location in bounds if available
+            if (this.receiverLocation) {
+                bounds.push([this.receiverLocation.lat, this.receiverLocation.lon]);
+            }
+
+            // Fit map to bounds with padding
+            this.map.fitBounds(bounds, {
+                padding: [50, 50],
+                maxZoom: 12,
+                animate: true,
+                duration: 0.5
+            });
+        } else if (this.receiverLocation) {
+            // If no spots but receiver location exists, center on receiver
+            this.map.setView([this.receiverLocation.lat, this.receiverLocation.lon], 6);
+        }
 
         // Update legend with active bands
         this.updateLegend();

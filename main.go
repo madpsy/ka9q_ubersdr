@@ -628,6 +628,9 @@ func main() {
 		handleDecoderSpotsCSV(w, r, multiDecoder, ipBanManager, fftRateLimiter)
 	}))
 
+	// CTY API endpoints (with IP ban checking)
+	RegisterCTYAPIHandlers(ipBanManager)
+
 	// Admin authentication endpoints (no auth required)
 	http.HandleFunc("/admin/login", adminHandler.HandleLogin)
 	http.HandleFunc("/admin/logout", adminHandler.HandleLogout)

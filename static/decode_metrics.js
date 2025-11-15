@@ -358,18 +358,12 @@ class DecodeMetricsDashboard {
                     x: {
                         type: 'time',
                         time: {
-                            unit: 'hour',
                             displayFormats: {
                                 hour: 'HH:mm',
                                 minute: 'HH:mm',
                                 day: 'MMM dd'
                             },
                             tooltipFormat: 'yyyy-MM-dd HH:mm'
-                        },
-                        adapters: {
-                            date: {
-                                locale: 'en-GB'
-                            }
                         },
                         title: {
                             display: true,
@@ -555,18 +549,12 @@ class DecodeMetricsDashboard {
                     x: {
                         type: 'time',
                         time: {
-                            unit: 'hour',
                             displayFormats: {
                                 hour: 'HH:mm',
                                 minute: 'HH:mm',
                                 day: 'MMM dd'
                             },
                             tooltipFormat: 'yyyy-MM-dd HH:mm'
-                        },
-                        adapters: {
-                            date: {
-                                locale: 'en-GB'
-                            }
                         },
                         title: {
                             display: true,

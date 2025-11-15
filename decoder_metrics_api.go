@@ -28,6 +28,9 @@ type DecodeMetricsResponse struct {
 	// Time series data (optional, based on query params)
 	TimeSeries []TimeSeriesPoint `json:"time_series,omitempty"`
 
+	// Execution time time series (optional, based on query params)
+	ExecutionTimeSeries []ExecutionTimeSeriesPoint `json:"execution_time_series,omitempty"`
+
 	// Top performers
 	TopCallsigns []CallsignStats `json:"top_callsigns,omitempty"`
 }
@@ -105,6 +108,23 @@ type ModeBandSummary struct {
 	DecodeCount     int     `json:"decode_count"`
 	UniqueCallsigns int     `json:"unique_callsigns"`
 	AvgSNR          float64 `json:"avg_snr,omitempty"`
+}
+
+// ExecutionTimeSeriesPoint represents execution time data over time
+type ExecutionTimeSeriesPoint struct {
+	Timestamp time.Time                          `json:"timestamp"`
+	Interval  string                             `json:"interval"`
+	Data      map[string]ExecutionTimeBucketData `json:"data"` // key: "mode:band"
+}
+
+// ExecutionTimeBucketData contains execution time stats for a time bucket
+type ExecutionTimeBucketData struct {
+	Mode        string  `json:"mode"`
+	Band        string  `json:"band"`
+	AvgSeconds  float64 `json:"avg_seconds"`
+	MinSeconds  float64 `json:"min_seconds"`
+	MaxSeconds  float64 `json:"max_seconds"`
+	SampleCount int     `json:"sample_count"`
 }
 
 // CallsignStats contains statistics for a callsign
@@ -275,6 +295,7 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 	// Generate time series if requested
 	if includeTimeSeries {
 		response.TimeSeries = generateTimeSeries(md.prometheusMetrics.digitalMetrics, filteredCombinations, interval, hours)
+		response.ExecutionTimeSeries = generateExecutionTimeSeries(md.prometheusMetrics.digitalMetrics, filteredCombinations, interval, hours)
 	}
 
 	// Generate top callsigns if requested
@@ -378,6 +399,98 @@ func countDecodesInTimeRange(dm *DigitalDecodeMetrics, mode, band string, start,
 	}
 
 	return count
+}
+
+// generateExecutionTimeSeries creates time-bucketed execution time data
+func generateExecutionTimeSeries(dm *DigitalDecodeMetrics, combinations []struct{ Mode, Band string }, interval time.Duration, hours int) []ExecutionTimeSeriesPoint {
+	now := time.Now()
+	startTime := now.Add(-time.Duration(hours) * time.Hour)
+
+	// Calculate number of buckets
+	numBuckets := int(time.Duration(hours) * time.Hour / interval)
+	if numBuckets > 1000 {
+		numBuckets = 1000 // Cap at 1000 buckets
+	}
+
+	timeSeries := make([]ExecutionTimeSeriesPoint, 0, numBuckets)
+
+	// Create buckets
+	for i := 0; i < numBuckets; i++ {
+		bucketStart := startTime.Add(time.Duration(i) * interval)
+		bucketEnd := bucketStart.Add(interval)
+
+		point := ExecutionTimeSeriesPoint{
+			Timestamp: bucketStart,
+			Interval:  interval.String(),
+			Data:      make(map[string]ExecutionTimeBucketData),
+		}
+
+		// For each mode/band combination, get execution time stats in this bucket
+		for _, combo := range combinations {
+			key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
+
+			avg, min, max, count := getExecutionTimeStatsInRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
+
+			if count > 0 {
+				point.Data[key] = ExecutionTimeBucketData{
+					Mode:        combo.Mode,
+					Band:        combo.Band,
+					AvgSeconds:  avg,
+					MinSeconds:  min,
+					MaxSeconds:  max,
+					SampleCount: count,
+				}
+			}
+		}
+
+		// Only add point if it has data
+		if len(point.Data) > 0 {
+			timeSeries = append(timeSeries, point)
+		}
+	}
+
+	return timeSeries
+}
+
+// getExecutionTimeStatsInRange gets execution time statistics for a time range
+func getExecutionTimeStatsInRange(dm *DigitalDecodeMetrics, mode, band string, start, end time.Time) (avgTime, minTime, maxTime float64, count int) {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+
+	if dm.executionTimes[mode] == nil || dm.executionTimes[mode][band] == nil {
+		return 0, 0, 0, 0
+	}
+
+	var totalDuration time.Duration
+	var minDuration time.Duration
+	var maxDuration time.Duration
+	count = 0
+
+	for _, e := range dm.executionTimes[mode][band] {
+		if e.Timestamp.After(start) && e.Timestamp.Before(end) {
+			totalDuration += e.Duration
+			count++
+
+			if count == 1 {
+				minDuration = e.Duration
+				maxDuration = e.Duration
+			} else {
+				if e.Duration < minDuration {
+					minDuration = e.Duration
+				}
+				if e.Duration > maxDuration {
+					maxDuration = e.Duration
+				}
+			}
+		}
+	}
+
+	if count == 0 {
+		return 0, 0, 0, 0
+	}
+
+	// Return all values in seconds
+	return totalDuration.Seconds() / float64(count), minDuration.Seconds(), maxDuration.Seconds(), count
 }
 
 // countUniqueCallsignsInTimeRange counts unique callsigns in a specific time range

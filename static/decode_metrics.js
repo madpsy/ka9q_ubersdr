@@ -3,7 +3,8 @@
 
 class DecodeMetricsDashboard {
     constructor() {
-        this.chart = null;
+        this.decodesChart = null;
+        this.executionTimeChart = null;
         this.autoRefreshInterval = null;
         this.autoRefreshEnabled = false;
         this.init();
@@ -159,6 +160,14 @@ class DecodeMetricsDashboard {
             html += '</div>';
         }
 
+        // Execution time chart
+        if (data.execution_time_series && data.execution_time_series.length > 0) {
+            html += '<div class="chart-container">';
+            html += '<h2>⚡ Decoder Execution Time by Band/Mode</h2>';
+            html += '<canvas id="execution-time-chart"></canvas>';
+            html += '</div>';
+        }
+
         // Per mode/band metrics
         html += '<div class="chart-container">';
         html += '<h2>📡 Detailed Metrics by Mode/Band</h2>';
@@ -193,20 +202,23 @@ class DecodeMetricsDashboard {
 
         results.innerHTML = html;
 
-        // Create chart if time series data exists
+        // Create charts if time series data exists
         if (data.time_series && data.time_series.length > 0) {
-            this.createChart(data);
+            this.createDecodesChart(data);
+        }
+        if (data.execution_time_series && data.execution_time_series.length > 0) {
+            this.createExecutionTimeChart(data);
         }
     }
 
-    createChart(data) {
+    createDecodesChart(data) {
         const ctx = document.getElementById('decodes-chart');
         if (!ctx) return;
 
         // Destroy existing chart
-        if (this.chart) {
-            this.chart.destroy();
-            this.chart = null;
+        if (this.decodesChart) {
+            this.decodesChart.destroy();
+            this.decodesChart = null;
         }
 
         // Prepare datasets - one line per mode/band combination
@@ -250,7 +262,7 @@ class DecodeMetricsDashboard {
             colorIndex++;
         });
 
-        this.chart = new Chart(ctx, {
+        this.decodesChart = new Chart(ctx, {
             type: 'line',
             data: { datasets },
             options: {
@@ -308,6 +320,195 @@ class DecodeMetricsDashboard {
                     },
                     y: {
                         type: 'linear',
+
+    createExecutionTimeChart(data) {
+        const ctx = document.getElementById('execution-time-chart');
+        if (!ctx) return;
+
+        // Destroy existing chart
+        if (this.executionTimeChart) {
+            this.executionTimeChart.destroy();
+            this.executionTimeChart = null;
+        }
+
+        // Prepare datasets - one line per mode/band combination
+        const datasets = [];
+        const colors = [
+            '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16',
+            '#22c55e', '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9',
+            '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
+            '#ec4899', '#f43f5e'
+        ];
+
+        // Group data by mode:band and track which modes are present
+        const seriesMap = new Map();
+        const modesPresent = new Set();
+
+        data.execution_time_series.forEach(point => {
+            Object.entries(point.data).forEach(([key, value]) => {
+                if (!seriesMap.has(key)) {
+                    seriesMap.set(key, []);
+                }
+                seriesMap.get(key).push({
+                    x: new Date(point.timestamp),
+                    y: value.avg_seconds
+                });
+                // Extract mode from key (format is "mode:band")
+                const mode = key.split(':')[0];
+                modesPresent.add(mode);
+            });
+        });
+
+        // Create dataset for each series
+        let colorIndex = 0;
+        seriesMap.forEach((points, key) => {
+            const [mode, band] = key.split(':');
+            datasets.push({
+                label: `${mode} ${band}`,
+                data: points,
+                borderColor: colors[colorIndex % colors.length],
+                backgroundColor: colors[colorIndex % colors.length] + '20',
+                tension: 0.4,
+                fill: false,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            });
+            colorIndex++;
+        });
+
+        // Add horizontal lines for maximum allowed execution times
+        const annotations = {};
+        if (modesPresent.has('FT4')) {
+            annotations.ft4Max = {
+                type: 'line',
+                yMin: 7,
+                yMax: 7,
+                borderColor: 'rgba(255, 99, 132, 0.8)',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                label: {
+                    display: true,
+                    content: 'FT4 Max (7s)',
+                    position: 'end',
+                    backgroundColor: 'rgba(255, 99, 132, 0.8)',
+                    color: '#fff'
+                }
+            };
+        }
+        if (modesPresent.has('FT8')) {
+            annotations.ft8Max = {
+                type: 'line',
+                yMin: 15,
+                yMax: 15,
+                borderColor: 'rgba(255, 206, 86, 0.8)',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                label: {
+                    display: true,
+                    content: 'FT8 Max (15s)',
+                    position: 'end',
+                    backgroundColor: 'rgba(255, 206, 86, 0.8)',
+                    color: '#fff'
+                }
+            };
+        }
+        if (modesPresent.has('WSPR')) {
+            annotations.wsprMax = {
+                type: 'line',
+                yMin: 120,
+                yMax: 120,
+                borderColor: 'rgba(75, 192, 192, 0.8)',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                label: {
+                    display: true,
+                    content: 'WSPR Max (120s)',
+                    position: 'end',
+                    backgroundColor: 'rgba(75, 192, 192, 0.8)',
+                    color: '#fff'
+                }
+            };
+        }
+
+        this.executionTimeChart = new Chart(ctx, {
+            type: 'line',
+            data: { datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2.5,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Decoder Execution Time Over Time',
+                        color: '#fff',
+                        font: { size: 16 }
+                    },
+                    legend: {
+                        labels: { color: '#fff' },
+                        position: 'top'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                if (items.length === 0) return '';
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    dateStyle: 'medium',
+                                    timeStyle: 'short',
+                                    hour12: false
+                                });
+                            },
+                            label: (context) => {
+                                return `${context.dataset.label}: ${context.parsed.y.toFixed(3)}s`;
+                            }
+                        }
+                    },
+                    annotation: {
+                        annotations: annotations
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            displayFormats: {
+                                hour: 'HH:mm',
+                                minute: 'HH:mm'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time (UTC)',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: {
+                        type: 'linear',
+                        title: {
+                            display: true,
+                            text: 'Execution Time (seconds)',
+                            color: '#fff'
+                        },
+                        ticks: {
+                            color: '#fff',
+                            callback: function(value) {
+                                return value.toFixed(2) + 's';
+                            }
+                        },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
                         title: {
                             display: true,
                             text: 'Decodes',

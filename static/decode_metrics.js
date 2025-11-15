@@ -354,14 +354,18 @@ class DecodeMetricsDashboard {
                             displayFormats: {
                                 hour: 'HH:mm',
                                 minute: 'HH:mm'
-                            }
+                            },
+                            tooltipFormat: 'yyyy-MM-dd HH:mm'
                         },
                         title: {
                             display: true,
                             text: 'Time (UTC)',
                             color: '#fff'
                         },
-                        ticks: { color: '#fff' },
+                        ticks: {
+                            color: '#fff',
+                            source: 'auto'
+                        },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     y: {
@@ -538,14 +542,18 @@ class DecodeMetricsDashboard {
                             displayFormats: {
                                 hour: 'HH:mm',
                                 minute: 'HH:mm'
-                            }
+                            },
+                            tooltipFormat: 'yyyy-MM-dd HH:mm'
                         },
                         title: {
                             display: true,
                             text: 'Time (UTC)',
                             color: '#fff'
                         },
-                        ticks: { color: '#fff' },
+                        ticks: {
+                            color: '#fff',
+                            source: 'auto'
+                        },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     y: {

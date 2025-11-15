@@ -358,11 +358,6 @@ class DecodeMetricsDashboard {
                     x: {
                         type: 'time',
                         time: {
-                            displayFormats: {
-                                hour: 'HH:mm',
-                                minute: 'HH:mm',
-                                day: 'MMM dd'
-                            },
                             tooltipFormat: 'yyyy-MM-dd HH:mm'
                         },
                         title: {
@@ -374,7 +369,15 @@ class DecodeMetricsDashboard {
                             color: '#fff',
                             source: 'auto',
                             maxRotation: 0,
-                            autoSkip: true
+                            autoSkip: true,
+                            callback: function(value) {
+                                const date = new Date(value);
+                                return date.toLocaleTimeString('en-GB', {
+                                    hour12: false,
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+                            }
                         },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
@@ -549,11 +552,6 @@ class DecodeMetricsDashboard {
                     x: {
                         type: 'time',
                         time: {
-                            displayFormats: {
-                                hour: 'HH:mm',
-                                minute: 'HH:mm',
-                                day: 'MMM dd'
-                            },
                             tooltipFormat: 'yyyy-MM-dd HH:mm'
                         },
                         title: {
@@ -565,7 +563,15 @@ class DecodeMetricsDashboard {
                             color: '#fff',
                             source: 'auto',
                             maxRotation: 0,
-                            autoSkip: true
+                            autoSkip: true,
+                            callback: function(value) {
+                                const date = new Date(value);
+                                return date.toLocaleTimeString('en-GB', {
+                                    hour12: false,
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+                            }
                         },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },

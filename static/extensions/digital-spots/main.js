@@ -553,21 +553,12 @@ class DigitalSpotsExtension extends DecoderExtension {
     }
 
     startFrequencyMonitoring() {
-        // Update band filter based on current frequency
+        // Update band filter based on current frequency immediately
         this.updateBandFilterFromFrequency();
-
-        // Subscribe to frequency changes
-        this.frequencyChangeHandler = () => {
-            this.updateBandFilterFromFrequency();
-        };
-        this.radio.on('frequency_changed', this.frequencyChangeHandler);
     }
 
     stopFrequencyMonitoring() {
-        if (this.frequencyChangeHandler) {
-            this.radio.off('frequency_changed', this.frequencyChangeHandler);
-            this.frequencyChangeHandler = null;
-        }
+        // No cleanup needed - using base class event subscription
     }
 
     updateBandFilterFromFrequency() {
@@ -592,6 +583,15 @@ class DigitalSpotsExtension extends DecoderExtension {
             this.filterAndRenderSpots();
             console.log(`Digital Spots: Auto-updated band filter to ${band}`);
         }
+    }
+
+    // Override base class method to handle frequency changes
+    onFrequencyChanged(frequency) {
+        // Call parent implementation if needed
+        super.onFrequencyChanged(frequency);
+
+        // Update band filter when frequency changes
+        this.updateBandFilterFromFrequency();
     }
 
     onEnable() {

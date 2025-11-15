@@ -39,6 +39,48 @@ class DecodeMetricsDashboard {
         document.getElementById('auto-refresh-btn').addEventListener('click', () => {
             this.toggleAutoRefresh();
         });
+
+        // Handle date range type toggle
+        document.getElementById('date-range-type').addEventListener('change', (e) => {
+            this.toggleDateRangeInputs(e.target.value);
+        });
+
+        // Initialize datetime inputs with sensible defaults
+        this.initializeDateInputs();
+
+        // Initialize with quick select visible
+        this.toggleDateRangeInputs('hours');
+    }
+
+    toggleDateRangeInputs(type) {
+        const quickSelect = document.getElementById('quick-select-controls');
+        const customRange = document.getElementById('custom-range-controls');
+
+        if (type === 'hours') {
+            quickSelect.style.display = 'block';
+            customRange.style.display = 'none';
+        } else {
+            quickSelect.style.display = 'none';
+            customRange.style.display = 'block';
+        }
+    }
+
+    initializeDateInputs() {
+        const now = new Date();
+        const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        // Format for datetime-local input (YYYY-MM-DDTHH:MM)
+        const formatForInput = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            return `${year}-${month}-${day}T${hours}:${minutes}`;
+        };
+
+        document.getElementById('date-from').value = formatForInput(yesterday);
+        document.getElementById('date-to').value = formatForInput(now);
     }
 
     toggleAutoRefresh() {
@@ -75,15 +117,47 @@ class DecodeMetricsDashboard {
     async loadMetrics() {
         const mode = document.getElementById('mode').value;
         const band = document.getElementById('band').value;
-        const hours = document.getElementById('hours').value;
         const interval = document.getElementById('interval').value;
+        const dateRangeType = document.getElementById('date-range-type').value;
 
         const params = new URLSearchParams();
         if (mode) params.append('mode', mode);
         if (band) params.append('band', band);
-        params.append('hours', hours);
         params.append('timeseries', 'true');
         params.append('interval', interval);
+
+        // Handle date range based on type
+        if (dateRangeType === 'hours') {
+            // Quick select - use hours parameter
+            const hours = document.getElementById('hours').value;
+            params.append('hours', hours);
+        } else {
+            // Custom range - use from/to parameters
+            const fromInput = document.getElementById('date-from').value;
+            const toInput = document.getElementById('date-to').value;
+
+            if (fromInput && toInput) {
+                // Convert datetime-local format to ISO 8601 UTC
+                const fromDate = new Date(fromInput);
+                const toDate = new Date(toInput);
+
+                if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+                    this.setStatus('Invalid date format', 'error');
+                    return;
+                }
+
+                if (fromDate >= toDate) {
+                    this.setStatus('Start date must be before end date', 'error');
+                    return;
+                }
+
+                params.append('from', fromDate.toISOString());
+                params.append('to', toDate.toISOString());
+            } else {
+                this.setStatus('Please select both start and end dates', 'error');
+                return;
+            }
+        }
 
         const url = `/api/decoder/metrics?${params.toString()}`;
         

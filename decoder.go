@@ -30,6 +30,9 @@ type MultiDecoder struct {
 	// CSV logger
 	spotsLogger *SpotsLogger
 
+	// Metrics logger (JSON Lines)
+	metricsLogger *MetricsLogger
+
 	// Statistics
 	stats *DecoderStats
 
@@ -111,6 +114,26 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		log.Printf("Spots CSV logging enabled: %s", config.SpotsLogDataDir)
 	}
 
+	// Initialize metrics logger (JSON Lines format)
+	// Path resolution is handled in main.go before this is called
+	if config.MetricsLogEnabled {
+		writeInterval := time.Duration(config.MetricsLogIntervalSecs) * time.Second
+		if writeInterval == 0 {
+			writeInterval = 5 * time.Minute // Default to 5 minutes
+		}
+		logger, err := NewMetricsLogger(config.MetricsLogDataDir, true, writeInterval)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize metrics logger: %w", err)
+		}
+		md.metricsLogger = logger
+		log.Printf("Metrics JSON Lines logging enabled: %s (interval: %v)", config.MetricsLogDataDir, writeInterval)
+
+		// Load recent metrics from files to restore state after restart
+		if err := logger.LoadRecentMetrics(prometheusMetrics.digitalMetrics); err != nil {
+			log.Printf("Warning: failed to load recent metrics from files: %v", err)
+		}
+	}
+
 	return md, nil
 }
 
@@ -150,6 +173,12 @@ func (md *MultiDecoder) Start() error {
 	for _, band := range md.decoderBands {
 		md.wg.Add(1)
 		go md.bandMonitorLoop(band)
+	}
+
+	// Start metrics logger periodic write goroutine
+	if md.metricsLogger != nil {
+		md.wg.Add(1)
+		go md.metricsWriteLoop()
 	}
 
 	log.Printf("Multi-decoder started (%d bands active)", len(md.decoderBands))
@@ -603,6 +632,13 @@ func (md *MultiDecoder) Stop() {
 		}
 	}
 
+	// Close metrics logger
+	if md.metricsLogger != nil {
+		if err := md.metricsLogger.Close(); err != nil {
+			log.Printf("Warning: Failed to close metrics logger: %v", err)
+		}
+	}
+
 	log.Printf("Multi-decoder stopped (%d bands cleaned up)", len(md.decoderBands))
 }
 
@@ -633,5 +669,30 @@ func (md *MultiDecoder) notifyDecode(decode DecodeInfo) {
 	if callback != nil {
 		// Run in goroutine to avoid blocking decoder processing
 		go callback(decode)
+	}
+}
+
+// metricsWriteLoop periodically writes metrics snapshots to JSON Lines files
+func (md *MultiDecoder) metricsWriteLoop() {
+	defer md.wg.Done()
+
+	ticker := time.NewTicker(md.metricsLogger.writeInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-md.stopChan:
+			// Write final metrics before stopping
+			if err := md.metricsLogger.WriteMetrics(md.prometheusMetrics.digitalMetrics); err != nil {
+				log.Printf("Warning: Failed to write final metrics: %v", err)
+			}
+			return
+
+		case <-ticker.C:
+			// Write metrics snapshot
+			if err := md.metricsLogger.WriteMetrics(md.prometheusMetrics.digitalMetrics); err != nil {
+				log.Printf("Warning: Failed to write metrics: %v", err)
+			}
+		}
 	}
 }

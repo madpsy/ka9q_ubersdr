@@ -157,19 +157,72 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 	// Get query parameters
 	mode := r.URL.Query().Get("mode")      // Filter by mode
 	band := r.URL.Query().Get("band")      // Filter by band
-	hoursStr := r.URL.Query().Get("hours") // Time window (default 24)
+	hoursStr := r.URL.Query().Get("hours") // Time window (default 24, deprecated in favor of from/to)
+	fromStr := r.URL.Query().Get("from")   // Start time (RFC3339 or Unix timestamp)
+	toStr := r.URL.Query().Get("to")       // End time (RFC3339 or Unix timestamp)
 	includeTimeSeries := r.URL.Query().Get("timeseries") == "true"
 	intervalStr := r.URL.Query().Get("interval") // Time series interval (default "15m")
 	includeTopCallsigns := r.URL.Query().Get("top_callsigns") == "true"
 	topLimitStr := r.URL.Query().Get("top_limit") // Limit for top callsigns (default 10)
 
-	// Parse hours (default 24, max 48)
-	hours := 24
-	if hoursStr != "" {
-		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 48 {
-			hours = h
+	// Determine time range
+	var startTime, endTime time.Time
+	now := time.Now()
+
+	// Priority: from/to parameters, then hours parameter, then default 24 hours
+	if fromStr != "" && toStr != "" {
+		// Parse from/to timestamps
+		var err error
+		startTime, err = parseTimeParam(fromStr)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("Invalid 'from' parameter: %v", err),
+			})
+			return
 		}
+
+		endTime, err = parseTimeParam(toStr)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("Invalid 'to' parameter: %v", err),
+			})
+			return
+		}
+
+		// Validate time range
+		if endTime.Before(startTime) {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "'to' time must be after 'from' time",
+			})
+			return
+		}
+
+		// Limit maximum range to 7 days
+		maxDuration := 7 * 24 * time.Hour
+		if endTime.Sub(startTime) > maxDuration {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "Time range cannot exceed 7 days",
+			})
+			return
+		}
+	} else {
+		// Fall back to hours parameter (default 24, max 48)
+		hours := 24
+		if hoursStr != "" {
+			if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 168 { // Max 7 days
+				hours = h
+			}
+		}
+		endTime = now
+		startTime = now.Add(-time.Duration(hours) * time.Hour)
 	}
+
+	// Calculate hours for backward compatibility
+	hours := int(endTime.Sub(startTime).Hours())
 
 	// Parse top limit (default 10, max 100)
 	topLimit := 10
@@ -203,10 +256,26 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 	response := DecodeMetricsResponse{}
 
 	// Set time window
-	now := time.Now()
 	response.Summary.TimeWindow.Hours = hours
-	response.Summary.TimeWindow.End = now
-	response.Summary.TimeWindow.Start = now.Add(-time.Duration(hours) * time.Hour)
+	response.Summary.TimeWindow.End = endTime
+	response.Summary.TimeWindow.Start = startTime
+
+	// Check if we need to read from files (if start time is beyond in-memory retention)
+	inMemoryRetention := 24 * time.Hour
+	needsFileData := startTime.Before(now.Add(-inMemoryRetention))
+
+	// Read historical data from files if needed
+	var fileSnapshots map[string][]MetricsSnapshot
+	if needsFileData && md.metricsLogger != nil && md.metricsLogger.enabled {
+		log.Printf("Reading metrics from files for time range: %v to %v", startTime, endTime)
+		var err error
+		fileSnapshots, err = md.metricsLogger.ReadMetricsFromFiles(startTime, endTime)
+		if err != nil {
+			log.Printf("Warning: error reading metrics from files: %v", err)
+		} else {
+			log.Printf("Loaded %d mode-band combinations from files", len(fileSnapshots))
+		}
+	}
 
 	// Get all mode/band combinations
 	combinations := md.prometheusMetrics.digitalMetrics.GetAllModeBandCombinations()
@@ -522,4 +591,29 @@ func getTopCallsigns(logger *SpotsLogger, mode, band string, hours, limit int) [
 	// For now, return empty slice as spots logger doesn't have this aggregation built-in
 	// This could be enhanced by adding a method to DecoderSpotsLogger
 	return []CallsignStats{}
+}
+
+// parseTimeParam parses a time parameter that can be either RFC3339 format or Unix timestamp
+func parseTimeParam(param string) (time.Time, error) {
+	// Try parsing as RFC3339 first
+	if t, err := time.Parse(time.RFC3339, param); err == nil {
+		return t, nil
+	}
+
+	// Try parsing as Unix timestamp (seconds)
+	if timestamp, err := strconv.ParseInt(param, 10, 64); err == nil {
+		return time.Unix(timestamp, 0), nil
+	}
+
+	// Try parsing as ISO 8601 without timezone
+	if t, err := time.Parse("2006-01-02T15:04:05", param); err == nil {
+		return t, nil
+	}
+
+	// Try parsing as date only (YYYY-MM-DD)
+	if t, err := time.Parse("2006-01-02", param); err == nil {
+		return t, nil
+	}
+
+	return time.Time{}, fmt.Errorf("invalid time format, expected RFC3339, Unix timestamp, or YYYY-MM-DD")
 }

@@ -43,6 +43,17 @@ decoder:
                                        # When false, logs and shows all spots including those without locators
                                        # Applies to both CSV logging and history view
   
+  # Metrics Logging (JSON Lines format for time-series data)
+  # Logs decoder performance metrics (decode counts, execution times, etc.)
+  metrics_log_enabled: true                # Enable JSON Lines logging of decoder metrics
+  metrics_log_data_dir: "decoder_metrics"  # Directory for metrics files (relative or absolute, default: data_dir/metrics)
+                                           # If relative: relative to current working directory
+                                           # If absolute: used as-is (e.g., /var/log/decoder_metrics)
+                                           # Files organized as: decoder_metrics/YYYY/MM/DD/MODE-BAND.jsonl
+                                           # Example: decoder_metrics/2024/11/14/FT8-20m.jsonl
+  metrics_log_interval_secs: 300           # Write interval in seconds (default: 300 = 5 minutes)
+                                           # Metrics snapshots written at this interval for all active bands
+
   # Band configurations
   # Each band creates a dedicated audio channel for decoding
   bands:

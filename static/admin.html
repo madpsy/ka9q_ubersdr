@@ -2526,6 +2526,34 @@
             spotsLogLocatorsOnlyField.appendChild(spotsLogLocatorsSmall);
             reportingSection.appendChild(spotsLogLocatorsOnlyField);
 
+            // Metrics Logging subsection
+            const metricsLoggingTitle = document.createElement('h4');
+            metricsLoggingTitle.textContent = 'Metrics Logging (JSON Lines)';
+            metricsLoggingTitle.style.marginTop = '20px';
+            metricsLoggingTitle.style.marginBottom = '10px';
+            metricsLoggingTitle.style.color = '#555';
+            reportingSection.appendChild(metricsLoggingTitle);
+
+            const metricsLogEnabledField = createConfigField('Metrics Logging Enabled', 'checkbox', currentDecoderConfig.metrics_log_enabled || false, 'metrics_log_enabled');
+            const metricsLogSmall = document.createElement('small');
+            metricsLogSmall.textContent = 'Log decoder performance metrics (decode counts, execution times) to JSON Lines files for time-series analysis';
+            metricsLogEnabledField.appendChild(metricsLogSmall);
+            reportingSection.appendChild(metricsLogEnabledField);
+
+            const metricsLogDataDirField = createConfigField('Metrics Log Directory', 'text', currentDecoderConfig.metrics_log_data_dir || '', 'metrics_log_data_dir');
+            metricsLogDataDirField.querySelector('input').placeholder = 'e.g., decoder_metrics (relative) or /var/log/metrics (absolute)';
+            const metricsLogDirSmall = document.createElement('small');
+            metricsLogDirSmall.textContent = 'Directory for JSON Lines metrics files. Can be relative (to config directory) or absolute path. Leave empty to use data_dir/metrics';
+            metricsLogDataDirField.appendChild(metricsLogDirSmall);
+            reportingSection.appendChild(metricsLogDataDirField);
+
+            const metricsLogIntervalField = createConfigField('Write Interval (seconds)', 'text', currentDecoderConfig.metrics_log_interval_secs || 300, 'metrics_log_interval_secs');
+            metricsLogIntervalField.querySelector('input').placeholder = '300';
+            const metricsLogIntervalSmall = document.createElement('small');
+            metricsLogIntervalSmall.textContent = 'How often to write metrics snapshots (default: 300 seconds = 5 minutes)';
+            metricsLogIntervalField.appendChild(metricsLogIntervalSmall);
+            reportingSection.appendChild(metricsLogIntervalField);
+
             container.appendChild(reportingSection);
 
             // Bands section

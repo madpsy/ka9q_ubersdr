@@ -157,6 +157,11 @@ type DecoderConfig struct {
 	SpotsLogDataDir      string `yaml:"spots_log_data_dir"`      // Directory for spots CSV files (relative or absolute, default: data_dir/spots)
 	SpotsLogLocatorsOnly bool   `yaml:"spots_log_locators_only"` // Only log spots with valid locators to CSV (default: true)
 
+	// Metrics logging configuration
+	MetricsLogEnabled      bool   `yaml:"metrics_log_enabled"`       // Enable JSON Lines logging of decoder metrics
+	MetricsLogDataDir      string `yaml:"metrics_log_data_dir"`      // Directory for metrics JSON Lines files (relative or absolute, default: data_dir/decoder_metrics)
+	MetricsLogIntervalSecs int    `yaml:"metrics_log_interval_secs"` // Write interval in seconds (default: 300 = 5 minutes)
+
 	// Band configurations
 	Bands []DecoderBandConfig `yaml:"bands"`
 }

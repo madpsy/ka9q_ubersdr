@@ -257,6 +257,66 @@
             100% { transform: rotate(360deg); }
         }
 
+        .version-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px 20px;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            font-size: 13px;
+            z-index: 1000;
+        }
+
+        .version-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .version-badge {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-weight: 500;
+            font-family: monospace;
+        }
+
+        .version-current {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .version-latest {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+
+        .version-update-available {
+            background: #fff3e0;
+            color: #f57c00;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .version-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .version-link:hover {
+            text-decoration: underline;
+        }
+
     </style>
 </head>
 <body>
@@ -490,6 +550,23 @@
                 <input type="file" id="sdrsharpFileInput" accept=".xml" style="display: none;" onchange="handleSDRSharpImport(event)">
             </div>
         </div>
+
+        <!-- Version Footer -->
+        <div id="versionFooter" class="version-footer" style="display: none;">
+            <div class="version-info">
+                <span>Current:</span>
+                <span id="currentVersion" class="version-badge version-current">Loading...</span>
+            </div>
+            <div class="version-info">
+                <span>Latest:</span>
+                <span id="latestVersion" class="version-badge version-latest">Checking...</span>
+            </div>
+            <div id="updateNotice" style="display: none;">
+                <a href="https://github.com/madpsy/ka9q_ubersdr/releases" target="_blank" class="version-link">
+                    🎉 New version available!
+                </a>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -518,6 +595,58 @@
 
         // Check session on page load
         checkSession();
+
+        // Version checking functionality
+        async function checkVersions() {
+            try {
+                // Fetch current version from /api/description
+                const descResponse = await fetch('/api/description');
+                let currentVersion = 'Unknown';
+                
+                if (descResponse.ok) {
+                    const descData = await descResponse.json();
+                    currentVersion = descData.version || 'Unknown';
+                    document.getElementById('currentVersion').textContent = currentVersion;
+                }
+
+                // Fetch latest version from GitHub
+                let latestVersion = 'Unknown';
+                try {
+                    const githubResponse = await fetch('https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/version.go');
+                    if (githubResponse.ok) {
+                        const githubText = await githubResponse.text();
+                        // Parse version from: const Version = "0.1.5"
+                        const versionMatch = githubText.match(/const\s+Version\s*=\s*"([^"]+)"/);
+                        if (versionMatch && versionMatch[1]) {
+                            latestVersion = versionMatch[1];
+                            document.getElementById('latestVersion').textContent = latestVersion;
+                        }
+                    }
+                } catch (error) {
+                    console.log('Could not fetch latest version from GitHub:', error);
+                    document.getElementById('latestVersion').textContent = 'Check failed';
+                    document.getElementById('latestVersion').classList.remove('version-latest');
+                    document.getElementById('latestVersion').style.background = '#f5f5f5';
+                    document.getElementById('latestVersion').style.color = '#999';
+                }
+
+                // Show footer
+                document.getElementById('versionFooter').style.display = 'flex';
+
+                // Compare versions and show update notice if different
+                if (currentVersion !== 'Unknown' && latestVersion !== 'Unknown' &&
+                    latestVersion !== 'Check failed' && currentVersion !== latestVersion) {
+                    document.getElementById('updateNotice').style.display = 'block';
+                    document.getElementById('latestVersion').classList.remove('version-latest');
+                    document.getElementById('latestVersion').classList.add('version-update-available');
+                }
+            } catch (error) {
+                console.error('Error checking versions:', error);
+            }
+        }
+
+        // Check versions on page load
+        checkVersions();
 
         // Login handling
         document.getElementById('loginForm').addEventListener('submit', async (e) => {

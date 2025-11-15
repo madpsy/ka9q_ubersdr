@@ -358,11 +358,18 @@ class DecodeMetricsDashboard {
                     x: {
                         type: 'time',
                         time: {
+                            unit: 'hour',
                             displayFormats: {
                                 hour: 'HH:mm',
-                                minute: 'HH:mm'
+                                minute: 'HH:mm',
+                                day: 'MMM dd'
                             },
                             tooltipFormat: 'yyyy-MM-dd HH:mm'
+                        },
+                        adapters: {
+                            date: {
+                                locale: 'en-GB'
+                            }
                         },
                         title: {
                             display: true,
@@ -371,7 +378,9 @@ class DecodeMetricsDashboard {
                         },
                         ticks: {
                             color: '#fff',
-                            source: 'auto'
+                            source: 'auto',
+                            maxRotation: 0,
+                            autoSkip: true
                         },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
@@ -546,11 +555,18 @@ class DecodeMetricsDashboard {
                     x: {
                         type: 'time',
                         time: {
+                            unit: 'hour',
                             displayFormats: {
                                 hour: 'HH:mm',
-                                minute: 'HH:mm'
+                                minute: 'HH:mm',
+                                day: 'MMM dd'
                             },
                             tooltipFormat: 'yyyy-MM-dd HH:mm'
+                        },
+                        adapters: {
+                            date: {
+                                locale: 'en-GB'
+                            }
                         },
                         title: {
                             display: true,
@@ -559,7 +575,9 @@ class DecodeMetricsDashboard {
                         },
                         ticks: {
                             color: '#fff',
-                            source: 'auto'
+                            source: 'auto',
+                            maxRotation: 0,
+                            autoSkip: true
                         },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },

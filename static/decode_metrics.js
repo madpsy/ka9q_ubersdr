@@ -18,7 +18,7 @@ class DecodeMetricsDashboard {
                 const data = await response.json();
                 const receiverNameEl = document.getElementById('receiver-name');
                 if (receiverNameEl && data.receiver && data.receiver.name) {
-                    receiverNameEl.textContent = `${data.receiver.name} - Digital Mode Decode Statistics`;
+                    receiverNameEl.textContent = `${data.receiver.name}`;
                 }
                 const versionSpan = document.getElementById('footer-version');
                 if (versionSpan && data.version) {

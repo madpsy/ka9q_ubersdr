@@ -132,7 +132,7 @@ func (ml *MetricsLogger) WriteMetrics(dm *DigitalDecodeMetrics) error {
 	combinations := dm.GetAllModeBandCombinations()
 
 	if len(combinations) == 0 {
-		log.Printf("No active mode/band combinations to write metrics for")
+		log.Printf("No active mode/band combinations to write metrics for (dm=%p, dm.decodesByModeBand has %d modes)", dm, len(dm.decodesByModeBand))
 		return nil
 	}
 

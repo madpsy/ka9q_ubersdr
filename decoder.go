@@ -695,6 +695,7 @@ func (md *MultiDecoder) notifyDecode(decode DecodeInfo) {
 func (md *MultiDecoder) metricsWriteLoop() {
 	defer md.wg.Done()
 
+	log.Printf("Metrics write loop started")
 	ticker := time.NewTicker(md.metricsLogger.writeInterval)
 	defer ticker.Stop()
 

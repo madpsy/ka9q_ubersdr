@@ -31,7 +31,9 @@ type MultiDecoder struct {
 	spotsLogger *SpotsLogger
 
 	// Metrics logger (JSON Lines)
-	metricsLogger *MetricsLogger
+	metricsLogger         *MetricsLogger
+	metricsFirstWriteDone bool
+	metricsFirstWriteMu   sync.Mutex
 
 	// Statistics
 	stats *DecoderStats
@@ -530,6 +532,14 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 			// Get cycle time for this mode
 			modeInfo := GetModeInfo(band.Config.Mode)
 			cycleSeconds := int(modeInfo.CycleTime.Seconds())
+
+			// Check if this is the first decode and we should write metrics immediately
+			md.metricsFirstWriteMu.Lock()
+			shouldWriteNow := !md.metricsFirstWriteDone && md.metricsLogger != nil
+			if shouldWriteNow {
+				md.metricsFirstWriteDone = true
+			}
+			md.metricsFirstWriteMu.Unlock()
 
 			// Submit to PSKReporter/WSPRNet and notify callback
 			for _, decode := range decodes {

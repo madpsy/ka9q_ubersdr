@@ -260,13 +260,10 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 	response.Summary.TimeWindow.End = endTime
 	response.Summary.TimeWindow.Start = startTime
 
-	// Check if we need to read from files (if start time is beyond in-memory retention)
-	inMemoryRetention := 24 * time.Hour
-	needsFileData := startTime.Before(now.Add(-inMemoryRetention))
-
-	// Read historical data from files if needed
+	// Always try to read from files if metrics logging is enabled
+	// This ensures we have data even after restarts or for time ranges with sparse in-memory data
 	var fileSnapshots map[string][]MetricsSnapshot
-	if needsFileData && md.metricsLogger != nil && md.metricsLogger.enabled {
+	if md.metricsLogger != nil && md.metricsLogger.enabled {
 		log.Printf("Reading metrics from files for time range: %v to %v", startTime, endTime)
 		var err error
 		fileSnapshots, err = md.metricsLogger.ReadMetricsFromFiles(startTime, endTime)
@@ -363,8 +360,8 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 
 	// Generate time series if requested
 	if includeTimeSeries {
-		response.TimeSeries = generateTimeSeries(md.prometheusMetrics.digitalMetrics, filteredCombinations, interval, hours)
-		response.ExecutionTimeSeries = generateExecutionTimeSeries(md.prometheusMetrics.digitalMetrics, filteredCombinations, interval, hours)
+		response.TimeSeries = generateTimeSeriesWithFiles(md.prometheusMetrics.digitalMetrics, filteredCombinations, interval, startTime, endTime, fileSnapshots)
+		response.ExecutionTimeSeries = generateExecutionTimeSeriesWithFiles(md.prometheusMetrics.digitalMetrics, filteredCombinations, interval, startTime, endTime, fileSnapshots)
 	}
 
 	// Generate top callsigns if requested
@@ -434,6 +431,146 @@ func generateTimeSeries(dm *DigitalDecodeMetrics, combinations []struct{ Mode, B
 					Band:            combo.Band,
 					DecodeCount:     count,
 					UniqueCallsigns: uniqueCallsigns,
+				}
+			}
+		}
+
+		// Only add point if it has data
+		if len(point.Data) > 0 {
+			timeSeries = append(timeSeries, point)
+		}
+	}
+
+	return timeSeries
+}
+
+// generateTimeSeriesWithFiles creates time-bucketed decode data using both in-memory and file data
+func generateTimeSeriesWithFiles(dm *DigitalDecodeMetrics, combinations []struct{ Mode, Band string }, interval time.Duration, startTime, endTime time.Time, fileSnapshots map[string][]MetricsSnapshot) []TimeSeriesPoint {
+	// Calculate number of buckets
+	duration := endTime.Sub(startTime)
+	numBuckets := int(duration / interval)
+	if numBuckets > 1000 {
+		numBuckets = 1000 // Cap at 1000 buckets
+	}
+	if numBuckets < 1 {
+		numBuckets = 1
+	}
+
+	timeSeries := make([]TimeSeriesPoint, 0, numBuckets)
+
+	// Create buckets
+	for i := 0; i < numBuckets; i++ {
+		bucketStart := startTime.Add(time.Duration(i) * interval)
+		bucketEnd := bucketStart.Add(interval)
+
+		point := TimeSeriesPoint{
+			Timestamp: bucketStart,
+			Interval:  interval.String(),
+			Data:      make(map[string]ModeBandSummary),
+		}
+
+		// For each mode/band combination
+		for _, combo := range combinations {
+			key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
+
+			// First, try to get data from files for this bucket
+			decodeCount := 0
+			uniqueCallsigns := 0
+
+			if fileSnapshots != nil {
+				snapshots := fileSnapshots[key]
+				for _, snapshot := range snapshots {
+					if snapshot.Timestamp.After(bucketStart) && snapshot.Timestamp.Before(bucketEnd) {
+						decodeCount += int(snapshot.DecodeCounts.Last1Hour) // Use 1h as proxy for activity
+						uniqueCallsigns += snapshot.UniqueCallsigns.Last1Hour
+					}
+				}
+			}
+
+			// If no file data, try in-memory data
+			if decodeCount == 0 {
+				decodeCount = countDecodesInTimeRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
+				uniqueCallsigns = countUniqueCallsignsInTimeRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
+			}
+
+			if decodeCount > 0 {
+				point.Data[key] = ModeBandSummary{
+					Mode:            combo.Mode,
+					Band:            combo.Band,
+					DecodeCount:     decodeCount,
+					UniqueCallsigns: uniqueCallsigns,
+				}
+			}
+		}
+
+		// Only add point if it has data
+		if len(point.Data) > 0 {
+			timeSeries = append(timeSeries, point)
+		}
+	}
+
+	return timeSeries
+}
+
+// generateExecutionTimeSeriesWithFiles creates time-bucketed execution time data using both in-memory and file data
+func generateExecutionTimeSeriesWithFiles(dm *DigitalDecodeMetrics, combinations []struct{ Mode, Band string }, interval time.Duration, startTime, endTime time.Time, fileSnapshots map[string][]MetricsSnapshot) []ExecutionTimeSeriesPoint {
+	// Calculate number of buckets
+	duration := endTime.Sub(startTime)
+	numBuckets := int(duration / interval)
+	if numBuckets > 1000 {
+		numBuckets = 1000 // Cap at 1000 buckets
+	}
+	if numBuckets < 1 {
+		numBuckets = 1
+	}
+
+	timeSeries := make([]ExecutionTimeSeriesPoint, 0, numBuckets)
+
+	// Create buckets
+	for i := 0; i < numBuckets; i++ {
+		bucketStart := startTime.Add(time.Duration(i) * interval)
+		bucketEnd := bucketStart.Add(interval)
+
+		point := ExecutionTimeSeriesPoint{
+			Timestamp: bucketStart,
+			Interval:  interval.String(),
+			Data:      make(map[string]ExecutionTimeBucketData),
+		}
+
+		// For each mode/band combination
+		for _, combo := range combinations {
+			key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
+
+			// First, try to get data from files for this bucket
+			var avgTime, minTime, maxTime float64
+			count := 0
+
+			if fileSnapshots != nil {
+				snapshots := fileSnapshots[key]
+				for _, snapshot := range snapshots {
+					if snapshot.Timestamp.After(bucketStart) && snapshot.Timestamp.Before(bucketEnd) {
+						avgTime = snapshot.ExecutionTime.Last1Min.Avg
+						minTime = snapshot.ExecutionTime.Last1Min.Min
+						maxTime = snapshot.ExecutionTime.Last1Min.Max
+						count = 1
+						break // Use first matching snapshot
+					}
+				}
+			}
+
+			// If no file data, try in-memory data
+			if count == 0 {
+				avgTime, minTime, maxTime, count = getExecutionTimeStatsInRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
+			}
+
+			if count > 0 {
+				point.Data[key] = ExecutionTimeBucketData{
+					Mode:        combo.Mode,
+					Band:        combo.Band,
+					AvgSeconds:  avgTime,
+					MinSeconds:  minTime,
+					MaxSeconds:  maxTime,
+					SampleCount: count,
 				}
 			}
 		}

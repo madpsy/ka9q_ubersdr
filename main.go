@@ -354,6 +354,14 @@ func main() {
 		config.Decoder.SpotsLogDataDir = *configDir + "/" + config.Decoder.SpotsLogDataDir
 	}
 
+	// Set metrics log data directory relative to config directory (same pattern as spots log)
+	if config.Decoder.Enabled && config.Decoder.MetricsLogEnabled && config.Decoder.MetricsLogDataDir == "" {
+		config.Decoder.MetricsLogDataDir = *configDir + "/decoder_metrics"
+	} else if config.Decoder.Enabled && config.Decoder.MetricsLogEnabled && !strings.HasPrefix(config.Decoder.MetricsLogDataDir, "/") {
+		// If relative path, make it relative to config directory
+		config.Decoder.MetricsLogDataDir = *configDir + "/" + config.Decoder.MetricsLogDataDir
+	}
+
 	// Set default value for spots locators only filter
 	// Default to true (only log/show spots with valid locators)
 	// Users must explicitly set to false in config to log/see all spots

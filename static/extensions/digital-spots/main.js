@@ -31,6 +31,7 @@ class DigitalSpotsExtension extends DecoderExtension {
     }
 
     onInitialize() {
+        console.log('Digital Spots: onInitialize called');
         this.renderTemplate();
         this.waitForDOMAndSetupHandlers();
         this.updateConnectionStatus();
@@ -38,6 +39,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.startAgeUpdates();
         this.startRadioStateMonitoring();
         this.startFrequencyMonitoring();
+        console.log('Digital Spots: onInitialize complete');
     }
 
     waitForDOMAndSetupHandlers() {
@@ -553,6 +555,7 @@ class DigitalSpotsExtension extends DecoderExtension {
     }
 
     startFrequencyMonitoring() {
+        console.log('Digital Spots: startFrequencyMonitoring called');
         // Update band filter based on current frequency immediately
         this.updateBandFilterFromFrequency();
     }
@@ -563,18 +566,33 @@ class DigitalSpotsExtension extends DecoderExtension {
 
     updateBandFilterFromFrequency() {
         const currentFreq = this.radio.getFrequency();
-        if (!currentFreq) return;
+        console.log('Digital Spots: updateBandFilterFromFrequency - currentFreq:', currentFreq);
+
+        if (!currentFreq) {
+            console.log('Digital Spots: No current frequency');
+            return;
+        }
 
         const band = this.radio.getFrequencyBand(currentFreq);
-        if (!band) return;
+        console.log('Digital Spots: Detected band:', band, 'for frequency:', currentFreq);
+
+        if (!band) {
+            console.log('Digital Spots: No band detected for frequency');
+            return;
+        }
 
         const bandFilter = document.getElementById('digital-spots-band-filter');
-        if (!bandFilter) return;
+        if (!bandFilter) {
+            console.log('Digital Spots: Band filter element not found');
+            return;
+        }
 
         // Check if the band exists in the dropdown options
         const bandOption = Array.from(bandFilter.options).find(
             option => option.value === band
         );
+
+        console.log('Digital Spots: Band option found:', !!bandOption, 'Current filter:', this.bandFilter, 'New band:', band);
 
         if (bandOption && this.bandFilter !== band) {
             // Only update if the band has changed and exists in options
@@ -582,11 +600,17 @@ class DigitalSpotsExtension extends DecoderExtension {
             bandFilter.value = band;
             this.filterAndRenderSpots();
             console.log(`Digital Spots: Auto-updated band filter to ${band}`);
+        } else if (!bandOption) {
+            console.log('Digital Spots: Band', band, 'not found in dropdown options');
+        } else {
+            console.log('Digital Spots: Band filter already set to', band);
         }
     }
 
     // Override base class method to handle frequency changes
     onFrequencyChanged(frequency) {
+        console.log('Digital Spots: onFrequencyChanged called with frequency:', frequency);
+
         // Call parent implementation if needed
         super.onFrequencyChanged(frequency);
 

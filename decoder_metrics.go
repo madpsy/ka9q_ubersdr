@@ -412,8 +412,8 @@ func (dm *DigitalDecodeMetrics) RecordExecutionTime(mode, band string, duration 
 	// Add execution time
 	dm.executionTimes[mode][band] = append(dm.executionTimes[mode][band], event)
 
-	// Clean old execution times (keep last 10 minutes)
-	cutoff := now.Add(-10 * time.Minute)
+	// Clean old execution times (keep last 24 hours to match decode retention)
+	cutoff := now.Add(-24 * time.Hour)
 	newTimes := make([]ExecutionTimeEvent, 0, len(dm.executionTimes[mode][band]))
 	for _, e := range dm.executionTimes[mode][band] {
 		if e.Timestamp.After(cutoff) {

@@ -37,6 +37,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.startConnectionMonitoring();
         this.startAgeUpdates();
         this.startRadioStateMonitoring();
+        this.startFrequencyMonitoring();
     }
 
     waitForDOMAndSetupHandlers() {
@@ -551,6 +552,48 @@ class DigitalSpotsExtension extends DecoderExtension {
         }
     }
 
+    startFrequencyMonitoring() {
+        // Update band filter based on current frequency
+        this.updateBandFilterFromFrequency();
+
+        // Subscribe to frequency changes
+        this.frequencyChangeHandler = () => {
+            this.updateBandFilterFromFrequency();
+        };
+        this.radio.on('frequency_changed', this.frequencyChangeHandler);
+    }
+
+    stopFrequencyMonitoring() {
+        if (this.frequencyChangeHandler) {
+            this.radio.off('frequency_changed', this.frequencyChangeHandler);
+            this.frequencyChangeHandler = null;
+        }
+    }
+
+    updateBandFilterFromFrequency() {
+        const currentFreq = this.radio.getFrequency();
+        if (!currentFreq) return;
+
+        const band = this.radio.getFrequencyBand(currentFreq);
+        if (!band) return;
+
+        const bandFilter = document.getElementById('digital-spots-band-filter');
+        if (!bandFilter) return;
+
+        // Check if the band exists in the dropdown options
+        const bandOption = Array.from(bandFilter.options).find(
+            option => option.value === band
+        );
+
+        if (bandOption && this.bandFilter !== band) {
+            // Only update if the band has changed and exists in options
+            this.bandFilter = band;
+            bandFilter.value = band;
+            this.filterAndRenderSpots();
+            console.log(`Digital Spots: Auto-updated band filter to ${band}`);
+        }
+    }
+
     onEnable() {
         if (!this.unsubscribe) {
             this.subscribeToDigitalSpots();
@@ -560,12 +603,14 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.startConnectionMonitoring();
         this.startAgeUpdates();
         this.startRadioStateMonitoring();
+        this.startFrequencyMonitoring();
     }
 
     onDisable() {
         this.stopConnectionMonitoring();
         this.stopAgeUpdates();
         this.stopRadioStateMonitoring();
+        this.stopFrequencyMonitoring();
 
         if (this.unsubscribe) {
             this.unsubscribe();

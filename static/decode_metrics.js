@@ -190,9 +190,39 @@ class DecodeMetricsDashboard {
             html += `<div class="metric-row"><span class="metric-label">Last Hour:</span><span class="metric-value">${metric.unique_callsigns.last_1h}</span></div>`;
             html += `<div class="metric-row"><span class="metric-label">Last 24h:</span><span class="metric-value">${metric.unique_callsigns.last_24h}</span></div>`;
             
-            if (metric.execution_time.last_1m.avg > 0) {
-                html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">Decoder Performance</div>';
-                html += `<div class="metric-row"><span class="metric-label">Avg Time:</span><span class="metric-value">${metric.execution_time.last_1m.avg.toFixed(2)}s</span></div>`;
+            if (metric.execution_time.last_1m.avg > 0 || metric.execution_time.last_5m.avg > 0) {
+                html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">Decoder Performance (Last 1 min)</div>';
+                if (metric.execution_time.last_1m.avg > 0) {
+                    html += `<div class="metric-row"><span class="metric-label">Avg Time:</span><span class="metric-value">${metric.execution_time.last_1m.avg.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Min Time:</span><span class="metric-value">${metric.execution_time.last_1m.min.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Max Time:</span><span class="metric-value">${metric.execution_time.last_1m.max.toFixed(3)}s</span></div>`;
+                }
+                
+                if (metric.execution_time.last_5m.avg > 0) {
+                    html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">Decoder Performance (Last 5 min)</div>';
+                    html += `<div class="metric-row"><span class="metric-label">Avg Time:</span><span class="metric-value">${metric.execution_time.last_5m.avg.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Min Time:</span><span class="metric-value">${metric.execution_time.last_5m.min.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Max Time:</span><span class="metric-value">${metric.execution_time.last_5m.max.toFixed(3)}s</span></div>`;
+                }
+                
+                // Add warning if execution time is approaching limits
+                const maxAllowed = metric.mode === 'FT4' ? 7 : (metric.mode === 'FT8' ? 15 : (metric.mode === 'WSPR' ? 120 : 0));
+                if (maxAllowed > 0 && metric.execution_time.last_1m.avg > 0) {
+                    const percentOfMax = (metric.execution_time.last_1m.avg / maxAllowed) * 100;
+                    let statusColor = '#22c55e'; // green
+                    let statusText = 'Good';
+                    if (percentOfMax > 90) {
+                        statusColor = '#ef4444'; // red
+                        statusText = 'Critical';
+                    } else if (percentOfMax > 75) {
+                        statusColor = '#f59e0b'; // orange
+                        statusText = 'Warning';
+                    } else if (percentOfMax > 50) {
+                        statusColor = '#eab308'; // yellow
+                        statusText = 'Caution';
+                    }
+                    html += `<div class="metric-row"><span class="metric-label">Status:</span><span class="metric-value" style="color: ${statusColor};">${statusText} (${percentOfMax.toFixed(0)}% of ${maxAllowed}s)</span></div>`;
+                }
             }
             
             html += '</div>';
@@ -320,6 +350,19 @@ class DecodeMetricsDashboard {
                     },
                     y: {
                         type: 'linear',
+                        title: {
+                            display: true,
+                            text: 'Decodes',
+                            color: '#fff'
+                        },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
 
     createExecutionTimeChart(data) {
         const ctx = document.getElementById('execution-time-chart');
@@ -502,19 +545,6 @@ class DecodeMetricsDashboard {
                                 return value.toFixed(2) + 's';
                             }
                         },
-                        grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                        beginAtZero: true
-                    }
-                }
-            }
-        });
-    }
-                        title: {
-                            display: true,
-                            text: 'Decodes',
-                            color: '#fff'
-                        },
-                        ticks: { color: '#fff' },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' },
                         beginAtZero: true
                     }

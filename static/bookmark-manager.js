@@ -352,9 +352,23 @@ function handleBookmarkClick(bookmarkOrFrequency, mode) {
     if (extension && toggleExtension) {
         // Small delay to ensure radio is tuned first
         setTimeout(() => {
-            toggleExtension(extension);
-            if (log) {
-                log(`Opening ${extension} extension`);
+            // Check if this extension is already active
+            const panel = document.getElementById('extension-panel');
+            const panelTitle = document.getElementById('extension-panel-title');
+            const decoder = window.decoderManager ? window.decoderManager.getDecoder(extension) : null;
+
+            const isPanelVisible = panel && panel.style.display !== 'none';
+            const isShowingThisExtension = panelTitle && decoder && panelTitle.textContent === decoder.displayName;
+            const isAlreadyActive = isPanelVisible && isShowingThisExtension;
+
+            // Only toggle if not already active
+            if (!isAlreadyActive) {
+                toggleExtension(extension);
+                if (log) {
+                    log(`Opening ${extension} extension`);
+                }
+            } else if (log) {
+                log(`${extension} extension already active`);
             }
         }, 100);
     }

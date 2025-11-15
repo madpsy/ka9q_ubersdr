@@ -179,6 +179,7 @@ func (md *MultiDecoder) Start() error {
 
 	// Start metrics logger periodic write goroutine
 	if md.metricsLogger != nil {
+		log.Printf("Starting metrics write loop (interval: %v)", md.metricsLogger.writeInterval)
 		md.wg.Add(1)
 		go md.metricsWriteLoop()
 	}
@@ -533,21 +534,13 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 			modeInfo := GetModeInfo(band.Config.Mode)
 			cycleSeconds := int(modeInfo.CycleTime.Seconds())
 
-			// Check if this is the first decode and we should write metrics immediately
+			// Check if this is the first decode (check before recording)
 			md.metricsFirstWriteMu.Lock()
 			shouldWriteNow := !md.metricsFirstWriteDone && md.metricsLogger != nil
 			if shouldWriteNow {
 				md.metricsFirstWriteDone = true
 			}
 			md.metricsFirstWriteMu.Unlock()
-
-			// Write metrics immediately if this is the first decode
-			if shouldWriteNow {
-				log.Printf("First decode detected - writing initial metrics snapshot")
-				if err := md.metricsLogger.WriteMetrics(md.prometheusMetrics.digitalMetrics); err != nil {
-					log.Printf("Warning: Failed to write initial metrics: %v", err)
-				}
-			}
 
 			// Submit to PSKReporter/WSPRNet and notify callback
 			for _, decode := range decodes {
@@ -595,6 +588,14 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 			}
 
 			md.stats.IncrementSpots(band.Config.Name, int64(len(decodes)))
+
+			// Write metrics immediately if this was the first decode (after all decodes are recorded)
+			if shouldWriteNow {
+				log.Printf("First decode detected - writing initial metrics snapshot")
+				if err := md.metricsLogger.WriteMetrics(md.prometheusMetrics.digitalMetrics); err != nil {
+					log.Printf("Warning: Failed to write initial metrics: %v", err)
+				}
+			}
 		}
 
 		// Record execution time metric only if we successfully got one

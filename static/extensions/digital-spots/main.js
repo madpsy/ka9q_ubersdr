@@ -611,9 +611,6 @@ class DigitalSpotsExtension extends DecoderExtension {
     onFrequencyChanged(frequency) {
         console.log('Digital Spots: onFrequencyChanged called with frequency:', frequency);
 
-        // Call parent implementation if needed
-        super.onFrequencyChanged(frequency);
-
         // Update band filter when frequency changes
         this.updateBandFilterFromFrequency();
     }

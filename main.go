@@ -630,6 +630,9 @@ func main() {
 	http.HandleFunc("/api/decoder/spots/analytics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleDecoderSpotsAnalytics(w, r, multiDecoder, ipBanManager, fftRateLimiter)
 	}))
+	http.HandleFunc("/api/decoder/metrics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleDecodeMetrics(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+	}))
 
 	// CTY API endpoints (with IP ban checking)
 	RegisterCTYAPIHandlers(ipBanManager)

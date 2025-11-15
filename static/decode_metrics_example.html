@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decode Metrics API Example</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .controls label {
+            display: inline-block;
+            margin-right: 10px;
+            font-weight: bold;
+        }
+        .controls input, .controls select, .controls button {
+            margin-right: 15px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .controls button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .controls button:hover {
+            background: #0056b3;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .metric-card h3 {
+            margin-top: 0;
+            color: #007bff;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .metric-label {
+            font-weight: bold;
+            color: #666;
+        }
+        .metric-value {
+            color: #333;
+        }
+        .chart-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>📊 Decode Metrics API Example</h1>
+    
+    <div class="controls">
+        <label>Mode:</label>
+        <select id="mode">
+            <option value="">All Modes</option>
+            <option value="FT8">FT8</option>
+            <option value="FT4">FT4</option>
+            <option value="WSPR">WSPR</option>
+        </select>
+        
+        <label>Band:</label>
+        <select id="band">
+            <option value="">All Bands</option>
+            <option value="160m">160m</option>
+            <option value="80m">80m</option>
+            <option value="60m">60m</option>
+            <option value="40m">40m</option>
+            <option value="30m">30m</option>
+            <option value="20m">20m</option>
+            <option value="17m">17m</option>
+            <option value="15m">15m</option>
+            <option value="12m">12m</option>
+            <option value="10m">10m</option>
+            <option value="6m">6m</option>
+        </select>
+        
+        <label>Hours:</label>
+        <input type="number" id="hours" value="24" min="1" max="48">
+        
+        <label>
+            <input type="checkbox" id="timeseries"> Include Time Series
+        </label>
+        
+        <label>Interval:</label>
+        <select id="interval">
+            <option value="15m">15 minutes</option>
+            <option value="30m">30 minutes</option>
+            <option value="1h">1 hour</option>
+            <option value="2h">2 hours</option>
+        </select>
+        
+        <button onclick="fetchMetrics()">Fetch Metrics</button>
+        <button onclick="showJSON()">Show Raw JSON</button>
+    </div>
+
+    <div id="error" class="error" style="display: none;"></div>
+    <div id="loading" class="loading" style="display: none;">Loading metrics...</div>
+    <div id="results"></div>
+
+    <script>
+        let currentData = null;
+
+        async function fetchMetrics() {
+            const mode = document.getElementById('mode').value;
+            const band = document.getElementById('band').value;
+            const hours = document.getElementById('hours').value;
+            const timeseries = document.getElementById('timeseries').checked;
+            const interval = document.getElementById('interval').value;
+
+            // Build query string
+            const params = new URLSearchParams();
+            if (mode) params.append('mode', mode);
+            if (band) params.append('band', band);
+            params.append('hours', hours);
+            if (timeseries) {
+                params.append('timeseries', 'true');
+                params.append('interval', interval);
+            }
+
+            const url = `/api/decoder/metrics?${params.toString()}`;
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('results').innerHTML = '';
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                currentData = await response.json();
+                displayMetrics(currentData);
+            } catch (error) {
+                document.getElementById('error').textContent = `Error: ${error.message}`;
+                document.getElementById('error').style.display = 'block';
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function displayMetrics(data) {
+            const results = document.getElementById('results');
+            
+            // Summary
+            let html = '<div class="metric-card">';
+            html += '<h3>📈 Summary</h3>';
+            html += `<div class="metric-row"><span class="metric-label">Total Modes:</span><span class="metric-value">${data.summary.total_modes}</span></div>`;
+            html += `<div class="metric-row"><span class="metric-label">Total Bands:</span><span class="metric-value">${data.summary.total_bands}</span></div>`;
+            html += `<div class="metric-row"><span class="metric-label">Time Window:</span><span class="metric-value">${data.summary.time_window.hours} hours</span></div>`;
+            html += `<div class="metric-row"><span class="metric-label">Period:</span><span class="metric-value">${new Date(data.summary.time_window.start).toLocaleString()} - ${new Date(data.summary.time_window.end).toLocaleString()}</span></div>`;
+            html += '</div>';
+
+            // Per-band metrics
+            html += '<h2>📡 Per Band/Mode Metrics</h2>';
+            html += '<div class="metrics-grid">';
+            
+            data.metrics.forEach(metric => {
+                html += '<div class="metric-card">';
+                html += `<h3>${metric.mode} on ${metric.band}</h3>`;
+                
+                html += '<h4>Decode Counts</h4>';
+                html += `<div class="metric-row"><span class="metric-label">Last 1 Hour:</span><span class="metric-value">${metric.decode_counts.last_1h}</span></div>`;
+                html += `<div class="metric-row"><span class="metric-label">Last 24 Hours:</span><span class="metric-value">${metric.decode_counts.last_24h}</span></div>`;
+                
+                html += '<h4>Decodes Per Cycle</h4>';
+                html += `<div class="metric-row"><span class="metric-label">Last 1 Min:</span><span class="metric-value">${metric.decodes_per_cycle.last_1m.toFixed(1)}</span></div>`;
+                html += `<div class="metric-row"><span class="metric-label">Last 60 Min:</span><span class="metric-value">${metric.decodes_per_cycle.last_60m.toFixed(1)}</span></div>`;
+                
+                html += '<h4>Unique Callsigns</h4>';
+                html += `<div class="metric-row"><span class="metric-label">Last 1 Hour:</span><span class="metric-value">${metric.unique_callsigns.last_1h}</span></div>`;
+                html += `<div class="metric-row"><span class="metric-label">Last 24 Hours:</span><span class="metric-value">${metric.unique_callsigns.last_24h}</span></div>`;
+                
+                html += '<h4>Activity</h4>';
+                html += `<div class="metric-row"><span class="metric-label">Decodes/Hour:</span><span class="metric-value">${metric.activity.decodes_per_hour.toFixed(1)}</span></div>`;
+                html += `<div class="metric-row"><span class="metric-label">Callsigns/Hour:</span><span class="metric-value">${metric.activity.callsigns_per_hour.toFixed(1)}</span></div>`;
+                html += `<div class="metric-row"><span class="metric-label">Activity Score:</span><span class="metric-value">${metric.activity.activity_score.toFixed(0)}%</span></div>`;
+                
+                if (metric.execution_time.last_1m.avg > 0) {
+                    html += '<h4>Decoder Performance (1m)</h4>';
+                    html += `<div class="metric-row"><span class="metric-label">Avg Time:</span><span class="metric-value">${metric.execution_time.last_1m.avg.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Min/Max:</span><span class="metric-value">${metric.execution_time.last_1m.min.toFixed(3)}s / ${metric.execution_time.last_1m.max.toFixed(3)}s</span></div>`;
+                }
+                
+                html += '</div>';
+            });
+            
+            html += '</div>';
+
+            // Time series chart
+            if (data.time_series && data.time_series.length > 0) {
+                html += '<div class="chart-container">';
+                html += '<h2>📊 Time Series Data</h2>';
+                html += `<p>Showing ${data.time_series.length} time buckets with interval: ${data.time_series[0].interval}</p>`;
+                html += '<p><em>Time series visualization would go here (integrate with Chart.js or similar)</em></p>';
+                html += '</div>';
+            }
+
+            results.innerHTML = html;
+        }
+
+        function showJSON() {
+            if (!currentData) {
+                alert('No data loaded. Fetch metrics first.');
+                return;
+            }
+            
+            const results = document.getElementById('results');
+            results.innerHTML = '<div class="chart-container"><h2>Raw JSON Response</h2><pre>' + 
+                JSON.stringify(currentData, null, 2) + '</pre></div>';
+        }
+
+        // Auto-fetch on page load
+        window.addEventListener('load', () => {
+            fetchMetrics();
+        });
+    </script>
+</body>
+</html>

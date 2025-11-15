@@ -1,0 +1,412 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+	"time"
+)
+
+// DecodeMetricsResponse contains comprehensive decode metrics
+type DecodeMetricsResponse struct {
+	// Summary statistics
+	Summary struct {
+		TotalModes int `json:"total_modes"`
+		TotalBands int `json:"total_bands"`
+		TimeWindow struct {
+			Hours int       `json:"hours"`
+			Start time.Time `json:"start"`
+			End   time.Time `json:"end"`
+		} `json:"time_window"`
+	} `json:"summary"`
+
+	// Per mode/band metrics
+	Metrics []ModeBandMetrics `json:"metrics"`
+
+	// Time series data (optional, based on query params)
+	TimeSeries []TimeSeriesPoint `json:"time_series,omitempty"`
+
+	// Top performers
+	TopCallsigns []CallsignStats `json:"top_callsigns,omitempty"`
+}
+
+// ModeBandMetrics contains all metrics for a specific mode/band combination
+type ModeBandMetrics struct {
+	Mode string `json:"mode"`
+	Band string `json:"band"`
+
+	// Decode counts
+	DecodeCounts struct {
+		Last1Hour   int64 `json:"last_1h"`
+		Last3Hours  int64 `json:"last_3h"`
+		Last6Hours  int64 `json:"last_6h"`
+		Last12Hours int64 `json:"last_12h"`
+		Last24Hours int64 `json:"last_24h"`
+	} `json:"decode_counts"`
+
+	// Average decodes per cycle
+	DecodesPerCycle struct {
+		Last1Min  float64 `json:"last_1m"`
+		Last5Min  float64 `json:"last_5m"`
+		Last15Min float64 `json:"last_15m"`
+		Last30Min float64 `json:"last_30m"`
+		Last60Min float64 `json:"last_60m"`
+	} `json:"decodes_per_cycle"`
+
+	// Unique callsigns
+	UniqueCallsigns struct {
+		Last1Hour   int `json:"last_1h"`
+		Last3Hours  int `json:"last_3h"`
+		Last6Hours  int `json:"last_6h"`
+		Last12Hours int `json:"last_12h"`
+		Last24Hours int `json:"last_24h"`
+	} `json:"unique_callsigns"`
+
+	// Decoder performance
+	ExecutionTime struct {
+		Last1Min struct {
+			Avg float64 `json:"avg_seconds"`
+			Min float64 `json:"min_seconds"`
+			Max float64 `json:"max_seconds"`
+		} `json:"last_1m"`
+		Last5Min struct {
+			Avg float64 `json:"avg_seconds"`
+			Min float64 `json:"min_seconds"`
+			Max float64 `json:"max_seconds"`
+		} `json:"last_5m"`
+		Last10Min struct {
+			Avg float64 `json:"avg_seconds"`
+			Min float64 `json:"min_seconds"`
+			Max float64 `json:"max_seconds"`
+		} `json:"last_10m"`
+	} `json:"execution_time"`
+
+	// Activity metrics
+	Activity struct {
+		DecodesPerHour   float64 `json:"decodes_per_hour"`
+		CallsignsPerHour float64 `json:"callsigns_per_hour"`
+		ActivityScore    float64 `json:"activity_score"` // Normalized 0-100
+	} `json:"activity"`
+}
+
+// TimeSeriesPoint represents a single point in time series data
+type TimeSeriesPoint struct {
+	Timestamp time.Time                  `json:"timestamp"`
+	Interval  string                     `json:"interval"` // e.g., "15m", "1h"
+	Data      map[string]ModeBandSummary `json:"data"`     // key: "mode:band"
+}
+
+// ModeBandSummary contains summary data for a time bucket
+type ModeBandSummary struct {
+	Mode            string  `json:"mode"`
+	Band            string  `json:"band"`
+	DecodeCount     int     `json:"decode_count"`
+	UniqueCallsigns int     `json:"unique_callsigns"`
+	AvgSNR          float64 `json:"avg_snr,omitempty"`
+}
+
+// CallsignStats contains statistics for a callsign
+type CallsignStats struct {
+	Callsign    string    `json:"callsign"`
+	DecodeCount int       `json:"decode_count"`
+	Modes       []string  `json:"modes"`
+	Bands       []string  `json:"bands"`
+	FirstSeen   time.Time `json:"first_seen"`
+	LastSeen    time.Time `json:"last_seen"`
+}
+
+// handleDecodeMetrics serves comprehensive decode metrics
+func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if md == nil || md.prometheusMetrics == nil || md.prometheusMetrics.digitalMetrics == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decode metrics are not available",
+		})
+		return
+	}
+
+	// Get query parameters
+	mode := r.URL.Query().Get("mode")      // Filter by mode
+	band := r.URL.Query().Get("band")      // Filter by band
+	hoursStr := r.URL.Query().Get("hours") // Time window (default 24)
+	includeTimeSeries := r.URL.Query().Get("timeseries") == "true"
+	intervalStr := r.URL.Query().Get("interval") // Time series interval (default "15m")
+	includeTopCallsigns := r.URL.Query().Get("top_callsigns") == "true"
+	topLimitStr := r.URL.Query().Get("top_limit") // Limit for top callsigns (default 10)
+
+	// Parse hours (default 24, max 48)
+	hours := 24
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 48 {
+			hours = h
+		}
+	}
+
+	// Parse top limit (default 10, max 100)
+	topLimit := 10
+	if topLimitStr != "" {
+		if limit, err := strconv.Atoi(topLimitStr); err == nil && limit > 0 && limit <= 100 {
+			topLimit = limit
+		}
+	}
+
+	// Parse interval (default 15m)
+	interval := 15 * time.Minute
+	if intervalStr != "" {
+		if d, err := time.ParseDuration(intervalStr); err == nil && d > 0 {
+			interval = d
+		}
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("decode-metrics-%s-%s-%d", mode, band, hours)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Decode metrics endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	// Build response
+	response := DecodeMetricsResponse{}
+
+	// Set time window
+	now := time.Now()
+	response.Summary.TimeWindow.Hours = hours
+	response.Summary.TimeWindow.End = now
+	response.Summary.TimeWindow.Start = now.Add(-time.Duration(hours) * time.Hour)
+
+	// Get all mode/band combinations
+	combinations := md.prometheusMetrics.digitalMetrics.GetAllModeBandCombinations()
+
+	// Filter combinations if mode or band specified
+	filteredCombinations := []struct{ Mode, Band string }{}
+	for _, combo := range combinations {
+		if (mode == "" || combo.Mode == mode) && (band == "" || combo.Band == band) {
+			filteredCombinations = append(filteredCombinations, combo)
+		}
+	}
+
+	response.Summary.TotalModes = countUniqueModes(filteredCombinations)
+	response.Summary.TotalBands = countUniqueBands(filteredCombinations)
+
+	// Collect metrics for each combination
+	response.Metrics = make([]ModeBandMetrics, 0, len(filteredCombinations))
+
+	for _, combo := range filteredCombinations {
+		metrics := ModeBandMetrics{
+			Mode: combo.Mode,
+			Band: combo.Band,
+		}
+
+		// Get cycle seconds (default 15 for FT8)
+		cycleSeconds := 15
+		if combo.Mode == "FT4" {
+			cycleSeconds = 7
+		} else if combo.Mode == "WSPR" {
+			cycleSeconds = 120
+		}
+
+		// Decode counts
+		metrics.DecodeCounts.Last1Hour = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 1)
+		metrics.DecodeCounts.Last3Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 3)
+		metrics.DecodeCounts.Last6Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 6)
+		metrics.DecodeCounts.Last12Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 12)
+		metrics.DecodeCounts.Last24Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 24)
+
+		// Decodes per cycle
+		metrics.DecodesPerCycle.Last1Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 1)
+		metrics.DecodesPerCycle.Last5Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 5)
+		metrics.DecodesPerCycle.Last15Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 15)
+		metrics.DecodesPerCycle.Last30Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 30)
+		metrics.DecodesPerCycle.Last60Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 60)
+
+		// Unique callsigns
+		metrics.UniqueCallsigns.Last1Hour = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 1)
+		metrics.UniqueCallsigns.Last3Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 3)
+		metrics.UniqueCallsigns.Last6Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 6)
+		metrics.UniqueCallsigns.Last12Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 12)
+		metrics.UniqueCallsigns.Last24Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 24)
+
+		// Execution time
+		avg1m, min1m, max1m := md.prometheusMetrics.digitalMetrics.GetExecutionTimeStats(combo.Mode, combo.Band, 1)
+		metrics.ExecutionTime.Last1Min.Avg = avg1m
+		metrics.ExecutionTime.Last1Min.Min = min1m
+		metrics.ExecutionTime.Last1Min.Max = max1m
+
+		avg5m, min5m, max5m := md.prometheusMetrics.digitalMetrics.GetExecutionTimeStats(combo.Mode, combo.Band, 5)
+		metrics.ExecutionTime.Last5Min.Avg = avg5m
+		metrics.ExecutionTime.Last5Min.Min = min5m
+		metrics.ExecutionTime.Last5Min.Max = max5m
+
+		avg10m, min10m, max10m := md.prometheusMetrics.digitalMetrics.GetExecutionTimeStats(combo.Mode, combo.Band, 10)
+		metrics.ExecutionTime.Last10Min.Avg = avg10m
+		metrics.ExecutionTime.Last10Min.Min = min10m
+		metrics.ExecutionTime.Last10Min.Max = max10m
+
+		// Activity metrics
+		if metrics.DecodeCounts.Last24Hours > 0 {
+			metrics.Activity.DecodesPerHour = float64(metrics.DecodeCounts.Last24Hours) / 24.0
+			metrics.Activity.CallsignsPerHour = float64(metrics.UniqueCallsigns.Last24Hours) / 24.0
+
+			// Activity score: normalized based on decodes per hour (0-100 scale)
+			// Assume 100 decodes/hour = 100% activity
+			metrics.Activity.ActivityScore = (metrics.Activity.DecodesPerHour / 100.0) * 100.0
+			if metrics.Activity.ActivityScore > 100 {
+				metrics.Activity.ActivityScore = 100
+			}
+		}
+
+		response.Metrics = append(response.Metrics, metrics)
+	}
+
+	// Generate time series if requested
+	if includeTimeSeries {
+		response.TimeSeries = generateTimeSeries(md.prometheusMetrics.digitalMetrics, filteredCombinations, interval, hours)
+	}
+
+	// Generate top callsigns if requested
+	if includeTopCallsigns && md.spotsLogger != nil {
+		response.TopCallsigns = getTopCallsigns(md.spotsLogger, mode, band, hours, topLimit)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding decode metrics: %v", err)
+	}
+}
+
+// countUniqueModes counts unique modes in combinations
+func countUniqueModes(combinations []struct{ Mode, Band string }) int {
+	modes := make(map[string]bool)
+	for _, combo := range combinations {
+		modes[combo.Mode] = true
+	}
+	return len(modes)
+}
+
+// countUniqueBands counts unique bands in combinations
+func countUniqueBands(combinations []struct{ Mode, Band string }) int {
+	bands := make(map[string]bool)
+	for _, combo := range combinations {
+		bands[combo.Band] = true
+	}
+	return len(bands)
+}
+
+// generateTimeSeries creates time-bucketed decode data
+func generateTimeSeries(dm *DigitalDecodeMetrics, combinations []struct{ Mode, Band string }, interval time.Duration, hours int) []TimeSeriesPoint {
+	now := time.Now()
+	startTime := now.Add(-time.Duration(hours) * time.Hour)
+
+	// Calculate number of buckets
+	numBuckets := int(time.Duration(hours) * time.Hour / interval)
+	if numBuckets > 1000 {
+		numBuckets = 1000 // Cap at 1000 buckets
+	}
+
+	timeSeries := make([]TimeSeriesPoint, 0, numBuckets)
+
+	// Create buckets
+	for i := 0; i < numBuckets; i++ {
+		bucketStart := startTime.Add(time.Duration(i) * interval)
+		bucketEnd := bucketStart.Add(interval)
+
+		point := TimeSeriesPoint{
+			Timestamp: bucketStart,
+			Interval:  interval.String(),
+			Data:      make(map[string]ModeBandSummary),
+		}
+
+		// For each mode/band combination, count decodes in this bucket
+		for _, combo := range combinations {
+			key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
+
+			// Get events for this mode/band
+			count := countDecodesInTimeRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
+			uniqueCallsigns := countUniqueCallsignsInTimeRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
+
+			if count > 0 {
+				point.Data[key] = ModeBandSummary{
+					Mode:            combo.Mode,
+					Band:            combo.Band,
+					DecodeCount:     count,
+					UniqueCallsigns: uniqueCallsigns,
+				}
+			}
+		}
+
+		// Only add point if it has data
+		if len(point.Data) > 0 {
+			timeSeries = append(timeSeries, point)
+		}
+	}
+
+	return timeSeries
+}
+
+// countDecodesInTimeRange counts decodes in a specific time range
+func countDecodesInTimeRange(dm *DigitalDecodeMetrics, mode, band string, start, end time.Time) int {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+
+	if dm.decodesByModeBand[mode] == nil || dm.decodesByModeBand[mode][band] == nil {
+		return 0
+	}
+
+	ts := dm.decodesByModeBand[mode][band]
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+
+	count := 0
+	for _, event := range ts.events {
+		if event.Timestamp.After(start) && event.Timestamp.Before(end) {
+			count++
+		}
+	}
+
+	return count
+}
+
+// countUniqueCallsignsInTimeRange counts unique callsigns in a specific time range
+func countUniqueCallsignsInTimeRange(dm *DigitalDecodeMetrics, mode, band string, start, end time.Time) int {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+
+	if dm.decodesByModeBand[mode] == nil || dm.decodesByModeBand[mode][band] == nil {
+		return 0
+	}
+
+	ts := dm.decodesByModeBand[mode][band]
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+
+	callsigns := make(map[string]bool)
+	for _, event := range ts.events {
+		if event.Timestamp.After(start) && event.Timestamp.Before(end) {
+			callsigns[event.Callsign] = true
+		}
+	}
+
+	return len(callsigns)
+}
+
+// getTopCallsigns retrieves top callsigns from spots logger
+func getTopCallsigns(logger *SpotsLogger, mode, band string, hours, limit int) []CallsignStats {
+	// This would require accessing the spots logger's data
+	// For now, return empty slice as spots logger doesn't have this aggregation built-in
+	// This could be enhanced by adding a method to DecoderSpotsLogger
+	return []CallsignStats{}
+}

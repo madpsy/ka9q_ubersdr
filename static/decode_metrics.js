@@ -193,32 +193,39 @@ class DecodeMetricsDashboard {
             // Always show decoder performance section
             html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">Decoder Performance</div>';
             
-            // Check if execution_time exists and has data
-            if (metric.execution_time && (metric.execution_time.last_1m || metric.execution_time.last_5m || metric.execution_time.last_10m)) {
-                if (metric.execution_time.last_1m && metric.execution_time.last_1m.avg > 0) {
+            // Check if execution_time exists and has data - handle both snake_case and camelCase
+            const execTime = metric.execution_time;
+            if (execTime) {
+                // Try last_1m first (snake_case from API)
+                const time1m = execTime.last_1m || execTime.Last1Min;
+                const time5m = execTime.last_5m || execTime.Last5Min;
+                const time10m = execTime.last_10m || execTime.Last10Min;
+                
+                if (time1m && time1m.avg_seconds > 0) {
                     html += '<div style="margin-top: 5px; font-size: 0.8em; opacity: 0.7;">Last 1 min:</div>';
-                    html += `<div class="metric-row"><span class="metric-label">Avg:</span><span class="metric-value">${metric.execution_time.last_1m.avg.toFixed(3)}s</span></div>`;
-                    html += `<div class="metric-row"><span class="metric-label">Min:</span><span class="metric-value">${metric.execution_time.last_1m.min.toFixed(3)}s</span></div>`;
-                    html += `<div class="metric-row"><span class="metric-label">Max:</span><span class="metric-value">${metric.execution_time.last_1m.max.toFixed(3)}s</span></div>`;
-                } else if (metric.execution_time.last_5m && metric.execution_time.last_5m.avg > 0) {
+                    html += `<div class="metric-row"><span class="metric-label">Avg:</span><span class="metric-value">${time1m.avg_seconds.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Min:</span><span class="metric-value">${time1m.min_seconds.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Max:</span><span class="metric-value">${time1m.max_seconds.toFixed(3)}s</span></div>`;
+                } else if (time5m && time5m.avg_seconds > 0) {
                     html += '<div style="margin-top: 5px; font-size: 0.8em; opacity: 0.7;">Last 5 min:</div>';
-                    html += `<div class="metric-row"><span class="metric-label">Avg:</span><span class="metric-value">${metric.execution_time.last_5m.avg.toFixed(3)}s</span></div>`;
-                    html += `<div class="metric-row"><span class="metric-label">Min:</span><span class="metric-value">${metric.execution_time.last_5m.min.toFixed(3)}s</span></div>`;
-                    html += `<div class="metric-row"><span class="metric-label">Max:</span><span class="metric-value">${metric.execution_time.last_5m.max.toFixed(3)}s</span></div>`;
-                } else if (metric.execution_time.last_10m && metric.execution_time.last_10m.avg > 0) {
+                    html += `<div class="metric-row"><span class="metric-label">Avg:</span><span class="metric-value">${time5m.avg_seconds.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Min:</span><span class="metric-value">${time5m.min_seconds.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Max:</span><span class="metric-value">${time5m.max_seconds.toFixed(3)}s</span></div>`;
+                } else if (time10m && time10m.avg_seconds > 0) {
                     html += '<div style="margin-top: 5px; font-size: 0.8em; opacity: 0.7;">Last 10 min:</div>';
-                    html += `<div class="metric-row"><span class="metric-label">Avg:</span><span class="metric-value">${metric.execution_time.last_10m.avg.toFixed(3)}s</span></div>`;
-                    html += `<div class="metric-row"><span class="metric-label">Min:</span><span class="metric-value">${metric.execution_time.last_10m.min.toFixed(3)}s</span></div>`;
-                    html += `<div class="metric-row"><span class="metric-label">Max:</span><span class="metric-value">${metric.execution_time.last_10m.max.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Avg:</span><span class="metric-value">${time10m.avg_seconds.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Min:</span><span class="metric-value">${time10m.min_seconds.toFixed(3)}s</span></div>`;
+                    html += `<div class="metric-row"><span class="metric-label">Max:</span><span class="metric-value">${time10m.max_seconds.toFixed(3)}s</span></div>`;
                 } else {
                     html += `<div class="metric-row"><span class="metric-label">Status:</span><span class="metric-value" style="opacity: 0.6;">No recent timing data</span></div>`;
+                    console.log('Execution time structure for', metric.mode, metric.band, ':', execTime);
                 }
                 
                 // Add warning if execution time is approaching limits
                 const maxAllowed = metric.mode === 'FT4' ? 7 : (metric.mode === 'FT8' ? 15 : (metric.mode === 'WSPR' ? 120 : 0));
-                const avgTime = (metric.execution_time.last_1m && metric.execution_time.last_1m.avg) ||
-                               (metric.execution_time.last_5m && metric.execution_time.last_5m.avg) ||
-                               (metric.execution_time.last_10m && metric.execution_time.last_10m.avg) || 0;
+                const avgTime = (time1m && time1m.avg_seconds) ||
+                               (time5m && time5m.avg_seconds) ||
+                               (time10m && time10m.avg_seconds) || 0;
                 if (maxAllowed > 0 && avgTime > 0) {
                     const percentOfMax = (avgTime / maxAllowed) * 100;
                     let statusColor = '#22c55e'; // green
@@ -238,7 +245,7 @@ class DecodeMetricsDashboard {
             } else {
                 // Debug: show what we have
                 html += `<div class="metric-row"><span class="metric-label">Status:</span><span class="metric-value" style="opacity: 0.6;">No timing data in metrics</span></div>`;
-                console.log('Execution time data for', metric.mode, metric.band, ':', metric.execution_time);
+                console.log('No execution_time field for', metric.mode, metric.band, '- Full metric:', metric);
             }
             
             html += '</div>';

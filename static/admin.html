@@ -2547,8 +2547,10 @@
             metricsLogDataDirField.appendChild(metricsLogDirSmall);
             reportingSection.appendChild(metricsLogDataDirField);
 
-            const metricsLogIntervalField = createConfigField('Write Interval (seconds)', 'text', currentDecoderConfig.metrics_log_interval_secs || 300, 'metrics_log_interval_secs');
+            const metricsLogIntervalField = createConfigField('Write Interval (seconds)', 'number', currentDecoderConfig.metrics_log_interval_secs || 300, 'metrics_log_interval_secs');
             metricsLogIntervalField.querySelector('input').placeholder = '300';
+            metricsLogIntervalField.querySelector('input').min = '10';
+            metricsLogIntervalField.querySelector('input').max = '3600';
             const metricsLogIntervalSmall = document.createElement('small');
             metricsLogIntervalSmall.textContent = 'How often to write metrics snapshots (default: 300 seconds = 5 minutes)';
             metricsLogIntervalField.appendChild(metricsLogIntervalSmall);

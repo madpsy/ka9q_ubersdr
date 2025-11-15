@@ -54,14 +54,17 @@ class DecodeMetricsDashboard {
 
     toggleDateRangeInputs(type) {
         const quickSelect = document.getElementById('quick-select-controls');
-        const customRange = document.getElementById('custom-range-controls');
+        const customRangeFrom = document.getElementById('custom-range-controls');
+        const customRangeTo = document.getElementById('custom-range-controls-to');
 
         if (type === 'hours') {
             quickSelect.style.display = 'block';
-            customRange.style.display = 'none';
+            customRangeFrom.style.display = 'none';
+            customRangeTo.style.display = 'none';
         } else {
             quickSelect.style.display = 'none';
-            customRange.style.display = 'block';
+            customRangeFrom.style.display = 'block';
+            customRangeTo.style.display = 'block';
         }
     }
 

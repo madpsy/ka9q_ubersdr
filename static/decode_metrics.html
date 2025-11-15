@@ -258,9 +258,12 @@
                     </select>
                 </div>
                 
-                <div class="control-group" id="hours-group">
+                
+                <div class="control-group" id="quick-select-controls">
                     <label>Time Window:</label>
                     <select id="hours">
+                        <option value="1">1 hour</option>
+                        <option value="3">3 hours</option>
                         <option value="6">6 hours</option>
                         <option value="12">12 hours</option>
                         <option value="24" selected>24 hours</option>
@@ -270,14 +273,14 @@
                     </select>
                 </div>
                 
-                <div class="control-group" id="from-group" style="display: none;">
+                <div class="control-group" id="custom-range-controls" style="display: none;">
                     <label>From:</label>
-                    <input type="datetime-local" id="from-date">
+                    <input type="datetime-local" id="date-from">
                 </div>
                 
-                <div class="control-group" id="to-group" style="display: none;">
+                <div class="control-group" id="custom-range-controls-to" style="display: none;">
                     <label>To:</label>
-                    <input type="datetime-local" id="to-date">
+                    <input type="datetime-local" id="date-to">
                 </div>
                 
                 <div class="control-group">
@@ -301,7 +304,7 @@
         </div>
 
         <div id="loading" class="loading" style="display: none;">Loading metrics...</div>
-        <div id="status" class="status">Click "Load Metrics" to begin</div>
+        <div id="status" class="status">Loading metrics automatically...</div>
         
         <div id="results"></div>
     </div>

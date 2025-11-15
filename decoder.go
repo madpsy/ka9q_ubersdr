@@ -541,6 +541,14 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 			}
 			md.metricsFirstWriteMu.Unlock()
 
+			// Write metrics immediately if this is the first decode
+			if shouldWriteNow {
+				log.Printf("First decode detected - writing initial metrics snapshot")
+				if err := md.metricsLogger.WriteMetrics(md.prometheusMetrics.digitalMetrics); err != nil {
+					log.Printf("Warning: Failed to write initial metrics: %v", err)
+				}
+			}
+
 			// Submit to PSKReporter/WSPRNet and notify callback
 			for _, decode := range decodes {
 				// Record individual decode with callsign for unique tracking and totals

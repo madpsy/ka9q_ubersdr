@@ -131,14 +131,24 @@ func (ml *MetricsLogger) WriteMetrics(dm *DigitalDecodeMetrics) error {
 	// Get all active mode/band combinations
 	combinations := dm.GetAllModeBandCombinations()
 
+	if len(combinations) == 0 {
+		log.Printf("No active mode/band combinations to write metrics for")
+		return nil
+	}
+
+	log.Printf("Writing metrics snapshot for %d mode/band combinations", len(combinations))
+
+	successCount := 0
 	for _, combo := range combinations {
 		snapshot := ml.createSnapshot(dm, combo.Mode, combo.Band, now)
 		if err := ml.writeSnapshot(snapshot); err != nil {
 			log.Printf("Error writing metrics snapshot for %s/%s: %v", combo.Mode, combo.Band, err)
 			continue
 		}
+		successCount++
 	}
 
+	log.Printf("Wrote metrics snapshot: %d/%d successful", successCount, len(combinations))
 	return nil
 }
 

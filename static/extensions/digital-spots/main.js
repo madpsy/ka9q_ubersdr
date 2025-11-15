@@ -14,7 +14,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.maxSpots = 100; // Reduced from 500 to prevent browser slowdown
         this.ageFilter = 10; // Default 10 minutes
         this.modeFilter = 'all';
-        this.bandFilter = 'all';
+        this.bandFilter = 'all'; // Start with 'all', will be updated on init
         this.snrFilter = null; // Default no limit
         this.distanceFilter = null; // Default no limit
         this.callsignFilter = '';
@@ -594,16 +594,20 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         console.log('Digital Spots: Band option found:', !!bandOption, 'Current filter:', this.bandFilter, 'New band:', band);
 
-        if (bandOption && this.bandFilter !== band) {
-            // Only update if the band has changed and exists in options
-            this.bandFilter = band;
+        if (bandOption) {
+            // Update the dropdown value
             bandFilter.value = band;
-            this.filterAndRenderSpots();
-            console.log(`Digital Spots: Auto-updated band filter to ${band}`);
-        } else if (!bandOption) {
-            console.log('Digital Spots: Band', band, 'not found in dropdown options');
+
+            // Only update internal state and re-filter if band actually changed
+            if (this.bandFilter !== band) {
+                this.bandFilter = band;
+                this.filterAndRenderSpots();
+                console.log(`Digital Spots: Auto-updated band filter to ${band}`);
+            } else {
+                console.log('Digital Spots: Band filter already set to', band, '- dropdown updated but no re-filter needed');
+            }
         } else {
-            console.log('Digital Spots: Band filter already set to', band);
+            console.log('Digital Spots: Band', band, 'not found in dropdown options');
         }
     }
 
@@ -613,6 +617,26 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         // Update band filter when frequency changes
         this.updateBandFilterFromFrequency();
+    }
+
+    // Also add polling as a backup in case events don't fire
+    startFrequencyPolling() {
+        // Poll frequency every 500ms as backup
+        this.frequencyPollInterval = setInterval(() => {
+            const currentFreq = this.radio.getFrequency();
+            if (currentFreq !== this.lastPolledFrequency) {
+                console.log('Digital Spots: Frequency changed via polling:', this.lastPolledFrequency, '->', currentFreq);
+                this.lastPolledFrequency = currentFreq;
+                this.updateBandFilterFromFrequency();
+            }
+        }, 500);
+    }
+
+    stopFrequencyPolling() {
+        if (this.frequencyPollInterval) {
+            clearInterval(this.frequencyPollInterval);
+            this.frequencyPollInterval = null;
+        }
     }
 
     onEnable() {
@@ -625,6 +649,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.startAgeUpdates();
         this.startRadioStateMonitoring();
         this.startFrequencyMonitoring();
+        this.startFrequencyPolling();
     }
 
     onDisable() {
@@ -632,6 +657,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.stopAgeUpdates();
         this.stopRadioStateMonitoring();
         this.stopFrequencyMonitoring();
+        this.stopFrequencyPolling();
 
         if (this.unsubscribe) {
             this.unsubscribe();

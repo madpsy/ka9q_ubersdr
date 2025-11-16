@@ -1308,12 +1308,17 @@
                 unique_callsigns: loc.unique_callsigns,
                 callsigns: loc.callsigns
             }
+        }));
+        
+        grid.highlightLocators(coloredLocators);
+    }
+
     // Create night polygon for day/night overlay
     function createNightPolygon(date) {
         // Create polygon for night side using SunCalc
         const polygon = [];
         const resolution = 2; // degrees for smoother curve
-        
+
         // Get sun position to find subsolar point (where sun is directly overhead)
         // We need to find where the sun's declination and hour angle place it
         const d = (date.valueOf() / 86400000) - 0.5 + 2440588 - 2451545; // Days since J2000
@@ -1321,12 +1326,12 @@
         const C = (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) * Math.PI / 180;
         const L = M + C + (102.9372 * Math.PI / 180) + Math.PI; // Ecliptic longitude
         const sunDec = Math.asin(Math.sin(L) * Math.sin(23.4397 * Math.PI / 180)); // Declination in radians
-        
+
         // Calculate subsolar longitude (where sun is at zenith)
         const gmst = (280.16 + 360.9856235 * d) * Math.PI / 180; // Greenwich mean sidereal time
         const sunRA = Math.atan2(Math.sin(L) * Math.cos(23.4397 * Math.PI / 180), Math.cos(L)); // Right ascension
         const sunLon = ((sunRA - gmst) * 180 / Math.PI + 180) % 360 - 180; // Subsolar longitude
-        
+
         // Calculate terminator line (where sun altitude = 0)
         const terminatorPoints = [];
         for (let lon = -180; lon <= 180; lon += resolution) {
@@ -1336,41 +1341,41 @@
             // At terminator, zenith_angle = 90°, so cos(90°) = 0
             // Therefore: 0 = sin(lat) * sin(dec) + cos(lat) * cos(dec) * cos(hour_angle)
             // Solving for lat: tan(lat) = -cos(hour_angle) / tan(dec)
-            
+
             const hourAngle = (lon - sunLon) * Math.PI / 180;
             const tanLat = -Math.cos(hourAngle) / Math.tan(sunDec);
             const lat = Math.atan(tanLat) * 180 / Math.PI;
-            
+
             // Handle edge cases where tan(dec) approaches 0 (equinoxes)
             if (!isNaN(lat) && isFinite(lat)) {
                 terminatorPoints.push([lat, lon]);
             }
         }
-        
+
         if (terminatorPoints.length === 0) {
             return polygon; // Return empty if calculation failed
         }
-        
+
         // Determine which pole is in darkness
         // If sun declination is positive (northern summer), south pole is dark
         const darkPole = sunDec > 0 ? -90 : 90;
-        
+
         // Build the night polygon
         // Start with the terminator line
         terminatorPoints.forEach(point => {
             polygon.push(point);
         });
-        
+
         // Close the polygon by going to the dark pole
         polygon.push([darkPole, 180]);
-        
+
         // Trace along the dark pole
         for (let lon = 180; lon >= -180; lon -= resolution * 4) {
             polygon.push([darkPole, lon]);
         }
-        
+
         polygon.push([darkPole, -180]);
-        
+
         return polygon;
     }
 
@@ -1378,19 +1383,19 @@
     function updateGreyline(mapType, hourIndex) {
         const animation = mapType === 'country' ? countryAnimation : continentAnimation;
         const map = mapType === 'country' ? countryMap : continentMap;
-        
+
         if (!map) return;
-        
+
         // Remove existing greyline layer if present
         if (animation.greylineLayer) {
             map.removeLayer(animation.greylineLayer);
         }
-        
+
         // Get the date for this hour
         // Use the timestamp from the hourly data if available
         let date;
-        if (animation.hourlyData && animation.hourlyData.hourly_data && 
-            animation.hourlyData.hourly_data[hourIndex] && 
+        if (animation.hourlyData && animation.hourlyData.hourly_data &&
+            animation.hourlyData.hourly_data[hourIndex] &&
             animation.hourlyData.hourly_data[hourIndex].timestamp) {
             date = new Date(animation.hourlyData.hourly_data[hourIndex].timestamp);
         } else {
@@ -1398,12 +1403,12 @@
             date = new Date();
             date.setUTCHours(hourIndex, 0, 0, 0);
         }
-        
+
         animation.greylineLayer = L.layerGroup();
-        
+
         // Create night overlay
         const nightPolygon = createNightPolygon(date);
-        
+
         if (nightPolygon.length > 0) {
             L.polygon(nightPolygon, {
                 color: 'transparent',
@@ -1412,7 +1417,7 @@
                 interactive: false
             }).addTo(animation.greylineLayer);
         }
-        
+
         animation.greylineLayer.addTo(map);
     }
 
@@ -1420,17 +1425,12 @@
     function removeGreyline(mapType) {
         const animation = mapType === 'country' ? countryAnimation : continentAnimation;
         const map = mapType === 'country' ? countryMap : continentMap;
-        
+
         if (!map) return;
-        
+
         if (animation.greylineLayer) {
             map.removeLayer(animation.greylineLayer);
             animation.greylineLayer = null;
         }
-    }
-
-        }));
-        
-        grid.highlightLocators(coloredLocators);
     }
 })();

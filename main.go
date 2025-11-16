@@ -668,6 +668,7 @@ func main() {
 	http.HandleFunc("/admin/banned-ips", adminHandler.AuthMiddleware(adminHandler.HandleBannedIPs))
 	http.HandleFunc("/admin/decoder-config", adminHandler.AuthMiddleware(adminHandler.HandleDecoderConfig))
 	http.HandleFunc("/admin/decoder-bands", adminHandler.AuthMiddleware(adminHandler.HandleDecoderBands))
+	http.HandleFunc("/admin/system-stats", adminHandler.AuthMiddleware(adminHandler.HandleSystemStats))
 
 	// Open log file for HTTP request logging
 	// If LogFile is a relative path and we have a config directory, prepend it

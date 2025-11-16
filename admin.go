@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"reflect"
 	"sort"
 	"strconv"
@@ -2481,4 +2482,46 @@ func (ah *AdminHandler) handleDeleteDecoderBand(w http.ResponseWriter, r *http.R
 		"status":  "success",
 		"message": "Decoder band deleted successfully. Restart server to apply changes.",
 	})
+}
+
+// HandleSystemStats returns system statistics by executing system commands
+func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Execute system commands and capture output
+	stats := make(map[string]interface{})
+
+	// Execute uptime
+	uptimeCmd := exec.Command("uptime")
+	if uptimeOutput, err := uptimeCmd.CombinedOutput(); err == nil {
+		stats["uptime"] = string(uptimeOutput)
+	} else {
+		stats["uptime"] = fmt.Sprintf("Error: %v", err)
+	}
+
+	// Execute df -h
+	dfCmd := exec.Command("df", "-h")
+	if dfOutput, err := dfCmd.CombinedOutput(); err == nil {
+		stats["disk"] = string(dfOutput)
+	} else {
+		stats["disk"] = fmt.Sprintf("Error: %v", err)
+	}
+
+	// Execute free -m
+	freeCmd := exec.Command("free", "-m")
+	if freeOutput, err := freeCmd.CombinedOutput(); err == nil {
+		stats["memory"] = string(freeOutput)
+	} else {
+		stats["memory"] = fmt.Sprintf("Error: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		log.Printf("Error encoding system stats: %v", err)
+	}
 }

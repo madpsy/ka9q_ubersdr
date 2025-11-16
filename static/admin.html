@@ -355,6 +355,7 @@
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
                     <button class="tab" onclick="switchTab('extensions')">Extensions</button>
                     <button class="tab" onclick="switchTab('decoder')">Decoder</button>
+                    <button class="tab" onclick="switchTab('system')">System</button>
                 </div>
 
                 <!-- Sessions Tab -->
@@ -509,6 +510,14 @@
                     </div>
                 </div>
 
+                <!-- System Tab -->
+                <div id="systemTab" class="tab-content">
+                    <div id="systemStats" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading system statistics...</p>
+                    </div>
+                </div>
+
                 <div class="button-group" id="sessionButtons" style="display: flex;">
                     <button class="btn btn-secondary" onclick="loadSessions()">Refresh Sessions</button>
                 </div>
@@ -545,6 +554,9 @@
                     <button class="btn" onclick="saveDecoderConfig()">Save Configuration</button>
                     <button class="btn btn-danger" onclick="saveDecoderConfigAndRestart()">Save & Restart</button>
                     <button class="btn btn-secondary" onclick="loadDecoderConfig()">Reload</button>
+                </div>
+                <div class="button-group" id="systemButtons" style="display: none;">
+                    <button class="btn btn-secondary" onclick="loadSystemStats()">Refresh</button>
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
@@ -771,6 +783,7 @@
             document.getElementById('decoderButtons').style.display = 'none';
             document.getElementById('sessionButtons').style.display = 'none';
             document.getElementById('bannedButtons').style.display = 'none';
+            document.getElementById('systemButtons').style.display = 'none';
 
             // Stop sessions auto-refresh when leaving sessions tab
             if (tab !== 'sessions') {
@@ -812,6 +825,11 @@
                 document.getElementById('decoderTab').classList.add('active');
                 document.getElementById('decoderButtons').style.display = 'flex';
                 loadDecoderConfig();
+            } else if (tab === 'system') {
+                document.querySelector('.tab:nth-child(8)').classList.add('active');
+                document.getElementById('systemTab').classList.add('active');
+                document.getElementById('systemButtons').style.display = 'flex';
+                loadSystemStats();
             }
         }
 
@@ -3144,6 +3162,58 @@
                 return;
             }
             await saveDecoderConfig(true);
+        }
+
+        // System statistics management
+        async function loadSystemStats() {
+            try {
+                const response = await authenticatedFetch('/admin/system-stats');
+                if (!response) return; // Auth failed, already handled
+                if (!response.ok) throw new Error('Failed to load system stats');
+
+                const stats = await response.json();
+                renderSystemStats(stats);
+                showAlert('System statistics loaded successfully', 'success');
+            } catch (error) {
+                showAlert('Error loading system statistics: ' + error.message, 'error');
+            }
+        }
+
+        function renderSystemStats(stats) {
+            const container = document.getElementById('systemStats');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            // Create sections for each stat
+            const sections = [
+                { title: 'System Uptime', key: 'uptime', icon: '⏱️' },
+                { title: 'Disk Usage', key: 'disk', icon: '💾' },
+                { title: 'Memory Usage', key: 'memory', icon: '🧠' }
+            ];
+
+            sections.forEach(section => {
+                const sectionDiv = document.createElement('div');
+                sectionDiv.className = 'config-section';
+                
+                const title = document.createElement('h3');
+                title.textContent = `${section.icon} ${section.title}`;
+                sectionDiv.appendChild(title);
+
+                const pre = document.createElement('pre');
+                pre.style.background = '#fff';
+                pre.style.padding = '15px';
+                pre.style.borderRadius = '5px';
+                pre.style.overflow = 'auto';
+                pre.style.fontFamily = 'monospace';
+                pre.style.fontSize = '13px';
+                pre.style.lineHeight = '1.5';
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.style.wordWrap = 'break-word';
+                pre.textContent = stats[section.key] || 'No data available';
+                sectionDiv.appendChild(pre);
+
+                container.appendChild(sectionDiv);
+            });
         }
     </script>
 </body>

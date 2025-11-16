@@ -372,22 +372,44 @@
     function updateCountryMap(data) {
         if (!countryGrid) return;
 
-        // Collect all locators from all countries and bands
-        countryLocatorData = [];
+        // Aggregate locators across all countries and bands
+        const locatorMap = new Map();
+        
         data.by_country.forEach(country => {
             country.bands.forEach(band => {
                 band.unique_locators.forEach(loc => {
-                    countryLocatorData.push({
-                        locator: loc.locator,
-                        avg_snr: loc.avg_snr,
-                        count: loc.count,
-                        unique_callsigns: loc.unique_callsigns,
-                        band: band.band,
-                        country: country.country
-                    });
+                    const key = loc.locator;
+                    if (!locatorMap.has(key)) {
+                        locatorMap.set(key, {
+                            locator: loc.locator,
+                            total_snr: 0,
+                            snr_count: 0,
+                            total_spots: 0,
+                            total_callsigns: 0,
+                            bands: [],
+                            countries: new Set()
+                        });
+                    }
+                    const agg = locatorMap.get(key);
+                    agg.total_snr += loc.avg_snr * loc.count; // Weight by count
+                    agg.snr_count += loc.count;
+                    agg.total_spots += loc.count;
+                    agg.total_callsigns += loc.unique_callsigns;
+                    agg.bands.push(band.band);
+                    agg.countries.add(country.country);
                 });
             });
         });
+
+        // Convert to array with calculated averages
+        countryLocatorData = Array.from(locatorMap.values()).map(agg => ({
+            locator: agg.locator,
+            avg_snr: agg.total_snr / agg.snr_count,
+            count: agg.total_spots,
+            unique_callsigns: agg.total_callsigns,
+            bands: [...new Set(agg.bands)].join(', '),
+            countries: Array.from(agg.countries).join(', ')
+        }));
 
         // Update colors based on current mode
         updateCountryMapColors();
@@ -407,22 +429,44 @@
     function updateContinentMap(data) {
         if (!continentGrid) return;
 
-        // Collect all locators from all continents and bands
-        continentLocatorData = [];
+        // Aggregate locators across all continents and bands
+        const locatorMap = new Map();
+        
         data.by_continent.forEach(continent => {
             continent.bands.forEach(band => {
                 band.unique_locators.forEach(loc => {
-                    continentLocatorData.push({
-                        locator: loc.locator,
-                        avg_snr: loc.avg_snr,
-                        count: loc.count,
-                        unique_callsigns: loc.unique_callsigns,
-                        band: band.band,
-                        continent: continent.continent_name
-                    });
+                    const key = loc.locator;
+                    if (!locatorMap.has(key)) {
+                        locatorMap.set(key, {
+                            locator: loc.locator,
+                            total_snr: 0,
+                            snr_count: 0,
+                            total_spots: 0,
+                            total_callsigns: 0,
+                            bands: [],
+                            continents: new Set()
+                        });
+                    }
+                    const agg = locatorMap.get(key);
+                    agg.total_snr += loc.avg_snr * loc.count; // Weight by count
+                    agg.snr_count += loc.count;
+                    agg.total_spots += loc.count;
+                    agg.total_callsigns += loc.unique_callsigns;
+                    agg.bands.push(band.band);
+                    agg.continents.add(continent.continent_name);
                 });
             });
         });
+
+        // Convert to array with calculated averages
+        continentLocatorData = Array.from(locatorMap.values()).map(agg => ({
+            locator: agg.locator,
+            avg_snr: agg.total_snr / agg.snr_count,
+            count: agg.total_spots,
+            unique_callsigns: agg.total_callsigns,
+            bands: [...new Set(agg.bands)].join(', '),
+            continents: Array.from(agg.continents).join(', ')
+        }));
 
         // Update colors based on current mode
         updateContinentMapColors();
@@ -457,8 +501,8 @@
                 avg_snr: loc.avg_snr,
                 count: loc.count,
                 unique_callsigns: loc.unique_callsigns,
-                band: loc.band,
-                country: loc.country
+                bands: loc.bands,
+                countries: loc.countries
             }
         }));
 
@@ -483,8 +527,8 @@
                 avg_snr: loc.avg_snr,
                 count: loc.count,
                 unique_callsigns: loc.unique_callsigns,
-                band: loc.band,
-                continent: loc.continent
+                bands: loc.bands,
+                continents: loc.continents
             }
         }));
 

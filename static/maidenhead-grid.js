@@ -300,29 +300,32 @@ class MaidenheadGrid {
                 
                 // Add popup or tooltip if data is provided
                 if (data && finalStyle.interactive) {
-                    let popupContent = `<strong>${locator}</strong><br>`;
+                    let tooltipContent = `<strong>${locator}</strong><br>`;
                     if (data.avg_snr !== undefined) {
-                        popupContent += `Avg SNR: ${data.avg_snr.toFixed(1)} dB<br>`;
+                        tooltipContent += `Avg SNR: ${data.avg_snr.toFixed(1)} dB<br>`;
                     }
                     if (data.count !== undefined) {
-                        popupContent += `Spots: ${data.count}<br>`;
+                        tooltipContent += `Spots: ${data.count}<br>`;
                     }
                     if (data.unique_callsigns !== undefined) {
-                        // Make "Unique Callsigns" clickable if callsigns data is available
-                        if (data.callsigns && data.callsigns.length > 0) {
-                            popupContent += `<span class="clickable-callsigns" onclick="openCallsignsModal('${locator}', ${JSON.stringify(data.callsigns).replace(/"/g, '&quot;')})">Unique Callsigns: ${data.unique_callsigns}</span>`;
-                        } else {
-                            popupContent += `Unique Callsigns: ${data.unique_callsigns}`;
-                        }
+                        tooltipContent += `Unique Callsigns: ${data.unique_callsigns}`;
                     }
+                    
                     // Add hover tooltip
-                    rectangle.bindTooltip(popupContent, {
+                    rectangle.bindTooltip(tooltipContent, {
                         direction: 'top',
                         offset: [0, -10],
                         opacity: 0.9
                     });
-                    // Keep popup for click as well
-                    rectangle.bindPopup(popupContent);
+                    
+                    // Add click handler to open callsigns modal if callsigns data is available
+                    if (data.callsigns && data.callsigns.length > 0) {
+                        rectangle.on('click', function() {
+                            if (typeof window.openCallsignsModal === 'function') {
+                                window.openCallsignsModal(locator, data.callsigns);
+                            }
+                        });
+                    }
                 }
                 
                 this.highlightLayer.addLayer(rectangle);

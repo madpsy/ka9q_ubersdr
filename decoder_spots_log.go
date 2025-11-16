@@ -889,6 +889,10 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 	continentData := make(map[string]map[string]*bandAggregator)
 	continentCountries := make(map[string]map[string]bool)
 
+	// Track unique callsigns per locator across all bands
+	countryLocatorCallsigns := make(map[string]map[string]map[string]bool)   // country -> locator -> callsigns
+	continentLocatorCallsigns := make(map[string]map[string]map[string]bool) // continent -> locator -> callsigns
+
 	for _, spot := range spots {
 		// Skip spots without country info
 		if spot.Country == "" {
@@ -1017,11 +1021,17 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 			// Convert locator statistics to sorted slice for this band
 			locatorStats := make([]LocatorStats, 0, len(agg.locators))
 			for locator, locAgg := range agg.locators {
+				// Get unique callsigns across all bands for this locator
+				uniqueCallsigns := 0
+				if countryLocatorCallsigns[country] != nil && countryLocatorCallsigns[country][locator] != nil {
+					uniqueCallsigns = len(countryLocatorCallsigns[country][locator])
+				}
+
 				locatorStats = append(locatorStats, LocatorStats{
 					Locator:         locator,
 					AvgSNR:          locAgg.totalSNR / float64(locAgg.count),
 					Count:           locAgg.count,
-					UniqueCallsigns: len(locAgg.callsigns),
+					UniqueCallsigns: uniqueCallsigns,
 				})
 			}
 			// Sort by locator name
@@ -1075,11 +1085,17 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 			// Convert locator statistics to sorted slice for this band
 			locatorStats := make([]LocatorStats, 0, len(agg.locators))
 			for locator, locAgg := range agg.locators {
+				// Get unique callsigns across all bands for this locator
+				uniqueCallsigns := 0
+				if continentLocatorCallsigns[continent] != nil && continentLocatorCallsigns[continent][locator] != nil {
+					uniqueCallsigns = len(continentLocatorCallsigns[continent][locator])
+				}
+
 				locatorStats = append(locatorStats, LocatorStats{
 					Locator:         locator,
 					AvgSNR:          locAgg.totalSNR / float64(locAgg.count),
 					Count:           locAgg.count,
-					UniqueCallsigns: len(locAgg.callsigns),
+					UniqueCallsigns: uniqueCallsigns,
 				})
 			}
 			// Sort by locator name

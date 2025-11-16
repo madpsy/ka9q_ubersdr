@@ -824,7 +824,7 @@ type AnalyticsResponse struct {
 }
 
 // GetSpotsAnalytics aggregates spots data for analytics
-func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterMode string, minSNR, hours int) (*AnalyticsResponse, error) {
+func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterMode, filterBand string, minSNR, hours int) (*AnalyticsResponse, error) {
 	if !sl.enabled {
 		return nil, fmt.Errorf("spots logging is not enabled")
 	}
@@ -838,7 +838,7 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 	// Get spots using existing method
 	spots, err := sl.GetHistoricalSpots(
 		filterMode,      // mode filter
-		"",              // band - all bands
+		filterBand,      // band filter
 		"",              // name - all names
 		"",              // callsign - all callsigns
 		"",              // locator - all locators

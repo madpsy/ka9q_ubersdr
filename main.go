@@ -2152,6 +2152,7 @@ func handleDecoderSpotsAnalytics(w http.ResponseWriter, r *http.Request, md *Mul
 	country := r.URL.Query().Get("country")
 	continent := r.URL.Query().Get("continent")
 	mode := r.URL.Query().Get("mode")
+	band := r.URL.Query().Get("band")
 	minSNRStr := r.URL.Query().Get("min_snr")
 	hoursStr := r.URL.Query().Get("hours")
 
@@ -2173,7 +2174,7 @@ func handleDecoderSpotsAnalytics(w http.ResponseWriter, r *http.Request, md *Mul
 
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
-	rateLimitKey := fmt.Sprintf("analytics-%s-%s-%s-%d-%d", country, continent, mode, minSNR, hours)
+	rateLimitKey := fmt.Sprintf("analytics-%s-%s-%s-%s-%d-%d", country, continent, mode, band, minSNR, hours)
 	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -2184,7 +2185,7 @@ func handleDecoderSpotsAnalytics(w http.ResponseWriter, r *http.Request, md *Mul
 	}
 
 	// Get analytics
-	analytics, err := md.spotsLogger.GetSpotsAnalytics(country, continent, mode, minSNR, hours)
+	analytics, err := md.spotsLogger.GetSpotsAnalytics(country, continent, mode, band, minSNR, hours)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{

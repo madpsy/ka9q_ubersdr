@@ -65,9 +65,11 @@
         });
 
         // Add Enter key handler to inputs
-        const inputs = [countrySearch, continentSelect, 
+        const inputs = [countrySearch, continentSelect,
                        document.getElementById('min-snr-select'),
-                       document.getElementById('hours-select')];
+                       document.getElementById('hours-select'),
+                       document.getElementById('mode-select'),
+                       document.getElementById('band-select')];
         
         inputs.forEach(input => {
             input.addEventListener('keypress', function(e) {
@@ -83,6 +85,7 @@
         document.getElementById('country-search').value = '';
         document.getElementById('continent-select').value = '';
         document.getElementById('mode-select').value = 'FT8';
+        document.getElementById('band-select').value = '';
         document.getElementById('min-snr-select').value = '-999';
         document.getElementById('hours-select').value = '24';
         showStatus('Filters cleared', 'success');
@@ -146,6 +149,7 @@
         let country = countryInput.value.trim();
         const continent = document.getElementById('continent-select').value;
         const mode = document.getElementById('mode-select').value;
+        const band = document.getElementById('band-select').value;
         const minSNR = document.getElementById('min-snr-select').value;
         const hours = document.getElementById('hours-select').value;
 
@@ -171,6 +175,7 @@
             if (country) url += `&country=${encodeURIComponent(country)}`;
             if (continent) url += `&continent=${continent}`;
             if (mode) url += `&mode=${mode}`;
+            if (band) url += `&band=${encodeURIComponent(band)}`;
             if (minSNR && parseInt(minSNR) !== -999) {
                 url += `&min_snr=${minSNR}`;
             }

@@ -1185,9 +1185,20 @@
         
         if (!animation.hourlyData || !grid) return;
         
-        // Get data for this hour
+        // Get data for this hour - the API returns an array of 24 hours
+        if (!animation.hourlyData.hourly_data || hourIndex >= animation.hourlyData.hourly_data.length) {
+            console.error('Invalid hour index or missing hourly data');
+            return;
+        }
+        
         const hourData = animation.hourlyData.hourly_data[hourIndex];
-        if (!hourData) return;
+        if (!hourData || !hourData.locators) {
+            console.log('No data for hour', hourIndex);
+            // Clear the map for this hour
+            grid.clearHighlights();
+            document.getElementById(`${mapType}-hour-display`).textContent = `Hour: ${String(hourIndex).padStart(2, '0')}:00 (No data)`;
+            return;
+        }
         
         // Update hour display
         const hourStr = String(hourIndex).padStart(2, '0') + ':00';
@@ -1196,53 +1207,19 @@
         // Clear current highlights
         grid.clearHighlights();
         
-        // Aggregate locators for this hour
-        const locatorMap = new Map();
-        const dataSource = mapType === 'country' ? hourData.by_country : hourData.by_continent;
-        
-        dataSource.forEach(entity => {
-            entity.bands.forEach(band => {
-                band.unique_locators.forEach(loc => {
-                    const key = loc.locator;
-                    if (!locatorMap.has(key)) {
-                        locatorMap.set(key, {
-                            locator: loc.locator,
-                            total_snr: 0,
-                            snr_count: 0,
-                            total_spots: 0,
-                            callsignMap: new Map()
-                        });
-                    }
-                    const agg = locatorMap.get(key);
-                    agg.total_snr += loc.avg_snr * loc.count;
-                    agg.snr_count += loc.count;
-                    agg.total_spots += loc.count;
-                    
-                    if (loc.callsigns && loc.callsigns.length > 0) {
-                        loc.callsigns.forEach(csInfo => {
-                            if (!agg.callsignMap.has(csInfo.callsign)) {
-                                agg.callsignMap.set(csInfo.callsign, new Set());
-                            }
-                            csInfo.bands.forEach(band => agg.callsignMap.get(csInfo.callsign).add(band));
-                        });
-                    }
-                });
-            });
-        });
-        
-        // Convert to array
-        const locatorData = Array.from(locatorMap.values()).map(agg => ({
-            locator: agg.locator,
-            avg_snr: agg.total_snr / agg.snr_count,
-            count: agg.total_spots,
-            unique_callsigns: agg.callsignMap.size,
-            callsigns: Array.from(agg.callsignMap.entries()).map(([callsign, bandsSet]) => ({
-                callsign: callsign,
-                bands: Array.from(bandsSet).sort()
-            }))
+        // The hourly data structure has locators directly in the hour object
+        const locatorData = Object.entries(hourData.locators).map(([locator, data]) => ({
+            locator: locator,
+            avg_snr: data.avg_snr,
+            count: data.count,
+            unique_callsigns: data.callsigns ? data.callsigns.length : 0,
+            callsigns: data.callsigns || []
         }));
         
-        if (locatorData.length === 0) return;
+        if (locatorData.length === 0) {
+            console.log('No locators for hour', hourIndex);
+            return;
+        }
         
         // Apply colors
         const coloredLocators = locatorData.map(loc => ({

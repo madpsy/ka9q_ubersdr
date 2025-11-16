@@ -424,7 +424,7 @@
                 locator: agg.locator,
                 avg_snr: agg.total_snr / agg.snr_count,
                 count: agg.total_spots,
-                unique_callsigns: agg.total_callsigns,
+                unique_callsigns: agg.callsignMap.size, // Use actual unique count from deduplicated map
                 bands: [...new Set(agg.bands)].join(', '),
                 countries: Array.from(agg.countries).join(', '),
                 callsigns: callsigns
@@ -501,7 +501,7 @@
                 locator: agg.locator,
                 avg_snr: agg.total_snr / agg.snr_count,
                 count: agg.total_spots,
-                unique_callsigns: agg.total_callsigns,
+                unique_callsigns: agg.callsignMap.size, // Use actual unique count from deduplicated map
                 bands: [...new Set(agg.bands)].join(', '),
                 continents: Array.from(agg.continents).join(', '),
                 callsigns: callsigns

@@ -384,7 +384,7 @@ class SpectrumDisplay {
         this.dragStartX = 0;
         this.dragStartFreq = 0;
         this.lastPanTime = 0;
-        this.panThrottleMs = 150; // Throttle pan requests to avoid backend rounding issues
+        this.panThrottleMs = 50; // Throttle pan requests (50ms = 20 requests/sec max)
 
         // Client-side prediction for smooth dragging
         this.predictedFreqOffset = 0; // Frequency offset for visual prediction during drag

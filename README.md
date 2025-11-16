@@ -4,6 +4,8 @@ Web interface for ka9q-radio SDR software.
 
 > **Note:** This is currently designed for RX888 MKII SDR hardware to provide 0-30 MHz (full HF) coverage.
 
+**Important:** Ensure NTP (Network Time Protocol) is installed and running on your host system to maintain accurate time synchronization. This is critical for proper SDR operation and time-stamped data as well as digital mode decoders.
+
 ## Quick Start
 
 > **Note:** This installation script is designed for Debian/Ubuntu-based systems only.

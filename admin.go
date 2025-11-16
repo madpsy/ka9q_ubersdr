@@ -2520,6 +2520,54 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		stats["memory"] = fmt.Sprintf("Error: %v", err)
 	}
 
+	// Get data directory sizes using du -sh
+	dataDirs := make(map[string]string)
+
+	// Decoder metrics directory
+	if ah.config.Decoder.Enabled && ah.config.Decoder.MetricsLogEnabled && ah.config.Decoder.MetricsLogDataDir != "" {
+		duCmd := exec.Command("du", "-sh", ah.config.Decoder.MetricsLogDataDir)
+		if duOutput, err := duCmd.CombinedOutput(); err == nil {
+			dataDirs["decoder_metrics"] = string(duOutput)
+		} else {
+			dataDirs["decoder_metrics"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.Decoder.MetricsLogDataDir)
+		}
+	}
+
+	// Decoder spots directory
+	if ah.config.Decoder.Enabled && ah.config.Decoder.SpotsLogEnabled && ah.config.Decoder.SpotsLogDataDir != "" {
+		duCmd := exec.Command("du", "-sh", ah.config.Decoder.SpotsLogDataDir)
+		if duOutput, err := duCmd.CombinedOutput(); err == nil {
+			dataDirs["decoder_spots"] = string(duOutput)
+		} else {
+			dataDirs["decoder_spots"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.Decoder.SpotsLogDataDir)
+		}
+	}
+
+	// Noise floor directory
+	if ah.config.NoiseFloor.Enabled && ah.config.NoiseFloor.DataDir != "" {
+		duCmd := exec.Command("du", "-sh", ah.config.NoiseFloor.DataDir)
+		if duOutput, err := duCmd.CombinedOutput(); err == nil {
+			dataDirs["noisefloor"] = string(duOutput)
+		} else {
+			dataDirs["noisefloor"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.NoiseFloor.DataDir)
+		}
+	}
+
+	// Space weather directory
+	if ah.config.SpaceWeather.Enabled && ah.config.SpaceWeather.LogToCSV && ah.config.SpaceWeather.DataDir != "" {
+		duCmd := exec.Command("du", "-sh", ah.config.SpaceWeather.DataDir)
+		if duOutput, err := duCmd.CombinedOutput(); err == nil {
+			dataDirs["spaceweather"] = string(duOutput)
+		} else {
+			dataDirs["spaceweather"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.SpaceWeather.DataDir)
+		}
+	}
+
+	// Add data directories to stats if any were found
+	if len(dataDirs) > 0 {
+		stats["data_directories"] = dataDirs
+	}
+
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		log.Printf("Error encoding system stats: %v", err)

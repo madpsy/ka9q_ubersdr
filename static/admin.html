@@ -554,6 +554,8 @@
                     <button class="btn" onclick="saveDecoderConfig()">Save Configuration</button>
                     <button class="btn btn-danger" onclick="saveDecoderConfigAndRestart()">Save & Restart</button>
                     <button class="btn btn-secondary" onclick="loadDecoderConfig()">Reload</button>
+                    <button class="btn btn-secondary" onclick="exportDecoderConfig()">Export Config</button>
+                    <button class="btn btn-secondary" onclick="importDecoderConfig()">Import Config</button>
                 </div>
                 <div class="button-group" id="systemButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadSystemStats()">Refresh</button>
@@ -562,6 +564,7 @@
                 <input type="file" id="bookmarksFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBookmarksImport(event)">
                 <input type="file" id="bandsFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBandsImport(event)">
                 <input type="file" id="sdrsharpFileInput" accept=".xml" style="display: none;" onchange="handleSDRSharpImport(event)">
+                <input type="file" id="decoderConfigFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleDecoderConfigImport(event)">
             </div>
         </div>
 
@@ -1131,6 +1134,115 @@
             if (confirm('Are you sure you want to reset to default configuration? This cannot be undone.')) {
                 showAlert('Reset functionality not implemented. Please manually restore config.yaml.example', 'info');
             }
+        }
+
+        function exportConfig() {
+            // Export current config as YAML
+            const yamlContent = convertConfigToYAML(currentConfig);
+            const blob = new Blob([yamlContent], { type: 'text/yaml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'config.yaml';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showAlert('Configuration exported successfully', 'success');
+        }
+
+        function importConfig() {
+            document.getElementById('configFileInput').click();
+        }
+
+        async function handleConfigImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                
+                // Try to parse as JSON first, then YAML
+                let importedConfig;
+                if (file.name.endsWith('.json')) {
+                    importedConfig = JSON.parse(text);
+                } else {
+                    // For YAML, we'll send it to the server to parse
+                    showAlert('YAML import: Please use the visual editor to modify configuration', 'info');
+                    return;
+                }
+
+                if (!confirm('This will replace your current configuration. Are you sure?')) {
+                    return;
+                }
+
+                // Update current config
+                currentConfig = importedConfig;
+                renderVisualEditor();
+                showAlert('Configuration imported successfully. Click "Save Configuration" to apply changes.', 'success');
+            } catch (error) {
+                showAlert('Error importing configuration: ' + error.message, 'error');
+            }
+
+            // Reset file input
+            event.target.value = '';
+        }
+
+        function convertConfigToYAML(config) {
+            // Simple YAML converter - converts JS object to YAML format
+            let yaml = '';
+            
+            function convertValue(value, indent = 0) {
+                const spaces = '  '.repeat(indent);
+                
+                if (value === null || value === undefined) {
+                    return 'null';
+                } else if (typeof value === 'boolean') {
+                    return value.toString();
+                } else if (typeof value === 'number') {
+                    return value.toString();
+                } else if (typeof value === 'string') {
+                    // Quote strings that contain special characters
+                    if (value.includes(':') || value.includes('#') || value.includes('\n')) {
+                        return `"${value.replace(/"/g, '\\"')}"`;
+                    }
+                    return value;
+                } else if (Array.isArray(value)) {
+                    if (value.length === 0) return '[]';
+                    let result = '\n';
+                    value.forEach(item => {
+                        if (typeof item === 'object' && item !== null) {
+                            result += spaces + '  -\n';
+                            result += convertObject(item, indent + 2);
+                        } else {
+                            result += spaces + '  - ' + convertValue(item, 0) + '\n';
+                        }
+                    });
+                    return result.trimEnd();
+                } else if (typeof value === 'object') {
+                    return '\n' + convertObject(value, indent);
+                }
+                return value.toString();
+            }
+            
+            function convertObject(obj, indent = 0) {
+                const spaces = '  '.repeat(indent);
+                let result = '';
+                
+                for (const [key, value] of Object.entries(obj)) {
+                    result += spaces + key + ':';
+                    const converted = convertValue(value, indent + 1);
+                    if (converted.startsWith('\n')) {
+                        result += converted + '\n';
+                    } else {
+                        result += ' ' + converted + '\n';
+                    }
+                }
+                
+                return result;
+            }
+            
+            return convertObject(config);
         }
 
         function showAlert(message, type) {
@@ -3164,6 +3276,60 @@
             await saveDecoderConfig(true);
         }
 
+        function exportDecoderConfig() {
+            // Export current decoder config as YAML
+            const decoderData = { decoder: currentDecoderConfig };
+            const yamlContent = convertConfigToYAML(decoderData);
+            const blob = new Blob([yamlContent], { type: 'text/yaml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'decoder.yaml';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showAlert('Decoder configuration exported successfully', 'success');
+        }
+
+        function importDecoderConfig() {
+            document.getElementById('decoderConfigFileInput').click();
+        }
+
+        async function handleDecoderConfigImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+
+                // Try to parse as JSON first, then YAML
+                let importedConfig;
+                if (file.name.endsWith('.json')) {
+                    const data = JSON.parse(text);
+                    importedConfig = data.decoder || data;
+                } else {
+                    // For YAML, we'll send it to the server to parse
+                    showAlert('YAML import: Please use the visual editor to modify decoder configuration', 'info');
+                    return;
+                }
+
+                if (!confirm('This will replace your current decoder configuration. Are you sure?')) {
+                    return;
+                }
+
+                // Update current decoder config
+                currentDecoderConfig = importedConfig;
+                renderDecoderConfig();
+                showAlert('Decoder configuration imported successfully. Click "Save Configuration" to apply changes.', 'success');
+            } catch (error) {
+                showAlert('Error importing decoder configuration: ' + error.message, 'error');
+            }
+
+            // Reset file input
+            event.target.value = '';
+        }
+
         // System statistics management
         async function loadSystemStats() {
             try {
@@ -3194,7 +3360,7 @@
             sections.forEach(section => {
                 const sectionDiv = document.createElement('div');
                 sectionDiv.className = 'config-section';
-                
+
                 const title = document.createElement('h3');
                 title.textContent = `${section.icon} ${section.title}`;
                 sectionDiv.appendChild(title);
@@ -3214,6 +3380,53 @@
 
                 container.appendChild(sectionDiv);
             });
+
+            // Add data directories section if available
+            if (stats.data_directories && Object.keys(stats.data_directories).length > 0) {
+                const dataDirSection = document.createElement('div');
+                dataDirSection.className = 'config-section';
+
+                const title = document.createElement('h3');
+                title.textContent = '📁 Data Directory Sizes';
+                dataDirSection.appendChild(title);
+
+                const dirLabels = {
+                    'decoder_metrics': 'Decoder Metrics',
+                    'decoder_spots': 'Decoder Spots',
+                    'noisefloor': 'Noise Floor',
+                    'spaceweather': 'Space Weather'
+                };
+
+                for (const [key, value] of Object.entries(stats.data_directories)) {
+                    const dirDiv = document.createElement('div');
+                    dirDiv.style.marginBottom = '10px';
+
+                    const dirLabel = document.createElement('strong');
+                    dirLabel.textContent = dirLabels[key] || key;
+                    dirLabel.style.display = 'block';
+                    dirLabel.style.marginBottom = '5px';
+                    dirLabel.style.color = '#667eea';
+                    dirDiv.appendChild(dirLabel);
+
+                    const pre = document.createElement('pre');
+                    pre.style.background = '#fff';
+                    pre.style.padding = '10px';
+                    pre.style.borderRadius = '5px';
+                    pre.style.overflow = 'auto';
+                    pre.style.fontFamily = 'monospace';
+                    pre.style.fontSize = '13px';
+                    pre.style.lineHeight = '1.5';
+                    pre.style.whiteSpace = 'pre-wrap';
+                    pre.style.wordWrap = 'break-word';
+                    pre.style.margin = '0';
+                    pre.textContent = value;
+                    dirDiv.appendChild(pre);
+
+                    dataDirSection.appendChild(dirDiv);
+                }
+
+                container.appendChild(dataDirSection);
+            }
         }
     </script>
 </body>

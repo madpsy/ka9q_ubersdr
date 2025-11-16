@@ -889,10 +889,6 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 	continentData := make(map[string]map[string]*bandAggregator)
 	continentCountries := make(map[string]map[string]bool)
 
-	// Track unique callsigns per locator across all bands
-	countryLocatorCallsigns := make(map[string]map[string]map[string]bool)   // country -> locator -> callsigns
-	continentLocatorCallsigns := make(map[string]map[string]map[string]bool) // continent -> locator -> callsigns
-
 	for _, spot := range spots {
 		// Skip spots without country info
 		if spot.Country == "" {
@@ -991,33 +987,6 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 		}
 	}
 
-	// Populate unique callsigns per locator across all bands
-	for _, spot := range spots {
-		if spot.Country == "" || spot.Locator == "" || spot.Callsign == "" {
-			continue
-		}
-
-		// Track for country
-		if countryLocatorCallsigns[spot.Country] == nil {
-			countryLocatorCallsigns[spot.Country] = make(map[string]map[string]bool)
-		}
-		if countryLocatorCallsigns[spot.Country][spot.Locator] == nil {
-			countryLocatorCallsigns[spot.Country][spot.Locator] = make(map[string]bool)
-		}
-		countryLocatorCallsigns[spot.Country][spot.Locator][spot.Callsign] = true
-
-		// Track for continent
-		if spot.Continent != "" {
-			if continentLocatorCallsigns[spot.Continent] == nil {
-				continentLocatorCallsigns[spot.Continent] = make(map[string]map[string]bool)
-			}
-			if continentLocatorCallsigns[spot.Continent][spot.Locator] == nil {
-				continentLocatorCallsigns[spot.Continent][spot.Locator] = make(map[string]bool)
-			}
-			continentLocatorCallsigns[spot.Continent][spot.Locator][spot.Callsign] = true
-		}
-	}
-
 	// Build country analytics
 	continentNames := map[string]string{
 		"AF": "Africa",
@@ -1048,17 +1017,11 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 			// Convert locator statistics to sorted slice for this band
 			locatorStats := make([]LocatorStats, 0, len(agg.locators))
 			for locator, locAgg := range agg.locators {
-				// Get unique callsigns across all bands for this locator
-				uniqueCallsigns := 0
-				if countryLocatorCallsigns[country] != nil && countryLocatorCallsigns[country][locator] != nil {
-					uniqueCallsigns = len(countryLocatorCallsigns[country][locator])
-				}
-
 				locatorStats = append(locatorStats, LocatorStats{
 					Locator:         locator,
 					AvgSNR:          locAgg.totalSNR / float64(locAgg.count),
 					Count:           locAgg.count,
-					UniqueCallsigns: uniqueCallsigns,
+					UniqueCallsigns: len(locAgg.callsigns),
 				})
 			}
 			// Sort by locator name
@@ -1112,17 +1075,11 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 			// Convert locator statistics to sorted slice for this band
 			locatorStats := make([]LocatorStats, 0, len(agg.locators))
 			for locator, locAgg := range agg.locators {
-				// Get unique callsigns across all bands for this locator
-				uniqueCallsigns := 0
-				if continentLocatorCallsigns[continent] != nil && continentLocatorCallsigns[continent][locator] != nil {
-					uniqueCallsigns = len(continentLocatorCallsigns[continent][locator])
-				}
-
 				locatorStats = append(locatorStats, LocatorStats{
 					Locator:         locator,
 					AvgSNR:          locAgg.totalSNR / float64(locAgg.count),
 					Count:           locAgg.count,
-					UniqueCallsigns: uniqueCallsigns,
+					UniqueCallsigns: len(locAgg.callsigns),
 				})
 			}
 			// Sort by locator name

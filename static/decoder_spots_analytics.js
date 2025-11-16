@@ -814,6 +814,19 @@
             const avgSNR = band.avg_snr >= 0 ? `+${band.avg_snr.toFixed(1)}` : band.avg_snr.toFixed(1);
             const maxSNR = band.max_snr >= 0 ? `+${band.max_snr.toFixed(1)}` : band.max_snr.toFixed(1);
 
+            // Calculate unique callsigns for this band by aggregating from locators
+            const uniqueCallsignsSet = new Set();
+            if (band.unique_locators && band.unique_locators.length > 0) {
+                band.unique_locators.forEach(loc => {
+                    if (loc.callsigns && loc.callsigns.length > 0) {
+                        loc.callsigns.forEach(csInfo => {
+                            uniqueCallsignsSet.add(csInfo.callsign);
+                        });
+                    }
+                });
+            }
+            const uniqueCallsignsCount = uniqueCallsignsSet.size;
+
             // Use backend's best_hours_utc (top 3) and collate into ranges for "Best Hours"
             const bestHourRanges = collateContiguousHours(band.best_hours_utc);
             // Find the actual top hour by checking which has the most spots in hourly_distribution
@@ -843,7 +856,7 @@
                         <span class="band-name">${band.band}</span>
                         <span class="band-spots">${band.spots.toLocaleString()} spots</span>
                     </div>
-                    <div class="band-snr">SNR: Min ${minSNR} dB • Avg ${avgSNR} dB • Max ${maxSNR} dB</div>
+                    <div class="band-snr">SNR: Min ${minSNR} dB • Avg ${avgSNR} dB • Max ${maxSNR} dB${uniqueCallsignsCount > 0 ? ` • ${uniqueCallsignsCount} unique callsigns` : ''}</div>
                     <div class="best-hours">
                         <strong>Best Hours (UTC):</strong>
                         <div class="hour-badges">

@@ -547,8 +547,8 @@ func main() {
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
 	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics) // New per-user spectrum
 
-	// Initialize admin handler
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager)
+	// Initialize admin handler (pass all components for proper shutdown during restart)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, spaceWeatherMonitor)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {

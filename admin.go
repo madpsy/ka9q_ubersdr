@@ -145,23 +145,93 @@ func (s *AdminSessionStore) cleanupExpiredSessions() {
 
 // AdminHandler handles admin configuration endpoints
 type AdminHandler struct {
-	config        *Config
-	configFile    string
-	configDir     string
-	sessions      *SessionManager
-	adminSessions *AdminSessionStore
-	ipBanManager  *IPBanManager
+	config              *Config
+	configFile          string
+	configDir           string
+	sessions            *SessionManager
+	adminSessions       *AdminSessionStore
+	ipBanManager        *IPBanManager
+	audioReceiver       *AudioReceiver
+	userSpectrumManager *UserSpectrumManager
+	noiseFloorMonitor   *NoiseFloorMonitor
+	multiDecoder        *MultiDecoder
+	dxCluster           *DXClusterClient
+	spaceWeatherMonitor *SpaceWeatherMonitor
+}
+
+// restartServer triggers a server restart after a short delay
+// It properly shuts down all components before exiting
+func (ah *AdminHandler) restartServer() {
+	log.Println("Server restart requested via admin API...")
+	go func() {
+		time.Sleep(1 * time.Second) // Give time for HTTP response to be sent
+		log.Println("Shutting down all components before restart...")
+
+		// Stop all components in reverse order of initialization
+		// This ensures proper cleanup of all radiod channels and connections
+
+		// 1. Stop multi-decoder (decoder channels)
+		if ah.multiDecoder != nil {
+			log.Println("Stopping multi-decoder...")
+			ah.multiDecoder.Stop()
+		}
+
+		// 2. Stop DX cluster client
+		if ah.dxCluster != nil {
+			log.Println("Stopping DX cluster client...")
+			ah.dxCluster.Stop()
+		}
+
+		// 3. Stop space weather monitor
+		if ah.spaceWeatherMonitor != nil {
+			log.Println("Stopping space weather monitor...")
+			ah.spaceWeatherMonitor.Stop()
+		}
+
+		// 4. Stop noise floor monitor (noise floor channels)
+		if ah.noiseFloorMonitor != nil {
+			log.Println("Stopping noise floor monitor...")
+			ah.noiseFloorMonitor.Stop()
+		}
+
+		// 5. Stop user spectrum manager (per-user spectrum channels)
+		if ah.userSpectrumManager != nil {
+			log.Println("Stopping user spectrum manager...")
+			ah.userSpectrumManager.Stop()
+		}
+
+		// 6. Stop audio receiver
+		if ah.audioReceiver != nil {
+			log.Println("Stopping audio receiver...")
+			ah.audioReceiver.Stop()
+		}
+
+		// 7. Finally, shutdown all web user sessions (websockets and their radiod channels)
+		if ah.sessions != nil {
+			log.Println("Shutting down all sessions...")
+			ah.sessions.Shutdown()
+		}
+
+		log.Println("All components stopped. Restarting server now...")
+		os.Exit(0) // Exit cleanly - process manager should restart
+	}()
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, spaceWeatherMonitor *SpaceWeatherMonitor) *AdminHandler {
 	return &AdminHandler{
-		config:        config,
-		configFile:    configFile,
-		configDir:     configDir,
-		sessions:      sessions,
-		adminSessions: NewAdminSessionStore(),
-		ipBanManager:  ipBanManager,
+		config:              config,
+		configFile:          configFile,
+		configDir:           configDir,
+		sessions:            sessions,
+		adminSessions:       NewAdminSessionStore(),
+		ipBanManager:        ipBanManager,
+		audioReceiver:       audioReceiver,
+		userSpectrumManager: userSpectrumManager,
+		noiseFloorMonitor:   noiseFloorMonitor,
+		multiDecoder:        multiDecoder,
+		dxCluster:           dxCluster,
+		spaceWeatherMonitor: spaceWeatherMonitor,
 	}
 }
 
@@ -319,6 +389,9 @@ func (ah *AdminHandler) handleGetConfig(w http.ResponseWriter, r *http.Request) 
 
 // handlePutConfig replaces the entire configuration
 func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) {
+	// Check for restart flag
+	restart := r.URL.Query().Get("restart") == "true"
+
 	var newConfig map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
@@ -345,16 +418,32 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "Configuration updated. Restart server to apply changes.",
-	}); err != nil {
-		log.Printf("Error encoding config update response: %v", err)
+
+	if restart {
+		// Trigger restart after response is sent
+		ah.restartServer()
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "Configuration updated. Server is restarting...",
+			"restart": true,
+		}); err != nil {
+			log.Printf("Error encoding config update response: %v", err)
+		}
+	} else {
+		if err := json.NewEncoder(w).Encode(map[string]string{
+			"status":  "success",
+			"message": "Configuration updated. Restart server to apply changes.",
+		}); err != nil {
+			log.Printf("Error encoding config update response: %v", err)
+		}
 	}
 }
 
 // handlePatchConfig updates specific configuration values
 func (ah *AdminHandler) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
+	// Check for restart flag
+	restart := r.URL.Query().Get("restart") == "true"
+
 	var updates map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
@@ -395,11 +484,24 @@ func (ah *AdminHandler) handlePatchConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "Configuration updated. Restart server to apply changes.",
-	}); err != nil {
-		log.Printf("Error encoding config patch response: %v", err)
+
+	if restart {
+		// Trigger restart after response is sent
+		ah.restartServer()
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "Configuration updated. Server is restarting...",
+			"restart": true,
+		}); err != nil {
+			log.Printf("Error encoding config patch response: %v", err)
+		}
+	} else {
+		if err := json.NewEncoder(w).Encode(map[string]string{
+			"status":  "success",
+			"message": "Configuration updated. Restart server to apply changes.",
+		}); err != nil {
+			log.Printf("Error encoding config patch response: %v", err)
+		}
 	}
 }
 
@@ -1968,6 +2070,9 @@ func (ah *AdminHandler) handleGetDecoderConfig(w http.ResponseWriter, r *http.Re
 
 // handleUpdateDecoderConfig updates the decoder configuration
 func (ah *AdminHandler) handleUpdateDecoderConfig(w http.ResponseWriter, r *http.Request) {
+	// Check for restart flag
+	restart := r.URL.Query().Get("restart") == "true"
+
 	var decoderConfig map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&decoderConfig); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
@@ -1999,10 +2104,21 @@ func (ah *AdminHandler) handleUpdateDecoderConfig(w http.ResponseWriter, r *http
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "Decoder configuration updated. Restart server to apply changes.",
-	})
+
+	if restart {
+		// Trigger restart after response is sent
+		ah.restartServer()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "Decoder configuration updated. Server is restarting...",
+			"restart": true,
+		})
+	} else {
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "success",
+			"message": "Decoder configuration updated. Restart server to apply changes.",
+		})
+	}
 }
 
 // HandleDecoderBands handles GET, POST, PUT, DELETE requests for decoder bands

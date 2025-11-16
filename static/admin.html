@@ -518,6 +518,7 @@
                 </div>
                 <div class="button-group" id="configButtons" style="display: none;">
                     <button class="btn" onclick="saveConfig()">Save Configuration</button>
+                    <button class="btn btn-danger" onclick="saveConfigAndRestart()">Save & Restart</button>
                     <button class="btn btn-secondary" onclick="loadConfig()">Reload</button>
                     <button class="btn btn-secondary" onclick="exportConfig()">Export Config</button>
                     <button class="btn btn-secondary" onclick="importConfig()">Import Config</button>
@@ -542,6 +543,7 @@
                 </div>
                 <div class="button-group" id="decoderButtons" style="display: none;">
                     <button class="btn" onclick="saveDecoderConfig()">Save Configuration</button>
+                    <button class="btn btn-danger" onclick="saveDecoderConfigAndRestart()">Save & Restart</button>
                     <button class="btn btn-secondary" onclick="loadDecoderConfig()">Reload</button>
                 </div>
                 <input type="file" id="configFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleConfigImport(event)">
@@ -567,11 +569,65 @@
                 </a>
             </div>
         </div>
+
+        <!-- Restart Countdown Overlay -->
+        <div id="restartOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.9); z-index: 10000; display: flex; align-items: center; justify-content: center;">
+            <div style="text-align: center; color: white;">
+                <div style="font-size: 72px; font-weight: bold; margin-bottom: 20px;" id="countdownNumber">10</div>
+                <h2 style="margin-bottom: 10px;">Server is restarting...</h2>
+                <p style="font-size: 18px; color: #ccc;">You will be redirected to the login page</p>
+                <div style="margin-top: 30px;">
+                    <div class="spinner" style="border-color: #f3f3f3; border-top-color: #667eea;"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
         let currentConfig = {};
         let currentTab = 'sessions';
+
+        // Show restart countdown overlay
+        function showRestartCountdown() {
+            const overlay = document.getElementById('restartOverlay');
+            const countdownEl = document.getElementById('countdownNumber');
+            overlay.style.display = 'flex';
+            
+            let countdown = 10;
+            countdownEl.textContent = countdown;
+            
+            const interval = setInterval(() => {
+                countdown--;
+                countdownEl.textContent = countdown;
+                
+                if (countdown <= 0) {
+                    clearInterval(interval);
+                    // Redirect to login page
+                    window.location.href = '/admin.html';
+                }
+            }, 1000);
+        }
+
+        // Helper function to handle fetch with automatic auth error handling
+        async function authenticatedFetch(url, options = {}) {
+            try {
+                const response = await fetch(url, options);
+                
+                // Check for authentication errors
+                if (response.status === 401) {
+                    // Session expired or invalid, redirect to login
+                    console.log('Authentication failed, redirecting to login');
+                    logout();
+                    showAlert('Session expired. Please login again.', 'error');
+                    return null;
+                }
+                
+                return response;
+            } catch (error) {
+                // Network or other errors
+                throw error;
+            }
+        }
 
         // Check for existing session on page load
         async function checkSession() {
@@ -761,14 +817,10 @@
 
         async function loadConfig() {
             try {
-                const response = await fetch('/admin/config');
+                const response = await authenticatedFetch('/admin/config');
+                if (!response) return; // Auth failed, already handled
+
                 if (!response.ok) {
-                    if (response.status === 401) {
-                        // Session expired, redirect to login
-                        logout();
-                        showAlert('Session expired. Please login again.', 'error');
-                        return;
-                    }
                     throw new Error('Failed to load config');
                 }
 
@@ -1002,7 +1054,7 @@
             }
         }
 
-        async function saveConfig() {
+        async function saveConfig(restart = false) {
             // Disable save button and show loading state
             const saveButton = event?.target || document.querySelector('.button-group .btn');
             const originalText = saveButton?.textContent;
@@ -1014,13 +1066,16 @@
             try {
                 showAlert('Saving configuration...', 'info');
 
-                const response = await fetch('/admin/config', {
+                const url = restart ? '/admin/config?restart=true' : '/admin/config';
+                const response = await authenticatedFetch(url, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify(currentConfig)
                 });
+
+                if (!response) return; // Auth failed, already handled
 
                 if (!response.ok) {
                     const errorText = await response.text();
@@ -1029,15 +1084,29 @@
                 
                 const result = await response.json();
                 showAlert(result.message || 'Configuration saved successfully', 'success');
+
+                // If restarting, show countdown overlay
+                if (restart && result.restart) {
+                    setTimeout(() => {
+                        showRestartCountdown();
+                    }, 500);
+                }
             } catch (error) {
                 showAlert('Error saving configuration: ' + error.message, 'error');
             } finally {
-                // Re-enable save button
-                if (saveButton) {
+                // Re-enable save button (unless restarting)
+                if (saveButton && !restart) {
                     saveButton.disabled = false;
                     saveButton.textContent = originalText;
                 }
             }
+        }
+
+        async function saveConfigAndRestart() {
+            if (!confirm('⚠️ WARNING: This will restart the server immediately!\n\nAll active user sessions will be disconnected.\n\nAre you sure you want to save the configuration and restart the server?')) {
+                return;
+            }
+            await saveConfig(true);
         }
 
         function resetConfig() {
@@ -1124,7 +1193,8 @@
                 // Load extensions first to cache them
                 await loadExtensions();
 
-                const response = await fetch('/admin/bookmarks');
+                const response = await authenticatedFetch('/admin/bookmarks');
+                if (!response) return; // Auth failed, already handled
                 if (!response.ok) throw new Error('Failed to load bookmarks');
 
                 const data = await response.json();
@@ -1446,7 +1516,8 @@
 
         async function loadBands() {
             try {
-                const response = await fetch('/admin/bands');
+                const response = await authenticatedFetch('/admin/bands');
+                if (!response) return; // Auth failed, already handled
                 if (!response.ok) throw new Error('Failed to load bands');
                 
                 const data = await response.json();
@@ -1823,21 +1894,21 @@
 
         async function loadSessions() {
             try {
-                const response = await fetch('/admin/sessions');
+                const response = await authenticatedFetch('/admin/sessions');
+                if (!response) {
+                    // Auth failed, stop auto-refresh
+                    stopSessionsAutoRefresh();
+                    return;
+                }
+
                 if (!response.ok) {
-                    // If unauthorized, stop auto-refresh and logout
-                    if (response.status === 401) {
-                        stopSessionsAutoRefresh();
-                        logout();
-                        return;
-                    }
                     throw new Error('Failed to load sessions');
                 }
-                
+
                 const data = await response.json();
                 currentSessions = data.sessions || [];
                 renderSessions();
-                
+
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!sessionsRefreshInterval) {
                     showAlert(`Loaded ${currentSessions.length} active session(s)`, 'success');
@@ -2008,7 +2079,8 @@
 
         async function loadBannedIPs() {
             try {
-                const response = await fetch('/admin/banned-ips');
+                const response = await authenticatedFetch('/admin/banned-ips');
+                if (!response) return; // Auth failed, already handled
                 if (!response.ok) throw new Error('Failed to load banned IPs');
 
                 const data = await response.json();
@@ -2230,7 +2302,8 @@
 
         async function loadAvailableExtensions() {
             try {
-                const response = await fetch('/admin/extensions-available');
+                const response = await authenticatedFetch('/admin/extensions-available');
+                if (!response) return; // Auth failed, already handled
                 if (!response.ok) throw new Error('Failed to load available extensions');
 
                 const data = await response.json();
@@ -2399,7 +2472,8 @@
 
         async function loadDecoderConfig() {
             try {
-                const response = await fetch('/admin/decoder-config');
+                const response = await authenticatedFetch('/admin/decoder-config');
+                if (!response) return; // Auth failed, already handled
                 if (!response.ok) throw new Error('Failed to load decoder config');
 
                 const data = await response.json();
@@ -3020,7 +3094,7 @@
             showAlert(`Set depth to ${depth} for ${matchingBands.length} ${mode} band${matchingBands.length > 1 ? 's' : ''}. Click "Save Configuration" to apply changes.`, 'info');
         }
 
-        async function saveDecoderConfig() {
+        async function saveDecoderConfig(restart = false) {
             const saveButton = event?.target || document.querySelector('#decoderButtons .btn');
             const originalText = saveButton?.textContent;
             if (saveButton) {
@@ -3031,11 +3105,14 @@
             try {
                 showAlert('Saving decoder configuration...', 'info');
 
-                const response = await fetch('/admin/decoder-config', {
+                const url = restart ? '/admin/decoder-config?restart=true' : '/admin/decoder-config';
+                const response = await authenticatedFetch(url, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ decoder: currentDecoderConfig })
                 });
+
+                if (!response) return; // Auth failed, already handled
 
                 if (!response.ok) {
                     const errorText = await response.text();
@@ -3044,14 +3121,29 @@
 
                 const result = await response.json();
                 showAlert(result.message || 'Decoder configuration saved successfully', 'success');
+
+                // If restarting, show countdown overlay
+                if (restart && result.restart) {
+                    setTimeout(() => {
+                        showRestartCountdown();
+                    }, 500);
+                }
             } catch (error) {
                 showAlert('Error saving decoder configuration: ' + error.message, 'error');
             } finally {
-                if (saveButton) {
+                // Re-enable save button (unless restarting)
+                if (saveButton && !restart) {
                     saveButton.disabled = false;
                     saveButton.textContent = originalText;
                 }
             }
+        }
+
+        async function saveDecoderConfigAndRestart() {
+            if (!confirm('⚠️ WARNING: This will restart the server immediately!\n\nAll active user sessions will be disconnected.\n\nAre you sure you want to save the decoder configuration and restart the server?')) {
+                return;
+            }
+            await saveDecoderConfig(true);
         }
     </script>
 </body>

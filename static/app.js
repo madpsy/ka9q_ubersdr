@@ -5137,6 +5137,14 @@ function updateScrollRate() {
     log(`Waterfall scroll rate changed to ${fps} fps`);
 }
 
+// Waterfall auto-adjust state
+let waterfallAutoAdjustEnabled = false;
+let waterfallAutoAdjustInterval = null;
+let waterfallNoiseFloorHistory = [];
+let waterfallPeakHistory = [];
+const WATERFALL_AUTO_ADJUST_HISTORY_SIZE = 10; // Average over 10 samples
+const WATERFALL_AUTO_ADJUST_UPDATE_RATE = 500; // Update every 500ms
+
 // Update waterfall intensity
 function updateWaterfallIntensity() {
     const intensity = parseFloat(document.getElementById('waterfall-intensity').value);
@@ -5156,6 +5164,129 @@ function updateWaterfallContrast() {
     document.getElementById('waterfall-contrast-value').textContent = contrast;
 
     log(`Waterfall contrast changed to ${contrast} (noise floor suppression)`);
+}
+
+// Toggle waterfall auto-adjust
+function toggleWaterfallAutoAdjust() {
+    const checkbox = document.getElementById('waterfall-auto-adjust');
+    if (!checkbox) return;
+
+    waterfallAutoAdjustEnabled = checkbox.checked;
+
+    if (waterfallAutoAdjustEnabled) {
+        // Start auto-adjustment
+        if (!waterfallAutoAdjustInterval) {
+            waterfallAutoAdjustInterval = setInterval(updateWaterfallAutoAdjust, WATERFALL_AUTO_ADJUST_UPDATE_RATE);
+        }
+        log('Waterfall auto-adjust enabled');
+    } else {
+        // Stop auto-adjustment
+        if (waterfallAutoAdjustInterval) {
+            clearInterval(waterfallAutoAdjustInterval);
+            waterfallAutoAdjustInterval = null;
+        }
+        // Clear history
+        waterfallNoiseFloorHistory = [];
+        waterfallPeakHistory = [];
+        log('Waterfall auto-adjust disabled');
+    }
+}
+
+// Update waterfall auto-adjust values
+function updateWaterfallAutoAdjust() {
+    if (!waterfallAutoAdjustEnabled || !analyser || !audioContext) return;
+
+    // Get frequency data
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(dataArray);
+
+    // Get frequency bin mapping
+    const binMapping = getFrequencyBinMapping();
+    if (!binMapping) return;
+
+    const { startBinIndex, binsForBandwidth } = binMapping;
+
+    // Find noise floor and peak in visible bandwidth
+    let minMagnitude = 255;
+    let maxMagnitude = 0;
+    let validSamples = 0;
+
+    for (let i = startBinIndex; i < startBinIndex + binsForBandwidth && i < dataArray.length; i++) {
+        const magnitude = dataArray[i];
+        if (magnitude > 0) { // Ignore zero values
+            minMagnitude = Math.min(minMagnitude, magnitude);
+            maxMagnitude = Math.max(maxMagnitude, magnitude);
+            validSamples++;
+        }
+    }
+
+    // Need valid data to proceed
+    if (validSamples === 0) return;
+
+    // Add to history for smoothing
+    waterfallNoiseFloorHistory.push(minMagnitude);
+    waterfallPeakHistory.push(maxMagnitude);
+
+    if (waterfallNoiseFloorHistory.length > WATERFALL_AUTO_ADJUST_HISTORY_SIZE) {
+        waterfallNoiseFloorHistory.shift();
+    }
+    if (waterfallPeakHistory.length > WATERFALL_AUTO_ADJUST_HISTORY_SIZE) {
+        waterfallPeakHistory.shift();
+    }
+
+    // Need enough history before adjusting
+    if (waterfallNoiseFloorHistory.length < WATERFALL_AUTO_ADJUST_HISTORY_SIZE) {
+        return;
+    }
+
+    // Calculate smoothed values
+    const avgNoiseFloor = waterfallNoiseFloorHistory.reduce((sum, v) => sum + v, 0) / waterfallNoiseFloorHistory.length;
+    const avgPeak = waterfallPeakHistory.reduce((sum, v) => sum + v, 0) / waterfallPeakHistory.length;
+
+    // Calculate dynamic range
+    const dynamicRange = avgPeak - avgNoiseFloor;
+
+    // Calculate optimal contrast (noise floor suppression)
+    // Set contrast slightly above noise floor to suppress noise while preserving weak signals
+    // Add 10% of dynamic range as headroom
+    const optimalContrast = Math.round(avgNoiseFloor + (dynamicRange * 0.1));
+    const clampedContrast = Math.max(0, Math.min(100, optimalContrast));
+
+    // Calculate optimal intensity
+    // Boost intensity based on how much dynamic range we have
+    // More dynamic range = less boost needed
+    // Less dynamic range = more boost needed
+    let optimalIntensity;
+    if (dynamicRange < 50) {
+        // Low dynamic range - boost significantly
+        optimalIntensity = 0.5;
+    } else if (dynamicRange < 100) {
+        // Medium dynamic range - moderate boost
+        optimalIntensity = 0.3;
+    } else if (dynamicRange < 150) {
+        // Good dynamic range - slight boost
+        optimalIntensity = 0.1;
+    } else {
+        // Excellent dynamic range - no boost needed
+        optimalIntensity = 0.0;
+    }
+
+    // Update sliders and values
+    const intensitySlider = document.getElementById('waterfall-intensity');
+    const contrastSlider = document.getElementById('waterfall-contrast');
+
+    if (intensitySlider) {
+        intensitySlider.value = optimalIntensity;
+        waterfallIntensity = optimalIntensity;
+        const displayValue = optimalIntensity >= 0 ? '+' + optimalIntensity.toFixed(2) : optimalIntensity.toFixed(2);
+        document.getElementById('waterfall-intensity-value').textContent = displayValue;
+    }
+
+    if (contrastSlider) {
+        contrastSlider.value = clampedContrast;
+        waterfallContrast = clampedContrast;
+        document.getElementById('waterfall-contrast-value').textContent = clampedContrast;
+    }
 }
 
 // Update oscilloscope zoom/timebase
@@ -5885,6 +6016,7 @@ window.updateFFTSize = updateFFTSize;
 window.updateScrollRate = updateScrollRate;
 window.updateWaterfallIntensity = updateWaterfallIntensity;
 window.updateWaterfallContrast = updateWaterfallContrast;
+window.toggleWaterfallAutoAdjust = toggleWaterfallAutoAdjust;
 window.updateOscilloscopeZoom = updateOscilloscopeZoom;
 
 // Oscilloscope controls

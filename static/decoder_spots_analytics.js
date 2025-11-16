@@ -14,6 +14,9 @@
     let continentColorMode = 'snr';
     let countryLocatorData = [];
     let continentLocatorData = [];
+    let receiverLocation = null;
+    let countryReceiverMarker = null;
+    let continentReceiverMarker = null;
     
     // Animation state
     let countryAnimation = {
@@ -21,7 +24,8 @@
         currentHourIndex: 0,
         hourlyData: null,
         intervalId: null,
-        playbackSpeed: 1000 // 1 second per hour
+        playbackSpeed: 1000, // 1 second per hour
+        greylineLayer: null
     };
     
     let continentAnimation = {
@@ -29,7 +33,8 @@
         currentHourIndex: 0,
         hourlyData: null,
         intervalId: null,
-        playbackSpeed: 1000 // 1 second per hour
+        playbackSpeed: 1000, // 1 second per hour
+        greylineLayer: null
     };
 
     // Continent name mapping
@@ -49,6 +54,7 @@
         loadCountries();
         loadContinents();
         fetchReceiverInfo();
+        loadReceiverLocation();
     });
 
     function initializeControls() {
@@ -368,7 +374,10 @@
                 showLabels: false
             });
             countryGrid.showGrid();
-            
+
+            // Add receiver marker
+            countryReceiverMarker = addReceiverMarker(countryMap, countryReceiverMarker);
+
             // Color mode radio buttons
             document.querySelectorAll('input[name="country-color-mode"]').forEach(radio => {
                 radio.addEventListener('change', function() {
@@ -395,7 +404,10 @@
                 showLabels: false
             });
             continentGrid.showGrid();
-            
+
+            // Add receiver marker
+            continentReceiverMarker = addReceiverMarker(continentMap, continentReceiverMarker);
+
             // Color mode radio buttons
             document.querySelectorAll('input[name="continent-color-mode"]').forEach(radio => {
                 radio.addEventListener('change', function() {
@@ -926,6 +938,52 @@
         }
     }
 
+    async function loadReceiverLocation() {
+        try {
+            const response = await fetch('/api/description');
+            if (!response.ok) {
+                console.warn('Failed to load receiver location');
+                return;
+            }
+
+            const data = await response.json();
+            if (data.receiver && data.receiver.gps) {
+                receiverLocation = {
+                    lat: data.receiver.gps.lat,
+                    lon: data.receiver.gps.lon
+                };
+            }
+        } catch (error) {
+            console.error('Error loading receiver location:', error);
+        }
+    }
+
+    function addReceiverMarker(map, markerVar) {
+        if (!receiverLocation || !map) return null;
+
+        // Create custom icon for receiver
+        const receiverIcon = L.divIcon({
+            className: '',
+            html: '<div style="width: 20px; height: 20px; background: #ff0000; border: 3px solid rgba(255, 255, 255, 0.9); border-radius: 50%; box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);"></div>',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+        });
+
+        const marker = L.marker(
+            [receiverLocation.lat, receiverLocation.lon],
+            { icon: receiverIcon }
+        ).addTo(map);
+
+        marker.bindPopup('<div style="font-family: monospace; font-size: 12px;"><b>Receiver Location</b></div>');
+        marker.bindTooltip('Receiver Location', {
+            direction: 'top',
+            offset: [0, -15],
+            permanent: false
+        });
+
+        return marker;
+    }
+
     function getNormalizedCountryName(countryName) {
         // Find the country in our list (case-insensitive) and return the exact name
         const found = allCountries.find(country =>
@@ -1108,6 +1166,9 @@
         animation.currentHourIndex = 0;
         document.getElementById(`${mapType}-hour-slider`).value = 0;
         
+        // Remove greyline overlay
+        removeGreyline(mapType);
+        
         // Show all data (aggregate view)
         if (mapType === 'country') {
             updateCountryMapColors();
@@ -1198,6 +1259,9 @@
         
         const hourData = animation.hourlyData.hourly_data[hourIndex];
         
+        // Update greyline overlay for this hour
+        updateGreyline(mapType, hourIndex);
+        
         // Check if we have locators for this hour (it's an array, not an object)
         if (!hourData || !hourData.locators || hourData.locators.length === 0) {
             console.log('No data for hour', hourIndex);
@@ -1244,6 +1308,127 @@
                 unique_callsigns: loc.unique_callsigns,
                 callsigns: loc.callsigns
             }
+    // Create night polygon for day/night overlay
+    function createNightPolygon(date) {
+        // Create polygon for night side using SunCalc
+        const polygon = [];
+        const resolution = 2; // degrees for smoother curve
+        
+        // Get sun position to find subsolar point (where sun is directly overhead)
+        // We need to find where the sun's declination and hour angle place it
+        const d = (date.valueOf() / 86400000) - 0.5 + 2440588 - 2451545; // Days since J2000
+        const M = (357.5291 + 0.98560028 * d) * Math.PI / 180; // Solar mean anomaly
+        const C = (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) * Math.PI / 180;
+        const L = M + C + (102.9372 * Math.PI / 180) + Math.PI; // Ecliptic longitude
+        const sunDec = Math.asin(Math.sin(L) * Math.sin(23.4397 * Math.PI / 180)); // Declination in radians
+        
+        // Calculate subsolar longitude (where sun is at zenith)
+        const gmst = (280.16 + 360.9856235 * d) * Math.PI / 180; // Greenwich mean sidereal time
+        const sunRA = Math.atan2(Math.sin(L) * Math.cos(23.4397 * Math.PI / 180), Math.cos(L)); // Right ascension
+        const sunLon = ((sunRA - gmst) * 180 / Math.PI + 180) % 360 - 180; // Subsolar longitude
+        
+        // Calculate terminator line (where sun altitude = 0)
+        const terminatorPoints = [];
+        for (let lon = -180; lon <= 180; lon += resolution) {
+            // At the terminator, the sun is at the horizon
+            // The latitude of the terminator at a given longitude can be calculated from:
+            // cos(zenith_angle) = sin(lat) * sin(dec) + cos(lat) * cos(dec) * cos(hour_angle)
+            // At terminator, zenith_angle = 90°, so cos(90°) = 0
+            // Therefore: 0 = sin(lat) * sin(dec) + cos(lat) * cos(dec) * cos(hour_angle)
+            // Solving for lat: tan(lat) = -cos(hour_angle) / tan(dec)
+            
+            const hourAngle = (lon - sunLon) * Math.PI / 180;
+            const tanLat = -Math.cos(hourAngle) / Math.tan(sunDec);
+            const lat = Math.atan(tanLat) * 180 / Math.PI;
+            
+            // Handle edge cases where tan(dec) approaches 0 (equinoxes)
+            if (!isNaN(lat) && isFinite(lat)) {
+                terminatorPoints.push([lat, lon]);
+            }
+        }
+        
+        if (terminatorPoints.length === 0) {
+            return polygon; // Return empty if calculation failed
+        }
+        
+        // Determine which pole is in darkness
+        // If sun declination is positive (northern summer), south pole is dark
+        const darkPole = sunDec > 0 ? -90 : 90;
+        
+        // Build the night polygon
+        // Start with the terminator line
+        terminatorPoints.forEach(point => {
+            polygon.push(point);
+        });
+        
+        // Close the polygon by going to the dark pole
+        polygon.push([darkPole, 180]);
+        
+        // Trace along the dark pole
+        for (let lon = 180; lon >= -180; lon -= resolution * 4) {
+            polygon.push([darkPole, lon]);
+        }
+        
+        polygon.push([darkPole, -180]);
+        
+        return polygon;
+    }
+
+    // Update greyline overlay for a specific hour
+    function updateGreyline(mapType, hourIndex) {
+        const animation = mapType === 'country' ? countryAnimation : continentAnimation;
+        const map = mapType === 'country' ? countryMap : continentMap;
+        
+        if (!map) return;
+        
+        // Remove existing greyline layer if present
+        if (animation.greylineLayer) {
+            map.removeLayer(animation.greylineLayer);
+        }
+        
+        // Get the date for this hour
+        // Use the timestamp from the hourly data if available
+        let date;
+        if (animation.hourlyData && animation.hourlyData.hourly_data && 
+            animation.hourlyData.hourly_data[hourIndex] && 
+            animation.hourlyData.hourly_data[hourIndex].timestamp) {
+            date = new Date(animation.hourlyData.hourly_data[hourIndex].timestamp);
+        } else {
+            // Fallback: use current date with the hour set
+            date = new Date();
+            date.setUTCHours(hourIndex, 0, 0, 0);
+        }
+        
+        animation.greylineLayer = L.layerGroup();
+        
+        // Create night overlay
+        const nightPolygon = createNightPolygon(date);
+        
+        if (nightPolygon.length > 0) {
+            L.polygon(nightPolygon, {
+                color: 'transparent',
+                fillColor: '#000033',
+                fillOpacity: 0.3,
+                interactive: false
+            }).addTo(animation.greylineLayer);
+        }
+        
+        animation.greylineLayer.addTo(map);
+    }
+
+    // Remove greyline overlay
+    function removeGreyline(mapType) {
+        const animation = mapType === 'country' ? countryAnimation : continentAnimation;
+        const map = mapType === 'country' ? countryMap : continentMap;
+        
+        if (!map) return;
+        
+        if (animation.greylineLayer) {
+            map.removeLayer(animation.greylineLayer);
+            animation.greylineLayer = null;
+        }
+    }
+
         }));
         
         grid.highlightLocators(coloredLocators);

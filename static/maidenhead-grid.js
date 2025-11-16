@@ -315,6 +315,13 @@ class MaidenheadGrid {
                             popupContent += `Unique Callsigns: ${data.unique_callsigns}`;
                         }
                     }
+                    // Add hover tooltip
+                    rectangle.bindTooltip(popupContent, {
+                        direction: 'top',
+                        offset: [0, -10],
+                        opacity: 0.9
+                    });
+                    // Keep popup for click as well
                     rectangle.bindPopup(popupContent);
                 }
                 

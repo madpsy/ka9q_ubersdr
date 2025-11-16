@@ -10,6 +10,10 @@
     let countryGrid = null;
     let continentMap = null;
     let continentGrid = null;
+    let countryColorMode = 'snr';
+    let continentColorMode = 'snr';
+    let countryLocatorData = [];
+    let continentLocatorData = [];
 
     // Continent name mapping
     const continentNames = {
@@ -328,9 +332,12 @@
             });
             countryGrid.showGrid();
             
-            // Grid toggle
-            document.getElementById('country-grid-toggle').addEventListener('change', function() {
-                countryGrid.toggleGrid();
+            // Color mode radio buttons
+            document.querySelectorAll('input[name="country-color-mode"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    countryColorMode = this.value;
+                    updateCountryMapColors();
+                });
             });
         }
 
@@ -352,9 +359,12 @@
             });
             continentGrid.showGrid();
             
-            // Grid toggle
-            document.getElementById('continent-grid-toggle').addEventListener('change', function() {
-                continentGrid.toggleGrid();
+            // Color mode radio buttons
+            document.querySelectorAll('input[name="continent-color-mode"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    continentColorMode = this.value;
+                    updateContinentMapColors();
+                });
             });
         }
     }
@@ -362,98 +372,211 @@
     function updateCountryMap(data) {
         if (!countryGrid) return;
 
-        // Clear previous highlights
-        countryGrid.clearHighlights();
-
         // Collect all locators from all countries and bands
-        const allLocators = [];
+        countryLocatorData = [];
         data.by_country.forEach(country => {
             country.bands.forEach(band => {
                 band.unique_locators.forEach(loc => {
-                    allLocators.push({
+                    countryLocatorData.push({
                         locator: loc.locator,
-                        style: {
-                            fillColor: getSNRColor(loc.avg_snr),
-                            fillOpacity: 0.5,
-                            color: '#333',
-                            weight: 1,
-                            opacity: 0.8
-                        },
-                        data: {
-                            avg_snr: loc.avg_snr,
-                            count: loc.count,
-                            unique_callsigns: loc.unique_callsigns,
-                            band: band.band,
-                            country: country.country
-                        }
+                        avg_snr: loc.avg_snr,
+                        count: loc.count,
+                        unique_callsigns: loc.unique_callsigns,
+                        band: band.band,
+                        country: country.country
                     });
                 });
             });
         });
 
-        // Highlight all locators
-        countryGrid.highlightLocators(allLocators);
+        // Update colors based on current mode
+        updateCountryMapColors();
 
-        // Fit map to bounds if we have locators
-        if (allLocators.length > 0) {
-            const bounds = calculateBounds(allLocators.map(l => l.locator));
-            if (bounds) {
-                countryMap.fitBounds(bounds, { padding: [50, 50] });
+        // Invalidate map size and fit bounds
+        setTimeout(() => {
+            countryMap.invalidateSize();
+            if (countryLocatorData.length > 0) {
+                const bounds = calculateBounds(countryLocatorData.map(l => l.locator));
+                if (bounds) {
+                    countryMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 6 });
+                }
             }
-        }
+        }, 100);
     }
 
     function updateContinentMap(data) {
         if (!continentGrid) return;
 
-        // Clear previous highlights
-        continentGrid.clearHighlights();
-
         // Collect all locators from all continents and bands
-        const allLocators = [];
+        continentLocatorData = [];
         data.by_continent.forEach(continent => {
             continent.bands.forEach(band => {
                 band.unique_locators.forEach(loc => {
-                    allLocators.push({
+                    continentLocatorData.push({
                         locator: loc.locator,
-                        style: {
-                            fillColor: getSNRColor(loc.avg_snr),
-                            fillOpacity: 0.5,
-                            color: '#333',
-                            weight: 1,
-                            opacity: 0.8
-                        },
-                        data: {
-                            avg_snr: loc.avg_snr,
-                            count: loc.count,
-                            unique_callsigns: loc.unique_callsigns,
-                            band: band.band,
-                            continent: continent.continent_name
-                        }
+                        avg_snr: loc.avg_snr,
+                        count: loc.count,
+                        unique_callsigns: loc.unique_callsigns,
+                        band: band.band,
+                        continent: continent.continent_name
                     });
                 });
             });
         });
 
-        // Highlight all locators
-        continentGrid.highlightLocators(allLocators);
+        // Update colors based on current mode
+        updateContinentMapColors();
 
-        // Fit map to bounds if we have locators
-        if (allLocators.length > 0) {
-            const bounds = calculateBounds(allLocators.map(l => l.locator));
-            if (bounds) {
-                continentMap.fitBounds(bounds, { padding: [50, 50] });
+        // Invalidate map size and fit bounds
+        setTimeout(() => {
+            continentMap.invalidateSize();
+            if (continentLocatorData.length > 0) {
+                const bounds = calculateBounds(continentLocatorData.map(l => l.locator));
+                if (bounds) {
+                    continentMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 6 });
+                }
             }
+        }, 100);
+    }
+
+    function updateCountryMapColors() {
+        if (!countryGrid || countryLocatorData.length === 0) return;
+
+        countryGrid.clearHighlights();
+
+        const coloredLocators = countryLocatorData.map(loc => ({
+            locator: loc.locator,
+            style: {
+                fillColor: getDynamicColor(loc, countryColorMode, countryLocatorData),
+                fillOpacity: 0.35,
+                color: '#333',
+                weight: 1,
+                opacity: 0.6
+            },
+            data: {
+                avg_snr: loc.avg_snr,
+                count: loc.count,
+                unique_callsigns: loc.unique_callsigns,
+                band: loc.band,
+                country: loc.country
+            }
+        }));
+
+        countryGrid.highlightLocators(coloredLocators);
+    }
+
+    function updateContinentMapColors() {
+        if (!continentGrid || continentLocatorData.length === 0) return;
+
+        continentGrid.clearHighlights();
+
+        const coloredLocators = continentLocatorData.map(loc => ({
+            locator: loc.locator,
+            style: {
+                fillColor: getDynamicColor(loc, continentColorMode, continentLocatorData),
+                fillOpacity: 0.35,
+                color: '#333',
+                weight: 1,
+                opacity: 0.6
+            },
+            data: {
+                avg_snr: loc.avg_snr,
+                count: loc.count,
+                unique_callsigns: loc.unique_callsigns,
+                band: loc.band,
+                continent: loc.continent
+            }
+        }));
+
+        continentGrid.highlightLocators(coloredLocators);
+    }
+
+    function getDynamicColor(locator, mode, allData) {
+        if (mode === 'snr') {
+            return getDynamicSNRColor(locator.avg_snr, allData);
+        } else {
+            return getDynamicSpotCountColor(locator.count, allData);
         }
     }
 
-    function getSNRColor(snr) {
-        // Color scale from red (poor) to green (excellent)
-        if (snr < -10) return '#d32f2f'; // Dark red
-        if (snr < 0) return '#f57c00';   // Orange
-        if (snr < 10) return '#fbc02d';  // Yellow
-        if (snr < 20) return '#7cb342';  // Light green
-        return '#388e3c';                // Dark green
+    function getDynamicSNRColor(snr, allData) {
+        // Calculate min and max SNR from data
+        const snrValues = allData.map(l => l.avg_snr);
+        const minSNR = Math.min(...snrValues);
+        const maxSNR = Math.max(...snrValues);
+        const range = maxSNR - minSNR;
+
+        if (range === 0) return '#7cb342'; // All same value
+
+        // Normalize to 0-1 range
+        const normalized = (snr - minSNR) / range;
+
+        // Color gradient from red (0) to green (1)
+        return getColorFromGradient(normalized);
+    }
+
+    function getDynamicSpotCountColor(count, allData) {
+        // Calculate min and max spot counts from data
+        const counts = allData.map(l => l.count);
+        const minCount = Math.min(...counts);
+        const maxCount = Math.max(...counts);
+        const range = maxCount - minCount;
+
+        if (range === 0) return '#7cb342'; // All same value
+
+        // Normalize to 0-1 range
+        const normalized = (count - minCount) / range;
+
+        // Color gradient from red (0) to green (1)
+        return getColorFromGradient(normalized);
+    }
+
+    function getColorFromGradient(value) {
+        // value is 0-1, where 0 is worst (red) and 1 is best (green)
+        // Color stops: red -> orange -> yellow -> light green -> dark green
+        if (value < 0.2) {
+            // Red to orange
+            const t = value / 0.2;
+            return interpolateColor('#d32f2f', '#f57c00', t);
+        } else if (value < 0.4) {
+            // Orange to yellow
+            const t = (value - 0.2) / 0.2;
+            return interpolateColor('#f57c00', '#fbc02d', t);
+        } else if (value < 0.6) {
+            // Yellow to light green
+            const t = (value - 0.4) / 0.2;
+            return interpolateColor('#fbc02d', '#9ccc65', t);
+        } else if (value < 0.8) {
+            // Light green to medium green
+            const t = (value - 0.6) / 0.2;
+            return interpolateColor('#9ccc65', '#7cb342', t);
+        } else {
+            // Medium green to dark green
+            const t = (value - 0.8) / 0.2;
+            return interpolateColor('#7cb342', '#388e3c', t);
+        }
+    }
+
+    function interpolateColor(color1, color2, factor) {
+        // Parse hex colors
+        const c1 = {
+            r: parseInt(color1.slice(1, 3), 16),
+            g: parseInt(color1.slice(3, 5), 16),
+            b: parseInt(color1.slice(5, 7), 16)
+        };
+        const c2 = {
+            r: parseInt(color2.slice(1, 3), 16),
+            g: parseInt(color2.slice(3, 5), 16),
+            b: parseInt(color2.slice(5, 7), 16)
+        };
+
+        // Interpolate
+        const r = Math.round(c1.r + (c2.r - c1.r) * factor);
+        const g = Math.round(c1.g + (c2.g - c1.g) * factor);
+        const b = Math.round(c1.b + (c2.b - c1.b) * factor);
+
+        // Convert back to hex
+        return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
     }
 
     function calculateBounds(locators) {

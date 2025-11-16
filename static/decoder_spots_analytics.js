@@ -316,6 +316,9 @@
 
         // Update country map with data
         updateCountryMap(data);
+        
+        // Show country animation controls
+        document.getElementById('country-animation-controls').style.display = 'flex';
 
         // Display continent analytics (only if no specific country was selected)
         const continentSection = document.getElementById('continent-section');
@@ -323,6 +326,7 @@
             // Hide continent section when a specific country is selected
             continentSection.style.display = 'none';
             document.getElementById('continent-map').style.display = 'none';
+            document.getElementById('continent-animation-controls').style.display = 'none';
         } else {
             continentSection.style.display = 'block';
             continentList.innerHTML = '';
@@ -333,6 +337,9 @@
             
             // Update continent map with data
             updateContinentMap(data);
+            
+            // Show continent animation controls
+            document.getElementById('continent-animation-controls').style.display = 'flex';
         }
 
         container.style.display = 'block';
@@ -1162,9 +1169,6 @@
             
             const data = await response.json();
             animation.hourlyData = data;
-            
-            // Show animation controls
-            document.getElementById(`${mapType}-animation-controls`).style.display = 'flex';
             
         } catch (error) {
             console.error('Error loading hourly data:', error);

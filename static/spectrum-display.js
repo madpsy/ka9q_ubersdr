@@ -396,6 +396,11 @@ class SpectrumDisplay {
         this.setupMouseHandlers();
         this.setupScrollHandler();
 
+        // Periodic sync verification to prevent audio/spectrum drift
+        this.lastSyncCheck = Date.now();
+        this.syncCheckInterval = 100; // Check every 100ms
+        this.startSyncMonitoring();
+
         // Color gradient cache
         this.colorGradient = this.createColorGradient();
 
@@ -743,6 +748,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
         // Stop frame processing
         this.stopFrameProcessing();
+
+        // Stop sync monitoring
+        this.stopSyncMonitoring();
 
         this.connected = false;
     }
@@ -3721,5 +3729,56 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             zoomLevel: this.zoomLevel,
             bitrate: this.currentBitrate
         };
+    }
+
+    // Start periodic sync monitoring to prevent audio/spectrum drift
+    startSyncMonitoring() {
+        // Use setInterval for regular checks
+        this.syncMonitoringInterval = setInterval(() => {
+            this.checkSync();
+        }, this.syncCheckInterval);
+        console.log(`Started sync monitoring (checking every ${this.syncCheckInterval}ms)`);
+    }
+
+    // Stop sync monitoring
+    stopSyncMonitoring() {
+        if (this.syncMonitoringInterval) {
+            clearInterval(this.syncMonitoringInterval);
+            this.syncMonitoringInterval = null;
+            console.log('Stopped sync monitoring');
+        }
+    }
+
+    // Check if spectrum display is in sync with audio frequency
+    checkSync() {
+        // Skip check if not connected or no data
+        if (!this.connected || !this.spectrumData || !this.currentTunedFreq || !this.totalBandwidth) {
+            return;
+        }
+
+        // Skip check while actively dragging (prediction is intentionally offset)
+        if (this.isDragging || this.predictedFreqOffset !== 0) {
+            return;
+        }
+
+        // Calculate where the tuned frequency marker should be displayed
+        const startFreq = this.centerFreq - this.totalBandwidth / 2;
+        const endFreq = this.centerFreq + this.totalBandwidth / 2;
+
+        // Check if marker is visible in current view
+        const isVisible = this.currentTunedFreq >= startFreq && this.currentTunedFreq <= endFreq;
+
+        if (!isVisible) {
+            // Marker has drifted off-screen - this indicates sync loss
+            console.log(`Sync check: Marker off-screen (tuned: ${(this.currentTunedFreq/1e6).toFixed(3)} MHz, ` +
+                       `range: ${(startFreq/1e6).toFixed(3)}-${(endFreq/1e6).toFixed(3)} MHz)`);
+
+            // If we're zoomed in, pan to bring marker back into view
+            if (this.binBandwidth && this.initialBinBandwidth &&
+                this.binBandwidth < this.initialBinBandwidth) {
+                console.log('Sync correction: Panning to restore marker visibility');
+                this.panTo(this.currentTunedFreq);
+            }
+        }
     }
 }

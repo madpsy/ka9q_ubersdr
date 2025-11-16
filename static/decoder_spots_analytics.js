@@ -815,20 +815,25 @@
             const maxSNR = band.max_snr >= 0 ? `+${band.max_snr.toFixed(1)}` : band.max_snr.toFixed(1);
 
             // Calculate unique callsigns for this band by aggregating from locators
-            // Only count callsigns that were actually heard on THIS specific band
+            // Note: CallsignInfo.Bands contains strings like "FT8 20m" (mode + band)
             const uniqueCallsignsSet = new Set();
+            let hasCallsignData = false;
+            
             if (band.unique_locators && band.unique_locators.length > 0) {
                 band.unique_locators.forEach(loc => {
                     if (loc.callsigns && loc.callsigns.length > 0) {
+                        hasCallsignData = true;
                         loc.callsigns.forEach(csInfo => {
-                            // Only add this callsign if it was heard on the current band
-                            if (csInfo.bands && csInfo.bands.includes(band.band)) {
+                            // Check if any of the bands in csInfo.bands contains this band
+                            // csInfo.bands contains strings like "FT8 20m", "WSPR 40m"
+                            if (csInfo.bands && csInfo.bands.some(b => b.includes(band.band))) {
                                 uniqueCallsignsSet.add(csInfo.callsign);
                             }
                         });
                     }
                 });
             }
+            
             const uniqueCallsignsCount = uniqueCallsignsSet.size;
 
             // Use backend's best_hours_utc (top 3) and collate into ranges for "Best Hours"
@@ -861,7 +866,7 @@
                         <span class="band-spots">${band.spots.toLocaleString()} spots</span>
                     </div>
                     <div class="band-snr">SNR: Min ${minSNR} dB • Avg ${avgSNR} dB • Max ${maxSNR} dB</div>
-                    ${uniqueCallsignsCount > 0 ? `<div class="band-snr">Unique Callsigns: ${uniqueCallsignsCount}</div>` : ''}
+                    ${hasCallsignData ? `<div class="band-snr">Unique Callsigns: ${uniqueCallsignsCount}</div>` : ''}
                     <div class="best-hours">
                         <strong>Best Hours (UTC):</strong>
                         <div class="hour-badges">

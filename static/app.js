@@ -5914,11 +5914,18 @@ function updateSpectrumAutoAdjust() {
     
     // Calculate dynamic range
     const dynamicRange = avgPeak - avgNoiseFloor;
-    
-    // Set contrast to noise floor + 10% of dynamic range
-    // This suppresses noise while preserving signals
-    const targetContrast = Math.max(0, Math.min(100, avgNoiseFloor + (dynamicRange * 0.10)));
-    
+
+    // Contrast slider (0-100) represents the noise floor suppression threshold
+    // Higher values = more aggressive noise suppression
+    // We want to set it to suppress the noise floor while preserving signals
+    // Map the noise floor dB value to the 0-100 contrast range
+    // Typical dB range is -120 to 0, so we normalize and scale
+    const minDb = -120;
+    const maxDb = 0;
+    const normalizedNoiseFloor = (avgNoiseFloor - minDb) / (maxDb - minDb);
+    // Set contrast to suppress everything below noise floor + 10% of dynamic range
+    const targetContrast = Math.max(0, Math.min(100, normalizedNoiseFloor * 100 + 10));
+
     // Set intensity based on dynamic range
     // High dynamic range (strong signals) = lower intensity (0.0)
     // Low dynamic range (weak signals) = higher intensity (0.5) to boost visibility

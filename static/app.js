@@ -5822,6 +5822,130 @@ function updateSpectrumGrid() {
     spectrumDisplay.updateConfig({ showGrid });
 }
 
+// RF Spectrum auto-adjust state
+let spectrumAutoAdjustEnabled = false;
+let spectrumAutoAdjustInterval = null;
+const spectrumNoiseFloorHistory = [];
+const spectrumPeakHistory = [];
+const SPECTRUM_HISTORY_SIZE = 10;
+
+// Toggle RF spectrum auto-adjust
+function toggleSpectrumAutoAdjust() {
+    const checkbox = document.getElementById('spectrum-auto-adjust');
+    if (!checkbox) return;
+    
+    spectrumAutoAdjustEnabled = checkbox.checked;
+    
+    if (spectrumAutoAdjustEnabled) {
+        // Start auto-adjustment
+        if (!spectrumAutoAdjustInterval) {
+            spectrumAutoAdjustInterval = setInterval(updateSpectrumAutoAdjust, 500);
+        }
+        log('RF Spectrum auto-adjust enabled');
+    } else {
+        // Stop auto-adjustment
+        if (spectrumAutoAdjustInterval) {
+            clearInterval(spectrumAutoAdjustInterval);
+            spectrumAutoAdjustInterval = null;
+        }
+        // Clear history
+        spectrumNoiseFloorHistory.length = 0;
+        spectrumPeakHistory.length = 0;
+        log('RF Spectrum auto-adjust disabled');
+    }
+}
+
+// Update RF spectrum auto-adjust values
+function updateSpectrumAutoAdjust() {
+    if (!spectrumDisplay || !spectrumDisplay.spectrumData || !spectrumDisplay.totalBandwidth) {
+        return;
+    }
+    
+    const spectrumData = spectrumDisplay.spectrumData;
+    const centerFreq = spectrumDisplay.centerFreq;
+    const totalBandwidth = spectrumDisplay.totalBandwidth;
+    
+    // Calculate frequency range
+    const startFreq = centerFreq - totalBandwidth / 2;
+    const endFreq = centerFreq + totalBandwidth / 2;
+    
+    // Get all dB values in visible range
+    const visibleValues = [];
+    for (let i = 0; i < spectrumData.length; i++) {
+        const freq = startFreq + (i / spectrumData.length) * totalBandwidth;
+        if (freq >= startFreq && freq <= endFreq) {
+            const db = spectrumData[i];
+            if (isFinite(db)) {
+                visibleValues.push(db);
+            }
+        }
+    }
+    
+    if (visibleValues.length === 0) {
+        return;
+    }
+    
+    // Sort values for percentile calculation
+    visibleValues.sort((a, b) => a - b);
+    
+    // Calculate noise floor (10th percentile)
+    const noiseFloorIndex = Math.floor(visibleValues.length * 0.10);
+    const currentNoiseFloor = visibleValues[noiseFloorIndex];
+    
+    // Calculate peak signal (90th percentile)
+    const peakIndex = Math.floor(visibleValues.length * 0.90);
+    const currentPeak = visibleValues[peakIndex];
+    
+    // Add to history for temporal smoothing
+    spectrumNoiseFloorHistory.push(currentNoiseFloor);
+    spectrumPeakHistory.push(currentPeak);
+    
+    // Keep only last N samples
+    if (spectrumNoiseFloorHistory.length > SPECTRUM_HISTORY_SIZE) {
+        spectrumNoiseFloorHistory.shift();
+    }
+    if (spectrumPeakHistory.length > SPECTRUM_HISTORY_SIZE) {
+        spectrumPeakHistory.shift();
+    }
+    
+    // Calculate smoothed values (average of history)
+    const avgNoiseFloor = spectrumNoiseFloorHistory.reduce((sum, val) => sum + val, 0) / spectrumNoiseFloorHistory.length;
+    const avgPeak = spectrumPeakHistory.reduce((sum, val) => sum + val, 0) / spectrumPeakHistory.length;
+    
+    // Calculate dynamic range
+    const dynamicRange = avgPeak - avgNoiseFloor;
+    
+    // Set contrast to noise floor + 10% of dynamic range
+    // This suppresses noise while preserving signals
+    const targetContrast = Math.max(0, Math.min(100, avgNoiseFloor + (dynamicRange * 0.10)));
+    
+    // Set intensity based on dynamic range
+    // High dynamic range (strong signals) = lower intensity (0.0)
+    // Low dynamic range (weak signals) = higher intensity (0.5) to boost visibility
+    let targetIntensity;
+    if (dynamicRange > 40) {
+        targetIntensity = 0.0;  // Strong signals, no boost needed
+    } else if (dynamicRange > 20) {
+        targetIntensity = 0.2;  // Moderate signals, slight boost
+    } else {
+        targetIntensity = 0.5;  // Weak signals, significant boost
+    }
+    
+    // Update sliders
+    const intensitySlider = document.getElementById('spectrum-intensity');
+    const contrastSlider = document.getElementById('spectrum-contrast');
+    
+    if (intensitySlider) {
+        intensitySlider.value = targetIntensity;
+        updateSpectrumIntensity();
+    }
+    
+    if (contrastSlider) {
+        contrastSlider.value = targetContrast;
+        updateSpectrumContrast();
+    }
+}
+
 function updateSpectrumIntensity() {
     if (!spectrumDisplay) return;
 
@@ -5978,6 +6102,7 @@ window.updateSpectrumRange = updateSpectrumRange;
 window.updateSpectrumGrid = updateSpectrumGrid;
 window.updateSpectrumIntensity = updateSpectrumIntensity;
 window.updateSpectrumContrast = updateSpectrumContrast;
+window.toggleSpectrumAutoAdjust = toggleSpectrumAutoAdjust;
 
 // Helper function for spectrum display to get current dial frequency
 window.getCurrentDialFrequency = function() {

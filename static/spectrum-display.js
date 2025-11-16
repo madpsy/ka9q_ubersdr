@@ -385,6 +385,10 @@ class SpectrumDisplay {
         this.dragStartFreq = 0;
         this.lastPanTime = 0;
         this.panThrottleMs = 150; // Throttle pan requests to avoid backend rounding issues
+
+        // Client-side prediction for smooth dragging
+        this.predictedFreqOffset = 0; // Frequency offset for visual prediction during drag
+        this.lastServerCenterFreq = 0; // Track last confirmed center freq from server
         this.scrollEnabled = false; // Mouse scroll wheel disabled by default
         this.zoomScrollEnabled = true; // Zoom scroll wheel enabled by default
         this.smoothingEnabled = false; // Temporal smoothing disabled by default
@@ -824,6 +828,18 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 this.binBandwidth = msg.binBandwidth;
                 this.totalBandwidth = msg.totalBandwidth;
 
+                // Track server-confirmed center frequency for prediction sync
+                this.lastServerCenterFreq = msg.centerFreq;
+
+                // Reset prediction offset when server confirms new position
+                if (this.isDragging) {
+                    // Adjust offset to account for server's actual position
+                    const serverOffset = msg.centerFreq - this.dragStartFreq;
+                    this.predictedFreqOffset = serverOffset;
+                } else {
+                    this.predictedFreqOffset = 0;
+                }
+
                 // Store initial bin bandwidth on first config (for zoom level calculation)
                 if (!this.initialBinBandwidth) {
                     this.initialBinBandwidth = this.binBandwidth;
@@ -937,6 +953,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         // Auto-range if enabled
         if (this.config.autoRange) {
             this.updateAutoRange();
+        }
+
+        // Apply client-side prediction: shift canvas horizontally if dragging
+        if (this.isDragging && this.predictedFreqOffset !== 0) {
+            this.applyPredictedShift();
         }
 
         // Initialize waterfall image data if needed
@@ -1095,8 +1116,10 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     drawFrequencyScaleAtPosition(yPos) {
         if (!this.totalBandwidth) return;
 
-        const startFreq = this.centerFreq - this.totalBandwidth / 2;
-        const endFreq = this.centerFreq + this.totalBandwidth / 2;
+        // Apply client-side prediction offset during dragging
+        const effectiveCenterFreq = this.centerFreq + this.predictedFreqOffset;
+        const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
+        const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
 
         // Clear the frequency scale area completely (solid black, not transparent)
         this.ctx.fillStyle = '#000000';
@@ -1189,6 +1212,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.lineGraphCanvas.height = 300;
             this.lineGraphCanvas.style.width = this.width + 'px';
             this.lineGraphCanvas.style.height = '300px';
+        }
+
+        // Apply client-side prediction: shift line graph if dragging
+        if (this.isDragging && this.predictedFreqOffset !== 0) {
+            this.applyPredictedShiftToLineGraph();
         }
 
         const ctx = this.lineGraphCtx;
@@ -1337,6 +1365,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.lineGraphCanvas.height = 600;
             this.lineGraphCanvas.style.width = this.width + 'px';
             this.lineGraphCanvas.style.height = '600px';
+        }
+
+        // Apply client-side prediction: shift line graph if dragging
+        if (this.isDragging && this.predictedFreqOffset !== 0) {
+            this.applyPredictedShiftToLineGraph();
         }
 
         const ctx = this.lineGraphCtx;
@@ -1657,8 +1690,10 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         if (!this.totalBandwidth || !this.lineGraphCtx) return;
 
         const ctx = this.lineGraphCtx;
-        const startFreq = this.centerFreq - this.totalBandwidth / 2;
-        const endFreq = this.centerFreq + this.totalBandwidth / 2;
+        // Apply client-side prediction offset during dragging
+        const effectiveCenterFreq = this.centerFreq + this.predictedFreqOffset;
+        const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
+        const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
 
         // Clear the frequency scale area (starts at 35px to leave room for bookmarks)
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -1913,6 +1948,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 // Clamp to boundaries
                 newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
+                // CLIENT-SIDE PREDICTION: Update visual offset immediately for smooth dragging
+                this.predictedFreqOffset = newCenterFreq - this.lastServerCenterFreq;
+
+                // Redraw immediately with predicted offset
+                if (this.spectrumData && this.spectrumData.length > 0) {
+                    this.draw();
+                }
+
                 // Throttle pan requests
                 const now = Date.now();
                 const timeSinceLastPan = now - this.lastPanTime;
@@ -1964,6 +2007,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             const rect = this.lineGraphCanvas.getBoundingClientRect();
             lineGraphDragStartX = e.clientX - rect.left;
             lineGraphDragStartFreq = this.centerFreq;
+            this.lastServerCenterFreq = this.centerFreq; // Track starting server position
+            this.predictedFreqOffset = 0; // Reset prediction offset
             lineGraphDragging = true;
             lineGraphDragDidMove = false;
             this.lineGraphCanvas.style.cursor = 'default';
@@ -2014,7 +2059,13 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
             lineGraphDragging = false;
             lineGraphDragDidMove = false;
+            this.predictedFreqOffset = 0; // Clear prediction offset when drag ends
             this.updateLineGraphCursorStyle();
+
+            // Redraw to clear any prediction artifacts
+            if (this.spectrumData && this.spectrumData.length > 0) {
+                this.draw();
+            }
         });
 
         // Add context menu handler for line graph (right-click)
@@ -2096,8 +2147,10 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     drawFrequencyScale() {
         if (!this.totalBandwidth) return;
 
-        const startFreq = this.centerFreq - this.totalBandwidth / 2;
-        const endFreq = this.centerFreq + this.totalBandwidth / 2;
+        // Apply client-side prediction offset during dragging
+        const effectiveCenterFreq = this.centerFreq + this.predictedFreqOffset;
+        const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
+        const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
 
         // Clear the frequency scale area completely (solid black, not transparent)
         this.ctx.fillStyle = '#000000';
@@ -2198,8 +2251,12 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         // Update overlay position in case canvas moved
         this.updateOverlayPosition();
 
+        // Apply client-side prediction offset during dragging
+        const effectiveCenterFreq = this.centerFreq + this.predictedFreqOffset;
+
         // Check if spectrum view has changed (pan/zoom) - regenerate marker cache if needed
-        const viewChanged = this.lastMarkerCenterFreq !== this.centerFreq ||
+        // Include prediction offset in change detection
+        const viewChanged = this.lastMarkerCenterFreq !== effectiveCenterFreq ||
                            this.lastMarkerTotalBandwidth !== this.totalBandwidth ||
                            this.lastMarkerDisplayMode !== this.displayMode;
 
@@ -2244,8 +2301,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             // Restore original context
             this.overlayCtx = originalCtx;
 
-            // Update tracking variables
-            this.lastMarkerCenterFreq = this.centerFreq;
+            // Update tracking variables (use effective center freq with prediction)
+            this.lastMarkerCenterFreq = effectiveCenterFreq;
             this.lastMarkerTotalBandwidth = this.totalBandwidth;
             this.lastMarkerDisplayMode = this.displayMode;
         }
@@ -2268,9 +2325,12 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     drawTunedFrequencyCursorOnly() {
         if (!this.currentTunedFreq || !this.totalBandwidth) return;
 
+        // Apply client-side prediction offset during dragging
+        const effectiveCenterFreq = this.centerFreq + this.predictedFreqOffset;
+
         // Calculate frequency range from server data
-        const startFreq = this.centerFreq - this.totalBandwidth / 2;
-        const endFreq = this.centerFreq + this.totalBandwidth / 2;
+        const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
+        const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
 
         // Only draw if tuned frequency is within range
         if (this.currentTunedFreq < startFreq || this.currentTunedFreq > endFreq) return;
@@ -2514,6 +2574,95 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         this.ctx.fillText(this.formatFrequency(endFreq), this.width - 5, this.height - 5);
     }
 
+    // Apply predicted horizontal shift to waterfall canvas during dragging
+    applyPredictedShift() {
+        if (!this.predictedFreqOffset || !this.totalBandwidth) return;
+
+        // Calculate pixel shift from frequency offset
+        const pixelShift = (this.predictedFreqOffset / this.totalBandwidth) * this.width;
+
+        // Only shift if movement is significant (at least 1 pixel)
+        if (Math.abs(pixelShift) < 1) return;
+
+        // Save current canvas content
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.canvas.width;
+        tempCanvas.height = this.canvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(this.canvas, 0, 0);
+
+        // Clear canvas
+        this.ctx.fillStyle = '#000';
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        // Draw shifted content
+        // Negative offset = drag right = shift content left (show higher frequencies on right)
+        // Positive offset = drag left = shift content right (show lower frequencies on left)
+        this.ctx.drawImage(tempCanvas, -pixelShift, 0);
+
+        // Fill gaps with black
+        if (pixelShift > 0) {
+            // Shifted right, fill left edge
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0, 0, pixelShift, this.height);
+        } else {
+            // Shifted left, fill right edge
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(this.width + pixelShift, 0, -pixelShift, this.height);
+        }
+    }
+
+    // Apply predicted horizontal shift to line graph canvas during dragging
+    applyPredictedShiftToLineGraph() {
+        if (!this.predictedFreqOffset || !this.totalBandwidth || !this.lineGraphCanvas) return;
+
+        // Calculate pixel shift from frequency offset
+        const pixelShift = (this.predictedFreqOffset / this.totalBandwidth) * this.width;
+
+        // Only shift if movement is significant (at least 1 pixel)
+        if (Math.abs(pixelShift) < 1) return;
+
+        // Save current canvas content
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.lineGraphCanvas.width;
+        tempCanvas.height = this.lineGraphCanvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(this.lineGraphCanvas, 0, 0);
+
+        // Clear canvas
+        this.lineGraphCtx.fillStyle = '#000';
+        this.lineGraphCtx.fillRect(0, 0, this.lineGraphCanvas.width, this.lineGraphCanvas.height);
+
+        // Restore grey background for bookmarks area (top 35px)
+        this.lineGraphCtx.fillStyle = '#adb5bd';
+        this.lineGraphCtx.fillRect(0, 0, this.lineGraphCanvas.width, 35);
+
+        // Draw shifted content
+        // Negative offset = drag right = shift content left
+        // Positive offset = drag left = shift content right
+        this.lineGraphCtx.drawImage(tempCanvas, -pixelShift, 0);
+
+        // Fill gaps with appropriate background
+        if (pixelShift > 0) {
+            // Shifted right, fill left edge
+            // Top 35px: grey for bookmarks
+            this.lineGraphCtx.fillStyle = '#adb5bd';
+            this.lineGraphCtx.fillRect(0, 0, pixelShift, 35);
+            // Rest: black for graph
+            this.lineGraphCtx.fillStyle = '#000';
+            this.lineGraphCtx.fillRect(0, 35, pixelShift, this.lineGraphCanvas.height - 35);
+        } else {
+            // Shifted left, fill right edge
+            const rightEdge = this.lineGraphCanvas.width + pixelShift;
+            // Top 35px: grey for bookmarks
+            this.lineGraphCtx.fillStyle = '#adb5bd';
+            this.lineGraphCtx.fillRect(rightEdge, 0, -pixelShift, 35);
+            // Rest: black for graph
+            this.lineGraphCtx.fillStyle = '#000';
+            this.lineGraphCtx.fillRect(rightEdge, 35, -pixelShift, this.lineGraphCanvas.height - 35);
+        }
+    }
+
     // Draw cursor information
     drawCursorInfo() {
         if (!this.spectrumData) return;
@@ -2721,6 +2870,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 // Clamp to boundaries
                 newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
+                // CLIENT-SIDE PREDICTION: Update visual offset immediately for smooth dragging
+                this.predictedFreqOffset = newCenterFreq - this.lastServerCenterFreq;
+
+                // Redraw immediately with predicted offset
+                if (this.spectrumData && this.spectrumData.length > 0) {
+                    this.draw();
+                }
+
                 // Throttle pan requests to avoid backend rounding issues
                 const now = Date.now();
                 const timeSinceLastPan = now - this.lastPanTime;
@@ -2769,6 +2926,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             const rect = this.canvas.getBoundingClientRect();
             this.dragStartX = e.clientX - rect.left;
             this.dragStartFreq = this.centerFreq;
+            this.lastServerCenterFreq = this.centerFreq; // Track starting server position
+            this.predictedFreqOffset = 0; // Reset prediction offset
             this.isDragging = true;
             this.dragDidMove = false; // Track if we actually moved
             this.canvas.style.cursor = 'default';
@@ -2845,7 +3004,13 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
             this.isDragging = false;
             this.dragDidMove = false;
+            this.predictedFreqOffset = 0; // Clear prediction offset when drag ends
             this.updateCursorStyle();
+
+            // Redraw to clear any prediction artifacts
+            if (this.spectrumData && this.spectrumData.length > 0) {
+                this.draw();
+            }
         });
 
         // Add context menu handler (right-click)

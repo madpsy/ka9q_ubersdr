@@ -2294,8 +2294,29 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
         const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
 
-        // Only draw if tuned frequency is within range
-        if (this.currentTunedFreq < startFreq || this.currentTunedFreq > endFreq) return;
+        // Check if tuned frequency has scrolled off-screen
+        if (this.currentTunedFreq < startFreq || this.currentTunedFreq > endFreq) {
+            // When marker scrolls off edge, update audio frequency to follow the spectrum edge
+            // Calculate which edge the marker would be at
+            let newFreq;
+            const edgeMargin = this.totalBandwidth * 0.1; // 10% from edge
+
+            if (this.currentTunedFreq < startFreq) {
+                // Scrolled off left edge - tune to left edge position
+                newFreq = startFreq + edgeMargin;
+            } else {
+                // Scrolled off right edge - tune to right edge position
+                newFreq = endFreq - edgeMargin;
+            }
+
+            // Update the frequency via the callback
+            if (this.config.onFrequencyClick && !this.isDragging) {
+                console.log(`Marker at edge - updating frequency to ${(newFreq/1e6).toFixed(3)} MHz`);
+                this.skipNextPan = true; // Don't pan back when we update frequency
+                this.config.onFrequencyClick(newFreq);
+            }
+            return; // Don't draw marker if off-screen
+        }
 
         // Calculate x position for center frequency
         const x = ((this.currentTunedFreq - startFreq) / (endFreq - startFreq)) * this.width;
@@ -3297,11 +3318,6 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             const oldTunedFreq = this.currentTunedFreq;
             this.currentTunedFreq = newConfig.tunedFreq;
 
-            // Check if tuned frequency is currently visible in spectrum view
-            const startFreq = this.centerFreq - this.totalBandwidth / 2;
-            const endFreq = this.centerFreq + this.totalBandwidth / 2;
-            const isFreqVisible = this.currentTunedFreq >= startFreq && this.currentTunedFreq <= endFreq;
-
             // If we're zoomed in and frequency changed, pan to follow it
             // Only pan if we have a valid zoom level and the frequency actually changed
             // Skip panning if the frequency change came from clicking the waterfall
@@ -3311,15 +3327,6 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 !this.skipNextPan) {
 
                 console.log(`Frequency changed to ${(this.currentTunedFreq/1e6).toFixed(3)} MHz - panning spectrum to follow`);
-                this.panTo(this.currentTunedFreq);
-            }
-            // Also pan if zoomed in and tuned frequency scrolled off-screen (even if frequency didn't change)
-            else if (this.binBandwidth && this.initialBinBandwidth &&
-                     this.binBandwidth < this.initialBinBandwidth &&
-                     this.currentTunedFreq && !isFreqVisible &&
-                     !this.skipNextPan) {
-
-                console.log(`Tuned frequency ${(this.currentTunedFreq/1e6).toFixed(3)} MHz scrolled off-screen - panning to follow`);
                 this.panTo(this.currentTunedFreq);
             }
 

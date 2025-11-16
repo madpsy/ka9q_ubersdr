@@ -388,7 +388,7 @@
                             total_callsigns: 0,
                             bands: [],
                             countries: new Set(),
-                            callsigns: [] // Store callsign info
+                            callsignMap: new Map() // Use Map to deduplicate callsigns
                         });
                     }
                     const agg = locatorMap.get(key);
@@ -398,24 +398,38 @@
                     agg.total_callsigns += loc.unique_callsigns;
                     agg.bands.push(band.band);
                     agg.countries.add(country.country);
-                    // Collect callsign info
+                    // Collect callsign info and merge bands for same callsign
                     if (loc.callsigns && loc.callsigns.length > 0) {
-                        agg.callsigns.push(...loc.callsigns);
+                        loc.callsigns.forEach(csInfo => {
+                            if (!agg.callsignMap.has(csInfo.callsign)) {
+                                agg.callsignMap.set(csInfo.callsign, new Set());
+                            }
+                            // Add all bands for this callsign
+                            csInfo.bands.forEach(band => agg.callsignMap.get(csInfo.callsign).add(band));
+                        });
                     }
                 });
             });
         });
 
-        // Convert to array with calculated averages
-        countryLocatorData = Array.from(locatorMap.values()).map(agg => ({
-            locator: agg.locator,
-            avg_snr: agg.total_snr / agg.snr_count,
-            count: agg.total_spots,
-            unique_callsigns: agg.total_callsigns,
-            bands: [...new Set(agg.bands)].join(', '),
-            countries: Array.from(agg.countries).join(', '),
-            callsigns: agg.callsigns // Keep callsign info for modal
-        }));
+        // Convert to array with calculated averages and deduplicated callsigns
+        countryLocatorData = Array.from(locatorMap.values()).map(agg => {
+            // Convert callsign map to array of CallsignInfo objects
+            const callsigns = Array.from(agg.callsignMap.entries()).map(([callsign, bandsSet]) => ({
+                callsign: callsign,
+                bands: Array.from(bandsSet).sort()
+            }));
+            
+            return {
+                locator: agg.locator,
+                avg_snr: agg.total_snr / agg.snr_count,
+                count: agg.total_spots,
+                unique_callsigns: agg.total_callsigns,
+                bands: [...new Set(agg.bands)].join(', '),
+                countries: Array.from(agg.countries).join(', '),
+                callsigns: callsigns
+            };
+        });
 
         // Update colors based on current mode
         updateCountryMapColors();
@@ -451,7 +465,7 @@
                             total_callsigns: 0,
                             bands: [],
                             continents: new Set(),
-                            callsigns: [] // Store callsign info
+                            callsignMap: new Map() // Use Map to deduplicate callsigns
                         });
                     }
                     const agg = locatorMap.get(key);
@@ -461,24 +475,38 @@
                     agg.total_callsigns += loc.unique_callsigns;
                     agg.bands.push(band.band);
                     agg.continents.add(continent.continent_name);
-                    // Collect callsign info
+                    // Collect callsign info and merge bands for same callsign
                     if (loc.callsigns && loc.callsigns.length > 0) {
-                        agg.callsigns.push(...loc.callsigns);
+                        loc.callsigns.forEach(csInfo => {
+                            if (!agg.callsignMap.has(csInfo.callsign)) {
+                                agg.callsignMap.set(csInfo.callsign, new Set());
+                            }
+                            // Add all bands for this callsign
+                            csInfo.bands.forEach(band => agg.callsignMap.get(csInfo.callsign).add(band));
+                        });
                     }
                 });
             });
         });
 
-        // Convert to array with calculated averages
-        continentLocatorData = Array.from(locatorMap.values()).map(agg => ({
-            locator: agg.locator,
-            avg_snr: agg.total_snr / agg.snr_count,
-            count: agg.total_spots,
-            unique_callsigns: agg.total_callsigns,
-            bands: [...new Set(agg.bands)].join(', '),
-            continents: Array.from(agg.continents).join(', '),
-            callsigns: agg.callsigns // Keep callsign info for modal
-        }));
+        // Convert to array with calculated averages and deduplicated callsigns
+        continentLocatorData = Array.from(locatorMap.values()).map(agg => {
+            // Convert callsign map to array of CallsignInfo objects
+            const callsigns = Array.from(agg.callsignMap.entries()).map(([callsign, bandsSet]) => ({
+                callsign: callsign,
+                bands: Array.from(bandsSet).sort()
+            }));
+            
+            return {
+                locator: agg.locator,
+                avg_snr: agg.total_snr / agg.snr_count,
+                count: agg.total_spots,
+                unique_callsigns: agg.total_callsigns,
+                bands: [...new Set(agg.bands)].join(', '),
+                continents: Array.from(agg.continents).join(', '),
+                callsigns: callsigns
+            };
+        });
 
         // Update colors based on current mode
         updateContinentMapColors();

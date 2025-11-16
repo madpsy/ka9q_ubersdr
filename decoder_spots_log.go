@@ -991,6 +991,33 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 		}
 	}
 
+	// Populate unique callsigns per locator across all bands
+	for _, spot := range spots {
+		if spot.Country == "" || spot.Locator == "" || spot.Callsign == "" {
+			continue
+		}
+
+		// Track for country
+		if countryLocatorCallsigns[spot.Country] == nil {
+			countryLocatorCallsigns[spot.Country] = make(map[string]map[string]bool)
+		}
+		if countryLocatorCallsigns[spot.Country][spot.Locator] == nil {
+			countryLocatorCallsigns[spot.Country][spot.Locator] = make(map[string]bool)
+		}
+		countryLocatorCallsigns[spot.Country][spot.Locator][spot.Callsign] = true
+
+		// Track for continent
+		if spot.Continent != "" {
+			if continentLocatorCallsigns[spot.Continent] == nil {
+				continentLocatorCallsigns[spot.Continent] = make(map[string]map[string]bool)
+			}
+			if continentLocatorCallsigns[spot.Continent][spot.Locator] == nil {
+				continentLocatorCallsigns[spot.Continent][spot.Locator] = make(map[string]bool)
+			}
+			continentLocatorCallsigns[spot.Continent][spot.Locator][spot.Callsign] = true
+		}
+	}
+
 	// Build country analytics
 	continentNames := map[string]string{
 		"AF": "Africa",

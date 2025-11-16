@@ -1065,45 +1065,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             console.log(`[drawWaterfall] Drew waterfall line #${this.waterfallLineCount} at y=${waterfallStartY}`);
         }
 
-        // Draw timestamps on left side frequently (about 4 visible on 600px canvas)
-        // With 600px height, we want timestamps every ~150 pixels
-        // At 60 fps, that's every ~150 frames = ~2.5 seconds
-        const linesPerSecond = 60; // Approximate frame rate
-        const secondsPerTimestamp = 2.5; // Timestamp frequency
-        const linesPerTimestamp = Math.floor(linesPerSecond * secondsPerTimestamp);
-
-        if (this.waterfallLineCount % linesPerTimestamp === 0) {
-            const elapsedSeconds = Math.floor((Date.now() - this.waterfallStartTime) / 1000);
-            const minutes = Math.floor(elapsedSeconds / 60);
-            const seconds = elapsedSeconds % 60;
-            const timestamp = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-
-            // Draw timestamp on left with background (at waterfallStartY where new line appears)
-            this.ctx.font = 'bold 11px monospace';
-            const textWidth = this.ctx.measureText(timestamp).width;
-
-            // Save current state
-            this.ctx.save();
-
-            // Set fixed height for timestamp background (not affected by canvas scaling)
-            const timestampHeight = 14;
-            const timestampPadding = 2;
-
-            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-            this.ctx.fillRect(0, waterfallStartY, textWidth + 6, timestampHeight);
-
-            this.ctx.fillStyle = '#ffffff';
-            this.ctx.strokeStyle = '#000000';
-            this.ctx.lineWidth = 2;
-            this.ctx.textAlign = 'left';
-            this.ctx.textBaseline = 'top';
-
-            this.ctx.strokeText(timestamp, 3, waterfallStartY + timestampPadding);
-            this.ctx.fillText(timestamp, 3, waterfallStartY + timestampPadding);
-
-            // Restore state
-            this.ctx.restore();
-        }
+        // Timestamps removed per user request
 
         // Draw frequency scale at appropriate position based on display mode
         // In waterfall mode, draw at y=35 (below bookmarks overlay)
@@ -3335,6 +3297,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             const oldTunedFreq = this.currentTunedFreq;
             this.currentTunedFreq = newConfig.tunedFreq;
 
+            // Check if tuned frequency is currently visible in spectrum view
+            const startFreq = this.centerFreq - this.totalBandwidth / 2;
+            const endFreq = this.centerFreq + this.totalBandwidth / 2;
+            const isFreqVisible = this.currentTunedFreq >= startFreq && this.currentTunedFreq <= endFreq;
+
             // If we're zoomed in and frequency changed, pan to follow it
             // Only pan if we have a valid zoom level and the frequency actually changed
             // Skip panning if the frequency change came from clicking the waterfall
@@ -3344,6 +3311,15 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 !this.skipNextPan) {
 
                 console.log(`Frequency changed to ${(this.currentTunedFreq/1e6).toFixed(3)} MHz - panning spectrum to follow`);
+                this.panTo(this.currentTunedFreq);
+            }
+            // Also pan if zoomed in and tuned frequency scrolled off-screen (even if frequency didn't change)
+            else if (this.binBandwidth && this.initialBinBandwidth &&
+                     this.binBandwidth < this.initialBinBandwidth &&
+                     this.currentTunedFreq && !isFreqVisible &&
+                     !this.skipNextPan) {
+
+                console.log(`Tuned frequency ${(this.currentTunedFreq/1e6).toFixed(3)} MHz scrolled off-screen - panning to follow`);
                 this.panTo(this.currentTunedFreq);
             }
 

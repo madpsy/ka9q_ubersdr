@@ -221,6 +221,11 @@
             }
 
             displayAnalytics(data);
+            
+            // Clear cached hourly data when filters change
+            countryAnimation.hourlyData = null;
+            continentAnimation.hourlyData = null;
+            
             showStatus(`Loaded analytics for ${data.time_range.hours} hours`, 'success');
         } catch (error) {
             console.error('Error loading analytics:', error);

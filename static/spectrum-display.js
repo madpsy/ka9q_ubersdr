@@ -143,7 +143,7 @@ class SpectrumDisplay {
         this.overlayCanvas.width = this.width;
         this.overlayCanvas.height = 35;
         this.overlayCanvas.style.pointerEvents = 'auto'; // Enable pointer events on canvas for bookmark clicks
-        this.overlayCanvas.style.cursor = 'pointer';
+        this.overlayCanvas.style.cursor = 'default';
         this.overlayDiv.appendChild(this.overlayCanvas);
 
         // Append overlay div to body (not to canvas parent) so it's in root stacking context
@@ -1966,7 +1966,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             lineGraphDragStartFreq = this.centerFreq;
             lineGraphDragging = true;
             lineGraphDragDidMove = false;
-            this.lineGraphCanvas.style.cursor = 'grabbing';
+            this.lineGraphCanvas.style.cursor = 'default';
 
             // Prevent text selection while dragging
             e.preventDefault();
@@ -2089,7 +2089,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         const isFullBandwidth = (startFreq <= 0 && endFreq >= 30e6);
 
         // Set cursor based on whether dragging is allowed
-        this.lineGraphCanvas.style.cursor = isFullBandwidth ? 'crosshair' : 'grab';
+        this.lineGraphCanvas.style.cursor = 'default';
     }
 
     // Draw frequency scale at top of waterfall
@@ -2771,7 +2771,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.dragStartFreq = this.centerFreq;
             this.isDragging = true;
             this.dragDidMove = false; // Track if we actually moved
-            this.canvas.style.cursor = 'grabbing';
+            this.canvas.style.cursor = 'default';
 
             // Prevent text selection while dragging
             e.preventDefault();
@@ -3073,7 +3073,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         const isFullBandwidth = (startFreq <= 0 && endFreq >= 30e6);
 
         // Set cursor based on whether dragging is allowed
-        this.canvas.style.cursor = isFullBandwidth ? 'default' : 'grab';
+        this.canvas.style.cursor = 'default';
     }
 
     // Update tooltip content and position

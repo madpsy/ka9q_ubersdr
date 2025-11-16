@@ -638,6 +638,9 @@ func main() {
 	http.HandleFunc("/api/decoder/spots/analytics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleDecoderSpotsAnalytics(w, r, multiDecoder, ipBanManager, fftRateLimiter)
 	}))
+	http.HandleFunc("/api/decoder/spots/analytics/hourly", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleDecoderSpotsAnalyticsHourly(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+	}))
 	http.HandleFunc("/api/decoder/metrics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleDecodeMetrics(w, r, multiDecoder, ipBanManager, fftRateLimiter)
 	}))
@@ -2197,6 +2200,75 @@ func handleDecoderSpotsAnalytics(w http.ResponseWriter, r *http.Request, md *Mul
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(analytics); err != nil {
 		log.Printf("Error encoding decoder spots analytics: %v", err)
+	}
+}
+
+// handleDecoderSpotsAnalyticsHourly serves aggregated analytics about decoder spots broken down by hour
+func handleDecoderSpotsAnalyticsHourly(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if md == nil || md.spotsLogger == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decoder spots logging is not enabled",
+		})
+		return
+	}
+
+	// Get query parameters
+	country := r.URL.Query().Get("country")
+	continent := r.URL.Query().Get("continent")
+	mode := r.URL.Query().Get("mode")
+	band := r.URL.Query().Get("band")
+	minSNRStr := r.URL.Query().Get("min_snr")
+	hoursStr := r.URL.Query().Get("hours")
+
+	// Parse minimum SNR (default -999 = no filter)
+	minSNR := -999
+	if minSNRStr != "" {
+		if snr, err := strconv.Atoi(minSNRStr); err == nil {
+			minSNR = snr
+		}
+	}
+
+	// Parse hours (default 24, max 48)
+	hours := 24
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 48 { // Max 48 hours
+			hours = h
+		}
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("analytics-hourly-%s-%s-%s-%s-%d-%d", country, continent, mode, band, minSNR, hours)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Decoder spots analytics hourly endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	// Get hourly analytics
+	analytics, err := md.spotsLogger.GetSpotsAnalyticsHourly(country, continent, mode, band, minSNR, hours)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get hourly analytics: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(analytics); err != nil {
+		log.Printf("Error encoding decoder spots hourly analytics: %v", err)
 	}
 }
 

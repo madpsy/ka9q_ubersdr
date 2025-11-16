@@ -1203,6 +1203,205 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 	return response, nil
 }
 
+// HourlyLocatorData represents locator data for a specific hour
+type HourlyLocatorData struct {
+	Hour      int            `json:"hour"`      // UTC hour (0-23)
+	Timestamp string         `json:"timestamp"` // ISO 8601 timestamp for the hour
+	Locators  []LocatorStats `json:"locators"`  // Locator statistics for this hour
+}
+
+// HourlyAnalyticsResponse represents the hourly analytics response
+type HourlyAnalyticsResponse struct {
+	TimeRange struct {
+		From  string `json:"from"`
+		To    string `json:"to"`
+		Hours int    `json:"hours"`
+	} `json:"time_range"`
+	Filters struct {
+		MinSNR    int    `json:"min_snr"`
+		Country   string `json:"country,omitempty"`
+		Continent string `json:"continent,omitempty"`
+	} `json:"filters"`
+	HourlyData []HourlyLocatorData `json:"hourly_data"`
+}
+
+// GetSpotsAnalyticsHourly returns analytics data broken down by hour
+func (sl *SpotsLogger) GetSpotsAnalyticsHourly(filterCountry, filterContinent, filterMode, filterBand string, minSNR, hours int) (*HourlyAnalyticsResponse, error) {
+	if !sl.enabled {
+		return nil, fmt.Errorf("spots logging is not enabled")
+	}
+
+	// Calculate date range
+	now := time.Now()
+	toDate := now.Format("2006-01-02")
+	fromTime := now.Add(-time.Duration(hours) * time.Hour)
+	fromDate := fromTime.Format("2006-01-02")
+
+	// Get spots using existing method
+	spots, err := sl.GetHistoricalSpots(
+		filterMode,      // mode filter
+		filterBand,      // band filter
+		"",              // name - all names
+		"",              // callsign - all callsigns
+		"",              // locator - all locators
+		filterContinent, // continent filter
+		"",              // direction - all directions
+		fromDate,
+		toDate,
+		"",    // startTime - no time filter
+		"",    // endTime - no time filter
+		false, // deduplicate
+		true,  // locatorsOnly
+		0,     // minDistanceKm
+		minSNR,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter by country if specified
+	if filterCountry != "" {
+		filtered := make([]SpotRecord, 0)
+		for _, spot := range spots {
+			if spot.Country == filterCountry {
+				filtered = append(filtered, spot)
+			}
+		}
+		spots = filtered
+	}
+
+	// Filter by time window (only keep spots within the hours range)
+	cutoffTime := fromTime
+	filtered := make([]SpotRecord, 0)
+	for _, spot := range spots {
+		spotTime, err := time.Parse(time.RFC3339, spot.Timestamp)
+		if err != nil {
+			continue
+		}
+		if spotTime.After(cutoffTime) || spotTime.Equal(cutoffTime) {
+			filtered = append(filtered, spot)
+		}
+	}
+	spots = filtered
+
+	// Build hourly analytics response
+	response := &HourlyAnalyticsResponse{}
+	response.TimeRange.From = fromTime.Format(time.RFC3339)
+	response.TimeRange.To = now.Format(time.RFC3339)
+	response.TimeRange.Hours = hours
+	response.Filters.MinSNR = minSNR
+	response.Filters.Country = filterCountry
+	response.Filters.Continent = filterContinent
+
+	// Group spots by hour
+	hourlySpots := make(map[int][]SpotRecord)
+	for _, spot := range spots {
+		spotTime, err := time.Parse(time.RFC3339, spot.Timestamp)
+		if err != nil {
+			continue
+		}
+		hour := spotTime.UTC().Hour()
+		hourlySpots[hour] = append(hourlySpots[hour], spot)
+	}
+
+	// Build hourly data for each hour (0-23)
+	response.HourlyData = make([]HourlyLocatorData, 0, 24)
+
+	for hour := 0; hour < 24; hour++ {
+		// Create timestamp for this hour (use today's date with the hour)
+		hourTime := time.Date(now.Year(), now.Month(), now.Day(), hour, 0, 0, 0, time.UTC)
+
+		hourData := HourlyLocatorData{
+			Hour:      hour,
+			Timestamp: hourTime.Format(time.RFC3339),
+			Locators:  make([]LocatorStats, 0),
+		}
+
+		// Get spots for this hour
+		spotsForHour := hourlySpots[hour]
+		if len(spotsForHour) == 0 {
+			// Include empty hour data
+			response.HourlyData = append(response.HourlyData, hourData)
+			continue
+		}
+
+		// Aggregate locators for this hour
+		locatorMap := make(map[string]*locatorAggregator)
+		callsignsByLocator := make(map[string]map[string]map[string]bool) // locator -> callsign -> mode+band
+
+		for _, spot := range spotsForHour {
+			if spot.Locator == "" {
+				continue
+			}
+
+			if locatorMap[spot.Locator] == nil {
+				locatorMap[spot.Locator] = &locatorAggregator{
+					callsigns: make(map[string]bool),
+				}
+			}
+
+			agg := locatorMap[spot.Locator]
+			agg.totalSNR += float64(spot.SNR)
+			agg.count++
+			if spot.Callsign != "" {
+				agg.callsigns[spot.Callsign] = true
+			}
+
+			// Track callsigns with mode+band combinations
+			if spot.Callsign != "" {
+				if callsignsByLocator[spot.Locator] == nil {
+					callsignsByLocator[spot.Locator] = make(map[string]map[string]bool)
+				}
+				if callsignsByLocator[spot.Locator][spot.Callsign] == nil {
+					callsignsByLocator[spot.Locator][spot.Callsign] = make(map[string]bool)
+				}
+				modeBand := fmt.Sprintf("%s %s", spot.Mode, spot.Band)
+				callsignsByLocator[spot.Locator][spot.Callsign][modeBand] = true
+			}
+		}
+
+		// Convert to LocatorStats
+		for locator, agg := range locatorMap {
+			// Build CallsignInfo list
+			callsignInfoList := make([]CallsignInfo, 0)
+			if callsignsByLocator[locator] != nil {
+				for callsign, modeBands := range callsignsByLocator[locator] {
+					bands := make([]string, 0, len(modeBands))
+					for modeBand := range modeBands {
+						bands = append(bands, modeBand)
+					}
+					sort.Strings(bands)
+					callsignInfoList = append(callsignInfoList, CallsignInfo{
+						Callsign: callsign,
+						Bands:    bands,
+					})
+				}
+			}
+			// Sort callsigns alphabetically
+			sort.Slice(callsignInfoList, func(i, j int) bool {
+				return callsignInfoList[i].Callsign < callsignInfoList[j].Callsign
+			})
+
+			hourData.Locators = append(hourData.Locators, LocatorStats{
+				Locator:         locator,
+				AvgSNR:          agg.totalSNR / float64(agg.count),
+				Count:           agg.count,
+				UniqueCallsigns: len(agg.callsigns),
+				Callsigns:       callsignInfoList,
+			})
+		}
+
+		// Sort locators by name
+		sort.Slice(hourData.Locators, func(i, j int) bool {
+			return hourData.Locators[i].Locator < hourData.Locators[j].Locator
+		})
+
+		response.HourlyData = append(response.HourlyData, hourData)
+	}
+
+	return response, nil
+}
+
 // locatorAggregator tracks statistics for a specific locator
 type locatorAggregator struct {
 	totalSNR  float64

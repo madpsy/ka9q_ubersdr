@@ -14,6 +14,23 @@
     let continentColorMode = 'snr';
     let countryLocatorData = [];
     let continentLocatorData = [];
+    
+    // Animation state
+    let countryAnimation = {
+        isPlaying: false,
+        currentHourIndex: 0,
+        hourlyData: null,
+        intervalId: null,
+        playbackSpeed: 1000 // 1 second per hour
+    };
+    
+    let continentAnimation = {
+        isPlaying: false,
+        currentHourIndex: 0,
+        hourlyData: null,
+        intervalId: null,
+        playbackSpeed: 1000 // 1 second per hour
+    };
 
     // Continent name mapping
     const continentNames = {
@@ -43,6 +60,9 @@
 
         loadBtn.addEventListener('click', loadAnalytics);
         clearFiltersBtn.addEventListener('click', clearFilters);
+        
+        // Initialize animation controls
+        initializeAnimationControls();
 
         // Handle graph toggle
         showGraphsToggle.addEventListener('change', function() {
@@ -987,4 +1007,257 @@
             closeCallsignsModal();
         }
     });
+    
+    // Animation functions
+    function initializeAnimationControls() {
+        // Country animation controls
+        const countryPlayBtn = document.getElementById('country-play-btn');
+        const countryPauseBtn = document.getElementById('country-pause-btn');
+        const countryStopBtn = document.getElementById('country-stop-btn');
+        const countrySlider = document.getElementById('country-hour-slider');
+        
+        if (countryPlayBtn) {
+            countryPlayBtn.addEventListener('click', () => playAnimation('country'));
+            countryPauseBtn.addEventListener('click', () => pauseAnimation('country'));
+            countryStopBtn.addEventListener('click', () => stopAnimation('country'));
+            countrySlider.addEventListener('input', (e) => scrubToHour('country', parseInt(e.target.value)));
+        }
+        
+        // Continent animation controls
+        const continentPlayBtn = document.getElementById('continent-play-btn');
+        const continentPauseBtn = document.getElementById('continent-pause-btn');
+        const continentStopBtn = document.getElementById('continent-stop-btn');
+        const continentSlider = document.getElementById('continent-hour-slider');
+        
+        if (continentPlayBtn) {
+            continentPlayBtn.addEventListener('click', () => playAnimation('continent'));
+            continentPauseBtn.addEventListener('click', () => pauseAnimation('continent'));
+            continentStopBtn.addEventListener('click', () => stopAnimation('continent'));
+            continentSlider.addEventListener('input', (e) => scrubToHour('continent', parseInt(e.target.value)));
+        }
+    }
+    
+    async function playAnimation(mapType) {
+        const animation = mapType === 'country' ? countryAnimation : continentAnimation;
+        
+        // If already playing, do nothing
+        if (animation.isPlaying) return;
+        
+        // If no hourly data, fetch it first
+        if (!animation.hourlyData) {
+            await loadHourlyData(mapType);
+            if (!animation.hourlyData) return; // Failed to load
+        }
+        
+        // Show pause button, hide play button
+        document.getElementById(`${mapType}-play-btn`).style.display = 'none';
+        document.getElementById(`${mapType}-pause-btn`).style.display = 'inline-flex';
+        
+        animation.isPlaying = true;
+        
+        // Start animation loop
+        animation.intervalId = setInterval(() => {
+            updateMapForHour(mapType, animation.currentHourIndex);
+            animation.currentHourIndex++;
+            
+            // Loop back to start after 24 hours
+            if (animation.currentHourIndex >= 24) {
+                animation.currentHourIndex = 0;
+            }
+            
+            // Update slider
+            document.getElementById(`${mapType}-hour-slider`).value = animation.currentHourIndex;
+        }, animation.playbackSpeed);
+        
+        // Update immediately
+        updateMapForHour(mapType, animation.currentHourIndex);
+    }
+    
+    function pauseAnimation(mapType) {
+        const animation = mapType === 'country' ? countryAnimation : continentAnimation;
+        
+        if (!animation.isPlaying) return;
+        
+        animation.isPlaying = false;
+        clearInterval(animation.intervalId);
+        animation.intervalId = null;
+        
+        // Show play button, hide pause button
+        document.getElementById(`${mapType}-play-btn`).style.display = 'inline-flex';
+        document.getElementById(`${mapType}-pause-btn`).style.display = 'none';
+    }
+    
+    function stopAnimation(mapType) {
+        const animation = mapType === 'country' ? countryAnimation : continentAnimation;
+        
+        pauseAnimation(mapType);
+        
+        // Reset to hour 0
+        animation.currentHourIndex = 0;
+        document.getElementById(`${mapType}-hour-slider`).value = 0;
+        
+        // Show all data (aggregate view)
+        if (mapType === 'country') {
+            updateCountryMapColors();
+        } else {
+            updateContinentMapColors();
+        }
+        
+        // Update hour display
+        document.getElementById(`${mapType}-hour-display`).textContent = 'Hour: 00:00';
+    }
+    
+    function scrubToHour(mapType, hourIndex) {
+        const animation = mapType === 'country' ? countryAnimation : continentAnimation;
+        
+        // Pause if playing
+        if (animation.isPlaying) {
+            pauseAnimation(mapType);
+        }
+        
+        // Update current hour
+        animation.currentHourIndex = hourIndex;
+        
+        // Update map if we have hourly data
+        if (animation.hourlyData) {
+            updateMapForHour(mapType, hourIndex);
+        }
+    }
+    
+    async function loadHourlyData(mapType) {
+        const animation = mapType === 'country' ? countryAnimation : continentAnimation;
+        
+        // Show loading overlay
+        document.getElementById('loading-overlay').style.display = 'flex';
+        
+        try {
+            // Build URL with same filters as current analytics
+            const countryInput = document.getElementById('country-search').value.trim();
+            const country = countryInput ? getNormalizedCountryName(countryInput) : '';
+            const continent = document.getElementById('continent-select').value;
+            const mode = document.getElementById('mode-select').value;
+            const band = document.getElementById('band-select').value;
+            const minSNR = document.getElementById('min-snr-select').value;
+            const hours = document.getElementById('hours-select').value;
+            
+            let url = `/api/decoder/spots/analytics/hourly?hours=${hours}`;
+            if (country) url += `&country=${encodeURIComponent(country)}`;
+            if (continent) url += `&continent=${continent}`;
+            if (mode) url += `&mode=${mode}`;
+            if (band) url += `&band=${encodeURIComponent(band)}`;
+            if (minSNR && parseInt(minSNR) !== -999) {
+                url += `&min_snr=${minSNR}`;
+            }
+            
+            const response = await fetch(url);
+            
+            if (response.status === 429) {
+                showStatus('Rate limit exceeded. Please wait before trying animation.', 'error');
+                return;
+            }
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            animation.hourlyData = data;
+            
+            // Show animation controls
+            document.getElementById(`${mapType}-animation-controls`).style.display = 'flex';
+            
+        } catch (error) {
+            console.error('Error loading hourly data:', error);
+            showStatus(`Error loading hourly data: ${error.message}`, 'error');
+        } finally {
+            document.getElementById('loading-overlay').style.display = 'none';
+        }
+    }
+    
+    function updateMapForHour(mapType, hourIndex) {
+        const animation = mapType === 'country' ? countryAnimation : continentAnimation;
+        const grid = mapType === 'country' ? countryGrid : continentGrid;
+        const colorMode = mapType === 'country' ? countryColorMode : continentColorMode;
+        
+        if (!animation.hourlyData || !grid) return;
+        
+        // Get data for this hour
+        const hourData = animation.hourlyData.hourly_data[hourIndex];
+        if (!hourData) return;
+        
+        // Update hour display
+        const hourStr = String(hourIndex).padStart(2, '0') + ':00';
+        document.getElementById(`${mapType}-hour-display`).textContent = `Hour: ${hourStr}`;
+        
+        // Clear current highlights
+        grid.clearHighlights();
+        
+        // Aggregate locators for this hour
+        const locatorMap = new Map();
+        const dataSource = mapType === 'country' ? hourData.by_country : hourData.by_continent;
+        
+        dataSource.forEach(entity => {
+            entity.bands.forEach(band => {
+                band.unique_locators.forEach(loc => {
+                    const key = loc.locator;
+                    if (!locatorMap.has(key)) {
+                        locatorMap.set(key, {
+                            locator: loc.locator,
+                            total_snr: 0,
+                            snr_count: 0,
+                            total_spots: 0,
+                            callsignMap: new Map()
+                        });
+                    }
+                    const agg = locatorMap.get(key);
+                    agg.total_snr += loc.avg_snr * loc.count;
+                    agg.snr_count += loc.count;
+                    agg.total_spots += loc.count;
+                    
+                    if (loc.callsigns && loc.callsigns.length > 0) {
+                        loc.callsigns.forEach(csInfo => {
+                            if (!agg.callsignMap.has(csInfo.callsign)) {
+                                agg.callsignMap.set(csInfo.callsign, new Set());
+                            }
+                            csInfo.bands.forEach(band => agg.callsignMap.get(csInfo.callsign).add(band));
+                        });
+                    }
+                });
+            });
+        });
+        
+        // Convert to array
+        const locatorData = Array.from(locatorMap.values()).map(agg => ({
+            locator: agg.locator,
+            avg_snr: agg.total_snr / agg.snr_count,
+            count: agg.total_spots,
+            unique_callsigns: agg.callsignMap.size,
+            callsigns: Array.from(agg.callsignMap.entries()).map(([callsign, bandsSet]) => ({
+                callsign: callsign,
+                bands: Array.from(bandsSet).sort()
+            }))
+        }));
+        
+        if (locatorData.length === 0) return;
+        
+        // Apply colors
+        const coloredLocators = locatorData.map(loc => ({
+            locator: loc.locator,
+            style: {
+                fillColor: getDynamicColor(loc, colorMode, locatorData),
+                fillOpacity: 0.35,
+                color: '#333',
+                weight: 1,
+                opacity: 0.6
+            },
+            data: {
+                avg_snr: loc.avg_snr,
+                count: loc.count,
+                unique_callsigns: loc.unique_callsigns,
+                callsigns: loc.callsigns
+            }
+        }));
+        
+        grid.highlightLocators(coloredLocators);
+    }
 })();

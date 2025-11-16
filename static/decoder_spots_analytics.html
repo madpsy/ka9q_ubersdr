@@ -135,6 +135,14 @@
                             <input type="radio" name="country-color-mode" value="spots"> Spot Count
                         </label>
                     </div>
+                    <!-- Animation Controls -->
+                    <div id="country-animation-controls" class="animation-controls" style="display: none;">
+                        <button id="country-play-btn" class="anim-btn play-btn" title="Play animation">▶</button>
+                        <button id="country-pause-btn" class="anim-btn pause-btn" style="display: none;" title="Pause animation">⏸</button>
+                        <button id="country-stop-btn" class="anim-btn stop-btn" title="Stop animation">⏹</button>
+                        <input type="range" id="country-hour-slider" class="hour-slider" min="0" max="23" value="0" step="1">
+                        <span id="country-hour-display" class="hour-display">Hour: 00:00</span>
+                    </div>
                 </div>
                 <div id="country-list" class="country-list">
                     <!-- Country cards will be inserted here -->
@@ -155,6 +163,14 @@
                             <input type="radio" name="continent-color-mode" value="spots"> Spot Count
                         </label>
                     </div>
+                    <!-- Animation Controls -->
+                    <div id="continent-animation-controls" class="animation-controls" style="display: none;">
+                        <button id="continent-play-btn" class="anim-btn play-btn" title="Play animation">▶</button>
+                        <button id="continent-pause-btn" class="anim-btn pause-btn" style="display: none;" title="Pause animation">⏸</button>
+                        <button id="continent-stop-btn" class="anim-btn stop-btn" title="Stop animation">⏹</button>
+                        <input type="range" id="continent-hour-slider" class="hour-slider" min="0" max="23" value="0" step="1">
+                        <span id="continent-hour-display" class="hour-display">Hour: 00:00</span>
+                    </div>
                 </div>
                 <div id="continent-list" class="continent-list">
                     <!-- Continent cards will be inserted here -->
@@ -163,6 +179,12 @@
         </div>
 
         <div id="status" class="status">Select filters and click "Load Analytics" to begin</div>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay" style="display: none;">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading hourly data...</div>
+        </div>
     </div>
 
     <!-- Callsigns Modal -->

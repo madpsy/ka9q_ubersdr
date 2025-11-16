@@ -1192,7 +1192,9 @@
         }
         
         const hourData = animation.hourlyData.hourly_data[hourIndex];
-        if (!hourData || !hourData.locators) {
+        
+        // Check if we have locators for this hour (it's an array, not an object)
+        if (!hourData || !hourData.locators || hourData.locators.length === 0) {
             console.log('No data for hour', hourIndex);
             // Clear the map for this hour
             grid.clearHighlights();
@@ -1207,17 +1209,17 @@
         // Clear current highlights
         grid.clearHighlights();
         
-        // The hourly data structure has locators directly in the hour object
-        const locatorData = Object.entries(hourData.locators).map(([locator, data]) => ({
-            locator: locator,
-            avg_snr: data.avg_snr,
-            count: data.count,
-            unique_callsigns: data.callsigns ? data.callsigns.length : 0,
-            callsigns: data.callsigns || []
+        // The hourly data structure has locators as an array of LocatorStats objects
+        const locatorData = hourData.locators.map(loc => ({
+            locator: loc.locator,
+            avg_snr: loc.avg_snr || 0,
+            count: loc.count || 0,
+            unique_callsigns: loc.unique_callsigns || 0,
+            callsigns: loc.callsigns || []
         }));
         
         if (locatorData.length === 0) {
-            console.log('No locators for hour', hourIndex);
+            console.log('No valid locators for hour', hourIndex);
             return;
         }
         

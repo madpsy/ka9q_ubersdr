@@ -385,6 +385,20 @@
                     updateCountryMapColors();
                 });
             });
+
+            // Receiver marker toggle
+            const countryShowReceiver = document.getElementById('country-show-receiver');
+            if (countryShowReceiver) {
+                countryShowReceiver.addEventListener('change', function() {
+                    if (countryReceiverMarker) {
+                        if (this.checked) {
+                            countryReceiverMarker.addTo(countryMap);
+                        } else {
+                            countryMap.removeLayer(countryReceiverMarker);
+                        }
+                    }
+                });
+            }
         }
 
         // Initialize continent map
@@ -415,6 +429,20 @@
                     updateContinentMapColors();
                 });
             });
+
+            // Receiver marker toggle
+            const continentShowReceiver = document.getElementById('continent-show-receiver');
+            if (continentShowReceiver) {
+                continentShowReceiver.addEventListener('change', function() {
+                    if (continentReceiverMarker) {
+                        if (this.checked) {
+                            continentReceiverMarker.addTo(continentMap);
+                        } else {
+                            continentMap.removeLayer(continentReceiverMarker);
+                        }
+                    }
+                });
+            }
         }
     }
 

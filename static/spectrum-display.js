@@ -3335,11 +3335,23 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 !this.skipNextPan) {
 
                 console.log(`Frequency changed to ${(this.currentTunedFreq/1e6).toFixed(3)} MHz - panning spectrum to follow`);
-                this.panTo(this.currentTunedFreq);
-            }
 
-            // Reset the skip flag
-            this.skipNextPan = false;
+                // Set flag to prevent sync monitoring from interfering during pan
+                this.skipNextPan = true;
+
+                this.panTo(this.currentTunedFreq);
+
+                // Clear the flag after a delay to allow spectrum to update
+                // 500ms should be enough for the server to respond and update the display
+                setTimeout(() => {
+                    this.skipNextPan = false;
+                }, 500);
+            } else if (this.skipNextPan) {
+                // If skipNextPan was set (e.g., from clicking waterfall), clear it after a delay
+                setTimeout(() => {
+                    this.skipNextPan = false;
+                }, 500);
+            }
         }
         // Update bandwidth edges if provided
         if (newConfig.bandwidthLow !== undefined) {
@@ -3758,6 +3770,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
         // Skip check while actively dragging (prediction is intentionally offset)
         if (this.isDragging || this.predictedFreqOffset !== 0) {
+            return;
+        }
+
+        // Skip check if we're waiting for a frequency change to settle
+        if (this.skipNextPan) {
             return;
         }
 

@@ -763,12 +763,19 @@ func escapeCSVField(field string) string {
 	return field
 }
 
+// CallsignInfo represents a callsign with its mode/band combinations
+type CallsignInfo struct {
+	Callsign string   `json:"callsign"`
+	Bands    []string `json:"bands"` // e.g., ["FT8 20m", "WSPR 40m"]
+}
+
 // LocatorStats represents statistics for a specific locator
 type LocatorStats struct {
-	Locator         string  `json:"locator"`
-	AvgSNR          float64 `json:"avg_snr"`
-	Count           int     `json:"count"`
-	UniqueCallsigns int     `json:"unique_callsigns"`
+	Locator         string         `json:"locator"`
+	AvgSNR          float64        `json:"avg_snr"`
+	Count           int            `json:"count"`
+	UniqueCallsigns int            `json:"unique_callsigns"`
+	Callsigns       []CallsignInfo `json:"callsigns"` // List of all unique callsigns with their bands
 }
 
 // BandAnalytics represents analytics for a specific band
@@ -889,6 +896,10 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 	continentData := make(map[string]map[string]*bandAggregator)
 	continentCountries := make(map[string]map[string]bool)
 
+	// Track unique callsigns per locator with mode+band combinations
+	countryLocatorCallsigns := make(map[string]map[string]map[string]map[string]bool)   // country -> locator -> callsign -> mode+band
+	continentLocatorCallsigns := make(map[string]map[string]map[string]map[string]bool) // continent -> locator -> callsign -> mode+band
+
 	for _, spot := range spots {
 		// Skip spots without country info
 		if spot.Country == "" {
@@ -956,6 +967,21 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 			if spot.Callsign != "" {
 				agg.locators[spot.Locator].callsigns[spot.Callsign] = true
 			}
+
+			// Also track unique callsigns with mode+band combinations for this locator
+			if spot.Callsign != "" {
+				if countryLocatorCallsigns[spot.Country] == nil {
+					countryLocatorCallsigns[spot.Country] = make(map[string]map[string]map[string]bool)
+				}
+				if countryLocatorCallsigns[spot.Country][spot.Locator] == nil {
+					countryLocatorCallsigns[spot.Country][spot.Locator] = make(map[string]map[string]bool)
+				}
+				if countryLocatorCallsigns[spot.Country][spot.Locator][spot.Callsign] == nil {
+					countryLocatorCallsigns[spot.Country][spot.Locator][spot.Callsign] = make(map[string]bool)
+				}
+				modeBand := fmt.Sprintf("%s %s", spot.Mode, spot.Band)
+				countryLocatorCallsigns[spot.Country][spot.Locator][spot.Callsign][modeBand] = true
+			}
 		}
 
 		// Aggregate continent data
@@ -982,6 +1008,21 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 				// Track unique callsigns for this locator
 				if spot.Callsign != "" {
 					contAgg.locators[spot.Locator].callsigns[spot.Callsign] = true
+				}
+
+				// Also track unique callsigns with mode+band combinations for this locator
+				if spot.Callsign != "" {
+					if continentLocatorCallsigns[spot.Continent] == nil {
+						continentLocatorCallsigns[spot.Continent] = make(map[string]map[string]map[string]bool)
+					}
+					if continentLocatorCallsigns[spot.Continent][spot.Locator] == nil {
+						continentLocatorCallsigns[spot.Continent][spot.Locator] = make(map[string]map[string]bool)
+					}
+					if continentLocatorCallsigns[spot.Continent][spot.Locator][spot.Callsign] == nil {
+						continentLocatorCallsigns[spot.Continent][spot.Locator][spot.Callsign] = make(map[string]bool)
+					}
+					modeBand := fmt.Sprintf("%s %s", spot.Mode, spot.Band)
+					continentLocatorCallsigns[spot.Continent][spot.Locator][spot.Callsign][modeBand] = true
 				}
 			}
 		}
@@ -1017,11 +1058,32 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 			// Convert locator statistics to sorted slice for this band
 			locatorStats := make([]LocatorStats, 0, len(agg.locators))
 			for locator, locAgg := range agg.locators {
+				// Build CallsignInfo list with mode+band combinations
+				callsignInfoList := make([]CallsignInfo, 0)
+				if countryLocatorCallsigns[country] != nil && countryLocatorCallsigns[country][locator] != nil {
+					for callsign, modeBands := range countryLocatorCallsigns[country][locator] {
+						bands := make([]string, 0, len(modeBands))
+						for modeBand := range modeBands {
+							bands = append(bands, modeBand)
+						}
+						sort.Strings(bands)
+						callsignInfoList = append(callsignInfoList, CallsignInfo{
+							Callsign: callsign,
+							Bands:    bands,
+						})
+					}
+				}
+				// Sort callsigns alphabetically
+				sort.Slice(callsignInfoList, func(i, j int) bool {
+					return callsignInfoList[i].Callsign < callsignInfoList[j].Callsign
+				})
+
 				locatorStats = append(locatorStats, LocatorStats{
 					Locator:         locator,
 					AvgSNR:          locAgg.totalSNR / float64(locAgg.count),
 					Count:           locAgg.count,
 					UniqueCallsigns: len(locAgg.callsigns),
+					Callsigns:       callsignInfoList,
 				})
 			}
 			// Sort by locator name
@@ -1075,11 +1137,34 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 			// Convert locator statistics to sorted slice for this band
 			locatorStats := make([]LocatorStats, 0, len(agg.locators))
 			for locator, locAgg := range agg.locators {
+				// Build CallsignInfo list with mode+band combinations
+				callsignInfoList := make([]CallsignInfo, 0)
+				uniqueCallsigns := 0
+				if continentLocatorCallsigns[continent] != nil && continentLocatorCallsigns[continent][locator] != nil {
+					uniqueCallsigns = len(continentLocatorCallsigns[continent][locator])
+					for callsign, modeBands := range continentLocatorCallsigns[continent][locator] {
+						bands := make([]string, 0, len(modeBands))
+						for modeBand := range modeBands {
+							bands = append(bands, modeBand)
+						}
+						sort.Strings(bands)
+						callsignInfoList = append(callsignInfoList, CallsignInfo{
+							Callsign: callsign,
+							Bands:    bands,
+						})
+					}
+				}
+				// Sort callsigns alphabetically
+				sort.Slice(callsignInfoList, func(i, j int) bool {
+					return callsignInfoList[i].Callsign < callsignInfoList[j].Callsign
+				})
+
 				locatorStats = append(locatorStats, LocatorStats{
 					Locator:         locator,
 					AvgSNR:          locAgg.totalSNR / float64(locAgg.count),
 					Count:           locAgg.count,
-					UniqueCallsigns: len(locAgg.callsigns),
+					UniqueCallsigns: uniqueCallsigns,
+					Callsigns:       callsignInfoList,
 				})
 			}
 			// Sort by locator name

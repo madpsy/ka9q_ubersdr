@@ -148,6 +148,21 @@
         <div id="status" class="status">Select filters and click "Load Analytics" to begin</div>
     </div>
 
+    <!-- Callsigns Modal -->
+    <div id="callsigns-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Callsigns</h2>
+                <button class="modal-close" onclick="closeCallsignsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="modal-callsigns-list" class="callsign-list">
+                    <!-- Callsigns will be inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer class="site-footer">
         <p>Download <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/decoder_spots_history.html" target="_blank">Spots History</a> • <a href="/bandconditions.html" target="_blank">Live Conditions</a> <span id="footer-version"></span></p>

@@ -308,7 +308,12 @@ class MaidenheadGrid {
                         popupContent += `Spots: ${data.count}<br>`;
                     }
                     if (data.unique_callsigns !== undefined) {
-                        popupContent += `Unique Callsigns: ${data.unique_callsigns}`;
+                        // Make "Unique Callsigns" clickable if callsigns data is available
+                        if (data.callsigns && data.callsigns.length > 0) {
+                            popupContent += `<span class="clickable-callsigns" onclick="openCallsignsModal('${locator}', ${JSON.stringify(data.callsigns).replace(/"/g, '&quot;')})">Unique Callsigns: ${data.unique_callsigns}</span>`;
+                        } else {
+                            popupContent += `Unique Callsigns: ${data.unique_callsigns}`;
+                        }
                     }
                     rectangle.bindPopup(popupContent);
                 }

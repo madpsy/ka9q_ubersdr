@@ -387,7 +387,8 @@
                             total_spots: 0,
                             total_callsigns: 0,
                             bands: [],
-                            countries: new Set()
+                            countries: new Set(),
+                            callsigns: [] // Store callsign info
                         });
                     }
                     const agg = locatorMap.get(key);
@@ -397,6 +398,10 @@
                     agg.total_callsigns += loc.unique_callsigns;
                     agg.bands.push(band.band);
                     agg.countries.add(country.country);
+                    // Collect callsign info
+                    if (loc.callsigns && loc.callsigns.length > 0) {
+                        agg.callsigns.push(...loc.callsigns);
+                    }
                 });
             });
         });
@@ -408,7 +413,8 @@
             count: agg.total_spots,
             unique_callsigns: agg.total_callsigns,
             bands: [...new Set(agg.bands)].join(', '),
-            countries: Array.from(agg.countries).join(', ')
+            countries: Array.from(agg.countries).join(', '),
+            callsigns: agg.callsigns // Keep callsign info for modal
         }));
 
         // Update colors based on current mode
@@ -444,7 +450,8 @@
                             total_spots: 0,
                             total_callsigns: 0,
                             bands: [],
-                            continents: new Set()
+                            continents: new Set(),
+                            callsigns: [] // Store callsign info
                         });
                     }
                     const agg = locatorMap.get(key);
@@ -454,6 +461,10 @@
                     agg.total_callsigns += loc.unique_callsigns;
                     agg.bands.push(band.band);
                     agg.continents.add(continent.continent_name);
+                    // Collect callsign info
+                    if (loc.callsigns && loc.callsigns.length > 0) {
+                        agg.callsigns.push(...loc.callsigns);
+                    }
                 });
             });
         });
@@ -465,7 +476,8 @@
             count: agg.total_spots,
             unique_callsigns: agg.total_callsigns,
             bands: [...new Set(agg.bands)].join(', '),
-            continents: Array.from(agg.continents).join(', ')
+            continents: Array.from(agg.continents).join(', '),
+            callsigns: agg.callsigns // Keep callsign info for modal
         }));
 
         // Update colors based on current mode
@@ -502,7 +514,8 @@
                 count: loc.count,
                 unique_callsigns: loc.unique_callsigns,
                 bands: loc.bands,
-                countries: loc.countries
+                countries: loc.countries,
+                callsigns: loc.callsigns // Include callsign info for popup
             }
         }));
 
@@ -528,7 +541,8 @@
                 count: loc.count,
                 unique_callsigns: loc.unique_callsigns,
                 bands: loc.bands,
-                continents: loc.continents
+                continents: loc.continents,
+                callsigns: loc.callsigns // Include callsign info for popup
             }
         }));
 
@@ -870,4 +884,74 @@
             displayAnalytics(currentData);
         }
     }
+
+    // Modal functions - make them global so they can be called from HTML onclick
+    window.openCallsignsModal = function(locator, callsigns) {
+        const modal = document.getElementById('callsigns-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalList = document.getElementById('modal-callsigns-list');
+        
+        modalTitle.textContent = `Callsigns for ${locator}`;
+        
+        // Clear previous content
+        modalList.innerHTML = '';
+        
+        if (!callsigns || callsigns.length === 0) {
+            modalList.innerHTML = '<p style="text-align: center; opacity: 0.7;">No callsign data available</p>';
+        } else {
+            // Sort callsigns alphabetically
+            const sortedCallsigns = [...callsigns].sort((a, b) =>
+                a.callsign.localeCompare(b.callsign)
+            );
+            
+            sortedCallsigns.forEach(callsignInfo => {
+                const item = document.createElement('div');
+                item.className = 'callsign-item';
+                
+                const link = document.createElement('a');
+                link.href = `https://www.qrz.com/db/${callsignInfo.callsign}`;
+                link.target = '_blank';
+                link.className = 'callsign-link';
+                link.textContent = callsignInfo.callsign;
+                
+                const bandsDiv = document.createElement('div');
+                bandsDiv.className = 'callsign-bands';
+                
+                if (callsignInfo.bands && callsignInfo.bands.length > 0) {
+                    callsignInfo.bands.forEach(band => {
+                        const badge = document.createElement('span');
+                        badge.className = 'band-badge';
+                        badge.textContent = band;
+                        bandsDiv.appendChild(badge);
+                    });
+                }
+                
+                item.appendChild(link);
+                item.appendChild(bandsDiv);
+                modalList.appendChild(item);
+            });
+        }
+        
+        modal.style.display = 'block';
+    };
+
+    window.closeCallsignsModal = function() {
+        const modal = document.getElementById('callsigns-modal');
+        modal.style.display = 'none';
+    };
+
+    // Close modal when clicking outside of it
+    window.onclick = function(event) {
+        const modal = document.getElementById('callsigns-modal');
+        if (event.target === modal) {
+            closeCallsignsModal();
+        }
+    };
+
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape') {
+            closeCallsignsModal();
+        }
+    });
 })();

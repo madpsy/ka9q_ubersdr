@@ -782,6 +782,7 @@ type LocatorStats struct {
 type BandAnalytics struct {
 	Band               string         `json:"band"`
 	Spots              int            `json:"spots"`
+	UniqueCallsigns    int            `json:"unique_callsigns"`
 	MinSNR             float64        `json:"min_snr"`
 	AvgSNR             float64        `json:"avg_snr"`
 	MaxSNR             float64        `json:"max_snr"`
@@ -1091,9 +1092,24 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 				return locatorStats[i].Locator < locatorStats[j].Locator
 			})
 
+			// Calculate unique callsigns for this band
+			uniqueCallsignsForBand := make(map[string]bool)
+			for _, locStat := range locatorStats {
+				for _, csInfo := range locStat.Callsigns {
+					// Check if this callsign was heard on this specific band
+					for _, modeBand := range csInfo.Bands {
+						if strings.Contains(modeBand, band) {
+							uniqueCallsignsForBand[csInfo.Callsign] = true
+							break
+						}
+					}
+				}
+			}
+
 			bandAnalytics := BandAnalytics{
 				Band:               band,
 				Spots:              agg.count,
+				UniqueCallsigns:    len(uniqueCallsignsForBand),
 				MinSNR:             agg.minSNR,
 				AvgSNR:             agg.totalSNR / float64(agg.count),
 				MaxSNR:             agg.maxSNR,
@@ -1172,9 +1188,24 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 				return locatorStats[i].Locator < locatorStats[j].Locator
 			})
 
+			// Calculate unique callsigns for this band
+			uniqueCallsignsForBand := make(map[string]bool)
+			for _, locStat := range locatorStats {
+				for _, csInfo := range locStat.Callsigns {
+					// Check if this callsign was heard on this specific band
+					for _, modeBand := range csInfo.Bands {
+						if strings.Contains(modeBand, band) {
+							uniqueCallsignsForBand[csInfo.Callsign] = true
+							break
+						}
+					}
+				}
+			}
+
 			bandAnalytics := BandAnalytics{
 				Band:               band,
 				Spots:              agg.count,
+				UniqueCallsigns:    len(uniqueCallsignsForBand),
 				MinSNR:             agg.minSNR,
 				AvgSNR:             agg.totalSNR / float64(agg.count),
 				MaxSNR:             agg.maxSNR,

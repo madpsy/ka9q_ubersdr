@@ -763,6 +763,14 @@ func escapeCSVField(field string) string {
 	return field
 }
 
+// LocatorStats represents statistics for a specific locator
+type LocatorStats struct {
+	Locator         string  `json:"locator"`
+	AvgSNR          float64 `json:"avg_snr"`
+	Count           int     `json:"count"`
+	UniqueCallsigns int     `json:"unique_callsigns"`
+}
+
 // BandAnalytics represents analytics for a specific band
 type BandAnalytics struct {
 	Band               string         `json:"band"`
@@ -770,6 +778,7 @@ type BandAnalytics struct {
 	MinSNR             float64        `json:"min_snr"`
 	AvgSNR             float64        `json:"avg_snr"`
 	MaxSNR             float64        `json:"max_snr"`
+	UniqueLocators     []LocatorStats `json:"unique_locators"`
 	BestHoursUTC       []int          `json:"best_hours_utc"`
 	HourlyDistribution map[string]int `json:"hourly_distribution"`
 }
@@ -892,9 +901,10 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 		}
 		if countryData[spot.Country][spot.Band] == nil {
 			countryData[spot.Country][spot.Band] = &bandAggregator{
-				hourly: make(map[int]int),
-				minSNR: float64(spot.SNR),
-				maxSNR: float64(spot.SNR),
+				hourly:   make(map[int]int),
+				locators: make(map[string]*locatorAggregator),
+				minSNR:   float64(spot.SNR),
+				maxSNR:   float64(spot.SNR),
 			}
 		}
 
@@ -906,9 +916,10 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 			}
 			if continentData[spot.Continent][spot.Band] == nil {
 				continentData[spot.Continent][spot.Band] = &bandAggregator{
-					hourly: make(map[int]int),
-					minSNR: float64(spot.SNR),
-					maxSNR: float64(spot.SNR),
+					hourly:   make(map[int]int),
+					locators: make(map[string]*locatorAggregator),
+					minSNR:   float64(spot.SNR),
+					maxSNR:   float64(spot.SNR),
 				}
 			}
 			continentCountries[spot.Continent][spot.Country] = true
@@ -932,6 +943,20 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 			agg.maxSNR = float64(spot.SNR)
 		}
 		agg.hourly[hour]++
+		// Track locator statistics per band (only if locator is not empty)
+		if spot.Locator != "" {
+			if agg.locators[spot.Locator] == nil {
+				agg.locators[spot.Locator] = &locatorAggregator{
+					callsigns: make(map[string]bool),
+				}
+			}
+			agg.locators[spot.Locator].totalSNR += float64(spot.SNR)
+			agg.locators[spot.Locator].count++
+			// Track unique callsigns for this locator
+			if spot.Callsign != "" {
+				agg.locators[spot.Locator].callsigns[spot.Callsign] = true
+			}
+		}
 
 		// Aggregate continent data
 		if spot.Continent != "" {
@@ -945,6 +970,20 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 				contAgg.maxSNR = float64(spot.SNR)
 			}
 			contAgg.hourly[hour]++
+			// Track locator statistics per band (only if locator is not empty)
+			if spot.Locator != "" {
+				if contAgg.locators[spot.Locator] == nil {
+					contAgg.locators[spot.Locator] = &locatorAggregator{
+						callsigns: make(map[string]bool),
+					}
+				}
+				contAgg.locators[spot.Locator].totalSNR += float64(spot.SNR)
+				contAgg.locators[spot.Locator].count++
+				// Track unique callsigns for this locator
+				if spot.Callsign != "" {
+					contAgg.locators[spot.Locator].callsigns[spot.Callsign] = true
+				}
+			}
 		}
 	}
 
@@ -975,12 +1014,28 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 
 		totalSpots := 0
 		for band, agg := range bands {
+			// Convert locator statistics to sorted slice for this band
+			locatorStats := make([]LocatorStats, 0, len(agg.locators))
+			for locator, locAgg := range agg.locators {
+				locatorStats = append(locatorStats, LocatorStats{
+					Locator:         locator,
+					AvgSNR:          locAgg.totalSNR / float64(locAgg.count),
+					Count:           locAgg.count,
+					UniqueCallsigns: len(locAgg.callsigns),
+				})
+			}
+			// Sort by locator name
+			sort.Slice(locatorStats, func(i, j int) bool {
+				return locatorStats[i].Locator < locatorStats[j].Locator
+			})
+
 			bandAnalytics := BandAnalytics{
 				Band:               band,
 				Spots:              agg.count,
 				MinSNR:             agg.minSNR,
 				AvgSNR:             agg.totalSNR / float64(agg.count),
 				MaxSNR:             agg.maxSNR,
+				UniqueLocators:     locatorStats,
 				BestHoursUTC:       findBestHours(agg.hourly, 3),
 				HourlyDistribution: formatHourlyDistribution(agg.hourly),
 			}
@@ -1017,12 +1072,28 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 
 		totalSpots := 0
 		for band, agg := range bands {
+			// Convert locator statistics to sorted slice for this band
+			locatorStats := make([]LocatorStats, 0, len(agg.locators))
+			for locator, locAgg := range agg.locators {
+				locatorStats = append(locatorStats, LocatorStats{
+					Locator:         locator,
+					AvgSNR:          locAgg.totalSNR / float64(locAgg.count),
+					Count:           locAgg.count,
+					UniqueCallsigns: len(locAgg.callsigns),
+				})
+			}
+			// Sort by locator name
+			sort.Slice(locatorStats, func(i, j int) bool {
+				return locatorStats[i].Locator < locatorStats[j].Locator
+			})
+
 			bandAnalytics := BandAnalytics{
 				Band:               band,
 				Spots:              agg.count,
 				MinSNR:             agg.minSNR,
 				AvgSNR:             agg.totalSNR / float64(agg.count),
 				MaxSNR:             agg.maxSNR,
+				UniqueLocators:     locatorStats,
 				BestHoursUTC:       findBestHours(agg.hourly, 3),
 				HourlyDistribution: formatHourlyDistribution(agg.hourly),
 			}
@@ -1047,6 +1118,13 @@ func (sl *SpotsLogger) GetSpotsAnalytics(filterCountry, filterContinent, filterM
 	return response, nil
 }
 
+// locatorAggregator tracks statistics for a specific locator
+type locatorAggregator struct {
+	totalSNR  float64
+	count     int
+	callsigns map[string]bool
+}
+
 // bandAggregator helps aggregate band statistics
 type bandAggregator struct {
 	count    int
@@ -1054,6 +1132,7 @@ type bandAggregator struct {
 	minSNR   float64
 	maxSNR   float64
 	hourly   map[int]int
+	locators map[string]*locatorAggregator
 }
 
 // findBestHours returns the top N hours with most spots (only hours with count > 0)

@@ -5,9 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Decoder Spots Analytics</title>
     <link rel="stylesheet" href="decoder_spots_analytics.css">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <!-- Chart.js for visualizations -->
     <script src="chart.umd.min.js"></script>
     <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
     <div class="container">
@@ -103,6 +107,14 @@
             <!-- Country Analytics Section -->
             <div id="country-section" class="analytics-section">
                 <h2>📍 By Country</h2>
+                <!-- Map for country view -->
+                <div id="country-map" class="analytics-map" style="height: 400px; margin-bottom: 20px; border-radius: 8px; display: none;">
+                    <div style="position: absolute; top: 10px; right: 10px; z-index: 1000; background: white; padding: 5px 10px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                        <label style="cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="country-grid-toggle" checked> Show Grid
+                        </label>
+                    </div>
+                </div>
                 <div id="country-list" class="country-list">
                     <!-- Country cards will be inserted here -->
                 </div>
@@ -111,6 +123,14 @@
             <!-- Continent Analytics Section -->
             <div id="continent-section" class="analytics-section">
                 <h2>🌍 By Continent</h2>
+                <!-- Map for continent view -->
+                <div id="continent-map" class="analytics-map" style="height: 400px; margin-bottom: 20px; border-radius: 8px; display: none;">
+                    <div style="position: absolute; top: 10px; right: 10px; z-index: 1000; background: white; padding: 5px 10px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                        <label style="cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="continent-grid-toggle" checked> Show Grid
+                        </label>
+                    </div>
+                </div>
                 <div id="continent-list" class="continent-list">
                     <!-- Continent cards will be inserted here -->
                 </div>
@@ -125,6 +145,9 @@
         <p>Download <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/decoder_spots_history.html" target="_blank">Spots History</a> • <a href="/bandconditions.html" target="_blank">Live Conditions</a> <span id="footer-version"></span></p>
     </footer>
 
+    <!-- Maidenhead Grid Library -->
+    <script src="maidenhead-grid.js"></script>
+    <!-- Analytics Script -->
     <script src="decoder_spots_analytics.js"></script>
 </body>
 </html>

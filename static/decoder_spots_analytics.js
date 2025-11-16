@@ -6,6 +6,10 @@
     let allCountries = [];
     let allContinents = [];
     let showGraphs = false;
+    let countryMap = null;
+    let countryGrid = null;
+    let continentMap = null;
+    let continentGrid = null;
 
     // Continent name mapping
     const continentNames = {
@@ -205,6 +209,9 @@
         const countryList = document.getElementById('country-list');
         const continentList = document.getElementById('continent-list');
 
+        // Initialize maps if not already done
+        initializeMaps();
+
         // Update title
         let titleParts = [];
         if (data.filters.country) {
@@ -278,11 +285,15 @@
             countryList.appendChild(card);
         });
 
+        // Update country map with data
+        updateCountryMap(data);
+
         // Display continent analytics (only if no specific country was selected)
         const continentSection = document.getElementById('continent-section');
         if (data.filters.country) {
             // Hide continent section when a specific country is selected
             continentSection.style.display = 'none';
+            document.getElementById('continent-map').style.display = 'none';
         } else {
             continentSection.style.display = 'block';
             continentList.innerHTML = '';
@@ -290,9 +301,201 @@
                 const card = createEntityCard(continent, 'continent');
                 continentList.appendChild(card);
             });
+            
+            // Update continent map with data
+            updateContinentMap(data);
         }
 
         container.style.display = 'block';
+    }
+
+    function initializeMaps() {
+        // Initialize country map
+        if (!countryMap) {
+            const countryMapDiv = document.getElementById('country-map');
+            countryMapDiv.style.display = 'block';
+            
+            countryMap = L.map('country-map').setView([20, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(countryMap);
+            
+            countryGrid = new MaidenheadGrid(countryMap, {
+                color: '#666',
+                weight: 1,
+                opacity: 0.3,
+                showLabels: false
+            });
+            countryGrid.showGrid();
+            
+            // Grid toggle
+            document.getElementById('country-grid-toggle').addEventListener('change', function() {
+                countryGrid.toggleGrid();
+            });
+        }
+
+        // Initialize continent map
+        if (!continentMap) {
+            const continentMapDiv = document.getElementById('continent-map');
+            continentMapDiv.style.display = 'block';
+            
+            continentMap = L.map('continent-map').setView([20, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(continentMap);
+            
+            continentGrid = new MaidenheadGrid(continentMap, {
+                color: '#666',
+                weight: 1,
+                opacity: 0.3,
+                showLabels: false
+            });
+            continentGrid.showGrid();
+            
+            // Grid toggle
+            document.getElementById('continent-grid-toggle').addEventListener('change', function() {
+                continentGrid.toggleGrid();
+            });
+        }
+    }
+
+    function updateCountryMap(data) {
+        if (!countryGrid) return;
+
+        // Clear previous highlights
+        countryGrid.clearHighlights();
+
+        // Collect all locators from all countries and bands
+        const allLocators = [];
+        data.by_country.forEach(country => {
+            country.bands.forEach(band => {
+                band.unique_locators.forEach(loc => {
+                    allLocators.push({
+                        locator: loc.locator,
+                        style: {
+                            fillColor: getSNRColor(loc.avg_snr),
+                            fillOpacity: 0.5,
+                            color: '#333',
+                            weight: 1,
+                            opacity: 0.8
+                        },
+                        data: {
+                            avg_snr: loc.avg_snr,
+                            count: loc.count,
+                            unique_callsigns: loc.unique_callsigns,
+                            band: band.band,
+                            country: country.country
+                        }
+                    });
+                });
+            });
+        });
+
+        // Highlight all locators
+        countryGrid.highlightLocators(allLocators);
+
+        // Fit map to bounds if we have locators
+        if (allLocators.length > 0) {
+            const bounds = calculateBounds(allLocators.map(l => l.locator));
+            if (bounds) {
+                countryMap.fitBounds(bounds, { padding: [50, 50] });
+            }
+        }
+    }
+
+    function updateContinentMap(data) {
+        if (!continentGrid) return;
+
+        // Clear previous highlights
+        continentGrid.clearHighlights();
+
+        // Collect all locators from all continents and bands
+        const allLocators = [];
+        data.by_continent.forEach(continent => {
+            continent.bands.forEach(band => {
+                band.unique_locators.forEach(loc => {
+                    allLocators.push({
+                        locator: loc.locator,
+                        style: {
+                            fillColor: getSNRColor(loc.avg_snr),
+                            fillOpacity: 0.5,
+                            color: '#333',
+                            weight: 1,
+                            opacity: 0.8
+                        },
+                        data: {
+                            avg_snr: loc.avg_snr,
+                            count: loc.count,
+                            unique_callsigns: loc.unique_callsigns,
+                            band: band.band,
+                            continent: continent.continent_name
+                        }
+                    });
+                });
+            });
+        });
+
+        // Highlight all locators
+        continentGrid.highlightLocators(allLocators);
+
+        // Fit map to bounds if we have locators
+        if (allLocators.length > 0) {
+            const bounds = calculateBounds(allLocators.map(l => l.locator));
+            if (bounds) {
+                continentMap.fitBounds(bounds, { padding: [50, 50] });
+            }
+        }
+    }
+
+    function getSNRColor(snr) {
+        // Color scale from red (poor) to green (excellent)
+        if (snr < -10) return '#d32f2f'; // Dark red
+        if (snr < 0) return '#f57c00';   // Orange
+        if (snr < 10) return '#fbc02d';  // Yellow
+        if (snr < 20) return '#7cb342';  // Light green
+        return '#388e3c';                // Dark green
+    }
+
+    function calculateBounds(locators) {
+        if (locators.length === 0) return null;
+
+        let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+
+        locators.forEach(locator => {
+            try {
+                const bounds = locatorToBounds(locator);
+                minLat = Math.min(minLat, bounds.south);
+                maxLat = Math.max(maxLat, bounds.north);
+                minLon = Math.min(minLon, bounds.west);
+                maxLon = Math.max(maxLon, bounds.east);
+            } catch (e) {
+                // Skip invalid locators
+            }
+        });
+
+        return [[minLat, minLon], [maxLat, maxLon]];
+    }
+
+    function locatorToBounds(locator) {
+        if (locator.length !== 4) {
+            throw new Error('Locator must be 4 characters');
+        }
+
+        const field = locator.substring(0, 2).toUpperCase();
+        const square = locator.substring(2, 4);
+
+        const fieldLon = (field.charCodeAt(0) - 65) * 20 - 180;
+        const fieldLat = (field.charCodeAt(1) - 65) * 10 - 90;
+
+        const squareLon = parseInt(square[0]) * 2;
+        const squareLat = parseInt(square[1]) * 1;
+
+        const west = fieldLon + squareLon;
+        const south = fieldLat + squareLat;
+        const east = west + 2;
+        const north = south + 1;
+
+        return { south, west, north, east };
     }
 
     function createEntityCard(entity, type) {

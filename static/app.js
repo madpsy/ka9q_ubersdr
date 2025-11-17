@@ -6635,3 +6635,47 @@ window.openBufferConfigModal = openBufferConfigModal;
 window.closeBufferConfigModal = closeBufferConfigModal;
 window.setBufferThreshold = setBufferThreshold;
 
+// Frequency scroll configuration
+let frequencyScrollMode = '100-fast'; // Default mode
+let frequencyScrollStep = 100; // Hz
+let frequencyScrollDelay = 100; // ms
+
+// Toggle frequency scroll dropdown visibility
+function toggleFrequencyScrollDropdown() {
+    const checkbox = document.getElementById('spectrum-scroll-enable');
+    const dropdown = document.getElementById('frequency-scroll-mode');
+    
+    if (checkbox && dropdown) {
+        dropdown.style.display = checkbox.checked ? 'block' : 'none';
+        
+        // Update scroll mode when enabling
+        if (checkbox.checked) {
+            updateFrequencyScrollMode();
+        }
+    }
+}
+
+// Update frequency scroll mode from dropdown
+function updateFrequencyScrollMode() {
+    const dropdown = document.getElementById('frequency-scroll-mode');
+    if (!dropdown) return;
+    
+    frequencyScrollMode = dropdown.value;
+    
+    // Parse the mode to get step and delay
+    const [stepStr, speed] = frequencyScrollMode.split('-');
+    const step = parseInt(stepStr);
+    
+    frequencyScrollStep = step;
+    
+    // Set delay based on speed
+    // "slow" = 200ms delay, "fast" = 100ms delay
+    frequencyScrollDelay = speed === 'slow' ? 200 : 100;
+    
+    log(`Frequency scroll mode: ${step} Hz ${speed} (${frequencyScrollDelay}ms delay)`);
+}
+
+// Expose functions globally
+window.toggleFrequencyScrollDropdown = toggleFrequencyScrollDropdown;
+window.updateFrequencyScrollMode = updateFrequencyScrollMode;
+

@@ -130,10 +130,20 @@
                         <input type="number" id="frequency" value="14175000" min="100000" max="30000000" step="1000" oninput="validateFrequencyInput(this)" onchange="handleFrequencyChange()" title="Frequency in Hz (F key to focus)">
                         <span class="frequency-unit">Hz</span>
                     </div>
-                    <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
-                        <input type="checkbox" id="spectrum-scroll-enable">
-                        <span>Scroll</span>
-                    </label>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
+                            <input type="checkbox" id="spectrum-scroll-enable" onchange="toggleFrequencyScrollDropdown()">
+                            <span>Scroll</span>
+                        </label>
+                        <select id="frequency-scroll-mode" style="display: none; padding: 2px 4px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.85em;" onchange="updateFrequencyScrollMode()">
+                            <option value="10-slow">10 Hz slow</option>
+                            <option value="10-fast">10 Hz fast</option>
+                            <option value="100-slow">100 Hz slow</option>
+                            <option value="100-fast" selected>100 Hz fast</option>
+                            <option value="1000-slow">1000 Hz slow</option>
+                            <option value="1000-fast">1000 Hz fast</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="tuning-buttons">
                     <button onclick="adjustFrequency(-1000)" title="Down 1 kHz (Left Arrow ←)">◄◄</button>

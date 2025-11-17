@@ -35,8 +35,11 @@ class SpectrumDisplay {
         // Frame buffering for audio synchronization
         this.frameQueue = [];
         this.maxQueueSize = 100;
+        this.maxHealthyQueueSize = 10; // Keep queue small to prevent lag accumulation
+        this.maxFrameAge = 500; // Drop frames older than 500ms (stale data)
         this.bufferMargin = 0.05; // 50ms safety margin (matching frequency tracking)
         this.animationLoopRunning = false;
+        this.droppedFrameCount = 0; // Track dropped frames for debugging
     
         // Cache filter latency for synchronization (updated dynamically)
         this.cachedFilterLatency = 0; // milliseconds
@@ -529,6 +532,33 @@ class SpectrumDisplay {
     
                 // Process frames that should be displayed now
                 const now = Date.now();
+
+                // ADAPTIVE FRAME DROPPING: Prevent unbounded queue growth during high CPU
+                // Drop old frames if queue is too large (prevents 5+ second lag)
+                if (this.frameQueue.length > this.maxHealthyQueueSize) {
+                    const dropped = this.frameQueue.length - this.maxHealthyQueueSize;
+                    this.frameQueue.splice(0, dropped);
+                    this.droppedFrameCount += dropped;
+                    if (this.droppedFrameCount % 50 === 0) {
+                        console.log(`Waterfall: Dropped ${this.droppedFrameCount} frames total to prevent lag (queue was ${this.frameQueue.length + dropped})`);
+                    }
+                }
+
+                // Drop stale frames (older than maxFrameAge)
+                while (this.frameQueue.length > 0) {
+                    const frame = this.frameQueue[0];
+                    const age = now - frame.receiveTime;
+
+                    if (age > this.maxFrameAge) {
+                        this.frameQueue.shift();
+                        this.droppedFrameCount++;
+                        if (this.droppedFrameCount % 50 === 0) {
+                            console.log(`Waterfall: Dropped stale frame (${age}ms old, total dropped: ${this.droppedFrameCount})`);
+                        }
+                    } else {
+                        break; // Rest of queue is fresh
+                    }
+                }
 
                 while (this.frameQueue.length > 0) {
                     const frame = this.frameQueue[0];

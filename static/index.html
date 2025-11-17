@@ -809,6 +809,35 @@
         </div>
     </div>
 
+    <!-- Country Spots Modal (for Digital Spots Extension) -->
+    <div id="country-spots-modal" class="country-spots-modal" style="display: none;">
+        <div class="country-spots-modal-content">
+            <div class="country-spots-modal-header">
+                <h3 id="country-spots-modal-title">Country Spots</h3>
+                <button id="country-spots-modal-close" class="modal-close-btn">&times;</button>
+            </div>
+            <div class="country-spots-modal-body">
+                <table class="country-spots-modal-table">
+                    <thead>
+                        <tr>
+                            <th>Callsign</th>
+                            <th>Mode</th>
+                            <th>SNR</th>
+                            <th>Grid</th>
+                            <th>Distance</th>
+                            <th>Bearing</th>
+                            <th>Age</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody id="country-spots-modal-tbody">
+                        <!-- Spots will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer class="site-footer">
         <p>Download <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/noisefloor.html" target="_blank">Noise Floor Graphs</a> • <a href="/bandconditions.html" target="_blank">Band Conditions</a><span id="footer-digitalspots-link" style="display: none;"> • <a href="/digitalspots_map.html" target="_blank">Live Map</a></span> <span id="footer-version"></span></p>

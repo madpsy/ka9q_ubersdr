@@ -150,10 +150,16 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 		lastData := band.LastDataTime
 		band.mu.Unlock()
 
-		// Consider stale if no decoder invocation in 3x cycle time
+		// Consider stale if no decoder invocation in 3x cycle time OR no data in 30 seconds
 		staleThreshold := modeInfo.CycleTime * 3
 		timeSinceInvoke := time.Since(lastInvoke)
-		isStale := !lastInvoke.IsZero() && timeSinceInvoke > staleThreshold
+		timeSinceData := time.Since(lastData)
+
+		// Band is stale if:
+		// 1. Decoder hasn't been invoked in 3x cycle time (and has been invoked at least once)
+		// 2. OR no audio data received in 30 seconds (and has received data at least once)
+		isStale := (!lastInvoke.IsZero() && timeSinceInvoke > staleThreshold) ||
+			(!lastData.IsZero() && timeSinceData > 30*time.Second)
 
 		bandHealth := DecoderBandHealth{
 			Name:              band.Config.Name,
@@ -287,7 +293,12 @@ func (md *MultiDecoder) GetStartupDiagnostics() DecoderHealthDiagnostics {
 		timeSinceInvoke := time.Since(lastInvoke)
 		timeSinceData := time.Since(lastData)
 		staleThreshold := modeInfo.CycleTime * 3
-		isStale := !lastInvoke.IsZero() && timeSinceInvoke > staleThreshold
+
+		// Band is stale if:
+		// 1. Decoder hasn't been invoked in 3x cycle time (and has been invoked at least once)
+		// 2. OR no audio data received in 30 seconds (and has received data at least once)
+		isStale := (!lastInvoke.IsZero() && timeSinceInvoke > staleThreshold) ||
+			(!lastData.IsZero() && timeSinceData > 30*time.Second)
 
 		bandDiag := DecoderBandDiagnostics{
 			Name:              band.Config.Name,

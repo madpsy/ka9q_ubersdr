@@ -3892,6 +3892,8 @@
                                 const diffMs = now - date;
                                 const diffSecs = Math.floor(diffMs / 1000);
                                 
+                                if (diffSecs < 0) return 'just now'; // Handle future times due to clock skew
+                                if (diffSecs < 2) return 'just now'; // Show "just now" for 0-1 seconds
                                 if (diffSecs < 60) return `${diffSecs}s ago`;
                                 if (diffSecs < 3600) return `${Math.floor(diffSecs / 60)}m ago`;
                                 if (diffSecs < 86400) return `${Math.floor(diffSecs / 3600)}h ago`;

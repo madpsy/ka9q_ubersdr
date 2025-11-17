@@ -326,12 +326,7 @@ func (md *MultiDecoder) bandMonitorLoop(band *DecoderBand) {
 			return
 
 		case audioData := <-band.AudioChan:
-			// Update last data time
-			band.mu.Lock()
-			band.LastDataTime = time.Now()
-			band.mu.Unlock()
-
-			// Process audio packet
+			// Process audio packet (LastDataTime will be updated when decoder completes)
 			md.processAudioPacket(band, audioData, time.Now())
 		}
 	}
@@ -508,6 +503,11 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 			md.stats.IncrementErrors()
 			// Don't return yet - we still want to clean up the log file
 			// Continue to cleanup section below
+		} else {
+			// Update last data time only when decoder successfully completes
+			band.mu.Lock()
+			band.LastDataTime = time.Now()
+			band.mu.Unlock()
 		}
 
 		// Update statistics

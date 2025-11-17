@@ -5171,26 +5171,33 @@ function updateWaterfallAutoAdjust() {
 
     const { startBinIndex, binsForBandwidth } = binMapping;
 
-    // Find noise floor and peak in visible bandwidth
-    let minMagnitude = 255;
-    let maxMagnitude = 0;
-    let validSamples = 0;
-
+    // Collect all magnitude values for percentile calculation
+    const magnitudes = [];
     for (let i = startBinIndex; i < startBinIndex + binsForBandwidth && i < dataArray.length; i++) {
         const magnitude = dataArray[i];
         if (magnitude > 0) { // Ignore zero values
-            minMagnitude = Math.min(minMagnitude, magnitude);
-            maxMagnitude = Math.max(maxMagnitude, magnitude);
-            validSamples++;
+            magnitudes.push(magnitude);
         }
     }
 
     // Need valid data to proceed
-    if (validSamples === 0) return;
+    if (magnitudes.length === 0) return;
 
-    // Add to history for smoothing
-    waterfallNoiseFloorHistory.push(minMagnitude);
-    waterfallPeakHistory.push(maxMagnitude);
+    // Sort for percentile calculation
+    magnitudes.sort((a, b) => a - b);
+
+    // Use percentiles to ignore outliers
+    // 10th percentile for noise floor (ignores very weak noise spikes)
+    // 75th percentile for typical signal level (ignores very strong signals)
+    const noiseFloorIndex = Math.floor(magnitudes.length * 0.10);
+    const typicalSignalIndex = Math.floor(magnitudes.length * 0.75);
+
+    const noiseFloor = magnitudes[noiseFloorIndex];
+    const typicalSignal = magnitudes[typicalSignalIndex];
+
+    // Add to history for temporal smoothing
+    waterfallNoiseFloorHistory.push(noiseFloor);
+    waterfallPeakHistory.push(typicalSignal);
 
     if (waterfallNoiseFloorHistory.length > WATERFALL_AUTO_ADJUST_HISTORY_SIZE) {
         waterfallNoiseFloorHistory.shift();
@@ -5206,10 +5213,10 @@ function updateWaterfallAutoAdjust() {
 
     // Calculate smoothed values
     const avgNoiseFloor = waterfallNoiseFloorHistory.reduce((sum, v) => sum + v, 0) / waterfallNoiseFloorHistory.length;
-    const avgPeak = waterfallPeakHistory.reduce((sum, v) => sum + v, 0) / waterfallPeakHistory.length;
+    const avgTypicalSignal = waterfallPeakHistory.reduce((sum, v) => sum + v, 0) / waterfallPeakHistory.length;
 
-    // Calculate dynamic range
-    const dynamicRange = avgPeak - avgNoiseFloor;
+    // Calculate dynamic range based on typical signals (not peaks)
+    const dynamicRange = avgTypicalSignal - avgNoiseFloor;
 
     // Calculate optimal contrast (noise floor suppression)
     // Set contrast slightly above noise floor to suppress noise while preserving weak signals

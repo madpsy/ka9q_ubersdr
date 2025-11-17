@@ -468,7 +468,7 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         container.classList.remove('empty');
 
-        // Track unique countries with their most recent timestamp
+        // Track unique countries with their most recent spot data
         const countryMap = new Map();
 
         bandSpots.forEach(spot => {
@@ -477,8 +477,13 @@ class DigitalSpotsExtension extends DecoderExtension {
 
             const spotTime = new Date(spot.timestamp).getTime();
 
-            if (!countryMap.has(country) || spotTime > countryMap.get(country)) {
-                countryMap.set(country, spotTime);
+            if (!countryMap.has(country) || spotTime > countryMap.get(country).timestamp) {
+                countryMap.set(country, {
+                    timestamp: spotTime,
+                    mode: spot.mode,
+                    snr: spot.snr,
+                    callsign: spot.callsign
+                });
             }
         });
 
@@ -486,20 +491,20 @@ class DigitalSpotsExtension extends DecoderExtension {
         const countries = Array.from(countryMap.entries())
             .sort((a, b) => {
                 // Sort by timestamp descending (most recent first)
-                return b[1] - a[1];
+                return b[1].timestamp - a[1].timestamp;
             })
             .slice(0, 10) // Take only the 10 most recent
-            .map(entry => entry[0])
-            .sort(); // Sort alphabetically
+            .sort((a, b) => a[0].localeCompare(b[0])); // Sort alphabetically by country name
 
         // Create badges
         const fragment = document.createDocumentFragment();
 
-        countries.forEach(country => {
+        countries.forEach(([country, spotData]) => {
             const badge = document.createElement('span');
             badge.className = 'country-badge';
             badge.textContent = country;
-            badge.title = `${country} on ${currentBand}`;
+            const snrText = spotData.snr >= 0 ? `+${spotData.snr}` : spotData.snr;
+            badge.title = `${country} on ${currentBand}\nLast: ${spotData.callsign}\nMode: ${spotData.mode}\nSNR: ${snrText} dB`;
             fragment.appendChild(badge);
         });
 
@@ -764,6 +769,22 @@ if (window.decoderManager) {
     const digitalSpotsExtension = new DigitalSpotsExtension();
     window.decoderManager.register(digitalSpotsExtension);
     console.log('Digital Spots extension registered:', digitalSpotsExtension);
+
+    // Auto-enable the extension to start collecting spots in the background
+    // This allows badges to work even when the panel is closed
+    setTimeout(() => {
+        if (window.audioContext) {
+            // Initialize without opening the panel
+            digitalSpotsExtension.radio = window.radio || window.decoderManager.radio;
+            if (digitalSpotsExtension.radio) {
+                // Start collecting spots immediately
+                digitalSpotsExtension.subscribeToDigitalSpots();
+                digitalSpotsExtension.startFrequencyMonitoring();
+                digitalSpotsExtension.startFrequencyPolling();
+                console.log('Digital Spots: Auto-enabled for background operation');
+            }
+        }
+    }, 1000);
 } else {
     console.error('decoderManager not available for Digital Spots extension');
 }

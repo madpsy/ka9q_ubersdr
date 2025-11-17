@@ -319,6 +319,9 @@ func (psk *PSKReporter) makePackets() int {
 		psk.sentReports = append(psk.sentReports, report)
 		psk.sentMutex.Unlock()
 
+		// Record that we sent data to PSKReporter
+		RecordPSKReporterSend()
+
 		reportCount++
 	}
 

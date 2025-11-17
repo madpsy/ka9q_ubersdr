@@ -3451,20 +3451,22 @@
         // Monitor health management
         async function loadMonitorHealth() {
             try {
-                // Fetch both noise floor and space weather health
-                const [nfResponse, swResponse] = await Promise.all([
+                // Fetch noise floor, space weather, and decoder health
+                const [nfResponse, swResponse, decoderResponse] = await Promise.all([
                     authenticatedFetch('/admin/noisefloor-health'),
-                    authenticatedFetch('/admin/spaceweather-health')
+                    authenticatedFetch('/admin/spaceweather-health'),
+                    authenticatedFetch('/admin/decoder-health')
                 ]);
                 
-                if (!nfResponse || !swResponse) return; // Auth failed, already handled
+                if (!nfResponse || !swResponse || !decoderResponse) return; // Auth failed, already handled
 
                 const nfHealth = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swHealth = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
+                const decoderHealth = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
 
-                renderMonitorHealth({ noiseFloor: nfHealth, spaceWeather: swHealth }, false);
+                renderMonitorHealth({ noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth }, false);
                 
-                const allHealthy = (nfHealth?.healthy !== false) && (swHealth?.healthy !== false);
+                const allHealthy = (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false);
                 if (allHealthy) {
                     showAlert('Health check completed - all systems healthy', 'success');
                 } else {
@@ -3477,18 +3479,20 @@
 
         async function loadMonitorHealthDetailed() {
             try {
-                // Fetch both noise floor and space weather detailed diagnostics
-                const [nfResponse, swResponse] = await Promise.all([
+                // Fetch noise floor, space weather, and decoder detailed diagnostics
+                const [nfResponse, swResponse, decoderResponse] = await Promise.all([
                     authenticatedFetch('/admin/noisefloor-health?detailed=true'),
-                    authenticatedFetch('/admin/spaceweather-health?detailed=true')
+                    authenticatedFetch('/admin/spaceweather-health?detailed=true'),
+                    authenticatedFetch('/admin/decoder-health?detailed=true')
                 ]);
                 
-                if (!nfResponse || !swResponse) return; // Auth failed, already handled
+                if (!nfResponse || !swResponse || !decoderResponse) return; // Auth failed, already handled
 
                 const nfDiag = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swDiag = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
+                const decoderDiag = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
 
-                renderMonitorHealth({ noiseFloor: nfDiag, spaceWeather: swDiag }, true);
+                renderMonitorHealth({ noiseFloor: nfDiag, spaceWeather: swDiag, decoder: decoderDiag }, true);
                 showAlert('Detailed diagnostics loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading detailed diagnostics: ' + error.message, 'error');
@@ -3501,7 +3505,7 @@
             container.classList.remove('loading');
 
             if (isDetailed) {
-                // Render detailed diagnostics for both systems
+                // Render detailed diagnostics for all systems
                 if (data.noiseFloor) {
                     const nfSection = document.createElement('div');
                     nfSection.className = 'config-section';
@@ -3541,6 +3545,26 @@
                     swSection.appendChild(swPre);
                     container.appendChild(swSection);
                 }
+
+                if (data.decoder) {
+                    const decoderSection = document.createElement('div');
+                    decoderSection.className = 'config-section';
+                    decoderSection.innerHTML = '<h3>🔍 Decoder - Detailed Diagnostics</h3>';
+
+                    const decoderPre = document.createElement('pre');
+                    decoderPre.style.background = '#fff';
+                    decoderPre.style.padding = '15px';
+                    decoderPre.style.borderRadius = '5px';
+                    decoderPre.style.overflow = 'auto';
+                    decoderPre.style.fontFamily = 'monospace';
+                    decoderPre.style.fontSize = '13px';
+                    decoderPre.style.lineHeight = '1.5';
+                    decoderPre.style.whiteSpace = 'pre-wrap';
+                    decoderPre.style.wordWrap = 'break-word';
+                    decoderPre.textContent = JSON.stringify(data.decoder, null, 2);
+                    decoderSection.appendChild(decoderPre);
+                    container.appendChild(decoderSection);
+                }
             } else {
                 // Render noise floor health status
                 if (data.noiseFloor) {
@@ -3550,6 +3574,11 @@
                 // Render space weather health status
                 if (data.spaceWeather) {
                     renderSpaceWeatherHealth(container, data.spaceWeather);
+                }
+
+                // Render decoder health status
+                if (data.decoder) {
+                    renderDecoderHealth(container, data.decoder);
                 }
             }
         }
@@ -3743,6 +3772,190 @@
                 issuesDiv.style.border = '1px solid #ffeaa7';
                 issuesDiv.style.borderRadius = '5px';
                 issuesDiv.style.marginBottom = '20px';
+
+                const issuesTitle = document.createElement('strong');
+                issuesTitle.textContent = '⚠️ Issues Detected:';
+                issuesTitle.style.display = 'block';
+                issuesTitle.style.marginBottom = '10px';
+                issuesDiv.appendChild(issuesTitle);
+
+                const issuesList = document.createElement('ul');
+                issuesList.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            container.appendChild(statusSection);
+        }
+
+        function renderDecoderHealth(container, data) {
+            // Render decoder health status
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : '#dc3545';
+
+            statusSection.innerHTML = `
+                <h3 style="color: ${statusColor};">${statusIcon} Decoder Monitor Health</h3>
+            `;
+
+            // Overall status
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span><br>
+                <span style="color: #666; font-size: 14px;">Bands Running: ${data.band_count || 0}</span>
+            `;
+            statusSection.appendChild(statusDiv);
+
+            // Band statistics
+            if (data.enabled && data.band_count > 0) {
+                const statsDiv = document.createElement('div');
+                statsDiv.style.display = 'grid';
+                statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+                statsDiv.style.gap = '15px';
+                statsDiv.style.marginBottom = '20px';
+
+                const stats = [
+                    { label: 'Total Bands', value: data.band_count || 0, icon: '📊' },
+                    { label: 'Healthy Bands', value: (data.bands || []).filter(b => b.healthy).length, icon: '✅' },
+                    { label: 'Stale Bands', value: (data.bands || []).filter(b => !b.healthy).length, icon: '⚠️' }
+                ];
+
+                stats.forEach(stat => {
+                    const statCard = document.createElement('div');
+                    statCard.style.padding = '15px';
+                    statCard.style.background = '#f8f9fa';
+                    statCard.style.borderRadius = '5px';
+                    statCard.style.textAlign = 'center';
+                    statCard.innerHTML = `
+                        <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
+                        <div style="font-size: 24px; font-weight: bold; color: #667eea; margin-bottom: 5px;">${stat.value}</div>
+                        <div style="font-size: 12px; color: #666;">${stat.label}</div>
+                    `;
+                    statsDiv.appendChild(statCard);
+                });
+                statusSection.appendChild(statsDiv);
+
+                // Band details table
+                if (data.bands && data.bands.length > 0) {
+                    const bandsTitle = document.createElement('h4');
+                    bandsTitle.textContent = 'Band Details';
+                    bandsTitle.style.marginTop = '20px';
+                    bandsTitle.style.marginBottom = '10px';
+                    statusSection.appendChild(bandsTitle);
+
+                    const table = document.createElement('table');
+                    table.style.width = '100%';
+                    table.style.borderCollapse = 'collapse';
+
+                    const thead = document.createElement('thead');
+                    thead.innerHTML = `
+                        <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                            <th style="padding: 10px; text-align: left;">Band</th>
+                            <th style="padding: 10px; text-align: left;">Mode</th>
+                            <th style="padding: 10px; text-align: left;">Frequency</th>
+                            <th style="padding: 10px; text-align: left;">Last Invoke</th>
+                            <th style="padding: 10px; text-align: left;">Last Data</th>
+                            <th style="padding: 10px; text-align: center;">Status</th>
+                        </tr>
+                    `;
+                    table.appendChild(thead);
+
+                    const tbody = document.createElement('tbody');
+                    data.bands.forEach(band => {
+                        const row = document.createElement('tr');
+                        row.style.borderBottom = '1px solid #dee2e6';
+
+                        const statusIcon = band.healthy ? '✅' : '⚠️';
+                        const statusText = band.healthy ? 'OK' : 'Stale';
+                        const statusColor = band.healthy ? '#28a745' : '#ffc107';
+
+                        row.innerHTML = `
+                            <td style="padding: 10px;"><strong>${band.name}</strong></td>
+                            <td style="padding: 10px;"><span style="color: #667eea;">${band.mode}</span></td>
+                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${(band.frequency / 1e6).toFixed(3)} MHz</td>
+                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${band.last_invoke || 'never'}</td>
+                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${band.last_data || 'never'}</td>
+                            <td style="padding: 10px; text-align: center;">
+                                <span style="color: ${statusColor}; font-weight: bold;">${statusIcon} ${statusText}</span>
+                            </td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+
+                    table.appendChild(tbody);
+                    statusSection.appendChild(table);
+                }
+
+                // Reporter status
+                const reportersTitle = document.createElement('h4');
+                reportersTitle.textContent = 'Spot Reporters';
+                reportersTitle.style.marginTop = '20px';
+                reportersTitle.style.marginBottom = '10px';
+                statusSection.appendChild(reportersTitle);
+
+                // PSKReporter status
+                if (data.pskreporter) {
+                    const pskDiv = document.createElement('div');
+                    pskDiv.style.padding = '15px';
+                    pskDiv.style.background = data.pskreporter.healthy ? '#d4edda' : '#f8d7da';
+                    pskDiv.style.border = `1px solid ${data.pskreporter.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+                    pskDiv.style.borderRadius = '5px';
+                    pskDiv.style.marginBottom = '10px';
+
+                    const pskIcon = data.pskreporter.healthy ? '✅' : '⚠️';
+                    pskDiv.innerHTML = `
+                        <strong>${pskIcon} PSKReporter</strong><br>
+                        <span style="color: #666; font-size: 14px;">Enabled: ${data.pskreporter.enabled ? 'Yes' : 'No'}</span><br>
+                        <span style="color: #666; font-size: 14px;">Last Send: ${data.pskreporter.last_send || 'never'}</span><br>
+                        <span style="color: #666; font-size: 14px;">Send Count: ${data.pskreporter.send_count || 0}</span><br>
+                        <span style="color: #666; font-size: 14px;">Queue Size: ${data.pskreporter.queue_size || 0}</span>
+                    `;
+                    statusSection.appendChild(pskDiv);
+                }
+
+                // WSPRNet status
+                if (data.wsprnet) {
+                    const wsprDiv = document.createElement('div');
+                    wsprDiv.style.padding = '15px';
+                    wsprDiv.style.background = data.wsprnet.healthy ? '#d4edda' : '#f8d7da';
+                    wsprDiv.style.border = `1px solid ${data.wsprnet.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+                    wsprDiv.style.borderRadius = '5px';
+                    wsprDiv.style.marginBottom = '10px';
+
+                    const wsprIcon = data.wsprnet.healthy ? '✅' : '⚠️';
+                    wsprDiv.innerHTML = `
+                        <strong>${wsprIcon} WSPRNet</strong><br>
+                        <span style="color: #666; font-size: 14px;">Enabled: ${data.wsprnet.enabled ? 'Yes' : 'No'}</span><br>
+                        <span style="color: #666; font-size: 14px;">Last Send: ${data.wsprnet.last_send || 'never'}</span><br>
+                        <span style="color: #666; font-size: 14px;">Send Count: ${data.wsprnet.send_count || 0}</span><br>
+                        <span style="color: #666; font-size: 14px;">Queue Size: ${data.wsprnet.queue_size || 0}</span>
+                    `;
+                    statusSection.appendChild(wsprDiv);
+                }
+            }
+
+            // Issues list
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.padding = '15px';
+                issuesDiv.style.background = '#fff3cd';
+                issuesDiv.style.border = '1px solid #ffeaa7';
+                issuesDiv.style.borderRadius = '5px';
+                issuesDiv.style.marginTop = '20px';
 
                 const issuesTitle = document.createElement('strong');
                 issuesTitle.textContent = '⚠️ Issues Detected:';

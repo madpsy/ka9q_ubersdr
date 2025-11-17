@@ -675,6 +675,9 @@ func main() {
 	http.HandleFunc("/admin/spaceweather-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleSpaceWeatherHealth(w, r, spaceWeatherMonitor)
 	}))
+	http.HandleFunc("/admin/decoder-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleDecoderHealth(w, r, multiDecoder)
+	}))
 
 	// Open log file for HTTP request logging
 	// If LogFile is a relative path and we have a config directory, prepend it
@@ -1635,6 +1638,38 @@ func handleSpaceWeatherHealth(w http.ResponseWriter, r *http.Request, swm *Space
 
 	if err := json.NewEncoder(w).Encode(status); err != nil {
 		log.Printf("Error encoding space weather health status: %v", err)
+	}
+}
+
+// handleDecoderHealth serves the health status of the decoder system
+// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
+func handleDecoderHealth(w http.ResponseWriter, r *http.Request, md *MultiDecoder) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get detailed diagnostics if requested
+	detailed := r.URL.Query().Get("detailed") == "true"
+
+	if detailed {
+		diagnostics := md.GetStartupDiagnostics()
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(diagnostics); err != nil {
+			log.Printf("Error encoding decoder diagnostics: %v", err)
+		}
+		return
+	}
+
+	// Return health status
+	status := md.GetHealthStatus()
+
+	// Set appropriate HTTP status code
+	if status.Healthy {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("Error encoding decoder health status: %v", err)
 	}
 }
 

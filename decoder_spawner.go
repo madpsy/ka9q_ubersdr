@@ -72,6 +72,9 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		log.Printf("DEBUG: Output file: %s", outputFile)
 	}
 
+	// Record decoder invocation
+	RecordDecoderInvoke(band.Config.Name)
+
 	// Start the decoder process and track execution time
 	startTime := time.Now()
 	if err := cmd.Start(); err != nil {

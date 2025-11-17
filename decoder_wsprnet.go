@@ -192,6 +192,9 @@ func (w *WSPRNet) workerThread() {
 			if success {
 				w.countSendsOK++
 				log.Printf("WSPRNet: Successfully sent report for %s", report.Callsign)
+
+				// Record that we sent data to WSPRNet
+				RecordWSPRNetSend()
 			} else {
 				// Check if we should retry
 				if report.RetryCount < WSPRMaxRetries {

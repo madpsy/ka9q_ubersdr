@@ -21,17 +21,12 @@
     padding: 6px 12px;
     background: #4a9eff;
     color: white;
-    border-radius: 4px;
+    border-radius: 12px;
     font-size: 12px;
     font-weight: bold;
     white-space: nowrap;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.digital-spots-badges-main .country-badge:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(74, 158, 255, 0.4);
+    cursor: default;
 }
 
 /* Notification Toast */

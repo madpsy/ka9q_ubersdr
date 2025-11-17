@@ -966,11 +966,12 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.updateAutoRange();
         }
 
-        // Apply client-side prediction: shift canvas horizontally if dragging AND mouse is actually moving
-        // Don't apply shift if just holding button down without movement
-        if (this.isDragging && this.predictedFreqOffset !== 0 && this.dragDidMove) {
-            this.applyPredictedShift();
-        }
+        // Don't apply predicted shift - it causes continuous movement when button is held
+        // The shift was intended for smooth dragging but causes issues with stationary mouse
+        // Commenting out for now - dragging will work but without client-side prediction
+        // if (this.isDragging && this.predictedFreqOffset !== 0 && this.dragDidMove) {
+        //     this.applyPredictedShift();
+        // }
 
         // Initialize waterfall image data if needed
         if (!this.waterfallImageData) {
@@ -1090,8 +1091,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     drawFrequencyScaleAtPosition(yPos) {
         if (!this.totalBandwidth) return;
 
-        // Apply client-side prediction offset during dragging (only if actively moving)
-        const effectiveCenterFreq = this.centerFreq + (this.isDragging && this.dragDidMove ? this.predictedFreqOffset : 0);
+        // Don't apply prediction offset - use server's center frequency
+        const effectiveCenterFreq = this.centerFreq;
         const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
         const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
 

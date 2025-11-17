@@ -5159,12 +5159,7 @@ const WATERFALL_AUTO_ADJUST_UPDATE_RATE = 500; // Update every 500ms
 
 // Update waterfall auto-adjust values (always enabled)
 function updateWaterfallAutoAdjust() {
-    console.log('updateWaterfallAutoAdjust called');
-
-    if (!analyser || !audioContext) {
-        console.log('Auto-adjust: Missing analyser or audioContext');
-        return;
-    }
+    if (!analyser || !audioContext) return;
 
     // Get frequency data
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -5172,10 +5167,7 @@ function updateWaterfallAutoAdjust() {
 
     // Get frequency bin mapping
     const binMapping = getFrequencyBinMapping();
-    if (!binMapping) {
-        console.log('Auto-adjust: No bin mapping available');
-        return;
-    }
+    if (!binMapping) return;
 
     const { startBinIndex, binsForBandwidth } = binMapping;
 
@@ -5193,13 +5185,8 @@ function updateWaterfallAutoAdjust() {
         }
     }
 
-    console.log(`Auto-adjust: validSamples=${validSamples}, min=${minMagnitude}, max=${maxMagnitude}`);
-
     // Need valid data to proceed
-    if (validSamples === 0) {
-        console.log('Auto-adjust: No valid samples');
-        return;
-    }
+    if (validSamples === 0) return;
 
     // Add to history for smoothing
     waterfallNoiseFloorHistory.push(minMagnitude);
@@ -5212,11 +5199,8 @@ function updateWaterfallAutoAdjust() {
         waterfallPeakHistory.shift();
     }
 
-    console.log(`Auto-adjust: History size=${waterfallNoiseFloorHistory.length}/${WATERFALL_AUTO_ADJUST_HISTORY_SIZE}`);
-
     // Need enough history before adjusting
     if (waterfallNoiseFloorHistory.length < WATERFALL_AUTO_ADJUST_HISTORY_SIZE) {
-        console.log('Auto-adjust: Waiting for more history samples');
         return;
     }
 
@@ -5252,14 +5236,9 @@ function updateWaterfallAutoAdjust() {
         optimalIntensity = 0.0;
     }
 
-    console.log(`Auto-adjust: avgNoiseFloor=${avgNoiseFloor.toFixed(1)}, avgPeak=${avgPeak.toFixed(1)}, dynamicRange=${dynamicRange.toFixed(1)}`);
-    console.log(`Auto-adjust: Setting intensity=${optimalIntensity}, contrast=${clampedContrast}`);
-
     // Apply optimal values directly (no UI controls)
     waterfallIntensity = optimalIntensity;
     waterfallContrast = clampedContrast;
-
-    log(`Waterfall auto-adjust: intensity=${optimalIntensity.toFixed(2)}, contrast=${clampedContrast}, range=${dynamicRange.toFixed(1)}`);
 }
 
 // Update oscilloscope zoom/timebase

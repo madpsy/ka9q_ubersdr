@@ -1,3 +1,40 @@
+/* Digital Spots Country Badges on Main Page */
+.digital-spots-badges-main {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0;
+    padding: 12px;
+    background: #222;
+    border-radius: 4px;
+    min-height: 50px;
+    align-items: center;
+    justify-content: center;
+}
+
+.digital-spots-badges-main.empty {
+    color: #666;
+    font-size: 12px;
+    font-style: italic;
+}
+
+.digital-spots-badges-main .country-badge {
+    padding: 6px 12px;
+    background: #4a9eff;
+    color: white;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    white-space: nowrap;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.digital-spots-badges-main .country-badge:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(74, 158, 255, 0.4);
+}
+
 /* Notification Toast */
 .notification-toast {
     position: fixed;

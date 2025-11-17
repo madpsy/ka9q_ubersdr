@@ -19,6 +19,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.distanceFilter = null; // Default no limit
         this.callsignFilter = '';
         this.highlightNew = true;
+        this.showBadges = true; // Default to showing badges
         this.unsubscribe = null;
         this.newSpotId = null;
         this.spotIdCounter = 0;
@@ -114,6 +115,9 @@ class DigitalSpotsExtension extends DecoderExtension {
                 const value = e.target.value;
                 this.distanceFilter = value === 'none' ? null : parseInt(value);
                 this.filterAndRenderSpots();
+            } else if (e.target.id === 'digital-spots-show-badges') {
+                this.showBadges = e.target.checked;
+                this.updateBadges();
             }
         });
 
@@ -147,6 +151,9 @@ class DigitalSpotsExtension extends DecoderExtension {
             if (snrFilter) snrFilter.value = this.snrFilter !== null ? this.snrFilter.toString() : 'none';
             if (distanceFilter) distanceFilter.value = this.distanceFilter !== null ? this.distanceFilter.toString() : 'none';
             if (callsignFilter) callsignFilter.value = this.callsignFilter;
+
+            const showBadgesCheckbox = document.getElementById('digital-spots-show-badges');
+            if (showBadgesCheckbox) showBadgesCheckbox.checked = this.showBadges;
         });
     }
 
@@ -201,6 +208,7 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         this.filterAndRenderSpots();
         this.updateLastUpdate();
+        this.updateBadges();
     }
 
     filterAndRenderSpots() {
@@ -415,7 +423,83 @@ class DigitalSpotsExtension extends DecoderExtension {
             }
 
             this.updateCount(filteredSpots.length, this.spots.length);
+
+            // Update badges after rendering spots
+            this.updateBadges();
         });
+    }
+
+    updateBadges() {
+        // Use the main page container instead of the extension panel container
+        const container = document.getElementById('digital-spots-badges-main');
+        if (!container) return;
+
+        // Hide container if badges are disabled
+        if (!this.showBadges) {
+            container.style.display = 'none';
+            return;
+        }
+
+        container.style.display = 'flex';
+
+        // Get current band from filter
+        const currentBand = this.bandFilter;
+
+        // If no specific band is selected, show message
+        if (currentBand === 'all') {
+            container.classList.add('empty');
+            container.innerHTML = 'Select a specific band to see country badges';
+            return;
+        }
+
+        // Get spots for current band
+        const bandSpots = this.spots.filter(spot => spot.band === currentBand && spot.country);
+
+        if (bandSpots.length === 0) {
+            container.classList.add('empty');
+            container.innerHTML = `No countries seen on ${currentBand} yet`;
+            return;
+        }
+
+        container.classList.remove('empty');
+
+        // Track unique countries with their most recent timestamp
+        const countryMap = new Map();
+
+        bandSpots.forEach(spot => {
+            const country = spot.country;
+            if (!country) return;
+
+            const spotTime = new Date(spot.timestamp).getTime();
+
+            if (!countryMap.has(country) || spotTime > countryMap.get(country)) {
+                countryMap.set(country, spotTime);
+            }
+        });
+
+        // Convert to array and sort by most recent first, then alphabetically
+        const countries = Array.from(countryMap.entries())
+            .sort((a, b) => {
+                // Sort by timestamp descending (most recent first)
+                return b[1] - a[1];
+            })
+            .slice(0, 10) // Take only the 10 most recent
+            .map(entry => entry[0])
+            .sort(); // Sort alphabetically
+
+        // Create badges
+        const fragment = document.createDocumentFragment();
+
+        countries.forEach(country => {
+            const badge = document.createElement('span');
+            badge.className = 'country-badge';
+            badge.textContent = country;
+            badge.title = `${country} on ${currentBand}`;
+            fragment.appendChild(badge);
+        });
+
+        container.innerHTML = '';
+        container.appendChild(fragment);
     }
 
     tuneToSpot(spot) {

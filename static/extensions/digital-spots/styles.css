@@ -86,6 +86,17 @@
     width: 120px;
 }
 
+.digital-spots-container .control-group input[type="checkbox"] {
+    margin-right: 5px;
+    cursor: pointer;
+}
+
+.digital-spots-container .control-group label:has(input[type="checkbox"]) {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
 .digital-spots-container .btn-clear {
     padding: 4px 12px;
     background: #dc3545;
@@ -117,6 +128,46 @@
 /* Push map button control group to far right */
 .digital-spots-container .control-group:has(#digital-spots-map-btn) {
     margin-left: auto;
+}
+
+.digital-spots-badges-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 15px;
+    padding: 10px;
+    background: #222;
+    border-radius: 4px;
+    min-height: 40px;
+    align-items: center;
+}
+
+.digital-spots-badges-container.hidden {
+    display: none;
+}
+
+.digital-spots-badges-container.empty {
+    justify-content: center;
+    color: #666;
+    font-size: 12px;
+    font-style: italic;
+}
+
+.country-badge {
+    padding: 6px 12px;
+    background: #4a9eff;
+    color: white;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    white-space: nowrap;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.country-badge:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(74, 158, 255, 0.4);
 }
 
 .digital-spots-table-container {

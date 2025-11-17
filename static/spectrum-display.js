@@ -3141,11 +3141,26 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                     this.zoomOut();
                 }
             } else if (this.scrollEnabled) {
-                // Perform initial zoom on first scroll (zoom in once, like clicking on waterfall)
+                // Perform initial zoom on first scroll if at default zoom level
+                // Use aggressive zoom similar to band buttons (zoom to show ~100 kHz view)
                 if (!this.hasPerformedInitialZoom && this.zoomLevel === 1) {
                     this.hasPerformedInitialZoom = true;
-                    this.zoomIn(); // Zoom in once on first scroll
-                    console.log('Initial zoom performed on first scroll');
+
+                    // Calculate aggressive zoom similar to band buttons
+                    // Target a focused bandwidth of ~100 kHz for good detail
+                    const focusedBandwidth = 100000; // 100 kHz
+                    const binCount = this.binCount || 2048;
+                    const binBandwidth = focusedBandwidth / binCount;
+
+                    // Send zoom message directly to WebSocket
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.ws.send(JSON.stringify({
+                            type: 'zoom',
+                            frequency: Math.round(this.centerFreq),
+                            binBandwidth: binBandwidth
+                        }));
+                        console.log(`Initial zoom performed: ${(focusedBandwidth/1e6).toFixed(3)} MHz view (${binBandwidth.toFixed(1)} Hz/bin)`);
+                    }
                 }
 
                 // Frequency scroll mode - use configured step and delay from dropdown

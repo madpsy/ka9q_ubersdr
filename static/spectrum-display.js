@@ -305,7 +305,7 @@ class SpectrumDisplay {
             wsUrl: config.wsUrl || wsUrlWithSession,
             minDb: config.minDb !== undefined ? config.minDb : -100,
             maxDb: config.maxDb !== undefined ? config.maxDb : 0,
-            autoRange: config.autoRange === true, // Disable auto-ranging by default
+            autoRange: true, // Auto-ranging always enabled
             rangeMargin: config.rangeMargin || 5, // dB margin for auto-range
             colorScheme: config.colorScheme || 'jet', // Default to jet color scheme
             intensity: config.intensity !== undefined ? config.intensity : 0.20, // Intensity adjustment (-1.0 to +1.0)
@@ -575,7 +575,6 @@ class SpectrumDisplay {
 
     // Display a spectrum frame
     displayFrame(data) {
-        console.log(`[displayFrame] Called - isDragging=${this.isDragging}, predictedFreqOffset=${this.predictedFreqOffset.toFixed(2)}`);
         this.spectrumData = data;
         this.lastUpdate = Date.now();
         this.draw();
@@ -1905,14 +1904,10 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
             // Handle dragging
             if (lineGraphDragging) {
-                console.log(`[LINE] mousemove: x=${x}, y=${y}, lastDragX=${this.lastDragX}, lastDragY=${this.lastDragY}`);
-
                 // Only process if mouse actually moved
                 if (x === this.lastDragX && y === this.lastDragY) {
-                    console.log(`[LINE] No movement detected, ignoring event`);
                     return; // No actual movement, ignore this event
                 }
-                console.log(`[LINE] Movement detected, processing drag`);
                 this.lastDragX = x;
                 this.lastDragY = y;
 
@@ -1940,16 +1935,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 const oldPredictedOffset = this.predictedFreqOffset;
                 this.predictedFreqOffset = newCenterFreq - this.lastServerCenterFreq;
 
-                console.log(`[LINE] Predicted offset: old=${oldPredictedOffset.toFixed(2)}, new=${this.predictedFreqOffset.toFixed(2)}, diff=${Math.abs(this.predictedFreqOffset - oldPredictedOffset).toFixed(2)}`);
-
                 // Only redraw if the predicted offset actually changed
                 if (Math.abs(this.predictedFreqOffset - oldPredictedOffset) > 0.1) {
-                    console.log(`[LINE] Calling draw() due to offset change`);
                     if (this.spectrumData && this.spectrumData.length > 0) {
                         this.draw();
                     }
-                } else {
-                    console.log(`[LINE] Skipping draw() - offset change too small`);
                 }
 
                 // Throttle pan requests
@@ -2864,14 +2854,10 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
             // Handle dragging
             if (this.isDragging) {
-                console.log(`[MAIN] mousemove: mouseX=${this.mouseX}, mouseY=${this.mouseY}, lastDragX=${this.lastDragX}, lastDragY=${this.lastDragY}`);
-
                 // Only process if mouse actually moved
                 if (this.mouseX === this.lastDragX && this.mouseY === this.lastDragY) {
-                    console.log(`[MAIN] No movement detected, ignoring event`);
                     return; // No actual movement, ignore this event
                 }
-                console.log(`[MAIN] Movement detected, processing drag`);
                 this.lastDragX = this.mouseX;
                 this.lastDragY = this.mouseY;
 
@@ -2901,16 +2887,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 const oldPredictedOffset = this.predictedFreqOffset;
                 this.predictedFreqOffset = newCenterFreq - this.lastServerCenterFreq;
 
-                console.log(`[MAIN] Predicted offset: old=${oldPredictedOffset.toFixed(2)}, new=${this.predictedFreqOffset.toFixed(2)}, diff=${Math.abs(this.predictedFreqOffset - oldPredictedOffset).toFixed(2)}`);
-
                 // Only redraw if the predicted offset actually changed
                 if (Math.abs(this.predictedFreqOffset - oldPredictedOffset) > 0.1) {
-                    console.log(`[MAIN] Calling draw() due to offset change`);
                     if (this.spectrumData && this.spectrumData.length > 0) {
                         this.draw();
                     }
-                } else {
-                    console.log(`[MAIN] Skipping draw() - offset change too small`);
                 }
 
                 // Throttle pan requests to avoid backend rounding issues

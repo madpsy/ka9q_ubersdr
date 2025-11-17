@@ -5836,31 +5836,6 @@ const spectrumNoiseFloorHistory = [];
 const spectrumPeakHistory = [];
 const SPECTRUM_HISTORY_SIZE = 10;
 
-// Toggle RF spectrum auto-adjust
-function toggleSpectrumAutoAdjust() {
-    const checkbox = document.getElementById('spectrum-auto-adjust');
-    if (!checkbox) return;
-    
-    spectrumAutoAdjustEnabled = checkbox.checked;
-    
-    if (spectrumAutoAdjustEnabled) {
-        // Start auto-adjustment
-        if (!spectrumAutoAdjustInterval) {
-            spectrumAutoAdjustInterval = setInterval(updateSpectrumAutoAdjust, 500);
-        }
-        log('RF Spectrum auto-adjust enabled');
-    } else {
-        // Stop auto-adjustment
-        if (spectrumAutoAdjustInterval) {
-            clearInterval(spectrumAutoAdjustInterval);
-            spectrumAutoAdjustInterval = null;
-        }
-        // Clear history
-        spectrumNoiseFloorHistory.length = 0;
-        spectrumPeakHistory.length = 0;
-        log('RF Spectrum auto-adjust disabled');
-    }
-}
 
 // Update RF spectrum auto-adjust values
 function updateSpectrumAutoAdjust() {
@@ -5960,26 +5935,7 @@ function updateSpectrumAutoAdjust() {
     }
 }
 
-function updateSpectrumIntensity() {
-    if (!spectrumDisplay) return;
 
-    const intensity = parseFloat(document.getElementById('spectrum-intensity').value);
-
-    // Format display value with + or - sign
-    const displayValue = intensity >= 0 ? '+' + intensity.toFixed(2) : intensity.toFixed(2);
-    document.getElementById('spectrum-intensity-value').textContent = displayValue;
-
-    spectrumDisplay.updateConfig({ intensity });
-}
-
-function updateSpectrumContrast() {
-    if (!spectrumDisplay) return;
-
-    const contrast = parseInt(document.getElementById('spectrum-contrast').value);
-    document.getElementById('spectrum-contrast-value').textContent = contrast;
-
-    spectrumDisplay.updateConfig({ contrast });
-}
 
 // Spectrum zoom control functions
 function spectrumZoomIn() {
@@ -6112,9 +6068,6 @@ window.spectrumMaxZoom = spectrumMaxZoom;
 window.updateSpectrumColorScheme = updateSpectrumColorScheme;
 window.updateSpectrumRange = updateSpectrumRange;
 window.updateSpectrumGrid = updateSpectrumGrid;
-window.updateSpectrumIntensity = updateSpectrumIntensity;
-window.updateSpectrumContrast = updateSpectrumContrast;
-window.toggleSpectrumAutoAdjust = toggleSpectrumAutoAdjust;
 
 // Helper function for spectrum display to get current dial frequency
 window.getCurrentDialFrequency = function() {

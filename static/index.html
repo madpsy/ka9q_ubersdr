@@ -97,20 +97,6 @@
                         </select>
                     </div>
                     <div class="spectrum-control-group">
-                        <label for="spectrum-intensity">Intensity:</label>
-                        <input type="range" id="spectrum-intensity" min="-1" max="1" value="0" step="0.05" oninput="updateSpectrumIntensity()">
-                        <span id="spectrum-intensity-value">+0.00</span>
-                    </div>
-                    <div class="spectrum-control-group">
-                        <label for="spectrum-contrast">Contrast:</label>
-                        <input type="range" id="spectrum-contrast" min="0" max="100" value="40" step="5" oninput="updateSpectrumContrast()">
-                        <span id="spectrum-contrast-value">40</span>
-                    </div>
-                    <div class="spectrum-control-group">
-                        <input type="checkbox" id="spectrum-auto-adjust" checked onchange="toggleSpectrumAutoAdjust()">
-                        <label for="spectrum-auto-adjust">Auto Adjust</label>
-                    </div>
-                    <div class="spectrum-control-group">
                         <label>Signal:</label>
                         <div class="signal-meter">
                             <div id="signal-meter-bar" class="signal-meter-bar"></div>

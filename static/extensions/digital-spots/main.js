@@ -28,6 +28,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.renderPending = false; // Prevent multiple pending renders
         this.currentModalCountry = null; // Track currently open modal
         this.currentModalBand = null;
+        this.currentModalModeFilter = 'all'; // Track modal mode filter
 
         // Subscribe to digital spots immediately
         this.subscribeToDigitalSpots();
@@ -820,6 +821,13 @@ class DigitalSpotsExtension extends DecoderExtension {
             this.setupModalHandlers();
             this.modalHandlersSetup = true;
         }
+
+        // Reset mode filter to 'all' when opening modal
+        this.currentModalModeFilter = 'all';
+        const modeFilter = document.getElementById('country-spots-modal-mode-filter');
+        if (modeFilter) {
+            modeFilter.value = 'all';
+        }
     }
 
     refreshModalContent() {
@@ -838,6 +846,12 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         const countrySpots = this.spots.filter(spot => {
             if (spot.band !== band || spot.country !== country) return false;
+
+            // Apply mode filter
+            if (this.currentModalModeFilter !== 'all' && spot.mode !== this.currentModalModeFilter) {
+                return false;
+            }
+
             const spotTime = new Date(spot.timestamp).getTime();
             return spotTime >= twoMinutesAgo;
         });
@@ -968,10 +982,18 @@ class DigitalSpotsExtension extends DecoderExtension {
     setupModalHandlers() {
         const modal = document.getElementById('country-spots-modal');
         const closeBtn = document.getElementById('country-spots-modal-close');
+        const modeFilter = document.getElementById('country-spots-modal-mode-filter');
 
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
                 this.closeCountryModal();
+            });
+        }
+
+        if (modeFilter) {
+            modeFilter.addEventListener('change', (e) => {
+                this.currentModalModeFilter = e.target.value;
+                this.refreshModalContent();
             });
         }
 

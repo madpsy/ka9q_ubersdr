@@ -814,7 +814,15 @@
         <div class="country-spots-modal-content">
             <div class="country-spots-modal-header">
                 <h3 id="country-spots-modal-title">Country Spots</h3>
-                <button id="country-spots-modal-close" class="modal-close-btn">&times;</button>
+                <div class="country-spots-modal-controls">
+                    <select id="country-spots-modal-mode-filter">
+                        <option value="all">All Modes</option>
+                        <option value="FT8">FT8</option>
+                        <option value="FT4">FT4</option>
+                        <option value="WSPR">WSPR</option>
+                    </select>
+                    <button id="country-spots-modal-close" class="modal-close-btn">&times;</button>
+                </div>
             </div>
             <div class="country-spots-modal-body">
                 <table class="country-spots-modal-table">

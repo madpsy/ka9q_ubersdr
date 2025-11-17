@@ -439,8 +439,8 @@ class DigitalSpotsExtension extends DecoderExtension {
         const container = document.getElementById('digital-spots-badges-main');
         if (!container) return;
 
-        // Hide container if badges are disabled
-        if (!this.showBadges) {
+        // Hide container if badges are disabled or extension is not enabled
+        if (!this.showBadges || !this.enabled) {
             container.style.display = 'none';
             return;
         }
@@ -744,6 +744,9 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.startRadioStateMonitoring();
         this.startFrequencyMonitoring();
         this.startFrequencyPolling();
+
+        // Show badges when extension is enabled
+        this.updateBadges();
     }
 
     onDisable() {
@@ -757,6 +760,12 @@ class DigitalSpotsExtension extends DecoderExtension {
             this.unsubscribe();
             this.unsubscribe = null;
         }
+
+        // Hide badges when extension is disabled
+        const container = document.getElementById('digital-spots-badges-main');
+        if (container) {
+            container.style.display = 'none';
+        }
     }
 
     onProcessAudio(dataArray) {
@@ -769,22 +778,6 @@ if (window.decoderManager) {
     const digitalSpotsExtension = new DigitalSpotsExtension();
     window.decoderManager.register(digitalSpotsExtension);
     console.log('Digital Spots extension registered:', digitalSpotsExtension);
-
-    // Auto-enable the extension to start collecting spots in the background
-    // This allows badges to work even when the panel is closed
-    setTimeout(() => {
-        if (window.audioContext) {
-            // Initialize without opening the panel
-            digitalSpotsExtension.radio = window.radio || window.decoderManager.radio;
-            if (digitalSpotsExtension.radio) {
-                // Start collecting spots immediately
-                digitalSpotsExtension.subscribeToDigitalSpots();
-                digitalSpotsExtension.startFrequencyMonitoring();
-                digitalSpotsExtension.startFrequencyPolling();
-                console.log('Digital Spots: Auto-enabled for background operation');
-            }
-        }
-    }, 1000);
 } else {
     console.error('decoderManager not available for Digital Spots extension');
 }

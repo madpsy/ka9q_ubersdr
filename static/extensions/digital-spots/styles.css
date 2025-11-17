@@ -436,7 +436,7 @@
     border: 1px solid #444;
     border-radius: 8px;
     width: 90%;
-    max-width: 1200px;
+    max-width: 900px;
     max-height: 80vh;
     display: flex;
     flex-direction: column;
@@ -589,7 +589,7 @@
 
 .country-spots-modal-table th:nth-child(8),
 .country-spots-modal-table td:nth-child(8) {
-    width: auto; /* Message */
+    width: 150px; /* Message */
 }
 
 /* Column-specific styles for modal table */

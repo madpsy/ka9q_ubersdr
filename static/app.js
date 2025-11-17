@@ -5970,7 +5970,6 @@ function updateSpectrumIntensity() {
     document.getElementById('spectrum-intensity-value').textContent = displayValue;
 
     spectrumDisplay.updateConfig({ intensity });
-    log(`Spectrum intensity changed to ${displayValue}`);
 }
 
 function updateSpectrumContrast() {
@@ -5980,7 +5979,6 @@ function updateSpectrumContrast() {
     document.getElementById('spectrum-contrast-value').textContent = contrast;
 
     spectrumDisplay.updateConfig({ contrast });
-    log(`Spectrum contrast changed to ${contrast} (noise floor suppression)`);
 }
 
 // Spectrum zoom control functions

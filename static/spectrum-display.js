@@ -1928,11 +1928,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
                 // CLIENT-SIDE PREDICTION: Update visual offset immediately for smooth dragging
+                const oldPredictedOffset = this.predictedFreqOffset;
                 this.predictedFreqOffset = newCenterFreq - this.lastServerCenterFreq;
 
-                // Redraw immediately with predicted offset
-                if (this.spectrumData && this.spectrumData.length > 0) {
-                    this.draw();
+                // Only redraw if the predicted offset actually changed
+                if (Math.abs(this.predictedFreqOffset - oldPredictedOffset) > 0.1) {
+                    if (this.spectrumData && this.spectrumData.length > 0) {
+                        this.draw();
+                    }
                 }
 
                 // Throttle pan requests
@@ -2877,11 +2880,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
 
                 // CLIENT-SIDE PREDICTION: Update visual offset immediately for smooth dragging
+                const oldPredictedOffset = this.predictedFreqOffset;
                 this.predictedFreqOffset = newCenterFreq - this.lastServerCenterFreq;
 
-                // Redraw immediately with predicted offset
-                if (this.spectrumData && this.spectrumData.length > 0) {
-                    this.draw();
+                // Only redraw if the predicted offset actually changed
+                if (Math.abs(this.predictedFreqOffset - oldPredictedOffset) > 0.1) {
+                    if (this.spectrumData && this.spectrumData.length > 0) {
+                        this.draw();
+                    }
                 }
 
                 // Throttle pan requests to avoid backend rounding issues

@@ -973,13 +973,19 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         //     this.applyPredictedShift();
         // }
 
+        // Calculate waterfall start position based on display mode
+        // In split mode (300px height), start at y=150 (halfway down)
+        // In waterfall-only mode (600px height), start at y=65 (below bookmarks overlay 35px + frequency scale 30px)
+        const waterfallStartY = this.displayMode === 'split' ? 150 : 65;
+        const waterfallHeight = this.height - waterfallStartY - 1;
+
         // Initialize waterfall image data if needed
         if (!this.waterfallImageData) {
             console.log(`[drawWaterfall] Initializing waterfall in ${this.displayMode} mode, canvas height: ${this.height}`);
             this.waterfallImageData = this.ctx.createImageData(this.width, 1);
-            // Initialize with black background
+            // Initialize with black background - only clear the waterfall drawing area
             this.ctx.fillStyle = '#000';
-            this.ctx.fillRect(0, 0, this.width, this.height);
+            this.ctx.fillRect(0, waterfallStartY, this.width, this.height - waterfallStartY);
         }
 
         // Initialize start time if needed
@@ -987,12 +993,6 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.waterfallStartTime = Date.now();
             this.waterfallLineCount = 0;
         }
-
-        // Calculate waterfall start position based on display mode
-        // In split mode (300px height), start at y=150 (halfway down)
-        // In waterfall-only mode (600px height), start at y=65 (below bookmarks overlay 35px + frequency scale 30px)
-        const waterfallStartY = this.displayMode === 'split' ? 150 : 65;
-        const waterfallHeight = this.height - waterfallStartY - 1;
 
         // Log only first time in split mode
         if (this.displayMode === 'split' && !this.splitModeLogged) {

@@ -40,6 +40,10 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.startAgeUpdates();
         this.startRadioStateMonitoring();
         this.startFrequencyMonitoring();
+
+        // Initialize badges display
+        this.updateBadges();
+
         console.log('Digital Spots: onInitialize complete');
     }
 
@@ -107,6 +111,7 @@ class DigitalSpotsExtension extends DecoderExtension {
             } else if (e.target.id === 'digital-spots-band-filter') {
                 this.bandFilter = e.target.value;
                 this.filterAndRenderSpots();
+                this.updateBadges();
             } else if (e.target.id === 'digital-spots-snr-filter') {
                 const value = e.target.value;
                 this.snrFilter = value === 'none' ? null : parseInt(value);

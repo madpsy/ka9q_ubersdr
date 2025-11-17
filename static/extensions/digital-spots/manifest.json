@@ -8,7 +8,7 @@
   "icon": "📶",
   "category": "decoder",
   "requiresAudio": false,
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "files": {
     "main": "main.js",
     "styles": ["styles.css"],

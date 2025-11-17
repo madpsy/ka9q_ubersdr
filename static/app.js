@@ -5151,9 +5151,9 @@ const WATERFALL_AUTO_ADJUST_HISTORY_SIZE = 10; // Average over 10 samples
 const WATERFALL_AUTO_ADJUST_UPDATE_RATE = 500; // Update every 500ms
 
 
-// Update waterfall auto-adjust values
+// Update waterfall auto-adjust values (always enabled)
 function updateWaterfallAutoAdjust() {
-    if (!waterfallAutoAdjustEnabled || !analyser || !audioContext) return;
+    if (!analyser || !audioContext) return;
 
     // Get frequency data
     const dataArray = new Uint8Array(analyser.frequencyBinCount);

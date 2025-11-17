@@ -5246,6 +5246,9 @@ function updateWaterfallAutoAdjust() {
     // Apply optimal values directly (no UI controls)
     waterfallIntensity = optimalIntensity;
     waterfallContrast = clampedContrast;
+
+    // Log the adjustment for debugging
+    console.log(`Waterfall auto-adjust: noise=${avgNoiseFloor.toFixed(1)}, peak=${avgPeak.toFixed(1)}, range=${dynamicRange.toFixed(1)}, contrast=${clampedContrast}, intensity=${optimalIntensity.toFixed(2)}`);
 }
 
 // Update oscilloscope zoom/timebase

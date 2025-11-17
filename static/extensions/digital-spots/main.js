@@ -26,6 +26,8 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.ageUpdateInterval = null;
         this.connectionCheckInterval = null;
         this.renderPending = false; // Prevent multiple pending renders
+        this.currentModalCountry = null; // Track currently open modal
+        this.currentModalBand = null;
 
         // Subscribe to digital spots immediately
         this.subscribeToDigitalSpots();
@@ -214,6 +216,11 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.filterAndRenderSpots();
         this.updateLastUpdate();
         this.updateBadges();
+
+        // Update modal if it's open
+        if (this.currentModalCountry && this.currentModalBand) {
+            this.refreshModalContent();
+        }
     }
 
     filterAndRenderSpots() {
@@ -507,6 +514,12 @@ class DigitalSpotsExtension extends DecoderExtension {
             badge.textContent = country;
             const snrText = spotData.snr >= 0 ? `+${spotData.snr}` : spotData.snr;
             badge.title = `${country} on ${currentBand}\nLast: ${spotData.callsign}\nMode: ${spotData.mode}\nSNR: ${snrText} dB`;
+
+            // Add click handler to open modal
+            badge.addEventListener('click', () => {
+                this.openCountryModal(country, currentBand);
+            });
+
             fragment.appendChild(badge);
         });
 
@@ -616,16 +629,30 @@ class DigitalSpotsExtension extends DecoderExtension {
                 }
             });
 
+            // Update modal age cells if modal is open
+            const modalAgeCells = document.querySelectorAll('.modal-age');
+            modalAgeCells.forEach(cell => {
+                const timestamp = cell.getAttribute('data-timestamp');
+                if (timestamp) {
+                    cell.textContent = this.formatAge(timestamp);
+                }
+            });
+
             // Only re-filter if we have an age filter and enough time has passed
             // Check every 10 seconds instead of every second
             if (this.ageFilter !== null && !this.lastAgeFilterCheck) {
                 this.lastAgeFilterCheck = Date.now();
             }
-            
+
             if (this.ageFilter !== null && this.lastAgeFilterCheck &&
                 (Date.now() - this.lastAgeFilterCheck) > 10000) {
                 this.lastAgeFilterCheck = Date.now();
                 this.filterAndRenderSpots();
+            }
+
+            // Refresh modal content every second if it's open
+            if (this.currentModalCountry && this.currentModalBand) {
+                this.refreshModalContent();
             }
         }, 1000);
     }
@@ -772,6 +799,200 @@ class DigitalSpotsExtension extends DecoderExtension {
 
     onProcessAudio(dataArray) {
         // Digital spots extension doesn't process audio
+    }
+
+    openCountryModal(country, band) {
+        // Track which modal is open
+        this.currentModalCountry = country;
+        this.currentModalBand = band;
+
+        const modal = document.getElementById('country-spots-modal');
+        const modalTitle = document.getElementById('country-spots-modal-title');
+
+        if (!modal || !modalTitle) {
+            console.error('Modal elements not found');
+            return;
+        }
+
+        // Set modal title
+        modalTitle.textContent = `${country} on ${band}`;
+
+        // Populate initial content
+        this.refreshModalContent();
+
+        // Show modal
+        modal.style.display = 'flex';
+
+        // Setup close handlers if not already done
+        if (!this.modalHandlersSetup) {
+            this.setupModalHandlers();
+            this.modalHandlersSetup = true;
+        }
+    }
+
+    refreshModalContent() {
+        const modalTbody = document.getElementById('country-spots-modal-tbody');
+
+        if (!modalTbody || !this.currentModalCountry || !this.currentModalBand) {
+            return;
+        }
+
+        const country = this.currentModalCountry;
+        const band = this.currentModalBand;
+
+        // Get spots for this country and band from the last 2 minutes
+        const now = Date.now();
+        const twoMinutesAgo = now - (120 * 1000);
+
+        const countrySpots = this.spots.filter(spot => {
+            if (spot.band !== band || spot.country !== country) return false;
+            const spotTime = new Date(spot.timestamp).getTime();
+            return spotTime >= twoMinutesAgo;
+        });
+
+        // Get unique callsigns with their most recent spot data
+        const callsignMap = new Map();
+
+        countrySpots.forEach(spot => {
+            const callsign = spot.callsign;
+            const spotTime = new Date(spot.timestamp).getTime();
+
+            if (!callsignMap.has(callsign) || spotTime > callsignMap.get(callsign).timestamp) {
+                callsignMap.set(callsign, {
+                    ...spot,
+                    timestamp: spotTime
+                });
+            }
+        });
+
+        // Convert to array and sort by callsign
+        const uniqueSpots = Array.from(callsignMap.values())
+            .sort((a, b) => a.callsign.localeCompare(b.callsign));
+
+        // Populate modal table
+        const fragment = document.createDocumentFragment();
+
+        if (uniqueSpots.length === 0) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 8;
+            cell.textContent = 'No spots found';
+            cell.style.textAlign = 'center';
+            cell.style.color = '#888';
+            row.appendChild(cell);
+            fragment.appendChild(row);
+        } else {
+            uniqueSpots.forEach(spot => {
+                const row = document.createElement('tr');
+
+                // Make row clickable to tune
+                row.style.cursor = 'pointer';
+                row.addEventListener('click', () => {
+                    this.tuneToSpot(spot);
+                    this.closeCountryModal();
+                });
+
+                // Callsign
+                const callsignCell = document.createElement('td');
+                callsignCell.className = 'modal-callsign';
+                callsignCell.textContent = spot.callsign;
+                row.appendChild(callsignCell);
+
+                // Mode
+                const modeCell = document.createElement('td');
+                modeCell.className = `modal-mode modal-mode-${spot.mode}`;
+                modeCell.textContent = spot.mode;
+                row.appendChild(modeCell);
+
+                // SNR
+                const snrCell = document.createElement('td');
+                snrCell.className = `modal-snr ${spot.snr >= 0 ? 'modal-snr-positive' : 'modal-snr-negative'}`;
+                snrCell.textContent = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
+                row.appendChild(snrCell);
+
+                // Grid
+                const gridCell = document.createElement('td');
+                gridCell.className = 'modal-grid';
+                gridCell.textContent = spot.locator || '';
+                row.appendChild(gridCell);
+
+                // Distance
+                const distanceCell = document.createElement('td');
+                distanceCell.className = 'modal-distance';
+                if (spot.distance_km !== undefined && spot.distance_km !== null) {
+                    distanceCell.textContent = `${Math.round(spot.distance_km)} km`;
+                } else {
+                    distanceCell.textContent = '';
+                }
+                row.appendChild(distanceCell);
+
+                // Bearing
+                const bearingCell = document.createElement('td');
+                bearingCell.className = 'modal-bearing';
+                if (spot.bearing_deg !== undefined && spot.bearing_deg !== null) {
+                    bearingCell.textContent = `${Math.round(spot.bearing_deg)}°`;
+                } else {
+                    bearingCell.textContent = '';
+                }
+                row.appendChild(bearingCell);
+
+                // Age
+                const ageCell = document.createElement('td');
+                ageCell.className = 'modal-age';
+                ageCell.setAttribute('data-timestamp', spot.timestamp);
+                ageCell.textContent = this.formatAge(spot.timestamp);
+                row.appendChild(ageCell);
+
+                // Message
+                const msgCell = document.createElement('td');
+                msgCell.className = 'modal-message';
+                msgCell.textContent = spot.message || '';
+                row.appendChild(msgCell);
+
+                fragment.appendChild(row);
+            });
+        }
+
+        modalTbody.innerHTML = '';
+        modalTbody.appendChild(fragment);
+    }
+
+    closeCountryModal() {
+        // Clear tracking
+        this.currentModalCountry = null;
+        this.currentModalBand = null;
+
+        const modal = document.getElementById('country-spots-modal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    setupModalHandlers() {
+        const modal = document.getElementById('country-spots-modal');
+        const closeBtn = document.getElementById('country-spots-modal-close');
+
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                this.closeCountryModal();
+            });
+        }
+
+        if (modal) {
+            // Close modal when clicking outside the content
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    this.closeCountryModal();
+                }
+            });
+
+            // Close modal on Escape key
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && modal.style.display === 'flex') {
+                    this.closeCountryModal();
+                }
+            });
+        }
     }
 }
 

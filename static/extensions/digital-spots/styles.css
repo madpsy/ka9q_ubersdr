@@ -162,7 +162,18 @@
     font-weight: bold;
     white-space: nowrap;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    cursor: default;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+}
+
+.country-badge:hover {
+    background: #3a8eef;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4);
+}
+
+.country-badge:active {
+    transform: translateY(0);
 }
 
 .digital-spots-table-container {
@@ -394,4 +405,200 @@
     color: #ffc107;
     font-size: 14px;
     margin-left: 4px;
+}
+
+/* Country Spots Modal */
+.country-spots-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.country-spots-modal-content {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 1200px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.country-spots-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid #333;
+    background: #222;
+    border-radius: 8px 8px 0 0;
+}
+
+.country-spots-modal-header h3 {
+    margin: 0;
+    color: #4a9eff;
+    font-size: 18px;
+}
+
+.modal-close-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 28px;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.modal-close-btn:hover {
+    background: #333;
+    color: #fff;
+}
+
+.country-spots-modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.country-spots-modal-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.country-spots-modal-table thead {
+    position: sticky;
+    top: 0;
+    background: #2a2a2a;
+    z-index: 1;
+}
+
+.country-spots-modal-table th {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 2px solid #444;
+    color: #4a9eff;
+    font-weight: bold;
+}
+
+.country-spots-modal-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #2a2a2a;
+    color: #e0e0e0;
+}
+
+.country-spots-modal-table tbody tr {
+    transition: background-color 0.2s;
+    cursor: pointer;
+}
+
+.country-spots-modal-table tbody tr:hover {
+    background: #2a2a2a;
+}
+
+/* Column-specific styles for modal table */
+.country-spots-modal-table .modal-callsign {
+    font-weight: bold;
+    color: #ffc107;
+}
+
+.country-spots-modal-table .modal-mode {
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+.country-spots-modal-table .modal-mode-FT8 {
+    background: #28a745;
+    color: white;
+}
+
+.country-spots-modal-table .modal-mode-FT4 {
+    background: #17a2b8;
+    color: white;
+}
+
+.country-spots-modal-table .modal-mode-WSPR {
+    background: #ffc107;
+    color: black;
+}
+
+.country-spots-modal-table .modal-snr {
+    font-family: monospace;
+    text-align: right;
+}
+
+.country-spots-modal-table .modal-snr-positive {
+    color: #28a745;
+}
+
+.country-spots-modal-table .modal-snr-negative {
+    color: #dc3545;
+}
+
+.country-spots-modal-table .modal-grid {
+    font-family: monospace;
+    color: #17a2b8;
+}
+
+.country-spots-modal-table .modal-distance {
+    font-family: monospace;
+    color: #9c27b0;
+    text-align: right;
+}
+
+.country-spots-modal-table .modal-bearing {
+    font-family: monospace;
+    color: #ff9800;
+    text-align: right;
+}
+
+.country-spots-modal-table .modal-age {
+    font-family: monospace;
+    color: #666;
+    font-size: 11px;
+}
+
+.country-spots-modal-table .modal-message {
+    color: #aaa;
+    font-size: 11px;
 }

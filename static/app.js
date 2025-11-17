@@ -5186,11 +5186,11 @@ function updateWaterfallAutoAdjust() {
     // Sort for percentile calculation
     magnitudes.sort((a, b) => a - b);
 
-    // Use percentiles to ignore extreme outliers
+    // Use percentiles to handle outliers
     // 10th percentile for noise floor (ignores very weak noise spikes)
-    // 95th percentile for peak level (captures strong signals, ignores only extreme outliers)
+    // 99th percentile for peak level (captures nearly all signals including strong ones)
     const noiseFloorIndex = Math.floor(magnitudes.length * 0.10);
-    const peakIndex = Math.floor(magnitudes.length * 0.95);
+    const peakIndex = Math.floor(magnitudes.length * 0.99);
 
     const noiseFloor = magnitudes[noiseFloorIndex];
     const peak = magnitudes[peakIndex];

@@ -150,16 +150,17 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 		lastData := band.LastDataTime
 		band.mu.Unlock()
 
-		// Consider stale if no decoder invocation in 3x cycle time OR no data in 30 seconds
+		// Consider stale if no decoder invocation in 3x cycle time OR no data in 3x cycle time
 		staleThreshold := modeInfo.CycleTime * 3
 		timeSinceInvoke := time.Since(lastInvoke)
 		timeSinceData := time.Since(lastData)
 
 		// Band is stale if:
 		// 1. Decoder hasn't been invoked in 3x cycle time (and has been invoked at least once)
-		// 2. OR no audio data received in 30 seconds (and has received data at least once)
+		// 2. OR no data processed in 3x cycle time (and has processed data at least once)
+		// This ensures WSPR (2min cycle) isn't marked stale within its normal cycle
 		isStale := (!lastInvoke.IsZero() && timeSinceInvoke > staleThreshold) ||
-			(!lastData.IsZero() && timeSinceData > 30*time.Second)
+			(!lastData.IsZero() && timeSinceData > staleThreshold)
 
 		bandHealth := DecoderBandHealth{
 			Name:              band.Config.Name,
@@ -181,13 +182,14 @@ func (md *MultiDecoder) GetHealthStatus() DecoderHealthStatus {
 			status.Healthy = false
 		}
 
-		// Check for data flow
+		// Check for data flow - use same threshold as decoder invocation (3x cycle time)
 		if lastData.IsZero() {
 			status.Issues = append(status.Issues, "Band "+band.Config.Name+": no audio data received")
 			status.Healthy = false
 		} else {
 			timeSinceData := time.Since(lastData)
-			if timeSinceData > 30*time.Second {
+			dataStaleThreshold := staleThreshold // Use same 3x cycle time threshold
+			if timeSinceData > dataStaleThreshold {
 				status.Issues = append(status.Issues, "Band "+band.Config.Name+": no audio data in "+timeSinceData.Round(time.Second).String())
 				status.Healthy = false
 			}

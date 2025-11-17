@@ -3830,8 +3830,8 @@
 
                 const stats = [
                     { label: 'Total Bands', value: data.band_count || 0, icon: '📊' },
-                    { label: 'Healthy Bands', value: (data.bands || []).filter(b => b.healthy).length, icon: '✅' },
-                    { label: 'Stale Bands', value: (data.bands || []).filter(b => !b.healthy).length, icon: '⚠️' }
+                    { label: 'Healthy Bands', value: (data.bands || []).filter(b => !b.is_stale).length, icon: '✅' },
+                    { label: 'Stale Bands', value: (data.bands || []).filter(b => b.is_stale).length, icon: '⚠️' }
                 ];
 
                 stats.forEach(stat => {
@@ -3879,9 +3879,9 @@
                         const row = document.createElement('tr');
                         row.style.borderBottom = '1px solid #dee2e6';
 
-                        const statusIcon = band.healthy ? '✅' : '⚠️';
-                        const statusText = band.healthy ? 'OK' : 'Stale';
-                        const statusColor = band.healthy ? '#28a745' : '#ffc107';
+                        const statusIcon = !band.is_stale ? '✅' : '⚠️';
+                        const statusText = !band.is_stale ? 'OK' : 'Stale';
+                        const statusColor = !band.is_stale ? '#28a745' : '#ffc107';
 
                         // Format timestamps to be more readable
                         const formatTime = (timeStr) => {

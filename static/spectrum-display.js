@@ -575,6 +575,7 @@ class SpectrumDisplay {
 
     // Display a spectrum frame
     displayFrame(data) {
+        console.log(`[displayFrame] Called - isDragging=${this.isDragging}, predictedFreqOffset=${this.predictedFreqOffset.toFixed(2)}`);
         this.spectrumData = data;
         this.lastUpdate = Date.now();
         this.draw();

@@ -457,12 +457,19 @@ class DigitalSpotsExtension extends DecoderExtension {
             return;
         }
 
-        // Get spots for current band
-        const bandSpots = this.spots.filter(spot => spot.band === currentBand && spot.country);
+        // Get spots for current band from the last 120 seconds
+        const now = Date.now();
+        const twoMinutesAgo = now - (120 * 1000);
 
-        if (bandSpots.length === 0) {
+        const recentBandSpots = this.spots.filter(spot => {
+            if (spot.band !== currentBand || !spot.country) return false;
+            const spotTime = new Date(spot.timestamp).getTime();
+            return spotTime >= twoMinutesAgo;
+        });
+
+        if (recentBandSpots.length === 0) {
             container.classList.add('empty');
-            container.innerHTML = `No countries seen on ${currentBand} yet`;
+            container.innerHTML = `No countries seen on ${currentBand} in the last 2 minutes`;
             return;
         }
 
@@ -471,7 +478,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         // Track unique countries with their most recent spot data
         const countryMap = new Map();
 
-        bandSpots.forEach(spot => {
+        recentBandSpots.forEach(spot => {
             const country = spot.country;
             if (!country) return;
 
@@ -487,13 +494,8 @@ class DigitalSpotsExtension extends DecoderExtension {
             }
         });
 
-        // Convert to array and sort by most recent first, then alphabetically
+        // Convert to array and sort alphabetically by country name
         const countries = Array.from(countryMap.entries())
-            .sort((a, b) => {
-                // Sort by timestamp descending (most recent first)
-                return b[1].timestamp - a[1].timestamp;
-            })
-            .slice(0, 10) // Take only the 10 most recent
             .sort((a, b) => a[0].localeCompare(b[0])); // Sort alphabetically by country name
 
         // Create badges

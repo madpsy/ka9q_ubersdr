@@ -11,7 +11,7 @@ class SpectrumDisplay {
         // Line graph canvas for split view
         this.lineGraphCanvas = document.getElementById('spectrum-line-graph-canvas');
         this.lineGraphCtx = this.lineGraphCanvas ? this.lineGraphCanvas.getContext('2d', { alpha: false }) : null;
-        // Display mode: 'waterfall', 'graph', or 'split'
+        // Display mode: locked to 'split' (line graph on top, waterfall on bottom)
         this.displayMode = 'split';
 
         // Line graph noise floor tracking for smoother display
@@ -915,45 +915,27 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         }
     }
 
-    // Draw the spectrum display
+    // Draw the spectrum display (split mode only: line graph on top, waterfall on bottom)
     draw() {
         if (!this.spectrumData || this.spectrumData.length === 0) {
             this.drawPlaceholder();
             return;
         }
 
-        // Draw based on display mode
-        if (this.displayMode === 'graph') {
-            // Graph-only mode: draw line graph in full height
-            this.drawLineGraphFullHeight();
+        // Draw line graph in top half
+        this.drawLineGraph();
 
-            // Update line graph tooltip with new data if mouse is over it
-            if (this.lineGraphMouseX && this.lineGraphMouseY) {
-                const x = this.lineGraphMouseX();
-                const y = this.lineGraphMouseY();
-                if (x >= 0 && y >= 0) {
-                    this.updateLineGraphTooltip(x, y);
-                }
+        // Update line graph tooltip with new data if mouse is over it
+        if (this.lineGraphMouseX && this.lineGraphMouseY) {
+            const x = this.lineGraphMouseX();
+            const y = this.lineGraphMouseY();
+            if (x >= 0 && y >= 0) {
+                this.updateLineGraphTooltip(x, y);
             }
-        } else if (this.displayMode === 'split') {
-            // Split mode: draw line graph in top half
-            this.drawLineGraph();
-
-            // Update line graph tooltip with new data if mouse is over it
-            if (this.lineGraphMouseX && this.lineGraphMouseY) {
-                const x = this.lineGraphMouseX();
-                const y = this.lineGraphMouseY();
-                if (x >= 0 && y >= 0) {
-                    this.updateLineGraphTooltip(x, y);
-                }
-            }
-
-            // Draw waterfall in bottom half
-            this.drawWaterfall();
-        } else {
-            // Waterfall-only mode (default)
-            this.drawWaterfall();
         }
+
+        // Draw waterfall in bottom half
+        this.drawWaterfall();
 
         // Draw tuned frequency cursor on overlay canvas
         this.drawTunedFrequencyCursor();
@@ -973,10 +955,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         //     this.applyPredictedShift();
         // }
 
-        // Calculate waterfall start position based on display mode
-        // In split mode (300px height), start at y=150 (halfway down)
-        // In waterfall-only mode (600px height), start at y=65 (below bookmarks overlay 35px + frequency scale 30px)
-        const waterfallStartY = this.displayMode === 'split' ? 150 : 65;
+        // Waterfall starts at y=150 (halfway down the 300px canvas in split mode)
+        const waterfallStartY = 150;
         const waterfallHeight = this.height - waterfallStartY - 1;
 
         // Initialize waterfall image data if needed
@@ -1080,11 +1060,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
         // Timestamps removed per user request
 
-        // Draw frequency scale at appropriate position based on display mode
-        // In waterfall mode, draw at y=35 (below bookmarks overlay)
-        // In split mode, draw at y=0 (bookmarks are in separate line graph canvas)
-        const freqScaleY = this.displayMode === 'waterfall' ? 35 : 0;
-        this.drawFrequencyScaleAtPosition(freqScaleY);
+        // Draw frequency scale at y=0 (bookmarks are in separate line graph canvas)
+        this.drawFrequencyScaleAtPosition(0);
     }
 
     // Draw frequency scale at a specific Y position
@@ -1175,10 +1152,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         }
     }
 
-    // Draw line graph in top half (split mode)
+    // Draw line graph in top half (split mode only)
     drawLineGraph() {
-        // Skip processing if not in split mode to save CPU
-        if (this.displayMode !== 'split') return;
         if (!this.lineGraphCanvas || !this.lineGraphCtx || !this.spectrumData) return;
 
         // Set canvas size to match main canvas width
@@ -1329,144 +1304,6 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         this.drawLineGraphDbScale(minDb, maxDb, graphHeight, graphTopMargin);
     }
 
-    // Draw line graph in full height (graph-only mode)
-    drawLineGraphFullHeight() {
-        // Skip processing if not in graph mode to save CPU
-        if (this.displayMode !== 'graph') return;
-        if (!this.lineGraphCanvas || !this.lineGraphCtx || !this.spectrumData) return;
-
-        // Set canvas size to match main canvas
-        if (this.lineGraphCanvas.width !== this.width || this.lineGraphCanvas.height !== 600) {
-            this.lineGraphCanvas.width = this.width;
-            this.lineGraphCanvas.height = 600;
-            this.lineGraphCanvas.style.width = this.width + 'px';
-            this.lineGraphCanvas.style.height = '600px';
-        }
-
-        // Apply client-side prediction: shift line graph if dragging AND mouse is actually moving
-        // Don't apply shift if just holding button down without movement
-        if (this.isDragging && this.predictedFreqOffset !== 0 && this.dragDidMove) {
-            this.applyPredictedShiftToLineGraph();
-        }
-
-        const ctx = this.lineGraphCtx;
-        const graphHeight = 600;
-        const graphWidth = this.width;
-        const graphTopMargin = 70; // Space for bookmarks (35px) + frequency scale (35px) at top
-        const graphDrawHeight = graphHeight - graphTopMargin;
-
-        // Clear canvas and set background colors
-        // Top 35px: grey background for bookmarks area
-        ctx.fillStyle = '#adb5bd';
-        ctx.fillRect(0, 0, graphWidth, 35);
-        // Rest: black background for graph
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 35, graphWidth, graphHeight - 35);
-
-        // Apply temporal smoothing based on toggle
-        const now = Date.now();
-
-        let smoothedData;
-
-        if (this.smoothingEnabled) {
-            // Smoothing enabled: keep last 5 frames (300ms window) - heavy smoothing
-            // Add current spectrum data to history
-            this.lineGraphDataHistory.push({
-                data: new Float32Array(this.spectrumData),
-                timestamp: now
-            });
-
-            // Remove old data based on smoothing level
-            const maxFrames = this.lineGraphDataHistoryMaxSize;
-            const maxAge = this.lineGraphDataHistoryMaxAge;
-
-            this.lineGraphDataHistory = this.lineGraphDataHistory
-                .filter(d => now - d.timestamp <= maxAge)
-                .slice(-maxFrames);
-
-            // Create smoothed data by averaging recent frames
-            smoothedData = new Float32Array(this.spectrumData.length);
-            for (let i = 0; i < this.spectrumData.length; i++) {
-                let sum = 0;
-                for (let j = 0; j < this.lineGraphDataHistory.length; j++) {
-                    sum += this.lineGraphDataHistory[j].data[i];
-                }
-                smoothedData[i] = sum / this.lineGraphDataHistory.length;
-            }
-        } else {
-            // Smoothing disabled: use raw spectrum data directly (no averaging)
-            smoothedData = this.spectrumData;
-        }
-
-        // Find min and max values
-        let currentMinDb = Infinity;
-        let currentMaxDb = -Infinity;
-        for (let i = 0; i < smoothedData.length; i++) {
-            const db = smoothedData[i];
-            if (isFinite(db)) {
-                currentMinDb = Math.min(currentMinDb, db);
-                currentMaxDb = Math.max(currentMaxDb, db);
-            }
-        }
-
-        // Track minimum and maximum values over time
-        this.lineGraphMinHistory.push({ value: currentMinDb, timestamp: now });
-        this.lineGraphMinHistory = this.lineGraphMinHistory.filter(m => now - m.timestamp <= this.lineGraphMinHistoryMaxAge);
-        const avgMinDb = this.lineGraphMinHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMinHistory.length;
-
-        this.lineGraphMaxHistory.push({ value: currentMaxDb, timestamp: now });
-        this.lineGraphMaxHistory = this.lineGraphMaxHistory.filter(m => now - m.timestamp <= this.lineGraphMaxHistoryMaxAge);
-        const avgMaxDb = this.lineGraphMaxHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMaxHistory.length;
-
-        const minDb = avgMinDb;
-        const maxDb = avgMaxDb;
-        const dbRange = maxDb - minDb;
-        if (dbRange === 0 || !isFinite(dbRange)) return;
-
-        // Create vertical gradient using the same color scheme as waterfall
-        const gradient = this.createLineGraphGradient(ctx, graphHeight);
-
-        // Draw filled area
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.moveTo(0, graphHeight);
-
-        for (let x = 0; x < graphWidth; x++) {
-            const binPos = (x / graphWidth) * smoothedData.length;
-            const binIndex = Math.floor(binPos);
-            const binFrac = binPos - binIndex;
-
-            let db;
-            if (binIndex >= 0 && binIndex < smoothedData.length - 1) {
-                const db1 = smoothedData[binIndex];
-                const db2 = smoothedData[binIndex + 1];
-                db = db1 + (db2 - db1) * binFrac;
-            } else if (binIndex === smoothedData.length - 1) {
-                db = smoothedData[binIndex];
-            } else {
-                db = minDb;
-            }
-
-            const normalized = Math.max(0, Math.min(1, (db - minDb) / dbRange));
-            const y = graphHeight - (normalized * graphDrawHeight);
-
-            ctx.lineTo(x, y);
-        }
-
-        ctx.lineTo(graphWidth, graphHeight);
-        ctx.closePath();
-        ctx.fill();
-
-        // Update and draw peak hold line
-        this.updatePeakHold(smoothedData, minDb, maxDb);
-        this.drawPeakHold(ctx, graphWidth, graphHeight, graphDrawHeight, graphTopMargin, minDb, maxDb);
-
-        // Draw frequency scale at top
-        this.drawLineGraphFrequencyScale();
-
-        // Draw dBFS scale on left side
-        this.drawLineGraphDbScale(minDb, maxDb, graphDrawHeight, graphTopMargin);
-    }
 
     // Draw dBFS scale on left side of line graph
     drawLineGraphDbScale(minDb, maxDb, graphDrawHeight, graphTopMargin) {
@@ -1736,148 +1573,6 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         }
     }
 
-    // Toggle through display modes: waterfall -> split -> graph -> waterfall
-    toggleLineGraph() {
-        console.log(`[toggleLineGraph] Current mode: ${this.displayMode}`);
-
-        if (this.displayMode === 'waterfall') {
-            // Switch to split mode
-            console.log('[toggleLineGraph] Switching to SPLIT mode');
-            this.displayMode = 'split';
-            this.splitModeLogged = false; // Reset flag for new split mode session
-
-            // Ensure main canvas is visible
-            this.canvas.style.display = 'block';
-
-            // Show line graph canvas with split-mode class
-            if (this.lineGraphCanvas) {
-                this.lineGraphCanvas.classList.remove('graph-only-mode');
-                this.lineGraphCanvas.classList.add('split-mode');
-                this.lineGraphCanvas.style.display = 'block';
-            }
-
-            // Add split-view class to main canvas
-            this.canvas.classList.add('split-view');
-
-            // Update canvas height to 300px (this clears the canvas!)
-            this.canvas.height = 300;
-            this.height = 300;
-            this.canvasHeight = 300;
-
-            // Reset waterfall line count when entering split mode
-            this.waterfallLineCount = 0;
-
-            console.log(`[toggleLineGraph] Split mode setup complete - canvas height: ${this.canvas.height}, display: ${this.canvas.style.display}`);
-
-            // Update bandwidth lines canvas height to 600px for split mode (to cover both graph and waterfall)
-            this.bandwidthLinesCanvas.height = 600;
-            this.bandwidthLinesCanvas.style.height = '600px';
-
-            // In split mode, position overlay absolutely at top (above line graph)
-            this.overlayDiv.style.position = 'absolute';
-            this.overlayDiv.style.top = '0';
-            this.overlayDiv.style.left = '0';
-            this.overlayDiv.style.zIndex = '15'; // Above line graph (z-index: 1)
-            this.overlayDiv.style.backgroundColor = '#adb5bd'; // Grey background to match page
-
-            // Clear with black
-            this.ctx.fillStyle = '#000';
-            this.ctx.fillRect(0, 0, this.width, 300);
-
-            // Reset waterfall image data
-            this.waterfallImageData = null;
-
-            // Update line graph cursor style
-            this.updateLineGraphCursorStyle();
-
-        } else if (this.displayMode === 'split') {
-            // Switch to graph-only mode
-            console.log('[toggleLineGraph] Switching to GRAPH mode');
-            this.displayMode = 'graph';
-
-            // Hide main canvas (waterfall)
-            this.canvas.style.display = 'none';
-            console.log('[toggleLineGraph] Main canvas hidden for graph mode');
-
-            // Show bandwidth lines canvas in graph-only mode (600px to cover full graph)
-            this.bandwidthLinesCanvas.style.display = 'block';
-            this.bandwidthLinesCanvas.height = 600;
-            this.bandwidthLinesCanvas.style.height = '600px';
-
-            // Show overlay div (bookmarks) in graph-only mode, positioned at top
-            this.overlayDiv.style.display = 'block';
-            this.overlayDiv.style.position = 'absolute';
-            this.overlayDiv.style.top = '0';
-            this.overlayDiv.style.left = '0';
-            this.overlayDiv.style.zIndex = '15';
-            this.overlayDiv.style.backgroundColor = '#adb5bd';
-
-            // Show line graph canvas at full height with graph-only-mode class
-            if (this.lineGraphCanvas) {
-                this.lineGraphCanvas.classList.remove('split-mode');
-                this.lineGraphCanvas.classList.add('graph-only-mode');
-            }
-
-        } else {
-            // Switch back to waterfall-only mode
-            console.log('[toggleLineGraph] Switching to WATERFALL mode');
-            this.displayMode = 'waterfall';
-
-            // Hide line graph canvas and clear it
-            if (this.lineGraphCanvas) {
-                this.lineGraphCanvas.classList.remove('split-mode', 'graph-only-mode');
-                this.lineGraphCanvas.style.display = 'none'; // Actually hide the canvas
-                console.log('[toggleLineGraph] Line graph canvas hidden');
-                // Clear the line graph canvas to prevent artifacts
-                if (this.lineGraphCtx) {
-                    this.lineGraphCtx.fillStyle = '#000';
-                    this.lineGraphCtx.fillRect(0, 0, this.lineGraphCanvas.width, this.lineGraphCanvas.height);
-                }
-            }
-
-            // Show main canvas
-            this.canvas.style.display = 'block';
-            this.canvas.classList.remove('split-view');
-            console.log(`[toggleLineGraph] Main canvas shown, display: ${this.canvas.style.display}, height: ${this.canvas.height}`);
-
-            // Show bandwidth lines canvas and restore to 600px height
-            this.bandwidthLinesCanvas.style.display = 'block';
-            this.bandwidthLinesCanvas.height = 600;
-            this.bandwidthLinesCanvas.style.height = '600px';
-
-            // Show overlay div (bookmarks)
-            this.overlayDiv.style.display = 'block';
-
-            // Update canvas height back to 600px
-            this.canvas.height = 600;
-            this.height = 600;
-            this.canvasHeight = 600;
-
-            // Update bandwidth lines canvas height back to 600px
-            this.bandwidthLinesCanvas.height = 600;
-            this.bandwidthLinesCanvas.style.height = '600px';
-
-            // Restore overlay div to fixed positioning (consistent with initial setup)
-            this.overlayDiv.style.position = 'fixed';
-            this.overlayDiv.style.zIndex = '20';
-            this.overlayDiv.style.backgroundColor = '#adb5bd'; // Grey background to match page
-
-            // Update overlay position to match canvas position
-            this.updateOverlayPosition();
-
-            // Clear the waterfall canvas
-            this.ctx.fillStyle = '#000';
-            this.ctx.fillRect(0, 0, this.width, 600);
-
-            // Reset waterfall image data
-            this.waterfallImageData = null;
-        }
-
-        // Redraw
-        if (this.spectrumData && this.spectrumData.length > 0) {
-            this.draw();
-        }
-    }
 
     // Setup mouse handlers for line graph canvas
     setupLineGraphMouseHandlers() {
@@ -2066,11 +1761,6 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
     // Update line graph tooltip content and position
     updateLineGraphTooltip(x, y) {
-        // Skip if not in graph or split mode to save CPU
-        if (this.displayMode !== 'graph' && this.displayMode !== 'split') {
-            this.hideTooltip();
-            return;
-        }
         if (!this.spectrumData || !this.lineGraphCanvas) {
             this.hideTooltip();
             return;
@@ -2116,8 +1806,6 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
     // Update cursor style for line graph based on zoom level
     updateLineGraphCursorStyle() {
-        // Skip if not in graph or split mode to save CPU
-        if (this.displayMode !== 'graph' && this.displayMode !== 'split') return;
         if (!this.lineGraphCanvas || !this.totalBandwidth) return;
 
         // Check if we're showing full bandwidth (0-30 MHz)
@@ -2423,7 +2111,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         this.drawBandwidthLines(xLow, xHigh);
     }
 
-    // Draw vertical green lines at bandwidth edges over waterfall/graph
+    // Draw vertical green lines at bandwidth edges over waterfall/graph (split mode only)
     drawBandwidthLines(xLow, xHigh) {
         // Only draw if both edges are visible
         if (xLow < 0 || xLow > this.width || xHigh < 0 || xHigh > this.width) return;
@@ -2431,24 +2119,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         // Clear the bandwidth lines overlay canvas
         this.bandwidthLinesCtx.clearRect(0, 0, this.bandwidthLinesCanvas.width, this.bandwidthLinesCanvas.height);
 
-        // Determine start Y and height based on display mode
-        let startY, height;
-
-        if (this.displayMode === 'graph') {
-            // Graph-only mode: draw from where graph starts (70px after bookmarks + freq scale)
-            startY = 70;
-            height = 600;
-        } else if (this.displayMode === 'split') {
-            // Split mode: draw on line graph (from 70px where graph starts) and waterfall
-            // Line graph is 300px tall, waterfall is 300px tall
-            // Total height needed: 600px (to cover both)
-            startY = 70; // Start where line graph drawing area begins (after bookmarks + freq scale)
-            height = 600; // Cover both line graph and waterfall
-        } else {
-            // Waterfall-only mode: draw full height
-            startY = 30; // Start below frequency scale
-            height = 600;
-        }
+        // Split mode: draw on line graph (from 70px where graph starts) and waterfall
+        // Line graph is 300px tall, waterfall is 300px tall
+        // Total height needed: 600px (to cover both)
+        const startY = 70; // Start where line graph drawing area begins (after bookmarks + freq scale)
+        const height = 600; // Cover both line graph and waterfall
 
         // Draw the bandwidth lines on the overlay canvas
         this.bandwidthLinesCtx.save();

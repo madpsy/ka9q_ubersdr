@@ -5968,52 +5968,10 @@ function updateSpectrumZoomDisplay() {
     }
 }
 
-function toggleSpectrumLineGraph() {
-    if (!spectrumDisplay) return;
-
-    spectrumDisplay.toggleLineGraph();
-
-    // Update button appearance and text based on mode
-    const button = document.getElementById('spectrum-line-graph-toggle');
-    if (button) {
-        if (spectrumDisplay.displayMode === 'waterfall') {
-            // Waterfall mode - button shows what's next (Split)
-            button.style.background = '';
-            button.style.color = '';
-            button.textContent = 'Split';
-        } else if (spectrumDisplay.displayMode === 'split') {
-            // Split mode - button shows what's next (Graph) - keep green
-            button.style.background = '#28a745';
-            button.style.color = 'white';
-            button.textContent = 'Graph';
-        } else {
-            // Graph mode - button shows what's next (Waterfall)
-            button.style.background = '#28a745';
-            button.style.color = 'white';
-            button.textContent = 'Waterfall';
-        }
-    }
-}
-
-// Initialize button text for split mode default
-document.addEventListener('DOMContentLoaded', () => {
-    // Wait for spectrum display to be initialized
-    setTimeout(() => {
-        const button = document.getElementById('spectrum-line-graph-toggle');
-        if (button && spectrumDisplay && spectrumDisplay.displayMode === 'split') {
-            button.style.background = '#28a745';
-            button.style.color = 'white';
-            button.textContent = 'Graph';
-        }
-    }, 100);
-});
-
-
 // Expose functions to global scope for HTML onclick/onchange handlers
 // (Required because ES6 modules don't automatically expose functions globally)
 
 // Spectrum controls
-window.toggleSpectrumLineGraph = toggleSpectrumLineGraph;
 window.spectrumResetZoom = spectrumResetZoom;
 window.spectrumZoomOut = spectrumZoomOut;
 window.spectrumZoomIn = spectrumZoomIn;

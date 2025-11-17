@@ -460,19 +460,19 @@ class DigitalSpotsExtension extends DecoderExtension {
             return;
         }
 
-        // Get spots for current band from the last 120 seconds
+        // Get spots for current band from the last 10 minutes
         const now = Date.now();
-        const twoMinutesAgo = now - (120 * 1000);
+        const tenMinutesAgo = now - (10 * 60 * 1000);
 
         const recentBandSpots = this.spots.filter(spot => {
             if (spot.band !== currentBand || !spot.country) return false;
             const spotTime = new Date(spot.timestamp).getTime();
-            return spotTime >= twoMinutesAgo;
+            return spotTime >= tenMinutesAgo;
         });
 
         if (recentBandSpots.length === 0) {
             container.classList.add('empty');
-            container.innerHTML = `No countries seen on ${currentBand} in the last 2 minutes`;
+            container.innerHTML = `No countries seen on ${currentBand} in the last 10 minutes`;
             return;
         }
 
@@ -840,9 +840,9 @@ class DigitalSpotsExtension extends DecoderExtension {
         const country = this.currentModalCountry;
         const band = this.currentModalBand;
 
-        // Get spots for this country and band from the last 2 minutes
+        // Get spots for this country and band from the last 10 minutes
         const now = Date.now();
-        const twoMinutesAgo = now - (120 * 1000);
+        const tenMinutesAgo = now - (10 * 60 * 1000);
 
         const countrySpots = this.spots.filter(spot => {
             if (spot.band !== band || spot.country !== country) return false;
@@ -853,7 +853,7 @@ class DigitalSpotsExtension extends DecoderExtension {
             }
 
             const spotTime = new Date(spot.timestamp).getTime();
-            return spotTime >= twoMinutesAgo;
+            return spotTime >= tenMinutesAgo;
         });
 
         // Get unique callsigns with their most recent spot data

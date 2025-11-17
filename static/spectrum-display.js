@@ -1900,10 +1900,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
             // Handle dragging
             if (lineGraphDragging) {
+                console.log(`[LINE] mousemove: x=${x}, y=${y}, lastDragX=${this.lastDragX}, lastDragY=${this.lastDragY}`);
+
                 // Only process if mouse actually moved
                 if (x === this.lastDragX && y === this.lastDragY) {
+                    console.log(`[LINE] No movement detected, ignoring event`);
                     return; // No actual movement, ignore this event
                 }
+                console.log(`[LINE] Movement detected, processing drag`);
                 this.lastDragX = x;
                 this.lastDragY = y;
 
@@ -2850,10 +2854,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
             // Handle dragging
             if (this.isDragging) {
+                console.log(`[MAIN] mousemove: mouseX=${this.mouseX}, mouseY=${this.mouseY}, lastDragX=${this.lastDragX}, lastDragY=${this.lastDragY}`);
+
                 // Only process if mouse actually moved
                 if (this.mouseX === this.lastDragX && this.mouseY === this.lastDragY) {
+                    console.log(`[MAIN] No movement detected, ignoring event`);
                     return; // No actual movement, ignore this event
                 }
+                console.log(`[MAIN] Movement detected, processing drag`);
                 this.lastDragX = this.mouseX;
                 this.lastDragY = this.mouseY;
 

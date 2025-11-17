@@ -6020,7 +6020,6 @@ window.spectrumMaxZoom = spectrumMaxZoom;
 window.updateSpectrumColorScheme = updateSpectrumColorScheme;
 window.updateSpectrumRange = updateSpectrumRange;
 window.updateSpectrumGrid = updateSpectrumGrid;
-window.updateSpectrumIntensity = updateSpectrumIntensity;
 
 // Helper function for spectrum display to get current dial frequency
 window.getCurrentDialFrequency = function() {

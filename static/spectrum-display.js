@@ -966,8 +966,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.updateAutoRange();
         }
 
-        // Apply client-side prediction: shift canvas horizontally if dragging
-        if (this.isDragging && this.predictedFreqOffset !== 0) {
+        // Apply client-side prediction: shift canvas horizontally if dragging AND mouse is actually moving
+        // Don't apply shift if just holding button down without movement
+        if (this.isDragging && this.predictedFreqOffset !== 0 && this.dragDidMove) {
             this.applyPredictedShift();
         }
 
@@ -1187,8 +1188,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.lineGraphCanvas.style.height = '300px';
         }
 
-        // Apply client-side prediction: shift line graph if dragging
-        if (this.isDragging && this.predictedFreqOffset !== 0) {
+        // Apply client-side prediction: shift line graph if dragging AND mouse is actually moving
+        // Don't apply shift if just holding button down without movement
+        if (this.isDragging && this.predictedFreqOffset !== 0 && this.dragDidMove) {
             this.applyPredictedShiftToLineGraph();
         }
 
@@ -1340,8 +1342,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.lineGraphCanvas.style.height = '600px';
         }
 
-        // Apply client-side prediction: shift line graph if dragging
-        if (this.isDragging && this.predictedFreqOffset !== 0) {
+        // Apply client-side prediction: shift line graph if dragging AND mouse is actually moving
+        // Don't apply shift if just holding button down without movement
+        if (this.isDragging && this.predictedFreqOffset !== 0 && this.dragDidMove) {
             this.applyPredictedShiftToLineGraph();
         }
 

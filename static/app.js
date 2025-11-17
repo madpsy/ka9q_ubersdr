@@ -114,6 +114,11 @@ const wsManager = new WebSocketManager({
             updateOscilloscopeZoom();
             startVisualization();
 
+            // Start waterfall auto-adjust (always enabled)
+            if (!waterfallAutoAdjustInterval) {
+                waterfallAutoAdjustInterval = setInterval(updateWaterfallAutoAdjust, WATERFALL_AUTO_ADJUST_UPDATE_RATE);
+                log('Waterfall auto-adjust enabled');
+            }
 
             // Open extensions from URL parameter if specified
             if (window.extensionsToOpen && window.extensionsToOpen.length > 0) {
@@ -5137,60 +5142,14 @@ function updateScrollRate() {
     log(`Waterfall scroll rate changed to ${fps} fps`);
 }
 
-// Waterfall auto-adjust state
-let waterfallAutoAdjustEnabled = false;
+// Waterfall auto-adjust state (always enabled)
+let waterfallAutoAdjustEnabled = true;
 let waterfallAutoAdjustInterval = null;
 let waterfallNoiseFloorHistory = [];
 let waterfallPeakHistory = [];
 const WATERFALL_AUTO_ADJUST_HISTORY_SIZE = 10; // Average over 10 samples
 const WATERFALL_AUTO_ADJUST_UPDATE_RATE = 500; // Update every 500ms
 
-// Update waterfall intensity
-function updateWaterfallIntensity() {
-    const intensity = parseFloat(document.getElementById('waterfall-intensity').value);
-    waterfallIntensity = intensity;
-
-    // Format display value with + or - sign
-    const displayValue = intensity >= 0 ? '+' + intensity.toFixed(2) : intensity.toFixed(2);
-    document.getElementById('waterfall-intensity-value').textContent = displayValue;
-
-    log(`Waterfall intensity changed to ${displayValue}`);
-}
-
-// Update waterfall contrast (noise floor threshold)
-function updateWaterfallContrast() {
-    const contrast = parseInt(document.getElementById('waterfall-contrast').value);
-    waterfallContrast = contrast;
-    document.getElementById('waterfall-contrast-value').textContent = contrast;
-
-    log(`Waterfall contrast changed to ${contrast} (noise floor suppression)`);
-}
-
-// Toggle waterfall auto-adjust
-function toggleWaterfallAutoAdjust() {
-    const checkbox = document.getElementById('waterfall-auto-adjust');
-    if (!checkbox) return;
-
-    waterfallAutoAdjustEnabled = checkbox.checked;
-
-    if (waterfallAutoAdjustEnabled) {
-        // Start auto-adjustment
-        if (!waterfallAutoAdjustInterval) {
-            waterfallAutoAdjustInterval = setInterval(updateWaterfallAutoAdjust, WATERFALL_AUTO_ADJUST_UPDATE_RATE);
-        }
-        log('Waterfall auto-adjust enabled');
-    } else {
-        // Stop auto-adjustment
-        if (waterfallAutoAdjustInterval) {
-            clearInterval(waterfallAutoAdjustInterval);
-            waterfallAutoAdjustInterval = null;
-        }
-        // Clear history
-        waterfallNoiseFloorHistory = [];
-        waterfallPeakHistory = [];
-        log('Waterfall auto-adjust disabled');
-    }
-}
 
 // Update waterfall auto-adjust values
 function updateWaterfallAutoAdjust() {
@@ -5271,22 +5230,9 @@ function updateWaterfallAutoAdjust() {
         optimalIntensity = 0.0;
     }
 
-    // Update sliders and values
-    const intensitySlider = document.getElementById('waterfall-intensity');
-    const contrastSlider = document.getElementById('waterfall-contrast');
-
-    if (intensitySlider) {
-        intensitySlider.value = optimalIntensity;
-        waterfallIntensity = optimalIntensity;
-        const displayValue = optimalIntensity >= 0 ? '+' + optimalIntensity.toFixed(2) : optimalIntensity.toFixed(2);
-        document.getElementById('waterfall-intensity-value').textContent = displayValue;
-    }
-
-    if (contrastSlider) {
-        contrastSlider.value = clampedContrast;
-        waterfallContrast = clampedContrast;
-        document.getElementById('waterfall-contrast-value').textContent = clampedContrast;
-    }
+    // Apply optimal values directly (no UI controls)
+    waterfallIntensity = optimalIntensity;
+    waterfallContrast = clampedContrast;
 }
 
 // Update oscilloscope zoom/timebase
@@ -5739,9 +5685,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Connect to spectrum WebSocket
         spectrumDisplay.connect();
 
-        // Start auto-adjust (always enabled)
-        if (!spectrumAutoAdjustInterval) {
-            spectrumAutoAdjustInterval = setInterval(updateSpectrumAutoAdjust, 500);
+        // Enable auto-adjust by default (checkbox is already checked in HTML)
+        const autoAdjustCheckbox = document.getElementById('spectrum-auto-adjust');
+        if (autoAdjustCheckbox && autoAdjustCheckbox.checked) {
+            // Trigger the toggle function to actually start auto-adjustment
+            toggleSpectrumAutoAdjust();
         }
 
         // Apply zoom from URL parameters if present
@@ -5834,6 +5782,31 @@ const spectrumNoiseFloorHistory = [];
 const spectrumPeakHistory = [];
 const SPECTRUM_HISTORY_SIZE = 10;
 
+// Toggle RF spectrum auto-adjust
+function toggleSpectrumAutoAdjust() {
+    const checkbox = document.getElementById('spectrum-auto-adjust');
+    if (!checkbox) return;
+    
+    spectrumAutoAdjustEnabled = checkbox.checked;
+    
+    if (spectrumAutoAdjustEnabled) {
+        // Start auto-adjustment
+        if (!spectrumAutoAdjustInterval) {
+            spectrumAutoAdjustInterval = setInterval(updateSpectrumAutoAdjust, 500);
+        }
+        log('RF Spectrum auto-adjust enabled');
+    } else {
+        // Stop auto-adjustment
+        if (spectrumAutoAdjustInterval) {
+            clearInterval(spectrumAutoAdjustInterval);
+            spectrumAutoAdjustInterval = null;
+        }
+        // Clear history
+        spectrumNoiseFloorHistory.length = 0;
+        spectrumPeakHistory.length = 0;
+        log('RF Spectrum auto-adjust disabled');
+    }
+}
 
 // Update RF spectrum auto-adjust values
 function updateSpectrumAutoAdjust() {
@@ -5933,7 +5906,26 @@ function updateSpectrumAutoAdjust() {
     }
 }
 
+function updateSpectrumIntensity() {
+    if (!spectrumDisplay) return;
 
+    const intensity = parseFloat(document.getElementById('spectrum-intensity').value);
+
+    // Format display value with + or - sign
+    const displayValue = intensity >= 0 ? '+' + intensity.toFixed(2) : intensity.toFixed(2);
+    document.getElementById('spectrum-intensity-value').textContent = displayValue;
+
+    spectrumDisplay.updateConfig({ intensity });
+}
+
+function updateSpectrumContrast() {
+    if (!spectrumDisplay) return;
+
+    const contrast = parseInt(document.getElementById('spectrum-contrast').value);
+    document.getElementById('spectrum-contrast-value').textContent = contrast;
+
+    spectrumDisplay.updateConfig({ contrast });
+}
 
 // Spectrum zoom control functions
 function spectrumZoomIn() {
@@ -6066,6 +6058,9 @@ window.spectrumMaxZoom = spectrumMaxZoom;
 window.updateSpectrumColorScheme = updateSpectrumColorScheme;
 window.updateSpectrumRange = updateSpectrumRange;
 window.updateSpectrumGrid = updateSpectrumGrid;
+window.updateSpectrumIntensity = updateSpectrumIntensity;
+window.updateSpectrumContrast = updateSpectrumContrast;
+window.toggleSpectrumAutoAdjust = toggleSpectrumAutoAdjust;
 
 // Helper function for spectrum display to get current dial frequency
 window.getCurrentDialFrequency = function() {
@@ -6102,9 +6097,6 @@ window.openRecorderModal = openRecorderModal;
 window.toggleAudioVisualization = toggleAudioVisualization;
 window.updateFFTSize = updateFFTSize;
 window.updateScrollRate = updateScrollRate;
-window.updateWaterfallIntensity = updateWaterfallIntensity;
-window.updateWaterfallContrast = updateWaterfallContrast;
-window.toggleWaterfallAutoAdjust = toggleWaterfallAutoAdjust;
 window.updateOscilloscopeZoom = updateOscilloscopeZoom;
 
 // Oscilloscope controls

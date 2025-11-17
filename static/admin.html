@@ -3599,30 +3599,29 @@
                     const table = document.createElement('table');
                     table.style.width = '100%';
                     table.style.borderCollapse = 'collapse';
-                    table.innerHTML = `
-                        <thead>
-                            <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
-                                <th style="padding: 10px; text-align: left;">Band</th>
-                                <th style="padding: 10px; text-align: left;">Last Data Time</th>
-                                <th style="padding: 10px; text-align: center;">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="lastDataTimesBody"></tbody>
-                    `;
-                    statusSection.appendChild(table);
-
-                    const tbody = document.getElementById('lastDataTimesBody');
-                    const stalledBands = data.stalled_bands || [];
                     
+                    const thead = document.createElement('thead');
+                    thead.innerHTML = `
+                        <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                            <th style="padding: 10px; text-align: left;">Band</th>
+                            <th style="padding: 10px; text-align: left;">Last Data Time</th>
+                            <th style="padding: 10px; text-align: center;">Status</th>
+                        </tr>
+                    `;
+                    table.appendChild(thead);
+
+                    const tbody = document.createElement('tbody');
+                    const stalledBands = data.stalled_bands || [];
+
                     for (const [band, time] of Object.entries(data.last_data_times)) {
                         const row = document.createElement('tr');
                         row.style.borderBottom = '1px solid #dee2e6';
-                        
+
                         const isStalled = stalledBands.includes(band);
                         const statusIcon = time === 'never' ? '❌' : (isStalled ? '⚠️' : '✅');
                         const statusText = time === 'never' ? 'No data' : (isStalled ? 'Stalled' : 'OK');
                         const statusColor = time === 'never' ? '#dc3545' : (isStalled ? '#ffc107' : '#28a745');
-                        
+
                         row.innerHTML = `
                             <td style="padding: 10px;"><strong>${band}</strong></td>
                             <td style="padding: 10px; font-family: monospace; font-size: 12px;">${time}</td>
@@ -3632,6 +3631,9 @@
                         `;
                         tbody.appendChild(row);
                     }
+
+                    table.appendChild(tbody);
+                    statusSection.appendChild(table);
                 }
 
                 container.appendChild(statusSection);

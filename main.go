@@ -672,6 +672,9 @@ func main() {
 	http.HandleFunc("/admin/noisefloor-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorHealth(w, r, noiseFloorMonitor)
 	}))
+	http.HandleFunc("/admin/spaceweather-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleSpaceWeatherHealth(w, r, spaceWeatherMonitor)
+	}))
 
 	// Open log file for HTTP request logging
 	// If LogFile is a relative path and we have a config directory, prepend it
@@ -1600,6 +1603,38 @@ func handleNoiseFloorHealth(w http.ResponseWriter, r *http.Request, nfm *NoiseFl
 
 	if err := json.NewEncoder(w).Encode(status); err != nil {
 		log.Printf("Error encoding noise floor health status: %v", err)
+	}
+}
+
+// handleSpaceWeatherHealth serves the health status of the space weather monitor
+// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
+func handleSpaceWeatherHealth(w http.ResponseWriter, r *http.Request, swm *SpaceWeatherMonitor) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get detailed diagnostics if requested
+	detailed := r.URL.Query().Get("detailed") == "true"
+
+	if detailed {
+		diagnostics := swm.GetStartupDiagnostics()
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(diagnostics); err != nil {
+			log.Printf("Error encoding space weather diagnostics: %v", err)
+		}
+		return
+	}
+
+	// Return health status
+	status := swm.GetHealthStatus()
+
+	// Set appropriate HTTP status code
+	if status.Healthy {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("Error encoding space weather health status: %v", err)
 	}
 }
 

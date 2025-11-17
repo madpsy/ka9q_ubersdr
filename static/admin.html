@@ -3451,14 +3451,21 @@
         // Monitor health management
         async function loadMonitorHealth() {
             try {
-                const response = await authenticatedFetch('/admin/noisefloor-health');
-                if (!response) return; // Auth failed, already handled
-                if (!response.ok && response.status !== 503) throw new Error('Failed to load health status');
-
-                const health = await response.json();
-                renderMonitorHealth(health, false);
+                // Fetch both noise floor and space weather health
+                const [nfResponse, swResponse] = await Promise.all([
+                    authenticatedFetch('/admin/noisefloor-health'),
+                    authenticatedFetch('/admin/spaceweather-health')
+                ]);
                 
-                if (health.healthy) {
+                if (!nfResponse || !swResponse) return; // Auth failed, already handled
+
+                const nfHealth = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
+                const swHealth = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
+
+                renderMonitorHealth({ noiseFloor: nfHealth, spaceWeather: swHealth }, false);
+                
+                const allHealthy = (nfHealth?.healthy !== false) && (swHealth?.healthy !== false);
+                if (allHealthy) {
                     showAlert('Health check completed - all systems healthy', 'success');
                 } else {
                     showAlert('Health check completed - issues detected', 'error');
@@ -3470,12 +3477,18 @@
 
         async function loadMonitorHealthDetailed() {
             try {
-                const response = await authenticatedFetch('/admin/noisefloor-health?detailed=true');
-                if (!response) return; // Auth failed, already handled
-                if (!response.ok && response.status !== 503) throw new Error('Failed to load detailed diagnostics');
+                // Fetch both noise floor and space weather detailed diagnostics
+                const [nfResponse, swResponse] = await Promise.all([
+                    authenticatedFetch('/admin/noisefloor-health?detailed=true'),
+                    authenticatedFetch('/admin/spaceweather-health?detailed=true')
+                ]);
+                
+                if (!nfResponse || !swResponse) return; // Auth failed, already handled
 
-                const diagnostics = await response.json();
-                renderMonitorHealth(diagnostics, true);
+                const nfDiag = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
+                const swDiag = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
+
+                renderMonitorHealth({ noiseFloor: nfDiag, spaceWeather: swDiag }, true);
                 showAlert('Detailed diagnostics loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading detailed diagnostics: ' + error.message, 'error');
@@ -3488,156 +3501,268 @@
             container.classList.remove('loading');
 
             if (isDetailed) {
-                // Render detailed diagnostics
-                const section = document.createElement('div');
-                section.className = 'config-section';
-                section.innerHTML = '<h3>🔍 Detailed Diagnostics</h3>';
+                // Render detailed diagnostics for both systems
+                if (data.noiseFloor) {
+                    const nfSection = document.createElement('div');
+                    nfSection.className = 'config-section';
+                    nfSection.innerHTML = '<h3>🔍 Noise Floor - Detailed Diagnostics</h3>';
 
-                const pre = document.createElement('pre');
-                pre.style.background = '#fff';
-                pre.style.padding = '15px';
-                pre.style.borderRadius = '5px';
-                pre.style.overflow = 'auto';
-                pre.style.fontFamily = 'monospace';
-                pre.style.fontSize = '13px';
-                pre.style.lineHeight = '1.5';
-                pre.style.whiteSpace = 'pre-wrap';
-                pre.style.wordWrap = 'break-word';
-                pre.textContent = JSON.stringify(data, null, 2);
-                section.appendChild(pre);
+                    const nfPre = document.createElement('pre');
+                    nfPre.style.background = '#fff';
+                    nfPre.style.padding = '15px';
+                    nfPre.style.borderRadius = '5px';
+                    nfPre.style.overflow = 'auto';
+                    nfPre.style.fontFamily = 'monospace';
+                    nfPre.style.fontSize = '13px';
+                    nfPre.style.lineHeight = '1.5';
+                    nfPre.style.whiteSpace = 'pre-wrap';
+                    nfPre.style.wordWrap = 'break-word';
+                    nfPre.textContent = JSON.stringify(data.noiseFloor, null, 2);
+                    nfSection.appendChild(nfPre);
+                    container.appendChild(nfSection);
+                }
 
-                container.appendChild(section);
+                if (data.spaceWeather) {
+                    const swSection = document.createElement('div');
+                    swSection.className = 'config-section';
+                    swSection.innerHTML = '<h3>🔍 Space Weather - Detailed Diagnostics</h3>';
+
+                    const swPre = document.createElement('pre');
+                    swPre.style.background = '#fff';
+                    swPre.style.padding = '15px';
+                    swPre.style.borderRadius = '5px';
+                    swPre.style.overflow = 'auto';
+                    swPre.style.fontFamily = 'monospace';
+                    swPre.style.fontSize = '13px';
+                    swPre.style.lineHeight = '1.5';
+                    swPre.style.whiteSpace = 'pre-wrap';
+                    swPre.style.wordWrap = 'break-word';
+                    swPre.textContent = JSON.stringify(data.spaceWeather, null, 2);
+                    swSection.appendChild(swPre);
+                    container.appendChild(swSection);
+                }
             } else {
-                // Render health status
-                const statusSection = document.createElement('div');
-                statusSection.className = 'config-section';
-                
-                const statusIcon = data.healthy ? '✅' : '❌';
-                const statusColor = data.healthy ? '#28a745' : '#dc3545';
-                
-                statusSection.innerHTML = `
-                    <h3 style="color: ${statusColor};">${statusIcon} Noise Floor Monitor Health</h3>
-                `;
-
-                // Overall status
-                const statusDiv = document.createElement('div');
-                statusDiv.style.padding = '15px';
-                statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
-                statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
-                statusDiv.style.borderRadius = '5px';
-                statusDiv.style.marginBottom = '20px';
-                statusDiv.innerHTML = `
-                    <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
-                    <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span><br>
-                    <span style="color: #666; font-size: 14px;">Running: ${data.running ? 'Yes' : 'No'}</span>
-                `;
-                statusSection.appendChild(statusDiv);
-
-                // Band statistics
-                const statsDiv = document.createElement('div');
-                statsDiv.style.display = 'grid';
-                statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
-                statsDiv.style.gap = '15px';
-                statsDiv.style.marginBottom = '20px';
-
-                const stats = [
-                    { label: 'Bands Configured', value: data.bands_configured || 0, icon: '📊' },
-                    { label: 'Bands Receiving Data', value: data.bands_receiving_data || 0, icon: '📡' },
-                    { label: 'Stalled Bands', value: (data.stalled_bands || []).length, icon: '⚠️' }
-                ];
-
-                stats.forEach(stat => {
-                    const statCard = document.createElement('div');
-                    statCard.style.padding = '15px';
-                    statCard.style.background = '#f8f9fa';
-                    statCard.style.borderRadius = '5px';
-                    statCard.style.textAlign = 'center';
-                    statCard.innerHTML = `
-                        <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
-                        <div style="font-size: 24px; font-weight: bold; color: #667eea; margin-bottom: 5px;">${stat.value}</div>
-                        <div style="font-size: 12px; color: #666;">${stat.label}</div>
-                    `;
-                    statsDiv.appendChild(statCard);
-                });
-                statusSection.appendChild(statsDiv);
-
-                // Issues list
-                if (data.issues && data.issues.length > 0) {
-                    const issuesDiv = document.createElement('div');
-                    issuesDiv.style.padding = '15px';
-                    issuesDiv.style.background = '#fff3cd';
-                    issuesDiv.style.border = '1px solid #ffeaa7';
-                    issuesDiv.style.borderRadius = '5px';
-                    issuesDiv.style.marginBottom = '20px';
-                    
-                    const issuesTitle = document.createElement('strong');
-                    issuesTitle.textContent = '⚠️ Issues Detected:';
-                    issuesTitle.style.display = 'block';
-                    issuesTitle.style.marginBottom = '10px';
-                    issuesDiv.appendChild(issuesTitle);
-
-                    const issuesList = document.createElement('ul');
-                    issuesList.style.marginLeft = '20px';
-                    data.issues.forEach(issue => {
-                        const li = document.createElement('li');
-                        li.textContent = issue;
-                        li.style.marginBottom = '5px';
-                        issuesList.appendChild(li);
-                    });
-                    issuesDiv.appendChild(issuesList);
-                    statusSection.appendChild(issuesDiv);
+                // Render noise floor health status
+                if (data.noiseFloor) {
+                    renderNoiseFloorHealth(container, data.noiseFloor);
                 }
 
-                // Last data times table
-                if (data.last_data_times && Object.keys(data.last_data_times).length > 0) {
-                    const timesTitle = document.createElement('h4');
-                    timesTitle.textContent = 'Last Data Received';
-                    timesTitle.style.marginTop = '20px';
-                    timesTitle.style.marginBottom = '10px';
-                    statusSection.appendChild(timesTitle);
-
-                    const table = document.createElement('table');
-                    table.style.width = '100%';
-                    table.style.borderCollapse = 'collapse';
-                    
-                    const thead = document.createElement('thead');
-                    thead.innerHTML = `
-                        <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
-                            <th style="padding: 10px; text-align: left;">Band</th>
-                            <th style="padding: 10px; text-align: left;">Last Data Time</th>
-                            <th style="padding: 10px; text-align: center;">Status</th>
-                        </tr>
-                    `;
-                    table.appendChild(thead);
-
-                    const tbody = document.createElement('tbody');
-                    const stalledBands = data.stalled_bands || [];
-
-                    for (const [band, time] of Object.entries(data.last_data_times)) {
-                        const row = document.createElement('tr');
-                        row.style.borderBottom = '1px solid #dee2e6';
-
-                        const isStalled = stalledBands.includes(band);
-                        const statusIcon = time === 'never' ? '❌' : (isStalled ? '⚠️' : '✅');
-                        const statusText = time === 'never' ? 'No data' : (isStalled ? 'Stalled' : 'OK');
-                        const statusColor = time === 'never' ? '#dc3545' : (isStalled ? '#ffc107' : '#28a745');
-
-                        row.innerHTML = `
-                            <td style="padding: 10px;"><strong>${band}</strong></td>
-                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${time}</td>
-                            <td style="padding: 10px; text-align: center;">
-                                <span style="color: ${statusColor}; font-weight: bold;">${statusIcon} ${statusText}</span>
-                            </td>
-                        `;
-                        tbody.appendChild(row);
-                    }
-
-                    table.appendChild(tbody);
-                    statusSection.appendChild(table);
+                // Render space weather health status
+                if (data.spaceWeather) {
+                    renderSpaceWeatherHealth(container, data.spaceWeather);
                 }
-
-                container.appendChild(statusSection);
             }
+        }
+
+        function renderNoiseFloorHealth(container, data) {
+            // Render health status
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : '#dc3545';
+
+            statusSection.innerHTML = `
+                <h3 style="color: ${statusColor};">${statusIcon} Noise Floor Monitor Health</h3>
+            `;
+
+            // Overall status
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span><br>
+                <span style="color: #666; font-size: 14px;">Running: ${data.running ? 'Yes' : 'No'}</span>
+            `;
+            statusSection.appendChild(statusDiv);
+
+            // Band statistics
+            const statsDiv = document.createElement('div');
+            statsDiv.style.display = 'grid';
+            statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+            statsDiv.style.gap = '15px';
+            statsDiv.style.marginBottom = '20px';
+
+            const stats = [
+                { label: 'Bands Configured', value: data.bands_configured || 0, icon: '📊' },
+                { label: 'Bands Receiving Data', value: data.bands_receiving_data || 0, icon: '📡' },
+                { label: 'Stalled Bands', value: (data.stalled_bands || []).length, icon: '⚠️' }
+            ];
+
+            stats.forEach(stat => {
+                const statCard = document.createElement('div');
+                statCard.style.padding = '15px';
+                statCard.style.background = '#f8f9fa';
+                statCard.style.borderRadius = '5px';
+                statCard.style.textAlign = 'center';
+                statCard.innerHTML = `
+                    <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #667eea; margin-bottom: 5px;">${stat.value}</div>
+                    <div style="font-size: 12px; color: #666;">${stat.label}</div>
+                `;
+                statsDiv.appendChild(statCard);
+            });
+            statusSection.appendChild(statsDiv);
+
+            // Issues list
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.padding = '15px';
+                issuesDiv.style.background = '#fff3cd';
+                issuesDiv.style.border = '1px solid #ffeaa7';
+                issuesDiv.style.borderRadius = '5px';
+                issuesDiv.style.marginBottom = '20px';
+
+                const issuesTitle = document.createElement('strong');
+                issuesTitle.textContent = '⚠️ Issues Detected:';
+                issuesTitle.style.display = 'block';
+                issuesTitle.style.marginBottom = '10px';
+                issuesDiv.appendChild(issuesTitle);
+
+                const issuesList = document.createElement('ul');
+                issuesList.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            // Last data times table
+            if (data.last_data_times && Object.keys(data.last_data_times).length > 0) {
+                const timesTitle = document.createElement('h4');
+                timesTitle.textContent = 'Last Data Received';
+                timesTitle.style.marginTop = '20px';
+                timesTitle.style.marginBottom = '10px';
+                statusSection.appendChild(timesTitle);
+
+                const table = document.createElement('table');
+                table.style.width = '100%';
+                table.style.borderCollapse = 'collapse';
+
+                const thead = document.createElement('thead');
+                thead.innerHTML = `
+                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                        <th style="padding: 10px; text-align: left;">Band</th>
+                        <th style="padding: 10px; text-align: left;">Last Data Time</th>
+                        <th style="padding: 10px; text-align: center;">Status</th>
+                    </tr>
+                `;
+                table.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+                const stalledBands = data.stalled_bands || [];
+
+                for (const [band, time] of Object.entries(data.last_data_times)) {
+                    const row = document.createElement('tr');
+                    row.style.borderBottom = '1px solid #dee2e6';
+
+                    const isStalled = stalledBands.includes(band);
+                    const statusIcon = time === 'never' ? '❌' : (isStalled ? '⚠️' : '✅');
+                    const statusText = time === 'never' ? 'No data' : (isStalled ? 'Stalled' : 'OK');
+                    const statusColor = time === 'never' ? '#dc3545' : (isStalled ? '#ffc107' : '#28a745');
+
+                    row.innerHTML = `
+                        <td style="padding: 10px;"><strong>${band}</strong></td>
+                        <td style="padding: 10px; font-family: monospace; font-size: 12px;">${time}</td>
+                        <td style="padding: 10px; text-align: center;">
+                            <span style="color: ${statusColor}; font-weight: bold;">${statusIcon} ${statusText}</span>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                }
+
+                table.appendChild(tbody);
+                statusSection.appendChild(table);
+            }
+
+            container.appendChild(statusSection);
+        }
+
+        function renderSpaceWeatherHealth(container, data) {
+            // Render space weather health status
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : '#dc3545';
+
+            statusSection.innerHTML = `
+                <h3 style="color: ${statusColor};">${statusIcon} Space Weather Monitor Health</h3>
+            `;
+
+            // Overall status
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span><br>
+                <span style="color: #666; font-size: 14px;">Last Update: ${data.last_update || 'Never'}</span><br>
+                <span style="color: #666; font-size: 14px;">Time Since Data: ${data.time_since_data || 'N/A'}</span>
+            `;
+            statusSection.appendChild(statusDiv);
+
+            // Current data display (if available)
+            if (data.current_data) {
+                const dataDiv = document.createElement('div');
+                dataDiv.style.padding = '15px';
+                dataDiv.style.background = '#f8f9fa';
+                dataDiv.style.borderRadius = '5px';
+                dataDiv.style.marginBottom = '20px';
+
+                const currentData = data.current_data;
+                dataDiv.innerHTML = `
+                    <h4 style="margin-bottom: 10px; color: #333;">Current Space Weather</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                        <div><strong>Solar Flux:</strong> ${currentData.solar_flux || 'N/A'} SFU</div>
+                        <div><strong>K-Index:</strong> ${currentData.k_index || 'N/A'} (${currentData.k_index_status || 'N/A'})</div>
+                        <div><strong>A-Index:</strong> ${currentData.a_index || 'N/A'}</div>
+                        <div><strong>Solar Wind Bz:</strong> ${currentData.solar_wind_bz ? currentData.solar_wind_bz.toFixed(2) : 'N/A'} nT</div>
+                        <div><strong>Propagation:</strong> ${currentData.propagation_quality || 'N/A'}</div>
+                    </div>
+                `;
+                statusSection.appendChild(dataDiv);
+            }
+
+            // Issues list
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.padding = '15px';
+                issuesDiv.style.background = '#fff3cd';
+                issuesDiv.style.border = '1px solid #ffeaa7';
+                issuesDiv.style.borderRadius = '5px';
+                issuesDiv.style.marginBottom = '20px';
+
+                const issuesTitle = document.createElement('strong');
+                issuesTitle.textContent = '⚠️ Issues Detected:';
+                issuesTitle.style.display = 'block';
+                issuesTitle.style.marginBottom = '10px';
+                issuesDiv.appendChild(issuesTitle);
+
+                const issuesList = document.createElement('ul');
+                issuesList.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            container.appendChild(statusSection);
         }
     </script>
 </body>

@@ -1935,11 +1935,16 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 const oldPredictedOffset = this.predictedFreqOffset;
                 this.predictedFreqOffset = newCenterFreq - this.lastServerCenterFreq;
 
+                console.log(`[LINE] Predicted offset: old=${oldPredictedOffset.toFixed(2)}, new=${this.predictedFreqOffset.toFixed(2)}, diff=${Math.abs(this.predictedFreqOffset - oldPredictedOffset).toFixed(2)}`);
+
                 // Only redraw if the predicted offset actually changed
                 if (Math.abs(this.predictedFreqOffset - oldPredictedOffset) > 0.1) {
+                    console.log(`[LINE] Calling draw() due to offset change`);
                     if (this.spectrumData && this.spectrumData.length > 0) {
                         this.draw();
                     }
+                } else {
+                    console.log(`[LINE] Skipping draw() - offset change too small`);
                 }
 
                 // Throttle pan requests
@@ -2891,11 +2896,16 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 const oldPredictedOffset = this.predictedFreqOffset;
                 this.predictedFreqOffset = newCenterFreq - this.lastServerCenterFreq;
 
+                console.log(`[MAIN] Predicted offset: old=${oldPredictedOffset.toFixed(2)}, new=${this.predictedFreqOffset.toFixed(2)}, diff=${Math.abs(this.predictedFreqOffset - oldPredictedOffset).toFixed(2)}`);
+
                 // Only redraw if the predicted offset actually changed
                 if (Math.abs(this.predictedFreqOffset - oldPredictedOffset) > 0.1) {
+                    console.log(`[MAIN] Calling draw() due to offset change`);
                     if (this.spectrumData && this.spectrumData.length > 0) {
                         this.draw();
                     }
+                } else {
+                    console.log(`[MAIN] Skipping draw() - offset change too small`);
                 }
 
                 // Throttle pan requests to avoid backend rounding issues

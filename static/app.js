@@ -6641,9 +6641,9 @@ window.closeBufferConfigModal = closeBufferConfigModal;
 window.setBufferThreshold = setBufferThreshold;
 
 // Frequency scroll configuration
-let frequencyScrollMode = '100-fast'; // Default mode
-let frequencyScrollStep = 100; // Hz
-let frequencyScrollDelay = 100; // ms
+let frequencyScrollMode = '1000-fast'; // Default mode
+let frequencyScrollStep = 1000; // Hz
+let frequencyScrollDelay = 50; // ms (fast mode)
 
 // Toggle frequency scroll dropdown visibility
 function toggleFrequencyScrollDropdown() {

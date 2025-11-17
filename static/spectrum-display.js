@@ -395,6 +395,7 @@ class SpectrumDisplay {
         this.zoomScrollEnabled = true; // Zoom scroll wheel enabled by default
         this.smoothingEnabled = false; // Temporal smoothing disabled by default
         this.snapEnabled = true; // 1 KHz snap enabled by default (matches checkbox)
+        this.hasPerformedInitialZoom = false; // Track if we've done initial zoom on first scroll
         this.setupMouseHandlers();
         this.setupScrollHandler();
 
@@ -3140,6 +3141,13 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                     this.zoomOut();
                 }
             } else if (this.scrollEnabled) {
+                // Perform initial zoom on first scroll (zoom in once, like clicking on waterfall)
+                if (!this.hasPerformedInitialZoom && this.zoomLevel === 1) {
+                    this.hasPerformedInitialZoom = true;
+                    this.zoomIn(); // Zoom in once on first scroll
+                    console.log('Initial zoom performed on first scroll');
+                }
+
                 // Frequency scroll mode - use configured step and delay from dropdown
                 const freqInput = document.getElementById('frequency');
                 if (!freqInput) return;
@@ -3438,6 +3446,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
         // Clear peak hold before reset to prevent misalignment
         this.peakHoldData = null;
+
+        // Reset initial zoom flag so it will zoom in again on next scroll
+        this.hasPerformedInitialZoom = false;
 
         // Send reset request to server - backend will use default config values
         this.ws.send(JSON.stringify({

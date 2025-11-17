@@ -3883,12 +3883,30 @@
                         const statusText = band.healthy ? 'OK' : 'Stale';
                         const statusColor = band.healthy ? '#28a745' : '#ffc107';
 
+                        // Format timestamps to be more readable
+                        const formatTime = (timeStr) => {
+                            if (!timeStr || timeStr === 'never') return 'never';
+                            try {
+                                const date = new Date(timeStr);
+                                const now = new Date();
+                                const diffMs = now - date;
+                                const diffSecs = Math.floor(diffMs / 1000);
+                                
+                                if (diffSecs < 60) return `${diffSecs}s ago`;
+                                if (diffSecs < 3600) return `${Math.floor(diffSecs / 60)}m ago`;
+                                if (diffSecs < 86400) return `${Math.floor(diffSecs / 3600)}h ago`;
+                                return `${Math.floor(diffSecs / 86400)}d ago`;
+                            } catch (e) {
+                                return timeStr;
+                            }
+                        };
+
                         row.innerHTML = `
                             <td style="padding: 10px;"><strong>${band.name}</strong></td>
                             <td style="padding: 10px;"><span style="color: #667eea;">${band.mode}</span></td>
                             <td style="padding: 10px; font-family: monospace; font-size: 12px;">${(band.frequency / 1e6).toFixed(3)} MHz</td>
-                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${band.last_invoke || 'never'}</td>
-                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${band.last_data || 'never'}</td>
+                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${formatTime(band.last_decoder_invoke)}</td>
+                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${formatTime(band.last_data_time)}</td>
                             <td style="padding: 10px; text-align: center;">
                                 <span style="color: ${statusColor}; font-weight: bold;">${statusIcon} ${statusText}</span>
                             </td>
@@ -3907,42 +3925,58 @@
                 reportersTitle.style.marginBottom = '10px';
                 statusSection.appendChild(reportersTitle);
 
+                // Helper function to format timestamps
+                const formatReporterTime = (timeStr) => {
+                    if (!timeStr || timeStr === 'never' || timeStr === '0001-01-01T00:00:00Z') return 'never';
+                    try {
+                        const date = new Date(timeStr);
+                        const now = new Date();
+                        const diffMs = now - date;
+                        const diffSecs = Math.floor(diffMs / 1000);
+
+                        if (diffSecs < 60) return `${diffSecs}s ago`;
+                        if (diffSecs < 3600) return `${Math.floor(diffSecs / 60)}m ago`;
+                        if (diffSecs < 86400) return `${Math.floor(diffSecs / 3600)}h ago`;
+                        return `${Math.floor(diffSecs / 86400)}d ago`;
+                    } catch (e) {
+                        return timeStr;
+                    }
+                };
+
                 // PSKReporter status
-                if (data.pskreporter) {
+                if (data.psk_reporter_status) {
                     const pskDiv = document.createElement('div');
                     pskDiv.style.padding = '15px';
-                    pskDiv.style.background = data.pskreporter.healthy ? '#d4edda' : '#f8d7da';
-                    pskDiv.style.border = `1px solid ${data.pskreporter.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+                    pskDiv.style.background = !data.psk_reporter_status.is_stale ? '#d4edda' : '#f8d7da';
+                    pskDiv.style.border = `1px solid ${!data.psk_reporter_status.is_stale ? '#c3e6cb' : '#f5c6cb'}`;
                     pskDiv.style.borderRadius = '5px';
                     pskDiv.style.marginBottom = '10px';
 
-                    const pskIcon = data.pskreporter.healthy ? '✅' : '⚠️';
+                    const pskIcon = !data.psk_reporter_status.is_stale ? '✅' : '⚠️';
                     pskDiv.innerHTML = `
                         <strong>${pskIcon} PSKReporter</strong><br>
-                        <span style="color: #666; font-size: 14px;">Enabled: ${data.pskreporter.enabled ? 'Yes' : 'No'}</span><br>
-                        <span style="color: #666; font-size: 14px;">Last Send: ${data.pskreporter.last_send || 'never'}</span><br>
-                        <span style="color: #666; font-size: 14px;">Send Count: ${data.pskreporter.send_count || 0}</span><br>
-                        <span style="color: #666; font-size: 14px;">Queue Size: ${data.pskreporter.queue_size || 0}</span>
+                        <span style="color: #666; font-size: 14px;">Enabled: ${data.psk_reporter_status.enabled ? 'Yes' : 'No'}</span><br>
+                        <span style="color: #666; font-size: 14px;">Last Send: ${formatReporterTime(data.psk_reporter_status.last_send_time)}</span><br>
+                        <span style="color: #666; font-size: 14px;">Send Count: ${data.psk_reporter_status.send_count || 0}</span>
                     `;
                     statusSection.appendChild(pskDiv);
                 }
 
                 // WSPRNet status
-                if (data.wsprnet) {
+                if (data.wspr_net_status) {
                     const wsprDiv = document.createElement('div');
                     wsprDiv.style.padding = '15px';
-                    wsprDiv.style.background = data.wsprnet.healthy ? '#d4edda' : '#f8d7da';
-                    wsprDiv.style.border = `1px solid ${data.wsprnet.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+                    wsprDiv.style.background = !data.wspr_net_status.is_stale ? '#d4edda' : '#f8d7da';
+                    wsprDiv.style.border = `1px solid ${!data.wspr_net_status.is_stale ? '#c3e6cb' : '#f5c6cb'}`;
                     wsprDiv.style.borderRadius = '5px';
                     wsprDiv.style.marginBottom = '10px';
 
-                    const wsprIcon = data.wsprnet.healthy ? '✅' : '⚠️';
+                    const wsprIcon = !data.wspr_net_status.is_stale ? '✅' : '⚠️';
                     wsprDiv.innerHTML = `
                         <strong>${wsprIcon} WSPRNet</strong><br>
-                        <span style="color: #666; font-size: 14px;">Enabled: ${data.wsprnet.enabled ? 'Yes' : 'No'}</span><br>
-                        <span style="color: #666; font-size: 14px;">Last Send: ${data.wsprnet.last_send || 'never'}</span><br>
-                        <span style="color: #666; font-size: 14px;">Send Count: ${data.wsprnet.send_count || 0}</span><br>
-                        <span style="color: #666; font-size: 14px;">Queue Size: ${data.wsprnet.queue_size || 0}</span>
+                        <span style="color: #666; font-size: 14px;">Enabled: ${data.wspr_net_status.enabled ? 'Yes' : 'No'}</span><br>
+                        <span style="color: #666; font-size: 14px;">Last Send: ${formatReporterTime(data.wspr_net_status.last_send_time)}</span><br>
+                        <span style="color: #666; font-size: 14px;">Send Count: ${data.wspr_net_status.send_count || 0}</span>
                     `;
                     statusSection.appendChild(wsprDiv);
                 }

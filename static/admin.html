@@ -771,6 +771,7 @@
 
         async function logout() {
             stopSessionsAutoRefresh();
+            stopMonitorAutoRefresh();
 
             try {
                 await fetch('/admin/logout', {
@@ -805,6 +806,11 @@
             // Stop sessions auto-refresh when leaving sessions tab
             if (tab !== 'sessions') {
                 stopSessionsAutoRefresh();
+            }
+            
+            // Stop monitor auto-refresh when leaving monitor tab
+            if (tab !== 'monitor') {
+                stopMonitorAutoRefresh();
             }
 
             if (tab === 'sessions') {
@@ -847,6 +853,7 @@
                 document.getElementById('monitorTab').classList.add('active');
                 document.getElementById('monitorButtons').style.display = 'flex';
                 loadMonitorHealth();
+                startMonitorAutoRefresh();
             } else if (tab === 'system') {
                 document.querySelector('.tab:nth-child(9)').classList.add('active');
                 document.getElementById('systemTab').classList.add('active');
@@ -2040,6 +2047,9 @@
         // Sessions management
         let currentSessions = [];
         let sessionsRefreshInterval = null;
+        
+        // Monitor health management
+        let monitorRefreshInterval = null;
 
         async function loadSessions() {
             try {
@@ -3458,7 +3468,11 @@
                     authenticatedFetch('/admin/decoder-health')
                 ]);
                 
-                if (!nfResponse || !swResponse || !decoderResponse) return; // Auth failed, already handled
+                if (!nfResponse || !swResponse || !decoderResponse) {
+                    // Auth failed, stop auto-refresh
+                    stopMonitorAutoRefresh();
+                    return;
+                }
 
                 const nfHealth = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swHealth = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
@@ -3466,14 +3480,42 @@
 
                 renderMonitorHealth({ noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth }, false);
                 
-                const allHealthy = (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false);
-                if (allHealthy) {
-                    showAlert('Health check completed - all systems healthy', 'success');
-                } else {
-                    showAlert('Health check completed - issues detected', 'error');
+                // Only show alert on manual refresh, not on auto-refresh
+                if (!monitorRefreshInterval) {
+                    const allHealthy = (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false);
+                    if (allHealthy) {
+                        showAlert('Health check completed - all systems healthy', 'success');
+                    } else {
+                        showAlert('Health check completed - issues detected', 'error');
+                    }
                 }
             } catch (error) {
-                showAlert('Error loading health status: ' + error.message, 'error');
+                // Only show error alert if not auto-refreshing to avoid spam
+                if (!monitorRefreshInterval) {
+                    showAlert('Error loading health status: ' + error.message, 'error');
+                } else {
+                    // Log error silently during auto-refresh
+                    console.error('Error loading health status during auto-refresh:', error);
+                }
+            }
+        }
+        
+        function startMonitorAutoRefresh() {
+            // Clear any existing interval
+            if (monitorRefreshInterval) {
+                clearInterval(monitorRefreshInterval);
+            }
+            
+            // Start auto-refresh every 10 seconds
+            monitorRefreshInterval = setInterval(() => {
+                loadMonitorHealth();
+            }, 10000);
+        }
+        
+        function stopMonitorAutoRefresh() {
+            if (monitorRefreshInterval) {
+                clearInterval(monitorRefreshInterval);
+                monitorRefreshInterval = null;
             }
         }
 

@@ -355,6 +355,7 @@
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
                     <button class="tab" onclick="switchTab('extensions')">Extensions</button>
                     <button class="tab" onclick="switchTab('decoder')">Decoder</button>
+                    <button class="tab" onclick="switchTab('monitor')">Monitor</button>
                     <button class="tab" onclick="switchTab('system')">System</button>
                 </div>
 
@@ -510,6 +511,14 @@
                     </div>
                 </div>
 
+                <!-- Monitor Tab -->
+                <div id="monitorTab" class="tab-content">
+                    <div id="monitorHealth" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading health status...</p>
+                    </div>
+                </div>
+
                 <!-- System Tab -->
                 <div id="systemTab" class="tab-content">
                     <div id="systemStats" class="loading">
@@ -556,6 +565,10 @@
                     <button class="btn btn-secondary" onclick="loadDecoderConfig()">Reload</button>
                     <button class="btn btn-secondary" onclick="exportDecoderConfig()">Export Config</button>
                     <button class="btn btn-secondary" onclick="importDecoderConfig()">Import Config</button>
+                </div>
+                <div class="button-group" id="monitorButtons" style="display: none;">
+                    <button class="btn btn-secondary" onclick="loadMonitorHealth()">Refresh</button>
+                    <button class="btn btn-secondary" onclick="loadMonitorHealthDetailed()">Detailed Diagnostics</button>
                 </div>
                 <div class="button-group" id="systemButtons" style="display: none;">
                     <button class="btn btn-secondary" onclick="loadSystemStats()">Refresh</button>
@@ -786,6 +799,7 @@
             document.getElementById('decoderButtons').style.display = 'none';
             document.getElementById('sessionButtons').style.display = 'none';
             document.getElementById('bannedButtons').style.display = 'none';
+            document.getElementById('monitorButtons').style.display = 'none';
             document.getElementById('systemButtons').style.display = 'none';
 
             // Stop sessions auto-refresh when leaving sessions tab
@@ -828,8 +842,13 @@
                 document.getElementById('decoderTab').classList.add('active');
                 document.getElementById('decoderButtons').style.display = 'flex';
                 loadDecoderConfig();
-            } else if (tab === 'system') {
+            } else if (tab === 'monitor') {
                 document.querySelector('.tab:nth-child(8)').classList.add('active');
+                document.getElementById('monitorTab').classList.add('active');
+                document.getElementById('monitorButtons').style.display = 'flex';
+                loadMonitorHealth();
+            } else if (tab === 'system') {
+                document.querySelector('.tab:nth-child(9)').classList.add('active');
                 document.getElementById('systemTab').classList.add('active');
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();
@@ -3426,6 +3445,196 @@
                 }
 
                 container.appendChild(dataDirSection);
+            }
+        }
+
+        // Monitor health management
+        async function loadMonitorHealth() {
+            try {
+                const response = await authenticatedFetch('/admin/noisefloor-health');
+                if (!response) return; // Auth failed, already handled
+                if (!response.ok && response.status !== 503) throw new Error('Failed to load health status');
+
+                const health = await response.json();
+                renderMonitorHealth(health, false);
+                
+                if (health.healthy) {
+                    showAlert('Health check completed - all systems healthy', 'success');
+                } else {
+                    showAlert('Health check completed - issues detected', 'error');
+                }
+            } catch (error) {
+                showAlert('Error loading health status: ' + error.message, 'error');
+            }
+        }
+
+        async function loadMonitorHealthDetailed() {
+            try {
+                const response = await authenticatedFetch('/admin/noisefloor-health?detailed=true');
+                if (!response) return; // Auth failed, already handled
+                if (!response.ok && response.status !== 503) throw new Error('Failed to load detailed diagnostics');
+
+                const diagnostics = await response.json();
+                renderMonitorHealth(diagnostics, true);
+                showAlert('Detailed diagnostics loaded successfully', 'success');
+            } catch (error) {
+                showAlert('Error loading detailed diagnostics: ' + error.message, 'error');
+            }
+        }
+
+        function renderMonitorHealth(data, isDetailed) {
+            const container = document.getElementById('monitorHealth');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            if (isDetailed) {
+                // Render detailed diagnostics
+                const section = document.createElement('div');
+                section.className = 'config-section';
+                section.innerHTML = '<h3>🔍 Detailed Diagnostics</h3>';
+
+                const pre = document.createElement('pre');
+                pre.style.background = '#fff';
+                pre.style.padding = '15px';
+                pre.style.borderRadius = '5px';
+                pre.style.overflow = 'auto';
+                pre.style.fontFamily = 'monospace';
+                pre.style.fontSize = '13px';
+                pre.style.lineHeight = '1.5';
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.style.wordWrap = 'break-word';
+                pre.textContent = JSON.stringify(data, null, 2);
+                section.appendChild(pre);
+
+                container.appendChild(section);
+            } else {
+                // Render health status
+                const statusSection = document.createElement('div');
+                statusSection.className = 'config-section';
+                
+                const statusIcon = data.healthy ? '✅' : '❌';
+                const statusColor = data.healthy ? '#28a745' : '#dc3545';
+                
+                statusSection.innerHTML = `
+                    <h3 style="color: ${statusColor};">${statusIcon} Noise Floor Monitor Health</h3>
+                `;
+
+                // Overall status
+                const statusDiv = document.createElement('div');
+                statusDiv.style.padding = '15px';
+                statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
+                statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+                statusDiv.style.borderRadius = '5px';
+                statusDiv.style.marginBottom = '20px';
+                statusDiv.innerHTML = `
+                    <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                    <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span><br>
+                    <span style="color: #666; font-size: 14px;">Running: ${data.running ? 'Yes' : 'No'}</span>
+                `;
+                statusSection.appendChild(statusDiv);
+
+                // Band statistics
+                const statsDiv = document.createElement('div');
+                statsDiv.style.display = 'grid';
+                statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+                statsDiv.style.gap = '15px';
+                statsDiv.style.marginBottom = '20px';
+
+                const stats = [
+                    { label: 'Bands Configured', value: data.bands_configured || 0, icon: '📊' },
+                    { label: 'Bands Receiving Data', value: data.bands_receiving_data || 0, icon: '📡' },
+                    { label: 'Stalled Bands', value: (data.stalled_bands || []).length, icon: '⚠️' }
+                ];
+
+                stats.forEach(stat => {
+                    const statCard = document.createElement('div');
+                    statCard.style.padding = '15px';
+                    statCard.style.background = '#f8f9fa';
+                    statCard.style.borderRadius = '5px';
+                    statCard.style.textAlign = 'center';
+                    statCard.innerHTML = `
+                        <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
+                        <div style="font-size: 24px; font-weight: bold; color: #667eea; margin-bottom: 5px;">${stat.value}</div>
+                        <div style="font-size: 12px; color: #666;">${stat.label}</div>
+                    `;
+                    statsDiv.appendChild(statCard);
+                });
+                statusSection.appendChild(statsDiv);
+
+                // Issues list
+                if (data.issues && data.issues.length > 0) {
+                    const issuesDiv = document.createElement('div');
+                    issuesDiv.style.padding = '15px';
+                    issuesDiv.style.background = '#fff3cd';
+                    issuesDiv.style.border = '1px solid #ffeaa7';
+                    issuesDiv.style.borderRadius = '5px';
+                    issuesDiv.style.marginBottom = '20px';
+                    
+                    const issuesTitle = document.createElement('strong');
+                    issuesTitle.textContent = '⚠️ Issues Detected:';
+                    issuesTitle.style.display = 'block';
+                    issuesTitle.style.marginBottom = '10px';
+                    issuesDiv.appendChild(issuesTitle);
+
+                    const issuesList = document.createElement('ul');
+                    issuesList.style.marginLeft = '20px';
+                    data.issues.forEach(issue => {
+                        const li = document.createElement('li');
+                        li.textContent = issue;
+                        li.style.marginBottom = '5px';
+                        issuesList.appendChild(li);
+                    });
+                    issuesDiv.appendChild(issuesList);
+                    statusSection.appendChild(issuesDiv);
+                }
+
+                // Last data times table
+                if (data.last_data_times && Object.keys(data.last_data_times).length > 0) {
+                    const timesTitle = document.createElement('h4');
+                    timesTitle.textContent = 'Last Data Received';
+                    timesTitle.style.marginTop = '20px';
+                    timesTitle.style.marginBottom = '10px';
+                    statusSection.appendChild(timesTitle);
+
+                    const table = document.createElement('table');
+                    table.style.width = '100%';
+                    table.style.borderCollapse = 'collapse';
+                    table.innerHTML = `
+                        <thead>
+                            <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                                <th style="padding: 10px; text-align: left;">Band</th>
+                                <th style="padding: 10px; text-align: left;">Last Data Time</th>
+                                <th style="padding: 10px; text-align: center;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="lastDataTimesBody"></tbody>
+                    `;
+                    statusSection.appendChild(table);
+
+                    const tbody = document.getElementById('lastDataTimesBody');
+                    const stalledBands = data.stalled_bands || [];
+                    
+                    for (const [band, time] of Object.entries(data.last_data_times)) {
+                        const row = document.createElement('tr');
+                        row.style.borderBottom = '1px solid #dee2e6';
+                        
+                        const isStalled = stalledBands.includes(band);
+                        const statusIcon = time === 'never' ? '❌' : (isStalled ? '⚠️' : '✅');
+                        const statusText = time === 'never' ? 'No data' : (isStalled ? 'Stalled' : 'OK');
+                        const statusColor = time === 'never' ? '#dc3545' : (isStalled ? '#ffc107' : '#28a745');
+                        
+                        row.innerHTML = `
+                            <td style="padding: 10px;"><strong>${band}</strong></td>
+                            <td style="padding: 10px; font-family: monospace; font-size: 12px;">${time}</td>
+                            <td style="padding: 10px; text-align: center;">
+                                <span style="color: ${statusColor}; font-weight: bold;">${statusIcon} ${statusText}</span>
+                            </td>
+                        `;
+                        tbody.appendChild(row);
+                    }
+                }
+
+                container.appendChild(statusSection);
             }
         }
     </script>

@@ -502,6 +502,7 @@
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
+    table-layout: fixed;
 }
 
 .country-spots-modal-table thead {
@@ -527,17 +528,65 @@
 
 .country-spots-modal-table tbody tr {
     transition: background-color 0.2s;
-    cursor: pointer;
 }
 
 .country-spots-modal-table tbody tr:hover {
     background: #2a2a2a;
 }
 
+/* Column widths for modal table */
+.country-spots-modal-table th:nth-child(1),
+.country-spots-modal-table td:nth-child(1) {
+    width: 120px; /* Callsign */
+}
+
+.country-spots-modal-table th:nth-child(2),
+.country-spots-modal-table td:nth-child(2) {
+    width: 70px; /* Mode */
+}
+
+.country-spots-modal-table th:nth-child(3),
+.country-spots-modal-table td:nth-child(3) {
+    width: 70px; /* SNR */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(4),
+.country-spots-modal-table td:nth-child(4) {
+    width: 80px; /* Grid */
+}
+
+.country-spots-modal-table th:nth-child(5),
+.country-spots-modal-table td:nth-child(5) {
+    width: 100px; /* Distance */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(6),
+.country-spots-modal-table td:nth-child(6) {
+    width: 80px; /* Bearing */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(7),
+.country-spots-modal-table td:nth-child(7) {
+    width: 80px; /* Age */
+}
+
+.country-spots-modal-table th:nth-child(8),
+.country-spots-modal-table td:nth-child(8) {
+    width: auto; /* Message */
+}
+
 /* Column-specific styles for modal table */
 .country-spots-modal-table .modal-callsign {
     font-weight: bold;
     color: #ffc107;
+    cursor: pointer;
+}
+
+.country-spots-modal-table .modal-callsign:hover {
+    text-decoration: underline;
 }
 
 .country-spots-modal-table .modal-mode {

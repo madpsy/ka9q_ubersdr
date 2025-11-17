@@ -328,11 +328,6 @@ class DigitalSpotsExtension extends DecoderExtension {
                     }, 500);
                 }
 
-                row.style.cursor = 'pointer';
-                row.addEventListener('click', () => {
-                    this.tuneToSpot(spot);
-                });
-
                 // Time
                 const timeCell = document.createElement('td');
                 timeCell.className = 'spot-time';
@@ -517,7 +512,6 @@ class DigitalSpotsExtension extends DecoderExtension {
 
             // Add click handler to open modal
             badge.addEventListener('click', () => {
-                console.log('Badge clicked:', country, currentBand);
                 this.openCountryModal(country, currentBand);
             });
 
@@ -803,17 +797,12 @@ class DigitalSpotsExtension extends DecoderExtension {
     }
 
     openCountryModal(country, band) {
-        console.log('openCountryModal called:', country, band);
-
         // Track which modal is open
         this.currentModalCountry = country;
         this.currentModalBand = band;
 
         const modal = document.getElementById('country-spots-modal');
         const modalTitle = document.getElementById('country-spots-modal-title');
-
-        console.log('Modal element:', modal);
-        console.log('Modal title element:', modalTitle);
 
         if (!modal || !modalTitle) {
             console.error('Modal elements not found');
@@ -891,17 +880,15 @@ class DigitalSpotsExtension extends DecoderExtension {
             uniqueSpots.forEach(spot => {
                 const row = document.createElement('tr');
 
-                // Make row clickable to tune
-                row.style.cursor = 'pointer';
-                row.addEventListener('click', () => {
-                    this.tuneToSpot(spot);
-                    this.closeCountryModal();
-                });
-
-                // Callsign
+                // Callsign - clickable to open QRZ
                 const callsignCell = document.createElement('td');
                 callsignCell.className = 'modal-callsign';
                 callsignCell.textContent = spot.callsign;
+                callsignCell.style.cursor = 'pointer';
+                callsignCell.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.openQRZ(spot.callsign);
+                });
                 row.appendChild(callsignCell);
 
                 // Mode

@@ -871,9 +871,9 @@ class DigitalSpotsExtension extends DecoderExtension {
             }
         });
 
-        // Convert to array and sort by callsign
+        // Convert to array and sort by timestamp (newest first)
         const uniqueSpots = Array.from(callsignMap.values())
-            .sort((a, b) => a.callsign.localeCompare(b.callsign));
+            .sort((a, b) => b.timestamp - a.timestamp);
 
         // Update modal title with count
         const modalTitle = document.getElementById('country-spots-modal-title');

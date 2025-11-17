@@ -385,6 +385,8 @@ class SpectrumDisplay {
         this.dragStartFreq = 0;
         this.lastPanTime = 0;
         this.panThrottleMs = 50; // Throttle pan requests (50ms = 20 requests/sec max)
+        this.lastDragX = -1; // Track last drag position to detect actual movement
+        this.lastDragY = -1;
 
         // Client-side prediction for smooth dragging
         this.predictedFreqOffset = 0; // Frequency offset for visual prediction during drag
@@ -1898,6 +1900,13 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
             // Handle dragging
             if (lineGraphDragging) {
+                // Only process if mouse actually moved
+                if (x === this.lastDragX && y === this.lastDragY) {
+                    return; // No actual movement, ignore this event
+                }
+                this.lastDragX = x;
+                this.lastDragY = y;
+
                 const deltaX = x - lineGraphDragStartX;
 
                 // Mark that we've moved if delta is significant
@@ -1981,6 +1990,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.predictedFreqOffset = 0; // Reset prediction offset
             lineGraphDragging = true;
             lineGraphDragDidMove = false;
+            this.lastDragX = lineGraphDragStartX; // Initialize drag position tracking
+            this.lastDragY = e.clientY - rect.top;
             this.lineGraphCanvas.style.cursor = 'default';
 
             // Prevent text selection while dragging
@@ -2839,6 +2850,13 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
             // Handle dragging
             if (this.isDragging) {
+                // Only process if mouse actually moved
+                if (this.mouseX === this.lastDragX && this.mouseY === this.lastDragY) {
+                    return; // No actual movement, ignore this event
+                }
+                this.lastDragX = this.mouseX;
+                this.lastDragY = this.mouseY;
+
                 const deltaX = this.mouseX - this.dragStartX;
 
                 // Mark that we've moved if delta is significant
@@ -2921,6 +2939,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             this.predictedFreqOffset = 0; // Reset prediction offset
             this.isDragging = true;
             this.dragDidMove = false; // Track if we actually moved
+            this.lastDragX = this.mouseX; // Initialize drag position tracking
+            this.lastDragY = this.mouseY;
             this.canvas.style.cursor = 'default';
 
             // Prevent text selection while dragging

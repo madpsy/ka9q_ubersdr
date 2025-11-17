@@ -115,9 +115,15 @@ const wsManager = new WebSocketManager({
             startVisualization();
 
             // Start waterfall auto-adjust (always enabled)
+            console.log('Attempting to start waterfall auto-adjust interval...');
+            console.log('waterfallAutoAdjustInterval:', waterfallAutoAdjustInterval);
+            console.log('WATERFALL_AUTO_ADJUST_UPDATE_RATE:', WATERFALL_AUTO_ADJUST_UPDATE_RATE);
             if (!waterfallAutoAdjustInterval) {
                 waterfallAutoAdjustInterval = setInterval(updateWaterfallAutoAdjust, WATERFALL_AUTO_ADJUST_UPDATE_RATE);
+                console.log('Waterfall auto-adjust interval started:', waterfallAutoAdjustInterval);
                 log('Waterfall auto-adjust enabled');
+            } else {
+                console.log('Waterfall auto-adjust interval already exists');
             }
 
             // Open extensions from URL parameter if specified
@@ -5153,7 +5159,12 @@ const WATERFALL_AUTO_ADJUST_UPDATE_RATE = 500; // Update every 500ms
 
 // Update waterfall auto-adjust values (always enabled)
 function updateWaterfallAutoAdjust() {
-    if (!analyser || !audioContext) return;
+    console.log('updateWaterfallAutoAdjust called');
+
+    if (!analyser || !audioContext) {
+        console.log('Auto-adjust: Missing analyser or audioContext');
+        return;
+    }
 
     // Get frequency data
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -5161,7 +5172,10 @@ function updateWaterfallAutoAdjust() {
 
     // Get frequency bin mapping
     const binMapping = getFrequencyBinMapping();
-    if (!binMapping) return;
+    if (!binMapping) {
+        console.log('Auto-adjust: No bin mapping available');
+        return;
+    }
 
     const { startBinIndex, binsForBandwidth } = binMapping;
 
@@ -5179,8 +5193,13 @@ function updateWaterfallAutoAdjust() {
         }
     }
 
+    console.log(`Auto-adjust: validSamples=${validSamples}, min=${minMagnitude}, max=${maxMagnitude}`);
+
     // Need valid data to proceed
-    if (validSamples === 0) return;
+    if (validSamples === 0) {
+        console.log('Auto-adjust: No valid samples');
+        return;
+    }
 
     // Add to history for smoothing
     waterfallNoiseFloorHistory.push(minMagnitude);
@@ -5193,8 +5212,11 @@ function updateWaterfallAutoAdjust() {
         waterfallPeakHistory.shift();
     }
 
+    console.log(`Auto-adjust: History size=${waterfallNoiseFloorHistory.length}/${WATERFALL_AUTO_ADJUST_HISTORY_SIZE}`);
+
     // Need enough history before adjusting
     if (waterfallNoiseFloorHistory.length < WATERFALL_AUTO_ADJUST_HISTORY_SIZE) {
+        console.log('Auto-adjust: Waiting for more history samples');
         return;
     }
 
@@ -5230,9 +5252,14 @@ function updateWaterfallAutoAdjust() {
         optimalIntensity = 0.0;
     }
 
+    console.log(`Auto-adjust: avgNoiseFloor=${avgNoiseFloor.toFixed(1)}, avgPeak=${avgPeak.toFixed(1)}, dynamicRange=${dynamicRange.toFixed(1)}`);
+    console.log(`Auto-adjust: Setting intensity=${optimalIntensity}, contrast=${clampedContrast}`);
+
     // Apply optimal values directly (no UI controls)
     waterfallIntensity = optimalIntensity;
     waterfallContrast = clampedContrast;
+
+    log(`Waterfall auto-adjust: intensity=${optimalIntensity.toFixed(2)}, contrast=${clampedContrast}, range=${dynamicRange.toFixed(1)}`);
 }
 
 // Update oscilloscope zoom/timebase

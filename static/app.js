@@ -5829,12 +5829,12 @@ function updateSpectrumAutoAdjust() {
     // Sort values for percentile calculation
     visibleValues.sort((a, b) => a - b);
     
-    // Calculate noise floor (10th percentile)
-    const noiseFloorIndex = Math.floor(visibleValues.length * 0.10);
+    // Calculate noise floor (5th percentile - lower to better identify true noise floor)
+    const noiseFloorIndex = Math.floor(visibleValues.length * 0.05);
     const currentNoiseFloor = visibleValues[noiseFloorIndex];
     
-    // Calculate peak signal (90th percentile)
-    const peakIndex = Math.floor(visibleValues.length * 0.90);
+    // Calculate peak signal (98th percentile - higher to focus on actual strong signals)
+    const peakIndex = Math.floor(visibleValues.length * 0.98);
     const currentPeak = visibleValues[peakIndex];
     
     // Add to history for temporal smoothing
@@ -5856,27 +5856,23 @@ function updateSpectrumAutoAdjust() {
     // Calculate dynamic range
     const dynamicRange = avgPeak - avgNoiseFloor;
 
-    // Contrast slider (0-100) represents the noise floor suppression threshold
-    // Higher values = more aggressive noise suppression
-    // We want to set it to suppress the noise floor while preserving signals
-    // Map the noise floor dB value to the 0-100 contrast range
-    // Typical dB range is -120 to 0, so we normalize and scale
+    // Contrast: Suppress noise floor more aggressively
+    // Map noise floor to contrast range, with higher values for better suppression
     const minDb = -120;
     const maxDb = 0;
     const normalizedNoiseFloor = (avgNoiseFloor - minDb) / (maxDb - minDb);
-    // Set contrast to suppress everything below noise floor + 10% of dynamic range
-    const targetContrast = Math.max(0, Math.min(100, normalizedNoiseFloor * 100 + 10));
+    // Increase contrast to better suppress noise floor (add 20-30 instead of 10)
+    const targetContrast = Math.max(0, Math.min(100, normalizedNoiseFloor * 100 + 25));
 
-    // Set intensity based on dynamic range
-    // High dynamic range (strong signals) = lower intensity (0.0)
-    // Low dynamic range (weak signals) = higher intensity (0.5) to boost visibility
+    // Intensity: Reduce brightness to prevent signals from being too hot
+    // Negative values darken the display
     let targetIntensity;
     if (dynamicRange > 40) {
-        targetIntensity = 0.0;  // Strong signals, no boost needed
+        targetIntensity = -0.3;  // Strong signals, darken significantly
     } else if (dynamicRange > 20) {
-        targetIntensity = 0.2;  // Moderate signals, slight boost
+        targetIntensity = -0.1;  // Moderate signals, darken slightly
     } else {
-        targetIntensity = 0.5;  // Weak signals, significant boost
+        targetIntensity = 0.1;   // Weak signals, slight boost
     }
     
     // Apply intensity and contrast directly

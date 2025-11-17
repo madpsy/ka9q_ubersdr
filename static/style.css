@@ -548,6 +548,7 @@ body {
 
 .frequency-input-wrapper input[type="number"] {
     flex: 1;
+    max-width: 150px; /* Limit width to fit frequency values */
     padding-right: 35px; /* Make room for Hz text */
     -moz-appearance: textfield; /* Firefox */
 }

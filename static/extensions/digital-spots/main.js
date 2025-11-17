@@ -517,6 +517,7 @@ class DigitalSpotsExtension extends DecoderExtension {
 
             // Add click handler to open modal
             badge.addEventListener('click', () => {
+                console.log('Badge clicked:', country, currentBand);
                 this.openCountryModal(country, currentBand);
             });
 
@@ -802,12 +803,17 @@ class DigitalSpotsExtension extends DecoderExtension {
     }
 
     openCountryModal(country, band) {
+        console.log('openCountryModal called:', country, band);
+
         // Track which modal is open
         this.currentModalCountry = country;
         this.currentModalBand = band;
 
         const modal = document.getElementById('country-spots-modal');
         const modalTitle = document.getElementById('country-spots-modal-title');
+
+        console.log('Modal element:', modal);
+        console.log('Modal title element:', modalTitle);
 
         if (!modal || !modalTitle) {
             console.error('Modal elements not found');

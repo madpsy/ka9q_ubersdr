@@ -6674,14 +6674,16 @@ function updateFrequencyScrollMode() {
     frequencyScrollStep = step;
     
     // Set delay based on speed
-    // "slow" = 200ms delay, "fast" = 100ms delay
-    frequencyScrollDelay = speed === 'slow' ? 200 : 100;
+    // "slow" = 200ms delay (5 updates/sec), "fast" = 50ms delay (20 updates/sec)
+    frequencyScrollDelay = speed === 'slow' ? 200 : 50;
     
     // Set global variables for spectrum-display.js to use
     window.frequencyScrollStep = step;
     window.frequencyScrollDelay = frequencyScrollDelay;
     
-    log(`Frequency scroll mode: ${step} Hz ${speed} (${frequencyScrollDelay}ms delay)`);
+    // Format step for display (show kHz for values >= 1000)
+    const stepDisplay = step >= 1000 ? `${step / 1000} kHz` : `${step} Hz`;
+    log(`Frequency scroll mode: ${stepDisplay} ${speed} (${frequencyScrollDelay}ms delay)`);
 }
 
 // Expose functions globally

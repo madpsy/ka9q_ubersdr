@@ -5219,9 +5219,9 @@ function updateWaterfallAutoAdjust() {
     const dynamicRange = avgTypicalSignal - avgNoiseFloor;
 
     // Calculate optimal contrast (noise floor suppression)
-    // Set contrast slightly above noise floor to suppress noise while preserving weak signals
-    // Add 10% of dynamic range as headroom
-    const optimalContrast = Math.round(avgNoiseFloor + (dynamicRange * 0.1));
+    // Set contrast very close to noise floor to preserve all signals
+    // Only suppress the actual noise floor, not weak signals
+    const optimalContrast = Math.round(avgNoiseFloor + (dynamicRange * 0.05));
     const clampedContrast = Math.max(0, Math.min(100, optimalContrast));
 
     // Calculate optimal intensity

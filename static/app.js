@@ -5739,11 +5739,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Connect to spectrum WebSocket
         spectrumDisplay.connect();
 
-        // Enable auto-adjust by default (checkbox is already checked in HTML)
-        const autoAdjustCheckbox = document.getElementById('spectrum-auto-adjust');
-        if (autoAdjustCheckbox && autoAdjustCheckbox.checked) {
-            // Trigger the toggle function to actually start auto-adjustment
-            toggleSpectrumAutoAdjust();
+        // Start auto-adjust (always enabled)
+        if (!spectrumAutoAdjustInterval) {
+            spectrumAutoAdjustInterval = setInterval(updateSpectrumAutoAdjust, 500);
         }
 
         // Apply zoom from URL parameters if present

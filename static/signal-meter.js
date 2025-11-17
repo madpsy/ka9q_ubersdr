@@ -4,7 +4,7 @@
 class SignalMeter {
     constructor() {
         // Display mode: 'dbfs' or 'snr'
-        this.displayMode = 'dbfs';
+        this.displayMode = 'snr';
         
         // Peak history for smoothing
         this.peakHistory = [];

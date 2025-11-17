@@ -1090,8 +1090,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     drawFrequencyScaleAtPosition(yPos) {
         if (!this.totalBandwidth) return;
 
-        // Apply client-side prediction offset during dragging
-        const effectiveCenterFreq = this.centerFreq + this.predictedFreqOffset;
+        // Apply client-side prediction offset during dragging (only if actively moving)
+        const effectiveCenterFreq = this.centerFreq + (this.isDragging && this.dragDidMove ? this.predictedFreqOffset : 0);
         const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
         const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
 

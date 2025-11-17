@@ -1943,10 +1943,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 if (lineGraphDragDidMove && Math.abs(newCenterFreq - this.centerFreq) > 1000 && timeSinceLastPan >= this.panThrottleMs) {
                     this.panTo(newCenterFreq);
                     this.lastPanTime = now;
-
-                    // Update drag start position for smooth continuous dragging
-                    lineGraphDragStartX = x;
-                    lineGraphDragStartFreq = newCenterFreq;
+                    // Don't update lineGraphDragStartX/lineGraphDragStartFreq here - keep original drag start point
                 }
 
                 // Don't show tooltip while dragging
@@ -2895,10 +2892,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 if (this.dragDidMove && Math.abs(newCenterFreq - this.centerFreq) > 1000 && timeSinceLastPan >= this.panThrottleMs) {
                     this.panTo(newCenterFreq);
                     this.lastPanTime = now;
-
-                    // Update drag start position for smooth continuous dragging
-                    this.dragStartX = this.mouseX;
-                    this.dragStartFreq = newCenterFreq;
+                    // Don't update dragStartX/dragStartFreq here - keep original drag start point
                 }
 
                 // Don't show tooltip while dragging

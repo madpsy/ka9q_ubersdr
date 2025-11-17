@@ -809,10 +809,7 @@ class DigitalSpotsExtension extends DecoderExtension {
             return;
         }
 
-        // Set modal title
-        modalTitle.textContent = `${country} on ${band}`;
-
-        // Populate initial content
+        // Populate initial content (this will also update the title with count)
         this.refreshModalContent();
 
         // Show modal
@@ -863,6 +860,13 @@ class DigitalSpotsExtension extends DecoderExtension {
         // Convert to array and sort by callsign
         const uniqueSpots = Array.from(callsignMap.values())
             .sort((a, b) => a.callsign.localeCompare(b.callsign));
+
+        // Update modal title with count
+        const modalTitle = document.getElementById('country-spots-modal-title');
+        if (modalTitle) {
+            const count = uniqueSpots.length;
+            modalTitle.textContent = `${country} on ${band} (${count} callsign${count !== 1 ? 's' : ''})`;
+        }
 
         // Populate modal table
         const fragment = document.createDocumentFragment();

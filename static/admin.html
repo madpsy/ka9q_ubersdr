@@ -3504,6 +3504,58 @@
             container.innerHTML = '';
             container.classList.remove('loading');
 
+            // Add summary warning banner at the top if any system has issues
+            if (!isDetailed) {
+                const hasNoiseFloorIssues = data.noiseFloor && !data.noiseFloor.healthy;
+                const hasSpaceWeatherIssues = data.spaceWeather && !data.spaceWeather.healthy;
+                const hasDecoderIssues = data.decoder && !data.decoder.healthy;
+                
+                if (hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues) {
+                    const warningBanner = document.createElement('div');
+                    warningBanner.style.padding = '20px';
+                    warningBanner.style.background = '#fff3cd';
+                    warningBanner.style.border = '2px solid #ffc107';
+                    warningBanner.style.borderRadius = '8px';
+                    warningBanner.style.marginBottom = '20px';
+                    warningBanner.style.boxShadow = '0 2px 8px rgba(255, 193, 7, 0.3)';
+                    
+                    const warningTitle = document.createElement('h3');
+                    warningTitle.style.margin = '0 0 15px 0';
+                    warningTitle.style.color = '#856404';
+                    warningTitle.style.fontSize = '20px';
+                    warningTitle.innerHTML = '⚠️ System Health Warnings';
+                    warningBanner.appendChild(warningTitle);
+                    
+                    const issuesList = document.createElement('ul');
+                    issuesList.style.margin = '0';
+                    issuesList.style.paddingLeft = '20px';
+                    issuesList.style.color = '#856404';
+                    issuesList.style.fontSize = '15px';
+                    issuesList.style.lineHeight = '1.8';
+                    
+                    if (hasNoiseFloorIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>Noise Floor Monitor:</strong> ' + (data.noiseFloor.issues && data.noiseFloor.issues.length > 0 ? data.noiseFloor.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+                    
+                    if (hasSpaceWeatherIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>Space Weather Monitor:</strong> ' + (data.spaceWeather.issues && data.spaceWeather.issues.length > 0 ? data.spaceWeather.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+                    
+                    if (hasDecoderIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>Decoder Monitor:</strong> ' + (data.decoder.issues && data.decoder.issues.length > 0 ? data.decoder.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+                    
+                    warningBanner.appendChild(issuesList);
+                    container.appendChild(warningBanner);
+                }
+            }
+
             if (isDetailed) {
                 // Render detailed diagnostics for all systems
                 if (data.noiseFloor) {

@@ -877,6 +877,11 @@ document.addEventListener('DOMContentLoaded', () => {
     window.adjustBandwidth = adjustBandwidth;
     window.updateBandwidthTooltips = updateBandwidthTooltips;
 
+    // Initialize frequency scroll mode with default values
+    if (typeof updateFrequencyScrollMode === 'function') {
+        updateFrequencyScrollMode();
+    }
+
     log('Ready to connect');
 
     // Handle window resize for audio visualizer canvases
@@ -6671,6 +6676,10 @@ function updateFrequencyScrollMode() {
     // Set delay based on speed
     // "slow" = 200ms delay, "fast" = 100ms delay
     frequencyScrollDelay = speed === 'slow' ? 200 : 100;
+    
+    // Set global variables for spectrum-display.js to use
+    window.frequencyScrollStep = step;
+    window.frequencyScrollDelay = frequencyScrollDelay;
     
     log(`Frequency scroll mode: ${step} Hz ${speed} (${frequencyScrollDelay}ms delay)`);
 }

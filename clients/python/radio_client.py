@@ -39,7 +39,8 @@ class RadioClient:
                  output_mode: str = 'pipewire', wav_file: Optional[str] = None,
                  duration: Optional[float] = None, ssl: bool = False,
                  nr2_enabled: bool = False, nr2_strength: float = 40.0,
-                 nr2_floor: float = 10.0, nr2_adapt_rate: float = 1.0):
+                 nr2_floor: float = 10.0, nr2_adapt_rate: float = 1.0,
+                 auto_reconnect: bool = False):
         self.url = url
         self.host = host
         self.port = port
@@ -59,6 +60,11 @@ class RadioClient:
         self.channels = 1  # Default mono, will be updated from server
         self.wav_writer = None
         self.pipewire_process = None
+
+        # Auto-reconnect settings
+        self.auto_reconnect = auto_reconnect
+        self.retry_count = 0
+        self.max_backoff = 60  # Maximum backoff time in seconds
         
         # NR2 noise reduction
         self.nr2_enabled = nr2_enabled
@@ -342,8 +348,8 @@ class RadioClient:
             print("Attempting connection anyway...", file=sys.stderr)
             return True  # Continue on error (like the web UI does)
     
-    async def run(self):
-        """Main client loop."""
+    async def run_once(self):
+        """Single connection attempt."""
         # Check if connection is allowed before attempting WebSocket connection
         if not await self.check_connection_allowed():
             return 1
@@ -358,6 +364,9 @@ class RadioClient:
         try:
             async with websockets.connect(url, ping_interval=None) as websocket:
                 print("Connected!", file=sys.stderr)
+
+                # Reset retry count on successful connection
+                self.retry_count = 0
                 
                 # Setup output based on mode
                 if self.output_mode == 'pipewire':
@@ -393,6 +402,40 @@ class RadioClient:
         finally:
             await self.cleanup()
         
+        return 0
+
+    def calculate_backoff(self) -> float:
+        """Calculate exponential backoff time with max limit."""
+        # Exponential backoff: 2^retry_count seconds, capped at max_backoff
+        backoff = min(2 ** self.retry_count, self.max_backoff)
+        return backoff
+
+    async def run(self):
+        """Main client loop with auto-reconnect support."""
+        while self.running:
+            exit_code = await self.run_once()
+
+            # If not auto-reconnecting or clean exit, stop
+            if not self.auto_reconnect or exit_code == 0:
+                return exit_code
+
+            # If user interrupted, stop
+            if not self.running:
+                return 0
+
+            # Calculate backoff time
+            self.retry_count += 1
+            backoff = self.calculate_backoff()
+
+            print(f"\nReconnecting in {backoff:.0f}s (attempt {self.retry_count})...", file=sys.stderr)
+
+            # Wait with ability to interrupt
+            try:
+                await asyncio.sleep(backoff)
+            except asyncio.CancelledError:
+                print("Reconnect cancelled", file=sys.stderr)
+                return 1
+
         return 0
     
     async def cleanup(self):
@@ -476,6 +519,8 @@ Examples:
                         help='NR2 spectral floor to prevent musical noise, 0-10%% (default: 10)')
     parser.add_argument('--nr2-adapt-rate', type=float, default=1.0, metavar='PERCENT',
                         help='NR2 noise profile adaptation rate, 0.1-5.0%% (default: 1)')
+    parser.add_argument('--auto-reconnect', action='store_true',
+                        help='Automatically reconnect on connection loss with exponential backoff (max 60s)')
     
     args = parser.parse_args()
     
@@ -526,7 +571,8 @@ Examples:
         nr2_enabled=args.nr2,
         nr2_strength=args.nr2_strength,
         nr2_floor=args.nr2_floor,
-        nr2_adapt_rate=args.nr2_adapt_rate
+        nr2_adapt_rate=args.nr2_adapt_rate,
+        auto_reconnect=args.auto_reconnect
     )
     
     # Setup signal handler for graceful shutdown

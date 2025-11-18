@@ -49,6 +49,9 @@ type RadioClient struct {
 	nr2Strength   float64
 	nr2Floor      float64
 	nr2AdaptRate  float64
+	autoReconnect bool
+	retryCount    int
+	maxBackoff    time.Duration
 }
 
 // WAVWriter handles WAV file writing
@@ -85,7 +88,8 @@ type ConnectionCheckResponse struct {
 // NewRadioClient creates a new radio client instance
 func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 	bandwidthLow, bandwidthHigh *int, outputMode, wavFile string,
-	duration *float64, ssl, nr2Enabled bool, nr2Strength, nr2Floor, nr2AdaptRate float64) *RadioClient {
+	duration *float64, ssl, nr2Enabled bool, nr2Strength, nr2Floor, nr2AdaptRate float64,
+	autoReconnect bool) *RadioClient {
 
 	client := &RadioClient{
 		url:           urlStr,
@@ -107,6 +111,9 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		nr2Strength:   nr2Strength,
 		nr2Floor:      nr2Floor,
 		nr2AdaptRate:  nr2AdaptRate,
+		autoReconnect: autoReconnect,
+		retryCount:    0,
+		maxBackoff:    60 * time.Second,
 	}
 
 	// Initialize NR2 processor if enabled
@@ -501,8 +508,18 @@ func (c *RadioClient) CheckConnectionAllowed() (bool, error) {
 	return true, nil
 }
 
-// Run executes the main client loop
-func (c *RadioClient) Run() int {
+// calculateBackoff calculates exponential backoff time with max limit
+func (c *RadioClient) calculateBackoff() time.Duration {
+	// Exponential backoff: 2^retryCount seconds, capped at maxBackoff
+	backoff := time.Duration(1<<uint(c.retryCount)) * time.Second
+	if backoff > c.maxBackoff {
+		backoff = c.maxBackoff
+	}
+	return backoff
+}
+
+// runOnce executes a single connection attempt
+func (c *RadioClient) runOnce() int {
 	// Check if connection is allowed before attempting WebSocket connection
 	allowed, err := c.CheckConnectionAllowed()
 	if err != nil {
@@ -529,6 +546,9 @@ func (c *RadioClient) Run() int {
 	defer conn.Close()
 
 	fmt.Fprintf(os.Stderr, "Connected!\n")
+
+	// Reset retry count on successful connection
+	c.retryCount = 0
 
 	// Setup output based on mode
 	switch c.outputMode {
@@ -568,6 +588,49 @@ func (c *RadioClient) Run() int {
 	}
 
 	c.Cleanup()
+	return 0
+}
+
+// Run executes the main client loop with auto-reconnect support
+func (c *RadioClient) Run() int {
+	for c.running {
+		exitCode := c.runOnce()
+
+		// If not auto-reconnecting or clean exit, stop
+		if !c.autoReconnect || exitCode == 0 {
+			return exitCode
+		}
+
+		// If user interrupted, stop
+		if !c.running {
+			return 0
+		}
+
+		// Calculate backoff time
+		c.retryCount++
+		backoff := c.calculateBackoff()
+
+		fmt.Fprintf(os.Stderr, "\nReconnecting in %.0fs (attempt %d)...\n", backoff.Seconds(), c.retryCount)
+
+		// Wait with ability to interrupt
+		select {
+		case <-time.After(backoff):
+			// Continue to reconnect
+		case <-func() chan struct{} {
+			ch := make(chan struct{})
+			go func() {
+				for c.running {
+					time.Sleep(100 * time.Millisecond)
+				}
+				close(ch)
+			}()
+			return ch
+		}():
+			fmt.Fprintf(os.Stderr, "Reconnect cancelled\n")
+			return 1
+		}
+	}
+
 	return 0
 }
 
@@ -653,6 +716,7 @@ func main() {
 	nr2StrengthFlag := flag.Float64("nr2-strength", 40.0, "NR2 noise reduction strength, 0-100% (default: 40)")
 	nr2FloorFlag := flag.Float64("nr2-floor", 10.0, "NR2 spectral floor to prevent musical noise, 0-10% (default: 10)")
 	nr2AdaptRateFlag := flag.Float64("nr2-adapt-rate", 1.0, "NR2 noise profile adaptation rate, 0.1-5.0% (default: 1)")
+	autoReconnectFlag := flag.Bool("auto-reconnect", false, "Automatically reconnect on connection loss with exponential backoff (max 60s)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "CLI Radio Client for ka9q_ubersdr\n\n")
@@ -765,6 +829,7 @@ func main() {
 		*urlFlag, *hostFlag, *portFlag, *frequencyFlag, *modeFlag,
 		bandwidthLow, bandwidthHigh, *outputFlag, *wavFileFlag,
 		duration, *sslFlag, *nr2Flag, *nr2StrengthFlag, *nr2FloorFlag, *nr2AdaptRateFlag,
+		*autoReconnectFlag,
 	)
 
 	// Setup signal handler for graceful shutdown

@@ -781,3 +781,28 @@
     color: #aaa;
     font-size: 11px;
 }
+
+/* Graph Tooltip */
+.country-spots-graph-tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid #4a9eff;
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: #e0e0e0;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 1000;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
+}
+
+.country-spots-graph-tooltip .tooltip-row {
+    margin: 2px 0;
+}
+
+.country-spots-graph-tooltip .tooltip-row:first-child {
+    color: #ffc107;
+    font-size: 13px;
+    margin-bottom: 4px;
+}

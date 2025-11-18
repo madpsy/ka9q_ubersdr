@@ -1168,15 +1168,21 @@ class DigitalSpotsExtension extends DecoderExtension {
         const canvas = document.createElement('canvas');
         canvas.className = 'country-spots-graph-canvas';
         canvasContainer.appendChild(canvas);
-        graphDiv.appendChild(canvasContainer);
 
+        // Create tooltip element
+        const tooltip = document.createElement('div');
+        tooltip.className = 'country-spots-graph-tooltip';
+        tooltip.style.display = 'none';
+        canvasContainer.appendChild(tooltip);
+
+        graphDiv.appendChild(canvasContainer);
         container.appendChild(graphDiv);
 
-        // Draw graph on canvas
-        this.drawFrequencyTimeGraph(canvas, spots, mode);
+        // Draw graph on canvas and setup interactivity
+        this.drawFrequencyTimeGraph(canvas, spots, mode, tooltip);
     }
 
-    drawFrequencyTimeGraph(canvas, spots, mode) {
+    drawFrequencyTimeGraph(canvas, spots, mode, tooltip = null) {
         const ctx = canvas.getContext('2d');
         const rect = canvas.parentElement.getBoundingClientRect();
 
@@ -1308,21 +1314,152 @@ class DigitalSpotsExtension extends DecoderExtension {
                 textColor = '#4a9eff';
         }
 
+        // Calculate positions and detect collisions
+        const labelHeight = 12;
+        const labelPadding = 2;
+        const positions = [];
+
         spots.forEach(spot => {
             const spotTime = new Date(spot.timestamp).getTime();
             const x = marginLeft + ((spotTime - tenMinutesAgo) / timeRange) * graphWidth;
-            const y = height - marginBottom - ((spot.frequency - (minFreq - freqPadding)) / (freqRange + 2 * freqPadding)) * graphHeight;
+            const baseY = height - marginBottom - ((spot.frequency - (minFreq - freqPadding)) / (freqRange + 2 * freqPadding)) * graphHeight;
+
+            // Measure text width
+            const textWidth = ctx.measureText(spot.callsign).width;
+
+            // Find a non-overlapping position
+            let y = baseY;
+            let attempts = 0;
+            const maxAttempts = 20;
+
+            while (attempts < maxAttempts) {
+                let overlaps = false;
+
+                // Check for overlap with existing labels
+                for (const pos of positions) {
+                    const xOverlap = Math.abs(x - pos.x) < (textWidth + pos.width) / 2 + labelPadding;
+                    const yOverlap = Math.abs(y - pos.y) < labelHeight + labelPadding;
+
+                    if (xOverlap && yOverlap) {
+                        overlaps = true;
+                        break;
+                    }
+                }
+
+                if (!overlaps) {
+                    break;
+                }
+
+                // Try offsetting vertically
+                attempts++;
+                if (attempts % 2 === 0) {
+                    y = baseY + (attempts / 2) * (labelHeight + labelPadding);
+                } else {
+                    y = baseY - (Math.ceil(attempts / 2)) * (labelHeight + labelPadding);
+                }
+            }
+
+            positions.push({ x, y, width: textWidth, baseY });
+
+            // Draw line from label to actual position if offset
+            if (Math.abs(y - baseY) > 2) {
+                ctx.strokeStyle = textColor;
+                ctx.lineWidth = 1;
+                ctx.setLineDash([2, 2]);
+                ctx.beginPath();
+                ctx.moveTo(x, baseY);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
 
             // Draw callsign as text
             ctx.fillStyle = textColor;
             ctx.fillText(spot.callsign, x, y);
 
-            // Add a small dot for better visibility
+            // Add a small dot at the actual frequency/time position
             ctx.fillStyle = textColor;
             ctx.beginPath();
-            ctx.arc(x, y, 2, 0, 2 * Math.PI);
+            ctx.arc(x, baseY, 2, 0, 2 * Math.PI);
             ctx.fill();
         });
+
+        // Setup mouse interaction for tooltips
+        if (tooltip) {
+            // Store spot positions for hit detection
+            canvas._spotPositions = positions.map((pos, idx) => ({
+                ...pos,
+                spot: spots[idx]
+            }));
+
+            // Remove old listeners if they exist
+            if (canvas._mouseMoveHandler) {
+                canvas.removeEventListener('mousemove', canvas._mouseMoveHandler);
+                canvas.removeEventListener('mouseleave', canvas._mouseLeaveHandler);
+            }
+
+            // Mouse move handler
+            canvas._mouseMoveHandler = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                // Find hovered spot
+                let hoveredSpot = null;
+                for (const pos of canvas._spotPositions) {
+                    const dx = mouseX - pos.x;
+                    const dy = mouseY - pos.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    // Check if mouse is near the label
+                    if (Math.abs(dx) < pos.width / 2 + 5 && Math.abs(dy) < labelHeight / 2 + 5) {
+                        hoveredSpot = pos.spot;
+                        break;
+                    }
+                }
+
+                if (hoveredSpot) {
+                    // Show tooltip
+                    const snrText = hoveredSpot.snr >= 0 ? `+${hoveredSpot.snr}` : hoveredSpot.snr;
+                    const distanceText = hoveredSpot.distance_km !== undefined && hoveredSpot.distance_km !== null
+                        ? `${Math.round(hoveredSpot.distance_km)} km`
+                        : 'N/A';
+                    const bearingText = hoveredSpot.bearing_deg !== undefined && hoveredSpot.bearing_deg !== null
+                        ? `${Math.round(hoveredSpot.bearing_deg)}°`
+                        : 'N/A';
+
+                    tooltip.innerHTML = `
+                        <div class="tooltip-row"><strong>${hoveredSpot.callsign}</strong></div>
+                        <div class="tooltip-row">Mode: ${hoveredSpot.mode}</div>
+                        <div class="tooltip-row">Freq: ${this.formatFrequency(hoveredSpot.frequency)} MHz</div>
+                        <div class="tooltip-row">SNR: ${snrText} dB</div>
+                        <div class="tooltip-row">Grid: ${hoveredSpot.locator || 'N/A'}</div>
+                        <div class="tooltip-row">Distance: ${distanceText}</div>
+                        <div class="tooltip-row">Bearing: ${bearingText}</div>
+                        <div class="tooltip-row">Age: ${this.formatAge(hoveredSpot.timestamp)}</div>
+                        ${hoveredSpot.message ? `<div class="tooltip-row">Msg: ${hoveredSpot.message}</div>` : ''}
+                    `;
+
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = (mouseX + 10) + 'px';
+                    tooltip.style.top = (mouseY + 10) + 'px';
+
+                    canvas.style.cursor = 'pointer';
+                } else {
+                    tooltip.style.display = 'none';
+                    canvas.style.cursor = 'default';
+                }
+            };
+
+            // Mouse leave handler
+            canvas._mouseLeaveHandler = () => {
+                tooltip.style.display = 'none';
+                canvas.style.cursor = 'default';
+            };
+
+            canvas.addEventListener('mousemove', canvas._mouseMoveHandler);
+            canvas.addEventListener('mouseleave', canvas._mouseLeaveHandler);
+        }
     }
 }
 

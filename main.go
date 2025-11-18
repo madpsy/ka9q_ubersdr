@@ -898,6 +898,16 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 		// Also skip sessions without a ClientIP address
 		if !session.IsSpectrum && session.ClientIP != "" {
 			session.mu.RLock()
+
+			// Check if this IP is bypassed
+			isBypassed := sessions.config.Server.IsIPTimeoutBypassed(session.ClientIP)
+
+			// Skip bypassed IPs UNLESS it's the current user's session
+			if isBypassed && session.ID != currentSessionID {
+				session.mu.RUnlock()
+				continue
+			}
+
 			sessionInfo := map[string]interface{}{
 				"frequency":      session.Frequency,
 				"mode":           session.Mode,

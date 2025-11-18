@@ -1876,6 +1876,7 @@ class DigitalSpotsExtension extends DecoderExtension {
             if (canvas._mouseMoveHandler) {
                 canvas.removeEventListener('mousemove', canvas._mouseMoveHandler);
                 canvas.removeEventListener('mouseleave', canvas._mouseLeaveHandler);
+                canvas.removeEventListener('click', canvas._clickHandler);
             }
 
             // Mouse move handler
@@ -1968,8 +1969,34 @@ class DigitalSpotsExtension extends DecoderExtension {
                 canvas.style.cursor = 'default';
             };
 
+            // Click handler to open QRZ page
+            canvas._clickHandler = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                // Find clicked spot
+                let clickedSpot = null;
+                for (const pos of canvas._spotPositions) {
+                    const dx = mouseX - pos.x;
+                    const dy = mouseY - pos.y;
+
+                    // Check if click is near the label
+                    if (Math.abs(dx) < pos.width / 2 + 5 && Math.abs(dy) < labelHeight / 2 + 5) {
+                        clickedSpot = pos.spot;
+                        break;
+                    }
+                }
+
+                if (clickedSpot) {
+                    // Open QRZ page in new tab
+                    this.openQRZ(clickedSpot.callsign);
+                }
+            };
+
             canvas.addEventListener('mousemove', canvas._mouseMoveHandler);
             canvas.addEventListener('mouseleave', canvas._mouseLeaveHandler);
+            canvas.addEventListener('click', canvas._clickHandler);
         }
     }
 

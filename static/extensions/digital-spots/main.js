@@ -221,6 +221,8 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         // Update modal if it's open
         if (this.currentModalCountry && this.currentModalBand) {
+            // Mark that graph needs refresh due to new spot
+            this._modalNeedsGraphRefresh = true;
             this.refreshModalContent();
         }
     }
@@ -835,10 +837,14 @@ class DigitalSpotsExtension extends DecoderExtension {
     }
 
     refreshModalContent() {
-        // Refresh both table and graph content
+        // Refresh table content (which deduplicates by callsign)
         this.refreshModalTable();
-        if (this.currentModalTab === 'graph') {
+
+        // Only refresh graphs when on graph tab and when new spots arrive
+        // Don't refresh every second from the age update interval
+        if (this.currentModalTab === 'graph' && this._modalNeedsGraphRefresh) {
             this.refreshModalGraphs();
+            this._modalNeedsGraphRefresh = false;
         }
     }
 
@@ -853,6 +859,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         const band = this.currentModalBand;
 
         // Get spots for this country and band from the last 10 minutes
+        // IMPORTANT: Use raw spots array, not filtered by main table's age filter
         const now = Date.now();
         const tenMinutesAgo = now - (10 * 60 * 1000);
 
@@ -864,6 +871,7 @@ class DigitalSpotsExtension extends DecoderExtension {
                 return false;
             }
 
+            // Apply 10-minute age filter for modal (independent of main table filter)
             const spotTime = new Date(spot.timestamp).getTime();
             return spotTime >= tenMinutesAgo;
         });
@@ -1005,6 +1013,8 @@ class DigitalSpotsExtension extends DecoderExtension {
         if (modeFilter) {
             modeFilter.addEventListener('change', (e) => {
                 this.currentModalModeFilter = e.target.value;
+                // Mark that graph needs refresh due to filter change
+                this._modalNeedsGraphRefresh = true;
                 this.refreshModalContent();
             });
         }
@@ -1073,8 +1083,18 @@ class DigitalSpotsExtension extends DecoderExtension {
         const band = this.currentModalBand;
 
         // Get spots for this country and band from the last 10 minutes
+        // IMPORTANT: Use raw spots array, not filtered by main table's age filter
         const now = Date.now();
         const tenMinutesAgo = now - (10 * 60 * 1000);
+
+        // Debug logging
+        console.log('Modal Graph Debug:', {
+            totalSpots: this.spots.length,
+            country: country,
+            band: band,
+            now: new Date(now).toISOString(),
+            tenMinutesAgo: new Date(tenMinutesAgo).toISOString()
+        });
 
         const countrySpots = this.spots.filter(spot => {
             if (spot.band !== band || spot.country !== country) return false;
@@ -1084,9 +1104,25 @@ class DigitalSpotsExtension extends DecoderExtension {
                 return false;
             }
 
+            // Apply 10-minute age filter for modal (independent of main table filter)
             const spotTime = new Date(spot.timestamp).getTime();
-            return spotTime >= tenMinutesAgo;
+            const ageMinutes = (now - spotTime) / 60000;
+            const passes = spotTime >= tenMinutesAgo;
+
+            // Log first few spots for debugging
+            if (countrySpots.length < 5) {
+                console.log('Spot check:', {
+                    callsign: spot.callsign,
+                    timestamp: spot.timestamp,
+                    ageMinutes: ageMinutes.toFixed(2),
+                    passes: passes
+                });
+            }
+
+            return passes;
         });
+
+        console.log('Filtered to', countrySpots.length, 'spots for', country, 'on', band);
 
         // Group spots by mode
         const spotsByMode = {};

@@ -29,6 +29,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.currentModalCountry = null; // Track currently open modal
         this.currentModalBand = null;
         this.currentModalModeFilter = 'all'; // Track modal mode filter
+        this.currentModalTab = 'graph'; // Track current modal tab (graph or table)
 
         // Subscribe to digital spots immediately
         this.subscribeToDigitalSpots();
@@ -828,9 +829,20 @@ class DigitalSpotsExtension extends DecoderExtension {
         if (modeFilter) {
             modeFilter.value = 'all';
         }
+
+        // Set default tab to graph
+        this.switchModalTab('graph');
     }
 
     refreshModalContent() {
+        // Refresh both table and graph content
+        this.refreshModalTable();
+        if (this.currentModalTab === 'graph') {
+            this.refreshModalGraphs();
+        }
+    }
+
+    refreshModalTable() {
         const modalTbody = document.getElementById('country-spots-modal-tbody');
 
         if (!modalTbody || !this.currentModalCountry || !this.currentModalBand) {
@@ -997,6 +1009,15 @@ class DigitalSpotsExtension extends DecoderExtension {
             });
         }
 
+        // Setup tab switching
+        const tabButtons = document.querySelectorAll('.country-spots-tab');
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const tab = button.getAttribute('data-tab');
+                this.switchModalTab(tab);
+            });
+        });
+
         if (modal) {
             // Close modal when clicking outside the content
             modal.addEventListener('click', (e) => {
@@ -1012,6 +1033,254 @@ class DigitalSpotsExtension extends DecoderExtension {
                 }
             });
         }
+    }
+
+    switchModalTab(tab) {
+        this.currentModalTab = tab;
+
+        // Update tab buttons
+        const tabButtons = document.querySelectorAll('.country-spots-tab');
+        tabButtons.forEach(button => {
+            if (button.getAttribute('data-tab') === tab) {
+                button.classList.add('active');
+            } else {
+                button.classList.remove('active');
+            }
+        });
+
+        // Update tab content
+        const tabContents = document.querySelectorAll('.country-spots-tab-content');
+        tabContents.forEach(content => {
+            if (content.id === `country-spots-${tab}-tab`) {
+                content.classList.add('active');
+            } else {
+                content.classList.remove('active');
+            }
+        });
+
+        // Refresh content if switching to graph tab
+        if (tab === 'graph') {
+            this.refreshModalGraphs();
+        }
+    }
+
+    refreshModalGraphs() {
+        if (!this.currentModalCountry || !this.currentModalBand) {
+            return;
+        }
+
+        const country = this.currentModalCountry;
+        const band = this.currentModalBand;
+
+        // Get spots for this country and band from the last 10 minutes
+        const now = Date.now();
+        const tenMinutesAgo = now - (10 * 60 * 1000);
+
+        const countrySpots = this.spots.filter(spot => {
+            if (spot.band !== band || spot.country !== country) return false;
+            const spotTime = new Date(spot.timestamp).getTime();
+            return spotTime >= tenMinutesAgo;
+        });
+
+        // Group spots by mode
+        const spotsByMode = {};
+        countrySpots.forEach(spot => {
+            if (!spotsByMode[spot.mode]) {
+                spotsByMode[spot.mode] = [];
+            }
+            spotsByMode[spot.mode].push(spot);
+        });
+
+        // Render graphs
+        const container = document.getElementById('country-spots-graphs-container');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        const modes = Object.keys(spotsByMode).sort();
+
+        if (modes.length === 0) {
+            container.innerHTML = '<div class="country-spots-graph-no-data">No spots found in the last 10 minutes</div>';
+            return;
+        }
+
+        modes.forEach(mode => {
+            const modeSpots = spotsByMode[mode];
+            this.renderModeGraph(container, mode, modeSpots);
+        });
+    }
+
+    renderModeGraph(container, mode, spots) {
+        // Create graph container
+        const graphDiv = document.createElement('div');
+        graphDiv.className = 'country-spots-graph';
+
+        const title = document.createElement('div');
+        title.className = 'country-spots-graph-title';
+        title.textContent = `${mode} - ${spots.length} spot${spots.length !== 1 ? 's' : ''}`;
+        graphDiv.appendChild(title);
+
+        const canvasContainer = document.createElement('div');
+        canvasContainer.className = 'country-spots-graph-canvas-container';
+
+        const canvas = document.createElement('canvas');
+        canvas.className = 'country-spots-graph-canvas';
+        canvasContainer.appendChild(canvas);
+        graphDiv.appendChild(canvasContainer);
+
+        container.appendChild(graphDiv);
+
+        // Draw graph on canvas
+        this.drawFrequencyTimeGraph(canvas, spots, mode);
+    }
+
+    drawFrequencyTimeGraph(canvas, spots, mode) {
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.parentElement.getBoundingClientRect();
+
+        // Set canvas size to match container
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Clear canvas
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, width, height);
+
+        if (spots.length === 0) {
+            ctx.fillStyle = '#666';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('No spots to display', width / 2, height / 2);
+            return;
+        }
+
+        // Calculate time range (last 10 minutes)
+        const now = Date.now();
+        const tenMinutesAgo = now - (10 * 60 * 1000);
+        const timeRange = now - tenMinutesAgo;
+
+        // Calculate frequency range
+        const frequencies = spots.map(s => s.frequency);
+        const minFreq = Math.min(...frequencies);
+        const maxFreq = Math.max(...frequencies);
+        const freqRange = maxFreq - minFreq;
+        const freqPadding = freqRange * 0.1 || 1000; // 10% padding or 1kHz minimum
+
+        // Graph margins
+        const marginLeft = 80;
+        const marginRight = 20;
+        const marginTop = 20;
+        const marginBottom = 40;
+        const graphWidth = width - marginLeft - marginRight;
+        const graphHeight = height - marginTop - marginBottom;
+
+        // Draw axes
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(marginLeft, marginTop);
+        ctx.lineTo(marginLeft, height - marginBottom);
+        ctx.lineTo(width - marginRight, height - marginBottom);
+        ctx.stroke();
+
+        // Draw Y-axis labels (Frequency in MHz)
+        ctx.fillStyle = '#aaa';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'right';
+
+        const numYTicks = 5;
+        for (let i = 0; i <= numYTicks; i++) {
+            const freq = minFreq - freqPadding + (freqRange + 2 * freqPadding) * (1 - i / numYTicks);
+            const y = marginTop + (graphHeight * i / numYTicks);
+
+            ctx.fillText((freq / 1000000).toFixed(3) + ' MHz', marginLeft - 10, y + 4);
+
+            // Draw grid line
+            ctx.strokeStyle = '#2a2a2a';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(marginLeft, y);
+            ctx.lineTo(width - marginRight, y);
+            ctx.stroke();
+        }
+
+        // Draw X-axis labels (Time)
+        ctx.textAlign = 'center';
+        const numXTicks = 5;
+        for (let i = 0; i <= numXTicks; i++) {
+            const time = tenMinutesAgo + (timeRange * i / numXTicks);
+            const x = marginLeft + (graphWidth * i / numXTicks);
+            const date = new Date(time);
+            const timeStr = date.toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZone: 'UTC'
+            });
+
+            ctx.fillStyle = '#aaa';
+            ctx.fillText(timeStr, x, height - marginBottom + 20);
+
+            // Draw grid line
+            ctx.strokeStyle = '#2a2a2a';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, marginTop);
+            ctx.lineTo(x, height - marginBottom);
+            ctx.stroke();
+        }
+
+        // Draw X-axis label
+        ctx.fillStyle = '#888';
+        ctx.font = '12px Arial';
+        ctx.fillText('Time (UTC)', width / 2, height - 5);
+
+        // Draw Y-axis label
+        ctx.save();
+        ctx.translate(15, height / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('Frequency (MHz)', 0, 0);
+        ctx.restore();
+
+        // Plot spots with callsigns as markers
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Color based on mode
+        let textColor;
+        switch (mode) {
+            case 'FT8':
+                textColor = '#28a745';
+                break;
+            case 'FT4':
+                textColor = '#17a2b8';
+                break;
+            case 'WSPR':
+                textColor = '#ffc107';
+                break;
+            default:
+                textColor = '#4a9eff';
+        }
+
+        spots.forEach(spot => {
+            const spotTime = new Date(spot.timestamp).getTime();
+            const x = marginLeft + ((spotTime - tenMinutesAgo) / timeRange) * graphWidth;
+            const y = height - marginBottom - ((spot.frequency - (minFreq - freqPadding)) / (freqRange + 2 * freqPadding)) * graphHeight;
+
+            // Draw callsign as text
+            ctx.fillStyle = textColor;
+            ctx.fillText(spot.callsign, x, y);
+
+            // Add a small dot for better visibility
+            ctx.fillStyle = textColor;
+            ctx.beginPath();
+            ctx.arc(x, y, 2, 0, 2 * Math.PI);
+            ctx.fill();
+        });
     }
 }
 

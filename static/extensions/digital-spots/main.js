@@ -1141,10 +1141,11 @@ class DigitalSpotsExtension extends DecoderExtension {
                     if (title) {
                         title.textContent = `${mode} - ${modeSpots.length} spot${modeSpots.length !== 1 ? 's' : ''}`;
                     }
-                    // Redraw canvas
+                    // Redraw canvas with tooltip
                     const canvas = graphDiv.querySelector('.country-spots-graph-canvas');
+                    const tooltip = graphDiv.querySelector('.country-spots-graph-tooltip');
                     if (canvas) {
-                        this.drawFrequencyTimeGraph(canvas, modeSpots, mode);
+                        this.drawFrequencyTimeGraph(canvas, modeSpots, mode, tooltip);
                     }
                 }
             });

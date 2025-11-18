@@ -1096,6 +1096,7 @@ class DigitalSpotsExtension extends DecoderExtension {
             tenMinutesAgo: new Date(tenMinutesAgo).toISOString()
         });
 
+        let debugCount = 0;
         const countrySpots = this.spots.filter(spot => {
             if (spot.band !== band || spot.country !== country) return false;
 
@@ -1110,13 +1111,14 @@ class DigitalSpotsExtension extends DecoderExtension {
             const passes = spotTime >= tenMinutesAgo;
 
             // Log first few spots for debugging
-            if (countrySpots.length < 5) {
+            if (debugCount < 5 && passes) {
                 console.log('Spot check:', {
                     callsign: spot.callsign,
                     timestamp: spot.timestamp,
                     ageMinutes: ageMinutes.toFixed(2),
                     passes: passes
                 });
+                debugCount++;
             }
 
             return passes;

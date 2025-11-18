@@ -1083,20 +1083,9 @@ class DigitalSpotsExtension extends DecoderExtension {
         const band = this.currentModalBand;
 
         // Get spots for this country and band from the last 10 minutes
-        // IMPORTANT: Use raw spots array, not filtered by main table's age filter
         const now = Date.now();
         const tenMinutesAgo = now - (10 * 60 * 1000);
 
-        // Debug logging
-        console.log('Modal Graph Debug:', {
-            totalSpots: this.spots.length,
-            country: country,
-            band: band,
-            now: new Date(now).toISOString(),
-            tenMinutesAgo: new Date(tenMinutesAgo).toISOString()
-        });
-
-        let debugCount = 0;
         const countrySpots = this.spots.filter(spot => {
             if (spot.band !== band || spot.country !== country) return false;
 
@@ -1107,24 +1096,8 @@ class DigitalSpotsExtension extends DecoderExtension {
 
             // Apply 10-minute age filter for modal (independent of main table filter)
             const spotTime = new Date(spot.timestamp).getTime();
-            const ageMinutes = (now - spotTime) / 60000;
-            const passes = spotTime >= tenMinutesAgo;
-
-            // Log first few spots for debugging
-            if (debugCount < 5 && passes) {
-                console.log('Spot check:', {
-                    callsign: spot.callsign,
-                    timestamp: spot.timestamp,
-                    ageMinutes: ageMinutes.toFixed(2),
-                    passes: passes
-                });
-                debugCount++;
-            }
-
-            return passes;
+            return spotTime >= tenMinutesAgo;
         });
-
-        console.log('Filtered to', countrySpots.length, 'spots for', country, 'on', band);
 
         // Group spots by mode
         const spotsByMode = {};

@@ -1430,17 +1430,17 @@ class DigitalSpotsExtension extends DecoderExtension {
                 ctx.lineTo(x, y);
                 ctx.stroke();
                 ctx.setLineDash([]);
+
+                // Add a small dot at the actual frequency/time position (only for shifted labels)
+                ctx.fillStyle = textColor;
+                ctx.beginPath();
+                ctx.arc(x, baseY, 2, 0, 2 * Math.PI);
+                ctx.fill();
             }
 
             // Draw callsign as text
             ctx.fillStyle = textColor;
             ctx.fillText(spot.callsign, x, y);
-
-            // Add a small dot at the actual frequency/time position
-            ctx.fillStyle = textColor;
-            ctx.beginPath();
-            ctx.arc(x, baseY, 2, 0, 2 * Math.PI);
-            ctx.fill();
         });
 
         // Setup mouse interaction for tooltips

@@ -1442,8 +1442,36 @@ class DigitalSpotsExtension extends DecoderExtension {
                     `;
 
                     tooltip.style.display = 'block';
-                    tooltip.style.left = (mouseX + 10) + 'px';
-                    tooltip.style.top = (mouseY + 10) + 'px';
+
+                    // Smart positioning: flip to left if too close to right edge
+                    const tooltipWidth = tooltip.offsetWidth || 200; // Estimate if not yet rendered
+                    const tooltipHeight = tooltip.offsetHeight || 150;
+                    
+                    let left = mouseX + 10;
+                    let top = mouseY + 10;
+
+                    // Check if tooltip would overflow right edge
+                    if (left + tooltipWidth > rect.width) {
+                        left = mouseX - tooltipWidth - 10;
+                    }
+
+                    // Check if tooltip would overflow bottom edge
+                    if (top + tooltipHeight > rect.height) {
+                        top = mouseY - tooltipHeight - 10;
+                    }
+
+                    // Ensure tooltip doesn't go off left edge
+                    if (left < 0) {
+                        left = 10;
+                    }
+
+                    // Ensure tooltip doesn't go off top edge
+                    if (top < 0) {
+                        top = 10;
+                    }
+
+                    tooltip.style.left = left + 'px';
+                    tooltip.style.top = top + 'px';
 
                     canvas.style.cursor = 'pointer';
                 } else {

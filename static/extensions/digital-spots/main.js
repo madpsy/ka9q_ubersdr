@@ -1097,6 +1097,16 @@ class DigitalSpotsExtension extends DecoderExtension {
             spotsByMode[spot.mode].push(spot);
         });
 
+        // Create a signature of current data to detect changes
+        const modes = Object.keys(spotsByMode).sort();
+        const dataSignature = modes.map(m => `${m}:${spotsByMode[m].length}`).join('|');
+
+        // Only re-render if data has changed
+        if (this._lastGraphSignature === dataSignature) {
+            return;
+        }
+        this._lastGraphSignature = dataSignature;
+
         // Render graphs
         const container = document.getElementById('country-spots-graphs-container');
         if (!container) return;
@@ -1105,8 +1115,6 @@ class DigitalSpotsExtension extends DecoderExtension {
         const scrollTop = container.scrollTop;
 
         container.innerHTML = '';
-
-        const modes = Object.keys(spotsByMode).sort();
 
         if (modes.length === 0) {
             container.innerHTML = '<div class="country-spots-graph-no-data">No spots found in the last 10 minutes</div>';
@@ -1210,7 +1218,7 @@ class DigitalSpotsExtension extends DecoderExtension {
             const freq = minFreq - freqPadding + (freqRange + 2 * freqPadding) * (1 - i / numYTicks);
             const y = marginTop + (graphHeight * i / numYTicks);
 
-            ctx.fillText((freq / 1000000).toFixed(3) + ' MHz', marginLeft - 10, y + 4);
+            ctx.fillText((freq / 1000000).toFixed(5), marginLeft - 10, y + 4);
 
             // Draw grid line
             ctx.strokeStyle = '#2a2a2a';
@@ -1252,9 +1260,9 @@ class DigitalSpotsExtension extends DecoderExtension {
         ctx.font = '12px Arial';
         ctx.fillText('Time (UTC)', width / 2, height - 5);
 
-        // Draw Y-axis label
+        // Draw Y-axis label (moved further left to avoid overlap)
         ctx.save();
-        ctx.translate(15, height / 2);
+        ctx.translate(12, height / 2);
         ctx.rotate(-Math.PI / 2);
         ctx.fillText('Frequency (MHz)', 0, 0);
         ctx.restore();

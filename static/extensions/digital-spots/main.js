@@ -1097,45 +1097,65 @@ class DigitalSpotsExtension extends DecoderExtension {
             spotsByMode[spot.mode].push(spot);
         });
 
-        // Create a signature of current data to detect changes
         const modes = Object.keys(spotsByMode).sort();
-        const dataSignature = modes.map(m => `${m}:${spotsByMode[m].length}`).join('|');
-
-        // Only re-render if data has changed
-        if (this._lastGraphSignature === dataSignature) {
-            return;
-        }
-        this._lastGraphSignature = dataSignature;
 
         // Render graphs
         const container = document.getElementById('country-spots-graphs-container');
         if (!container) return;
 
-        // Save scroll position before updating
-        const scrollTop = container.scrollTop;
+        // Check if we need to rebuild the structure (modes changed)
+        const existingModes = Array.from(container.querySelectorAll('.country-spots-graph'))
+            .map(g => g.getAttribute('data-mode'))
+            .filter(m => m);
 
-        container.innerHTML = '';
+        const modesChanged = modes.length !== existingModes.length ||
+                           !modes.every(m => existingModes.includes(m));
 
-        if (modes.length === 0) {
-            container.innerHTML = '<div class="country-spots-graph-no-data">No spots found in the last 10 minutes</div>';
-            return;
+        if (modesChanged) {
+            // Structure changed, need to rebuild
+            const scrollTop = container.scrollTop;
+            container.innerHTML = '';
+
+            if (modes.length === 0) {
+                container.innerHTML = '<div class="country-spots-graph-no-data">No spots found in the last 10 minutes</div>';
+                return;
+            }
+
+            modes.forEach(mode => {
+                const modeSpots = spotsByMode[mode];
+                this.renderModeGraph(container, mode, modeSpots);
+            });
+
+            // Restore scroll position
+            requestAnimationFrame(() => {
+                container.scrollTop = scrollTop;
+            });
+        } else {
+            // Just update existing canvases without rebuilding
+            modes.forEach(mode => {
+                const modeSpots = spotsByMode[mode];
+                const graphDiv = container.querySelector(`.country-spots-graph[data-mode="${mode}"]`);
+                if (graphDiv) {
+                    // Update title
+                    const title = graphDiv.querySelector('.country-spots-graph-title');
+                    if (title) {
+                        title.textContent = `${mode} - ${modeSpots.length} spot${modeSpots.length !== 1 ? 's' : ''}`;
+                    }
+                    // Redraw canvas
+                    const canvas = graphDiv.querySelector('.country-spots-graph-canvas');
+                    if (canvas) {
+                        this.drawFrequencyTimeGraph(canvas, modeSpots, mode);
+                    }
+                }
+            });
         }
-
-        modes.forEach(mode => {
-            const modeSpots = spotsByMode[mode];
-            this.renderModeGraph(container, mode, modeSpots);
-        });
-
-        // Restore scroll position after rendering
-        requestAnimationFrame(() => {
-            container.scrollTop = scrollTop;
-        });
     }
 
     renderModeGraph(container, mode, spots) {
         // Create graph container
         const graphDiv = document.createElement('div');
         graphDiv.className = 'country-spots-graph';
+        graphDiv.setAttribute('data-mode', mode);
 
         const title = document.createElement('div');
         title.className = 'country-spots-graph-title';

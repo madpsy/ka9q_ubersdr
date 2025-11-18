@@ -1374,9 +1374,16 @@ function displayActiveChannels(channels) {
                 <span style="color: #888; font-style: italic;">You</span>
             </td>`;
         } else {
+            // Disable button if mode is 'IQ' (case-insensitive)
+            const isIQMode = channel.mode.toUpperCase() === 'IQ';
+            const buttonDisabled = isIQMode ? 'disabled' : '';
+            const buttonStyle = isIQMode
+                ? 'background: #6c757d; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: not-allowed; font-size: 12px; font-weight: bold; opacity: 0.6;'
+                : 'background: #007bff; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;';
+
             html += `<td style="padding: 8px; border-bottom: 1px solid #333; text-align: center;">
                 <button onclick="tuneToChannel(${channel.frequency}, '${channel.mode}', ${channel.bandwidth_low}, ${channel.bandwidth_high})"
-                    style="background: #007bff; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;">
+                    style="${buttonStyle}" ${buttonDisabled}>
                     Go
                 </button>
             </td>`;

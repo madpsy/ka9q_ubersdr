@@ -482,7 +482,15 @@ func (c *RadioClient) CheckConnectionAllowed() (bool, error) {
 
 	fmt.Fprintf(os.Stderr, "Checking connection permission...\n")
 
-	resp, err := http.Post(httpURL, "application/json", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", httpURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "UberSDR Client 1.0 (go)")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Connection check failed: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Attempting connection anyway...\n")
@@ -537,8 +545,10 @@ func (c *RadioClient) runOnce() int {
 		fmt.Fprintf(os.Stderr, "Bandwidth: %d to %d Hz\n", *c.bandwidthLow, *c.bandwidthHigh)
 	}
 
-	// Connect to WebSocket
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	// Connect to WebSocket with custom User-Agent header
+	headers := http.Header{}
+	headers.Set("User-Agent", "UberSDR Client 1.0 (go)")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Connection error: %v\n", err)
 		return 1

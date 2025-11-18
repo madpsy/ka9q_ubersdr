@@ -329,7 +329,10 @@ class RadioClient:
                 async with session.post(
                     http_url,
                     json=request_body,
-                    headers={'Content-Type': 'application/json'},
+                    headers={
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'UberSDR Client 1.0 (python)'
+                    },
                     ssl=False if not self.ssl else None
                 ) as response:
                     data = await response.json()
@@ -362,7 +365,11 @@ class RadioClient:
             print(f"Bandwidth: {self.bandwidth_low} to {self.bandwidth_high} Hz", file=sys.stderr)
         
         try:
-            async with websockets.connect(url, ping_interval=None) as websocket:
+            async with websockets.connect(
+                url,
+                ping_interval=None,
+                extra_headers={'User-Agent': 'UberSDR Client 1.0 (python)'}
+            ) as websocket:
                 print("Connected!", file=sys.stderr)
 
                 # Reset retry count on successful connection

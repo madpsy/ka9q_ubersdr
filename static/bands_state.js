@@ -6,7 +6,7 @@
 
 class BandStateMonitor {
     constructor(options = {}) {
-        this.pollInterval = options.pollInterval || 5 * 60 * 1000; // 5 minutes default
+        this.pollInterval = options.pollInterval || 60 * 1000; // 1 minute default
         this.snrThreshold = options.snrThreshold || 6; // SNR threshold for open/closed
         this.apiEndpoint = options.apiEndpoint || '/api/noisefloor/aggregate';
         this.bands = options.bands || ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
@@ -311,7 +311,7 @@ const BAND_SHORTCUTS = {
 function initBandStateUI() {
     // Create the monitor instance
     bandStateMonitor = new BandStateMonitor({
-        pollInterval: 5 * 60 * 1000, // 5 minutes
+        pollInterval: 60 * 1000, // 1 minute
         snrThreshold: 6,
         apiEndpoint: '/api/noisefloor/aggregate'
     });

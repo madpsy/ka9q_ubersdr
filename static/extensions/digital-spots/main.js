@@ -34,6 +34,16 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.lastGraphRefresh = 0; // Track last graph refresh time for throttling
         this.badgeUpdatePending = false; // Prevent multiple pending badge updates
         this.lastBadgeUpdate = 0; // Track last badge update time for throttling
+        
+        // Performance optimization: caching and limits
+        this.filteredSpotsCache = null; // Cache filtered results
+        this.lastFilterParams = null; // Track filter parameters for cache invalidation
+        this.maxDisplayRows = 500; // Limit displayed rows for performance
+        this.showingAllRows = false; // Track if showing all or limited rows
+        this.callsignFilterDebounceTimer = null; // Debounce timer for callsign filter
+        this.filterDebounceDelay = 300; // ms delay for debouncing
+        this.badgeCache = null; // Cache badge data
+        this.lastBadgeBand = null; // Track last band for badge cache
 
         // Subscribe to digital spots immediately
         this.subscribeToDigitalSpots();
@@ -112,21 +122,26 @@ class DigitalSpotsExtension extends DecoderExtension {
             if (e.target.id === 'digital-spots-age-filter') {
                 const value = e.target.value;
                 this.ageFilter = value === 'none' ? null : parseInt(value);
+                this.showingAllRows = false; // Reset display limit
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'digital-spots-mode-filter') {
                 this.modeFilter = e.target.value;
+                this.showingAllRows = false; // Reset display limit
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'digital-spots-band-filter') {
                 this.bandFilter = e.target.value;
+                this.showingAllRows = false; // Reset display limit
                 this.filterAndRenderSpots();
                 this.updateBadges();
             } else if (e.target.id === 'digital-spots-snr-filter') {
                 const value = e.target.value;
                 this.snrFilter = value === 'none' ? null : parseInt(value);
+                this.showingAllRows = false; // Reset display limit
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'digital-spots-distance-filter') {
                 const value = e.target.value;
                 this.distanceFilter = value === 'none' ? null : parseInt(value);
+                this.showingAllRows = false; // Reset display limit
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'digital-spots-show-badges') {
                 this.showBadges = e.target.checked;
@@ -136,8 +151,16 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         container.addEventListener('input', (e) => {
             if (e.target.id === 'digital-spots-callsign-filter') {
+                // Debounce callsign filter to avoid filtering on every keystroke
+                if (this.callsignFilterDebounceTimer) {
+                    clearTimeout(this.callsignFilterDebounceTimer);
+                }
+                
                 this.callsignFilter = e.target.value.toUpperCase();
-                this.filterAndRenderSpots();
+                this.callsignFilterDebounceTimer = setTimeout(() => {
+                    this.showingAllRows = false; // Reset display limit
+                    this.filterAndRenderSpots();
+                }, this.filterDebounceDelay);
             }
         });
 
@@ -219,11 +242,21 @@ class DigitalSpotsExtension extends DecoderExtension {
             this.spots = this.spots.slice(0, this.maxSpots);
         }
 
-        this.filterAndRenderSpots();
-        this.updateLastUpdate();
-        this.scheduleBadgeUpdate();
+        // Invalidate caches when new spot added
+        this.filteredSpotsCache = null;
+        this.badgeCache = null;
 
-        // Update modal if it's open
+        // Only update UI if panel is visible
+        const panel = document.querySelector('.decoder-extension-panel');
+        const isPanelVisible = panel && panel.style.display !== 'none';
+        
+        if (isPanelVisible) {
+            this.filterAndRenderSpots();
+            this.updateLastUpdate();
+            this.scheduleBadgeUpdate();
+        }
+
+        // Update modal if it's open (modal can be open even if panel is closed)
         if (this.currentModalCountry && this.currentModalBand) {
             // Mark that graph needs refresh due to new spot
             this._modalNeedsGraphRefresh = true;
@@ -231,7 +264,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         }
     }
 
-    filterAndRenderSpots() {
+    filterAndRenderSpots(forceRefresh = false) {
         const tbody = document.getElementById('digital-spots-tbody');
         if (!tbody) return;
 
@@ -239,66 +272,86 @@ class DigitalSpotsExtension extends DecoderExtension {
         if (this.renderPending) return;
         this.renderPending = true;
 
-        // Apply all filters in a single pass for better performance
-        const now = new Date();
-        const maxAgeMs = this.ageFilter !== null ? this.ageFilter * 60 * 1000 : null;
-        const minSnr = this.snrFilter;
-        const minDistance = this.distanceFilter;
-        const callsignUpper = this.callsignFilter.toUpperCase();
-        
-        const filteredSpots = this.spots.filter(spot => {
-            // Filter out spots with empty Grid/locator
-            if (!spot.locator || spot.locator.trim() === '') {
-                return false;
-            }
+        // Check if we can use cached results
+        const now = Date.now();
+        const filterParams = JSON.stringify({
+            age: this.ageFilter,
+            mode: this.modeFilter,
+            band: this.bandFilter,
+            snr: this.snrFilter,
+            distance: this.distanceFilter,
+            callsign: this.callsignFilter,
+            spotCount: this.spots.length
+        });
 
-            // Age filter
-            if (maxAgeMs !== null) {
-                try {
-                    const spotTime = new Date(spot.timestamp);
-                    const ageMs = now - spotTime;
-                    if (ageMs > maxAgeMs) return false;
-                } catch (e) {
-                    // Keep spot if timestamp is invalid
-                }
-            }
-            
-            // Mode filter
-            if (this.modeFilter !== 'all' && spot.mode !== this.modeFilter) {
-                return false;
-            }
-            
-            // Band filter (using band property from backend)
-            if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) {
-                return false;
-            }
-            
-            // SNR filter
-            if (minSnr !== null && spot.snr < minSnr) {
-                return false;
-            }
-            
-            // Distance filter
-            if (minDistance !== null) {
-                // Only filter if spot has distance_km field
-                if (spot.distance_km !== undefined && spot.distance_km !== null) {
-                    if (spot.distance_km < minDistance) {
-                        return false;
+        let filteredSpots;
+        if (!forceRefresh && this.filteredSpotsCache && this.lastFilterParams === filterParams) {
+            // Use cached results
+            filteredSpots = this.filteredSpotsCache;
+        } else {
+            // Apply filters with optimized order (cheapest first, most selective early)
+            const nowDate = new Date(now);
+            const maxAgeMs = this.ageFilter !== null ? this.ageFilter * 60 * 1000 : null;
+            const minSnr = this.snrFilter;
+            const minDistance = this.distanceFilter;
+            const callsignUpper = this.callsignFilter.toUpperCase();
+
+            filteredSpots = this.spots.filter(spot => {
+                // Age filter FIRST - most selective, eliminates old spots early
+                if (maxAgeMs !== null) {
+                    try {
+                        const spotTime = new Date(spot.timestamp);
+                        const ageMs = nowDate - spotTime;
+                        if (ageMs > maxAgeMs) return false;
+                    } catch (e) {
+                        return false; // Skip invalid timestamps
                     }
                 }
-                // If spot doesn't have distance, keep it (don't filter out)
-            }
-            
-            // Callsign filter
-            if (callsignUpper &&
-                !spot.callsign.toUpperCase().includes(callsignUpper) &&
-                !(spot.locator && spot.locator.toUpperCase().includes(callsignUpper)) &&
-                !(spot.message && spot.message.toUpperCase().includes(callsignUpper))) {
-                return false;
-            }
-            
-            return true;
-        });
+
+                // Band filter - very selective when not 'all'
+                if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) {
+                    return false;
+                }
+
+                // Mode filter - selective when not 'all'
+                if (this.modeFilter !== 'all' && spot.mode !== this.modeFilter) {
+                    return false;
+                }
+
+                // Filter out spots with empty Grid/locator
+                if (!spot.locator || spot.locator.trim() === '') {
+                    return false;
+                }
+
+                // SNR filter - cheap comparison
+                if (minSnr !== null && spot.snr < minSnr) {
+                    return false;
+                }
+
+                // Distance filter - cheap comparison
+                if (minDistance !== null) {
+                    if (spot.distance_km !== undefined && spot.distance_km !== null) {
+                        if (spot.distance_km < minDistance) {
+                            return false;
+                        }
+                    }
+                }
+
+                // Callsign filter LAST - most expensive (string operations)
+                if (callsignUpper &&
+                    !spot.callsign.toUpperCase().includes(callsignUpper) &&
+                    !(spot.locator && spot.locator.toUpperCase().includes(callsignUpper)) &&
+                    !(spot.message && spot.message.toUpperCase().includes(callsignUpper))) {
+                    return false;
+                }
+
+                return true;
+            });
+
+            // Cache the results
+            this.filteredSpotsCache = filteredSpots;
+            this.lastFilterParams = filterParams;
+        }
 
         // DEFER DOM UPDATES TO NEXT ANIMATION FRAME
         // This prevents blocking the audio thread during heavy spot activity
@@ -324,8 +377,12 @@ class DigitalSpotsExtension extends DecoderExtension {
 
             let highlightedNewSpot = false;
 
+            // Limit displayed rows for performance (show first N rows)
+            const displayLimit = this.showingAllRows ? filteredSpots.length : Math.min(this.maxDisplayRows, filteredSpots.length);
+            const spotsToRender = filteredSpots.slice(0, displayLimit);
+
             // Render spots using DocumentFragment
-            filteredSpots.forEach((spot) => {
+            spotsToRender.forEach((spot) => {
                 const row = document.createElement('tr');
 
                 if (this.newSpotId && spot._highlightId === this.newSpotId && this.highlightNew) {
@@ -429,6 +486,44 @@ class DigitalSpotsExtension extends DecoderExtension {
                 fragment.appendChild(row);
             });
 
+            // Add "show more" button if there are more spots to display
+            if (displayLimit < filteredSpots.length && !this.showingAllRows) {
+                const row = document.createElement('tr');
+                row.className = 'show-more-row';
+                const cell = document.createElement('td');
+                cell.colSpan = 12;
+                cell.style.textAlign = 'center';
+                cell.style.padding = '10px';
+                cell.style.cursor = 'pointer';
+                cell.style.backgroundColor = '#2a2a2a';
+                cell.style.color = '#4a9eff';
+                cell.textContent = `Show all ${filteredSpots.length} spots (currently showing ${displayLimit})`;
+                cell.addEventListener('click', () => {
+                    this.showingAllRows = true;
+                    this.filterAndRenderSpots(true);
+                });
+                row.appendChild(cell);
+                fragment.appendChild(row);
+            } else if (this.showingAllRows && filteredSpots.length > this.maxDisplayRows) {
+                // Add "show less" button
+                const row = document.createElement('tr');
+                row.className = 'show-less-row';
+                const cell = document.createElement('td');
+                cell.colSpan = 12;
+                cell.style.textAlign = 'center';
+                cell.style.padding = '10px';
+                cell.style.cursor = 'pointer';
+                cell.style.backgroundColor = '#2a2a2a';
+                cell.style.color = '#4a9eff';
+                cell.textContent = `Show less (showing all ${filteredSpots.length} spots)`;
+                cell.addEventListener('click', () => {
+                    this.showingAllRows = false;
+                    this.filterAndRenderSpots(true);
+                });
+                row.appendChild(cell);
+                fragment.appendChild(row);
+            }
+
             // Clear and append all at once for better performance
             tbody.innerHTML = '';
             tbody.appendChild(fragment);
@@ -445,6 +540,11 @@ class DigitalSpotsExtension extends DecoderExtension {
     }
 
     scheduleBadgeUpdate() {
+        // Skip if extension panel is not visible
+        const panel = document.querySelector('.decoder-extension-panel');
+        const isPanelVisible = panel && panel.style.display !== 'none';
+        if (!isPanelVisible) return;
+
         // Throttle badge updates to prevent blocking audio thread
         // Only update once per second maximum
         const now = Date.now();
@@ -484,22 +584,52 @@ class DigitalSpotsExtension extends DecoderExtension {
         if (currentBand === 'all') {
             container.classList.add('empty');
             container.innerHTML = 'Select a specific band to see country badges';
+            this.badgeCache = null;
+            this.lastBadgeBand = null;
+            return;
+        }
+
+        // Check if we can use cached badge data
+        if (this.badgeCache && this.lastBadgeBand === currentBand) {
+            // Use cached data - just update the DOM
+            const fragment = document.createDocumentFragment();
+            this.badgeCache.forEach(([country, spotData]) => {
+                const badge = document.createElement('span');
+                badge.className = 'country-badge';
+                badge.textContent = country;
+                const snrText = spotData.snr >= 0 ? `+${spotData.snr}` : spotData.snr;
+                badge.title = `${country} on ${currentBand}\nLast: ${spotData.callsign}\nMode: ${spotData.mode}\nSNR: ${snrText} dB`;
+                badge.addEventListener('click', () => {
+                    this.openCountryModal(country, currentBand);
+                });
+                fragment.appendChild(badge);
+            });
+            container.innerHTML = '';
+            container.appendChild(fragment);
             return;
         }
 
         // Get spots for current band from the last 10 minutes
+        // Optimize: filter by time first (most selective), then band, then country
         const now = Date.now();
         const tenMinutesAgo = now - (10 * 60 * 1000);
 
         const recentBandSpots = this.spots.filter(spot => {
-            if (spot.band !== currentBand || !spot.country) return false;
+            // Time filter first (most selective)
             const spotTime = new Date(spot.timestamp).getTime();
-            return spotTime >= tenMinutesAgo;
+            if (spotTime < tenMinutesAgo) return false;
+            // Band filter
+            if (spot.band !== currentBand) return false;
+            // Country filter
+            if (!spot.country) return false;
+            return true;
         });
 
         if (recentBandSpots.length === 0) {
             container.classList.add('empty');
             container.innerHTML = `No countries seen on ${currentBand} in the last 10 minutes`;
+            this.badgeCache = null;
+            this.lastBadgeBand = null;
             return;
         }
 
@@ -510,8 +640,6 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         recentBandSpots.forEach(spot => {
             const country = spot.country;
-            if (!country) return;
-
             const spotTime = new Date(spot.timestamp).getTime();
 
             if (!countryMap.has(country) || spotTime > countryMap.get(country).timestamp) {
@@ -526,7 +654,11 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         // Convert to array and sort alphabetically by country name
         const countries = Array.from(countryMap.entries())
-            .sort((a, b) => a[0].localeCompare(b[0])); // Sort alphabetically by country name
+            .sort((a, b) => a[0].localeCompare(b[0]));
+
+        // Cache the results
+        this.badgeCache = countries;
+        this.lastBadgeBand = currentBand;
 
         // Create badges
         const fragment = document.createDocumentFragment();
@@ -638,43 +770,52 @@ class DigitalSpotsExtension extends DecoderExtension {
 
     clearSpots() {
         this.spots = [];
+        this.filteredSpotsCache = null; // Invalidate cache
+        this.badgeCache = null; // Invalidate badge cache
+        this.showingAllRows = false; // Reset display limit
         this.filterAndRenderSpots();
     }
 
     startAgeUpdates() {
         this.ageUpdateInterval = setInterval(() => {
-            // Only update age text, don't re-render entire table
-            const ageCells = document.querySelectorAll('.spot-age');
-            ageCells.forEach(cell => {
-                const timestamp = cell.getAttribute('data-timestamp');
-                if (timestamp) {
-                    cell.textContent = this.formatAge(timestamp);
-                }
-            });
+            // Skip all processing if extension panel is not visible
+            const panel = document.querySelector('.decoder-extension-panel');
+            const isPanelVisible = panel && panel.style.display !== 'none';
+            
+            if (isPanelVisible) {
+                // Only update age text, don't re-render entire table
+                const ageCells = document.querySelectorAll('.spot-age');
+                ageCells.forEach(cell => {
+                    const timestamp = cell.getAttribute('data-timestamp');
+                    if (timestamp) {
+                        cell.textContent = this.formatAge(timestamp);
+                    }
+                });
 
-            // Update modal age cells if modal is open
-            const modalAgeCells = document.querySelectorAll('.modal-age');
-            modalAgeCells.forEach(cell => {
-                const timestamp = cell.getAttribute('data-timestamp');
-                if (timestamp) {
-                    cell.textContent = this.formatAge(timestamp);
+                // Only re-filter if we have an age filter and enough time has passed
+                // Check every 10 seconds instead of every second
+                if (this.ageFilter !== null && !this.lastAgeFilterCheck) {
+                    this.lastAgeFilterCheck = Date.now();
                 }
-            });
 
-            // Only re-filter if we have an age filter and enough time has passed
-            // Check every 10 seconds instead of every second
-            if (this.ageFilter !== null && !this.lastAgeFilterCheck) {
-                this.lastAgeFilterCheck = Date.now();
+                if (this.ageFilter !== null && this.lastAgeFilterCheck &&
+                    (Date.now() - this.lastAgeFilterCheck) > 10000) {
+                    this.lastAgeFilterCheck = Date.now();
+                    this.filterAndRenderSpots();
+                }
             }
 
-            if (this.ageFilter !== null && this.lastAgeFilterCheck &&
-                (Date.now() - this.lastAgeFilterCheck) > 10000) {
-                this.lastAgeFilterCheck = Date.now();
-                this.filterAndRenderSpots();
-            }
-
-            // Refresh modal content every second if it's open
+            // Update modal age cells if modal is open (modal can be open even if panel is closed)
             if (this.currentModalCountry && this.currentModalBand) {
+                const modalAgeCells = document.querySelectorAll('.modal-age');
+                modalAgeCells.forEach(cell => {
+                    const timestamp = cell.getAttribute('data-timestamp');
+                    if (timestamp) {
+                        cell.textContent = this.formatAge(timestamp);
+                    }
+                });
+                
+                // Refresh modal content every second if it's open
                 this.refreshModalContent();
             }
         }, 1000);
@@ -909,16 +1050,19 @@ class DigitalSpotsExtension extends DecoderExtension {
         const tenMinutesAgo = now - (10 * 60 * 1000);
 
         const countrySpots = this.spots.filter(spot => {
+            // Age filter FIRST (most selective - eliminates old spots early)
+            const spotTime = new Date(spot.timestamp).getTime();
+            if (spotTime < tenMinutesAgo) return false;
+
+            // Band and country filters (very selective)
             if (spot.band !== band || spot.country !== country) return false;
 
-            // Apply mode filter
+            // Mode filter last (only if not 'all')
             if (this.currentModalModeFilter !== 'all' && spot.mode !== this.currentModalModeFilter) {
                 return false;
             }
 
-            // Apply 10-minute age filter for modal (independent of main table filter)
-            const spotTime = new Date(spot.timestamp).getTime();
-            return spotTime >= tenMinutesAgo;
+            return true;
         });
 
         // Get unique callsigns with their most recent spot data
@@ -1134,16 +1278,19 @@ class DigitalSpotsExtension extends DecoderExtension {
         const tenMinutesAgo = now - (10 * 60 * 1000);
 
         const countrySpots = this.spots.filter(spot => {
+            // Age filter FIRST (most selective - eliminates old spots early)
+            const spotTime = new Date(spot.timestamp).getTime();
+            if (spotTime < tenMinutesAgo) return false;
+
+            // Band and country filters (very selective)
             if (spot.band !== band || spot.country !== country) return false;
 
-            // Apply mode filter
+            // Mode filter last (only if not 'all')
             if (this.currentModalModeFilter !== 'all' && spot.mode !== this.currentModalModeFilter) {
                 return false;
             }
 
-            // Apply 10-minute age filter for modal (independent of main table filter)
-            const spotTime = new Date(spot.timestamp).getTime();
-            return spotTime >= tenMinutesAgo;
+            return true;
         });
 
         // Group spots by mode

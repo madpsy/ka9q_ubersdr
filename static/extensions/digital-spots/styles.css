@@ -425,7 +425,7 @@
 /* Modal Tabs */
 .country-spots-modal-tabs {
     display: flex;
-    gap: 0;
+    gap: 4px;
     background: #222;
     border-bottom: 2px solid #444;
     padding: 0 20px;

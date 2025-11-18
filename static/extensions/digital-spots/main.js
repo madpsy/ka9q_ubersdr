@@ -44,6 +44,9 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.filterDebounceDelay = 300; // ms delay for debouncing
         this.badgeCache = null; // Cache badge data
         this.lastBadgeBand = null; // Track last band for badge cache
+        this.lastRenderedSpotId = null; // Track last rendered spot for incremental updates
+        this.pendingSpots = []; // Queue of spots waiting to be rendered
+        this.renderThrottleTimer = null; // Throttle timer for rendering
 
         // Subscribe to digital spots immediately
         this.subscribeToDigitalSpots();
@@ -249,11 +252,20 @@ class DigitalSpotsExtension extends DecoderExtension {
         // Only update UI if panel is visible
         const panel = document.querySelector('.decoder-extension-panel');
         const isPanelVisible = panel && panel.style.display !== 'none';
-        
+
         if (isPanelVisible) {
-            this.filterAndRenderSpots();
-            this.updateLastUpdate();
-            this.scheduleBadgeUpdate();
+            // Add to pending queue for incremental rendering
+            this.pendingSpots.push(spot);
+
+            // Throttle rendering to max once per 500ms
+            if (!this.renderThrottleTimer) {
+                this.renderThrottleTimer = setTimeout(() => {
+                    this.renderThrottleTimer = null;
+                    this.renderPendingSpots();
+                    this.updateLastUpdate();
+                    this.scheduleBadgeUpdate();
+                }, 500);
+            }
         }
 
         // Update modal if it's open (modal can be open even if panel is closed)
@@ -262,6 +274,192 @@ class DigitalSpotsExtension extends DecoderExtension {
             this._modalNeedsGraphRefresh = true;
             this.refreshModalContent();
         }
+    }
+
+    renderPendingSpots() {
+        if (this.pendingSpots.length === 0) return;
+
+        const tbody = document.getElementById('digital-spots-tbody');
+        if (!tbody) return;
+
+        // Get current filter parameters
+        const now = Date.now();
+        const nowDate = new Date(now);
+        const maxAgeMs = this.ageFilter !== null ? this.ageFilter * 60 * 1000 : null;
+        const minSnr = this.snrFilter;
+        const minDistance = this.distanceFilter;
+        const callsignUpper = this.callsignFilter.toUpperCase();
+
+        // Filter pending spots
+        const newFilteredSpots = this.pendingSpots.filter(spot => {
+            // Age filter FIRST
+            if (maxAgeMs !== null) {
+                try {
+                    const spotTime = new Date(spot.timestamp);
+                    const ageMs = nowDate - spotTime;
+                    if (ageMs > maxAgeMs) return false;
+                } catch (e) {
+                    return false;
+                }
+            }
+            // Band filter
+            if (this.bandFilter !== 'all' && spot.band !== this.bandFilter) return false;
+            // Mode filter
+            if (this.modeFilter !== 'all' && spot.mode !== this.modeFilter) return false;
+            // Locator filter
+            if (!spot.locator || spot.locator.trim() === '') return false;
+            // SNR filter
+            if (minSnr !== null && spot.snr < minSnr) return false;
+            // Distance filter
+            if (minDistance !== null && spot.distance_km !== undefined && spot.distance_km !== null) {
+                if (spot.distance_km < minDistance) return false;
+            }
+            // Callsign filter
+            if (callsignUpper &&
+                !spot.callsign.toUpperCase().includes(callsignUpper) &&
+                !(spot.locator && spot.locator.toUpperCase().includes(callsignUpper)) &&
+                !(spot.message && spot.message.toUpperCase().includes(callsignUpper))) {
+                return false;
+            }
+            return true;
+        });
+
+        // Clear pending queue
+        this.pendingSpots = [];
+
+        if (newFilteredSpots.length === 0) return;
+
+        // Create rows for new spots
+        const fragment = document.createDocumentFragment();
+        newFilteredSpots.forEach(spot => {
+            const row = this.createSpotRow(spot);
+            fragment.appendChild(row);
+        });
+
+        // Prepend new rows to table
+        if (tbody.firstChild) {
+            tbody.insertBefore(fragment, tbody.firstChild);
+        } else {
+            tbody.appendChild(fragment);
+        }
+
+        // Enforce display limit by removing excess rows from bottom
+        const displayLimit = this.showingAllRows ? Infinity : this.maxDisplayRows;
+        while (tbody.children.length > displayLimit + 1) { // +1 for potential "show more" row
+            const lastChild = tbody.lastChild;
+            if (lastChild && !lastChild.classList.contains('show-more-row') && !lastChild.classList.contains('show-less-row')) {
+                tbody.removeChild(lastChild);
+            } else {
+                break;
+            }
+        }
+
+        // Update count
+        this.updateCount(tbody.children.length, this.spots.length);
+    }
+
+    createSpotRow(spot) {
+        const row = document.createElement('tr');
+
+        if (this.newSpotId && spot._highlightId === this.newSpotId && this.highlightNew) {
+            row.className = 'spot-new';
+            setTimeout(() => {
+                row.classList.remove('spot-new');
+            }, 500);
+            this.newSpotId = null;
+        }
+
+        // Time
+        const timeCell = document.createElement('td');
+        timeCell.className = 'spot-time';
+        timeCell.textContent = this.formatTime(spot.timestamp);
+        row.appendChild(timeCell);
+
+        // Age
+        const ageCell = document.createElement('td');
+        ageCell.className = 'spot-age';
+        ageCell.setAttribute('data-timestamp', spot.timestamp);
+        ageCell.textContent = this.formatAge(spot.timestamp);
+        row.appendChild(ageCell);
+
+        // Mode
+        const modeCell = document.createElement('td');
+        modeCell.className = `spot-mode spot-mode-${spot.mode}`;
+        modeCell.textContent = spot.mode;
+        row.appendChild(modeCell);
+
+        // Frequency
+        const freqCell = document.createElement('td');
+        freqCell.className = 'spot-frequency';
+        freqCell.textContent = this.formatFrequency(spot.frequency);
+        freqCell.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.tuneToSpot(spot);
+        });
+        row.appendChild(freqCell);
+
+        // Band
+        const bandCell = document.createElement('td');
+        bandCell.className = 'spot-band';
+        bandCell.textContent = spot.band || '';
+        row.appendChild(bandCell);
+
+        // Callsign
+        const callCell = document.createElement('td');
+        callCell.className = 'spot-callsign';
+        callCell.textContent = spot.callsign;
+        callCell.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.openQRZ(spot.callsign);
+        });
+        row.appendChild(callCell);
+
+        // Country
+        const countryCell = document.createElement('td');
+        countryCell.className = 'spot-country';
+        countryCell.textContent = spot.country || '';
+        row.appendChild(countryCell);
+
+        // Grid
+        const gridCell = document.createElement('td');
+        gridCell.className = 'spot-grid';
+        gridCell.textContent = spot.locator || '';
+        row.appendChild(gridCell);
+
+        // Distance
+        const distanceCell = document.createElement('td');
+        distanceCell.className = 'spot-distance';
+        if (spot.distance_km !== undefined && spot.distance_km !== null) {
+            distanceCell.textContent = `${Math.round(spot.distance_km)} km`;
+        } else {
+            distanceCell.textContent = '';
+        }
+        row.appendChild(distanceCell);
+
+        // Bearing
+        const bearingCell = document.createElement('td');
+        bearingCell.className = 'spot-bearing';
+        if (spot.bearing_deg !== undefined && spot.bearing_deg !== null) {
+            distanceCell.title = `${Math.round(spot.bearing_deg)}°`;
+            bearingCell.textContent = `${Math.round(spot.bearing_deg)}°`;
+        } else {
+            bearingCell.textContent = '';
+        }
+        row.appendChild(bearingCell);
+
+        // SNR
+        const snrCell = document.createElement('td');
+        snrCell.className = `spot-snr ${spot.snr >= 0 ? 'spot-snr-positive' : 'spot-snr-negative'}`;
+        snrCell.textContent = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
+        row.appendChild(snrCell);
+
+        // Message
+        const msgCell = document.createElement('td');
+        msgCell.className = 'spot-message';
+        msgCell.textContent = spot.message || '';
+        row.appendChild(msgCell);
+
+        return row;
     }
 
     filterAndRenderSpots(forceRefresh = false) {
@@ -773,6 +971,11 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.filteredSpotsCache = null; // Invalidate cache
         this.badgeCache = null; // Invalidate badge cache
         this.showingAllRows = false; // Reset display limit
+        this.pendingSpots = []; // Clear pending queue
+        if (this.renderThrottleTimer) {
+            clearTimeout(this.renderThrottleTimer);
+            this.renderThrottleTimer = null;
+        }
         this.filterAndRenderSpots();
     }
 

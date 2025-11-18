@@ -1908,8 +1908,11 @@ class DigitalSpotsExtension extends DecoderExtension {
                         ? `${Math.round(hoveredSpot.bearing_deg)}°`
                         : 'N/A';
 
+                    // Get SNR color for callsign
+                    const snrColor = getSNRColor(hoveredSpot.snr, mode);
+
                     tooltip.innerHTML = `
-                        <div class="tooltip-row"><strong>${hoveredSpot.callsign}</strong></div>
+                        <div class="tooltip-row"><strong style="color: ${snrColor}">${hoveredSpot.callsign}</strong></div>
                         <div class="tooltip-row">Mode: ${hoveredSpot.mode}</div>
                         <div class="tooltip-row">Freq: ${this.formatFrequency(hoveredSpot.frequency)} MHz</div>
                         <div class="tooltip-row">SNR: ${snrText} dB</div>

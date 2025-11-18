@@ -1635,10 +1635,18 @@ class DigitalSpotsExtension extends DecoderExtension {
             return;
         }
 
-        // Calculate time range (last 10 minutes)
-        const now = Date.now();
-        const tenMinutesAgo = now - (10 * 60 * 1000);
-        const timeRange = now - tenMinutesAgo;
+        // Calculate time range based on actual spot times (not rolling window)
+        // This makes the time axis show absolute times where spots occurred
+        const spotTimes = spots.map(s => new Date(s.timestamp).getTime());
+        const minTime = Math.min(...spotTimes);
+        const maxTime = Math.max(...spotTimes);
+        const timeRange = maxTime - minTime;
+
+        // Add 5% padding on each side for better visualization
+        const timePadding = Math.max(timeRange * 0.05, 30000); // At least 30 seconds padding
+        const displayMinTime = minTime - timePadding;
+        const displayMaxTime = maxTime + timePadding;
+        const displayTimeRange = displayMaxTime - displayMinTime;
 
         // Calculate frequency range
         const frequencies = spots.map(s => s.frequency);
@@ -1685,17 +1693,18 @@ class DigitalSpotsExtension extends DecoderExtension {
             ctx.stroke();
         }
 
-        // Draw X-axis labels (Time)
+        // Draw X-axis labels (Time) - showing actual times where spots occurred
         ctx.textAlign = 'center';
         const numXTicks = 5;
         for (let i = 0; i <= numXTicks; i++) {
-            const time = tenMinutesAgo + (timeRange * i / numXTicks);
+            const time = displayMinTime + (displayTimeRange * i / numXTicks);
             const x = marginLeft + (graphWidth * i / numXTicks);
             const date = new Date(time);
             const timeStr = date.toLocaleTimeString('en-US', {
                 hour12: false,
                 hour: '2-digit',
                 minute: '2-digit',
+                second: '2-digit',
                 timeZone: 'UTC'
             });
 
@@ -1751,7 +1760,7 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         spots.forEach(spot => {
             const spotTime = new Date(spot.timestamp).getTime();
-            const x = marginLeft + ((spotTime - tenMinutesAgo) / timeRange) * graphWidth;
+            const x = marginLeft + ((spotTime - displayMinTime) / displayTimeRange) * graphWidth;
             const baseY = height - marginBottom - ((spot.frequency - (minFreq - freqPadding)) / (freqRange + 2 * freqPadding)) * graphHeight;
 
             // Measure text width

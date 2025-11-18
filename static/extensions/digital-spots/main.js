@@ -1693,12 +1693,33 @@ class DigitalSpotsExtension extends DecoderExtension {
             ctx.stroke();
         }
 
-        // Draw X-axis labels (Time) - showing actual times where spots occurred
+        // Draw X-axis labels (Time) - use actual spot timestamps for labels
+        // This ensures labels align with mode-specific boundaries (FT8=15s, FT4=7.5s, WSPR=120s)
         ctx.textAlign = 'center';
-        const numXTicks = 5;
-        for (let i = 0; i <= numXTicks; i++) {
-            const time = displayMinTime + (displayTimeRange * i / numXTicks);
-            const x = marginLeft + (graphWidth * i / numXTicks);
+
+        // Get unique spot times and sort them
+        const uniqueSpotTimes = [...new Set(spotTimes)].sort((a, b) => a - b);
+
+        // Select evenly distributed spot times for labels (aim for ~5-7 labels)
+        const targetLabels = 6;
+        const labelTimes = [];
+
+        if (uniqueSpotTimes.length <= targetLabels) {
+            // Use all unique times if we have few spots
+            labelTimes.push(...uniqueSpotTimes);
+        } else {
+            // Select evenly distributed times from actual spots
+            const step = Math.floor(uniqueSpotTimes.length / (targetLabels - 1));
+            for (let i = 0; i < targetLabels - 1; i++) {
+                labelTimes.push(uniqueSpotTimes[i * step]);
+            }
+            // Always include the last spot time
+            labelTimes.push(uniqueSpotTimes[uniqueSpotTimes.length - 1]);
+        }
+
+        // Draw labels at actual spot times
+        labelTimes.forEach(time => {
+            const x = marginLeft + ((time - displayMinTime) / displayTimeRange) * graphWidth;
             const date = new Date(time);
             const timeStr = date.toLocaleTimeString('en-US', {
                 hour12: false,
@@ -1718,7 +1739,7 @@ class DigitalSpotsExtension extends DecoderExtension {
             ctx.moveTo(x, marginTop);
             ctx.lineTo(x, height - marginBottom);
             ctx.stroke();
-        }
+        });
 
         // Draw X-axis label
         ctx.fillStyle = '#888';
@@ -1737,21 +1758,38 @@ class DigitalSpotsExtension extends DecoderExtension {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Color based on mode
-        let textColor;
-        switch (mode) {
-            case 'FT8':
-                textColor = '#28a745';
-                break;
-            case 'FT4':
-                textColor = '#17a2b8';
-                break;
-            case 'WSPR':
-                textColor = '#ffc107';
-                break;
-            default:
-                textColor = '#4a9eff';
-        }
+        // Helper function to get color based on SNR and mode
+        const getSNRColor = (snr, mode) => {
+            // Define SNR thresholds for each mode
+            let thresholds;
+            if (mode === 'WSPR') {
+                // WSPR typical range: -31 to +10 dB
+                thresholds = {
+                    strong: -5,    // >= -5 dB: green (strong)
+                    good: -15,     // >= -15 dB: yellow (good)
+                    weak: -25      // >= -25 dB: orange (weak)
+                    // < -25 dB: red (very weak)
+                };
+            } else {
+                // FT8/FT4 typical range: -24 to +20 dB
+                thresholds = {
+                    strong: 5,     // >= +5 dB: green (strong)
+                    good: -5,      // >= -5 dB: yellow (good)
+                    weak: -15      // >= -15 dB: orange (weak)
+                    // < -15 dB: red (very weak)
+                };
+            }
+
+            if (snr >= thresholds.strong) {
+                return '#28a745'; // Green - strong signal
+            } else if (snr >= thresholds.good) {
+                return '#ffc107'; // Yellow - good signal
+            } else if (snr >= thresholds.weak) {
+                return '#ff8c00'; // Orange - weak signal
+            } else {
+                return '#dc3545'; // Red - very weak signal
+            }
+        };
 
         // Calculate positions and detect collisions
         const labelHeight = 12;
@@ -1762,6 +1800,9 @@ class DigitalSpotsExtension extends DecoderExtension {
             const spotTime = new Date(spot.timestamp).getTime();
             const x = marginLeft + ((spotTime - displayMinTime) / displayTimeRange) * graphWidth;
             const baseY = height - marginBottom - ((spot.frequency - (minFreq - freqPadding)) / (freqRange + 2 * freqPadding)) * graphHeight;
+
+            // Get color based on SNR
+            const textColor = getSNRColor(spot.snr, mode);
 
             // Measure text width
             const textWidth = ctx.measureText(spot.callsign).width;

@@ -616,7 +616,7 @@ func main() {
 	hostFlag := flag.String("H", "localhost", "Server hostname (default: localhost, ignored if --url is provided)")
 	portFlag := flag.Int("p", 8080, "Server port (default: 8080, ignored if --url is provided)")
 	frequencyFlag := flag.Int("f", 0, "Frequency in Hz (e.g., 14074000 for 14.074 MHz)")
-	modeFlag := flag.String("m", "", "Demodulation mode (am, sam, usb, lsb, fm, nfm, cwu, cwl)")
+	modeFlag := flag.String("m", "", "Demodulation mode (am, sam, usb, lsb, fm, nfm, cwu, cwl, iq)")
 	bandwidthFlag := flag.String("b", "", "Bandwidth in format low:high (e.g., -5000:5000)")
 	outputFlag := flag.String("o", "pipewire", "Output mode (pipewire, stdout, wav)")
 	wavFileFlag := flag.String("w", "", "WAV file path (required when output=wav)")
@@ -661,7 +661,7 @@ func main() {
 	// Validate mode
 	validModes := map[string]bool{
 		"am": true, "sam": true, "usb": true, "lsb": true,
-		"fm": true, "nfm": true, "cwu": true, "cwl": true,
+		"fm": true, "nfm": true, "cwu": true, "cwl": true, "iq": true,
 	}
 	if !validModes[strings.ToLower(*modeFlag)] {
 		fmt.Fprintf(os.Stderr, "Error: invalid mode '%s'\n", *modeFlag)

@@ -462,6 +462,9 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		case "nfm":
 			bwl = -5000
 			bwh = 5000
+		case "iq":
+			bwl = -5000
+			bwh = 5000
 		default:
 			bwl = 50
 			bwh = 3000
@@ -671,6 +674,9 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 						defaultLow = -8000
 						defaultHigh = 8000
 					case "nfm":
+						defaultLow = -5000
+						defaultHigh = 5000
+					case "iq":
 						defaultLow = -5000
 						defaultHigh = 5000
 					default:

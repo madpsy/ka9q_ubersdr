@@ -11,7 +11,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         });
 
         this.spots = [];
-        this.maxSpots = 1000; // Store up to 1000 spots in memory for excellent band filtering
+        this.maxSpots = 5000; // Store up to 5000 spots in memory (enough for ~10 minutes at high activity)
         this.ageFilter = 10; // Default 10 minutes
         this.modeFilter = 'all';
         this.bandFilter = 'all'; // Start with 'all', will be updated on init

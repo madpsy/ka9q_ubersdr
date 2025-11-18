@@ -1505,7 +1505,16 @@ class DigitalSpotsExtension extends DecoderExtension {
             spotsByMode[spot.mode].push(spot);
         });
 
-        const modes = Object.keys(spotsByMode).sort();
+        // Sort modes in preferred order: FT8, FT4, WSPR, then others alphabetically
+        const modeOrder = { 'FT8': 1, 'FT4': 2, 'WSPR': 3 };
+        const modes = Object.keys(spotsByMode).sort((a, b) => {
+            const orderA = modeOrder[a] || 999;
+            const orderB = modeOrder[b] || 999;
+            if (orderA !== orderB) {
+                return orderA - orderB;
+            }
+            return a.localeCompare(b); // Alphabetical for other modes
+        });
 
         // Render graphs
         const container = document.getElementById('country-spots-graphs-container');

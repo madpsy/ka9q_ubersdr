@@ -784,7 +784,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				Type:        "audio",
 				Data:        encoded,
 				SampleRate:  session.SampleRate,
-				Channels:    1, // Mono
+				Channels:    session.Channels, // 1=mono, 2=stereo (for IQ mode)
 				AudioFormat: audioFormat,
 				Timestamp:   time.Now().UnixMilli(), // Send time in milliseconds for latency tracking
 			}
@@ -811,6 +811,7 @@ func (wsh *WebSocketHandler) sendStatus(conn *wsConn, session *Session) error {
 		Frequency:  session.Frequency,
 		Mode:       session.Mode,
 		SampleRate: session.SampleRate,
+		Channels:   session.Channels,
 		Info:       session.GetInfo(),
 	}
 	return wsh.sendMessage(conn, msg)

@@ -56,6 +56,7 @@ class RadioClient:
         self.running = True
         self.start_time = None
         self.sample_rate = 12000  # Default, will be updated from server
+        self.channels = 1  # Default mono, will be updated from server
         self.wav_writer = None
         self.pipewire_process = None
         
@@ -120,10 +121,10 @@ class RadioClient:
         """Initialize WAV file writer."""
         if self.wav_file:
             self.wav_writer = wave.open(self.wav_file, 'wb')
-            self.wav_writer.setnchannels(1)  # Mono
+            self.wav_writer.setnchannels(self.channels)  # Mono or stereo
             self.wav_writer.setsampwidth(2)  # 16-bit
             self.wav_writer.setframerate(self.sample_rate)
-            print(f"Recording to WAV file: {self.wav_file}", file=sys.stderr)
+            print(f"Recording to WAV file: {self.wav_file} ({self.channels} channel(s))", file=sys.stderr)
     
     async def setup_pipewire(self):
         """Start PipeWire playback process."""
@@ -133,13 +134,13 @@ class RadioClient:
                 'pw-play',
                 '--format=s16',
                 '--rate', str(self.sample_rate),
-                '--channels=1',
+                f'--channels={self.channels}',
                 '-',
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL
             )
-            print(f"PipeWire output started (sample rate: {self.sample_rate} Hz)", file=sys.stderr)
+            print(f"PipeWire output started (sample rate: {self.sample_rate} Hz, channels: {self.channels})", file=sys.stderr)
         except FileNotFoundError:
             print("Error: pw-play not found. Please install pipewire-utils.", file=sys.stderr)
             sys.exit(1)
@@ -234,12 +235,30 @@ class RadioClient:
             # Process audio data
             audio_data = message.get('data')
             sample_rate = message.get('sampleRate', self.sample_rate)
+            channels = message.get('channels', self.channels)
             
             # Update sample rate if changed
             if sample_rate != self.sample_rate:
                 self.sample_rate = sample_rate
                 print(f"Sample rate updated: {self.sample_rate} Hz", file=sys.stderr)
             
+            # Update channels if changed (requires restarting PipeWire)
+            if channels != self.channels:
+                self.channels = channels
+                print(f"Channels updated: {self.channels}", file=sys.stderr)
+
+                # Restart PipeWire with new channel count if active
+                if self.output_mode == 'pipewire' and self.pipewire_process:
+                    print("Restarting PipeWire with new channel configuration...", file=sys.stderr)
+                    if self.pipewire_process.stdin:
+                        self.pipewire_process.stdin.close()
+                    try:
+                        await asyncio.wait_for(self.pipewire_process.wait(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        self.pipewire_process.kill()
+                        await self.pipewire_process.wait()
+                    await self.setup_pipewire()
+
             if audio_data:
                 pcm_data = self.decode_audio(audio_data)
                 await self.output_audio(pcm_data)

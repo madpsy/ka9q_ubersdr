@@ -40,6 +40,7 @@ type RadioClient struct {
 	running       bool
 	startTime     *time.Time
 	sampleRate    int
+	channels      int
 	wavWriter     *WAVWriter
 	pipewireCmd   *exec.Cmd
 	pipewireStdin io.WriteCloser
@@ -62,6 +63,7 @@ type WebSocketMessage struct {
 	Type       string `json:"type"`
 	Data       string `json:"data,omitempty"`
 	SampleRate int    `json:"sampleRate,omitempty"`
+	Channels   int    `json:"channels,omitempty"`
 	SessionID  string `json:"sessionId,omitempty"`
 	Frequency  int    `json:"frequency,omitempty"`
 	Mode       string `json:"mode,omitempty"`
@@ -100,6 +102,7 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		userSessionID: uuid.New().String(),
 		running:       true,
 		sampleRate:    12000, // Default, will be updated from server
+		channels:      1,     // Default mono, will be updated from server
 		nr2Enabled:    nr2Enabled,
 		nr2Strength:   nr2Strength,
 		nr2Floor:      nr2Floor,
@@ -194,7 +197,7 @@ func (c *RadioClient) SetupPipewire() error {
 	cmd := exec.Command("pw-play",
 		"--format=s16",
 		fmt.Sprintf("--rate=%d", c.sampleRate),
-		"--channels=1",
+		fmt.Sprintf("--channels=%d", c.channels),
 		"-")
 
 	stdin, err := cmd.StdinPipe()
@@ -211,7 +214,7 @@ func (c *RadioClient) SetupPipewire() error {
 
 	c.pipewireCmd = cmd
 	c.pipewireStdin = stdin
-	fmt.Fprintf(os.Stderr, "PipeWire output started (sample rate: %d Hz)\n", c.sampleRate)
+	fmt.Fprintf(os.Stderr, "PipeWire output started (sample rate: %d Hz, channels: %d)\n", c.sampleRate, c.channels)
 	return nil
 }
 
@@ -335,11 +338,35 @@ func (c *RadioClient) HandleMessage(msg WebSocketMessage) error {
 		if sampleRate == 0 {
 			sampleRate = c.sampleRate
 		}
+		channels := msg.Channels
+		if channels == 0 {
+			channels = c.channels
+		}
 
 		// Update sample rate if changed
 		if sampleRate != c.sampleRate {
 			c.sampleRate = sampleRate
 			fmt.Fprintf(os.Stderr, "Sample rate updated: %d Hz\n", c.sampleRate)
+		}
+
+		// Update channels if changed (requires restarting PipeWire)
+		if channels != c.channels {
+			c.channels = channels
+			fmt.Fprintf(os.Stderr, "Channels updated: %d\n", c.channels)
+
+			// Restart PipeWire with new channel count if active
+			if c.outputMode == "pipewire" && c.pipewireStdin != nil {
+				fmt.Fprintf(os.Stderr, "Restarting PipeWire with new channel configuration...\n")
+				c.pipewireStdin.Close()
+				if c.pipewireCmd != nil {
+					c.pipewireCmd.Wait()
+				}
+				if err := c.SetupPipewire(); err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to restart PipeWire: %v\n", err)
+					c.running = false
+					return err
+				}
+			}
 		}
 
 		if msg.Data != "" {

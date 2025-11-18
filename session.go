@@ -21,6 +21,7 @@ type Session struct {
 	BandwidthLow  int // Low edge of filter in Hz (can be negative)
 	BandwidthHigh int // High edge of filter in Hz
 	SampleRate    int
+	Channels      int // Number of audio channels (1=mono, 2=stereo for IQ)
 	CreatedAt     time.Time
 	LastActive    time.Time
 	AudioChan     chan []byte
@@ -223,6 +224,13 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	// Get sample rate for mode
 	sampleRate := sm.config.Audio.GetSampleRateForMode(mode)
 
+	// Determine number of channels based on mode
+	// IQ mode uses stereo (I and Q channels), all others use mono
+	channels := 1
+	if mode == "iq" {
+		channels = 2
+	}
+
 	// Create session with default bandwidth edges (50 Hz to bandwidth Hz for SSB)
 	session := &Session{
 		ID:            sessionID,
@@ -234,6 +242,7 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 		BandwidthLow:  50,        // Default low edge
 		BandwidthHigh: bandwidth, // Default high edge
 		SampleRate:    sampleRate,
+		Channels:      channels,
 		CreatedAt:     time.Now(),
 		LastActive:    time.Now(),
 		AudioChan:     make(chan []byte, 100), // Buffer 100 audio packets
@@ -577,6 +586,12 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		session.Mode = mode
 		// Update sample rate when mode changes
 		session.SampleRate = sm.config.Audio.GetSampleRateForMode(mode)
+		// Update channels when mode changes (IQ=stereo, others=mono)
+		if mode == "iq" {
+			session.Channels = 2
+		} else {
+			session.Channels = 1
+		}
 	}
 	if sendBandwidth {
 		session.BandwidthLow = bandwidthLow
@@ -1032,6 +1047,7 @@ func (s *Session) GetInfo() map[string]interface{} {
 		"mode":        s.Mode,
 		"bandwidth":   s.Bandwidth,
 		"sample_rate": s.SampleRate,
+		"channels":    s.Channels,
 		"created_at":  s.CreatedAt,
 		"last_active": s.LastActive,
 	}
@@ -1073,6 +1089,7 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			info["bin_bandwidth"] = session.BinBandwidth
 		} else {
 			info["sample_rate"] = session.SampleRate
+			info["channels"] = session.Channels
 			info["bandwidth_low"] = session.BandwidthLow
 			info["bandwidth_high"] = session.BandwidthHigh
 		}

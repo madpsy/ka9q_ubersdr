@@ -30,6 +30,10 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.currentModalBand = null;
         this.currentModalModeFilter = 'all'; // Track modal mode filter
         this.currentModalTab = 'graph'; // Track current modal tab (graph or table)
+        this.graphRefreshPending = false; // Prevent multiple pending graph refreshes
+        this.lastGraphRefresh = 0; // Track last graph refresh time for throttling
+        this.badgeUpdatePending = false; // Prevent multiple pending badge updates
+        this.lastBadgeUpdate = 0; // Track last badge update time for throttling
 
         // Subscribe to digital spots immediately
         this.subscribeToDigitalSpots();
@@ -217,7 +221,7 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         this.filterAndRenderSpots();
         this.updateLastUpdate();
-        this.updateBadges();
+        this.scheduleBadgeUpdate();
 
         // Update modal if it's open
         if (this.currentModalCountry && this.currentModalBand) {
@@ -438,6 +442,26 @@ class DigitalSpotsExtension extends DecoderExtension {
             // Update badges after rendering spots
             this.updateBadges();
         });
+    }
+
+    scheduleBadgeUpdate() {
+        // Throttle badge updates to prevent blocking audio thread
+        // Only update once per second maximum
+        const now = Date.now();
+        const timeSinceLastUpdate = now - this.lastBadgeUpdate;
+
+        if (timeSinceLastUpdate >= 1000) {
+            // Enough time has passed, schedule update
+            if (!this.badgeUpdatePending) {
+                this.badgeUpdatePending = true;
+                this.lastBadgeUpdate = now;
+                requestAnimationFrame(() => {
+                    this.badgeUpdatePending = false;
+                    this.updateBadges();
+                });
+            }
+        }
+        // If less than 1 second, skip this update (will update on next spot)
     }
 
     updateBadges() {
@@ -840,12 +864,33 @@ class DigitalSpotsExtension extends DecoderExtension {
         // Refresh table content (which deduplicates by callsign)
         this.refreshModalTable();
 
-        // Only refresh graphs when on graph tab and when new spots arrive
-        // Don't refresh every second from the age update interval
+        // Throttle graph updates to prevent blocking audio thread
+        // Only update graph once per second maximum
         if (this.currentModalTab === 'graph' && this._modalNeedsGraphRefresh) {
-            this.refreshModalGraphs();
-            this._modalNeedsGraphRefresh = false;
+            const now = Date.now();
+            const timeSinceLastRefresh = now - this.lastGraphRefresh;
+
+            // Throttle: only refresh if at least 1 second has passed
+            if (timeSinceLastRefresh >= 1000) {
+                this.scheduleGraphRefresh();
+                this._modalNeedsGraphRefresh = false;
+            }
+            // If less than 1 second, leave flag set so it refreshes on next check
         }
+    }
+
+    scheduleGraphRefresh() {
+        // Prevent multiple pending refreshes
+        if (this.graphRefreshPending) return;
+
+        this.graphRefreshPending = true;
+        this.lastGraphRefresh = Date.now();
+
+        // Defer to next animation frame to avoid blocking audio thread
+        requestAnimationFrame(() => {
+            this.graphRefreshPending = false;
+            this.refreshModalGraphs();
+        });
     }
 
     refreshModalTable() {
@@ -1070,7 +1115,9 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         // Refresh content if switching to graph tab
         if (tab === 'graph') {
-            this.refreshModalGraphs();
+            // Force immediate refresh when switching tabs (user action)
+            this.lastGraphRefresh = 0;
+            this.scheduleGraphRefresh();
         }
     }
 

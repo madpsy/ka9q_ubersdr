@@ -1078,6 +1078,12 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         const countrySpots = this.spots.filter(spot => {
             if (spot.band !== band || spot.country !== country) return false;
+
+            // Apply mode filter
+            if (this.currentModalModeFilter !== 'all' && spot.mode !== this.currentModalModeFilter) {
+                return false;
+            }
+
             const spotTime = new Date(spot.timestamp).getTime();
             return spotTime >= tenMinutesAgo;
         });
@@ -1095,6 +1101,9 @@ class DigitalSpotsExtension extends DecoderExtension {
         const container = document.getElementById('country-spots-graphs-container');
         if (!container) return;
 
+        // Save scroll position before updating
+        const scrollTop = container.scrollTop;
+
         container.innerHTML = '';
 
         const modes = Object.keys(spotsByMode).sort();
@@ -1107,6 +1116,11 @@ class DigitalSpotsExtension extends DecoderExtension {
         modes.forEach(mode => {
             const modeSpots = spotsByMode[mode];
             this.renderModeGraph(container, mode, modeSpots);
+        });
+
+        // Restore scroll position after rendering
+        requestAnimationFrame(() => {
+            container.scrollTop = scrollTop;
         });
     }
 

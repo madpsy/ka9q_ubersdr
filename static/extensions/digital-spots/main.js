@@ -34,6 +34,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.lastGraphRefresh = 0; // Track last graph refresh time for throttling
         this.badgeUpdatePending = false; // Prevent multiple pending badge updates
         this.lastBadgeUpdate = 0; // Track last badge update time for throttling
+        this.modalGraphRefreshInterval = null; // Interval for periodic graph updates
         
         // Performance optimization: caching and limits
         this.filteredSpotsCache = null; // Cache filtered results
@@ -1202,6 +1203,9 @@ class DigitalSpotsExtension extends DecoderExtension {
 
         // Set default tab to graph
         this.switchModalTab('graph');
+
+        // Start periodic graph refresh (every 5 seconds) to keep time axis current
+        this.startModalGraphRefresh();
     }
 
     refreshModalContent() {
@@ -1381,6 +1385,9 @@ class DigitalSpotsExtension extends DecoderExtension {
     }
 
     closeCountryModal() {
+        // Stop periodic graph refresh
+        this.stopModalGraphRefresh();
+
         // Clear tracking
         this.currentModalCountry = null;
         this.currentModalBand = null;
@@ -1465,6 +1472,11 @@ class DigitalSpotsExtension extends DecoderExtension {
             // Force immediate refresh when switching tabs (user action)
             this.lastGraphRefresh = 0;
             this.scheduleGraphRefresh();
+            // Restart periodic refresh when switching to graph tab
+            this.startModalGraphRefresh();
+        } else {
+            // Stop periodic refresh when switching away from graph tab
+            this.stopModalGraphRefresh();
         }
     }
 
@@ -1905,6 +1917,37 @@ class DigitalSpotsExtension extends DecoderExtension {
 
             canvas.addEventListener('mousemove', canvas._mouseMoveHandler);
             canvas.addEventListener('mouseleave', canvas._mouseLeaveHandler);
+        }
+    }
+
+    startModalGraphRefresh() {
+        // Clear any existing interval
+        this.stopModalGraphRefresh();
+
+        // Only start if modal is open and graph tab is active
+        if (!this.currentModalCountry || !this.currentModalBand || this.currentModalTab !== 'graph') {
+            return;
+        }
+
+        // Refresh graph every 5 seconds to keep time axis current
+        // This makes spots visually move from right to left as they age
+        this.modalGraphRefreshInterval = setInterval(() => {
+            if (this.currentModalCountry && this.currentModalBand && this.currentModalTab === 'graph') {
+                // Force refresh to update time axis
+                this.lastGraphRefresh = 0;
+                this._modalNeedsGraphRefresh = true;
+                this.scheduleGraphRefresh();
+            } else {
+                // Stop if modal closed or switched tabs
+                this.stopModalGraphRefresh();
+            }
+        }, 5000); // 5 second interval
+    }
+
+    stopModalGraphRefresh() {
+        if (this.modalGraphRefreshInterval) {
+            clearInterval(this.modalGraphRefreshInterval);
+            this.modalGraphRefreshInterval = null;
         }
     }
 }

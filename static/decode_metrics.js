@@ -164,19 +164,19 @@ class DecodeMetricsDashboard {
 
         if (data.summaries && data.summaries.length > 0) {
             data.summaries.forEach(summary => {
-                totalSpots += summary.spot_count;
-                
+                totalSpots += summary.total_spots;
+
                 // Aggregate by mode
                 if (!modeBreakdown[summary.mode]) {
                     modeBreakdown[summary.mode] = 0;
                 }
-                modeBreakdown[summary.mode] += summary.spot_count;
-                
+                modeBreakdown[summary.mode] += summary.total_spots;
+
                 // Aggregate by band
                 if (!bandBreakdown[summary.band]) {
                     bandBreakdown[summary.band] = 0;
                 }
-                bandBreakdown[summary.band] += summary.spot_count;
+                bandBreakdown[summary.band] += summary.total_spots;
             });
 
             // Display total

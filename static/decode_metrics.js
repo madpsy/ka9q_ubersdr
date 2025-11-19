@@ -10,6 +10,7 @@ class DecodeMetricsDashboard {
         this.weekChart = null;
         this.monthChart = null;
         this.yearChart = null;
+        this.summaryAutoRefreshInterval = null; // Auto-refresh for summary data
         this.MODE_COLORS = {
             'FT8': 'rgba(54, 162, 235, 0.8)',
             'FT4': 'rgba(255, 159, 64, 0.8)',
@@ -17,8 +18,8 @@ class DecodeMetricsDashboard {
         };
         this.init();
         this.loadVersion();
-        this.loadSummaries(); // Load summary statistics
-        this.loadCharts(); // Load summary charts
+        this.loadSummariesAndCharts(); // Load summary statistics and charts
+        this.startSummaryAutoRefresh(); // Start auto-refresh for summaries
         // Don't auto-load detailed metrics - user must click "Load Metrics" button
     }
 
@@ -116,7 +117,14 @@ class DecodeMetricsDashboard {
         }
     }
 
-    async loadSummaries() {
+    startSummaryAutoRefresh() {
+        // Auto-refresh summary data every 10 seconds
+        this.summaryAutoRefreshInterval = setInterval(() => {
+            this.loadSummariesAndCharts();
+        }, 10000);
+    }
+
+    async loadSummariesAndCharts() {
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
         
@@ -126,8 +134,15 @@ class DecodeMetricsDashboard {
         const yearStr = String(year);
 
         try {
-            // Fetch today's summary
-            const todayResponse = await fetch(`/api/decoder/metrics/summary?period=day&date=${todayStr}`);
+            // Fetch all data in parallel
+            const [todayResponse, weekResponse, monthResponse, yearResponse] = await Promise.all([
+                fetch(`/api/decoder/metrics/summary?period=day&date=${todayStr}`),
+                fetch(`/api/decoder/metrics/summary?period=week&date=this-week`),
+                fetch(`/api/decoder/metrics/summary?period=month&date=${monthStr}`),
+                fetch(`/api/decoder/metrics/summary?period=year&date=${yearStr}`)
+            ]);
+
+            // Process today's summary
             if (todayResponse.ok) {
                 const todayData = await todayResponse.json();
                 this.displaySummary('today-summary', todayData, 'day');
@@ -135,20 +150,26 @@ class DecodeMetricsDashboard {
                 document.getElementById('today-summary').innerHTML = '<div style="opacity: 0.6;">No data available</div>';
             }
 
-            // Fetch this month's summary
-            const monthResponse = await fetch(`/api/decoder/metrics/summary?period=month&date=${monthStr}`);
+            // Process week chart
+            if (weekResponse.ok) {
+                const weekData = await weekResponse.json();
+                this.updateWeekChart(weekData);
+            }
+
+            // Process month summary and chart
             if (monthResponse.ok) {
                 const monthData = await monthResponse.json();
                 this.displaySummary('month-summary', monthData, 'month');
+                this.updateMonthChart(monthData);
             } else {
                 document.getElementById('month-summary').innerHTML = '<div style="opacity: 0.6;">No data available</div>';
             }
 
-            // Fetch this year's summary
-            const yearResponse = await fetch(`/api/decoder/metrics/summary?period=year&date=${yearStr}`);
+            // Process year summary and chart
             if (yearResponse.ok) {
                 const yearData = await yearResponse.json();
                 this.displaySummary('year-summary', yearData, 'year');
+                this.updateYearChart(yearData);
             } else {
                 document.getElementById('year-summary').innerHTML = '<div style="opacity: 0.6;">No data available</div>';
             }
@@ -158,13 +179,6 @@ class DecodeMetricsDashboard {
             document.getElementById('month-summary').innerHTML = '<div style="opacity: 0.6;">Error loading data</div>';
             document.getElementById('year-summary').innerHTML = '<div style="opacity: 0.6;">Error loading data</div>';
         }
-    }
-
-    async loadCharts() {
-        // Load all three charts
-        await this.loadWeekChart();
-        await this.loadMonthChart();
-        await this.loadYearChart();
     }
 
     displaySummary(elementId, data, period) {
@@ -221,12 +235,8 @@ class DecodeMetricsDashboard {
         element.innerHTML = html;
     }
 
-    async loadWeekChart() {
+    updateWeekChart(data) {
         try {
-            // Use 'this-week' keyword which the API supports
-            const response = await fetch(`/api/decoder/metrics/summary?period=week&date=this-week`);
-            const data = await response.json();
-
             if (!data.summaries || data.summaries.length === 0) {
                 console.log('No weekly data available');
                 return;
@@ -260,61 +270,63 @@ class DecodeMetricsDashboard {
                 borderWidth: 1
             }));
 
-            const ctx = document.getElementById('week-chart').getContext('2d');
+            // Update existing chart if it exists, otherwise create new one
             if (this.weekChart) {
-                this.weekChart.destroy();
-            }
-            this.weekChart = new Chart(ctx, {
-                type: 'bar',
-                data: { labels, datasets },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    scales: {
-                        x: {
-                            stacked: true,
-                            ticks: { color: '#fff' },
-                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                this.weekChart.data.labels = labels;
+                this.weekChart.data.datasets = datasets;
+                this.weekChart.update('none'); // 'none' animation mode for smooth update
+            } else {
+                const ctx = document.getElementById('week-chart').getContext('2d');
+                this.weekChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        animation: {
+                            duration: 0 // Disable animation for smoother updates
                         },
-                        y: {
-                            stacked: true,
-                            beginAtZero: true,
-                            ticks: {
-                                color: '#fff',
-                                callback: function(value) {
-                                    return value.toLocaleString();
-                                }
+                        scales: {
+                            x: {
+                                stacked: true,
+                                ticks: { color: '#fff' },
+                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
                             },
-                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                            labels: { color: '#fff' }
+                            y: {
+                                stacked: true,
+                                beginAtZero: true,
+                                ticks: {
+                                    color: '#fff',
+                                    callback: function(value) {
+                                        return value.toLocaleString();
+                                    }
+                                },
+                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                            }
                         },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: { color: '#fff' }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            });
+                });
+            }
         } catch (error) {
             console.error('Error loading week chart:', error);
         }
     }
 
-    async loadMonthChart() {
+    updateMonthChart(data) {
         try {
-            const today = new Date();
-            const yearMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-            const response = await fetch(`/api/decoder/metrics/summary?period=month&date=${yearMonth}`);
-            const data = await response.json();
-
             if (!data.summaries || data.summaries.length === 0) {
                 console.log('No monthly data available');
                 return;
@@ -348,68 +360,71 @@ class DecodeMetricsDashboard {
                 borderWidth: 1
             }));
 
-            const ctx = document.getElementById('month-chart').getContext('2d');
+            // Update existing chart if it exists, otherwise create new one
             if (this.monthChart) {
-                this.monthChart.destroy();
-            }
-            this.monthChart = new Chart(ctx, {
-                type: 'bar',
-                data: { labels, datasets },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    scales: {
-                        x: {
-                            stacked: true,
-                            title: { display: true, text: 'Day of Month', color: '#fff' },
-                            ticks: { color: '#fff' },
-                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                this.monthChart.data.labels = labels;
+                this.monthChart.data.datasets = datasets;
+                this.monthChart.update('none'); // 'none' animation mode for smooth update
+            } else {
+                const ctx = document.getElementById('month-chart').getContext('2d');
+                this.monthChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        animation: {
+                            duration: 0 // Disable animation for smoother updates
                         },
-                        y: {
-                            stacked: true,
-                            beginAtZero: true,
-                            ticks: {
-                                color: '#fff',
-                                callback: function(value) {
-                                    return value.toLocaleString();
-                                }
+                        scales: {
+                            x: {
+                                stacked: true,
+                                title: { display: true, text: 'Day of Month', color: '#fff' },
+                                ticks: { color: '#fff' },
+                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
                             },
-                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                            labels: { color: '#fff' }
+                            y: {
+                                stacked: true,
+                                beginAtZero: true,
+                                ticks: {
+                                    color: '#fff',
+                                    callback: function(value) {
+                                        return value.toLocaleString();
+                                    }
+                                },
+                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                            }
                         },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: { color: '#fff' }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            });
+                });
+            }
         } catch (error) {
             console.error('Error loading month chart:', error);
         }
     }
 
-    async loadYearChart() {
+    updateYearChart(data) {
         try {
-            const today = new Date();
-            const year = today.getFullYear();
-
-            // Fetch year data with monthly breakdown in a single request
-            const response = await fetch(`/api/decoder/metrics/summary?period=year&date=${year}`);
-            const data = await response.json();
-
             if (!data.summaries || data.summaries.length === 0) {
                 console.log('No yearly data available');
                 return;
             }
+
+            const today = new Date();
+            const year = today.getFullYear();
 
             // Aggregate by mode across all bands for each month
             const monthlyData = {};
@@ -467,49 +482,56 @@ class DecodeMetricsDashboard {
                 borderWidth: 1
             }));
 
-            const ctx = document.getElementById('year-chart').getContext('2d');
+            // Update existing chart if it exists, otherwise create new one
             if (this.yearChart) {
-                this.yearChart.destroy();
-            }
-            this.yearChart = new Chart(ctx, {
-                type: 'bar',
-                data: { labels: monthLabels, datasets },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    scales: {
-                        x: {
-                            stacked: true,
-                            ticks: { color: '#fff' },
-                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                this.yearChart.data.labels = monthLabels;
+                this.yearChart.data.datasets = datasets;
+                this.yearChart.update('none'); // 'none' animation mode for smooth update
+            } else {
+                const ctx = document.getElementById('year-chart').getContext('2d');
+                this.yearChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels: monthLabels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        animation: {
+                            duration: 0 // Disable animation for smoother updates
                         },
-                        y: {
-                            stacked: true,
-                            beginAtZero: true,
-                            ticks: {
-                                color: '#fff',
-                                callback: function(value) {
-                                    return value.toLocaleString();
-                                }
+                        scales: {
+                            x: {
+                                stacked: true,
+                                ticks: { color: '#fff' },
+                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
                             },
-                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                            labels: { color: '#fff' }
+                            y: {
+                                stacked: true,
+                                beginAtZero: true,
+                                ticks: {
+                                    color: '#fff',
+                                    callback: function(value) {
+                                        return value.toLocaleString();
+                                    }
+                                },
+                                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                            }
                         },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: { color: '#fff' }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            });
+                });
+            }
         } catch (error) {
             console.error('Error loading year chart:', error);
         }

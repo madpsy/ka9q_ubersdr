@@ -7,10 +7,19 @@ class DecodeMetricsDashboard {
         this.executionTimeChart = null;
         this.autoRefreshInterval = null;
         this.autoRefreshEnabled = false;
+        this.weekChart = null;
+        this.monthChart = null;
+        this.yearChart = null;
+        this.MODE_COLORS = {
+            'FT8': 'rgba(54, 162, 235, 0.8)',
+            'FT4': 'rgba(255, 159, 64, 0.8)',
+            'WSPR': 'rgba(75, 192, 192, 0.8)'
+        };
         this.init();
         this.loadVersion();
         this.loadSummaries(); // Load summary statistics
-        this.loadMetrics(); // Auto-load on page load
+        this.loadCharts(); // Load summary charts
+        // Don't auto-load detailed metrics - user must click "Load Metrics" button
     }
 
     async loadVersion() {
@@ -151,6 +160,13 @@ class DecodeMetricsDashboard {
         }
     }
 
+    async loadCharts() {
+        // Load all three charts
+        await this.loadWeekChart();
+        await this.loadMonthChart();
+        await this.loadYearChart();
+    }
+
     displaySummary(elementId, data, period) {
         const element = document.getElementById(elementId);
         if (!element) return;
@@ -203,6 +219,254 @@ class DecodeMetricsDashboard {
         }
 
         element.innerHTML = html;
+    }
+
+    async loadWeekChart() {
+        try {
+            const today = new Date();
+            const dateStr = today.toISOString().split('T')[0];
+            const response = await fetch(`/api/decoder/metrics/summary?period=week&date=${dateStr}`);
+            const data = await response.json();
+
+            if (!data.daily_breakdown || data.daily_breakdown.length === 0) {
+                console.log('No weekly data available');
+                return;
+            }
+
+            // Aggregate by mode across all bands for each day
+            const dailyData = {};
+            data.daily_breakdown.forEach(day => {
+                const date = day.date;
+                if (!dailyData[date]) {
+                    dailyData[date] = { FT8: 0, FT4: 0, WSPR: 0 };
+                }
+                day.bands.forEach(band => {
+                    band.modes.forEach(mode => {
+                        if (dailyData[date][mode.mode] !== undefined) {
+                            dailyData[date][mode.mode] += mode.total_spots;
+                        }
+                    });
+                });
+            });
+
+            // Sort dates and prepare chart data
+            const dates = Object.keys(dailyData).sort();
+            const labels = dates.map(d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+            
+            const datasets = Object.keys(this.MODE_COLORS).map(mode => ({
+                label: mode,
+                data: dates.map(date => dailyData[date][mode] || 0),
+                backgroundColor: this.MODE_COLORS[mode],
+                borderColor: this.MODE_COLORS[mode].replace('0.8', '1'),
+                borderWidth: 1
+            }));
+
+            const ctx = document.getElementById('week-chart').getContext('2d');
+            if (this.weekChart) {
+                this.weekChart.destroy();
+            }
+            this.weekChart = new Chart(ctx, {
+                type: 'bar',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        x: { stacked: true },
+                        y: { 
+                            stacked: true,
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString();
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error loading week chart:', error);
+        }
+    }
+
+    async loadMonthChart() {
+        try {
+            const today = new Date();
+            const yearMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+            const response = await fetch(`/api/decoder/metrics/summary?period=month&date=${yearMonth}`);
+            const data = await response.json();
+
+            if (!data.daily_breakdown || data.daily_breakdown.length === 0) {
+                console.log('No monthly data available');
+                return;
+            }
+
+            // Aggregate by mode across all bands for each day
+            const dailyData = {};
+            data.daily_breakdown.forEach(day => {
+                const date = day.date;
+                if (!dailyData[date]) {
+                    dailyData[date] = { FT8: 0, FT4: 0, WSPR: 0 };
+                }
+                day.bands.forEach(band => {
+                    band.modes.forEach(mode => {
+                        if (dailyData[date][mode.mode] !== undefined) {
+                            dailyData[date][mode.mode] += mode.total_spots;
+                        }
+                    });
+                });
+            });
+
+            // Sort dates and prepare chart data
+            const dates = Object.keys(dailyData).sort();
+            const labels = dates.map(d => new Date(d).getDate());
+            
+            const datasets = Object.keys(this.MODE_COLORS).map(mode => ({
+                label: mode,
+                data: dates.map(date => dailyData[date][mode] || 0),
+                backgroundColor: this.MODE_COLORS[mode],
+                borderColor: this.MODE_COLORS[mode].replace('0.8', '1'),
+                borderWidth: 1
+            }));
+
+            const ctx = document.getElementById('month-chart').getContext('2d');
+            if (this.monthChart) {
+                this.monthChart.destroy();
+            }
+            this.monthChart = new Chart(ctx, {
+                type: 'bar',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        x: { 
+                            stacked: true,
+                            title: { display: true, text: 'Day of Month' }
+                        },
+                        y: { 
+                            stacked: true,
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString();
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error loading month chart:', error);
+        }
+    }
+
+    async loadYearChart() {
+        try {
+            const today = new Date();
+            const year = today.getFullYear();
+            
+            // Fetch data for all 12 months
+            const monthlyData = { FT8: [], FT4: [], WSPR: [] };
+            const monthLabels = [];
+            
+            for (let month = 1; month <= 12; month++) {
+                const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+                monthLabels.push(new Date(year, month - 1).toLocaleDateString('en-US', { month: 'short' }));
+                
+                try {
+                    const response = await fetch(`/api/decoder/metrics/summary?period=month&date=${yearMonth}`);
+                    const data = await response.json();
+                    
+                    // Aggregate by mode across all bands for the month
+                    const monthTotals = { FT8: 0, FT4: 0, WSPR: 0 };
+                    if (data.bands) {
+                        data.bands.forEach(band => {
+                            band.modes.forEach(mode => {
+                                if (monthTotals[mode.mode] !== undefined) {
+                                    monthTotals[mode.mode] += mode.total_spots;
+                                }
+                            });
+                        });
+                    }
+                    
+                    monthlyData.FT8.push(monthTotals.FT8);
+                    monthlyData.FT4.push(monthTotals.FT4);
+                    monthlyData.WSPR.push(monthTotals.WSPR);
+                } catch (error) {
+                    // Month might not have data yet
+                    monthlyData.FT8.push(0);
+                    monthlyData.FT4.push(0);
+                    monthlyData.WSPR.push(0);
+                }
+            }
+            
+            const datasets = Object.keys(this.MODE_COLORS).map(mode => ({
+                label: mode,
+                data: monthlyData[mode],
+                backgroundColor: this.MODE_COLORS[mode],
+                borderColor: this.MODE_COLORS[mode].replace('0.8', '1'),
+                borderWidth: 1
+            }));
+
+            const ctx = document.getElementById('year-chart').getContext('2d');
+            if (this.yearChart) {
+                this.yearChart.destroy();
+            }
+            this.yearChart = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: monthLabels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        x: { stacked: true },
+                        y: { 
+                            stacked: true,
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString();
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error loading year chart:', error);
+        }
     }
 
     setStatus(message, type = 'info') {

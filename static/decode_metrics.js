@@ -230,29 +230,29 @@ class DecodeMetricsDashboard {
             const days = Math.floor((today - startOfYear) / (24 * 60 * 60 * 1000));
             const weekNumber = Math.ceil((days + startOfYear.getDay() + 1) / 7);
             const dateStr = `${year}-W${String(weekNumber).padStart(2, '0')}`;
-            
+
             const response = await fetch(`/api/decoder/metrics/summary?period=week&date=${dateStr}`);
             const data = await response.json();
 
-            if (!data.daily_breakdown || data.daily_breakdown.length === 0) {
+            if (!data.summaries || data.summaries.length === 0) {
                 console.log('No weekly data available');
                 return;
             }
 
             // Aggregate by mode across all bands for each day
             const dailyData = {};
-            data.daily_breakdown.forEach(day => {
-                const date = day.date;
-                if (!dailyData[date]) {
-                    dailyData[date] = { FT8: 0, FT4: 0, WSPR: 0 };
-                }
-                day.bands.forEach(band => {
-                    band.modes.forEach(mode => {
-                        if (dailyData[date][mode.mode] !== undefined) {
-                            dailyData[date][mode.mode] += mode.total_spots;
+            data.summaries.forEach(summary => {
+                if (summary.daily_breakdown) {
+                    summary.daily_breakdown.forEach(day => {
+                        const date = day.date;
+                        if (!dailyData[date]) {
+                            dailyData[date] = { FT8: 0, FT4: 0, WSPR: 0 };
+                        }
+                        if (dailyData[date][summary.mode] !== undefined) {
+                            dailyData[date][summary.mode] += day.spots;
                         }
                     });
-                });
+                }
             });
 
             // Sort dates and prepare chart data
@@ -313,25 +313,25 @@ class DecodeMetricsDashboard {
             const response = await fetch(`/api/decoder/metrics/summary?period=month&date=${yearMonth}`);
             const data = await response.json();
 
-            if (!data.daily_breakdown || data.daily_breakdown.length === 0) {
+            if (!data.summaries || data.summaries.length === 0) {
                 console.log('No monthly data available');
                 return;
             }
 
             // Aggregate by mode across all bands for each day
             const dailyData = {};
-            data.daily_breakdown.forEach(day => {
-                const date = day.date;
-                if (!dailyData[date]) {
-                    dailyData[date] = { FT8: 0, FT4: 0, WSPR: 0 };
-                }
-                day.bands.forEach(band => {
-                    band.modes.forEach(mode => {
-                        if (dailyData[date][mode.mode] !== undefined) {
-                            dailyData[date][mode.mode] += mode.total_spots;
+            data.summaries.forEach(summary => {
+                if (summary.daily_breakdown) {
+                    summary.daily_breakdown.forEach(day => {
+                        const date = day.date;
+                        if (!dailyData[date]) {
+                            dailyData[date] = { FT8: 0, FT4: 0, WSPR: 0 };
+                        }
+                        if (dailyData[date][summary.mode] !== undefined) {
+                            dailyData[date][summary.mode] += day.spots;
                         }
                     });
-                });
+                }
             });
 
             // Sort dates and prepare chart data
@@ -397,25 +397,25 @@ class DecodeMetricsDashboard {
             const response = await fetch(`/api/decoder/metrics/summary?period=year&date=${year}`);
             const data = await response.json();
 
-            if (!data.monthly_breakdown || data.monthly_breakdown.length === 0) {
+            if (!data.summaries || data.summaries.length === 0) {
                 console.log('No yearly data available');
                 return;
             }
 
             // Aggregate by mode across all bands for each month
             const monthlyData = {};
-            data.monthly_breakdown.forEach(month => {
-                const monthKey = month.month;
-                if (!monthlyData[monthKey]) {
-                    monthlyData[monthKey] = { FT8: 0, FT4: 0, WSPR: 0 };
-                }
-                month.bands.forEach(band => {
-                    band.modes.forEach(mode => {
-                        if (monthlyData[monthKey][mode.mode] !== undefined) {
-                            monthlyData[monthKey][mode.mode] += mode.total_spots;
+            data.summaries.forEach(summary => {
+                if (summary.monthly_breakdown) {
+                    summary.monthly_breakdown.forEach(month => {
+                        const monthKey = month.month;
+                        if (!monthlyData[monthKey]) {
+                            monthlyData[monthKey] = { FT8: 0, FT4: 0, WSPR: 0 };
+                        }
+                        if (monthlyData[monthKey][summary.mode] !== undefined) {
+                            monthlyData[monthKey][summary.mode] += month.spots;
                         }
                     });
-                });
+                }
             });
 
             // Create labels for all 12 months and prepare data

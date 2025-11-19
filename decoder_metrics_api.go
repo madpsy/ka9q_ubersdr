@@ -473,10 +473,18 @@ func generateTimeSeriesWithFiles(dm *DigitalDecodeMetrics, combinations []struct
 		for _, combo := range combinations {
 			key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
 
-			// Always use in-memory data for accurate per-interval counts
-			// File snapshots contain cumulative hourly counts which would be incorrect for time buckets
+			// Try in-memory data first (most accurate for recent data)
 			decodeCount := countDecodesInTimeRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
 			uniqueCallsigns := countUniqueCallsignsInTimeRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
+
+			// If no in-memory data and we have file snapshots, estimate from snapshots
+			if decodeCount == 0 && fileSnapshots != nil {
+				snapshots := fileSnapshots[key]
+				if len(snapshots) > 0 {
+					// Find snapshots that bracket this time bucket
+					decodeCount, uniqueCallsigns = estimateCountsFromSnapshots(snapshots, bucketStart, bucketEnd, interval)
+				}
+			}
 
 			if decodeCount > 0 {
 				point.Data[key] = ModeBandSummary{
@@ -495,6 +503,70 @@ func generateTimeSeriesWithFiles(dm *DigitalDecodeMetrics, combinations []struct
 	}
 
 	return timeSeries
+}
+
+// estimateCountsFromSnapshots estimates decode counts for a time bucket from file snapshots
+// Uses the difference between snapshots to calculate per-interval counts
+func estimateCountsFromSnapshots(snapshots []MetricsSnapshot, bucketStart, bucketEnd time.Time, interval time.Duration) (decodeCount int, uniqueCallsigns int) {
+	if len(snapshots) == 0 {
+		return 0, 0
+	}
+
+	// Find the snapshot closest to bucket start (before or at start)
+	var beforeSnapshot *MetricsSnapshot
+	var afterSnapshot *MetricsSnapshot
+
+	for i := range snapshots {
+		s := &snapshots[i]
+
+		// Find snapshot before or at bucket start
+		if s.Timestamp.Before(bucketStart) || s.Timestamp.Equal(bucketStart) {
+			if beforeSnapshot == nil || s.Timestamp.After(beforeSnapshot.Timestamp) {
+				beforeSnapshot = s
+			}
+		}
+
+		// Find snapshot at or after bucket end
+		if (s.Timestamp.After(bucketStart) || s.Timestamp.Equal(bucketStart)) &&
+			(s.Timestamp.Before(bucketEnd) || s.Timestamp.Equal(bucketEnd)) {
+			if afterSnapshot == nil || s.Timestamp.Before(afterSnapshot.Timestamp) {
+				afterSnapshot = s
+			}
+		}
+	}
+
+	// If we have both before and after snapshots, calculate the difference
+	if beforeSnapshot != nil && afterSnapshot != nil && !beforeSnapshot.Timestamp.Equal(afterSnapshot.Timestamp) {
+		// Calculate time-weighted decode count based on the difference
+		timeDiff := afterSnapshot.Timestamp.Sub(beforeSnapshot.Timestamp).Seconds()
+		decodeDiff := afterSnapshot.DecodeCounts.Last1Hour - beforeSnapshot.DecodeCounts.Last1Hour
+		callsignDiff := afterSnapshot.UniqueCallsigns.Last1Hour - beforeSnapshot.UniqueCallsigns.Last1Hour
+
+		// Ensure non-negative
+		if decodeDiff < 0 {
+			decodeDiff = 0
+		}
+		if callsignDiff < 0 {
+			callsignDiff = 0
+		}
+
+		// Scale to the bucket interval
+		bucketSeconds := interval.Seconds()
+		if timeDiff > 0 {
+			decodeCount = int(float64(decodeDiff) * (bucketSeconds / timeDiff))
+			uniqueCallsigns = int(float64(callsignDiff) * (bucketSeconds / timeDiff))
+		}
+	} else if afterSnapshot != nil {
+		// Only have one snapshot in or near the bucket
+		// Use a rough estimate based on the hourly rate
+		bucketHours := interval.Hours()
+		if afterSnapshot.Activity.DecodesPerHour > 0 {
+			decodeCount = int(afterSnapshot.Activity.DecodesPerHour * bucketHours)
+			uniqueCallsigns = int(afterSnapshot.Activity.CallsignsPerHour * bucketHours)
+		}
+	}
+
+	return decodeCount, uniqueCallsigns
 }
 
 // generateExecutionTimeSeriesWithFiles creates time-bucketed execution time data using both in-memory and file data

@@ -248,6 +248,10 @@
             margin-bottom: 4px;
         }
 
+        .distance-extreme span:last-child {
+            text-align: right;
+        }
+
         .distance-extreme-label {
             font-weight: 500;
             color: #4a9eff;

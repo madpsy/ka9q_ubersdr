@@ -34,7 +34,7 @@ type MetricChange struct {
 }
 
 // handleDecodeMetricsSummary serves aggregated metrics summaries
-func handleDecodeMetricsSummary(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+func handleDecodeMetricsSummary(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager, rateLimiter *SummaryRateLimiter) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
 		return
@@ -93,13 +93,12 @@ func handleDecodeMetricsSummary(w http.ResponseWriter, r *http.Request, md *Mult
 		return
 	}
 
-	// Check rate limit (1 request per 2 seconds per IP)
+	// Check rate limit (5 requests per second per IP)
 	clientIP := getClientIP(r)
-	rateLimitKey := fmt.Sprintf("summary-%s-%s-%s-%s", period, dateStr, mode, band)
-	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+	if !rateLimiter.AllowRequest(clientIP) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+			"error": "Rate limit exceeded. Maximum 5 requests per second.",
 		})
 		log.Printf("Summary endpoint rate limit exceeded for IP: %s", clientIP)
 		return

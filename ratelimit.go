@@ -413,3 +413,61 @@ func (swrl *SpaceWeatherRateLimiter) GetStats() (int, int) {
 	}
 	return len(swrl.limiters), totalEndpoints
 }
+
+// SummaryRateLimiter manages rate limiters for metrics summary endpoint requests per IP
+// Limits to 5 requests per second per IP
+type SummaryRateLimiter struct {
+	limiters map[string]*RateLimiter
+	mu       sync.RWMutex
+}
+
+// NewSummaryRateLimiter creates a new summary endpoint rate limiter
+// Fixed at 5 requests per second
+func NewSummaryRateLimiter() *SummaryRateLimiter {
+	return &SummaryRateLimiter{
+		limiters: make(map[string]*RateLimiter),
+	}
+}
+
+// AllowRequest checks if a summary request is allowed for the given IP
+// Returns true if allowed, false if rate limit exceeded
+func (srl *SummaryRateLimiter) AllowRequest(ip string) bool {
+	srl.mu.Lock()
+	limiter, exists := srl.limiters[ip]
+	if !exists {
+		// Create a rate limiter with 5 tokens max, refilling at 5 tokens/sec
+		limiter = &RateLimiter{
+			tokens:     5.0,
+			maxTokens:  5.0,
+			refillRate: 5.0, // 5 requests per second
+			lastRefill: time.Now(),
+		}
+		srl.limiters[ip] = limiter
+	}
+	srl.mu.Unlock()
+
+	return limiter.Allow()
+}
+
+// Cleanup removes rate limiters for IPs that haven't been used recently
+func (srl *SummaryRateLimiter) Cleanup() {
+	srl.mu.Lock()
+	defer srl.mu.Unlock()
+
+	now := time.Now()
+	for ip, limiter := range srl.limiters {
+		limiter.mu.Lock()
+		// Remove limiters that haven't been used in the last 10 minutes
+		if now.Sub(limiter.lastRefill) > 10*time.Minute {
+			delete(srl.limiters, ip)
+		}
+		limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the current number of tracked IPs
+func (srl *SummaryRateLimiter) GetStats() int {
+	srl.mu.RLock()
+	defer srl.mu.RUnlock()
+	return len(srl.limiters)
+}

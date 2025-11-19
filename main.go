@@ -534,6 +534,10 @@ func main() {
 	fftRateLimiter := NewFFTRateLimiter()
 	log.Printf("FFT endpoint rate limiting: 1 request per 2 seconds per band per IP")
 
+	// Initialize Summary endpoint rate limiter (5 requests per second per IP)
+	summaryRateLimiter := NewSummaryRateLimiter()
+	log.Printf("Summary endpoint rate limiting: 5 requests per second per IP")
+
 	// Initialize space weather endpoint rate limiter
 	spaceWeatherRateLimiter := NewSpaceWeatherRateLimiter()
 	log.Printf("Space weather rate limiting: 1 req/sec (current), 1 req/2.5sec (history/dates/csv)")
@@ -547,6 +551,7 @@ func main() {
 			aggregateRateLimiter.Cleanup()
 			fftRateLimiter.Cleanup()
 			spaceWeatherRateLimiter.Cleanup()
+			summaryRateLimiter.Cleanup()
 		}
 	}()
 
@@ -653,7 +658,7 @@ func main() {
 		handleDecodeMetrics(w, r, multiDecoder, ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/decoder/metrics/summary", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleDecodeMetricsSummary(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+		handleDecodeMetricsSummary(w, r, multiDecoder, ipBanManager, summaryRateLimiter)
 	}))
 
 	// CTY API endpoints (with IP ban checking)

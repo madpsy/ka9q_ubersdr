@@ -281,6 +281,7 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 
 	// Also add combinations from file snapshots if available (BEFORE filtering)
 	if fileSnapshots != nil {
+		log.Printf("Checking fileSnapshots for filter: mode='%s', band='%s'", mode, band)
 		addedFromFiles := 0
 		for key := range fileSnapshots {
 			// Parse key format "mode:band" using strings.Split
@@ -289,8 +290,11 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 				foundMode := parts[0]
 				foundBand := parts[1]
 
+				log.Printf("Checking key '%s': mode='%s', band='%s'", key, foundMode, foundBand)
+
 				// Apply filter here - only add if it matches the requested mode/band
 				if (mode == "" || foundMode == mode) && (band == "" || foundBand == band) {
+					log.Printf("Key '%s' matches filter", key)
 					// Check if this combination already exists
 					exists := false
 					for _, combo := range combinations {
@@ -303,13 +307,19 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 						combinations = append(combinations, struct{ Mode, Band string }{Mode: foundMode, Band: foundBand})
 						addedFromFiles++
 						log.Printf("Added mode-band combination from files: %s:%s", foundMode, foundBand)
+					} else {
+						log.Printf("Key '%s' already exists in combinations", key)
 					}
+				} else {
+					log.Printf("Key '%s' does NOT match filter (mode match: %v, band match: %v)",
+						key, (mode == "" || foundMode == mode), (band == "" || foundBand == band))
 				}
 			} else {
 				log.Printf("Warning: could not parse mode-band key: %s", key)
 			}
 		}
-		log.Printf("Added %d mode-band combinations from files (total now: %d)", addedFromFiles, len(combinations))
+		log.Printf("Added %d mode-band combinations from files (total now: %d) for filter mode='%s', band='%s'",
+			addedFromFiles, len(combinations), mode, band)
 	}
 
 	// Filter combinations if mode or band specified

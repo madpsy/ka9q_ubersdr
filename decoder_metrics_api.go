@@ -276,9 +276,11 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 
 	// Get all mode/band combinations from in-memory data
 	combinations := md.prometheusMetrics.digitalMetrics.GetAllModeBandCombinations()
+	log.Printf("Found %d mode-band combinations in memory", len(combinations))
 
 	// Also add combinations from file snapshots if available
 	if fileSnapshots != nil {
+		addedFromFiles := 0
 		for key := range fileSnapshots {
 			// Parse key format "mode:band"
 			var foundMode, foundBand string
@@ -293,9 +295,12 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 				}
 				if !exists {
 					combinations = append(combinations, struct{ Mode, Band string }{Mode: foundMode, Band: foundBand})
+					addedFromFiles++
+					log.Printf("Added mode-band combination from files: %s:%s", foundMode, foundBand)
 				}
 			}
 		}
+		log.Printf("Added %d mode-band combinations from files (total now: %d)", addedFromFiles, len(combinations))
 	}
 
 	// Filter combinations if mode or band specified
@@ -326,12 +331,27 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 			cycleSeconds = 120
 		}
 
-		// Decode counts
+		// Decode counts - try in-memory first, then estimate from file snapshots
 		metrics.DecodeCounts.Last1Hour = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 1)
 		metrics.DecodeCounts.Last3Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 3)
 		metrics.DecodeCounts.Last6Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 6)
 		metrics.DecodeCounts.Last12Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 12)
 		metrics.DecodeCounts.Last24Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 24)
+
+		// If no in-memory data, try to estimate from file snapshots
+		if metrics.DecodeCounts.Last24Hours == 0 && fileSnapshots != nil {
+			key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
+			if snapshots, exists := fileSnapshots[key]; exists && len(snapshots) > 0 {
+				// Use the most recent snapshot's data
+				mostRecent := snapshots[len(snapshots)-1]
+				metrics.DecodeCounts.Last1Hour = mostRecent.DecodeCounts.Last1Hour
+				metrics.DecodeCounts.Last3Hours = mostRecent.DecodeCounts.Last3Hours
+				metrics.DecodeCounts.Last6Hours = mostRecent.DecodeCounts.Last6Hours
+				metrics.DecodeCounts.Last12Hours = mostRecent.DecodeCounts.Last12Hours
+				metrics.DecodeCounts.Last24Hours = mostRecent.DecodeCounts.Last24Hours
+				log.Printf("Using file snapshot data for %s:%s - Last24h: %d", combo.Mode, combo.Band, metrics.DecodeCounts.Last24Hours)
+			}
+		}
 
 		// Decodes per cycle
 		metrics.DecodesPerCycle.Last1Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 1)

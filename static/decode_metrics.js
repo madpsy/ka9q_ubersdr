@@ -5,8 +5,6 @@ class DecodeMetricsDashboard {
     constructor() {
         this.decodesChart = null;
         this.executionTimeChart = null;
-        this.autoRefreshInterval = null;
-        this.autoRefreshEnabled = false;
         this.weekChart = null;
         this.monthChart = null;
         this.yearChart = null;
@@ -71,10 +69,6 @@ class DecodeMetricsDashboard {
             this.loadMetrics();
         });
 
-        document.getElementById('auto-refresh-btn').addEventListener('click', () => {
-            this.toggleAutoRefresh();
-        });
-
         // Handle date range type toggle
         document.getElementById('date-range-type').addEventListener('change', (e) => {
             this.toggleDateRangeInputs(e.target.value);
@@ -119,26 +113,6 @@ class DecodeMetricsDashboard {
 
         document.getElementById('date-from').value = formatForInput(yesterday);
         document.getElementById('date-to').value = formatForInput(now);
-    }
-
-    toggleAutoRefresh() {
-        this.autoRefreshEnabled = !this.autoRefreshEnabled;
-        const btn = document.getElementById('auto-refresh-btn');
-        
-        if (this.autoRefreshEnabled) {
-            btn.textContent = 'Auto-Refresh: ON';
-            btn.style.background = '#22c55e';
-            this.autoRefreshInterval = setInterval(() => {
-                this.loadMetrics();
-            }, 30000); // Refresh every 30 seconds
-        } else {
-            btn.textContent = 'Auto-Refresh: OFF';
-            btn.style.background = '#2196F3';
-            if (this.autoRefreshInterval) {
-                clearInterval(this.autoRefreshInterval);
-                this.autoRefreshInterval = null;
-            }
-        }
     }
 
     startSummaryAutoRefresh() {

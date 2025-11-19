@@ -130,20 +130,17 @@ func (msa *MetricsSummaryAggregator) UpdateAllSummaries(dm *DigitalDecodeMetrics
 
 			// Process all 4 periods sequentially for this mode/band combination
 			// This reduces goroutine count from combinations*4 to maxConcurrentWorkers
-			periods := []struct {
-				name string
-				fn   func(string, string) error
-			}{
-				{"daily", msa.updateDailySummary},
-				{"weekly", msa.updateWeeklySummary},
-				{"monthly", msa.updateMonthlySummary},
-				{"yearly", msa.updateYearlySummary},
+			if err := msa.updateDailySummary(mode, band, dm); err != nil {
+				log.Printf("Error updating daily summary for %s/%s: %v", mode, band, err)
 			}
-
-			for _, p := range periods {
-				if err := p.fn(mode, band); err != nil {
-					log.Printf("Error updating %s summary for %s/%s: %v", p.name, mode, band, err)
-				}
+			if err := msa.updateWeeklySummary(mode, band, dm); err != nil {
+				log.Printf("Error updating weekly summary for %s/%s: %v", mode, band, err)
+			}
+			if err := msa.updateMonthlySummary(mode, band, dm); err != nil {
+				log.Printf("Error updating monthly summary for %s/%s: %v", mode, band, err)
+			}
+			if err := msa.updateYearlySummary(mode, band, dm); err != nil {
+				log.Printf("Error updating yearly summary for %s/%s: %v", mode, band, err)
 			}
 		}(combo.Mode, combo.Band)
 	}
@@ -153,16 +150,16 @@ func (msa *MetricsSummaryAggregator) UpdateAllSummaries(dm *DigitalDecodeMetrics
 }
 
 // updateDailySummary updates the daily summary for a mode/band combination
-func (msa *MetricsSummaryAggregator) updateDailySummary(mode, band string) error {
+func (msa *MetricsSummaryAggregator) updateDailySummary(mode, band string, dm *DigitalDecodeMetrics) error {
 	now := time.Now()
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
-	return msa.updateSummary(mode, band, "day", startOfDay, endOfDay)
+	return msa.updateSummary(mode, band, "day", startOfDay, endOfDay, dm)
 }
 
 // updateWeeklySummary updates the weekly summary for a mode/band combination
-func (msa *MetricsSummaryAggregator) updateWeeklySummary(mode, band string) error {
+func (msa *MetricsSummaryAggregator) updateWeeklySummary(mode, band string, dm *DigitalDecodeMetrics) error {
 	now := time.Now()
 	// Start of week (Monday)
 	weekday := int(now.Weekday())
@@ -172,53 +169,55 @@ func (msa *MetricsSummaryAggregator) updateWeeklySummary(mode, band string) erro
 	startOfWeek := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
 	endOfWeek := startOfWeek.Add(7 * 24 * time.Hour)
 
-	return msa.updateSummary(mode, band, "week", startOfWeek, endOfWeek)
+	return msa.updateSummary(mode, band, "week", startOfWeek, endOfWeek, dm)
 }
 
 // updateMonthlySummary updates the monthly summary for a mode/band combination
-func (msa *MetricsSummaryAggregator) updateMonthlySummary(mode, band string) error {
+func (msa *MetricsSummaryAggregator) updateMonthlySummary(mode, band string, dm *DigitalDecodeMetrics) error {
 	now := time.Now()
 	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	endOfMonth := startOfMonth.AddDate(0, 1, 0)
 
-	return msa.updateSummary(mode, band, "month", startOfMonth, endOfMonth)
+	return msa.updateSummary(mode, band, "month", startOfMonth, endOfMonth, dm)
 }
 
 // updateYearlySummary updates the yearly summary for a mode/band combination
-func (msa *MetricsSummaryAggregator) updateYearlySummary(mode, band string) error {
+func (msa *MetricsSummaryAggregator) updateYearlySummary(mode, band string, dm *DigitalDecodeMetrics) error {
 	now := time.Now()
 	startOfYear := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
 	endOfYear := startOfYear.AddDate(1, 0, 0)
 
-	return msa.updateSummary(mode, band, "year", startOfYear, endOfYear)
+	return msa.updateSummary(mode, band, "year", startOfYear, endOfYear, dm)
 }
 
-// updateSummary updates a summary for a specific period
-func (msa *MetricsSummaryAggregator) updateSummary(mode, band, period string, startTime, endTime time.Time) error {
+// updateSummary updates a summary for a specific period using in-memory metrics
+func (msa *MetricsSummaryAggregator) updateSummary(mode, band, period string, startTime, endTime time.Time, dm *DigitalDecodeMetrics) error {
 	// Get or create summary
 	summary, err := msa.loadOrCreateSummary(mode, band, period, startTime, endTime)
 	if err != nil {
 		return err
 	}
 
-	// Read new snapshots since last processed
-	snapshots, err := msa.readNewSnapshots(mode, band, summary.LastProcessedSnapshot, endTime)
-	if err != nil {
-		return err
+	// Only update if enough time has passed since last update (avoid redundant updates)
+	now := time.Now()
+	if now.Sub(summary.LastUpdated) < 1*time.Minute {
+		return nil // Skip if updated less than 1 minute ago
 	}
 
-	if len(snapshots) == 0 {
-		return nil // No new data
+	// Create a single snapshot from current in-memory metrics instead of reading files
+	// This is much more efficient than reading and parsing JSONL files
+	snapshot := msa.metricsLogger.createSnapshot(dm, mode, band, now)
+	if snapshot == nil {
+		return nil // No data available
 	}
 
-	// Process snapshots and update summary
+	// Process the single snapshot
+	snapshots := []MetricsSnapshot{*snapshot}
 	msa.processSnapshots(summary, snapshots, period)
 
 	// Update metadata
-	summary.LastUpdated = time.Now()
-	if len(snapshots) > 0 {
-		summary.LastProcessedSnapshot = snapshots[len(snapshots)-1].Timestamp
-	}
+	summary.LastUpdated = now
+	summary.LastProcessedSnapshot = now
 
 	// Save summary
 	return msa.saveSummary(summary)
@@ -263,24 +262,6 @@ func (msa *MetricsSummaryAggregator) loadOrCreateSummary(mode, band, period stri
 	}
 
 	return summary, nil
-}
-
-// readNewSnapshots reads snapshots from JSONL files since last processed time
-func (msa *MetricsSummaryAggregator) readNewSnapshots(mode, band string, since, until time.Time) ([]MetricsSnapshot, error) {
-	if msa.metricsLogger == nil || !msa.metricsLogger.enabled {
-		return nil, nil
-	}
-
-	// Read from files using the metrics logger
-	snapshotsMap, err := msa.metricsLogger.ReadMetricsFromFiles(since, until)
-	if err != nil {
-		return nil, err
-	}
-
-	key := fmt.Sprintf("%s:%s", mode, band)
-	snapshots := snapshotsMap[key]
-
-	return snapshots, nil
 }
 
 // processSnapshots processes new snapshots and updates the summary

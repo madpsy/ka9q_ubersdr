@@ -279,7 +279,7 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 	combinations := md.prometheusMetrics.digitalMetrics.GetAllModeBandCombinations()
 	log.Printf("Found %d mode-band combinations in memory", len(combinations))
 
-	// Also add combinations from file snapshots if available
+	// Also add combinations from file snapshots if available (BEFORE filtering)
 	if fileSnapshots != nil {
 		addedFromFiles := 0
 		for key := range fileSnapshots {
@@ -289,18 +289,21 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 				foundMode := parts[0]
 				foundBand := parts[1]
 
-				// Check if this combination already exists
-				exists := false
-				for _, combo := range combinations {
-					if combo.Mode == foundMode && combo.Band == foundBand {
-						exists = true
-						break
+				// Apply filter here - only add if it matches the requested mode/band
+				if (mode == "" || foundMode == mode) && (band == "" || foundBand == band) {
+					// Check if this combination already exists
+					exists := false
+					for _, combo := range combinations {
+						if combo.Mode == foundMode && combo.Band == foundBand {
+							exists = true
+							break
+						}
 					}
-				}
-				if !exists {
-					combinations = append(combinations, struct{ Mode, Band string }{Mode: foundMode, Band: foundBand})
-					addedFromFiles++
-					log.Printf("Added mode-band combination from files: %s:%s", foundMode, foundBand)
+					if !exists {
+						combinations = append(combinations, struct{ Mode, Band string }{Mode: foundMode, Band: foundBand})
+						addedFromFiles++
+						log.Printf("Added mode-band combination from files: %s:%s", foundMode, foundBand)
+					}
 				}
 			} else {
 				log.Printf("Warning: could not parse mode-band key: %s", key)

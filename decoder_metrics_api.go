@@ -346,29 +346,59 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 
 		if fileSnapshots != nil {
 			if snapshots, exists := fileSnapshots[key]; exists && len(snapshots) > 0 {
-				// Use the most recent snapshot's data
-				mostRecent := snapshots[len(snapshots)-1]
-				metrics.DecodeCounts.Last1Hour = mostRecent.DecodeCounts.Last1Hour
-				metrics.DecodeCounts.Last3Hours = mostRecent.DecodeCounts.Last3Hours
-				metrics.DecodeCounts.Last6Hours = mostRecent.DecodeCounts.Last6Hours
-				metrics.DecodeCounts.Last12Hours = mostRecent.DecodeCounts.Last12Hours
-				metrics.DecodeCounts.Last24Hours = mostRecent.DecodeCounts.Last24Hours
+				// Strategy: Find a snapshot that's at least 1 hour old (to have accumulated data)
+				// but prefer more recent ones (within the time range) over very old ones
+				// This avoids both: brand new snapshots (low counts) and very stale data
 
-				metrics.UniqueCallsigns.Last1Hour = mostRecent.UniqueCallsigns.Last1Hour
-				metrics.UniqueCallsigns.Last3Hours = mostRecent.UniqueCallsigns.Last3Hours
-				metrics.UniqueCallsigns.Last6Hours = mostRecent.UniqueCallsigns.Last6Hours
-				metrics.UniqueCallsigns.Last12Hours = mostRecent.UniqueCallsigns.Last12Hours
-				metrics.UniqueCallsigns.Last24Hours = mostRecent.UniqueCallsigns.Last24Hours
+				var bestSnapshot *MetricsSnapshot
+				oneHourAgo := endTime.Add(-1 * time.Hour)
 
-				metrics.DecodesPerCycle.Last1Min = mostRecent.DecodesPerCycle.Last1Min
-				metrics.DecodesPerCycle.Last5Min = mostRecent.DecodesPerCycle.Last5Min
-				metrics.DecodesPerCycle.Last15Min = mostRecent.DecodesPerCycle.Last15Min
-				metrics.DecodesPerCycle.Last30Min = mostRecent.DecodesPerCycle.Last30Min
-				metrics.DecodesPerCycle.Last60Min = mostRecent.DecodesPerCycle.Last60Min
+				// First pass: try to find snapshots that are at least 1 hour old
+				for i := range snapshots {
+					s := &snapshots[i]
+					if s.Timestamp.Before(oneHourAgo) && s.DecodeCounts.Last24Hours > 0 {
+						if bestSnapshot == nil || s.Timestamp.After(bestSnapshot.Timestamp) {
+							bestSnapshot = s
+						}
+					}
+				}
 
-				usedFileData = true
-				log.Printf("Using file snapshot data for %s:%s - Last24h: %d decodes, %d callsigns",
-					combo.Mode, combo.Band, metrics.DecodeCounts.Last24Hours, metrics.UniqueCallsigns.Last24Hours)
+				// If no snapshot older than 1 hour, use the one with highest count
+				if bestSnapshot == nil {
+					maxDecodes := int64(0)
+					for i := range snapshots {
+						s := &snapshots[i]
+						if s.DecodeCounts.Last24Hours > maxDecodes {
+							maxDecodes = s.DecodeCounts.Last24Hours
+							bestSnapshot = s
+						}
+					}
+				}
+
+				if bestSnapshot != nil && bestSnapshot.DecodeCounts.Last24Hours > 0 {
+					metrics.DecodeCounts.Last1Hour = bestSnapshot.DecodeCounts.Last1Hour
+					metrics.DecodeCounts.Last3Hours = bestSnapshot.DecodeCounts.Last3Hours
+					metrics.DecodeCounts.Last6Hours = bestSnapshot.DecodeCounts.Last6Hours
+					metrics.DecodeCounts.Last12Hours = bestSnapshot.DecodeCounts.Last12Hours
+					metrics.DecodeCounts.Last24Hours = bestSnapshot.DecodeCounts.Last24Hours
+
+					metrics.UniqueCallsigns.Last1Hour = bestSnapshot.UniqueCallsigns.Last1Hour
+					metrics.UniqueCallsigns.Last3Hours = bestSnapshot.UniqueCallsigns.Last3Hours
+					metrics.UniqueCallsigns.Last6Hours = bestSnapshot.UniqueCallsigns.Last6Hours
+					metrics.UniqueCallsigns.Last12Hours = bestSnapshot.UniqueCallsigns.Last12Hours
+					metrics.UniqueCallsigns.Last24Hours = bestSnapshot.UniqueCallsigns.Last24Hours
+
+					metrics.DecodesPerCycle.Last1Min = bestSnapshot.DecodesPerCycle.Last1Min
+					metrics.DecodesPerCycle.Last5Min = bestSnapshot.DecodesPerCycle.Last5Min
+					metrics.DecodesPerCycle.Last15Min = bestSnapshot.DecodesPerCycle.Last15Min
+					metrics.DecodesPerCycle.Last30Min = bestSnapshot.DecodesPerCycle.Last30Min
+					metrics.DecodesPerCycle.Last60Min = bestSnapshot.DecodesPerCycle.Last60Min
+
+					usedFileData = true
+					log.Printf("Using file snapshot from %v for %s - Last24h: %d decodes, %d callsigns (from %d snapshots, endTime: %v)",
+						bestSnapshot.Timestamp.Format("2006-01-02 15:04:05"), key,
+						metrics.DecodeCounts.Last24Hours, metrics.UniqueCallsigns.Last24Hours, len(snapshots), endTime.Format("15:04:05"))
+				}
 			}
 		}
 

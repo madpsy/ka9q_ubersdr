@@ -2543,6 +2543,16 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Decoder metrics summary directory
+	if ah.config.Decoder.Enabled && ah.config.Decoder.MetricsLogEnabled && ah.config.Decoder.MetricsSummaryDataDir != "" {
+		duCmd := exec.Command("du", "-sh", ah.config.Decoder.MetricsSummaryDataDir)
+		if duOutput, err := duCmd.CombinedOutput(); err == nil {
+			dataDirs["decoder_summaries"] = string(duOutput)
+		} else {
+			dataDirs["decoder_summaries"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.Decoder.MetricsSummaryDataDir)
+		}
+	}
+
 	// Noise floor directory
 	if ah.config.NoiseFloor.Enabled && ah.config.NoiseFloor.DataDir != "" {
 		duCmd := exec.Command("du", "-sh", ah.config.NoiseFloor.DataDir)

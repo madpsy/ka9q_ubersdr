@@ -362,6 +362,14 @@ func main() {
 		config.Decoder.MetricsLogDataDir = *configDir + "/" + config.Decoder.MetricsLogDataDir
 	}
 
+	// Set metrics summary data directory relative to config directory (same pattern as metrics log)
+	if config.Decoder.Enabled && config.Decoder.MetricsLogEnabled && config.Decoder.MetricsSummaryDataDir == "" {
+		config.Decoder.MetricsSummaryDataDir = *configDir + "/decoder_summaries"
+	} else if config.Decoder.Enabled && config.Decoder.MetricsLogEnabled && !strings.HasPrefix(config.Decoder.MetricsSummaryDataDir, "/") {
+		// If relative path, make it relative to config directory
+		config.Decoder.MetricsSummaryDataDir = *configDir + "/" + config.Decoder.MetricsSummaryDataDir
+	}
+
 	// Set default value for spots locators only filter
 	// Default to true (only log/show spots with valid locators)
 	// Users must explicitly set to false in config to log/see all spots
@@ -643,6 +651,9 @@ func main() {
 	}))
 	http.HandleFunc("/api/decoder/metrics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleDecodeMetrics(w, r, multiDecoder, ipBanManager, fftRateLimiter)
+	}))
+	http.HandleFunc("/api/decoder/metrics/summary", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleDecodeMetricsSummary(w, r, multiDecoder, ipBanManager, fftRateLimiter)
 	}))
 
 	// CTY API endpoints (with IP ban checking)

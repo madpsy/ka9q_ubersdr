@@ -505,8 +505,8 @@ Examples:
     parser.add_argument('-f', '--frequency', type=int, required=True,
                         help='Frequency in Hz (e.g., 14074000 for 14.074 MHz)')
     parser.add_argument('-m', '--mode', required=True,
-                        choices=['am', 'sam', 'usb', 'lsb', 'fm', 'nfm', 'cwu', 'cwl', 'iq'],
-                        help='Demodulation mode')
+                        choices=['am', 'sam', 'usb', 'lsb', 'fm', 'nfm', 'cwu', 'cwl', 'iq', 'iq48', 'iq96', 'iq192'],
+                        help='Demodulation mode (iq48/iq96/iq192 require bypassed IP)')
     parser.add_argument('-b', '--bandwidth', type=parse_bandwidth,
                         help='Bandwidth in format low:high (e.g., -5000:5000)')
     parser.add_argument('-o', '--output', choices=['pipewire', 'stdout', 'wav'],

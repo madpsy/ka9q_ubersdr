@@ -162,6 +162,9 @@ type DecoderConfig struct {
 	MetricsLogDataDir      string `yaml:"metrics_log_data_dir"`      // Directory for metrics JSON Lines files (relative or absolute, default: data_dir/decoder_metrics)
 	MetricsLogIntervalSecs int    `yaml:"metrics_log_interval_secs"` // Write interval in seconds (default: 300 = 5 minutes)
 
+	// Metrics summary configuration
+	MetricsSummaryDataDir string `yaml:"metrics_summary_data_dir"` // Directory for metrics summary files (relative or absolute, default: data_dir/decoder_summaries)
+
 	// Band configurations
 	Bands []DecoderBandConfig `yaml:"bands"`
 }

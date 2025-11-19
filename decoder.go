@@ -35,6 +35,9 @@ type MultiDecoder struct {
 	metricsFirstWriteDone bool
 	metricsFirstWriteMu   sync.Mutex
 
+	// Metrics summary aggregator
+	summaryAggregator *MetricsSummaryAggregator
+
 	// Statistics
 	stats *DecoderStats
 
@@ -134,6 +137,15 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 		if err := logger.LoadRecentMetrics(prometheusMetrics.digitalMetrics); err != nil {
 			log.Printf("Warning: failed to load recent metrics from files: %v", err)
 		}
+
+		// Initialize metrics summary aggregator
+		// Path resolution is handled in main.go before this is called
+		aggregator, err := NewMetricsSummaryAggregator(config.MetricsLogDataDir, config.MetricsSummaryDataDir, logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize metrics summary aggregator: %w", err)
+		}
+		md.summaryAggregator = aggregator
+		log.Printf("Metrics summary aggregator enabled: %s", config.MetricsSummaryDataDir)
 	}
 
 	return md, nil
@@ -712,6 +724,13 @@ func (md *MultiDecoder) metricsWriteLoop() {
 			// Write metrics snapshot
 			if err := md.metricsLogger.WriteMetrics(md.prometheusMetrics.digitalMetrics); err != nil {
 				log.Printf("Warning: Failed to write metrics: %v", err)
+			}
+
+			// Update summary aggregations
+			if md.summaryAggregator != nil {
+				if err := md.summaryAggregator.UpdateAllSummaries(md.prometheusMetrics.digitalMetrics); err != nil {
+					log.Printf("Warning: Failed to update summaries: %v", err)
+				}
 			}
 		}
 	}

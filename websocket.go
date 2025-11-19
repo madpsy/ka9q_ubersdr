@@ -366,6 +366,29 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	mode := "usb" // Default mode
 	if m := query.Get("mode"); m != "" {
+		// Validate mode against whitelist
+		validModes := map[string]bool{
+			"usb": true, "lsb": true, "am": true, "sam": true,
+			"fm": true, "nfm": true, "cwu": true, "cwl": true, "iq": true,
+		}
+		// Wide IQ modes only allowed for bypassed IPs
+		wideIQModes := map[string]bool{
+			"iq48": true, "iq96": true, "iq192": true,
+		}
+
+		if !validModes[m] && !wideIQModes[m] {
+			log.Printf("Rejected WebSocket connection: invalid mode '%s' from %s (client IP: %s)", m, sourceIP, clientIP)
+			wsh.sendError(conn, fmt.Sprintf("Invalid mode '%s'. Valid modes: usb, lsb, am, sam, fm, nfm, cwu, cwl, iq", m))
+			return
+		}
+
+		// Check if wide IQ mode requires bypass
+		if wideIQModes[m] && !wsh.config.Server.IsIPTimeoutBypassed(clientIP) {
+			log.Printf("Rejected WebSocket connection: wide IQ mode '%s' requires bypassed IP from %s (client IP: %s)", m, sourceIP, clientIP)
+			wsh.sendError(conn, fmt.Sprintf("Mode '%s' is only available for authorized IPs", m))
+			return
+		}
+
 		mode = m
 	}
 
@@ -392,15 +415,29 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	// Get bandwidth parameters from query string (optional)
 	var bandwidthLow, bandwidthHigh *int
+	const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs exempt)
+	isBypassed := wsh.config.Server.IsIPTimeoutBypassed(clientIP)
 	if bwl := query.Get("bandwidthLow"); bwl != "" {
 		var val int
 		if _, err := fmt.Sscanf(bwl, "%d", &val); err == nil {
+			// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
+			if !isBypassed && (val < -maxBandwidth || val > maxBandwidth) {
+				log.Printf("Rejected WebSocket connection: bandwidthLow %d Hz out of range (±%d Hz) from %s (client IP: %s)", val, maxBandwidth, sourceIP, clientIP)
+				wsh.sendError(conn, fmt.Sprintf("Bandwidth low %d Hz is out of valid range (±%d Hz)", val, maxBandwidth))
+				return
+			}
 			bandwidthLow = &val
 		}
 	}
 	if bwh := query.Get("bandwidthHigh"); bwh != "" {
 		var val int
 		if _, err := fmt.Sscanf(bwh, "%d", &val); err == nil {
+			// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
+			if !isBypassed && (val < -maxBandwidth || val > maxBandwidth) {
+				log.Printf("Rejected WebSocket connection: bandwidthHigh %d Hz out of range (±%d Hz) from %s (client IP: %s)", val, maxBandwidth, sourceIP, clientIP)
+				wsh.sendError(conn, fmt.Sprintf("Bandwidth high %d Hz is out of valid range (±%d Hz)", val, maxBandwidth))
+				return
+			}
 			bandwidthHigh = &val
 		}
 	}
@@ -566,16 +603,49 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					wsh.sendError(conn, "Mode 'spectrum' is reserved for the spectrum analyzer. Please use a valid audio mode (usb, lsb, am, fm, etc.)")
 					continue // Don't close connection, just reject this tune request
 				}
+				// Validate mode against whitelist
+				validModes := map[string]bool{
+					"usb": true, "lsb": true, "am": true, "sam": true,
+					"fm": true, "nfm": true, "cwu": true, "cwl": true, "iq": true,
+				}
+				// Wide IQ modes only allowed for bypassed IPs
+				wideIQModes := map[string]bool{
+					"iq48": true, "iq96": true, "iq192": true,
+				}
+
+				if !validModes[msg.Mode] && !wideIQModes[msg.Mode] {
+					wsh.sendError(conn, fmt.Sprintf("Invalid mode '%s'. Valid modes: usb, lsb, am, sam, fm, nfm, cwu, cwl, iq", msg.Mode))
+					continue // Don't close connection, just reject this tune request
+				}
+
+				// Check if wide IQ mode requires bypass
+				if wideIQModes[msg.Mode] && !wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP) {
+					wsh.sendError(conn, fmt.Sprintf("Mode '%s' is only available for authorized IPs", msg.Mode))
+					continue // Don't close connection, just reject this tune request
+				}
+
 				newMode = msg.Mode
 			}
 			// Accept bandwidth values (can be negative or zero for low edge)
 			// Use pointers to distinguish between 0 (valid value) and not-sent (nil)
 			if msg.BandwidthLow != nil || msg.BandwidthHigh != nil {
 				// At least one bandwidth value was sent
+				const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs exempt)
+				isBypassed := wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP)
 				if msg.BandwidthLow != nil {
+					// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
+					if !isBypassed && (*msg.BandwidthLow < -maxBandwidth || *msg.BandwidthLow > maxBandwidth) {
+						wsh.sendError(conn, fmt.Sprintf("Bandwidth low %d Hz is out of valid range (±%d Hz)", *msg.BandwidthLow, maxBandwidth))
+						continue // Don't close connection, just reject this tune request
+					}
 					newBandwidthLow = *msg.BandwidthLow
 				}
 				if msg.BandwidthHigh != nil {
+					// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
+					if !isBypassed && (*msg.BandwidthHigh < -maxBandwidth || *msg.BandwidthHigh > maxBandwidth) {
+						wsh.sendError(conn, fmt.Sprintf("Bandwidth high %d Hz is out of valid range (±%d Hz)", *msg.BandwidthHigh, maxBandwidth))
+						continue // Don't close connection, just reject this tune request
+					}
 					newBandwidthHigh = *msg.BandwidthHigh
 				}
 			}

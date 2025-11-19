@@ -225,9 +225,9 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	sampleRate := sm.config.Audio.GetSampleRateForMode(mode)
 
 	// Determine number of channels based on mode
-	// IQ mode uses stereo (I and Q channels), all others use mono
+	// IQ modes use stereo (I and Q channels), all others use mono
 	channels := 1
-	if mode == "iq" {
+	if mode == "iq" || mode == "iq48" || mode == "iq96" || mode == "iq192" {
 		channels = 2
 	}
 
@@ -586,8 +586,8 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		session.Mode = mode
 		// Update sample rate when mode changes
 		session.SampleRate = sm.config.Audio.GetSampleRateForMode(mode)
-		// Update channels when mode changes (IQ=stereo, others=mono)
-		if mode == "iq" {
+		// Update channels when mode changes (IQ modes=stereo, others=mono)
+		if mode == "iq" || mode == "iq48" || mode == "iq96" || mode == "iq192" {
 			session.Channels = 2
 		} else {
 			session.Channels = 1

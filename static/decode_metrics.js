@@ -18,9 +18,33 @@ class DecodeMetricsDashboard {
         };
         this.init();
         this.loadVersion();
+        this.loadDecoderNames(); // Load decoder band names
         this.loadSummariesAndCharts(); // Load summary statistics and charts
         this.startSummaryAutoRefresh(); // Start auto-refresh for summaries
         // Don't auto-load detailed metrics - user must click "Load Metrics" button
+    }
+
+    async loadDecoderNames() {
+        try {
+            const response = await fetch('/api/decoder/band-names');
+            if (response.ok) {
+                const data = await response.json();
+                const select = document.getElementById('decoder-name');
+                if (select && data.band_names) {
+                    // Clear existing options except "All Decoders"
+                    select.innerHTML = '<option value="">All Decoders</option>';
+                    // Add decoder names
+                    data.band_names.forEach(name => {
+                        const option = document.createElement('option');
+                        option.value = name;
+                        option.textContent = name;
+                        select.appendChild(option);
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error loading decoder names:', error);
+        }
     }
 
     async loadVersion() {
@@ -549,14 +573,13 @@ class DecodeMetricsDashboard {
     }
 
     async loadMetrics() {
-        const mode = document.getElementById('mode').value;
-        const band = document.getElementById('band').value;
+        const decoderName = document.getElementById('decoder-name').value;
         const interval = document.getElementById('interval').value;
         const dateRangeType = document.getElementById('date-range-type').value;
 
         const params = new URLSearchParams();
-        if (mode) params.append('mode', mode);
-        if (band) params.append('band', band);
+        // Decoder name encompasses both mode and band, so use it as the band filter
+        if (decoderName) params.append('band', decoderName);
         params.append('timeseries', 'true');
         params.append('interval', interval);
 

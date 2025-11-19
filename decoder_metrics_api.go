@@ -281,7 +281,6 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 
 	// Also add combinations from file snapshots if available (BEFORE filtering)
 	if fileSnapshots != nil {
-		log.Printf("Checking fileSnapshots for filter: mode='%s', band='%s'", mode, band)
 		addedFromFiles := 0
 		for key := range fileSnapshots {
 			// Parse key format "mode:band" using strings.Split
@@ -290,11 +289,10 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 				foundMode := parts[0]
 				foundBand := parts[1]
 
-				log.Printf("Checking key '%s': mode='%s', band='%s'", key, foundMode, foundBand)
-
 				// Apply filter here - only add if it matches the requested mode/band
+				// Note: Band names are user-defined and may not match standard names
+				// For exact match filtering to work, the band parameter must match exactly
 				if (mode == "" || foundMode == mode) && (band == "" || foundBand == band) {
-					log.Printf("Key '%s' matches filter", key)
 					// Check if this combination already exists
 					exists := false
 					for _, combo := range combinations {
@@ -306,20 +304,11 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 					if !exists {
 						combinations = append(combinations, struct{ Mode, Band string }{Mode: foundMode, Band: foundBand})
 						addedFromFiles++
-						log.Printf("Added mode-band combination from files: %s:%s", foundMode, foundBand)
-					} else {
-						log.Printf("Key '%s' already exists in combinations", key)
 					}
-				} else {
-					log.Printf("Key '%s' does NOT match filter (mode match: %v, band match: %v)",
-						key, (mode == "" || foundMode == mode), (band == "" || foundBand == band))
 				}
-			} else {
-				log.Printf("Warning: could not parse mode-band key: %s", key)
 			}
 		}
-		log.Printf("Added %d mode-band combinations from files (total now: %d) for filter mode='%s', band='%s'",
-			addedFromFiles, len(combinations), mode, band)
+		log.Printf("Added %d mode-band combinations from files (total now: %d)", addedFromFiles, len(combinations))
 	}
 
 	// Filter combinations if mode or band specified
@@ -954,4 +943,40 @@ func parseTimeParam(param string) (time.Time, error) {
 	}
 
 	return time.Time{}, fmt.Errorf("invalid time format, expected RFC3339, Unix timestamp, or YYYY-MM-DD")
+}
+
+// handleDecoderBandNames returns the list of configured decoder band names (public endpoint)
+func handleDecoderBandNames(w http.ResponseWriter, r *http.Request, md *MultiDecoder, ipBanManager *IPBanManager) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if md == nil || md.config == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decoder configuration is not available",
+		})
+		return
+	}
+
+	// Extract band names from decoder configuration
+	bandNames := make([]string, 0)
+	for _, band := range md.config.Bands {
+		if band.Enabled {
+			bandNames = append(bandNames, band.Name)
+		}
+	}
+
+	response := map[string]interface{}{
+		"band_names": bandNames,
+		"count":      len(bandNames),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding decoder band names: %v", err)
+	}
 }

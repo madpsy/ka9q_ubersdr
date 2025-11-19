@@ -274,8 +274,29 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 		}
 	}
 
-	// Get all mode/band combinations
+	// Get all mode/band combinations from in-memory data
 	combinations := md.prometheusMetrics.digitalMetrics.GetAllModeBandCombinations()
+
+	// Also add combinations from file snapshots if available
+	if fileSnapshots != nil {
+		for key := range fileSnapshots {
+			// Parse key format "mode:band"
+			var foundMode, foundBand string
+			if _, err := fmt.Sscanf(key, "%[^:]:%s", &foundMode, &foundBand); err == nil {
+				// Check if this combination already exists
+				exists := false
+				for _, combo := range combinations {
+					if combo.Mode == foundMode && combo.Band == foundBand {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					combinations = append(combinations, struct{ Mode, Band string }{Mode: foundMode, Band: foundBand})
+				}
+			}
+		}
+	}
 
 	// Filter combinations if mode or band specified
 	filteredCombinations := []struct{ Mode, Band string }{}

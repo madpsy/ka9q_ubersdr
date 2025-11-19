@@ -340,16 +340,11 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 			cycleSeconds = 120
 		}
 
-		// Decode counts - try in-memory first, then estimate from file snapshots
-		metrics.DecodeCounts.Last1Hour = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 1)
-		metrics.DecodeCounts.Last3Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 3)
-		metrics.DecodeCounts.Last6Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 6)
-		metrics.DecodeCounts.Last12Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 12)
-		metrics.DecodeCounts.Last24Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 24)
+		// Try to get data from file snapshots first for historical data
+		key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
+		usedFileData := false
 
-		// If no in-memory data, try to estimate from file snapshots
-		if metrics.DecodeCounts.Last24Hours == 0 && fileSnapshots != nil {
-			key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
+		if fileSnapshots != nil {
 			if snapshots, exists := fileSnapshots[key]; exists && len(snapshots) > 0 {
 				// Use the most recent snapshot's data
 				mostRecent := snapshots[len(snapshots)-1]
@@ -358,23 +353,48 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 				metrics.DecodeCounts.Last6Hours = mostRecent.DecodeCounts.Last6Hours
 				metrics.DecodeCounts.Last12Hours = mostRecent.DecodeCounts.Last12Hours
 				metrics.DecodeCounts.Last24Hours = mostRecent.DecodeCounts.Last24Hours
-				log.Printf("Using file snapshot data for %s:%s - Last24h: %d", combo.Mode, combo.Band, metrics.DecodeCounts.Last24Hours)
+
+				metrics.UniqueCallsigns.Last1Hour = mostRecent.UniqueCallsigns.Last1Hour
+				metrics.UniqueCallsigns.Last3Hours = mostRecent.UniqueCallsigns.Last3Hours
+				metrics.UniqueCallsigns.Last6Hours = mostRecent.UniqueCallsigns.Last6Hours
+				metrics.UniqueCallsigns.Last12Hours = mostRecent.UniqueCallsigns.Last12Hours
+				metrics.UniqueCallsigns.Last24Hours = mostRecent.UniqueCallsigns.Last24Hours
+
+				metrics.DecodesPerCycle.Last1Min = mostRecent.DecodesPerCycle.Last1Min
+				metrics.DecodesPerCycle.Last5Min = mostRecent.DecodesPerCycle.Last5Min
+				metrics.DecodesPerCycle.Last15Min = mostRecent.DecodesPerCycle.Last15Min
+				metrics.DecodesPerCycle.Last30Min = mostRecent.DecodesPerCycle.Last30Min
+				metrics.DecodesPerCycle.Last60Min = mostRecent.DecodesPerCycle.Last60Min
+
+				usedFileData = true
+				log.Printf("Using file snapshot data for %s:%s - Last24h: %d decodes, %d callsigns",
+					combo.Mode, combo.Band, metrics.DecodeCounts.Last24Hours, metrics.UniqueCallsigns.Last24Hours)
 			}
 		}
 
-		// Decodes per cycle
-		metrics.DecodesPerCycle.Last1Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 1)
-		metrics.DecodesPerCycle.Last5Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 5)
-		metrics.DecodesPerCycle.Last15Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 15)
-		metrics.DecodesPerCycle.Last30Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 30)
-		metrics.DecodesPerCycle.Last60Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 60)
+		// Only use in-memory data if no file data was available
+		if !usedFileData {
+			// Decode counts
+			metrics.DecodeCounts.Last1Hour = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 1)
+			metrics.DecodeCounts.Last3Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 3)
+			metrics.DecodeCounts.Last6Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 6)
+			metrics.DecodeCounts.Last12Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 12)
+			metrics.DecodeCounts.Last24Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 24)
 
-		// Unique callsigns
-		metrics.UniqueCallsigns.Last1Hour = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 1)
-		metrics.UniqueCallsigns.Last3Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 3)
-		metrics.UniqueCallsigns.Last6Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 6)
-		metrics.UniqueCallsigns.Last12Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 12)
-		metrics.UniqueCallsigns.Last24Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 24)
+			// Decodes per cycle
+			metrics.DecodesPerCycle.Last1Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 1)
+			metrics.DecodesPerCycle.Last5Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 5)
+			metrics.DecodesPerCycle.Last15Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 15)
+			metrics.DecodesPerCycle.Last30Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 30)
+			metrics.DecodesPerCycle.Last60Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 60)
+
+			// Unique callsigns
+			metrics.UniqueCallsigns.Last1Hour = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 1)
+			metrics.UniqueCallsigns.Last3Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 3)
+			metrics.UniqueCallsigns.Last6Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 6)
+			metrics.UniqueCallsigns.Last12Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 12)
+			metrics.UniqueCallsigns.Last24Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 24)
+		}
 
 		// Execution time
 		avg1m, min1m, max1m := md.prometheusMetrics.digitalMetrics.GetExecutionTimeStats(combo.Mode, combo.Band, 1)

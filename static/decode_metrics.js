@@ -413,8 +413,9 @@ class DecodeMetricsDashboard {
 
             // Aggregate by mode across all bands for each month
             const monthlyData = {};
+
+            // First pass: collect all monthly_breakdown data
             data.summaries.forEach(summary => {
-                // Check if monthly_breakdown exists, if not use total_spots for current month
                 if (summary.monthly_breakdown && summary.monthly_breakdown.length > 0) {
                     summary.monthly_breakdown.forEach(month => {
                         const monthKey = month.month;
@@ -425,8 +426,12 @@ class DecodeMetricsDashboard {
                             monthlyData[monthKey][summary.mode] += month.spots;
                         }
                     });
-                } else {
-                    // Fallback: use total_spots for current month if no breakdown exists yet
+                }
+            });
+
+            // Second pass: for summaries without monthly_breakdown, add total_spots to current month
+            data.summaries.forEach(summary => {
+                if (!summary.monthly_breakdown || summary.monthly_breakdown.length === 0) {
                     const currentMonth = `${year}-${String(today.getMonth() + 1).padStart(2, '0')}`;
                     if (!monthlyData[currentMonth]) {
                         monthlyData[currentMonth] = { FT8: 0, FT4: 0, WSPR: 0 };
@@ -436,6 +441,8 @@ class DecodeMetricsDashboard {
                     }
                 }
             });
+
+            console.log('Year chart monthly data:', monthlyData);
 
             // Create labels for all 12 months and prepare data
             const monthLabels = [];

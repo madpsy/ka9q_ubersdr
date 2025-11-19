@@ -386,45 +386,50 @@ class DecodeMetricsDashboard {
         try {
             const today = new Date();
             const year = today.getFullYear();
-            
-            // Fetch data for all 12 months
-            const monthlyData = { FT8: [], FT4: [], WSPR: [] };
-            const monthLabels = [];
-            
-            for (let month = 1; month <= 12; month++) {
-                const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-                monthLabels.push(new Date(year, month - 1).toLocaleDateString('en-US', { month: 'short' }));
-                
-                try {
-                    const response = await fetch(`/api/decoder/metrics/summary?period=month&date=${yearMonth}`);
-                    const data = await response.json();
-                    
-                    // Aggregate by mode across all bands for the month
-                    const monthTotals = { FT8: 0, FT4: 0, WSPR: 0 };
-                    if (data.bands) {
-                        data.bands.forEach(band => {
-                            band.modes.forEach(mode => {
-                                if (monthTotals[mode.mode] !== undefined) {
-                                    monthTotals[mode.mode] += mode.total_spots;
-                                }
-                            });
-                        });
-                    }
-                    
-                    monthlyData.FT8.push(monthTotals.FT8);
-                    monthlyData.FT4.push(monthTotals.FT4);
-                    monthlyData.WSPR.push(monthTotals.WSPR);
-                } catch (error) {
-                    // Month might not have data yet
-                    monthlyData.FT8.push(0);
-                    monthlyData.FT4.push(0);
-                    monthlyData.WSPR.push(0);
-                }
+
+            // Fetch year data with monthly breakdown in a single request
+            const response = await fetch(`/api/decoder/metrics/summary?period=year&date=${year}`);
+            const data = await response.json();
+
+            if (!data.monthly_breakdown || data.monthly_breakdown.length === 0) {
+                console.log('No yearly data available');
+                return;
             }
-            
+
+            // Aggregate by mode across all bands for each month
+            const monthlyData = {};
+            data.monthly_breakdown.forEach(month => {
+                const monthKey = month.month;
+                if (!monthlyData[monthKey]) {
+                    monthlyData[monthKey] = { FT8: 0, FT4: 0, WSPR: 0 };
+                }
+                month.bands.forEach(band => {
+                    band.modes.forEach(mode => {
+                        if (monthlyData[monthKey][mode.mode] !== undefined) {
+                            monthlyData[monthKey][mode.mode] += mode.total_spots;
+                        }
+                    });
+                });
+            });
+
+            // Create labels for all 12 months and prepare data
+            const monthLabels = [];
+            const monthlyDataArrays = { FT8: [], FT4: [], WSPR: [] };
+
+            for (let month = 1; month <= 12; month++) {
+                const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+                monthLabels.push(new Date(year, month - 1).toLocaleDateString('en-US', { month: 'short' }));
+
+                // Use data if available, otherwise 0
+                const monthData = monthlyData[monthKey] || { FT8: 0, FT4: 0, WSPR: 0 };
+                monthlyDataArrays.FT8.push(monthData.FT8);
+                monthlyDataArrays.FT4.push(monthData.FT4);
+                monthlyDataArrays.WSPR.push(monthData.WSPR);
+            }
+
             const datasets = Object.keys(this.MODE_COLORS).map(mode => ({
                 label: mode,
-                data: monthlyData[mode],
+                data: monthlyDataArrays[mode],
                 backgroundColor: this.MODE_COLORS[mode],
                 borderColor: this.MODE_COLORS[mode].replace('0.8', '1'),
                 borderWidth: 1

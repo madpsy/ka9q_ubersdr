@@ -43,8 +43,9 @@ type MetricsSummary struct {
 	AvgSpotsPerHour  float64 `json:"avg_spots_per_hour"`
 
 	// Breakdown data
-	HourlyBreakdown []HourlyStats `json:"hourly_breakdown,omitempty"`
-	DailyBreakdown  []DailyStats  `json:"daily_breakdown,omitempty"`
+	HourlyBreakdown  []HourlyStats  `json:"hourly_breakdown,omitempty"`
+	DailyBreakdown   []DailyStats   `json:"daily_breakdown,omitempty"`
+	MonthlyBreakdown []MonthlyStats `json:"monthly_breakdown,omitempty"`
 
 	// Callsign tracking (for unique count)
 	callsignSet map[string]bool `json:"-"` // Not serialized
@@ -60,6 +61,13 @@ type HourlyStats struct {
 // DailyStats contains metrics for a specific day
 type DailyStats struct {
 	Date            string `json:"date"` // YYYY-MM-DD
+	Spots           int64  `json:"spots"`
+	UniqueCallsigns int    `json:"unique_callsigns"`
+}
+
+// MonthlyStats contains metrics for a specific month
+type MonthlyStats struct {
+	Month           string `json:"month"` // YYYY-MM
 	Spots           int64  `json:"spots"`
 	UniqueCallsigns int    `json:"unique_callsigns"`
 }
@@ -294,8 +302,8 @@ func (msa *MetricsSummaryAggregator) processSnapshots(summary *MetricsSummary, s
 			}
 		}
 
-		// Update daily breakdown for weekly/monthly/yearly summaries
-		if period != "day" {
+		// Update daily breakdown for weekly/monthly summaries
+		if period == "week" || period == "month" {
 			dateStr := snapshot.Timestamp.Format("2006-01-02")
 			found := false
 			for i := range summary.DailyBreakdown {
@@ -311,6 +319,29 @@ func (msa *MetricsSummaryAggregator) processSnapshots(summary *MetricsSummary, s
 			if !found {
 				summary.DailyBreakdown = append(summary.DailyBreakdown, DailyStats{
 					Date:            dateStr,
+					Spots:           snapshot.DecodeCounts.Last1Hour,
+					UniqueCallsigns: snapshot.UniqueCallsigns.Last1Hour,
+				})
+			}
+		}
+
+		// Update monthly breakdown for yearly summaries
+		if period == "year" {
+			monthStr := snapshot.Timestamp.Format("2006-01")
+			found := false
+			for i := range summary.MonthlyBreakdown {
+				if summary.MonthlyBreakdown[i].Month == monthStr {
+					summary.MonthlyBreakdown[i].Spots += snapshot.DecodeCounts.Last1Hour
+					if snapshot.UniqueCallsigns.Last1Hour > summary.MonthlyBreakdown[i].UniqueCallsigns {
+						summary.MonthlyBreakdown[i].UniqueCallsigns = snapshot.UniqueCallsigns.Last1Hour
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				summary.MonthlyBreakdown = append(summary.MonthlyBreakdown, MonthlyStats{
+					Month:           monthStr,
 					Spots:           snapshot.DecodeCounts.Last1Hour,
 					UniqueCallsigns: snapshot.UniqueCallsigns.Last1Hour,
 				})

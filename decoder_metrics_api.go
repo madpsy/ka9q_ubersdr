@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -282,9 +283,12 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 	if fileSnapshots != nil {
 		addedFromFiles := 0
 		for key := range fileSnapshots {
-			// Parse key format "mode:band"
-			var foundMode, foundBand string
-			if _, err := fmt.Sscanf(key, "%[^:]:%s", &foundMode, &foundBand); err == nil {
+			// Parse key format "mode:band" using strings.Split
+			parts := strings.Split(key, ":")
+			if len(parts) == 2 {
+				foundMode := parts[0]
+				foundBand := parts[1]
+
 				// Check if this combination already exists
 				exists := false
 				for _, combo := range combinations {
@@ -298,6 +302,8 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 					addedFromFiles++
 					log.Printf("Added mode-band combination from files: %s:%s", foundMode, foundBand)
 				}
+			} else {
+				log.Printf("Warning: could not parse mode-band key: %s", key)
 			}
 		}
 		log.Printf("Added %d mode-band combinations from files (total now: %d)", addedFromFiles, len(combinations))

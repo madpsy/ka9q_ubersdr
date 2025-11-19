@@ -415,14 +415,14 @@ func (swrl *SpaceWeatherRateLimiter) GetStats() (int, int) {
 }
 
 // SummaryRateLimiter manages rate limiters for metrics summary endpoint requests per IP
-// Limits to 5 requests per second per IP
+// Limits to 10 requests per second per IP
 type SummaryRateLimiter struct {
 	limiters map[string]*RateLimiter
 	mu       sync.RWMutex
 }
 
 // NewSummaryRateLimiter creates a new summary endpoint rate limiter
-// Fixed at 5 requests per second
+// Fixed at 10 requests per second
 func NewSummaryRateLimiter() *SummaryRateLimiter {
 	return &SummaryRateLimiter{
 		limiters: make(map[string]*RateLimiter),
@@ -435,11 +435,11 @@ func (srl *SummaryRateLimiter) AllowRequest(ip string) bool {
 	srl.mu.Lock()
 	limiter, exists := srl.limiters[ip]
 	if !exists {
-		// Create a rate limiter with 5 tokens max, refilling at 5 tokens/sec
+		// Create a rate limiter with 10 tokens max, refilling at 10 tokens/sec
 		limiter = &RateLimiter{
-			tokens:     5.0,
-			maxTokens:  5.0,
-			refillRate: 5.0, // 5 requests per second
+			tokens:     10.0,
+			maxTokens:  10.0,
+			refillRate: 10.0, // 10 requests per second
 			lastRefill: time.Now(),
 		}
 		srl.limiters[ip] = limiter

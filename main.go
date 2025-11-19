@@ -534,9 +534,9 @@ func main() {
 	fftRateLimiter := NewFFTRateLimiter()
 	log.Printf("FFT endpoint rate limiting: 1 request per 2 seconds per band per IP")
 
-	// Initialize Summary endpoint rate limiter (5 requests per second per IP)
+	// Initialize Summary endpoint rate limiter (10 requests per second per IP)
 	summaryRateLimiter := NewSummaryRateLimiter()
-	log.Printf("Summary endpoint rate limiting: 5 requests per second per IP")
+	log.Printf("Summary endpoint rate limiting: 10 requests per second per IP")
 
 	// Initialize space weather endpoint rate limiter
 	spaceWeatherRateLimiter := NewSpaceWeatherRateLimiter()

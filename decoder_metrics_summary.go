@@ -316,47 +316,6 @@ func (msa *MetricsSummaryAggregator) getSummaryKey(summary *MetricsSummary) stri
 	}
 }
 
-// loadOrCreateSummary loads an existing summary or creates a new one
-func (msa *MetricsSummaryAggregator) loadOrCreateSummary(mode, band, period string, startTime, endTime time.Time) (*MetricsSummary, error) {
-	filePath := msa.getSummaryFilePath(mode, band, period, startTime)
-
-	// Try to load existing summary
-	if data, err := os.ReadFile(filePath); err == nil {
-		var summary MetricsSummary
-		if err := json.Unmarshal(data, &summary); err == nil {
-			// Initialize callsign set from unique count
-			summary.callsignSet = make(map[string]bool)
-			// Initialize ProcessedHours if nil
-			if summary.ProcessedHours == nil {
-				summary.ProcessedHours = make(map[string]bool)
-			}
-			return &summary, nil
-		}
-	}
-
-	// Create new summary
-	summary := &MetricsSummary{
-		Period:                period,
-		StartTime:             startTime,
-		EndTime:               endTime,
-		Mode:                  mode,
-		Band:                  band,
-		callsignSet:           make(map[string]bool),
-		ProcessedHours:        make(map[string]bool),
-		LastProcessedSnapshot: startTime,
-	}
-
-	// Initialize hourly breakdown for daily summaries
-	if period == "day" {
-		summary.HourlyBreakdown = make([]HourlyStats, 24)
-		for i := 0; i < 24; i++ {
-			summary.HourlyBreakdown[i].Hour = i
-		}
-	}
-
-	return summary, nil
-}
-
 // getSummaryFilePath returns the file path for a summary
 func (msa *MetricsSummaryAggregator) getSummaryFilePath(mode, band, period string, startTime time.Time) string {
 	var dirPath string
@@ -510,4 +469,30 @@ func (msa *MetricsSummaryAggregator) ReadAllSummaries(period string, date time.T
 	}
 
 	return summaries, nil
+}
+
+// GetAllSummariesFromMemory returns all summaries for a given period and date from memory
+// This is much faster than reading from disk and provides real-time data
+func (msa *MetricsSummaryAggregator) GetAllSummariesFromMemory(period string, date time.Time) []MetricsSummary {
+	msa.mu.RLock()
+	defer msa.mu.RUnlock()
+
+	summaries := make([]MetricsSummary, 0)
+
+	// Iterate through all in-memory summaries and filter by period and date
+	for _, summary := range msa.summaries {
+		if summary.Period != period {
+			continue
+		}
+
+		// Check if the date falls within this summary's time range
+		if (date.Equal(summary.StartTime) || date.After(summary.StartTime)) &&
+			date.Before(summary.EndTime) {
+			// Make a copy to avoid race conditions
+			summaryCopy := *summary
+			summaries = append(summaries, summaryCopy)
+		}
+	}
+
+	return summaries
 }

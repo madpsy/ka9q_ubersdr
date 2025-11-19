@@ -104,16 +104,8 @@ func handleDecodeMetricsSummary(w http.ResponseWriter, r *http.Request, md *Mult
 		return
 	}
 
-	// Read summaries for the requested period
-	summaries, err := md.summaryAggregator.ReadAllSummaries(period, date)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": fmt.Sprintf("Failed to read summaries: %v", err),
-		})
-		log.Printf("Error reading summaries: %v", err)
-		return
-	}
+	// Read summaries from memory for real-time data (much faster than disk)
+	summaries := md.summaryAggregator.GetAllSummariesFromMemory(period, date)
 
 	// Filter by mode and/or band if specified
 	filteredSummaries := filterSummaries(summaries, mode, band)
@@ -136,10 +128,18 @@ func handleDecodeMetricsSummary(w http.ResponseWriter, r *http.Request, md *Mult
 			return
 		}
 
-		previousSummaries, err := md.summaryAggregator.ReadAllSummaries(period, compareDate)
-		if err != nil {
-			log.Printf("Warning: error reading comparison summaries: %v", err)
-		} else {
+		// For comparison, try memory first, fall back to disk for historical data
+		previousSummaries := md.summaryAggregator.GetAllSummariesFromMemory(period, compareDate)
+		if len(previousSummaries) == 0 {
+			// Not in memory, try reading from disk (historical data)
+			var err error
+			previousSummaries, err = md.summaryAggregator.ReadAllSummaries(period, compareDate)
+			if err != nil {
+				log.Printf("Warning: error reading comparison summaries from disk: %v", err)
+			}
+		}
+
+		if len(previousSummaries) > 0 {
 			filteredPrevious := filterSummaries(previousSummaries, mode, band)
 			changes := calculateChanges(filteredSummaries, filteredPrevious)
 

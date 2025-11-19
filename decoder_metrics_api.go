@@ -473,25 +473,10 @@ func generateTimeSeriesWithFiles(dm *DigitalDecodeMetrics, combinations []struct
 		for _, combo := range combinations {
 			key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
 
-			// First, try to get data from files for this bucket
-			decodeCount := 0
-			uniqueCallsigns := 0
-
-			if fileSnapshots != nil {
-				snapshots := fileSnapshots[key]
-				for _, snapshot := range snapshots {
-					if snapshot.Timestamp.After(bucketStart) && snapshot.Timestamp.Before(bucketEnd) {
-						decodeCount += int(snapshot.DecodeCounts.Last1Hour) // Use 1h as proxy for activity
-						uniqueCallsigns += snapshot.UniqueCallsigns.Last1Hour
-					}
-				}
-			}
-
-			// If no file data, try in-memory data
-			if decodeCount == 0 {
-				decodeCount = countDecodesInTimeRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
-				uniqueCallsigns = countUniqueCallsignsInTimeRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
-			}
+			// Always use in-memory data for accurate per-interval counts
+			// File snapshots contain cumulative hourly counts which would be incorrect for time buckets
+			decodeCount := countDecodesInTimeRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
+			uniqueCallsigns := countUniqueCallsignsInTimeRange(dm, combo.Mode, combo.Band, bucketStart, bucketEnd)
 
 			if decodeCount > 0 {
 				point.Data[key] = ModeBandSummary{

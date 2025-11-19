@@ -224,7 +224,13 @@ class DecodeMetricsDashboard {
     async loadWeekChart() {
         try {
             const today = new Date();
-            const dateStr = today.toISOString().split('T')[0];
+            // Calculate ISO week number
+            const year = today.getFullYear();
+            const startOfYear = new Date(year, 0, 1);
+            const days = Math.floor((today - startOfYear) / (24 * 60 * 60 * 1000));
+            const weekNumber = Math.ceil((days + startOfYear.getDay() + 1) / 7);
+            const dateStr = `${year}-W${String(weekNumber).padStart(2, '0')}`;
+            
             const response = await fetch(`/api/decoder/metrics/summary?period=week&date=${dateStr}`);
             const data = await response.json();
 

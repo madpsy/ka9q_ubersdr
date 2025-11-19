@@ -9,6 +9,7 @@ class DecodeMetricsDashboard {
         this.autoRefreshEnabled = false;
         this.init();
         this.loadVersion();
+        this.loadSummaries(); // Load summary statistics
         this.loadMetrics(); // Auto-load on page load
     }
 
@@ -104,6 +105,104 @@ class DecodeMetricsDashboard {
                 this.autoRefreshInterval = null;
             }
         }
+    }
+
+    async loadSummaries() {
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+        
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const monthStr = `${year}-${month}`;
+        const yearStr = String(year);
+
+        try {
+            // Fetch today's summary
+            const todayResponse = await fetch(`/api/decoder/metrics/summary?period=day&date=${todayStr}`);
+            if (todayResponse.ok) {
+                const todayData = await todayResponse.json();
+                this.displaySummary('today-summary', todayData, 'day');
+            } else {
+                document.getElementById('today-summary').innerHTML = '<div style="opacity: 0.6;">No data available</div>';
+            }
+
+            // Fetch this month's summary
+            const monthResponse = await fetch(`/api/decoder/metrics/summary?period=month&date=${monthStr}`);
+            if (monthResponse.ok) {
+                const monthData = await monthResponse.json();
+                this.displaySummary('month-summary', monthData, 'month');
+            } else {
+                document.getElementById('month-summary').innerHTML = '<div style="opacity: 0.6;">No data available</div>';
+            }
+
+            // Fetch this year's summary
+            const yearResponse = await fetch(`/api/decoder/metrics/summary?period=year&date=${yearStr}`);
+            if (yearResponse.ok) {
+                const yearData = await yearResponse.json();
+                this.displaySummary('year-summary', yearData, 'year');
+            } else {
+                document.getElementById('year-summary').innerHTML = '<div style="opacity: 0.6;">No data available</div>';
+            }
+        } catch (error) {
+            console.error('Error loading summaries:', error);
+            document.getElementById('today-summary').innerHTML = '<div style="opacity: 0.6;">Error loading data</div>';
+            document.getElementById('month-summary').innerHTML = '<div style="opacity: 0.6;">Error loading data</div>';
+            document.getElementById('year-summary').innerHTML = '<div style="opacity: 0.6;">Error loading data</div>';
+        }
+    }
+
+    displaySummary(elementId, data, period) {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+
+        let html = '';
+        
+        // Calculate totals across all modes and bands
+        let totalSpots = 0;
+        const modeBreakdown = {};
+        const bandBreakdown = {};
+
+        if (data.summaries && data.summaries.length > 0) {
+            data.summaries.forEach(summary => {
+                totalSpots += summary.spot_count;
+                
+                // Aggregate by mode
+                if (!modeBreakdown[summary.mode]) {
+                    modeBreakdown[summary.mode] = 0;
+                }
+                modeBreakdown[summary.mode] += summary.spot_count;
+                
+                // Aggregate by band
+                if (!bandBreakdown[summary.band]) {
+                    bandBreakdown[summary.band] = 0;
+                }
+                bandBreakdown[summary.band] += summary.spot_count;
+            });
+
+            // Display total
+            html += `<div class="metric-row"><span class="metric-label">Total Spots:</span><span class="metric-value">${totalSpots.toLocaleString()}</span></div>`;
+            
+            // Display mode breakdown
+            html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">By Mode:</div>';
+            Object.entries(modeBreakdown)
+                .sort((a, b) => b[1] - a[1])
+                .forEach(([mode, count]) => {
+                    html += `<div class="metric-row"><span class="metric-label">${mode}:</span><span class="metric-value">${count.toLocaleString()}</span></div>`;
+                });
+            
+            // Display top 5 bands
+            html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">Top Bands:</div>';
+            Object.entries(bandBreakdown)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5)
+                .forEach(([band, count]) => {
+                    html += `<div class="metric-row"><span class="metric-label">${band}:</span><span class="metric-value">${count.toLocaleString()}</span></div>`;
+                });
+        } else {
+            html = '<div style="opacity: 0.6;">No spots recorded yet</div>';
+        }
+
+        element.innerHTML = html;
     }
 
     setStatus(message, type = 'info') {

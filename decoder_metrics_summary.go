@@ -276,7 +276,19 @@ func (msa *MetricsSummaryAggregator) readNewSnapshots(mode, band string, since, 
 
 // processSnapshots processes new snapshots and updates the summary
 func (msa *MetricsSummaryAggregator) processSnapshots(summary *MetricsSummary, snapshots []MetricsSnapshot, period string) {
+	// Deduplicate snapshots to one per hour to avoid counting overlapping Last1Hour windows
+	// Key format: "YYYY-MM-DD-HH"
+	hourlySnapshots := make(map[string]MetricsSnapshot)
 	for _, snapshot := range snapshots {
+		hourKey := snapshot.Timestamp.Format("2006-01-02-15") // Hour precision
+		// Keep the latest snapshot for each hour
+		if existing, ok := hourlySnapshots[hourKey]; !ok || snapshot.Timestamp.After(existing.Timestamp) {
+			hourlySnapshots[hourKey] = snapshot
+		}
+	}
+
+	// Process only one snapshot per hour to avoid overcounting
+	for _, snapshot := range hourlySnapshots {
 		// Add to total spots (use Last1Hour as incremental value)
 		summary.TotalSpots += snapshot.DecodeCounts.Last1Hour
 

@@ -33,8 +33,9 @@ type MetricsSummary struct {
 	Band      string    `json:"band"`
 
 	// Tracking for incremental updates
-	LastProcessedSnapshot time.Time `json:"last_processed_snapshot"`
-	LastUpdated           time.Time `json:"last_updated"`
+	LastProcessedSnapshot time.Time       `json:"last_processed_snapshot"`
+	LastUpdated           time.Time       `json:"last_updated"`
+	ProcessedHours        map[string]bool `json:"processed_hours,omitempty"` // Track which hours have been processed
 
 	// Aggregated metrics
 	TotalSpots       int64   `json:"total_spots"`
@@ -230,6 +231,10 @@ func (msa *MetricsSummaryAggregator) loadOrCreateSummary(mode, band, period stri
 		if err := json.Unmarshal(data, &summary); err == nil {
 			// Initialize callsign set from unique count
 			summary.callsignSet = make(map[string]bool)
+			// Initialize ProcessedHours if nil
+			if summary.ProcessedHours == nil {
+				summary.ProcessedHours = make(map[string]bool)
+			}
 			return &summary, nil
 		}
 	}
@@ -242,6 +247,7 @@ func (msa *MetricsSummaryAggregator) loadOrCreateSummary(mode, band, period stri
 		Mode:                  mode,
 		Band:                  band,
 		callsignSet:           make(map[string]bool),
+		ProcessedHours:        make(map[string]bool),
 		LastProcessedSnapshot: startTime,
 	}
 
@@ -281,6 +287,12 @@ func (msa *MetricsSummaryAggregator) processSnapshots(summary *MetricsSummary, s
 	hourlySnapshots := make(map[string]MetricsSnapshot)
 	for _, snapshot := range snapshots {
 		hourKey := snapshot.Timestamp.Format("2006-01-02-15") // Hour precision
+
+		// Skip if this hour has already been processed
+		if summary.ProcessedHours[hourKey] {
+			continue
+		}
+
 		// Keep the latest snapshot for each hour
 		if existing, ok := hourlySnapshots[hourKey]; !ok || snapshot.Timestamp.After(existing.Timestamp) {
 			hourlySnapshots[hourKey] = snapshot
@@ -288,7 +300,9 @@ func (msa *MetricsSummaryAggregator) processSnapshots(summary *MetricsSummary, s
 	}
 
 	// Process only one snapshot per hour to avoid overcounting
-	for _, snapshot := range hourlySnapshots {
+	for hourKey, snapshot := range hourlySnapshots {
+		// Mark this hour as processed
+		summary.ProcessedHours[hourKey] = true
 		// Add to total spots (use Last1Hour as incremental value)
 		summary.TotalSpots += snapshot.DecodeCounts.Last1Hour
 

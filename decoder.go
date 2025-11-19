@@ -726,11 +726,13 @@ func (md *MultiDecoder) metricsWriteLoop() {
 				log.Printf("Warning: Failed to write metrics: %v", err)
 			}
 
-			// Update summary aggregations
-			if md.summaryAggregator != nil {
-				if err := md.summaryAggregator.UpdateAllSummaries(md.prometheusMetrics.digitalMetrics); err != nil {
-					log.Printf("Warning: Failed to update summaries: %v", err)
-				}
+			// Update summary aggregations asynchronously to avoid blocking spot processing
+			if md.summaryAggregator != nil && md.summaryAggregator.ShouldUpdate() {
+				go func() {
+					if err := md.summaryAggregator.UpdateAllSummaries(md.prometheusMetrics.digitalMetrics); err != nil {
+						log.Printf("Warning: Failed to update summaries: %v", err)
+					}
+				}()
 			}
 		}
 	}

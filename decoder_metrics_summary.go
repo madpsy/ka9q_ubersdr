@@ -84,7 +84,7 @@ func NewMetricsSummaryAggregator(metricsDir, summaryDir string, metricsLogger *M
 		metricsDir:     metricsDir,
 		summaryDir:     summaryDir,
 		metricsLogger:  metricsLogger,
-		updateInterval: 1 * time.Minute,
+		updateInterval: 5 * time.Minute, // Increased from 1 minute to reduce load
 		lastUpdate:     time.Now(),
 	}
 
@@ -97,6 +97,7 @@ func (msa *MetricsSummaryAggregator) ShouldUpdate() bool {
 }
 
 // UpdateAllSummaries updates all summary periods for all active mode/band combinations
+// Uses a worker pool to limit concurrent operations and prevent resource exhaustion
 func (msa *MetricsSummaryAggregator) UpdateAllSummaries(dm *DigitalDecodeMetrics) error {
 	msa.mu.Lock()
 	msa.lastUpdate = time.Now()
@@ -111,36 +112,38 @@ func (msa *MetricsSummaryAggregator) UpdateAllSummaries(dm *DigitalDecodeMetrics
 
 	log.Printf("Updating summaries for %d mode/band combinations", len(combinations))
 
-	// Update summaries for each combination
+	// Limit concurrent workers to prevent CPU/IO saturation
+	const maxConcurrentWorkers = 10
+	sem := make(chan struct{}, maxConcurrentWorkers)
+
+	// Update summaries for each combination with controlled concurrency
 	var wg sync.WaitGroup
 	for _, combo := range combinations {
-		wg.Add(4) // 4 periods: daily, weekly, monthly, yearly
+		wg.Add(1)
 
 		go func(mode, band string) {
 			defer wg.Done()
-			if err := msa.updateDailySummary(mode, band); err != nil {
-				log.Printf("Error updating daily summary for %s/%s: %v", mode, band, err)
+
+			// Acquire semaphore slot
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			// Process all 4 periods sequentially for this mode/band combination
+			// This reduces goroutine count from combinations*4 to maxConcurrentWorkers
+			periods := []struct {
+				name string
+				fn   func(string, string) error
+			}{
+				{"daily", msa.updateDailySummary},
+				{"weekly", msa.updateWeeklySummary},
+				{"monthly", msa.updateMonthlySummary},
+				{"yearly", msa.updateYearlySummary},
 			}
-		}(combo.Mode, combo.Band)
 
-		go func(mode, band string) {
-			defer wg.Done()
-			if err := msa.updateWeeklySummary(mode, band); err != nil {
-				log.Printf("Error updating weekly summary for %s/%s: %v", mode, band, err)
-			}
-		}(combo.Mode, combo.Band)
-
-		go func(mode, band string) {
-			defer wg.Done()
-			if err := msa.updateMonthlySummary(mode, band); err != nil {
-				log.Printf("Error updating monthly summary for %s/%s: %v", mode, band, err)
-			}
-		}(combo.Mode, combo.Band)
-
-		go func(mode, band string) {
-			defer wg.Done()
-			if err := msa.updateYearlySummary(mode, band); err != nil {
-				log.Printf("Error updating yearly summary for %s/%s: %v", mode, band, err)
+			for _, p := range periods {
+				if err := p.fn(mode, band); err != nil {
+					log.Printf("Error updating %s summary for %s/%s: %v", p.name, mode, band, err)
+				}
 			}
 		}(combo.Mode, combo.Band)
 	}

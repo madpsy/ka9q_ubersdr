@@ -2780,6 +2780,13 @@
             metricsLogDataDirField.appendChild(metricsLogDirSmall);
             reportingSection.appendChild(metricsLogDataDirField);
 
+            const metricsSummaryDataDirField = createConfigField('Metrics Summary Directory', 'text', currentDecoderConfig.metrics_summary_data_dir || '', 'metrics_summary_data_dir');
+            metricsSummaryDataDirField.querySelector('input').placeholder = 'e.g., decoder_summaries (relative) or /var/summaries (absolute)';
+            const metricsSummaryDirSmall = document.createElement('small');
+            metricsSummaryDirSmall.textContent = 'Directory for pre-aggregated metrics summaries (day/week/month/year). Can be relative (to config directory) or absolute path. Leave empty to use data_dir/summaries';
+            metricsSummaryDataDirField.appendChild(metricsSummaryDirSmall);
+            reportingSection.appendChild(metricsSummaryDataDirField);
+
             const metricsLogIntervalField = createConfigField('Write Interval (seconds)', 'number', currentDecoderConfig.metrics_log_interval_secs || 300, 'metrics_log_interval_secs');
             metricsLogIntervalField.querySelector('input').placeholder = '300';
             metricsLogIntervalField.querySelector('input').min = '10';
@@ -3422,6 +3429,7 @@
                 const dirLabels = {
                     'decoder_metrics': 'Decoder Metrics',
                     'decoder_spots': 'Decoder Spots',
+                    'decoder_summary': 'Decoder Summary',
                     'noisefloor': 'Noise Floor',
                     'spaceweather': 'Space Weather'
                 };

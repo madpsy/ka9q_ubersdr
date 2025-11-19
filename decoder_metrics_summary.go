@@ -11,17 +11,21 @@ import (
 )
 
 // MetricsSummaryAggregator handles aggregation of metrics into time-period summaries
+// Uses event-driven updates with periodic file writes
 type MetricsSummaryAggregator struct {
 	metricsDir string
 	summaryDir string
 
 	metricsLogger *MetricsLogger
 
-	// Update control
-	updateInterval time.Duration
-	lastUpdate     time.Time
+	// In-memory summaries (key: "mode:band:period:date")
+	summaries map[string]*MetricsSummary
+	mu        sync.RWMutex
 
-	mu sync.RWMutex
+	// File write control
+	writeInterval time.Duration
+	lastWrite     time.Time
+	writeMu       sync.Mutex
 }
 
 // MetricsSummary represents aggregated metrics for a specific time period
@@ -81,146 +85,235 @@ func NewMetricsSummaryAggregator(metricsDir, summaryDir string, metricsLogger *M
 	}
 
 	msa := &MetricsSummaryAggregator{
-		metricsDir:     metricsDir,
-		summaryDir:     summaryDir,
-		metricsLogger:  metricsLogger,
-		updateInterval: 5 * time.Minute, // Increased from 1 minute to reduce load
-		lastUpdate:     time.Now(),
+		metricsDir:    metricsDir,
+		summaryDir:    summaryDir,
+		metricsLogger: metricsLogger,
+		summaries:     make(map[string]*MetricsSummary),
+		writeInterval: 1 * time.Minute, // Write to disk every minute
+		lastWrite:     time.Now(),
+	}
+
+	// Load existing summaries from disk
+	if err := msa.loadExistingSummaries(); err != nil {
+		log.Printf("Warning: failed to load existing summaries: %v", err)
 	}
 
 	return msa, nil
 }
 
-// ShouldUpdate returns true if enough time has passed since last update
-func (msa *MetricsSummaryAggregator) ShouldUpdate() bool {
-	return time.Since(msa.lastUpdate) >= msa.updateInterval
+// RecordDecode records a decode event and updates all relevant summaries
+// This is called immediately when a spot is decoded (event-driven)
+func (msa *MetricsSummaryAggregator) RecordDecode(mode, band string, timestamp time.Time) {
+	msa.mu.Lock()
+	defer msa.mu.Unlock()
+
+	// Update all period summaries for this decode
+	msa.incrementSummary(mode, band, "day", timestamp, 1)
+	msa.incrementSummary(mode, band, "week", timestamp, 1)
+	msa.incrementSummary(mode, band, "month", timestamp, 1)
+	msa.incrementSummary(mode, band, "year", timestamp, 1)
 }
 
-// UpdateAllSummaries updates all summary periods for all active mode/band combinations
-// Uses a worker pool to limit concurrent operations and prevent resource exhaustion
-func (msa *MetricsSummaryAggregator) UpdateAllSummaries(dm *DigitalDecodeMetrics) error {
-	msa.mu.Lock()
-	msa.lastUpdate = time.Now()
-	msa.mu.Unlock()
+// WriteIfNeeded writes summaries to disk if enough time has passed
+func (msa *MetricsSummaryAggregator) WriteIfNeeded() error {
+	msa.writeMu.Lock()
+	defer msa.writeMu.Unlock()
 
-	// Get all active mode/band combinations
-	combinations := dm.GetAllModeBandCombinations()
-
-	if len(combinations) == 0 {
-		return nil
+	if time.Since(msa.lastWrite) < msa.writeInterval {
+		return nil // Not time yet
 	}
 
-	log.Printf("Updating summaries for %d mode/band combinations", len(combinations))
+	msa.lastWrite = time.Now()
 
-	// Limit concurrent workers to prevent CPU/IO saturation
-	const maxConcurrentWorkers = 10
-	sem := make(chan struct{}, maxConcurrentWorkers)
+	// Write all in-memory summaries to disk
+	msa.mu.RLock()
+	summariesToWrite := make([]*MetricsSummary, 0, len(msa.summaries))
+	for _, summary := range msa.summaries {
+		summariesToWrite = append(summariesToWrite, summary)
+	}
+	msa.mu.RUnlock()
 
-	// Update summaries for each combination with controlled concurrency
-	var wg sync.WaitGroup
-	for _, combo := range combinations {
-		wg.Add(1)
-
-		go func(mode, band string) {
-			defer wg.Done()
-
-			// Acquire semaphore slot
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			// Process all 4 periods sequentially for this mode/band combination
-			// This reduces goroutine count from combinations*4 to maxConcurrentWorkers
-			if err := msa.updateDailySummary(mode, band, dm); err != nil {
-				log.Printf("Error updating daily summary for %s/%s: %v", mode, band, err)
-			}
-			if err := msa.updateWeeklySummary(mode, band, dm); err != nil {
-				log.Printf("Error updating weekly summary for %s/%s: %v", mode, band, err)
-			}
-			if err := msa.updateMonthlySummary(mode, band, dm); err != nil {
-				log.Printf("Error updating monthly summary for %s/%s: %v", mode, band, err)
-			}
-			if err := msa.updateYearlySummary(mode, band, dm); err != nil {
-				log.Printf("Error updating yearly summary for %s/%s: %v", mode, band, err)
-			}
-		}(combo.Mode, combo.Band)
+	// Write without holding the read lock
+	for _, summary := range summariesToWrite {
+		if err := msa.saveSummary(summary); err != nil {
+			log.Printf("Warning: failed to save summary for %s/%s/%s: %v",
+				summary.Mode, summary.Band, summary.Period, err)
+		}
 	}
 
-	wg.Wait()
 	return nil
 }
 
-// updateDailySummary updates the daily summary for a mode/band combination
-func (msa *MetricsSummaryAggregator) updateDailySummary(mode, band string, dm *DigitalDecodeMetrics) error {
-	now := time.Now()
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	endOfDay := startOfDay.Add(24 * time.Hour)
+// incrementSummary increments the count for a specific summary period
+// Must be called with msa.mu held
+func (msa *MetricsSummaryAggregator) incrementSummary(mode, band, period string, timestamp time.Time, count int64) {
+	// Calculate period boundaries
+	var startTime, endTime time.Time
+	var key string
 
-	return msa.updateSummary(mode, band, "day", startOfDay, endOfDay, dm)
-}
-
-// updateWeeklySummary updates the weekly summary for a mode/band combination
-func (msa *MetricsSummaryAggregator) updateWeeklySummary(mode, band string, dm *DigitalDecodeMetrics) error {
-	now := time.Now()
-	// Start of week (Monday)
-	weekday := int(now.Weekday())
-	if weekday == 0 {
-		weekday = 7 // Sunday = 7
+	switch period {
+	case "day":
+		startTime = time.Date(timestamp.Year(), timestamp.Month(), timestamp.Day(), 0, 0, 0, 0, timestamp.Location())
+		endTime = startTime.Add(24 * time.Hour)
+		key = fmt.Sprintf("%s:%s:day:%s", mode, band, startTime.Format("2006-01-02"))
+	case "week":
+		weekday := int(timestamp.Weekday())
+		if weekday == 0 {
+			weekday = 7
+		}
+		startTime = time.Date(timestamp.Year(), timestamp.Month(), timestamp.Day()-weekday+1, 0, 0, 0, 0, timestamp.Location())
+		endTime = startTime.Add(7 * 24 * time.Hour)
+		year, week := startTime.ISOWeek()
+		key = fmt.Sprintf("%s:%s:week:%d-W%02d", mode, band, year, week)
+	case "month":
+		startTime = time.Date(timestamp.Year(), timestamp.Month(), 1, 0, 0, 0, 0, timestamp.Location())
+		endTime = startTime.AddDate(0, 1, 0)
+		key = fmt.Sprintf("%s:%s:month:%s", mode, band, startTime.Format("2006-01"))
+	case "year":
+		startTime = time.Date(timestamp.Year(), 1, 1, 0, 0, 0, 0, timestamp.Location())
+		endTime = startTime.AddDate(1, 0, 0)
+		key = fmt.Sprintf("%s:%s:year:%d", mode, band, timestamp.Year())
+	default:
+		return
 	}
-	startOfWeek := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
-	endOfWeek := startOfWeek.Add(7 * 24 * time.Hour)
 
-	return msa.updateSummary(mode, band, "week", startOfWeek, endOfWeek, dm)
-}
-
-// updateMonthlySummary updates the monthly summary for a mode/band combination
-func (msa *MetricsSummaryAggregator) updateMonthlySummary(mode, band string, dm *DigitalDecodeMetrics) error {
-	now := time.Now()
-	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-	endOfMonth := startOfMonth.AddDate(0, 1, 0)
-
-	return msa.updateSummary(mode, band, "month", startOfMonth, endOfMonth, dm)
-}
-
-// updateYearlySummary updates the yearly summary for a mode/band combination
-func (msa *MetricsSummaryAggregator) updateYearlySummary(mode, band string, dm *DigitalDecodeMetrics) error {
-	now := time.Now()
-	startOfYear := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
-	endOfYear := startOfYear.AddDate(1, 0, 0)
-
-	return msa.updateSummary(mode, band, "year", startOfYear, endOfYear, dm)
-}
-
-// updateSummary updates a summary for a specific period using in-memory metrics
-func (msa *MetricsSummaryAggregator) updateSummary(mode, band, period string, startTime, endTime time.Time, dm *DigitalDecodeMetrics) error {
 	// Get or create summary
-	summary, err := msa.loadOrCreateSummary(mode, band, period, startTime, endTime)
-	if err != nil {
-		return err
+	summary, exists := msa.summaries[key]
+	if !exists {
+		summary = &MetricsSummary{
+			Period:         period,
+			StartTime:      startTime,
+			EndTime:        endTime,
+			Mode:           mode,
+			Band:           band,
+			callsignSet:    make(map[string]bool),
+			ProcessedHours: make(map[string]bool),
+		}
+
+		// Initialize hourly breakdown for daily summaries
+		if period == "day" {
+			summary.HourlyBreakdown = make([]HourlyStats, 24)
+			for i := 0; i < 24; i++ {
+				summary.HourlyBreakdown[i].Hour = i
+			}
+		}
+
+		msa.summaries[key] = summary
 	}
 
-	// Only update if enough time has passed since last update (avoid redundant updates)
+	// Increment total spots
+	summary.TotalSpots += count
+	summary.LastUpdated = time.Now()
+
+	// Update hourly breakdown for daily summaries
+	if period == "day" && summary.HourlyBreakdown != nil {
+		hour := timestamp.Hour()
+		if hour >= 0 && hour < 24 {
+			summary.HourlyBreakdown[hour].Spots += count
+		}
+	}
+
+	// Update daily breakdown for weekly/monthly summaries
+	if period == "week" || period == "month" {
+		dateStr := timestamp.Format("2006-01-02")
+		found := false
+		for i := range summary.DailyBreakdown {
+			if summary.DailyBreakdown[i].Date == dateStr {
+				summary.DailyBreakdown[i].Spots += count
+				found = true
+				break
+			}
+		}
+		if !found {
+			summary.DailyBreakdown = append(summary.DailyBreakdown, DailyStats{
+				Date:  dateStr,
+				Spots: count,
+			})
+		}
+	}
+
+	// Update monthly breakdown for yearly summaries
+	if period == "year" {
+		monthStr := timestamp.Format("2006-01")
+		found := false
+		for i := range summary.MonthlyBreakdown {
+			if summary.MonthlyBreakdown[i].Month == monthStr {
+				summary.MonthlyBreakdown[i].Spots += count
+				found = true
+				break
+			}
+		}
+		if !found {
+			summary.MonthlyBreakdown = append(summary.MonthlyBreakdown, MonthlyStats{
+				Month: monthStr,
+				Spots: count,
+			})
+		}
+	}
+
+	// Recalculate average
+	if summary.TotalSpots > 0 {
+		duration := summary.EndTime.Sub(summary.StartTime).Hours()
+		if duration > 0 {
+			summary.AvgSpotsPerHour = float64(summary.TotalSpots) / duration
+		}
+	}
+}
+
+// loadExistingSummaries loads all existing summary files from disk into memory
+func (msa *MetricsSummaryAggregator) loadExistingSummaries() error {
+	// Load summaries for current day, week, month, and year
 	now := time.Now()
-	if now.Sub(summary.LastUpdated) < 1*time.Minute {
-		return nil // Skip if updated less than 1 minute ago
+
+	periods := []struct {
+		name string
+		date time.Time
+	}{
+		{"day", now},
+		{"week", now},
+		{"month", now},
+		{"year", now},
 	}
 
-	// Create a single snapshot from current in-memory metrics instead of reading files
-	// This is much more efficient than reading and parsing JSONL files
-	snapshot := msa.metricsLogger.createSnapshot(dm, mode, band, now)
-	if snapshot == nil {
-		return nil // No data available
+	for _, p := range periods {
+		summaries, err := msa.ReadAllSummaries(p.name, p.date)
+		if err != nil {
+			log.Printf("Warning: failed to load %s summaries: %v", p.name, err)
+			continue
+		}
+
+		msa.mu.Lock()
+		for _, summary := range summaries {
+			key := msa.getSummaryKey(&summary)
+			// Make a copy and store it
+			summaryCopy := summary
+			summaryCopy.callsignSet = make(map[string]bool)
+			if summaryCopy.ProcessedHours == nil {
+				summaryCopy.ProcessedHours = make(map[string]bool)
+			}
+			msa.summaries[key] = &summaryCopy
+		}
+		msa.mu.Unlock()
 	}
 
-	// Process the single snapshot
-	snapshots := []MetricsSnapshot{*snapshot}
-	msa.processSnapshots(summary, snapshots, period)
+	return nil
+}
 
-	// Update metadata
-	summary.LastUpdated = now
-	summary.LastProcessedSnapshot = now
-
-	// Save summary
-	return msa.saveSummary(summary)
+// getSummaryKey generates a unique key for a summary
+func (msa *MetricsSummaryAggregator) getSummaryKey(summary *MetricsSummary) string {
+	switch summary.Period {
+	case "day":
+		return fmt.Sprintf("%s:%s:day:%s", summary.Mode, summary.Band, summary.StartTime.Format("2006-01-02"))
+	case "week":
+		year, week := summary.StartTime.ISOWeek()
+		return fmt.Sprintf("%s:%s:week:%d-W%02d", summary.Mode, summary.Band, year, week)
+	case "month":
+		return fmt.Sprintf("%s:%s:month:%s", summary.Mode, summary.Band, summary.StartTime.Format("2006-01"))
+	case "year":
+		return fmt.Sprintf("%s:%s:year:%d", summary.Mode, summary.Band, summary.StartTime.Year())
+	default:
+		return fmt.Sprintf("%s:%s:%s:%s", summary.Mode, summary.Band, summary.Period, summary.StartTime.Format("2006-01-02"))
+	}
 }
 
 // loadOrCreateSummary loads an existing summary or creates a new one
@@ -262,110 +355,6 @@ func (msa *MetricsSummaryAggregator) loadOrCreateSummary(mode, band, period stri
 	}
 
 	return summary, nil
-}
-
-// processSnapshots processes new snapshots and updates the summary
-func (msa *MetricsSummaryAggregator) processSnapshots(summary *MetricsSummary, snapshots []MetricsSnapshot, period string) {
-	// Deduplicate snapshots to one per hour to avoid counting overlapping Last1Hour windows
-	// Key format: "YYYY-MM-DD-HH"
-	hourlySnapshots := make(map[string]MetricsSnapshot)
-	for _, snapshot := range snapshots {
-		hourKey := snapshot.Timestamp.Format("2006-01-02-15") // Hour precision
-
-		// Skip if this hour has already been processed
-		if summary.ProcessedHours[hourKey] {
-			continue
-		}
-
-		// Keep the latest snapshot for each hour
-		if existing, ok := hourlySnapshots[hourKey]; !ok || snapshot.Timestamp.After(existing.Timestamp) {
-			hourlySnapshots[hourKey] = snapshot
-		}
-	}
-
-	// Process only one snapshot per hour to avoid overcounting
-	for hourKey, snapshot := range hourlySnapshots {
-		// Mark this hour as processed
-		summary.ProcessedHours[hourKey] = true
-		// Add to total spots (use Last1Hour as incremental value)
-		summary.TotalSpots += snapshot.DecodeCounts.Last1Hour
-
-		// Track unique callsigns (this is approximate since we don't have individual callsigns)
-		// We'll use the max unique callsigns seen in any snapshot as an approximation
-		if snapshot.UniqueCallsigns.Last1Hour > summary.UniqueCallsigns {
-			summary.UniqueCallsigns = snapshot.UniqueCallsigns.Last1Hour
-		}
-
-		// Update peak spots per hour
-		if snapshot.Activity.DecodesPerHour > summary.PeakSpotsPerHour {
-			summary.PeakSpotsPerHour = snapshot.Activity.DecodesPerHour
-		}
-
-		// Update hourly breakdown for daily summaries
-		if period == "day" && summary.HourlyBreakdown != nil {
-			hour := snapshot.Timestamp.Hour()
-			if hour >= 0 && hour < 24 {
-				summary.HourlyBreakdown[hour].Spots += snapshot.DecodeCounts.Last1Hour
-				if snapshot.UniqueCallsigns.Last1Hour > summary.HourlyBreakdown[hour].UniqueCallsigns {
-					summary.HourlyBreakdown[hour].UniqueCallsigns = snapshot.UniqueCallsigns.Last1Hour
-				}
-			}
-		}
-
-		// Update daily breakdown for weekly/monthly summaries
-		if period == "week" || period == "month" {
-			dateStr := snapshot.Timestamp.Format("2006-01-02")
-			found := false
-			for i := range summary.DailyBreakdown {
-				if summary.DailyBreakdown[i].Date == dateStr {
-					summary.DailyBreakdown[i].Spots += snapshot.DecodeCounts.Last1Hour
-					if snapshot.UniqueCallsigns.Last1Hour > summary.DailyBreakdown[i].UniqueCallsigns {
-						summary.DailyBreakdown[i].UniqueCallsigns = snapshot.UniqueCallsigns.Last1Hour
-					}
-					found = true
-					break
-				}
-			}
-			if !found {
-				summary.DailyBreakdown = append(summary.DailyBreakdown, DailyStats{
-					Date:            dateStr,
-					Spots:           snapshot.DecodeCounts.Last1Hour,
-					UniqueCallsigns: snapshot.UniqueCallsigns.Last1Hour,
-				})
-			}
-		}
-
-		// Update monthly breakdown for yearly summaries
-		if period == "year" {
-			monthStr := snapshot.Timestamp.Format("2006-01")
-			found := false
-			for i := range summary.MonthlyBreakdown {
-				if summary.MonthlyBreakdown[i].Month == monthStr {
-					summary.MonthlyBreakdown[i].Spots += snapshot.DecodeCounts.Last1Hour
-					if snapshot.UniqueCallsigns.Last1Hour > summary.MonthlyBreakdown[i].UniqueCallsigns {
-						summary.MonthlyBreakdown[i].UniqueCallsigns = snapshot.UniqueCallsigns.Last1Hour
-					}
-					found = true
-					break
-				}
-			}
-			if !found {
-				summary.MonthlyBreakdown = append(summary.MonthlyBreakdown, MonthlyStats{
-					Month:           monthStr,
-					Spots:           snapshot.DecodeCounts.Last1Hour,
-					UniqueCallsigns: snapshot.UniqueCallsigns.Last1Hour,
-				})
-			}
-		}
-	}
-
-	// Calculate average spots per hour
-	if summary.TotalSpots > 0 {
-		duration := summary.EndTime.Sub(summary.StartTime).Hours()
-		if duration > 0 {
-			summary.AvgSpotsPerHour = float64(summary.TotalSpots) / duration
-		}
-	}
 }
 
 // getSummaryFilePath returns the file path for a summary

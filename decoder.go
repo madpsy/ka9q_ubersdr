@@ -561,6 +561,11 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 					md.prometheusMetrics.RecordDigitalDecode(decode.Mode, band.Config.Name, decode.Callsign, cycleSeconds)
 				}
 
+				// Record decode in summary aggregator (event-driven)
+				if md.summaryAggregator != nil {
+					md.summaryAggregator.RecordDecode(decode.Mode, band.Config.Name, decode.Timestamp)
+				}
+
 				// Log to CSV (independent of reporting)
 				if md.spotsLogger != nil {
 					// Check if we should only log spots with valid locators
@@ -726,13 +731,11 @@ func (md *MultiDecoder) metricsWriteLoop() {
 				log.Printf("Warning: Failed to write metrics: %v", err)
 			}
 
-			// Update summary aggregations asynchronously to avoid blocking spot processing
-			if md.summaryAggregator != nil && md.summaryAggregator.ShouldUpdate() {
-				go func() {
-					if err := md.summaryAggregator.UpdateAllSummaries(md.prometheusMetrics.digitalMetrics); err != nil {
-						log.Printf("Warning: Failed to update summaries: %v", err)
-					}
-				}()
+			// Write summary files to disk (summaries are updated in real-time via RecordDecode)
+			if md.summaryAggregator != nil {
+				if err := md.summaryAggregator.WriteIfNeeded(); err != nil {
+					log.Printf("Warning: Failed to write summaries: %v", err)
+				}
 			}
 		}
 	}

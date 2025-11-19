@@ -271,19 +271,28 @@ class DecodeMetricsDashboard {
                     responsive: true,
                     maintainAspectRatio: true,
                     scales: {
-                        x: { stacked: true },
-                        y: { 
+                        x: {
+                            stacked: true,
+                            ticks: { color: '#fff' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y: {
                             stacked: true,
                             beginAtZero: true,
                             ticks: {
+                                color: '#fff',
                                 callback: function(value) {
                                     return value.toLocaleString();
                                 }
-                            }
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
                         }
                     },
                     plugins: {
-                        legend: { position: 'top' },
+                        legend: {
+                            position: 'top',
+                            labels: { color: '#fff' }
+                        },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
@@ -350,22 +359,29 @@ class DecodeMetricsDashboard {
                     responsive: true,
                     maintainAspectRatio: true,
                     scales: {
-                        x: { 
+                        x: {
                             stacked: true,
-                            title: { display: true, text: 'Day of Month' }
+                            title: { display: true, text: 'Day of Month', color: '#fff' },
+                            ticks: { color: '#fff' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
                         },
-                        y: { 
+                        y: {
                             stacked: true,
                             beginAtZero: true,
                             ticks: {
+                                color: '#fff',
                                 callback: function(value) {
                                     return value.toLocaleString();
                                 }
-                            }
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
                         }
                     },
                     plugins: {
-                        legend: { position: 'top' },
+                        legend: {
+                            position: 'top',
+                            labels: { color: '#fff' }
+                        },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
@@ -455,19 +471,28 @@ class DecodeMetricsDashboard {
                     responsive: true,
                     maintainAspectRatio: true,
                     scales: {
-                        x: { stacked: true },
-                        y: { 
+                        x: {
+                            stacked: true,
+                            ticks: { color: '#fff' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y: {
                             stacked: true,
                             beginAtZero: true,
                             ticks: {
+                                color: '#fff',
                                 callback: function(value) {
                                     return value.toLocaleString();
                                 }
-                            }
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
                         }
                     },
                     plugins: {
-                        legend: { position: 'top' },
+                        legend: {
+                            position: 'top',
+                            labels: { color: '#fff' }
+                        },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {

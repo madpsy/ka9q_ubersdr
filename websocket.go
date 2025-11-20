@@ -471,50 +471,61 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	session.WSConn = conn
 
 	// Apply bandwidth parameters (either from URL or mode-specific defaults)
-	var bwl, bwh int
-	if bandwidthLow != nil && bandwidthHigh != nil {
-		// Both bandwidth parameters provided in URL - use them
-		bwl = *bandwidthLow
-		bwh = *bandwidthHigh
-
-	} else {
-		// No bandwidth parameters in URL - apply mode-specific defaults
-		// These match the defaults in app.js setMode() function
-		switch mode {
-		case "usb":
-			bwl = 50
-			bwh = 2700
-		case "lsb":
-			bwl = -2700
-			bwh = -50
-		case "am", "sam":
-			bwl = -5000
-			bwh = 5000
-		case "cwu", "cwl":
-			bwl = -200
-			bwh = 200
-		case "fm":
-			bwl = -8000
-			bwh = 8000
-		case "nfm":
-			bwl = -5000
-			bwh = 5000
-		case "iq":
-			bwl = -5000
-			bwh = 5000
-		default:
-			bwl = 50
-			bwh = 3000
-		}
-		log.Printf("Applying mode-specific bandwidth defaults for %s: %d to %d Hz", mode, bwl, bwh)
+	// Wide IQ modes (iq48, iq96, iq192) should use their preset bandwidth values
+	wideIQModes := map[string]bool{
+		"iq48": true, "iq96": true, "iq192": true,
 	}
 
-	// Update session with bandwidth
-	if err := wsh.sessions.UpdateSessionWithEdges(session.ID, 0, "", bwl, bwh, true); err != nil {
-		log.Printf("Failed to apply bandwidth: %v", err)
-		wsh.sendError(conn, "Failed to apply bandwidth: "+err.Error())
-		wsh.sessions.DestroySession(session.ID)
-		return
+	if !wideIQModes[mode] {
+		// Not a wide IQ mode - apply bandwidth settings
+		var bwl, bwh int
+		if bandwidthLow != nil && bandwidthHigh != nil {
+			// Both bandwidth parameters provided in URL - use them
+			bwl = *bandwidthLow
+			bwh = *bandwidthHigh
+
+		} else {
+			// No bandwidth parameters in URL - apply mode-specific defaults
+			// These match the defaults in app.js setMode() function
+			switch mode {
+			case "usb":
+				bwl = 50
+				bwh = 2700
+			case "lsb":
+				bwl = -2700
+				bwh = -50
+			case "am", "sam":
+				bwl = -5000
+				bwh = 5000
+			case "cwu", "cwl":
+				bwl = -200
+				bwh = 200
+			case "fm":
+				bwl = -8000
+				bwh = 8000
+			case "nfm":
+				bwl = -5000
+				bwh = 5000
+			case "iq":
+				bwl = -5000
+				bwh = 5000
+			default:
+				bwl = 50
+				bwh = 3000
+			}
+			log.Printf("Applying mode-specific bandwidth defaults for %s: %d to %d Hz", mode, bwl, bwh)
+		}
+
+		// Update session with bandwidth
+		if err := wsh.sessions.UpdateSessionWithEdges(session.ID, 0, "", bwl, bwh, true); err != nil {
+			log.Printf("Failed to apply bandwidth: %v", err)
+			wsh.sendError(conn, "Failed to apply bandwidth: "+err.Error())
+			wsh.sessions.DestroySession(session.ID)
+			return
+		}
+	} else {
+		// Wide IQ mode - use preset bandwidth values, don't override
+		log.Printf("Using preset bandwidth for wide IQ mode: %s", mode)
 	}
 
 	// Subscribe to audio
@@ -725,46 +736,57 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					time.Sleep(500 * time.Millisecond)
 
 					// Step 2: Send bandwidth values that match frontend defaults for this mode
-					// These match the defaults in app.js setMode() function
-					var defaultLow, defaultHigh int
-					switch newMode {
-					case "usb":
-						defaultLow = 50
-						defaultHigh = 2700
-					case "lsb":
-						defaultLow = -2700
-						defaultHigh = -50
-					case "am", "sam":
-						defaultLow = -5000
-						defaultHigh = 5000
-					case "cwu", "cwl":
-						defaultLow = -200
-						defaultHigh = 200
-					case "fm":
-						defaultLow = -8000
-						defaultHigh = 8000
-					case "nfm":
-						defaultLow = -5000
-						defaultHigh = 5000
-					case "iq":
-						defaultLow = -5000
-						defaultHigh = 5000
-					default:
-						defaultLow = 50
-						defaultHigh = 3000
+					// Wide IQ modes (iq48, iq96, iq192) should use their preset bandwidth values
+					wideIQModes := map[string]bool{
+						"iq48": true, "iq96": true, "iq192": true,
 					}
 
-					// Use custom bandwidth if provided, otherwise use mode defaults
-					sendBandwidthLow := defaultLow
-					sendBandwidthHigh := defaultHigh
-					if bandwidthChanged {
-						sendBandwidthLow = newBandwidthLow
-						sendBandwidthHigh = newBandwidthHigh
-					}
+					if !wideIQModes[newMode] {
+						// Not a wide IQ mode - apply bandwidth settings
+						// These match the defaults in app.js setMode() function
+						var defaultLow, defaultHigh int
+						switch newMode {
+						case "usb":
+							defaultLow = 50
+							defaultHigh = 2700
+						case "lsb":
+							defaultLow = -2700
+							defaultHigh = -50
+						case "am", "sam":
+							defaultLow = -5000
+							defaultHigh = 5000
+						case "cwu", "cwl":
+							defaultLow = -200
+							defaultHigh = 200
+						case "fm":
+							defaultLow = -8000
+							defaultHigh = 8000
+						case "nfm":
+							defaultLow = -5000
+							defaultHigh = 5000
+						case "iq":
+							defaultLow = -5000
+							defaultHigh = 5000
+						default:
+							defaultLow = 50
+							defaultHigh = 3000
+						}
 
-					if err := wsh.sessions.UpdateSessionWithEdges(currentSession.ID, 0, "", sendBandwidthLow, sendBandwidthHigh, true); err != nil {
-						wsh.sendError(conn, "Failed to update bandwidth after mode change: "+err.Error())
-						continue
+						// Use custom bandwidth if provided, otherwise use mode defaults
+						sendBandwidthLow := defaultLow
+						sendBandwidthHigh := defaultHigh
+						if bandwidthChanged {
+							sendBandwidthLow = newBandwidthLow
+							sendBandwidthHigh = newBandwidthHigh
+						}
+
+						if err := wsh.sessions.UpdateSessionWithEdges(currentSession.ID, 0, "", sendBandwidthLow, sendBandwidthHigh, true); err != nil {
+							wsh.sendError(conn, "Failed to update bandwidth after mode change: "+err.Error())
+							continue
+						}
+					} else {
+						// Wide IQ mode - use preset bandwidth values, don't override
+						log.Printf("Using preset bandwidth for wide IQ mode after mode change: %s", newMode)
 					}
 
 					// Send squelch update after mode change if provided

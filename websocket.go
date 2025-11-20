@@ -414,10 +414,23 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Get bandwidth parameters from query string (optional)
+	// Wide IQ modes should not have bandwidth parameters - they use preset values
+	wideIQModes := map[string]bool{
+		"iq48": true, "iq96": true, "iq192": true,
+	}
+
 	var bandwidthLow, bandwidthHigh *int
 	const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs exempt)
 	isBypassed := wsh.config.Server.IsIPTimeoutBypassed(clientIP)
+
 	if bwl := query.Get("bandwidthLow"); bwl != "" {
+		// Reject bandwidth parameters for wide IQ modes
+		if wideIQModes[mode] {
+			log.Printf("Rejected WebSocket connection: bandwidth parameters not allowed for wide IQ mode '%s' from %s (client IP: %s)", mode, sourceIP, clientIP)
+			wsh.sendError(conn, fmt.Sprintf("Bandwidth parameters are not allowed for mode '%s' - preset bandwidth will be used", mode))
+			return
+		}
+
 		var val int
 		if _, err := fmt.Sscanf(bwl, "%d", &val); err == nil {
 			// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
@@ -430,6 +443,13 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	if bwh := query.Get("bandwidthHigh"); bwh != "" {
+		// Reject bandwidth parameters for wide IQ modes
+		if wideIQModes[mode] {
+			log.Printf("Rejected WebSocket connection: bandwidth parameters not allowed for wide IQ mode '%s' from %s (client IP: %s)", mode, sourceIP, clientIP)
+			wsh.sendError(conn, fmt.Sprintf("Bandwidth parameters are not allowed for mode '%s' - preset bandwidth will be used", mode))
+			return
+		}
+
 		var val int
 		if _, err := fmt.Sscanf(bwh, "%d", &val); err == nil {
 			// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
@@ -472,9 +492,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	// Apply bandwidth parameters (either from URL or mode-specific defaults)
 	// Wide IQ modes (iq48, iq96, iq192) should use their preset bandwidth values
-	wideIQModes := map[string]bool{
-		"iq48": true, "iq96": true, "iq192": true,
-	}
+	// Note: wideIQModes is already defined earlier in this function
 
 	if !wideIQModes[mode] {
 		// Not a wide IQ mode - apply bandwidth settings
@@ -639,7 +657,18 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			}
 			// Accept bandwidth values (can be negative or zero for low edge)
 			// Use pointers to distinguish between 0 (valid value) and not-sent (nil)
+			// Wide IQ modes should not accept bandwidth changes
+			wideIQModesForTune := map[string]bool{
+				"iq48": true, "iq96": true, "iq192": true,
+			}
+
 			if msg.BandwidthLow != nil || msg.BandwidthHigh != nil {
+				// Reject bandwidth changes for wide IQ modes
+				if wideIQModesForTune[newMode] {
+					wsh.sendError(conn, fmt.Sprintf("Bandwidth changes are not allowed for mode '%s' - preset bandwidth will be used", newMode))
+					continue // Don't close connection, just reject this tune request
+				}
+
 				// At least one bandwidth value was sent
 				const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs exempt)
 				isBypassed := wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP)
@@ -737,11 +766,12 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 
 					// Step 2: Send bandwidth values that match frontend defaults for this mode
 					// Wide IQ modes (iq48, iq96, iq192) should use their preset bandwidth values
-					wideIQModes := map[string]bool{
+					// Define wideIQModes for this scope
+					wideIQModesForModeChange := map[string]bool{
 						"iq48": true, "iq96": true, "iq192": true,
 					}
 
-					if !wideIQModes[newMode] {
+					if !wideIQModesForModeChange[newMode] {
 						// Not a wide IQ mode - apply bandwidth settings
 						// These match the defaults in app.js setMode() function
 						var defaultLow, defaultHigh int

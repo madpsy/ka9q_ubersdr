@@ -451,7 +451,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 	} else {
 		// Wide IQ mode - ignore any bandwidth parameters from client
-		log.Printf("Ignoring bandwidth parameters for wide IQ mode '%s' - using preset values", mode)
+		log.Printf("WIDEIQ_IGNORE_URL_BW: mode=%s", mode)
 	}
 
 	// Validate mode - "spectrum" is reserved for the spectrum manager
@@ -527,7 +527,6 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 
 		// Update session with bandwidth
-		log.Printf("DEBUG: About to call UpdateSessionWithEdges for mode %s with bandwidth %d to %d", mode, bwl, bwh)
 		if err := wsh.sessions.UpdateSessionWithEdges(session.ID, 0, "", bwl, bwh, true); err != nil {
 			log.Printf("Failed to apply bandwidth: %v", err)
 			wsh.sendError(conn, "Failed to apply bandwidth: "+err.Error())
@@ -536,7 +535,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 	} else {
 		// Wide IQ mode - use preset bandwidth values, don't override
-		log.Printf("DEBUG: Skipping bandwidth override for wide IQ mode: %s", mode)
+		log.Printf("WIDEIQ_SKIP_BANDWIDTH: mode=%s session=%s", mode, session.ID)
 	}
 
 	// Subscribe to audio

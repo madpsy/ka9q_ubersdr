@@ -273,7 +273,7 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 		if err := sm.radiod.CreateChannelWithSquelch(channelName, frequency, radiodMode, sampleRate, ssrc, 0, &squelchOpen, &squelchClose); err != nil {
 			return nil, fmt.Errorf("failed to create radiod channel: %w", err)
 		}
-		log.Printf("Created wide IQ mode channel '%s' using preset bandwidth values", channelName)
+		log.Printf("WIDEIQ_CREATE_CHANNEL: mode=%s channel=%s ssrc=0x%08x", mode, channelName, ssrc)
 	} else {
 		// Normal mode - create channel with specified bandwidth
 		if err := sm.radiod.CreateChannelWithSquelch(channelName, frequency, radiodMode, sampleRate, ssrc, bandwidth, &squelchOpen, &squelchClose); err != nil {

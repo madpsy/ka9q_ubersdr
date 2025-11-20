@@ -423,43 +423,35 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs exempt)
 	isBypassed := wsh.config.Server.IsIPTimeoutBypassed(clientIP)
 
-	if bwl := query.Get("bandwidthLow"); bwl != "" {
-		// Reject bandwidth parameters for wide IQ modes
-		if wideIQModes[mode] {
-			log.Printf("Rejected WebSocket connection: bandwidth parameters not allowed for wide IQ mode '%s' from %s (client IP: %s)", mode, sourceIP, clientIP)
-			wsh.sendError(conn, fmt.Sprintf("Bandwidth parameters are not allowed for mode '%s' - preset bandwidth will be used", mode))
-			return
-		}
-
-		var val int
-		if _, err := fmt.Sscanf(bwl, "%d", &val); err == nil {
-			// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
-			if !isBypassed && (val < -maxBandwidth || val > maxBandwidth) {
-				log.Printf("Rejected WebSocket connection: bandwidthLow %d Hz out of range (±%d Hz) from %s (client IP: %s)", val, maxBandwidth, sourceIP, clientIP)
-				wsh.sendError(conn, fmt.Sprintf("Bandwidth low %d Hz is out of valid range (±%d Hz)", val, maxBandwidth))
-				return
+	// Only process bandwidth parameters for non-wide IQ modes
+	if !wideIQModes[mode] {
+		if bwl := query.Get("bandwidthLow"); bwl != "" {
+			var val int
+			if _, err := fmt.Sscanf(bwl, "%d", &val); err == nil {
+				// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
+				if !isBypassed && (val < -maxBandwidth || val > maxBandwidth) {
+					log.Printf("Rejected WebSocket connection: bandwidthLow %d Hz out of range (±%d Hz) from %s (client IP: %s)", val, maxBandwidth, sourceIP, clientIP)
+					wsh.sendError(conn, fmt.Sprintf("Bandwidth low %d Hz is out of valid range (±%d Hz)", val, maxBandwidth))
+					return
+				}
+				bandwidthLow = &val
 			}
-			bandwidthLow = &val
 		}
-	}
-	if bwh := query.Get("bandwidthHigh"); bwh != "" {
-		// Reject bandwidth parameters for wide IQ modes
-		if wideIQModes[mode] {
-			log.Printf("Rejected WebSocket connection: bandwidth parameters not allowed for wide IQ mode '%s' from %s (client IP: %s)", mode, sourceIP, clientIP)
-			wsh.sendError(conn, fmt.Sprintf("Bandwidth parameters are not allowed for mode '%s' - preset bandwidth will be used", mode))
-			return
-		}
-
-		var val int
-		if _, err := fmt.Sscanf(bwh, "%d", &val); err == nil {
-			// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
-			if !isBypassed && (val < -maxBandwidth || val > maxBandwidth) {
-				log.Printf("Rejected WebSocket connection: bandwidthHigh %d Hz out of range (±%d Hz) from %s (client IP: %s)", val, maxBandwidth, sourceIP, clientIP)
-				wsh.sendError(conn, fmt.Sprintf("Bandwidth high %d Hz is out of valid range (±%d Hz)", val, maxBandwidth))
-				return
+		if bwh := query.Get("bandwidthHigh"); bwh != "" {
+			var val int
+			if _, err := fmt.Sscanf(bwh, "%d", &val); err == nil {
+				// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
+				if !isBypassed && (val < -maxBandwidth || val > maxBandwidth) {
+					log.Printf("Rejected WebSocket connection: bandwidthHigh %d Hz out of range (±%d Hz) from %s (client IP: %s)", val, maxBandwidth, sourceIP, clientIP)
+					wsh.sendError(conn, fmt.Sprintf("Bandwidth high %d Hz is out of valid range (±%d Hz)", val, maxBandwidth))
+					return
+				}
+				bandwidthHigh = &val
 			}
-			bandwidthHigh = &val
 		}
+	} else {
+		// Wide IQ mode - ignore any bandwidth parameters from client
+		log.Printf("Ignoring bandwidth parameters for wide IQ mode '%s' - using preset values", mode)
 	}
 
 	// Validate mode - "spectrum" is reserved for the spectrum manager

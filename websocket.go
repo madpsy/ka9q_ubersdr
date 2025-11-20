@@ -527,6 +527,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 
 		// Update session with bandwidth
+		log.Printf("DEBUG: About to call UpdateSessionWithEdges for mode %s with bandwidth %d to %d", mode, bwl, bwh)
 		if err := wsh.sessions.UpdateSessionWithEdges(session.ID, 0, "", bwl, bwh, true); err != nil {
 			log.Printf("Failed to apply bandwidth: %v", err)
 			wsh.sendError(conn, "Failed to apply bandwidth: "+err.Error())
@@ -535,7 +536,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 	} else {
 		// Wide IQ mode - use preset bandwidth values, don't override
-		log.Printf("Using preset bandwidth for wide IQ mode: %s", mode)
+		log.Printf("DEBUG: Skipping bandwidth override for wide IQ mode: %s", mode)
 	}
 
 	// Subscribe to audio

@@ -57,7 +57,14 @@ class RadioClient:
         self.running = True
         self.start_time = None
         self.sample_rate = 12000  # Default, will be updated from server
-        self.channels = 1  # Default mono, will be updated from server
+
+        # Determine default channels based on mode
+        # IQ modes are stereo (I and Q channels), others are mono
+        if self.mode in ('iq', 'iq48', 'iq96', 'iq192'):
+            self.channels = 2
+        else:
+            self.channels = 1
+
         self.wav_writer = None
         self.pipewire_process = None
 

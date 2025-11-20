@@ -58,6 +58,7 @@ type RadioClient struct {
 type WAVWriter struct {
 	file       *os.File
 	sampleRate int
+	channels   int
 	dataSize   int
 }
 
@@ -91,12 +92,20 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 	duration *float64, ssl, nr2Enabled bool, nr2Strength, nr2Floor, nr2AdaptRate float64,
 	autoReconnect bool) *RadioClient {
 
+	// Determine default channels based on mode
+	// IQ modes are stereo (I and Q channels), others are mono
+	modeStr := strings.ToLower(mode)
+	defaultChannels := 1
+	if modeStr == "iq" || modeStr == "iq48" || modeStr == "iq96" || modeStr == "iq192" {
+		defaultChannels = 2
+	}
+
 	client := &RadioClient{
 		url:           urlStr,
 		host:          host,
 		port:          port,
 		frequency:     frequency,
-		mode:          strings.ToLower(mode),
+		mode:          modeStr,
 		bandwidthLow:  bandwidthLow,
 		bandwidthHigh: bandwidthHigh,
 		outputMode:    outputMode,
@@ -105,8 +114,8 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		ssl:           ssl,
 		userSessionID: uuid.New().String(),
 		running:       true,
-		sampleRate:    12000, // Default, will be updated from server
-		channels:      1,     // Default mono, will be updated from server
+		sampleRate:    12000,           // Default, will be updated from server
+		channels:      defaultChannels, // Default based on mode, will be updated from server
 		nr2Enabled:    nr2Enabled,
 		nr2Strength:   nr2Strength,
 		nr2Floor:      nr2Floor,
@@ -190,12 +199,13 @@ func (c *RadioClient) SetupWAVWriter() error {
 	c.wavWriter = &WAVWriter{
 		file:       file,
 		sampleRate: c.sampleRate,
+		channels:   c.channels,
 		dataSize:   0,
 	}
 
 	// Write WAV header (will be updated on close)
 	c.wavWriter.WriteHeader()
-	fmt.Fprintf(os.Stderr, "Recording to WAV file: %s\n", c.wavFile)
+	fmt.Fprintf(os.Stderr, "Recording to WAV file: %s (%d channel(s))\n", c.wavFile, c.channels)
 	return nil
 }
 
@@ -680,10 +690,10 @@ func (w *WAVWriter) WriteHeader() error {
 	copy(header[12:16], "fmt ")
 	binary.LittleEndian.PutUint32(header[16:20], 16) // fmt chunk size
 	binary.LittleEndian.PutUint16(header[20:22], 1)  // PCM format
-	binary.LittleEndian.PutUint16(header[22:24], 1)  // Mono
+	binary.LittleEndian.PutUint16(header[22:24], 1)  // Number of channels (will be updated)
 	binary.LittleEndian.PutUint32(header[24:28], uint32(w.sampleRate))
-	binary.LittleEndian.PutUint32(header[28:32], uint32(w.sampleRate*2)) // Byte rate
-	binary.LittleEndian.PutUint16(header[32:34], 2)                      // Block align
+	binary.LittleEndian.PutUint32(header[28:32], uint32(w.sampleRate*2)) // Byte rate (will be updated)
+	binary.LittleEndian.PutUint16(header[32:34], 2)                      // Block align (will be updated)
 	binary.LittleEndian.PutUint16(header[34:36], 16)                     // Bits per sample
 
 	// data chunk
@@ -704,6 +714,19 @@ func (w *WAVWriter) Close() error {
 	w.file.Seek(4, 0)
 	binary.Write(w.file, binary.LittleEndian, uint32(36+w.dataSize))
 
+	// Update number of channels
+	w.file.Seek(22, 0)
+	binary.Write(w.file, binary.LittleEndian, uint16(w.channels))
+
+	// Update byte rate (sample_rate * channels * bytes_per_sample)
+	w.file.Seek(28, 0)
+	binary.Write(w.file, binary.LittleEndian, uint32(w.sampleRate*w.channels*2))
+
+	// Update block align (channels * bytes_per_sample)
+	w.file.Seek(32, 0)
+	binary.Write(w.file, binary.LittleEndian, uint16(w.channels*2))
+
+	// Update data size
 	w.file.Seek(40, 0)
 	binary.Write(w.file, binary.LittleEndian, uint32(w.dataSize))
 

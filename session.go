@@ -258,10 +258,27 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	// Create radiod channel with unique random SSRC, bandwidth, and default squelch
 	// Default squelch: -999 dB (force squelch always open initially)
 	// User can adjust via squelch knob to enable threshold-based squelch
+	// For wide IQ modes (iq48, iq96, iq192), don't send bandwidth - use preset values
 	squelchOpen := float32(-999.0)
 	squelchClose := float32(-999.0)
-	if err := sm.radiod.CreateChannelWithSquelch(channelName, frequency, radiodMode, sampleRate, ssrc, bandwidth, &squelchOpen, &squelchClose); err != nil {
-		return nil, fmt.Errorf("failed to create radiod channel: %w", err)
+
+	// Check if this is a wide IQ mode
+	wideIQModes := map[string]bool{
+		"iq48": true, "iq96": true, "iq192": true,
+	}
+
+	if wideIQModes[mode] {
+		// Wide IQ mode - create channel without bandwidth parameter (use preset)
+		// We pass 0 for bandwidth which signals radiod to use preset values
+		if err := sm.radiod.CreateChannelWithSquelch(channelName, frequency, radiodMode, sampleRate, ssrc, 0, &squelchOpen, &squelchClose); err != nil {
+			return nil, fmt.Errorf("failed to create radiod channel: %w", err)
+		}
+		log.Printf("Created wide IQ mode channel '%s' using preset bandwidth values", channelName)
+	} else {
+		// Normal mode - create channel with specified bandwidth
+		if err := sm.radiod.CreateChannelWithSquelch(channelName, frequency, radiodMode, sampleRate, ssrc, bandwidth, &squelchOpen, &squelchClose); err != nil {
+			return nil, fmt.Errorf("failed to create radiod channel: %w", err)
+		}
 	}
 
 	sm.sessions[sessionID] = session

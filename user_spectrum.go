@@ -505,7 +505,7 @@ func (usm *UserSpectrumManager) checkAudioParameterMismatch(ssrc uint32, radiodF
 
 	// Skip parameter checking for wide IQ modes - they use preset bandwidth values
 	wideIQModes := map[string]bool{
-		"iq48": true, "iq96": true, "iq192": true,
+		"iq48": true, "iq96": true, "iq192": true, "iq384": true,
 	}
 	if wideIQModes[sessionMode] {
 		log.Printf("WIDEIQ_SKIP_PARAM_CHECK: mode=%s ssrc=0x%08x", sessionMode, ssrc)

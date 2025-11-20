@@ -227,7 +227,7 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	// Determine number of channels based on mode
 	// IQ modes use stereo (I and Q channels), all others use mono
 	channels := 1
-	if mode == "iq" || mode == "iq48" || mode == "iq96" || mode == "iq192" {
+	if mode == "iq" || mode == "iq48" || mode == "iq96" || mode == "iq192" || mode == "iq384" {
 		channels = 2
 	}
 
@@ -258,13 +258,13 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	// Create radiod channel with unique random SSRC, bandwidth, and default squelch
 	// Default squelch: -999 dB (force squelch always open initially)
 	// User can adjust via squelch knob to enable threshold-based squelch
-	// For wide IQ modes (iq48, iq96, iq192), don't send bandwidth - use preset values
+	// For wide IQ modes (iq48, iq96, iq192, iq384), don't send bandwidth - use preset values
 	squelchOpen := float32(-999.0)
 	squelchClose := float32(-999.0)
 
 	// Check if this is a wide IQ mode
 	wideIQModes := map[string]bool{
-		"iq48": true, "iq96": true, "iq192": true,
+		"iq48": true, "iq96": true, "iq192": true, "iq384": true,
 	}
 
 	if wideIQModes[mode] {
@@ -604,7 +604,7 @@ func (sm *SessionManager) UpdateSessionWithEdges(sessionID string, frequency uin
 		// Update sample rate when mode changes
 		session.SampleRate = sm.config.Audio.GetSampleRateForMode(mode)
 		// Update channels when mode changes (IQ modes=stereo, others=mono)
-		if mode == "iq" || mode == "iq48" || mode == "iq96" || mode == "iq192" {
+		if mode == "iq" || mode == "iq48" || mode == "iq96" || mode == "iq192" || mode == "iq384" {
 			session.Channels = 2
 		} else {
 			session.Channels = 1

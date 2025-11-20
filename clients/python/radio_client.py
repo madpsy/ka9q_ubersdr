@@ -60,7 +60,7 @@ class RadioClient:
 
         # Determine default channels based on mode
         # IQ modes are stereo (I and Q channels), others are mono
-        if self.mode in ('iq', 'iq48', 'iq96', 'iq192'):
+        if self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384'):
             self.channels = 2
         else:
             self.channels = 1
@@ -512,8 +512,8 @@ Examples:
     parser.add_argument('-f', '--frequency', type=int, required=True,
                         help='Frequency in Hz (e.g., 14074000 for 14.074 MHz)')
     parser.add_argument('-m', '--mode', required=True,
-                        choices=['am', 'sam', 'usb', 'lsb', 'fm', 'nfm', 'cwu', 'cwl', 'iq', 'iq48', 'iq96', 'iq192'],
-                        help='Demodulation mode (iq48/iq96/iq192 require bypassed IP)')
+                        choices=['am', 'sam', 'usb', 'lsb', 'fm', 'nfm', 'cwu', 'cwl', 'iq', 'iq48', 'iq96', 'iq192', 'iq384'],
+                        help='Demodulation mode (iq48/iq96/iq192/iq384 require bypassed IP)')
     parser.add_argument('-b', '--bandwidth', type=parse_bandwidth,
                         help='Bandwidth in format low:high (e.g., -5000:5000)')
     parser.add_argument('-o', '--output', choices=['pipewire', 'stdout', 'wav'],

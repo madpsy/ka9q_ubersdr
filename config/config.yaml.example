@@ -118,6 +118,7 @@ audio:
     iq48: 50000   # Wide bandwidth IQ output for 48 kHz of real bandwidth
     iq96: 100000  # Wide bandwidth IQ output for 96 kHz of real bandwidth
     iq192: 200000 # Wide bandwidth IQ output for 192 kHz of real bandwidth
+    iq384: 400000 # Wide bandwidth IQ output for 384 kHz of real bandwidth
   # Opus compression settings
   opus:
     # Enable Opus compression for audio streaming (reduces bandwidth significantly)

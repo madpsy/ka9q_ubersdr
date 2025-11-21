@@ -2128,7 +2128,7 @@
             }
         }
 
-        function renderSessions() {
+        function renderSessions(filterType = 'all') {
             const container = document.getElementById('sessionsList');
             container.innerHTML = '';
             container.classList.remove('loading');
@@ -2137,6 +2137,30 @@
                 container.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No active sessions</p>';
                 return;
             }
+
+            // Add filter dropdown
+            const filterDiv = document.createElement('div');
+            filterDiv.style.marginBottom = '15px';
+            filterDiv.style.padding = '10px';
+            filterDiv.style.background = '#f8f9fa';
+            filterDiv.style.borderRadius = '5px';
+            filterDiv.style.display = 'flex';
+            filterDiv.style.alignItems = 'center';
+            filterDiv.style.gap = '10px';
+            filterDiv.innerHTML = `
+                <label style="font-weight: 500; color: #555;">Filter:</label>
+                <select id="sessionFilter" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                    <option value="all" ${filterType === 'all' ? 'selected' : ''}>Show All Users</option>
+                    <option value="regular" ${filterType === 'regular' ? 'selected' : ''}>Show Regular Users Only</option>
+                    <option value="bypassed" ${filterType === 'bypassed' ? 'selected' : ''}>Show Bypassed Users Only</option>
+                </select>
+            `;
+            container.appendChild(filterDiv);
+
+            // Add event listener to filter dropdown
+            document.getElementById('sessionFilter').addEventListener('change', (e) => {
+                renderSessions(e.target.value);
+            });
 
             // Separate internal sessions from user sessions
             const userSessions = currentSessions.filter(s => !s.is_internal);
@@ -2184,7 +2208,62 @@
 
             const tbody = document.getElementById('sessionsTableBody');
 
-            for (const [key, sessions] of Object.entries(sessionsByUser)) {
+            // Helper function to convert IP address to sortable value
+            function ipToSortValue(ip) {
+                if (!ip || ip === 'N/A') return [0, 0, 0, 0, 0, 0, 0, 0]; // Sort N/A to the end
+                
+                // IPv4 address
+                if (ip.includes('.') && !ip.includes(':')) {
+                    const parts = ip.split('.').map(p => parseInt(p) || 0);
+                    // Pad to 8 elements for consistent comparison with IPv6
+                    return [...parts, 0, 0, 0, 0];
+                }
+                
+                // IPv6 address
+                if (ip.includes(':')) {
+                    // Expand :: notation and convert to numeric array
+                    let parts = ip.split(':');
+                    const emptyIndex = parts.indexOf('');
+                    if (emptyIndex !== -1) {
+                        // Handle :: expansion
+                        const before = parts.slice(0, emptyIndex);
+                        const after = parts.slice(emptyIndex + 1).filter(p => p !== '');
+                        const zerosNeeded = 8 - before.length - after.length;
+                        parts = [...before, ...Array(zerosNeeded).fill('0'), ...after];
+                    }
+                    return parts.slice(0, 8).map(p => parseInt(p || '0', 16));
+                }
+                
+                return [0, 0, 0, 0, 0, 0, 0, 0];
+            }
+
+            // Sort sessions by IP address
+            const sortedEntries = Object.entries(sessionsByUser).sort((a, b) => {
+                const audioA = a[1].audio[0];
+                const spectrumA = a[1].spectrum[0];
+                const ipA = audioA?.client_ip || spectrumA?.client_ip || 'N/A';
+                
+                const audioB = b[1].audio[0];
+                const spectrumB = b[1].spectrum[0];
+                const ipB = audioB?.client_ip || spectrumB?.client_ip || 'N/A';
+                
+                const sortA = ipToSortValue(ipA);
+                const sortB = ipToSortValue(ipB);
+                
+                // Compare each segment
+                for (let i = 0; i < 8; i++) {
+                    if (sortA[i] !== sortB[i]) {
+                        return sortA[i] - sortB[i];
+                    }
+                }
+                return 0;
+            });
+
+            for (const [key, sessions] of sortedEntries) {
+                // Apply filter
+                if (filterType === 'regular' && sessions.isBypassed) continue;
+                if (filterType === 'bypassed' && !sessions.isBypassed) continue;
+                
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
                 

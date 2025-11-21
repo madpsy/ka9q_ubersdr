@@ -110,6 +110,17 @@ class RadioAPI {
         return window.dxClusterClient.onDigitalSpot(callback);
     }
 
+    onCWSpot(callback) {
+        // Subscribe to CW spots via the DX cluster websocket
+        if (!window.dxClusterClient) {
+            console.warn('DX Cluster client not available');
+            return null;
+        }
+
+        // Use the client's built-in subscription mechanism for CW spots
+        return window.dxClusterClient.onCWSpot(callback);
+    }
+
     // === RADIO CONTROLS ===
     
     setFrequency(freq) {

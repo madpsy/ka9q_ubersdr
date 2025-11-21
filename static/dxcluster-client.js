@@ -7,8 +7,10 @@ class DXClusterClient {
         this.connected = false;
         this.spotCallbacks = []; // Array of DX spot callbacks
         this.digitalSpotCallbacks = []; // Array of digital spot callbacks
+        this.cwSpotCallbacks = []; // Array of CW spot callbacks
         this.receivedSpots = []; // Buffer for DX spots received before callbacks registered
         this.receivedDigitalSpots = []; // Buffer for digital spots received before callbacks registered
+        this.receivedCWSpots = []; // Buffer for CW spots received before callbacks registered
         this.maxBufferedSpots = 100; // Maximum spots to buffer
     }
 
@@ -123,6 +125,29 @@ class DXClusterClient {
                 }
                 break;
 
+            case 'cw_spot':
+                // CW spot from CW Skimmer
+                if (message.data) {
+                    // If no callbacks registered yet, buffer the spot
+                    if (this.cwSpotCallbacks.length === 0) {
+                        this.receivedCWSpots.push(message.data);
+                        // Limit buffer size
+                        if (this.receivedCWSpots.length > this.maxBufferedSpots) {
+                            this.receivedCWSpots.shift();
+                        }
+                    } else {
+                        // Notify all callbacks
+                        this.cwSpotCallbacks.forEach(callback => {
+                            try {
+                                callback(message.data);
+                            } catch (error) {
+                                console.error('[DX Cluster] Error in CW spot callback:', error);
+                            }
+                        });
+                    }
+                }
+                break;
+
             case 'pong':
                 // Response to ping
                 break;
@@ -180,6 +205,32 @@ class DXClusterClient {
             const index = this.digitalSpotCallbacks.indexOf(callback);
             if (index > -1) {
                 this.digitalSpotCallbacks.splice(index, 1);
+            }
+        };
+    }
+
+    // Subscribe to CW spot notifications
+    onCWSpot(callback) {
+        this.cwSpotCallbacks.push(callback);
+        
+        // Send any buffered CW spots to the new callback
+        if (this.receivedCWSpots.length > 0) {
+            this.receivedCWSpots.forEach(spot => {
+                try {
+                    callback(spot);
+                } catch (error) {
+                    console.error('[DX Cluster] Error sending buffered CW spot:', error);
+                }
+            });
+            // Clear the buffer after sending
+            this.receivedCWSpots = [];
+        }
+        
+        // Return unsubscribe function
+        return () => {
+            const index = this.cwSpotCallbacks.indexOf(callback);
+            if (index > -1) {
+                this.cwSpotCallbacks.splice(index, 1);
             }
         };
     }

@@ -2138,12 +2138,21 @@
                 return;
             }
 
-            // Group sessions by user_session_id (or fall back to client IP)
+            // Separate internal sessions from user sessions
+            const userSessions = currentSessions.filter(s => !s.is_internal);
+            const internalSessions = currentSessions.filter(s => s.is_internal);
+
+            // Group user sessions by user_session_id (or fall back to client IP)
             const sessionsByUser = {};
-            currentSessions.forEach(session => {
+            userSessions.forEach(session => {
                 const key = session.user_session_id || session.client_ip || session.source_ip;
                 if (!sessionsByUser[key]) {
-                    sessionsByUser[key] = { audio: [], spectrum: [], hasUUID: !!session.user_session_id };
+                    sessionsByUser[key] = {
+                        audio: [],
+                        spectrum: [],
+                        hasUUID: !!session.user_session_id,
+                        isBypassed: session.is_bypassed || false
+                    };
                 }
                 if (session.is_spectrum) {
                     sessionsByUser[key].spectrum.push(session);
@@ -2178,6 +2187,11 @@
             for (const [key, sessions] of Object.entries(sessionsByUser)) {
                 const row = document.createElement('tr');
                 row.style.borderBottom = '1px solid #dee2e6';
+                
+                // Highlight bypassed users with a subtle background color
+                if (sessions.isBypassed) {
+                    row.style.background = '#e8f5e9'; // Light green background for bypassed
+                }
 
                 const audioSession = sessions.audio[0];
                 const spectrumSession = sessions.spectrum[0];
@@ -2207,7 +2221,11 @@
                 }
 
                 // Combine IP display: show client IP, with source IP in parentheses if different
+                // Add bypass indicator if applicable
                 let ipDisplay = clientIP;
+                if (sessions.isBypassed) {
+                    ipDisplay += ` <span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; margin-left: 5px;">BYPASSED</span>`;
+                }
                 if (sourceIP !== clientIP && sourceIP !== 'N/A') {
                     ipDisplay += ` <span style="color: #666; font-size: 11px;">(via ${sourceIP})</span>`;
                 }
@@ -2250,11 +2268,30 @@
             summary.style.padding = '15px';
             summary.style.background = '#f8f9fa';
             summary.style.borderRadius = '5px';
+            
+            // Count bypassed vs non-bypassed users
+            let bypassedCount = 0;
+            let nonBypassedCount = 0;
+            for (const [key, sessions] of Object.entries(sessionsByUser)) {
+                if (sessions.isBypassed) {
+                    bypassedCount++;
+                } else {
+                    nonBypassedCount++;
+                }
+            }
+            
             const maxSessions = currentConfig?.server?.max_sessions || '?';
+            const userAudio = userSessions.filter(s => !s.is_spectrum).length;
+            const userSpectrum = userSessions.filter(s => s.is_spectrum).length;
+            const internalAudio = internalSessions.filter(s => !s.is_spectrum).length;
+            const internalSpectrum = internalSessions.filter(s => s.is_spectrum).length;
+            
             summary.innerHTML = `
-                <strong>Summary:</strong> ${Object.keys(sessionsByUser).length} of ${maxSessions} maximum unique user(s),
-                ${currentSessions.filter(s => !s.is_spectrum).length} audio connection(s),
-                ${currentSessions.filter(s => s.is_spectrum).length} spectrum connection(s)
+                <strong>Summary:</strong><br>
+                <span style="margin-left: 20px;">• Regular users: <strong>${nonBypassedCount}</strong> of <strong>${maxSessions}</strong> maximum</span><br>
+                <span style="margin-left: 20px;">• Bypassed users: <strong>${bypassedCount}</strong> <em style="color: #666;">(not counted towards limit)</em></span><br>
+                <span style="margin-left: 20px;">• Internal sessions: <strong>${internalSessions.length}</strong> <em style="color: #666;">(${internalAudio} audio, ${internalSpectrum} spectrum - system use only)</em></span><br>
+                <span style="margin-left: 20px;">• User connections: ${userAudio} audio, ${userSpectrum} spectrum</span>
             `;
             container.appendChild(summary);
         }

@@ -139,8 +139,9 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	}
 
 	// Check session limit based on unique user_session_ids
-	// Skip this check if the IP is in the bypass list
-	if !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+	// Skip this check if the IP is in the bypass list OR if this is an internal session (no IP)
+	// Internal sessions (noise floor, decoders) have empty ClientIP and should not count towards user limits
+	if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
 		// If userSessionID is empty, treat as a unique user for each session
 		if userSessionID == "" {
 			// No UUID provided - count as unique user per session (legacy behavior)
@@ -340,8 +341,9 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 	}
 
 	// Check session limit based on unique user_session_ids
-	// Skip this check if the IP is in the bypass list
-	if !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+	// Skip this check if the IP is in the bypass list OR if this is an internal session (no IP)
+	// Internal sessions (noise floor, decoders) have empty ClientIP and should not count towards user limits
+	if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
 		// If userSessionID is empty, treat as a unique user for each session
 		if userSessionID == "" {
 			// No UUID provided - count as unique user per session (legacy behavior)
@@ -1086,6 +1088,13 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 	sessions := make([]map[string]interface{}, 0, len(sm.sessions))
 	for _, session := range sm.sessions {
 		session.mu.RLock()
+		
+		// Check if this session's IP is bypassed
+		isBypassed := sm.config.Server.IsIPTimeoutBypassed(session.ClientIP)
+		
+		// Check if this is an internal session (no client IP = internal system session)
+		isInternal := session.ClientIP == ""
+		
 		info := map[string]interface{}{
 			"id":              session.ID,
 			"channel":         session.ChannelName,
@@ -1098,6 +1107,8 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			"user_session_id": session.UserSessionID,
 			"created_at":      session.CreatedAt.Format(time.RFC3339),
 			"last_active":     session.LastActive.Format(time.RFC3339),
+			"is_bypassed":     isBypassed,
+			"is_internal":     isInternal,
 		}
 
 		// Add type-specific info

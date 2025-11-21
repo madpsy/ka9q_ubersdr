@@ -3417,9 +3417,28 @@
             connectionSection.className = 'config-section';
             connectionSection.innerHTML = '<h3>Connection Settings</h3>';
 
-            // Enabled checkbox
-            const enabledField = createConfigField('Enabled', 'checkbox', currentCWSkimmerConfig.enabled || false, 'enabled');
-            connectionSection.appendChild(enabledField);
+            // Enabled select (Yes/No dropdown like decoder)
+            const enabledDiv = document.createElement('div');
+            enabledDiv.className = 'config-field';
+            const enabledLabel = document.createElement('label');
+            enabledLabel.textContent = 'Enabled';
+            enabledDiv.appendChild(enabledLabel);
+            const enabledSelect = document.createElement('select');
+            enabledSelect.dataset.key = 'enabled';
+            const enabledYes = document.createElement('option');
+            enabledYes.value = 'true';
+            enabledYes.textContent = 'Yes';
+            const enabledNo = document.createElement('option');
+            enabledNo.value = 'false';
+            enabledNo.textContent = 'No';
+            enabledSelect.appendChild(enabledYes);
+            enabledSelect.appendChild(enabledNo);
+            enabledSelect.value = (currentCWSkimmerConfig.enabled === true || currentCWSkimmerConfig.enabled === 'true') ? 'true' : 'false';
+            enabledSelect.addEventListener('change', (e) => {
+                currentCWSkimmerConfig.enabled = e.target.value === 'true';
+            });
+            enabledDiv.appendChild(enabledSelect);
+            connectionSection.appendChild(enabledDiv);
 
             // Host
             const hostField = createConfigField('Host', 'text', currentCWSkimmerConfig.host || 'localhost', 'host');
@@ -3468,12 +3487,31 @@
             loggingSection.className = 'config-section';
             loggingSection.innerHTML = '<h3>Spot Logging</h3>';
 
-            // Spots Log Enabled
-            const spotsLogEnabledField = createConfigField('CSV Logging Enabled', 'checkbox', currentCWSkimmerConfig.spots_log_enabled !== false, 'spots_log_enabled');
+            // Spots Log Enabled select (Yes/No dropdown)
+            const spotsLogEnabledDiv = document.createElement('div');
+            spotsLogEnabledDiv.className = 'config-field';
+            const spotsLogLabel = document.createElement('label');
+            spotsLogLabel.textContent = 'CSV Logging Enabled';
+            spotsLogEnabledDiv.appendChild(spotsLogLabel);
+            const spotsLogSelect = document.createElement('select');
+            spotsLogSelect.dataset.key = 'spots_log_enabled';
+            const spotsLogYes = document.createElement('option');
+            spotsLogYes.value = 'true';
+            spotsLogYes.textContent = 'Yes';
+            const spotsLogNo = document.createElement('option');
+            spotsLogNo.value = 'false';
+            spotsLogNo.textContent = 'No';
+            spotsLogSelect.appendChild(spotsLogYes);
+            spotsLogSelect.appendChild(spotsLogNo);
+            spotsLogSelect.value = (currentCWSkimmerConfig.spots_log_enabled === false) ? 'false' : 'true';
+            spotsLogSelect.addEventListener('change', (e) => {
+                currentCWSkimmerConfig.spots_log_enabled = e.target.value === 'true';
+            });
+            spotsLogEnabledDiv.appendChild(spotsLogSelect);
             const spotsLogSmall = document.createElement('small');
             spotsLogSmall.textContent = 'Log CW Skimmer spots to CSV files organized by mode/date/band';
-            spotsLogEnabledField.appendChild(spotsLogSmall);
-            loggingSection.appendChild(spotsLogEnabledField);
+            spotsLogEnabledDiv.appendChild(spotsLogSmall);
+            loggingSection.appendChild(spotsLogEnabledDiv);
 
             // Spots Log Data Dir
             const spotsLogDataDirField = createConfigField('CSV Log Directory', 'text', currentCWSkimmerConfig.spots_log_data_dir || 'data/spots', 'spots_log_data_dir');
@@ -3485,13 +3523,7 @@
 
             container.appendChild(loggingSection);
 
-            // Add event listeners for config changes
-            container.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-                checkbox.addEventListener('change', (e) => {
-                    currentCWSkimmerConfig[e.target.dataset.key] = e.target.checked;
-                });
-            });
-
+            // Add event listeners for text and number inputs
             container.querySelectorAll('input[type="text"], input[type="number"]').forEach(input => {
                 input.addEventListener('change', (e) => {
                     const value = e.target.type === 'number' ? parseInt(e.target.value) : e.target.value;

@@ -3387,6 +3387,8 @@
             } catch (error) {
                 showAlert('Error importing decoder configuration: ' + error.message, 'error');
             }
+        }
+
         // CW Skimmer configuration management
         let currentCWSkimmerConfig = {};
 
@@ -3592,11 +3594,6 @@
             } catch (error) {
                 showAlert('Error importing CW Skimmer configuration: ' + error.message, 'error');
             }
-        }
-
-
-            // Reset file input
-            event.target.value = '';
         }
 
         // System statistics management

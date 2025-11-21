@@ -18,7 +18,7 @@ keepalive_delay: 300 # Seconds between keep-alive messages (default: 300 = 5 min
 # CSV Logging Configuration
 # Spots will be stored in the same directory structure as decoder spots
 spots_log_enabled: true
-spots_log_data_dir: "data/spots"  # Directory for CSV files (default: data/spots)
+spots_log_data_dir: "cwskimmer_spots"  # Directory for CSV files (default: data/spots)
 
 # CSV files will be organized as:
 # data/spots/SKIMMER/YYYY/MM/DD/band.csv

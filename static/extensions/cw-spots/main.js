@@ -228,6 +228,12 @@ class CWSpotsExtension extends DecoderExtension {
         // Invalidate cache
         this.filteredSpotsCache = null;
 
+        // Invalidate spectrum marker cache when spots change
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.invalidateMarkerCache();
+            window.spectrumDisplay.draw();
+        }
+
         // Only update UI if panel is visible
         const panel = document.querySelector('.decoder-extension-panel');
         const isPanelVisible = panel && panel.style.display !== 'none';
@@ -806,6 +812,217 @@ class CWSpotsExtension extends DecoderExtension {
 
         if (this.unsubscribe) {
             this.unsubscribe();
+
+// Draw CW spots on spectrum display (exposed on window for spectrum-display.js access)
+// Global array for CW spot positions (for spectrum display)
+let cwSpotPositions = [];
+window.cwSpotPositions = cwSpotPositions;
+
+// Global reference to the extension instance
+let cwSpotsExtensionInstance = null;
+
+let lastCWDebugLog = 0;
+function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
+    const now = Date.now();
+    const shouldLog = (now - lastCWDebugLog) > 5000; // Log once every 5 seconds
+    
+    if (!spectrumDisplay || !spectrumDisplay.overlayCtx) {
+        cwSpotPositions = [];
+        window.cwSpotPositions = cwSpotPositions;
+        return;
+    }
+
+    // Get the CW spots extension instance from global reference
+    const cwExtension = cwSpotsExtensionInstance;
+
+    // Only draw if extension exists, is enabled, and has spots
+    if (!cwExtension || !cwExtension.enabled || !cwExtension.spots || cwExtension.spots.length === 0) {
+        cwSpotPositions = [];
+        window.cwSpotPositions = cwSpotPositions;
+        return;
+    }
+    
+    if (shouldLog) {
+        console.log('CW Spots: enabled=', cwExtension.enabled, 'spots=', cwExtension.spots.length);
+        lastCWDebugLog = now;
+    }
+
+    // Use the overlay canvas context (same as bookmarks and DX spots)
+    const ctx = spectrumDisplay.overlayCtx;
+
+    if (!ctx || !spectrumDisplay.totalBandwidth || !spectrumDisplay.centerFreq) {
+        cwSpotPositions = [];
+        window.cwSpotPositions = cwSpotPositions;
+        return;
+    }
+
+    // Calculate frequency range
+    const startFreq = spectrumDisplay.centerFreq - spectrumDisplay.totalBandwidth / 2;
+    const endFreq = spectrumDisplay.centerFreq + spectrumDisplay.totalBandwidth / 2;
+
+    // Clear spot positions array
+    cwSpotPositions = [];
+
+    // Get filtered spots
+    let filteredSpots = cwExtension.spots;
+    
+    if (shouldLog) {
+        console.log('Spectrum range:', (startFreq/1e6).toFixed(3), '-', (endFreq/1e6).toFixed(3), 'MHz');
+        console.log('Filtered spots:', filteredSpots.length);
+    }
+
+    // Apply age filter
+    if (cwExtension.ageFilter !== null) {
+        const now = new Date();
+        const maxAgeMs = cwExtension.ageFilter * 60 * 1000;
+        filteredSpots = filteredSpots.filter(spot => {
+            try {
+                const spotTime = new Date(spot.time);
+                const ageMs = now - spotTime;
+                return ageMs <= maxAgeMs;
+            } catch (e) {
+                return true;
+            }
+        });
+    }
+
+    // Apply band filter
+    if (cwExtension.bandFilter !== 'all') {
+        const bandRanges = {
+            '160m': { min: 1800000, max: 2000000 },
+            '80m': { min: 3500000, max: 4000000 },
+            '60m': { min: 5330500, max: 5403500 },
+            '40m': { min: 7000000, max: 7300000 },
+            '30m': { min: 10100000, max: 10150000 },
+            '20m': { min: 14000000, max: 14350000 },
+            '17m': { min: 18068000, max: 18168000 },
+            '15m': { min: 21000000, max: 21450000 },
+            '12m': { min: 24890000, max: 24990000 },
+            '10m': { min: 28000000, max: 29700000 }
+        };
+        const band = bandRanges[cwExtension.bandFilter];
+        if (band) {
+            filteredSpots = filteredSpots.filter(spot =>
+                spot.frequency >= band.min && spot.frequency <= band.max
+            );
+        }
+    }
+
+    // Apply SNR filter
+    if (cwExtension.snrFilter !== null) {
+        filteredSpots = filteredSpots.filter(spot => spot.snr >= cwExtension.snrFilter);
+    }
+
+    // Apply WPM filter
+    if (cwExtension.wpmFilter !== null) {
+        filteredSpots = filteredSpots.filter(spot => spot.wpm >= cwExtension.wpmFilter);
+    }
+
+    // Apply distance filter
+    if (cwExtension.distanceFilter !== null) {
+        filteredSpots = filteredSpots.filter(spot =>
+            spot.distance_km !== undefined && spot.distance_km !== null && spot.distance_km >= cwExtension.distanceFilter
+        );
+    }
+
+    // Apply callsign filter
+    if (cwExtension.callsignFilter) {
+        filteredSpots = filteredSpots.filter(spot =>
+            spot.dx_call.toUpperCase().includes(cwExtension.callsignFilter) ||
+            (spot.country && spot.country.toUpperCase().includes(cwExtension.callsignFilter))
+        );
+    }
+
+    // Deduplicate spots by callsign+frequency combination - keep only the most recent
+    const uniqueSpots = [];
+    const seenCombinations = new Set();
+    filteredSpots.forEach(spot => {
+        const key = `${spot.dx_call}@${spot.frequency}`;
+        if (!seenCombinations.has(key)) {
+            uniqueSpots.push(spot);
+            seenCombinations.add(key);
+        }
+    });
+
+    // Draw each unique spot that's within the visible range
+    // Draw in reverse order so newest spots (at start of array) are drawn last and appear on top
+    let drawnCount = 0;
+    for (let i = uniqueSpots.length - 1; i >= 0; i--) {
+        const spot = uniqueSpots[i];
+        // Only draw if frequency is within visible range
+        if (spot.frequency < startFreq || spot.frequency > endFreq) {
+            continue;
+        }
+        drawnCount++;
+
+        // Calculate x position
+        const x = ((spot.frequency - startFreq) / (endFreq - startFreq)) * spectrumDisplay.width;
+
+        // Draw at same height as bookmarks (y=20) but use different color
+        const labelY = 20;
+        
+        if (shouldLog) {
+            console.log(`Drawing ${spot.dx_call} at x=${x.toFixed(0)}, y=${labelY}`);
+        }
+
+        // Draw spot label
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+
+        // Background for label - use cyan/blue for CW spots (different from DX cluster green)
+        const labelWidth = ctx.measureText(spot.dx_call).width + 8;
+        const labelHeight = 12;
+
+        ctx.fillStyle = 'rgba(23, 162, 184, 0.95)'; // Cyan background for CW
+        ctx.fillRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
+
+        // Border for label
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - labelWidth / 2, labelY, labelWidth, labelHeight);
+
+        // Label text
+        ctx.fillStyle = '#FFFFFF'; // White text
+        ctx.fillText(spot.dx_call, x, labelY + 2);
+
+        // Draw downward arrow below label
+        const arrowY = labelY + labelHeight;
+        const arrowLength = 6;
+        ctx.fillStyle = 'rgba(23, 162, 184, 0.95)';
+        ctx.beginPath();
+        ctx.moveTo(x, arrowY + arrowLength); // Arrow tip
+        ctx.lineTo(x - 4, arrowY); // Left point
+        ctx.lineTo(x + 4, arrowY); // Right point
+        ctx.closePath();
+        ctx.fill();
+
+        // Arrow border
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Store spot position for hover detection
+        cwSpotPositions.push({
+            x: x,
+            y: labelY,
+            width: labelWidth,
+            height: labelHeight + arrowLength,
+            spot: spot
+        });
+    }
+
+    // Update window reference
+    window.cwSpotPositions = cwSpotPositions;
+    
+    if (shouldLog && drawnCount > 0) {
+        console.log('Drew', drawnCount, 'CW spot markers on spectrum');
+    }
+}
+
+// Expose function on window for spectrum-display.js access
+window.drawCWSpotsOnSpectrum = drawCWSpotsOnSpectrum;
+
             this.unsubscribe = null;
         }
     }
@@ -817,9 +1034,12 @@ class CWSpotsExtension extends DecoderExtension {
 
 // Register the extension
 if (window.decoderManager) {
-    const cwSpotsExtension = new CWSpotsExtension();
-    window.decoderManager.register(cwSpotsExtension);
-    console.log('CW Spots extension registered:', cwSpotsExtension);
+    cwSpotsExtensionInstance = new CWSpotsExtension();
+    window.decoderManager.register(cwSpotsExtensionInstance);
+    console.log('CW Spots extension registered:', cwSpotsExtensionInstance);
 } else {
     console.error('decoderManager not available for CW Spots extension');
 }
+
+// Also expose the instance globally for debugging
+window.cwSpotsExtensionInstance = cwSpotsExtensionInstance;

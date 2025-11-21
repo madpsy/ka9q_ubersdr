@@ -2002,6 +2002,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 window.drawDXSpotsOnSpectrum(this, console.log);
             }
 
+            // Draw CW spots to cache
+            if (typeof window.drawCWSpotsOnSpectrum === 'function') {
+                window.drawCWSpotsOnSpectrum(this, console.log);
+            }
+
             // Restore original context
             this.overlayCtx = originalCtx;
 

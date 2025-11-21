@@ -5805,7 +5805,7 @@ let spectrumAutoAdjustEnabled = false;
 let spectrumAutoAdjustInterval = null;
 const spectrumNoiseFloorHistory = [];
 const spectrumPeakHistory = [];
-const SPECTRUM_HISTORY_SIZE = 10;
+const SPECTRUM_HISTORY_SIZE = 80; // 80 samples × 500ms = 40 second window
 
 
 // Update RF spectrum auto-adjust values

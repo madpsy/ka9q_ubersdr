@@ -19,6 +19,11 @@ type CWSkimmerConfig struct {
 	// CSV Logging (follows decoder pattern)
 	SpotsLogEnabled bool   `yaml:"spots_log_enabled"`  // Enable CSV logging
 	SpotsLogDataDir string `yaml:"spots_log_data_dir"` // Directory for spots CSV files (default: data/spots)
+
+	// PSKReporter configuration
+	PSKReporterEnabled  bool   `yaml:"pskreporter_enabled"`  // Enable PSKReporter uploads
+	PSKReporterCallsign string `yaml:"pskreporter_callsign"` // Callsign for PSKReporter (defaults to main callsign)
+	PSKReporterLocator  string `yaml:"pskreporter_locator"`  // Grid locator for PSKReporter
 }
 
 // LoadCWSkimmerConfig loads CW Skimmer configuration from a YAML file
@@ -45,6 +50,10 @@ func LoadCWSkimmerConfig(filename string) (*CWSkimmerConfig, error) {
 	}
 	if config.SpotsLogDataDir == "" {
 		config.SpotsLogDataDir = "data/spots" // Default to same directory as decoder spots
+	}
+	// Default PSKReporter callsign to main callsign if not specified
+	if config.PSKReporterCallsign == "" {
+		config.PSKReporterCallsign = config.Callsign
 	}
 
 	return &config, nil
@@ -78,6 +87,19 @@ func (c *CWSkimmerConfig) Validate() error {
 
 	if c.SpotsLogEnabled && c.SpotsLogDataDir == "" {
 		return fmt.Errorf("cwskimmer spots_log_data_dir cannot be empty when logging is enabled")
+	}
+
+	// Validate PSKReporter configuration if enabled
+	if c.PSKReporterEnabled {
+		if c.PSKReporterCallsign == "" {
+			return fmt.Errorf("cwskimmer pskreporter_callsign cannot be empty when PSKReporter is enabled")
+		}
+		if c.PSKReporterLocator == "" {
+			return fmt.Errorf("cwskimmer pskreporter_locator cannot be empty when PSKReporter is enabled")
+		}
+		if !isValidGridLocator(c.PSKReporterLocator) {
+			return fmt.Errorf("cwskimmer pskreporter_locator must be a valid grid locator (e.g., IO91vl)")
+		}
 	}
 
 	return nil

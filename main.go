@@ -493,6 +493,28 @@ func main() {
 			}
 		}
 
+		// Initialize PSKReporter if enabled
+		if cwskimmerConfig.PSKReporterEnabled {
+			pskReporter, err := NewPSKReporter(
+				cwskimmerConfig.PSKReporterCallsign,
+				cwskimmerConfig.PSKReporterLocator,
+				"ka9q_ubersdr",
+				"", // No antenna info for CW Skimmer
+			)
+			if err != nil {
+				log.Printf("Warning: Failed to initialize PSKReporter for CW Skimmer: %v", err)
+			} else {
+				if err := pskReporter.Connect(); err != nil {
+					log.Printf("Warning: Failed to connect PSKReporter for CW Skimmer: %v", err)
+				} else {
+					cwSkimmer.SetPSKReporter(pskReporter)
+					defer pskReporter.Stop()
+					log.Printf("CW Skimmer PSKReporter enabled: callsign=%s, locator=%s",
+						cwskimmerConfig.PSKReporterCallsign, cwskimmerConfig.PSKReporterLocator)
+				}
+			}
+		}
+
 		// Register spot handler for logging
 		cwSkimmer.OnSpot(func(spot CWSkimmerSpot) {
 			if DebugMode {

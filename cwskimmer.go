@@ -47,6 +47,7 @@ type CWSkimmerClient struct {
 	spotHandlers      []func(CWSkimmerSpot)
 	messageHandlers   []func(string)
 	spotsLogger       *CWSkimmerSpotsLogger
+	pskReporter       *PSKReporter
 	ctyDatabase       *CTYDatabase
 	receiverLat       float64
 	receiverLon       float64
@@ -69,6 +70,11 @@ func NewCWSkimmerClient(config *CWSkimmerConfig, ctyDatabase *CTYDatabase, recei
 // SetSpotsLogger sets the spots logger for CSV logging
 func (c *CWSkimmerClient) SetSpotsLogger(logger *CWSkimmerSpotsLogger) {
 	c.spotsLogger = logger
+}
+
+// SetPSKReporter sets the PSKReporter instance for spot uploads
+func (c *CWSkimmerClient) SetPSKReporter(psk *PSKReporter) {
+	c.pskReporter = psk
 }
 
 // SetPrometheusMetrics sets the Prometheus metrics instance
@@ -376,6 +382,13 @@ func (c *CWSkimmerClient) processLine(line string) {
 			}
 		}
 
+		// Submit to PSKReporter if enabled
+		if c.config.PSKReporterEnabled && c.pskReporter != nil {
+			if err := c.submitToPSKReporter(&spot); err != nil {
+				log.Printf("CW Skimmer: Failed to submit to PSKReporter: %v", err)
+			}
+		}
+
 		// Call spot handlers
 		c.mu.RLock()
 		handlers := c.spotHandlers
@@ -595,6 +608,25 @@ func (c *CWSkimmerClient) checkInactivity() {
 		c.disconnect()
 		c.scheduleReconnect()
 	}
+}
+
+// submitToPSKReporter submits a CW spot to PSKReporter
+func (c *CWSkimmerClient) submitToPSKReporter(spot *CWSkimmerSpot) error {
+	if c.pskReporter == nil {
+		return fmt.Errorf("PSKReporter not initialized")
+	}
+
+	// Convert CWSkimmerSpot to DecodeInfo for PSKReporter
+	decode := &DecodeInfo{
+		Callsign:  spot.DXCall,
+		Locator:   "", // CW spots don't have locators
+		SNR:       spot.SNR,
+		Frequency: uint64(spot.Frequency),
+		Timestamp: spot.Time,
+		Mode:      "CW", // CW mode
+	}
+
+	return c.pskReporter.Submit(decode)
 }
 
 // scheduleReconnect schedules a reconnection attempt

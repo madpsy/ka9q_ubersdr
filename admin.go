@@ -2505,14 +2505,17 @@ func (ah *AdminHandler) handleGetCWSkimmerConfig(w http.ResponseWriter, r *http.
 		// If file doesn't exist, return default empty config
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"enabled":            false,
-			"host":               "localhost",
-			"port":               7300,
-			"callsign":           "N0CALL",
-			"reconnect_delay":    30,
-			"keepalive_delay":    300,
-			"spots_log_enabled":  true,
-			"spots_log_data_dir": "data/spots",
+			"enabled":               false,
+			"host":                  "localhost",
+			"port":                  7300,
+			"callsign":              "N0CALL",
+			"reconnect_delay":       30,
+			"keepalive_delay":       300,
+			"spots_log_enabled":     true,
+			"spots_log_data_dir":    "data/spots",
+			"pskreporter_enabled":   false,
+			"pskreporter_callsign":  "N0CALL",
+			"pskreporter_locator":   "",
 		})
 		return
 	}

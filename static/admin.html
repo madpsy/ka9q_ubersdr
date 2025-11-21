@@ -3523,6 +3523,55 @@
 
             container.appendChild(loggingSection);
 
+            // PSKReporter Settings Section
+            const pskReporterSection = document.createElement('div');
+            pskReporterSection.className = 'config-section';
+            pskReporterSection.innerHTML = '<h3>PSKReporter</h3>';
+
+            // PSKReporter Enabled select (Yes/No dropdown)
+            const pskReporterEnabledDiv = document.createElement('div');
+            pskReporterEnabledDiv.className = 'config-field';
+            const pskReporterLabel = document.createElement('label');
+            pskReporterLabel.textContent = 'PSKReporter Enabled';
+            pskReporterEnabledDiv.appendChild(pskReporterLabel);
+            const pskReporterSelect = document.createElement('select');
+            pskReporterSelect.dataset.key = 'pskreporter_enabled';
+            const pskReporterYes = document.createElement('option');
+            pskReporterYes.value = 'true';
+            pskReporterYes.textContent = 'Yes';
+            const pskReporterNo = document.createElement('option');
+            pskReporterNo.value = 'false';
+            pskReporterNo.textContent = 'No';
+            pskReporterSelect.appendChild(pskReporterYes);
+            pskReporterSelect.appendChild(pskReporterNo);
+            pskReporterSelect.value = (currentCWSkimmerConfig.pskreporter_enabled === true || currentCWSkimmerConfig.pskreporter_enabled === 'true') ? 'true' : 'false';
+            pskReporterSelect.addEventListener('change', (e) => {
+                currentCWSkimmerConfig.pskreporter_enabled = e.target.value === 'true';
+            });
+            pskReporterEnabledDiv.appendChild(pskReporterSelect);
+            const pskReporterSmall = document.createElement('small');
+            pskReporterSmall.textContent = 'Upload CW spots to PSKReporter for propagation analysis';
+            pskReporterEnabledDiv.appendChild(pskReporterSmall);
+            pskReporterSection.appendChild(pskReporterEnabledDiv);
+
+            // PSKReporter Callsign
+            const pskReporterCallsignField = createConfigField('PSKReporter Callsign', 'text', currentCWSkimmerConfig.pskreporter_callsign || currentCWSkimmerConfig.callsign || 'N0CALL', 'pskreporter_callsign');
+            pskReporterCallsignField.querySelector('input').placeholder = 'e.g., W1ABC (defaults to main callsign)';
+            const pskReporterCallsignSmall = document.createElement('small');
+            pskReporterCallsignSmall.textContent = 'Your callsign for PSKReporter (defaults to main callsign if not specified)';
+            pskReporterCallsignField.appendChild(pskReporterCallsignSmall);
+            pskReporterSection.appendChild(pskReporterCallsignField);
+
+            // PSKReporter Locator
+            const pskReporterLocatorField = createConfigField('PSKReporter Locator', 'text', currentCWSkimmerConfig.pskreporter_locator || '', 'pskreporter_locator');
+            pskReporterLocatorField.querySelector('input').placeholder = 'e.g., IO91vl';
+            const pskReporterLocatorSmall = document.createElement('small');
+            pskReporterLocatorSmall.textContent = 'Your Maidenhead grid locator for PSKReporter (required if PSKReporter is enabled)';
+            pskReporterLocatorField.appendChild(pskReporterLocatorSmall);
+            pskReporterSection.appendChild(pskReporterLocatorField);
+
+            container.appendChild(pskReporterSection);
+
             // Add event listeners for text and number inputs
             container.querySelectorAll('input[type="text"], input[type="number"]').forEach(input => {
                 input.addEventListener('change', (e) => {

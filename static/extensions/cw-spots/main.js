@@ -740,14 +740,16 @@ class CWSpotsExtension extends DecoderExtension {
         console.log('CW Spots: Band option found:', !!bandOption, 'Current filter:', this.bandFilter, 'New band:', band);
 
         if (bandOption) {
+            // Always update dropdown value to match internal state
             bandFilter.value = band;
 
+            // Only re-filter if band actually changed
             if (this.bandFilter !== band) {
                 this.bandFilter = band;
                 this.filterAndRenderSpots();
                 console.log(`CW Spots: Auto-updated band filter to ${band}`);
             } else {
-                console.log('CW Spots: Band filter already set to', band);
+                console.log('CW Spots: Band filter already set to', band, '- dropdown synced');
             }
         } else {
             console.log('CW Spots: Band', band, 'not found in dropdown options');

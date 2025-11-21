@@ -481,6 +481,8 @@ func (h *DXClusterWebSocketHandler) BroadcastCWSpot(spot CWSkimmerSpot) {
 		"cq_zone":   spot.CQZone,
 		"itu_zone":  spot.ITUZone,
 		"continent": spot.Continent,
+		"latitude":  spot.Latitude,
+		"longitude": spot.Longitude,
 	}
 
 	// Add distance and bearing if available

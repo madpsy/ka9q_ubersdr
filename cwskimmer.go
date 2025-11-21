@@ -475,7 +475,6 @@ func (c *CWSkimmerClient) parseCWSpot(line string) (CWSkimmerSpot, bool) {
 // enrichSpot enriches a spot with CTY data and distance/bearing
 func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 	if c.ctyDatabase == nil {
-		log.Printf("CW Skimmer: enrichSpot called but ctyDatabase is nil for %s", spot.DXCall)
 		return
 	}
 
@@ -491,9 +490,6 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 		// These represent the country/prefix location and are needed for the map
 		spot.Latitude = info.Latitude
 		spot.Longitude = info.Longitude
-		
-		log.Printf("CW Skimmer: Enriched %s - Country: %s, Lat: %.4f, Lon: %.4f",
-			spot.DXCall, spot.Country, spot.Latitude, spot.Longitude)
 
 		// Calculate distance and bearing if receiver location is set
 		// This uses the same lat/lon we just set above
@@ -502,11 +498,8 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 				distance, bearing := CalculateDistanceAndBearing(c.receiverLat, c.receiverLon, info.Latitude, info.Longitude)
 				spot.DistanceKm = &distance
 				spot.BearingDeg = &bearing
-				log.Printf("CW Skimmer: Calculated distance: %.1f km, bearing: %.1f°", distance, bearing)
 			}
 		}
-	} else {
-		log.Printf("CW Skimmer: No CTY info found for %s", spot.DXCall)
 	}
 }
 

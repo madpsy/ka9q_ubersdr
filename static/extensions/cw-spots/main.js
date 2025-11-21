@@ -62,9 +62,6 @@ class CWSpotsExtension extends DecoderExtension {
         this.startRadioStateMonitoring();
         this.startFrequencyMonitoring();
 
-        // Initialize badges display
-        this.updateBadges();
-
         console.log('CW Spots: onInitialize complete');
     }
 

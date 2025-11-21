@@ -907,10 +907,6 @@ class CWSkimmerMap {
     }
 
     handleCWSpot(spot) {
-        // Debug: log ALL fields in the raw spot
-        console.log('[CW Skimmer Map] Raw spot received - ALL FIELDS:', JSON.stringify(spot, null, 2));
-        console.log('[CW Skimmer Map] Object.keys:', Object.keys(spot));
-        
         // CW spots use different field names than digital spots
         // Map CW spot fields to expected format
         const mappedSpot = {
@@ -931,16 +927,9 @@ class CWSkimmerMap {
             comment: spot.comment
         };
 
-        console.log('[CW Skimmer Map] Checking for lat/lon in spot object:');
-        console.log('  - spot.latitude:', spot.latitude);
-        console.log('  - spot.longitude:', spot.longitude);
-        console.log('  - Has distance?', spot.distance_km);
-        console.log('  - Has bearing?', spot.bearing_deg);
-
         // Only process spots with valid coordinates
         if (!mappedSpot.latitude || !mappedSpot.longitude) {
             console.warn('[CW Skimmer Map] Skipping spot without coordinates:', mappedSpot.callsign);
-            console.warn('  Full spot data:', spot);
             return;
         }
 

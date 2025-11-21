@@ -404,10 +404,6 @@ func (mp *MQTTPublisher) publish(topic string, payload MetricPayload) {
 		log.Printf("MQTT ERROR: Failed to publish to topic %s: %v", topic, token.Error())
 		return
 	}
-
-	if DebugMode {
-		log.Printf("MQTT DEBUG: Published to %s: %d metrics", topic, len(payload.Metrics))
-	}
 }
 
 // publishSpectrumData publishes FFT spectrum data for all bands

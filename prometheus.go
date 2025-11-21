@@ -736,11 +736,6 @@ func (pm *PrometheusMetrics) UpdateSessionMetrics(sessions *SessionManager) {
 
 	// Update resource metrics
 	pm.updateResourceMetrics()
-
-	if DebugMode {
-		log.Printf("DEBUG: Updated Prometheus metrics: sessions=%d, users=%d, audio=%d, spectrum=%d, radiod_channels=%d",
-			totalSessions, uniqueUsers, audioCount, spectrumCount, radiodChannelsTotal)
-	}
 }
 
 // updateResourceMetrics updates runtime resource metrics

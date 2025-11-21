@@ -147,12 +147,9 @@ func (psk *PSKReporter) Submit(decode *DecodeInfo) error {
 func (psk *PSKReporter) sendThread() {
 	defer psk.wg.Done()
 
-	log.Println("PSKReporter: Processing loop started")
-
 	for psk.running {
 		// Random sleep between 18-38 seconds
 		sleepTime := 18 + rand.Intn(21)
-		log.Printf("PSKReporter: Sleeping for %d seconds before next send", sleepTime)
 
 		select {
 		case <-time.After(time.Duration(sleepTime) * time.Second):
@@ -166,14 +163,7 @@ func (psk *PSKReporter) sendThread() {
 
 		// Clean up old sent reports
 		psk.cleanupSentReports()
-
-		// Check queue count
-		psk.queueMutex.Lock()
-		queueCount := len(psk.reportQueue)
-		psk.queueMutex.Unlock()
-
-		log.Printf("PSKReporter: Woke up, checking queue (count=%d)", queueCount)
-
+	
 		// Make packets from queued reports
 		reportCount := 0
 		for psk.running {
@@ -183,15 +173,7 @@ func (psk *PSKReporter) sendThread() {
 				break
 			}
 		}
-
-		if reportCount > 0 {
-			log.Printf("PSKReporter: Sent %d reports this cycle", reportCount)
-		} else {
-			log.Println("PSKReporter: No reports sent this cycle (all filtered as duplicates or queue empty)")
-		}
 	}
-
-	log.Println("PSKReporter: Processing loop stopped")
 }
 
 // cleanupSentReports removes old sent reports
@@ -298,19 +280,7 @@ func (psk *PSKReporter) makePackets() int {
 		hasLocator := report.Locator != "" && isValidGridLocator(report.Locator)
 		recordLen := psk.buildSenderRecord(packet[offset:], &report, hasLocator)
 		offset += recordLen
-
-		log.Printf("PSKReporter: Processing %s from %s on %.3f MHz, SNR %d dB (%s)",
-			report.Callsign,
-			func() string {
-				if hasLocator {
-					return report.Locator
-				}
-				return "unknown"
-			}(),
-			float64(report.Frequency)/1e6,
-			report.SNR,
-			report.Mode)
-
+	
 		// Track sent report with current timestamp
 		psk.sentMutex.Lock()
 		report.EpochTime = time.Now() // Update to send time

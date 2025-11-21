@@ -141,16 +141,8 @@ func (ds *DecoderSpawner) ProcessDecoderOutput(outputFile string, band *DecoderB
 		return nil, fmt.Errorf("failed to parse decoder output: %w", err)
 	}
 
-	if DebugMode {
-		log.Printf("DEBUG: Parsed %d decodes from %s", len(decodes), outputFile)
-	}
-
 	// Deduplicate by callsign (keep strongest SNR)
 	decodes = DeduplicateDecodes(decodes)
-
-	if DebugMode {
-		log.Printf("DEBUG: After deduplication: %d unique decodes", len(decodes))
-	}
 
 	return decodes, nil
 }
@@ -162,8 +154,6 @@ func (ds *DecoderSpawner) CleanupFiles(wavFile, outputFile string, mode DecoderM
 	if !ds.config.KeepWav {
 		if err := os.Remove(wavFile); err != nil && !os.IsNotExist(err) {
 			log.Printf("Warning: failed to remove WAV file %s: %v", wavFile, err)
-		} else if DebugMode {
-			log.Printf("DEBUG: Removed WAV file: %s", wavFile)
 		}
 	}
 
@@ -172,8 +162,6 @@ func (ds *DecoderSpawner) CleanupFiles(wavFile, outputFile string, mode DecoderM
 	if !ds.config.KeepLogs && mode != ModeWSPR {
 		if err := os.Remove(outputFile); err != nil && !os.IsNotExist(err) {
 			log.Printf("Warning: failed to remove output file %s: %v", outputFile, err)
-		} else if DebugMode {
-			log.Printf("DEBUG: Removed output file: %s", outputFile)
 		}
 	}
 }

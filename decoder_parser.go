@@ -316,15 +316,8 @@ func isValidGridLocatorForMode(s string, mode DecoderMode) bool {
 
 // ParseDecoderLog reads and parses a decoder log file
 func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode, bandName string, receiverLocator string) ([]*DecodeInfo, error) {
-	if DebugMode || mode == ModeFT4 {
-		log.Printf("DEBUG: ParseDecoderLog called for %s mode, file: %s", mode.String(), filename)
-	}
-
 	file, err := os.Open(filename)
 	if err != nil {
-		if DebugMode || mode == ModeFT4 {
-			log.Printf("DEBUG: Failed to open file %s: %v", filename, err)
-		}
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 	defer file.Close()
@@ -391,11 +384,6 @@ func ParseDecoderLog(filename string, dialFreq uint64, mode DecoderMode, bandNam
 
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading log file: %w", err)
-	}
-
-	if DebugMode || mode == ModeFT4 {
-		log.Printf("DEBUG: ParseDecoderLog stats for %s - File: %s, Total lines: %d, Skipped: %d, Parsed: %d, Valid decodes: %d",
-			mode.String(), filename, lineCount, skippedCount, parsedCount, len(decodes))
 	}
 
 	return decodes, nil

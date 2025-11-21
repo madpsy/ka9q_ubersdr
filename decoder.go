@@ -476,8 +476,6 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 			if logFile != "" && !md.config.KeepLogs {
 				if removeErr := os.Remove(logFile); removeErr != nil && !os.IsNotExist(removeErr) {
 					log.Printf("Warning: failed to remove log file %s: %v", logFile, removeErr)
-				} else if DebugMode {
-					log.Printf("DEBUG: Removed log file: %s", logFile)
 				}
 			}
 		}()

@@ -206,21 +206,7 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte) {
 	// Send audio to session's channel
 	select {
 	case session.AudioChan <- dataCopy:
-		// Successfully sent - log first few in debug mode
-		if DebugMode {
-			ar.mu.Lock()
-			if ar.sentPacketCount == nil {
-				ar.sentPacketCount = make(map[string]int)
-			}
-			ar.sentPacketCount[session.ID]++
-			count := ar.sentPacketCount[session.ID]
-			ar.mu.Unlock()
-			
-			if count <= 5 {
-				log.Printf("DEBUG: Routed audio packet #%d to session %s (SSRC: 0x%08x, %d bytes)",
-					count, session.ID, ssrc, len(dataCopy))
-			}
-		}
+		// Successfully sent
 	default:
 		// Channel full, skip this packet
 		log.Printf("Warning: audio channel full for session %s (SSRC: %d)", session.ID, ssrc)

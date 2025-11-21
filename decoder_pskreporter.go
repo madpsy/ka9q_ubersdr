@@ -290,9 +290,7 @@ func (psk *PSKReporter) makePackets() int {
 		psk.queueMutex.Unlock()
 
 		// Skip duplicates
-		if skip, lastSentAgo := psk.shouldSkipReport(&report); skip {
-			log.Printf("PSKReporter: Skipping duplicate %s on %.3f MHz (%s) - last sent %.0f seconds ago",
-				report.Callsign, float64(report.Frequency)/1e6, report.Mode, lastSentAgo.Seconds())
+		if skip, _ := psk.shouldSkipReport(&report); skip {
 			continue
 		}
 

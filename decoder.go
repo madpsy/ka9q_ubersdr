@@ -398,12 +398,6 @@ func (md *MultiDecoder) processAudioPacket(band *DecoderBand, audioData []byte, 
 		} else {
 			ds.SamplesWritten += int64(n)
 			ds.TotalSamples += int64(n)
-
-			// Log first few writes to confirm audio is flowing
-			if ds.SamplesWritten <= int64(5*len(audioData)) {
-				log.Printf("DECODER: %s wrote %d bytes to WAV (total: %d samples)",
-					band.Config.Name, len(audioData), ds.SamplesWritten)
-			}
 		}
 	}
 }
@@ -531,17 +525,6 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 		}
 
 		if len(decodes) > 0 {
-			log.Printf("Decoded %d spots from %s", len(decodes), band.Config.Name)
-
-			// Log individual decodes only in debug mode
-			if DebugMode {
-				for _, decode := range decodes {
-					log.Printf("  %s: %s %s SNR:%d @ %.6f MHz",
-						band.Config.Name, decode.Callsign, decode.Locator,
-						decode.SNR, float64(decode.Frequency)/1e6)
-				}
-			}
-
 			// Get cycle time for this mode
 			modeInfo := GetModeInfo(band.Config.Mode)
 			cycleSeconds := int(modeInfo.CycleTime.Seconds())

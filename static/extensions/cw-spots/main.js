@@ -559,8 +559,8 @@ class CWSpotsExtension extends DecoderExtension {
     tuneToSpot(spot) {
         this.radio.setFrequency(spot.frequency);
 
-        // CW uses USB or CW mode
-        const mode = 'usb';
+        // CW uses CWL for < 10 MHz, CWU for >= 10 MHz
+        const mode = spot.frequency < 10000000 ? 'cwl' : 'cwu';
         this.radio.setMode(mode, false);
 
         this.radio.log(`Tuned to ${spot.dx_call} on ${this.formatFrequency(spot.frequency)} MHz ${mode.toUpperCase()} (CW ${spot.wpm} WPM)`);

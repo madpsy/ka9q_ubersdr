@@ -151,6 +151,8 @@ class CWSpotsExtension extends DecoderExtension {
         container.addEventListener('click', (e) => {
             if (e.target.id === 'cw-spots-clear') {
                 this.clearSpots();
+            } else if (e.target.id === 'cw-spots-map-btn') {
+                window.open('/cwskimmer_map.html', '_blank');
             }
         });
 
@@ -815,6 +817,12 @@ class CWSpotsExtension extends DecoderExtension {
         if (this.unsubscribe) {
             this.unsubscribe();
             this.unsubscribe = null;
+        }
+
+        // Invalidate spectrum marker cache to remove CW spot markers
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.invalidateMarkerCache();
+            window.spectrumDisplay.draw();
         }
     }
 

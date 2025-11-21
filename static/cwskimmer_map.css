@@ -1,0 +1,414 @@
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            overflow: hidden;
+        }
+
+        #map {
+            position: absolute;
+            top: 60px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1;
+        }
+
+        .header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: rgba(26, 26, 26, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid #333;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 1000;
+            gap: 20px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .header h1 {
+            font-size: 1.5em;
+            color: #4a9eff;
+            margin: 0;
+        }
+
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .status-connected {
+            background: #28a745;
+            color: white;
+        }
+
+        .status-disconnected {
+            background: #dc3545;
+            color: white;
+        }
+
+        .spot-count {
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-label {
+            font-size: 12px;
+            color: #aaa;
+            font-weight: 500;
+        }
+
+        .filter-select {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #fff;
+            padding: 6px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .filter-select option {
+            color: initial;
+            background: initial;
+        }
+
+        .filter-select:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: #4a9eff;
+        }
+
+        .filter-select:focus {
+            border-color: #4a9eff;
+            box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
+        }
+
+        .legend {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(26, 26, 26, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            z-index: 1000;
+            max-width: 200px;
+        }
+
+        .legend h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #4a9eff;
+        }
+
+        .space-weather-legend {
+            position: absolute;
+            bottom: 420px;
+            left: 10px;
+            background: rgba(26, 26, 26, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 10px 15px;
+            z-index: 1000;
+            min-width: 220px;
+        }
+
+        .distance-legend {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(26, 26, 26, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            z-index: 1000;
+            min-width: 220px;
+        }
+
+        .distance-legend h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #4a9eff;
+        }
+
+        .sw-metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 11px;
+        }
+
+        .sw-metric-label {
+            color: #aaa;
+        }
+
+        .sw-metric-value {
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .new-entities-legend {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(26, 26, 26, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 8px 15px;
+            z-index: 1000;
+            display: flex;
+            gap: 20px;
+        }
+
+        .new-entities-legend h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #4a9eff;
+        }
+
+        .new-entity-column {
+            flex: 1;
+            min-width: 200px;
+            white-space: nowrap;
+        }
+
+        .distance-range {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .distance-bar-container {
+            flex: 1;
+            height: 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            margin: 0 8px;
+            overflow: hidden;
+        }
+
+        .distance-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4a9eff, #2d7dd2);
+            transition: width 0.3s ease;
+        }
+
+        .distance-extremes {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #333;
+            font-size: 11px;
+            color: #aaa;
+        }
+
+        .distance-extreme {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .distance-extreme span:last-child {
+            text-align: right;
+        }
+
+        .distance-extreme-label {
+            font-weight: 500;
+            color: #4a9eff;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .legend-receiver {
+            width: 16px;
+            height: 16px;
+            background: #ff0000;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.8);
+        }
+
+        .band-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .band-legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .band-legend-label {
+            color: #ccc;
+        }
+
+        /* Custom marker styles */
+        .custom-marker {
+            border-radius: 50%;
+            border: none;
+        }
+
+        .receiver-marker {
+            background: #ff0000;
+            border: 3px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+        }
+        /* Live Messages Panel */
+        .live-messages-panel {
+            position: absolute;
+            top: 70px;
+            right: 10px;
+            width: 350px;
+            max-height: 500px;
+            background: rgba(26, 26, 26, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 8px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .live-messages-header {
+            padding: 12px 15px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .live-messages-header:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .live-messages-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #4a9eff;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .live-messages-toggle {
+            font-size: 18px;
+            color: #aaa;
+            transition: transform 0.2s;
+        }
+
+        .live-messages-toggle.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .live-messages-content {
+            overflow-y: auto;
+            max-height: 450px;
+            padding: 10px;
+        }
+
+        .live-messages-content.collapsed {
+            display: none;
+        }
+
+        .live-message {
+            padding: 8px;
+            margin-bottom: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-left: 3px solid #4a9eff;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: monospace;
+        }
+
+        .live-message-time {
+            color: #888;
+            font-size: 10px;
+            margin-bottom: 4px;
+        }
+
+        .live-message-callsign {
+            color: #4a9eff;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .live-message-details {
+            color: #ccc;
+            margin-top: 4px;
+        }
+
+        .live-message-mode {
+            display: inline-block;
+            padding: 2px 6px;
+            background: rgba(74, 158, 255, 0.2);
+            border-radius: 3px;
+            color: #4a9eff;
+            font-size: 10px;
+            margin-right: 4px;
+        }
+
+        .live-messages-empty {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+            font-size: 12px;
+        }

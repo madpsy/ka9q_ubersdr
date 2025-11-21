@@ -20,12 +20,21 @@ class CWSpotsExtension extends DecoderExtension {
         this.distanceFilter = null;
         this.callsignFilter = '';
         this.highlightNew = true;
+        this.showBadges = true; // Default to showing badges
         this.unsubscribe = null;
         this.newSpotId = null;
         this.spotIdCounter = 0;
         this.ageUpdateInterval = null;
         this.connectionCheckInterval = null;
         this.renderPending = false;
+        this.currentModalCountry = null; // Track currently open modal
+        this.currentModalBand = null;
+        this.currentModalTab = 'graph'; // Track current modal tab (graph or table)
+        this.graphRefreshPending = false; // Prevent multiple pending graph refreshes
+        this.lastGraphRefresh = 0; // Track last graph refresh time for throttling
+        this.badgeUpdatePending = false; // Prevent multiple pending badge updates
+        this.lastBadgeUpdate = 0; // Track last badge update time for throttling
+        this.modalGraphRefreshInterval = null; // Interval for periodic graph updates
         
         // Performance optimization
         this.filteredSpotsCache = null;
@@ -34,6 +43,8 @@ class CWSpotsExtension extends DecoderExtension {
         this.showingAllRows = false;
         this.callsignFilterDebounceTimer = null;
         this.filterDebounceDelay = 300;
+        this.badgeCache = null; // Cache badge data
+        this.lastBadgeBand = null; // Track last band for badge cache
         this.pendingSpots = [];
         this.renderThrottleTimer = null;
 
@@ -50,6 +61,10 @@ class CWSpotsExtension extends DecoderExtension {
         this.startAgeUpdates();
         this.startRadioStateMonitoring();
         this.startFrequencyMonitoring();
+
+        // Initialize badges display
+        this.updateBadges();
+
         console.log('CW Spots: onInitialize complete');
     }
 
@@ -116,6 +131,7 @@ class CWSpotsExtension extends DecoderExtension {
                 this.bandFilter = e.target.value;
                 this.showingAllRows = false;
                 this.filterAndRenderSpots();
+                this.updateBadges();
             } else if (e.target.id === 'cw-spots-snr-filter') {
                 const value = e.target.value;
                 this.snrFilter = value === 'none' ? null : parseInt(value);
@@ -131,6 +147,9 @@ class CWSpotsExtension extends DecoderExtension {
                 this.distanceFilter = value === 'none' ? null : parseInt(value);
                 this.showingAllRows = false;
                 this.filterAndRenderSpots();
+            } else if (e.target.id === 'cw-spots-show-badges') {
+                this.showBadges = e.target.checked;
+                this.updateBadges();
             }
         });
 
@@ -170,6 +189,9 @@ class CWSpotsExtension extends DecoderExtension {
             if (wpmFilter) wpmFilter.value = this.wpmFilter !== null ? this.wpmFilter.toString() : 'none';
             if (distanceFilter) distanceFilter.value = this.distanceFilter !== null ? this.distanceFilter.toString() : 'none';
             if (callsignFilter) callsignFilter.value = this.callsignFilter;
+
+            const showBadgesCheckbox = document.getElementById('cw-spots-show-badges');
+            if (showBadgesCheckbox) showBadgesCheckbox.checked = this.showBadges;
 
             // Update band filter from current frequency FIRST (updates this.bandFilter)
             this.updateBandFilterFromFrequency();
@@ -228,8 +250,9 @@ class CWSpotsExtension extends DecoderExtension {
             this.spots = this.spots.slice(0, this.maxSpots);
         }
 
-        // Invalidate cache
+        // Invalidate caches when new spot added
         this.filteredSpotsCache = null;
+        this.badgeCache = null;
 
         // Invalidate spectrum marker cache when spots change
         if (window.spectrumDisplay) {
@@ -250,8 +273,16 @@ class CWSpotsExtension extends DecoderExtension {
                     this.renderThrottleTimer = null;
                     this.renderPendingSpots();
                     this.updateLastUpdate();
+                    this.scheduleBadgeUpdate();
                 }, 500);
             }
+        }
+
+        // Update modal if it's open (modal can be open even if panel is closed)
+        if (this.currentModalCountry && this.currentModalBand) {
+            // Mark that graph needs refresh due to new spot
+            this._modalNeedsGraphRefresh = true;
+            this.refreshModalContent();
         }
     }
 
@@ -568,6 +599,9 @@ class CWSpotsExtension extends DecoderExtension {
             }
 
             this.updateCount(filteredSpots.length, this.spots.length);
+
+            // Update badges after rendering spots
+            this.updateBadges();
         });
     }
 
@@ -660,6 +694,7 @@ class CWSpotsExtension extends DecoderExtension {
     clearSpots() {
         this.spots = [];
         this.filteredSpotsCache = null;
+        this.badgeCache = null; // Invalidate badge cache
         this.showingAllRows = false;
         this.pendingSpots = [];
         if (this.renderThrottleTimer) {
@@ -692,6 +727,20 @@ class CWSpotsExtension extends DecoderExtension {
                     this.lastAgeFilterCheck = Date.now();
                     this.filterAndRenderSpots();
                 }
+            }
+
+            // Update modal age cells if modal is open (modal can be open even if panel is closed)
+            if (this.currentModalCountry && this.currentModalBand) {
+                const modalAgeCells = document.querySelectorAll('.modal-age');
+                modalAgeCells.forEach(cell => {
+                    const timestamp = cell.getAttribute('data-timestamp');
+                    if (timestamp) {
+                        cell.textContent = this.formatAge(timestamp);
+                    }
+                });
+                
+                // Refresh modal content every second if it's open
+                this.refreshModalContent();
             }
         }, 1000);
     }
@@ -805,6 +854,9 @@ class CWSpotsExtension extends DecoderExtension {
         this.startRadioStateMonitoring();
         this.startFrequencyMonitoring();
         this.startFrequencyPolling();
+
+        // Show badges when extension is enabled
+        this.updateBadges();
     }
 
     onDisable() {
@@ -812,11 +864,924 @@ class CWSpotsExtension extends DecoderExtension {
         this.stopAgeUpdates();
         this.stopRadioStateMonitoring();
         this.stopFrequencyMonitoring();
+
+    scheduleBadgeUpdate() {
+        // Skip if extension panel is not visible
+        const panel = document.querySelector('.decoder-extension-panel');
+        const isPanelVisible = panel && panel.style.display !== 'none';
+        if (!isPanelVisible) return;
+
+        // Throttle badge updates to prevent blocking audio thread
+        // Only update once per second maximum
+        const now = Date.now();
+        const timeSinceLastUpdate = now - this.lastBadgeUpdate;
+
+        if (timeSinceLastUpdate >= 1000) {
+            // Enough time has passed, schedule update
+            if (!this.badgeUpdatePending) {
+                this.badgeUpdatePending = true;
+                this.lastBadgeUpdate = now;
+                requestAnimationFrame(() => {
+                    this.badgeUpdatePending = false;
+                    this.updateBadges();
+                });
+            }
+        }
+        // If less than 1 second, skip this update (will update on next spot)
+    }
+
+    updateBadges() {
+        // Use the main page container instead of the extension panel container
+        const container = document.getElementById('cw-spots-badges-main');
+        if (!container) return;
+
+        // Hide container if badges are disabled or extension is not enabled
+        if (!this.showBadges || !this.enabled) {
+            container.style.display = 'none';
+            return;
+        }
+
+        container.style.display = 'flex';
+
+        // Get current band from filter
+        const currentBand = this.bandFilter;
+
+        // If no specific band is selected, show message
+        if (currentBand === 'all') {
+            container.classList.add('empty');
+            container.innerHTML = 'Select a specific band to see country badges';
+            this.badgeCache = null;
+            this.lastBadgeBand = null;
+            return;
+        }
+
+        // Check if we can use cached badge data
+        if (this.badgeCache && this.lastBadgeBand === currentBand) {
+            // Use cached data - just update the DOM
+            const fragment = document.createDocumentFragment();
+            this.badgeCache.forEach(([country, spotData]) => {
+                const badge = document.createElement('span');
+                badge.className = 'country-badge';
+                badge.textContent = country;
+                const snrText = spotData.snr >= 0 ? `+${spotData.snr}` : spotData.snr;
+                badge.title = `${country} on ${currentBand}\nLast: ${spotData.callsign}\nSNR: ${snrText} dB\nWPM: ${spotData.wpm}`;
+                badge.addEventListener('click', () => {
+                    this.openCountryModal(country, currentBand);
+                });
+                fragment.appendChild(badge);
+            });
+            container.innerHTML = '';
+            container.appendChild(fragment);
+            return;
+        }
+
+        // Get spots for current band from the last 10 minutes
+        // Optimize: filter by time first (most selective), then band, then country
+        const now = Date.now();
+        const tenMinutesAgo = now - (10 * 60 * 1000);
+
+        const recentBandSpots = this.spots.filter(spot => {
+            // Time filter first (most selective)
+            const spotTime = new Date(spot.time).getTime();
+            if (spotTime < tenMinutesAgo) return false;
+            // Band filter
+            if (spot.band !== currentBand) return false;
+            // Country filter
+            if (!spot.country) return false;
+            return true;
+        });
+
+        if (recentBandSpots.length === 0) {
+            container.classList.add('empty');
+            container.innerHTML = `No countries seen on ${currentBand} in the last 10 minutes`;
+            this.badgeCache = null;
+            this.lastBadgeBand = null;
+            return;
+        }
+
+        container.classList.remove('empty');
+
+        // Track unique countries with their most recent spot data
+        const countryMap = new Map();
+
+        recentBandSpots.forEach(spot => {
+            const country = spot.country;
+            const spotTime = new Date(spot.time).getTime();
+
+            if (!countryMap.has(country) || spotTime > countryMap.get(country).timestamp) {
+                countryMap.set(country, {
+                    timestamp: spotTime,
+                    snr: spot.snr,
+                    wpm: spot.wpm,
+                    callsign: spot.dx_call
+                });
+            }
+        });
+
+        // Convert to array and sort alphabetically by country name
+        const countries = Array.from(countryMap.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]));
+
+        // Cache the results
+        this.badgeCache = countries;
+        this.lastBadgeBand = currentBand;
+
+        // Create badges
+        const fragment = document.createDocumentFragment();
+
+        countries.forEach(([country, spotData]) => {
+            const badge = document.createElement('span');
+            badge.className = 'country-badge';
+            badge.textContent = country;
+            const snrText = spotData.snr >= 0 ? `+${spotData.snr}` : spotData.snr;
+            badge.title = `${country} on ${currentBand}\nLast: ${spotData.callsign}\nSNR: ${snrText} dB\nWPM: ${spotData.wpm}`;
+
+            // Add click handler to open modal
+            badge.addEventListener('click', () => {
+                this.openCountryModal(country, currentBand);
+            });
+
+            fragment.appendChild(badge);
+        });
+
+        container.innerHTML = '';
+        container.appendChild(fragment);
+    }
+
+    openCountryModal(country, band) {
+        // Track which modal is open
+        this.currentModalCountry = country;
+        this.currentModalBand = band;
+
+        const modal = document.getElementById('cw-country-spots-modal');
+        const modalTitle = document.getElementById('cw-country-spots-modal-title');
+
+        if (!modal || !modalTitle) {
+            console.error('Modal elements not found');
+            return;
+        }
+
+        // Populate initial content (this will also update the title with count)
+        this.refreshModalContent();
+
+        // Show modal
+        modal.style.display = 'flex';
+
+        // Setup close handlers if not already done
+        if (!this.modalHandlersSetup) {
+            this.setupModalHandlers();
+            this.modalHandlersSetup = true;
+        }
+
+        // Set default tab to graph
+        this.switchModalTab('graph');
+
+        // Start periodic graph refresh (every 5 seconds) to keep time axis current
+        this.startModalGraphRefresh();
+    }
+
+    refreshModalContent() {
+        // Refresh table content (which deduplicates by callsign)
+        this.refreshModalTable();
+
+        // Throttle graph updates to prevent blocking audio thread
+        // Only update graph once per second maximum
+        if (this.currentModalTab === 'graph' && this._modalNeedsGraphRefresh) {
+            const now = Date.now();
+            const timeSinceLastRefresh = now - this.lastGraphRefresh;
+
+            // Throttle: only refresh if at least 1 second has passed
+            if (timeSinceLastRefresh >= 1000) {
+                this.scheduleGraphRefresh();
+                this._modalNeedsGraphRefresh = false;
+            }
+            // If less than 1 second, leave flag set so it refreshes on next check
+        }
+    }
+
+    scheduleGraphRefresh() {
+        // Prevent multiple pending refreshes
+        if (this.graphRefreshPending) return;
+
+        this.graphRefreshPending = true;
+        this.lastGraphRefresh = Date.now();
+
+        // Defer to next animation frame to avoid blocking audio thread
+        requestAnimationFrame(() => {
+            this.graphRefreshPending = false;
+            this.refreshModalGraphs();
+        });
+    }
+
+    refreshModalTable() {
+        const modalTbody = document.getElementById('cw-country-spots-modal-tbody');
+
+        if (!modalTbody || !this.currentModalCountry || !this.currentModalBand) {
+            return;
+        }
+
+        const country = this.currentModalCountry;
+        const band = this.currentModalBand;
+
+        // Get spots for this country and band from the last 10 minutes
+        // IMPORTANT: Use raw spots array, not filtered by main table's age filter
+        const now = Date.now();
+        const tenMinutesAgo = now - (10 * 60 * 1000);
+
+        const countrySpots = this.spots.filter(spot => {
+            // Age filter FIRST (most selective - eliminates old spots early)
+            const spotTime = new Date(spot.time).getTime();
+            if (spotTime < tenMinutesAgo) return false;
+
+            // Band and country filters (very selective)
+            if (spot.band !== band || spot.country !== country) return false;
+
+            return true;
+        });
+
+        // Get unique callsigns with their most recent spot data
+        const callsignMap = new Map();
+
+        countrySpots.forEach(spot => {
+            const callsign = spot.dx_call;
+            const spotTime = new Date(spot.time).getTime();
+
+            if (!callsignMap.has(callsign) || spotTime > callsignMap.get(callsign).timestamp) {
+                callsignMap.set(callsign, {
+                    ...spot,
+                    timestamp: spotTime
+                });
+            }
+        });
+
+        // Convert to array and sort by timestamp (newest first)
+        const uniqueSpots = Array.from(callsignMap.values())
+            .sort((a, b) => b.timestamp - a.timestamp);
+
+        // Update modal title with count
+        const modalTitle = document.getElementById('cw-country-spots-modal-title');
+        if (modalTitle) {
+            const count = uniqueSpots.length;
+            modalTitle.textContent = `${country} on ${band} (${count} callsign${count !== 1 ? 's' : ''})`;
+        }
+
+        // Populate modal table
+        const fragment = document.createDocumentFragment();
+
+        if (uniqueSpots.length === 0) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 7;
+            cell.textContent = 'No spots found';
+            cell.style.textAlign = 'center';
+            cell.style.color = '#888';
+            row.appendChild(cell);
+            fragment.appendChild(row);
+        } else {
+            uniqueSpots.forEach(spot => {
+                const row = document.createElement('tr');
+
+                // Callsign - clickable to open QRZ
+                const callsignCell = document.createElement('td');
+                callsignCell.className = 'modal-callsign';
+                callsignCell.textContent = spot.dx_call;
+                callsignCell.style.cursor = 'pointer';
+                callsignCell.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.openQRZ(spot.dx_call);
+                });
+                row.appendChild(callsignCell);
+
+                // SNR
+                const snrCell = document.createElement('td');
+                snrCell.className = `modal-snr ${spot.snr >= 0 ? 'modal-snr-positive' : 'modal-snr-negative'}`;
+                snrCell.textContent = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
+                row.appendChild(snrCell);
+
+                // WPM
+                const wpmCell = document.createElement('td');
+                wpmCell.className = 'modal-wpm';
+                wpmCell.textContent = spot.wpm || '';
+                row.appendChild(wpmCell);
+
+                // Distance
+                const distanceCell = document.createElement('td');
+                distanceCell.className = 'modal-distance';
+                if (spot.distance_km !== undefined && spot.distance_km !== null) {
+                    distanceCell.textContent = `${Math.round(spot.distance_km)} km`;
+                } else {
+                    distanceCell.textContent = '';
+                }
+                row.appendChild(distanceCell);
+
+                // Bearing
+                const bearingCell = document.createElement('td');
+                bearingCell.className = 'modal-bearing';
+                if (spot.bearing_deg !== undefined && spot.bearing_deg !== null) {
+                    bearingCell.textContent = `${Math.round(spot.bearing_deg)}°`;
+                } else {
+                    bearingCell.textContent = '';
+                }
+                row.appendChild(bearingCell);
+
+                // Age
+                const ageCell = document.createElement('td');
+                ageCell.className = 'modal-age';
+                ageCell.setAttribute('data-timestamp', spot.time);
+                ageCell.textContent = this.formatAge(spot.time);
+                row.appendChild(ageCell);
+
+                // Comment
+                const commentCell = document.createElement('td');
+                commentCell.className = 'modal-comment';
+                commentCell.textContent = spot.comment || '';
+                row.appendChild(commentCell);
+
+                fragment.appendChild(row);
+            });
+        }
+
+        modalTbody.innerHTML = '';
+        modalTbody.appendChild(fragment);
+    }
+
+    refreshModalGraphs() {
+        if (!this.currentModalCountry || !this.currentModalBand) {
+            return;
+        }
+
+        const country = this.currentModalCountry;
+        const band = this.currentModalBand;
+
+        // Get spots for this country and band from the last 10 minutes
+        const now = Date.now();
+        const tenMinutesAgo = now - (10 * 60 * 1000);
+
+        const countrySpots = this.spots.filter(spot => {
+            // Age filter FIRST (most selective - eliminates old spots early)
+            const spotTime = new Date(spot.time).getTime();
+            if (spotTime < tenMinutesAgo) return false;
+
+            // Band and country filters (very selective)
+            if (spot.band !== band || spot.country !== country) return false;
+
+            return true;
+        });
+
+        // Render graph
+        const container = document.getElementById('cw-country-spots-graphs-container');
+        if (!container) return;
+
+        // Check if we need to rebuild the structure
+        const existingGraph = container.querySelector('.country-spots-graph');
+
+        if (!existingGraph || countrySpots.length === 0) {
+            // Need to rebuild
+            const scrollTop = container.scrollTop;
+            container.innerHTML = '';
+
+            if (countrySpots.length === 0) {
+                container.innerHTML = '<div class="country-spots-graph-no-data">No spots found in the last 10 minutes</div>';
+                return;
+            }
+
+            this.renderCWGraph(container, countrySpots);
+
+            // Restore scroll position
+            requestAnimationFrame(() => {
+                container.scrollTop = scrollTop;
+            });
+        } else {
+            // Just update existing canvas
+            const graphDiv = container.querySelector('.country-spots-graph');
+            if (graphDiv) {
+                // Update title
+                const title = graphDiv.querySelector('.country-spots-graph-title');
+                if (title) {
+                    title.textContent = `CW Spots - ${countrySpots.length} spot${countrySpots.length !== 1 ? 's' : ''}`;
+                }
+                // Redraw canvas with tooltip
+                const canvas = graphDiv.querySelector('.country-spots-graph-canvas');
+                const tooltip = graphDiv.querySelector('.country-spots-graph-tooltip');
+                if (canvas) {
+                    this.drawFrequencyTimeGraph(canvas, countrySpots, tooltip);
+                }
+            }
+        }
+    }
+
+    renderCWGraph(container, spots) {
+        // Create graph container
+        const graphDiv = document.createElement('div');
+        graphDiv.className = 'country-spots-graph';
+
+        const title = document.createElement('div');
+        title.className = 'country-spots-graph-title';
+        title.textContent = `CW Spots - ${spots.length} spot${spots.length !== 1 ? 's' : ''}`;
+        graphDiv.appendChild(title);
+
+        const canvasContainer = document.createElement('div');
+        canvasContainer.className = 'country-spots-graph-canvas-container';
+
+        const canvas = document.createElement('canvas');
+        canvas.className = 'country-spots-graph-canvas';
+        canvasContainer.appendChild(canvas);
+
+        // Create tooltip element
+        const tooltip = document.createElement('div');
+        tooltip.className = 'country-spots-graph-tooltip';
+        tooltip.style.display = 'none';
+        canvasContainer.appendChild(tooltip);
+
+        graphDiv.appendChild(canvasContainer);
+        container.appendChild(graphDiv);
+
+        // Draw graph on canvas and setup interactivity
+        this.drawFrequencyTimeGraph(canvas, spots, tooltip);
+    }
+
+    drawFrequencyTimeGraph(canvas, spots, tooltip = null) {
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.parentElement.getBoundingClientRect();
+
+        // Set canvas size to match container
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Clear canvas
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, width, height);
+
+        if (spots.length === 0) {
+            ctx.fillStyle = '#666';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('No spots to display', width / 2, height / 2);
+            return;
+        }
+
+        // Calculate time range based on actual spot times
+        const spotTimes = spots.map(s => new Date(s.time).getTime());
+        const minTime = Math.min(...spotTimes);
+        const maxTime = Math.max(...spotTimes);
+        const timeRange = maxTime - minTime;
+
+        // Add 5% padding on each side for better visualization
+        const timePadding = Math.max(timeRange * 0.05, 30000); // At least 30 seconds padding
+        const displayMinTime = minTime - timePadding;
+        const displayMaxTime = maxTime + timePadding;
+        const displayTimeRange = displayMaxTime - displayMinTime;
+
+        // Calculate frequency range
+        const frequencies = spots.map(s => s.frequency);
+        const minFreq = Math.min(...frequencies);
+        const maxFreq = Math.max(...frequencies);
+        const freqRange = maxFreq - minFreq;
+        const freqPadding = freqRange * 0.1 || 1000; // 10% padding or 1kHz minimum
+
+        // Graph margins
+        const marginLeft = 80;
+        const marginRight = 20;
+        const marginTop = 20;
+        const marginBottom = 40;
+        const graphWidth = width - marginLeft - marginRight;
+        const graphHeight = height - marginTop - marginBottom;
+
+        // Draw axes
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(marginLeft, marginTop);
+        ctx.lineTo(marginLeft, height - marginBottom);
+        ctx.lineTo(width - marginRight, height - marginBottom);
+        ctx.stroke();
+
+        // Draw Y-axis labels (Frequency in MHz)
+        ctx.fillStyle = '#aaa';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'right';
+
+        const numYTicks = 5;
+        for (let i = 0; i <= numYTicks; i++) {
+            const freq = minFreq - freqPadding + (freqRange + 2 * freqPadding) * (1 - i / numYTicks);
+            const y = marginTop + (graphHeight * i / numYTicks);
+
+            ctx.fillText((freq / 1000000).toFixed(5), marginLeft - 10, y + 4);
+
+            // Draw grid line
+            ctx.strokeStyle = '#2a2a2a';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(marginLeft, y);
+            ctx.lineTo(width - marginRight, y);
+            ctx.stroke();
+        }
+
+        // Draw X-axis labels (Time) - use actual spot timestamps for labels
+        ctx.textAlign = 'center';
+
+        // Get unique spot times and sort them
+        const uniqueSpotTimes = [...new Set(spotTimes)].sort((a, b) => a - b);
+
+        // Select evenly distributed spot times for labels (aim for ~5-7 labels)
+        const targetLabels = 6;
+        const labelTimes = [];
+
+        if (uniqueSpotTimes.length <= targetLabels) {
+            labelTimes.push(...uniqueSpotTimes);
+        } else {
+            const step = Math.floor(uniqueSpotTimes.length / (targetLabels - 1));
+            for (let i = 0; i < targetLabels - 1; i++) {
+                labelTimes.push(uniqueSpotTimes[i * step]);
+            }
+            labelTimes.push(uniqueSpotTimes[uniqueSpotTimes.length - 1]);
+        }
+
+        // Draw labels at actual spot times
+        labelTimes.forEach(time => {
+            const x = marginLeft + ((time - displayMinTime) / displayTimeRange) * graphWidth;
+            const date = new Date(time);
+            const timeStr = date.toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                timeZone: 'UTC'
+            });
+
+            ctx.fillStyle = '#aaa';
+            ctx.fillText(timeStr, x, height - marginBottom + 20);
+
+            // Draw grid line
+            ctx.strokeStyle = '#2a2a2a';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, marginTop);
+            ctx.lineTo(x, height - marginBottom);
+            ctx.stroke();
+        });
+
+        // Draw X-axis label
+        ctx.fillStyle = '#888';
+        ctx.font = '12px Arial';
+        ctx.fillText('Time (UTC)', width / 2, height - 5);
+
+        // Draw Y-axis label
+        ctx.save();
+        ctx.translate(12, height / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('Frequency (MHz)', 0, 0);
+        ctx.restore();
+
+        // Plot spots with callsigns as markers
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Helper function to get color based on SNR
+        const getSNRColor = (snr) => {
+            // CW typical range: -10 to +30 dB
+            if (snr >= 15) {
+                return '#28a745'; // Green - strong signal
+            } else if (snr >= 5) {
+                return '#ffc107'; // Yellow - good signal
+            } else if (snr >= -5) {
+                return '#ff8c00'; // Orange - weak signal
+            } else {
+                return '#dc3545'; // Red - very weak signal
+            }
+        };
+
+        // Calculate positions and detect collisions
+        const labelHeight = 12;
+        const labelPadding = 2;
+        const positions = [];
+
+        spots.forEach(spot => {
+            const spotTime = new Date(spot.time).getTime();
+            const x = marginLeft + ((spotTime - displayMinTime) / displayTimeRange) * graphWidth;
+            const baseY = height - marginBottom - ((spot.frequency - (minFreq - freqPadding)) / (freqRange + 2 * freqPadding)) * graphHeight;
+
+            // Get color based on SNR
+            const textColor = getSNRColor(spot.snr);
+
+            // Measure text width
+            const textWidth = ctx.measureText(spot.dx_call).width;
+
+            // Find a non-overlapping position
+            let y = baseY;
+            let attempts = 0;
+            const maxAttempts = 20;
+
+            while (attempts < maxAttempts) {
+                let overlaps = false;
+
+                // Check for overlap with existing labels
+                for (const pos of positions) {
+                    const xOverlap = Math.abs(x - pos.x) < (textWidth + pos.width) / 2 + labelPadding;
+                    const yOverlap = Math.abs(y - pos.y) < labelHeight + labelPadding;
+
+                    if (xOverlap && yOverlap) {
+                        overlaps = true;
+                        break;
+                    }
+                }
+
+                if (!overlaps) {
+                    break;
+                }
+
+                // Try offsetting vertically
+                attempts++;
+                if (attempts % 2 === 0) {
+                    y = baseY + (attempts / 2) * (labelHeight + labelPadding);
+                } else {
+                    y = baseY - (Math.ceil(attempts / 2)) * (labelHeight + labelPadding);
+                }
+            }
+
+            positions.push({ x, y, width: textWidth, baseY });
+
+            // Draw line from label to actual position if offset
+            if (Math.abs(y - baseY) > 2) {
+                ctx.strokeStyle = textColor;
+                ctx.lineWidth = 1;
+                ctx.setLineDash([2, 2]);
+                ctx.beginPath();
+                ctx.moveTo(x, baseY);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Add a small dot at the actual frequency/time position
+                ctx.fillStyle = textColor;
+                ctx.beginPath();
+                ctx.arc(x, baseY, 2, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+
+            // Draw callsign as text
+            ctx.fillStyle = textColor;
+            ctx.fillText(spot.dx_call, x, y);
+        });
+
+        // Setup mouse interaction for tooltips
+        if (tooltip) {
+            // Store spot positions for hit detection
+            canvas._spotPositions = positions.map((pos, idx) => ({
+                ...pos,
+                spot: spots[idx]
+            }));
+
+            // Remove old listeners if they exist
+            if (canvas._mouseMoveHandler) {
+                canvas.removeEventListener('mousemove', canvas._mouseMoveHandler);
+                canvas.removeEventListener('mouseleave', canvas._mouseLeaveHandler);
+                canvas.removeEventListener('click', canvas._clickHandler);
+            }
+
+            // Mouse move handler
+            canvas._mouseMoveHandler = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                // Find hovered spot
+                let hoveredSpot = null;
+                for (const pos of canvas._spotPositions) {
+                    const dx = mouseX - pos.x;
+                    const dy = mouseY - pos.y;
+
+                    // Check if mouse is near the label
+                    if (Math.abs(dx) < pos.width / 2 + 5 && Math.abs(dy) < labelHeight / 2 + 5) {
+                        hoveredSpot = pos.spot;
+                        break;
+                    }
+                }
+
+                if (hoveredSpot) {
+                    // Show tooltip
+                    const snrText = hoveredSpot.snr >= 0 ? `+${hoveredSpot.snr}` : hoveredSpot.snr;
+                    const distanceText = hoveredSpot.distance_km !== undefined && hoveredSpot.distance_km !== null
+                        ? `${Math.round(hoveredSpot.distance_km)} km`
+                        : 'N/A';
+                    const bearingText = hoveredSpot.bearing_deg !== undefined && hoveredSpot.bearing_deg !== null
+                        ? `${Math.round(hoveredSpot.bearing_deg)}°`
+                        : 'N/A';
+
+                    // Get SNR color for callsign
+                    const snrColor = getSNRColor(hoveredSpot.snr);
+
+                    tooltip.innerHTML = `
+                        <div class="tooltip-row"><strong style="color: ${snrColor}">${hoveredSpot.dx_call}</strong></div>
+                        <div class="tooltip-row">Freq: ${this.formatFrequency(hoveredSpot.frequency)} MHz</div>
+                        <div class="tooltip-row">SNR: ${snrText} dB</div>
+                        <div class="tooltip-row">WPM: ${hoveredSpot.wpm || 'N/A'}</div>
+                        <div class="tooltip-row">Distance: ${distanceText}</div>
+                        <div class="tooltip-row">Bearing: ${bearingText}</div>
+                        <div class="tooltip-row">Age: ${this.formatAge(hoveredSpot.time)}</div>
+                        ${hoveredSpot.comment ? `<div class="tooltip-row">Comment: ${hoveredSpot.comment}</div>` : ''}
+                    `;
+
+                    tooltip.style.display = 'block';
+
+                    // Smart positioning
+                    const tooltipWidth = tooltip.offsetWidth || 200;
+                    const tooltipHeight = tooltip.offsetHeight || 150;
+                    
+                    let left = mouseX + 10;
+                    let top = mouseY + 10;
+
+                    if (left + tooltipWidth > rect.width) {
+                        left = mouseX - tooltipWidth - 10;
+                    }
+
+                    if (top + tooltipHeight > rect.height) {
+                        top = mouseY - tooltipHeight - 10;
+                    }
+
+                    if (left < 0) {
+                        left = 10;
+                    }
+
+                    if (top < 0) {
+                        top = 10;
+                    }
+
+                    tooltip.style.left = left + 'px';
+                    tooltip.style.top = top + 'px';
+
+                    canvas.style.cursor = 'pointer';
+                } else {
+                    tooltip.style.display = 'none';
+                    canvas.style.cursor = 'default';
+                }
+            };
+
+            // Mouse leave handler
+            canvas._mouseLeaveHandler = () => {
+                tooltip.style.display = 'none';
+                canvas.style.cursor = 'default';
+            };
+
+            // Click handler to open QRZ page
+            canvas._clickHandler = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                // Find clicked spot
+                let clickedSpot = null;
+                for (const pos of canvas._spotPositions) {
+                    const dx = mouseX - pos.x;
+                    const dy = mouseY - pos.y;
+
+                    if (Math.abs(dx) < pos.width / 2 + 5 && Math.abs(dy) < labelHeight / 2 + 5) {
+                        clickedSpot = pos.spot;
+                        break;
+                    }
+                }
+
+                if (clickedSpot) {
+                    this.openQRZ(clickedSpot.dx_call);
+                }
+            };
+
+            canvas.addEventListener('mousemove', canvas._mouseMoveHandler);
+            canvas.addEventListener('mouseleave', canvas._mouseLeaveHandler);
+            canvas.addEventListener('click', canvas._clickHandler);
+        }
+    }
+
+    closeCountryModal() {
+        // Stop periodic graph refresh
+        this.stopModalGraphRefresh();
+
+        // Clear tracking
+        this.currentModalCountry = null;
+        this.currentModalBand = null;
+
+        const modal = document.getElementById('cw-country-spots-modal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    setupModalHandlers() {
+        const modal = document.getElementById('cw-country-spots-modal');
+        const closeBtn = document.getElementById('cw-country-spots-modal-close');
+
+            closeBtn.addEventListener('click', () => {
+                this.closeCountryModal();
+            });
+        }
+
+        // Setup tab switching
+        const tabButtons = document.querySelectorAll('.cw-country-spots-tab');
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const tab = button.getAttribute('data-tab');
+                this.switchModalTab(tab);
+            });
+        });
+
+        if (modal) {
+            // Close modal when clicking outside the content
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    this.closeCountryModal();
+                }
+            });
+
+            // Close modal on Escape key
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && modal.style.display === 'flex') {
+                    this.closeCountryModal();
+                }
+            });
+        }
+    }
+
+    switchModalTab(tab) {
+        this.currentModalTab = tab;
+
+        // Update tab buttons
+        const tabButtons = document.querySelectorAll('.cw-country-spots-tab');
+        tabButtons.forEach(button => {
+            if (button.getAttribute('data-tab') === tab) {
+                button.classList.add('active');
+            } else {
+                button.classList.remove('active');
+            }
+        });
+
+        // Update tab content
+        const tabContents = document.querySelectorAll('.country-spots-tab-content');
+        tabContents.forEach(content => {
+            if (content.id === `cw-country-spots-${tab}-tab`) {
+                content.classList.add('active');
+            } else {
+                content.classList.remove('active');
+            }
+        });
+
+        // Refresh content if switching to graph tab
+        if (tab === 'graph') {
+            // Force immediate refresh when switching tabs (user action)
+            this.lastGraphRefresh = 0;
+            this.scheduleGraphRefresh();
+            // Restart periodic refresh when switching to graph tab
+            this.startModalGraphRefresh();
+        } else {
+            // Stop periodic refresh when switching away from graph tab
+            this.stopModalGraphRefresh();
+        }
+    }
+
+    startModalGraphRefresh() {
+        // Clear any existing interval
+        this.stopModalGraphRefresh();
+
+        // Only start if modal is open and graph tab is active
+        if (!this.currentModalCountry || !this.currentModalBand || this.currentModalTab !== 'graph') {
+            return;
+        }
+
+        // Refresh graph every 5 seconds to keep time axis current
+        this.modalGraphRefreshInterval = setInterval(() => {
+            if (this.currentModalCountry && this.currentModalBand && this.currentModalTab === 'graph') {
+                // Force refresh to update time axis
+                this.lastGraphRefresh = 0;
+                this._modalNeedsGraphRefresh = true;
+                this.scheduleGraphRefresh();
+            } else {
+                // Stop if modal closed or switched tabs
+                this.stopModalGraphRefresh();
+            }
+        }, 5000); // 5 second interval
+    }
+
+    stopModalGraphRefresh() {
+        if (this.modalGraphRefreshInterval) {
+            clearInterval(this.modalGraphRefreshInterval);
+            this.modalGraphRefreshInterval = null;
+        }
+    }
+        if (closeBtn) {
         this.stopFrequencyPolling();
 
         if (this.unsubscribe) {
             this.unsubscribe();
             this.unsubscribe = null;
+        }
+
+        // Hide badges when extension is disabled
+        const container = document.getElementById('cw-spots-badges-main');
+        if (container) {
+            container.style.display = 'none';
         }
 
         // Invalidate spectrum marker cache to remove CW spot markers

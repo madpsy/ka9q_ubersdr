@@ -109,6 +109,11 @@
             <!-- Country badges will be inserted here by the extension -->
         </div>
 
+        <!-- Country Badges Container (for CW Spots Extension) -->
+        <div id="cw-spots-badges-main" class="cw-spots-badges-main" style="display: none;">
+            <!-- Country badges will be inserted here by the extension -->
+        </div>
+
         <!-- Band Status Bar -->
         <div class="band-status-bar">
             <div class="band-status-container">
@@ -851,6 +856,49 @@
                             </tr>
                         </thead>
                         <tbody id="country-spots-modal-tbody">
+                            <!-- Spots will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CW Country Spots Modal -->
+    <div id="cw-country-spots-modal" class="country-spots-modal" style="display: none;">
+        <div class="country-spots-modal-content">
+            <div class="country-spots-modal-header">
+                <h3 id="cw-country-spots-modal-title">Country Spots</h3>
+                <div class="country-spots-modal-controls">
+                    <button id="cw-country-spots-modal-close" class="modal-close-btn">&times;</button>
+                </div>
+            </div>
+            <div class="country-spots-modal-tabs">
+                <button class="cw-country-spots-tab active" data-tab="graph">Graph</button>
+                <button class="cw-country-spots-tab" data-tab="table">Table</button>
+            </div>
+            <div class="country-spots-modal-body">
+                <!-- Graph Tab -->
+                <div id="cw-country-spots-graph-tab" class="country-spots-tab-content active">
+                    <div id="cw-country-spots-graphs-container" class="country-spots-graphs-container">
+                        <!-- Graphs will be inserted here dynamically -->
+                    </div>
+                </div>
+                <!-- Table Tab -->
+                <div id="cw-country-spots-table-tab" class="country-spots-tab-content">
+                    <table class="country-spots-modal-table">
+                        <thead>
+                            <tr>
+                                <th>Callsign</th>
+                                <th>SNR</th>
+                                <th>WPM</th>
+                                <th>Distance</th>
+                                <th>Bearing</th>
+                                <th>Age</th>
+                                <th>Comment</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cw-country-spots-modal-tbody">
                             <!-- Spots will be inserted here -->
                         </tbody>
                     </table>

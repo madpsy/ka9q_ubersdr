@@ -26,7 +26,60 @@
     font-weight: bold;
     white-space: nowrap;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    cursor: default;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+}
+
+.digital-spots-badges-main .country-badge:hover {
+    background: #3a8eef;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4);
+}
+
+.digital-spots-badges-main .country-badge:active {
+    transform: translateY(0);
+}
+
+/* CW Spots Country Badges on Main Page */
+.cw-spots-badges-main {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    min-height: 0;
+    align-items: center;
+    justify-content: center;
+}
+
+.cw-spots-badges-main.empty {
+    color: #666;
+    font-size: 12px;
+    font-style: italic;
+}
+
+.cw-spots-badges-main .country-badge {
+    padding: 6px 12px;
+    background: #17a2b8;
+    color: white;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+    white-space: nowrap;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+}
+
+.cw-spots-badges-main .country-badge:hover {
+    background: #138496;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4);
+}
+
+.cw-spots-badges-main .country-badge:active {
+    transform: translateY(0);
 }
 
 /* Notification Toast */

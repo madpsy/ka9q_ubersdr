@@ -44,7 +44,7 @@ type CWSkimmerClient struct {
 	lastActivityTime  time.Time
 	spotHandlers      []func(CWSkimmerSpot)
 	messageHandlers   []func(string)
-	spotsLogger       *SpotsLogger
+	spotsLogger       *CWSkimmerSpotsLogger
 	ctyDatabase       *CTYDatabase
 	receiverLat       float64
 	receiverLon       float64
@@ -65,7 +65,7 @@ func NewCWSkimmerClient(config *CWSkimmerConfig, ctyDatabase *CTYDatabase, recei
 }
 
 // SetSpotsLogger sets the spots logger for CSV logging
-func (c *CWSkimmerClient) SetSpotsLogger(logger *SpotsLogger) {
+func (c *CWSkimmerClient) SetSpotsLogger(logger *CWSkimmerSpotsLogger) {
 	c.spotsLogger = logger
 }
 
@@ -369,24 +369,7 @@ func (c *CWSkimmerClient) processLine(line string) {
 
 		// Log to CSV if enabled
 		if c.config.SpotsLogEnabled && c.spotsLogger != nil {
-			// Convert to DecodeInfo format for logging
-			decode := &DecodeInfo{
-				Timestamp:  spot.Time,
-				Callsign:   spot.DXCall,
-				Locator:    "", // Always empty for CW
-				SNR:        spot.SNR,
-				Frequency:  uint64(spot.Frequency),
-				Message:    spot.Comment,
-				Country:    spot.Country,
-				CQZone:     spot.CQZone,
-				ITUZone:    spot.ITUZone,
-				Continent:  spot.Continent,
-				DistanceKm: spot.DistanceKm,
-				BearingDeg: spot.BearingDeg,
-				Mode:       "SKIMMER",
-				BandName:   spot.Band,
-			}
-			if err := c.spotsLogger.LogSpot(decode); err != nil {
+			if err := c.spotsLogger.LogSpot(&spot); err != nil {
 				log.Printf("CW Skimmer: Failed to log spot: %v", err)
 			}
 		}
@@ -471,22 +454,18 @@ func (c *CWSkimmerClient) parseCWSpot(line string) (CWSkimmerSpot, bool) {
 		return CWSkimmerSpot{}, false
 	}
 
-	// Rest is comment (if any) - combine WPM with any additional text
+	// Rest is comment (if any) - just CQ, DE, or empty (don't include WPM or time)
 	if len(fields) > 6 {
-		// Include WPM in the comment
-		commentParts := []string{fmt.Sprintf("%d WPM", spot.WPM)}
-		commentParts = append(commentParts, fields[6:]...)
-		spot.Comment = strings.Join(commentParts, " ")
+		// Get remaining fields after WPM
+		remainingFields := fields[6:]
 		// Remove trailing time if present (ends with Z)
-		if strings.HasSuffix(spot.Comment, "Z") {
-			lastSpace := strings.LastIndex(spot.Comment, " ")
-			if lastSpace > 0 {
-				spot.Comment = strings.TrimSpace(spot.Comment[:lastSpace])
-			}
+		if len(remainingFields) > 0 && strings.HasSuffix(remainingFields[len(remainingFields)-1], "Z") {
+			remainingFields = remainingFields[:len(remainingFields)-1]
 		}
-	} else {
-		spot.Comment = fmt.Sprintf("%d WPM", spot.WPM)
+		// Join remaining fields (should be CQ, DE, or empty)
+		spot.Comment = strings.TrimSpace(strings.Join(remainingFields, " "))
 	}
+	// If no comment, leave it empty (not "0 WPM")
 
 	return spot, true
 }

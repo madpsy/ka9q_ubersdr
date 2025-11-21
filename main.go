@@ -483,11 +483,12 @@ func main() {
 
 		// Initialize spots logger if enabled
 		if cwskimmerConfig.SpotsLogEnabled {
-			spotsLogger, err := NewSpotsLogger(cwskimmerConfig.SpotsLogDataDir, true)
+			spotsLogger, err := NewCWSkimmerSpotsLogger(cwskimmerConfig.SpotsLogDataDir, true)
 			if err != nil {
 				log.Printf("Warning: Failed to initialize CW Skimmer spots logger: %v", err)
 			} else {
 				cwSkimmer.SetSpotsLogger(spotsLogger)
+				defer spotsLogger.Close()
 				log.Printf("CW Skimmer spots logging enabled to: %s", cwskimmerConfig.SpotsLogDataDir)
 			}
 		}

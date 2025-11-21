@@ -5861,6 +5861,11 @@ function updateSpectrumAutoAdjust() {
         spectrumPeakHistory.shift();
     }
     
+    // Need enough history before adjusting (prevents immediate changes when signals appear/disappear)
+    if (spectrumNoiseFloorHistory.length < SPECTRUM_HISTORY_SIZE) {
+        return;
+    }
+    
     // Calculate smoothed values (average of history)
     const avgNoiseFloor = spectrumNoiseFloorHistory.reduce((sum, val) => sum + val, 0) / spectrumNoiseFloorHistory.length;
     const avgPeak = spectrumPeakHistory.reduce((sum, val) => sum + val, 0) / spectrumPeakHistory.length;

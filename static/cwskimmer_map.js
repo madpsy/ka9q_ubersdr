@@ -539,8 +539,8 @@ class CWSkimmerMap {
             minZoom: 2
         }).addTo(this.map);
 
-        // Setup mode filter
-        this.setupModeFilter();
+        // Setup filters
+        this.setupFilters();
 
         // Setup visibility toggles
         this.setupVisibilityToggles();

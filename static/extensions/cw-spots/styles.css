@@ -105,6 +105,25 @@
     background: #c82333;
 }
 
+.cw-spots-container .btn-map {
+    padding: 4px 12px;
+    background: #17a2b8;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.cw-spots-container .btn-map:hover {
+    background: #138496;
+}
+
+/* Push map button control group to far right */
+.cw-spots-container .control-group:has(#cw-spots-map-btn) {
+    margin-left: auto;
+}
+
 .cw-spots-table-container {
     flex: 1;
     overflow-y: auto;

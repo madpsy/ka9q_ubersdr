@@ -90,6 +90,14 @@ initialize_configs() {
         merge_config_keys "/app/config/decoder.yaml" "/etc/ka9q_ubersdr/decoder.yaml.example" "decoder.yaml"
     fi
 
+    if [ ! -f "/app/config/cwskimmer.yaml" ]; then
+        echo "Initializing cwskimmer.yaml from example..."
+        cp /etc/ka9q_ubersdr/cwskimmer.yaml.example /app/config/cwskimmer.yaml
+    else
+        # Merge missing keys from example into existing config (like config.yaml)
+        merge_config_keys "/app/config/cwskimmer.yaml" "/etc/ka9q_ubersdr/cwskimmer.yaml.example" "cwskimmer.yaml"
+    fi
+
     # Initialize CTY.DAT directory if it doesn't exist
     if [ ! -d "/app/config/cty" ]; then
         echo "Initializing cty directory..."

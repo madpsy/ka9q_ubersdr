@@ -445,6 +445,68 @@ func main() {
 	}
 	defer dxCluster.Stop()
 
+	// Load CW Skimmer configuration from cwskimmer.yaml if it exists
+	cwskimmerPath := "cwskimmer.yaml"
+	if *configDir != "." {
+		cwskimmerPath = *configDir + "/cwskimmer.yaml"
+	}
+	cwskimmerConfig, err := LoadCWSkimmerConfig(cwskimmerPath)
+	if err != nil {
+		log.Printf("No cwskimmer.yaml found or error loading: %v", err)
+		// Create a disabled config
+		cwskimmerConfig = &CWSkimmerConfig{Enabled: false}
+	} else {
+		log.Printf("Loaded CW Skimmer configuration from cwskimmer.yaml (enabled: %v)", cwskimmerConfig.Enabled)
+	}
+
+	// Set spots log data directory relative to config directory (same pattern as decoder)
+	if cwskimmerConfig.Enabled && cwskimmerConfig.SpotsLogEnabled && cwskimmerConfig.SpotsLogDataDir == "" {
+		cwskimmerConfig.SpotsLogDataDir = *configDir + "/decoder_spots"
+	} else if cwskimmerConfig.Enabled && cwskimmerConfig.SpotsLogEnabled && !strings.HasPrefix(cwskimmerConfig.SpotsLogDataDir, "/") {
+		// If relative path, make it relative to config directory
+		cwskimmerConfig.SpotsLogDataDir = *configDir + "/" + cwskimmerConfig.SpotsLogDataDir
+	}
+
+	// Initialize CW Skimmer client
+	var cwSkimmer *CWSkimmerClient
+	if cwskimmerConfig.Enabled {
+		// Get receiver location from admin config
+		receiverLat := config.Admin.GPS.Lat
+		receiverLon := config.Admin.GPS.Lon
+
+		cwSkimmer = NewCWSkimmerClient(cwskimmerConfig, globalCTY, receiverLat, receiverLon)
+
+		// Set Prometheus metrics if enabled
+		if prometheusMetrics != nil {
+			cwSkimmer.SetPrometheusMetrics(prometheusMetrics)
+		}
+
+		// Initialize spots logger if enabled
+		if cwskimmerConfig.SpotsLogEnabled {
+			spotsLogger, err := NewSpotsLogger(cwskimmerConfig.SpotsLogDataDir, true)
+			if err != nil {
+				log.Printf("Warning: Failed to initialize CW Skimmer spots logger: %v", err)
+			} else {
+				cwSkimmer.SetSpotsLogger(spotsLogger)
+				log.Printf("CW Skimmer spots logging enabled to: %s", cwskimmerConfig.SpotsLogDataDir)
+			}
+		}
+
+		// Register spot handler for logging
+		cwSkimmer.OnSpot(func(spot CWSkimmerSpot) {
+			if DebugMode {
+				log.Printf("CW Skimmer Spot: %.1f kHz %s by %s - %d dB %d WPM %s",
+					spot.Frequency/1000, spot.DXCall, spot.Spotter, spot.SNR, spot.WPM, spot.Comment)
+			}
+		})
+
+		if err := cwSkimmer.Start(); err != nil {
+			log.Printf("Warning: Failed to start CW Skimmer client: %v", err)
+		} else {
+			defer cwSkimmer.Stop()
+		}
+	}
+
 	// Initialize space weather monitor
 	// Set data directory relative to config directory
 	if config.SpaceWeather.LogToCSV && config.SpaceWeather.DataDir == "" {
@@ -687,6 +749,7 @@ func main() {
 	http.HandleFunc("/admin/banned-ips", adminHandler.AuthMiddleware(adminHandler.HandleBannedIPs))
 	http.HandleFunc("/admin/decoder-config", adminHandler.AuthMiddleware(adminHandler.HandleDecoderConfig))
 	http.HandleFunc("/admin/decoder-bands", adminHandler.AuthMiddleware(adminHandler.HandleDecoderBands))
+	http.HandleFunc("/admin/cwskimmer-config", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerConfig))
 	http.HandleFunc("/admin/system-stats", adminHandler.AuthMiddleware(adminHandler.HandleSystemStats))
 	http.HandleFunc("/admin/noisefloor-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorHealth(w, r, noiseFloorMonitor)

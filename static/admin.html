@@ -355,6 +355,7 @@
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
                     <button class="tab" onclick="switchTab('extensions')">Extensions</button>
                     <button class="tab" onclick="switchTab('decoder')">Decoder</button>
+                    <button class="tab" onclick="switchTab('cwskimmer')">CW Skimmer</button>
                     <button class="tab" onclick="switchTab('monitor')">Monitor</button>
                     <button class="tab" onclick="switchTab('system')">System</button>
                 </div>
@@ -511,6 +512,24 @@
                     </div>
                 </div>
 
+                <!-- CW Skimmer Tab -->
+                <div id="cwskimmerTab" class="tab-content">
+                    <div class="alert alert-info" style="margin-bottom: 20px;">
+                        ℹ️ <strong>Note:</strong> CW Skimmer configuration changes require a server restart to take effect.
+                    </div>
+                    <div id="cwskimmerConfig" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading CW Skimmer configuration...</p>
+                    </div>
+                </div>
+                <div class="button-group" id="cwskimmerButtons" style="display: none;">
+                    <button class="btn" onclick="saveCWSkimmerConfig()">Save Configuration</button>
+                    <button class="btn btn-danger" onclick="saveCWSkimmerConfigAndRestart()">Save & Restart</button>
+                    <button class="btn btn-secondary" onclick="loadCWSkimmerConfig()">Reload</button>
+                    <button class="btn btn-secondary" onclick="exportCWSkimmerConfig()">Export Config</button>
+                    <button class="btn btn-secondary" onclick="importCWSkimmerConfig()">Import Config</button>
+                </div>
+
                 <!-- Monitor Tab -->
                 <div id="monitorTab" class="tab-content">
                     <div id="monitorHealth" class="loading">
@@ -578,6 +597,7 @@
                 <input type="file" id="bandsFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleBandsImport(event)">
                 <input type="file" id="sdrsharpFileInput" accept=".xml" style="display: none;" onchange="handleSDRSharpImport(event)">
                 <input type="file" id="decoderConfigFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleDecoderConfigImport(event)">
+                <input type="file" id="cwskimmerConfigFileInput" accept=".yaml,.yml,.json" style="display: none;" onchange="handleCWSkimmerConfigImport(event)">
             </div>
         </div>
 
@@ -798,6 +818,7 @@
             document.getElementById('bandButtons').style.display = 'none';
             document.getElementById('extensionButtons').style.display = 'none';
             document.getElementById('decoderButtons').style.display = 'none';
+            document.getElementById('cwskimmerButtons').style.display = 'none';
             document.getElementById('sessionButtons').style.display = 'none';
             document.getElementById('bannedButtons').style.display = 'none';
             document.getElementById('monitorButtons').style.display = 'none';
@@ -848,6 +869,11 @@
                 document.getElementById('decoderTab').classList.add('active');
                 document.getElementById('decoderButtons').style.display = 'flex';
                 loadDecoderConfig();
+            } else if (tab === 'cwskimmer') {
+                document.querySelector('.tab:nth-child(8)').classList.add('active');
+                document.getElementById('cwskimmerTab').classList.add('active');
+                document.getElementById('cwskimmerButtons').style.display = 'flex';
+                loadCWSkimmerConfig();
             } else if (tab === 'monitor') {
                 document.querySelector('.tab:nth-child(8)').classList.add('active');
                 document.getElementById('monitorTab').classList.add('active');
@@ -3361,6 +3387,213 @@
             } catch (error) {
                 showAlert('Error importing decoder configuration: ' + error.message, 'error');
             }
+        // CW Skimmer configuration management
+        let currentCWSkimmerConfig = {};
+
+        async function loadCWSkimmerConfig() {
+            try {
+                const response = await authenticatedFetch('/admin/cwskimmer-config');
+                if (!response) return; // Auth failed, already handled
+                if (!response.ok) throw new Error('Failed to load CW Skimmer config');
+
+                const data = await response.json();
+                currentCWSkimmerConfig = data;
+                renderCWSkimmerConfig();
+                showAlert('CW Skimmer configuration loaded successfully', 'success');
+            } catch (error) {
+                showAlert('Error loading CW Skimmer configuration: ' + error.message, 'error');
+            }
+        }
+
+        function renderCWSkimmerConfig() {
+            const container = document.getElementById('cwskimmerConfig');
+            container.innerHTML = '';
+            container.classList.remove('loading');
+
+            // Connection Settings Section
+            const connectionSection = document.createElement('div');
+            connectionSection.className = 'config-section';
+            connectionSection.innerHTML = '<h3>Connection Settings</h3>';
+
+            // Enabled checkbox
+            const enabledField = createConfigField('Enabled', 'checkbox', currentCWSkimmerConfig.enabled || false, 'enabled');
+            connectionSection.appendChild(enabledField);
+
+            // Host
+            const hostField = createConfigField('Host', 'text', currentCWSkimmerConfig.host || 'localhost', 'host');
+            hostField.querySelector('input').placeholder = 'e.g., localhost or skimmer.example.com';
+            const hostSmall = document.createElement('small');
+            hostSmall.textContent = 'CW Skimmer server hostname or IP address';
+            hostField.appendChild(hostSmall);
+            connectionSection.appendChild(hostField);
+
+            // Port
+            const portField = createConfigField('Port', 'number', currentCWSkimmerConfig.port || 7300, 'port');
+            portField.querySelector('input').placeholder = '7300';
+            const portSmall = document.createElement('small');
+            portSmall.textContent = 'CW Skimmer server telnet port (default: 7300)';
+            portField.appendChild(portSmall);
+            connectionSection.appendChild(portField);
+
+            // Callsign
+            const callsignField = createConfigField('Callsign', 'text', currentCWSkimmerConfig.callsign || 'N0CALL', 'callsign');
+            callsignField.querySelector('input').placeholder = 'e.g., W1ABC';
+            const callsignSmall = document.createElement('small');
+            callsignSmall.textContent = 'Your callsign for login to the CW Skimmer server';
+            callsignField.appendChild(callsignSmall);
+            connectionSection.appendChild(callsignField);
+
+            // Reconnect Delay
+            const reconnectField = createConfigField('Reconnect Delay (seconds)', 'number', currentCWSkimmerConfig.reconnect_delay || 30, 'reconnect_delay');
+            reconnectField.querySelector('input').placeholder = '30';
+            const reconnectSmall = document.createElement('small');
+            reconnectSmall.textContent = 'Seconds to wait between reconnection attempts (default: 30)';
+            reconnectField.appendChild(reconnectSmall);
+            connectionSection.appendChild(reconnectField);
+
+            // Keepalive Delay
+            const keepaliveField = createConfigField('Keepalive Delay (seconds)', 'number', currentCWSkimmerConfig.keepalive_delay || 300, 'keepalive_delay');
+            keepaliveField.querySelector('input').placeholder = '300';
+            const keepaliveSmall = document.createElement('small');
+            keepaliveSmall.textContent = 'Seconds between keepalive messages (default: 300 = 5 minutes)';
+            keepaliveField.appendChild(keepaliveSmall);
+            connectionSection.appendChild(keepaliveField);
+
+            container.appendChild(connectionSection);
+
+            // Logging Settings Section
+            const loggingSection = document.createElement('div');
+            loggingSection.className = 'config-section';
+            loggingSection.innerHTML = '<h3>Spot Logging</h3>';
+
+            // Spots Log Enabled
+            const spotsLogEnabledField = createConfigField('CSV Logging Enabled', 'checkbox', currentCWSkimmerConfig.spots_log_enabled !== false, 'spots_log_enabled');
+            const spotsLogSmall = document.createElement('small');
+            spotsLogSmall.textContent = 'Log CW Skimmer spots to CSV files organized by mode/date/band';
+            spotsLogEnabledField.appendChild(spotsLogSmall);
+            loggingSection.appendChild(spotsLogEnabledField);
+
+            // Spots Log Data Dir
+            const spotsLogDataDirField = createConfigField('CSV Log Directory', 'text', currentCWSkimmerConfig.spots_log_data_dir || 'data/spots', 'spots_log_data_dir');
+            spotsLogDataDirField.querySelector('input').placeholder = 'e.g., data/spots (relative) or /var/log/spots (absolute)';
+            const spotsLogDirSmall = document.createElement('small');
+            spotsLogDirSmall.textContent = 'Directory for CSV files. Spots will be stored in SKIMMER/YYYY/MM/DD/band.csv structure. Uses same directory as decoder spots by default.';
+            spotsLogDataDirField.appendChild(spotsLogDirSmall);
+            loggingSection.appendChild(spotsLogDataDirField);
+
+            container.appendChild(loggingSection);
+
+            // Add event listeners for config changes
+            container.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    currentCWSkimmerConfig[e.target.dataset.key] = e.target.checked;
+                });
+            });
+
+            container.querySelectorAll('input[type="text"], input[type="number"]').forEach(input => {
+                input.addEventListener('change', (e) => {
+                    const value = e.target.type === 'number' ? parseInt(e.target.value) : e.target.value;
+                    currentCWSkimmerConfig[e.target.dataset.key] = value;
+                });
+            });
+        }
+
+        async function saveCWSkimmerConfig(restart = false) {
+            const saveButton = event?.target || document.querySelector('#cwskimmerButtons .btn');
+            const originalText = saveButton?.textContent;
+            if (saveButton) {
+                saveButton.disabled = true;
+                saveButton.textContent = 'Saving...';
+            }
+
+            try {
+                showAlert('Saving CW Skimmer configuration...', 'info');
+
+                const url = restart ? '/admin/cwskimmer-config?restart=true' : '/admin/cwskimmer-config';
+                const response = await authenticatedFetch(url, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentCWSkimmerConfig)
+                });
+
+                if (!response) return; // Auth failed, already handled
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to save CW Skimmer config');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || 'CW Skimmer configuration saved successfully', 'success');
+
+                if (result.restart) {
+                    showAlert('Server is restarting... Please wait and refresh the page in a few seconds.', 'info');
+                    setTimeout(() => location.reload(), 5000);
+                }
+            } catch (error) {
+                showAlert('Error saving CW Skimmer configuration: ' + error.message, 'error');
+            } finally {
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.textContent = originalText;
+                }
+            }
+        }
+
+        async function saveCWSkimmerConfigAndRestart() {
+            if (!confirm('⚠️ WARNING: This will restart the server immediately!\n\nAll active user sessions will be disconnected.\n\nAre you sure you want to save the CW Skimmer configuration and restart the server?')) {
+                return;
+            }
+            await saveCWSkimmerConfig(true);
+        }
+
+        function exportCWSkimmerConfig() {
+            // Export current CW Skimmer config as YAML
+            const yamlContent = convertConfigToYAML(currentCWSkimmerConfig);
+            const blob = new Blob([yamlContent], { type: 'text/yaml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'cwskimmer.yaml';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showAlert('CW Skimmer configuration exported successfully', 'success');
+        }
+
+        function importCWSkimmerConfig() {
+            document.getElementById('cwskimmerConfigFileInput').click();
+        }
+
+        async function handleCWSkimmerConfigImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                let importedConfig;
+                if (file.name.endsWith('.json')) {
+                    const data = JSON.parse(text);
+                    importedConfig = data;
+                } else {
+                    // For YAML, we'll send it to the server to parse
+                    showAlert('YAML import: Please use the visual editor to modify CW Skimmer configuration', 'info');
+                    return;
+                }
+
+                if (!confirm('This will replace your current CW Skimmer configuration. Are you sure?')) {
+                    return;
+                }
+
+                // Update current CW Skimmer config
+                currentCWSkimmerConfig = importedConfig;
+                renderCWSkimmerConfig();
+                showAlert('CW Skimmer configuration imported successfully. Click "Save Configuration" to apply changes.', 'success');
+            } catch (error) {
+                showAlert('Error importing CW Skimmer configuration: ' + error.message, 'error');
+            }
+        }
+
 
             // Reset file input
             event.target.value = '';

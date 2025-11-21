@@ -2484,6 +2484,102 @@ func (ah *AdminHandler) handleDeleteDecoderBand(w http.ResponseWriter, r *http.R
 	})
 }
 
+// HandleCWSkimmerConfig handles GET and PUT requests for CW Skimmer configuration
+func (ah *AdminHandler) HandleCWSkimmerConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		ah.handleGetCWSkimmerConfig(w, r)
+	case http.MethodPut:
+		ah.handleUpdateCWSkimmerConfig(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetCWSkimmerConfig returns the CW Skimmer configuration
+func (ah *AdminHandler) handleGetCWSkimmerConfig(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(ah.getConfigPath("cwskimmer.yaml"))
+	if err != nil {
+		// If file doesn't exist, return default empty config
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"enabled":            false,
+			"host":               "localhost",
+			"port":               7300,
+			"callsign":           "N0CALL",
+			"reconnect_delay":    30,
+			"keepalive_delay":    300,
+			"spots_log_enabled":  true,
+			"spots_log_data_dir": "data/spots",
+		})
+		return
+	}
+
+	var cwskimmerConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &cwskimmerConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse CW Skimmer config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(cwskimmerConfig)
+}
+
+// handleUpdateCWSkimmerConfig updates the CW Skimmer configuration
+func (ah *AdminHandler) handleUpdateCWSkimmerConfig(w http.ResponseWriter, r *http.Request) {
+	// Check for restart flag
+	restart := r.URL.Query().Get("restart") == "true"
+
+	var cwskimmerConfig map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&cwskimmerConfig); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Backup existing file with timestamp before replacing
+	cwskimmerPath := ah.getConfigPath("cwskimmer.yaml")
+	if _, err := os.Stat(cwskimmerPath); err == nil {
+		timestamp := time.Now().Format("20060102-150405")
+		backupPath := fmt.Sprintf("%s.%s", cwskimmerPath, timestamp)
+		if err := os.Rename(cwskimmerPath, backupPath); err != nil {
+			log.Printf("Warning: Failed to backup cwskimmer.yaml: %v", err)
+		} else {
+			log.Printf("Backed up cwskimmer.yaml to %s", backupPath)
+		}
+	}
+
+	// Convert to YAML and write to file
+	yamlData, err := yaml.Marshal(cwskimmerConfig)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal CW Skimmer config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(cwskimmerPath, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write CW Skimmer config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+
+	if restart {
+		// Trigger restart after response is sent
+		ah.restartServer()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "CW Skimmer configuration updated. Server is restarting...",
+			"restart": true,
+		})
+	} else {
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "success",
+			"message": "CW Skimmer configuration updated. Restart server to apply changes.",
+		})
+	}
+}
+
 // HandleSystemStats returns system statistics by executing system commands
 func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

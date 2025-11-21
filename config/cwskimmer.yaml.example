@@ -1,0 +1,32 @@
+# CW Skimmer Configuration
+# This file configures the CW Skimmer client for receiving and logging CW spots
+
+# Enable or disable the CW Skimmer client
+enabled: false
+
+# CW Skimmer server connection details
+host: "localhost"
+port: 7300
+
+# Your callsign for login
+callsign: "N0CALL"
+
+# Reconnection settings
+reconnect_delay: 30  # Seconds between reconnection attempts (default: 30)
+keepalive_delay: 300 # Seconds between keep-alive messages (default: 300 = 5 minutes)
+
+# CSV Logging Configuration
+# Spots will be stored in the same directory structure as decoder spots
+spots_log_enabled: true
+spots_log_data_dir: "data/spots"  # Directory for CSV files (default: data/spots)
+
+# CSV files will be organized as:
+# data/spots/SKIMMER/YYYY/MM/DD/band.csv
+# Example: data/spots/SKIMMER/2025/11/21/20m.csv
+#
+# CSV format (same as decoder spots):
+# timestamp,callsign,locator,snr,frequency,band,message,country,cq_zone,itu_zone,continent,distance_km,bearing_deg
+#
+# Note: The locator field will always be empty for CW Skimmer spots since CW transmissions
+# don't include grid square information. All other fields will be populated from the spot
+# data and enriched with CTY.DAT lookups.

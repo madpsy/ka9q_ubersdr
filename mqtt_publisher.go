@@ -464,10 +464,6 @@ func (mp *MQTTPublisher) publishSpectrumData(config *Config) {
 			log.Printf("MQTT ERROR: Failed to publish spectrum for band %s: %v", band.Name, token.Error())
 			continue
 		}
-
-		if DebugMode {
-			log.Printf("MQTT DEBUG: Published spectrum to %s: %d bins", topic, len(fft.Data))
-		}
 	}
 }
 

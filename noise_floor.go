@@ -1425,9 +1425,6 @@ func (nfm *NoiseFloorMonitor) GetLatestFFT(band string) *BandFFT {
 	defer nfm.fftMu.RUnlock()
 
 	if buffer, ok := nfm.fftBuffers[band]; ok {
-		if DebugMode {
-			log.Printf("DEBUG: FFT request for band %s - buffer has %d samples", band, len(buffer.Samples))
-		}
 		// Return 1-second max hold for real-time display (preserves peaks)
 		fft := buffer.GetMaxHoldFFT(1 * time.Second)
 		if fft == nil && DebugMode {

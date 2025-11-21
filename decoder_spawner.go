@@ -65,13 +65,6 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		}
 	}()
 
-	if DebugMode {
-		log.Printf("DEBUG: Spawning decoder: %s %v", cmd.Path, cmd.Args)
-		log.Printf("DEBUG: Working directory: %s", workDir)
-		log.Printf("DEBUG: Log file: %s", logFile)
-		log.Printf("DEBUG: Output file: %s", outputFile)
-	}
-
 	// Record decoder invocation
 	RecordDecoderInvoke(band.Config.Name)
 

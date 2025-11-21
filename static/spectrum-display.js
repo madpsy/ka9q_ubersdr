@@ -407,6 +407,11 @@ class SpectrumDisplay {
         // Auto-ranging
         this.actualMinDb = this.config.minDb;
         this.actualMaxDb = this.config.maxDb;
+        
+        // Auto-range history for temporal smoothing
+        this.autoRangeMinHistory = [];
+        this.autoRangeMaxHistory = [];
+        this.autoRangeHistorySize = 80; // 80 samples for 40 second window (at ~500ms per frame)
 
         // Waterfall
         this.waterfallImageData = null;
@@ -2264,13 +2269,34 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         }
 
         if (isFinite(min) && isFinite(max)) {
-            // Add margin - NO SMOOTHING to prevent fading
+            // Add margin
             const targetMin = Math.floor(min - this.config.rangeMargin);
             const targetMax = Math.ceil(max + this.config.rangeMargin);
 
-            // Direct assignment - no exponential moving average
-            this.actualMinDb = targetMin;
-            this.actualMaxDb = targetMax;
+            // Add to history for temporal smoothing
+            this.autoRangeMinHistory.push(targetMin);
+            this.autoRangeMaxHistory.push(targetMax);
+
+            // Keep only last N samples
+            if (this.autoRangeMinHistory.length > this.autoRangeHistorySize) {
+                this.autoRangeMinHistory.shift();
+            }
+            if (this.autoRangeMaxHistory.length > this.autoRangeHistorySize) {
+                this.autoRangeMaxHistory.shift();
+            }
+
+            // Need enough history before adjusting (prevents instant changes)
+            if (this.autoRangeMinHistory.length < this.autoRangeHistorySize) {
+                return;
+            }
+
+            // Calculate smoothed values (average of history)
+            const avgMin = this.autoRangeMinHistory.reduce((sum, val) => sum + val, 0) / this.autoRangeMinHistory.length;
+            const avgMax = this.autoRangeMaxHistory.reduce((sum, val) => sum + val, 0) / this.autoRangeMaxHistory.length;
+
+            // Apply smoothed values
+            this.actualMinDb = avgMin;
+            this.actualMaxDb = avgMax;
         }
     }
 

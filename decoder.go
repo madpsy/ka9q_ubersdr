@@ -440,11 +440,6 @@ func (md *MultiDecoder) createNewFile(band *DecoderBand, cycleStart time.Time) {
 	ds.Filename = filename
 	ds.FileCycle = ds.CurrentCycle
 	ds.SamplesWritten = 0
-
-	if DebugMode {
-		log.Printf("DEBUG: Created WAV file for %s: %s (cycle %d)",
-			band.Config.Name, filename, ds.CurrentCycle)
-	}
 }
 
 // closeAndDecode closes the current WAV file and spawns a decoder
@@ -458,8 +453,6 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 	}
 
 	filename := ds.Filename
-	dataSize := ds.WavFile.GetDataSize()
-	duration := ds.WavFile.GetDuration()
 
 	// Close WAV file
 	if err := ds.WavFile.Close(); err != nil {
@@ -469,9 +462,6 @@ func (md *MultiDecoder) closeAndDecode(band *DecoderBand) {
 	ds.WavFile = nil
 	ds.FileCycle = -1
 	ds.mu.Unlock()
-
-	log.Printf("Closed WAV file for %s: %s (%.1f sec, %d bytes)",
-		band.Config.Name, filename, duration, dataSize)
 
 	// Spawn decoder in goroutine
 	go func() {

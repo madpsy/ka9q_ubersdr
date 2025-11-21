@@ -578,11 +578,6 @@ func main() {
 					bandName := frequencyToBand(float64(decode.Frequency))
 					prometheusMetrics.mqttPublisher.PublishDigitalDecode(decode, bandName)
 				}
-
-				if DebugMode {
-					log.Printf("Digital Spot: %s %s %s SNR:%d @ %.6f MHz",
-						decode.Mode, decode.Callsign, decode.Locator, decode.SNR, float64(decode.Frequency)/1e6)
-				}
 			})
 			defer multiDecoder.Stop()
 		}

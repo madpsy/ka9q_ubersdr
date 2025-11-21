@@ -571,11 +571,6 @@ func (mp *MQTTPublisher) PublishDigitalDecode(decode DecodeInfo, bandName string
 		log.Printf("MQTT ERROR: Failed to publish digital decode to %s: %v", topic, token.Error())
 		return
 	}
-
-	if DebugMode {
-		log.Printf("MQTT DEBUG: Published decode to %s: %s %s SNR:%d",
-			topic, decode.Callsign, decode.Locator, decode.SNR)
-	}
 }
 
 // publishDigitalDecodeMetrics publishes digital decode metrics grouped by mode and band

@@ -81,8 +81,6 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		return "", "", 0, fmt.Errorf("failed to start decoder: %w", err)
 	}
 
-	log.Printf("Started decoder for %s, waiting for completion...", band.Config.Name)
-
 	// Wait for decoder to complete
 	err := cmd.Wait()
 	executionTime := time.Since(startTime)
@@ -91,8 +89,6 @@ func (ds *DecoderSpawner) SpawnDecoder(wavFile string, band *DecoderBand) (strin
 		log.Printf("Decoder process for %s exited with error: %v", band.Config.Name, err)
 		return "", "", executionTime, fmt.Errorf("decoder process failed: %w", err)
 	}
-
-	log.Printf("Decoder for %s completed successfully in %.3f seconds", band.Config.Name, executionTime.Seconds())
 
 	// Give the decoder a moment to fully release file handles
 	// This is especially important for jt9 which may buffer writes

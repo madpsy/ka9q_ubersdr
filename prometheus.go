@@ -1126,16 +1126,6 @@ func (pm *PrometheusMetrics) updateDigitalMetrics(mode, band string, cycleSecond
 	pm.digitalExecTime10mAvg.With(labels).Set(avg10m)
 	pm.digitalExecTime10mMin.With(labels).Set(min10m)
 	pm.digitalExecTime10mMax.With(labels).Set(max10m)
-
-	if DebugMode {
-		log.Printf("DEBUG: Updated digital decode metrics for %s/%s: avg_per_cycle_1m=%.2f, avg_per_cycle_60m=%.2f, total_1h=%d, unique_1h=%d, exec_1m=%.3fs",
-			mode, band,
-			pm.digitalMetrics.GetAverageDecodesPerCycle(mode, band, cycleSeconds, 1),
-			pm.digitalMetrics.GetAverageDecodesPerCycle(mode, band, cycleSeconds, 60),
-			pm.digitalMetrics.GetTotalDecodes(mode, band, 1),
-			pm.digitalMetrics.GetUniqueCallsigns(mode, band, 1),
-			avg1m)
-	}
 }
 
 // UpdateAllDigitalMetrics updates metrics for all active mode/band combinations

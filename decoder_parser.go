@@ -128,10 +128,6 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 		return nil, fmt.Errorf("line does not match WSPR format")
 	}
 
-	if DebugMode {
-		log.Printf("WSPR DEBUG: Regex matched! Groups: %d", len(matches))
-	}
-
 	// Parse date and time (YYMMDD HHMM)
 	dateStr := matches[1]
 	timeStr := matches[2]

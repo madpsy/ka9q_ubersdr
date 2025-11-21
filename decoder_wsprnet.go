@@ -181,17 +181,11 @@ func (w *WSPRNet) workerThread() {
 
 		// If we have a report, send it
 		if haveReport {
-			log.Printf("WSPRNet: Sending %s from %s on %.6f MHz (rx %.6f MHz), SNR %d dB, %d dBm",
-				report.Callsign, report.Locator,
-				float64(report.Frequency)/1e6, float64(report.ReceiverFreq)/1e6,
-				report.SNR, report.DBm)
-
 			success := w.sendReport(&report)
 
 			w.statsMutex.Lock()
 			if success {
 				w.countSendsOK++
-				log.Printf("WSPRNet: Successfully sent report for %s", report.Callsign)
 
 				// Record that we sent data to WSPRNet
 				RecordWSPRNetSend()

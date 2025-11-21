@@ -433,10 +433,6 @@ func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64,
 
 		// Add HIGH_EDGE (tag 40 = 0x28)
 		buf = encodeDouble(&buf, 0x28, halfBandwidth)
-
-		if DebugMode {
-			log.Printf("DEBUG: Updated filter edges: LOW=%.1f Hz, HIGH=%.1f Hz", -halfBandwidth, halfBandwidth)
-		}
 	}
 
 	// Add COMMAND_TAG (tag 1 = 0x01)
@@ -444,10 +440,6 @@ func (rc *RadiodController) UpdateSpectrumChannel(ssrc uint32, frequency uint64,
 
 	// Add EOL marker
 	buf = append(buf, 0)
-
-	if DebugMode {
-		log.Printf("DEBUG: Sending UpdateSpectrumChannel command for SSRC 0x%08x", ssrc)
-	}
 
 	// Send command
 	if err := rc.sendCommand(buf); err != nil {

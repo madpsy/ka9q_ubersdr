@@ -7,6 +7,7 @@ class CWSkimmerMap {
         this.ws = null;
         this.spots = new Map(); // Store spots by unique key (callsign-band)
         this.markers = new Map(); // Store Leaflet markers
+        this.markerClusterGroup = null; // Leaflet marker cluster group
         this.receiverMarker = null;
         this.receiverLocation = null;
         this.receiverInfo = null;
@@ -539,6 +540,35 @@ class CWSkimmerMap {
             minZoom: 2
         }).addTo(this.map);
 
+        // Initialize marker cluster group with zoom-dependent clustering
+        this.markerClusterGroup = L.markerClusterGroup({
+            maxClusterRadius: (zoom) => {
+                // Increase spread as you zoom in
+                if (zoom >= 10) return 20;  // Very tight clustering when zoomed in
+                if (zoom >= 7) return 40;   // Medium clustering
+                if (zoom >= 4) return 60;   // Looser clustering
+                return 80;                   // Wide clustering when zoomed out
+            },
+            spiderfyOnMaxZoom: true,
+            showCoverageOnHover: true,
+            zoomToBoundsOnClick: true,
+            disableClusteringAtZoom: 12, // Disable clustering when zoomed in close
+            iconCreateFunction: (cluster) => {
+                const count = cluster.getChildCount();
+                let size = 'small';
+                if (count >= 100) size = 'large';
+                else if (count >= 10) size = 'medium';
+                
+                return L.divIcon({
+                    html: `<div><span>${count}</span></div>`,
+                    className: `marker-cluster marker-cluster-${size}`,
+                    iconSize: L.point(40, 40)
+                });
+            }
+        });
+        
+        this.map.addLayer(this.markerClusterGroup);
+
         // Setup filters
         this.setupFilters();
 
@@ -699,7 +729,9 @@ class CWSkimmerMap {
     }
 
     applyFilters() {
-        // Hide/show markers based on all filters
+        // Clear cluster group and re-add filtered markers
+        this.markerClusterGroup.clearLayers();
+        
         const now = Date.now();
         this.markers.forEach((marker, key) => {
             const spot = this.spots.get(key);
@@ -720,9 +752,7 @@ class CWSkimmerMap {
             }
 
             if (ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
-                marker.addTo(this.map);
-            } else {
-                marker.remove();
+                this.markerClusterGroup.addLayer(marker);
             }
         });
         
@@ -966,7 +996,7 @@ class CWSkimmerMap {
     addOrUpdateMarker(key, spot) {
         // Remove existing marker if present
         if (this.markers.has(key)) {
-            this.map.removeLayer(this.markers.get(key));
+            this.markerClusterGroup.removeLayer(this.markers.get(key));
         }
 
         // Get color for band
@@ -993,10 +1023,27 @@ class CWSkimmerMap {
             iconAnchor: [6, 6]
         });
 
+        // Get current zoom level for dynamic offset
+        const zoom = this.map.getZoom();
+        
         // Apply consistent offset based on callsign hash
         const offset = this.getCallsignOffset(spot.callsign);
-        const adjustedLat = spot.latitude + offset.lat;
-        const adjustedLon = spot.longitude + offset.lon;
+        let latOffset = offset.lat;
+        let lonOffset = offset.lon;
+        
+        // Increase spread when zoomed in (zoom 7+)
+        if (zoom >= 7 && zoom < 12) {
+            const spreadFactor = (zoom - 6) * 0.5; // Gradually increase spread
+            latOffset *= spreadFactor;
+            lonOffset *= spreadFactor;
+        } else if (zoom >= 12) {
+            // Maximum spread when very zoomed in
+            latOffset *= 3;
+            lonOffset *= 3;
+        }
+        
+        const adjustedLat = spot.latitude + latOffset;
+        const adjustedLon = spot.longitude + lonOffset;
 
         // Create marker with adjusted position
         const marker = L.marker([adjustedLat, adjustedLon], { icon });
@@ -1025,7 +1072,7 @@ class CWSkimmerMap {
         }
         
         if (ageMatch && bandMatch && countryMatch && continentMatch && snrMatch) {
-            marker.addTo(this.map);
+            this.markerClusterGroup.addLayer(marker);
         }
 
         // Store marker
@@ -1090,9 +1137,9 @@ class CWSkimmerMap {
     }
 
     removeSpot(key) {
-        // Remove marker from map
+        // Remove marker from cluster group
         if (this.markers.has(key)) {
-            this.map.removeLayer(this.markers.get(key));
+            this.markerClusterGroup.removeLayer(this.markers.get(key));
             this.markers.delete(key);
         }
 

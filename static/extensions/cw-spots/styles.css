@@ -4,16 +4,18 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    overflow: hidden;
+    padding: 10px;
+    background: #1a1a1a;
+    color: #e0e0e0;
 }
 
 .cw-spots-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px;
-    background: #2a2a2a;
-    border-bottom: 1px solid #444;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #333;
 }
 
 .cw-spots-title {
@@ -24,74 +26,90 @@
 
 .cw-spots-title h3 {
     margin: 0;
-    font-size: 16px;
-    color: #fff;
+    font-size: 18px;
+    color: #4a9eff;
 }
 
 .cw-spots-info {
     display: flex;
     gap: 15px;
     font-size: 12px;
-    color: #aaa;
+    color: #888;
+}
+
+.cw-spots-container .status-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.cw-spots-container .status-connected {
+    background: #28a745;
+    color: white;
+}
+
+.cw-spots-container .status-disconnected {
+    background: #dc3545;
+    color: white;
 }
 
 .cw-spots-controls {
     display: flex;
-    flex-wrap: wrap;
     gap: 10px;
-    padding: 10px;
-    background: #252525;
-    border-bottom: 1px solid #444;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
 }
 
-.control-group {
+.cw-spots-container .control-group {
     display: flex;
     align-items: center;
     gap: 5px;
 }
 
-.control-group label {
+.cw-spots-container .control-group label {
     font-size: 12px;
     color: #aaa;
-    white-space: nowrap;
 }
 
-.control-group select,
-.control-group input[type="text"] {
+.cw-spots-container .control-group select,
+.cw-spots-container .control-group input[type="text"] {
     padding: 4px 8px;
-    background: #1a1a1a;
+    background: #2a2a2a;
     border: 1px solid #444;
-    border-radius: 3px;
-    color: #fff;
+    border-radius: 4px;
+    color: #e0e0e0;
     font-size: 12px;
 }
 
-.control-group input[type="text"] {
+.cw-spots-container .control-group input[type="text"] {
     width: 120px;
 }
 
-.control-group input[type="checkbox"] {
+.cw-spots-container .control-group input[type="checkbox"] {
     margin-right: 5px;
+    cursor: pointer;
 }
 
-.btn-clear {
+.cw-spots-container .btn-clear {
     padding: 4px 12px;
     background: #dc3545;
     border: none;
-    border-radius: 3px;
-    color: #fff;
+    border-radius: 4px;
+    color: white;
     font-size: 12px;
     cursor: pointer;
 }
 
-.btn-clear:hover {
+.cw-spots-container .btn-clear:hover {
     background: #c82333;
 }
 
 .cw-spots-table-container {
     flex: 1;
-    overflow: auto;
-    background: #1a1a1a;
+    overflow-y: auto;
+    border: 1px solid #333;
+    border-radius: 4px;
 }
 
 .cw-spots-table {
@@ -104,148 +122,201 @@
     position: sticky;
     top: 0;
     background: #2a2a2a;
-    z-index: 10;
+    z-index: 1;
 }
 
 .cw-spots-table th {
     padding: 8px;
     text-align: left;
-    color: #aaa;
-    font-weight: 600;
     border-bottom: 2px solid #444;
-    white-space: nowrap;
+    color: #4a9eff;
+    font-weight: bold;
+}
+
+/* Column widths */
+.cw-spots-table th:nth-child(1),
+.cw-spots-table td:nth-child(1) {
+    width: 90px; /* Time */
+}
+
+.cw-spots-table th:nth-child(2),
+.cw-spots-table td:nth-child(2) {
+    width: 60px; /* Age */
+}
+
+.cw-spots-table th:nth-child(3),
+.cw-spots-table td:nth-child(3) {
+    width: 100px; /* Frequency */
+}
+
+.cw-spots-table th:nth-child(4),
+.cw-spots-table td:nth-child(4) {
+    width: 50px; /* Band */
+}
+
+.cw-spots-table th:nth-child(5),
+.cw-spots-table td:nth-child(5) {
+    width: 100px; /* Callsign */
+}
+
+.cw-spots-table th:nth-child(6),
+.cw-spots-table td:nth-child(6) {
+    width: 200px; /* Country */
+}
+
+.cw-spots-table th:nth-child(7),
+.cw-spots-table td:nth-child(7) {
+    width: 80px; /* Distance */
+    text-align: right;
+}
+
+.cw-spots-table th:nth-child(8),
+.cw-spots-table td:nth-child(8) {
+    width: 60px; /* Bearing */
+    text-align: right;
+}
+
+.cw-spots-table th:nth-child(9),
+.cw-spots-table td:nth-child(9) {
+    width: 50px; /* SNR */
+    text-align: right;
+}
+
+.cw-spots-table th:nth-child(10),
+.cw-spots-table td:nth-child(10) {
+    width: 60px; /* WPM */
+    text-align: right;
+}
+
+.cw-spots-table th:nth-child(11),
+.cw-spots-table td:nth-child(11) {
+    width: auto; /* Comment - takes remaining space */
 }
 
 .cw-spots-table td {
     padding: 6px 8px;
     border-bottom: 1px solid #2a2a2a;
-    color: #ddd;
-    text-align: left;
+}
+
+.cw-spots-table tbody tr {
+    transition: background-color 0.2s;
 }
 
 .cw-spots-table tbody tr:hover {
-    background: #252525;
+    background: #2a2a2a;
+    cursor: pointer;
+}
+
+.cw-spots-table tbody tr.no-spots {
+    text-align: center;
+    color: #888;
+}
+
+.cw-spots-table tbody tr.no-spots:hover {
+    background: transparent;
+    cursor: default;
 }
 
 .cw-spots-table tbody tr.spot-new {
-    animation: highlight 0.5s ease-out;
+    animation: highlight-cw-spot 0.5s ease-out;
 }
 
-@keyframes highlight {
+@keyframes highlight-cw-spot {
     0% {
-        background: #4a9eff;
+        background-color: #4a9eff;
     }
     100% {
-        background: transparent;
+        background-color: transparent;
     }
 }
 
-.cw-spots-table tbody tr.no-spots td {
-    text-align: center;
-    color: #666;
-    padding: 20px;
-}
-
-.spot-time {
-    font-family: monospace;
-    color: #4a9eff;
-}
-
-.spot-age {
-    font-family: monospace;
+.cw-spots-table .spot-time {
     color: #888;
+    font-family: monospace;
+}
+
+.cw-spots-table .spot-age {
+    color: #666;
+    font-family: monospace;
     font-size: 11px;
 }
 
-.spot-frequency {
+.cw-spots-table .spot-frequency {
     font-family: monospace;
-    color: #28a745;
-    cursor: pointer;
-    text-decoration: underline;
-}
-
-.spot-frequency:hover {
-    color: #5cb85c;
-}
-
-.spot-band {
-    color: #ffc107;
-    font-weight: 600;
-}
-
-.spot-callsign {
-    font-family: monospace;
-    font-weight: bold;
-    color: #fff;
-    cursor: pointer;
-    text-decoration: underline;
-}
-
-.spot-callsign:hover {
     color: #4a9eff;
+    cursor: pointer;
 }
 
-.spot-country {
+.cw-spots-table .spot-frequency:hover {
+    text-decoration: underline;
+}
+
+.cw-spots-table .spot-callsign {
+    font-weight: bold;
+    color: #ffc107;
+    cursor: pointer;
+}
+
+.cw-spots-table .spot-callsign:hover {
+    text-decoration: underline;
+}
+
+.cw-spots-table .spot-band {
+    font-family: monospace;
+    color: #6c757d;
+    font-size: 11px;
+}
+
+.cw-spots-table .spot-country {
     color: #aaa;
 }
 
-.spot-distance {
+.cw-spots-table .spot-distance {
     font-family: monospace;
-    color: #17a2b8;
+    color: #9c27b0;
+    text-align: right;
+    font-size: 11px;
 }
 
-.spot-bearing {
+.cw-spots-table .spot-bearing {
     font-family: monospace;
-    color: #6c757d;
+    color: #ff9800;
+    text-align: right;
+    font-size: 11px;
 }
 
-.spot-snr {
+.cw-spots-table .spot-snr {
     font-family: monospace;
-    font-weight: bold;
+    text-align: right;
 }
 
-.spot-snr-positive {
+.cw-spots-table .spot-snr-positive {
     color: #28a745;
 }
 
-.spot-snr-negative {
-    color: #ffc107;
+.cw-spots-table .spot-snr-negative {
+    color: #dc3545;
 }
 
-.spot-wpm {
+.cw-spots-table .spot-wpm {
     font-family: monospace;
     color: #17a2b8;
-    font-weight: 600;
+    text-align: right;
+    font-weight: bold;
 }
 
-.spot-comment {
-    color: #888;
+.cw-spots-table .spot-comment {
+    color: #aaa;
+    font-size: 11px;
     font-style: italic;
 }
 
-.status-badge {
-    padding: 3px 8px;
-    border-radius: 3px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.status-connected {
-    background: #28a745;
-    color: #fff;
-}
-
-.status-disconnected {
-    background: #dc3545;
-    color: #fff;
-}
-
-.show-more-row,
-.show-less-row {
+.cw-spots-table .show-more-row,
+.cw-spots-table .show-less-row {
     background: #2a2a2a !important;
 }
 
-.show-more-row:hover,
-.show-less-row:hover {
+.cw-spots-table .show-more-row:hover,
+.cw-spots-table .show-less-row:hover {
     background: #333 !important;
 }

@@ -158,6 +158,7 @@ type AdminHandler struct {
 	multiDecoder        *MultiDecoder
 	dxCluster           *DXClusterClient
 	spaceWeatherMonitor *SpaceWeatherMonitor
+	cwSkimmerConfig     *CWSkimmerConfig
 }
 
 // restartServer triggers a server restart after a short delay
@@ -219,7 +220,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, spaceWeatherMonitor *SpaceWeatherMonitor) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig) *AdminHandler {
 	return &AdminHandler{
 		config:              config,
 		configFile:          configFile,
@@ -233,6 +234,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		multiDecoder:        multiDecoder,
 		dxCluster:           dxCluster,
 		spaceWeatherMonitor: spaceWeatherMonitor,
+		cwSkimmerConfig:     cwSkimmerConfig,
 	}
 }
 
@@ -2669,6 +2671,16 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 			dataDirs["spaceweather"] = string(duOutput)
 		} else {
 			dataDirs["spaceweather"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.config.SpaceWeather.DataDir)
+		}
+	}
+
+	// CW Skimmer spots directory
+	if ah.cwSkimmerConfig != nil && ah.cwSkimmerConfig.Enabled && ah.cwSkimmerConfig.SpotsLogEnabled && ah.cwSkimmerConfig.SpotsLogDataDir != "" {
+		duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.SpotsLogDataDir)
+		if duOutput, err := duCmd.CombinedOutput(); err == nil {
+			dataDirs["cwskimmer_spots"] = string(duOutput)
+		} else {
+			dataDirs["cwskimmer_spots"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.cwSkimmerConfig.SpotsLogDataDir)
 		}
 	}
 

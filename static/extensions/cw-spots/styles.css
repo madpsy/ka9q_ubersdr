@@ -1,0 +1,250 @@
+/* CW Spots Extension Styles */
+
+.cw-spots-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.cw-spots-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background: #2a2a2a;
+    border-bottom: 1px solid #444;
+}
+
+.cw-spots-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.cw-spots-title h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #fff;
+}
+
+.cw-spots-info {
+    display: flex;
+    gap: 15px;
+    font-size: 12px;
+    color: #aaa;
+}
+
+.cw-spots-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px;
+    background: #252525;
+    border-bottom: 1px solid #444;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.control-group label {
+    font-size: 12px;
+    color: #aaa;
+    white-space: nowrap;
+}
+
+.control-group select,
+.control-group input[type="text"] {
+    padding: 4px 8px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: #fff;
+    font-size: 12px;
+}
+
+.control-group input[type="text"] {
+    width: 120px;
+}
+
+.control-group input[type="checkbox"] {
+    margin-right: 5px;
+}
+
+.btn-clear {
+    padding: 4px 12px;
+    background: #dc3545;
+    border: none;
+    border-radius: 3px;
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.btn-clear:hover {
+    background: #c82333;
+}
+
+.cw-spots-table-container {
+    flex: 1;
+    overflow: auto;
+    background: #1a1a1a;
+}
+
+.cw-spots-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.cw-spots-table thead {
+    position: sticky;
+    top: 0;
+    background: #2a2a2a;
+    z-index: 10;
+}
+
+.cw-spots-table th {
+    padding: 8px;
+    text-align: left;
+    color: #aaa;
+    font-weight: 600;
+    border-bottom: 2px solid #444;
+    white-space: nowrap;
+}
+
+.cw-spots-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #2a2a2a;
+    color: #ddd;
+}
+
+.cw-spots-table tbody tr:hover {
+    background: #252525;
+}
+
+.cw-spots-table tbody tr.spot-new {
+    animation: highlight 0.5s ease-out;
+}
+
+@keyframes highlight {
+    0% {
+        background: #4a9eff;
+    }
+    100% {
+        background: transparent;
+    }
+}
+
+.cw-spots-table tbody tr.no-spots td {
+    text-align: center;
+    color: #666;
+    padding: 20px;
+}
+
+.spot-time {
+    font-family: monospace;
+    color: #4a9eff;
+}
+
+.spot-age {
+    font-family: monospace;
+    color: #888;
+    font-size: 11px;
+}
+
+.spot-frequency {
+    font-family: monospace;
+    color: #28a745;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.spot-frequency:hover {
+    color: #5cb85c;
+}
+
+.spot-band {
+    color: #ffc107;
+    font-weight: 600;
+}
+
+.spot-callsign {
+    font-family: monospace;
+    font-weight: bold;
+    color: #fff;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.spot-callsign:hover {
+    color: #4a9eff;
+}
+
+.spot-country {
+    color: #aaa;
+}
+
+.spot-distance {
+    font-family: monospace;
+    color: #17a2b8;
+}
+
+.spot-bearing {
+    font-family: monospace;
+    color: #6c757d;
+}
+
+.spot-snr {
+    font-family: monospace;
+    font-weight: bold;
+}
+
+.spot-snr-positive {
+    color: #28a745;
+}
+
+.spot-snr-negative {
+    color: #ffc107;
+}
+
+.spot-wpm {
+    font-family: monospace;
+    color: #17a2b8;
+    font-weight: 600;
+}
+
+.spot-comment {
+    color: #888;
+    font-style: italic;
+}
+
+.status-badge {
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.status-connected {
+    background: #28a745;
+    color: #fff;
+}
+
+.status-disconnected {
+    background: #dc3545;
+    color: #fff;
+}
+
+.show-more-row,
+.show-less-row {
+    background: #2a2a2a !important;
+}
+
+.show-more-row:hover,
+.show-less-row:hover {
+    background: #333 !important;
+}

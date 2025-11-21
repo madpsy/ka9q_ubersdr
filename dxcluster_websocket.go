@@ -20,6 +20,13 @@ type digitalSpotKey struct {
 	mode     string
 }
 
+// cwSpotKey is used for deduplication of CW spots
+type cwSpotKey struct {
+	callsign  string
+	band      string
+	frequency float64
+}
+
 // DXClusterWebSocketHandler manages WebSocket connections for DX cluster spots
 type DXClusterWebSocketHandler struct {
 	clients           map[*websocket.Conn]*sync.Mutex // Each connection has its own write mutex
@@ -39,6 +46,15 @@ type DXClusterWebSocketHandler struct {
 	digitalSpotBufferMu sync.RWMutex
 	maxDigitalSpots     int
 
+	// CW spot deduplication
+	cwSpotCache   map[cwSpotKey]time.Time
+	cwSpotCacheMu sync.RWMutex
+
+	// CW spot buffer for new connections
+	cwSpotBuffer   []map[string]interface{}
+	cwSpotBufferMu sync.RWMutex
+	maxCWSpots     int
+
 	// Receiver location for distance/bearing calculation
 	receiverLocator string
 }
@@ -54,6 +70,9 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 		digitalSpotCache:  make(map[digitalSpotKey]time.Time),
 		digitalSpotBuffer: make([]map[string]interface{}, 0, 500),
 		maxDigitalSpots:   500,
+		cwSpotCache:       make(map[cwSpotKey]time.Time),
+		cwSpotBuffer:      make([]map[string]interface{}, 0, 500),
+		maxCWSpots:        500,
 		receiverLocator:   receiverLocator,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
@@ -71,6 +90,9 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 
 	// Start cleanup goroutine for digital spot cache
 	go handler.cleanupDigitalSpotCache()
+
+	// Start cleanup goroutine for CW spot cache
+	go handler.cleanupCWSpotCache()
 
 	return handler
 }
@@ -148,6 +170,9 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 
 	// Send buffered digital spots to new client
 	h.sendBufferedDigitalSpots(conn)
+
+	// Send buffered CW spots to new client
+	h.sendBufferedCWSpots(conn)
 
 	// Handle client messages (mainly for ping/pong)
 	go h.handleClient(conn)
@@ -410,6 +435,130 @@ func (h *DXClusterWebSocketHandler) frequencyToBand(freqHz float64) string {
 		return "10m"
 	default:
 		return "unknown"
+	}
+}
+
+// BroadcastCWSpot broadcasts a CW spot to all connected clients
+// with deduplication based on callsign/band/frequency within a 2-minute window
+func (h *DXClusterWebSocketHandler) BroadcastCWSpot(spot CWSkimmerSpot) {
+	// Create deduplication key
+	key := cwSpotKey{
+		callsign:  spot.DXCall,
+		band:      spot.Band,
+		frequency: spot.Frequency,
+	}
+
+	// Check if we've seen this spot recently (within 2 minutes)
+	h.cwSpotCacheMu.RLock()
+	lastSeen, exists := h.cwSpotCache[key]
+	h.cwSpotCacheMu.RUnlock()
+
+	now := time.Now()
+	if exists && now.Sub(lastSeen) < 2*time.Minute {
+		// Skip this spot - we've seen it recently
+		return
+	}
+
+	// Update cache with current time
+	h.cwSpotCacheMu.Lock()
+	h.cwSpotCache[key] = now
+	h.cwSpotCacheMu.Unlock()
+
+	// Record spot in Prometheus if enabled
+	if h.prometheusMetrics != nil {
+		h.prometheusMetrics.RecordDXSpot("CW-" + spot.Band)
+	}
+
+	data := map[string]interface{}{
+		"frequency": spot.Frequency,
+		"dx_call":   spot.DXCall,
+		"snr":       spot.SNR,
+		"wpm":       spot.WPM,
+		"comment":   spot.Comment,
+		"time":      spot.Time,
+		"band":      spot.Band,
+		"country":   spot.Country,
+		"cq_zone":   spot.CQZone,
+		"itu_zone":  spot.ITUZone,
+		"continent": spot.Continent,
+	}
+
+	// Add distance and bearing if available
+	if spot.DistanceKm != nil {
+		data["distance_km"] = *spot.DistanceKm
+	}
+	if spot.BearingDeg != nil {
+		data["bearing_deg"] = *spot.BearingDeg
+	}
+
+	message := map[string]interface{}{
+		"type": "cw_spot",
+		"data": data,
+	}
+
+	// Add to buffer for new connections
+	h.addCWSpotToBuffer(data)
+
+	h.broadcast(message)
+}
+
+// addCWSpotToBuffer adds a CW spot to the buffer, maintaining max size
+func (h *DXClusterWebSocketHandler) addCWSpotToBuffer(spotData map[string]interface{}) {
+	h.cwSpotBufferMu.Lock()
+	defer h.cwSpotBufferMu.Unlock()
+
+	// Add spot to buffer
+	h.cwSpotBuffer = append(h.cwSpotBuffer, spotData)
+
+	// If buffer exceeds max size, remove oldest spots
+	if len(h.cwSpotBuffer) > h.maxCWSpots {
+		// Keep only the most recent maxCWSpots
+		h.cwSpotBuffer = h.cwSpotBuffer[len(h.cwSpotBuffer)-h.maxCWSpots:]
+	}
+}
+
+// sendBufferedCWSpots sends all buffered CW spots to a newly connected client
+func (h *DXClusterWebSocketHandler) sendBufferedCWSpots(conn *websocket.Conn) {
+	h.cwSpotBufferMu.RLock()
+	bufferedSpots := make([]map[string]interface{}, len(h.cwSpotBuffer))
+	copy(bufferedSpots, h.cwSpotBuffer)
+	h.cwSpotBufferMu.RUnlock()
+
+	if len(bufferedSpots) == 0 {
+		return
+	}
+
+	log.Printf("DX Cluster WebSocket: Sending %d buffered CW spots to new client", len(bufferedSpots))
+
+	// Send each spot as an individual message
+	for _, spotData := range bufferedSpots {
+		message := map[string]interface{}{
+			"type": "cw_spot",
+			"data": spotData,
+		}
+
+		if err := h.sendMessage(conn, message); err != nil {
+			log.Printf("DX Cluster WebSocket: Failed to send buffered CW spot: %v", err)
+			// Continue sending other spots even if one fails
+		}
+	}
+}
+
+// cleanupCWSpotCache periodically removes old entries from the cache
+func (h *DXClusterWebSocketHandler) cleanupCWSpotCache() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		h.cwSpotCacheMu.Lock()
+		now := time.Now()
+		for key, lastSeen := range h.cwSpotCache {
+			// Remove entries older than 3 minutes (1 minute buffer beyond the 2-minute window)
+			if now.Sub(lastSeen) > 3*time.Minute {
+				delete(h.cwSpotCache, key)
+			}
+		}
+		h.cwSpotCacheMu.Unlock()
 	}
 }
 

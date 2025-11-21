@@ -545,6 +545,13 @@ func main() {
 	}
 	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, receiverLocator)
 
+	// Register CW Skimmer spot handler to broadcast via websocket
+	if cwSkimmer != nil {
+		cwSkimmer.OnSpot(func(spot CWSkimmerSpot) {
+			dxClusterWsHandler.BroadcastCWSpot(spot)
+		})
+	}
+
 	// Register DX spot handler for logging
 	dxCluster.OnSpot(func(spot DXSpot) {
 		if DebugMode {

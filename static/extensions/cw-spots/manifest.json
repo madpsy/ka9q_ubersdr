@@ -1,0 +1,31 @@
+{
+  "name": "cw-spots",
+  "displayName": "CW Spots",
+  "version": "1.0.0",
+  "description": "Display real-time CW spots from CW Skimmer",
+  "author": "UberSDR",
+  "type": "display",
+  "icon": "⚡",
+  "category": "decoder",
+  "requiresAudio": false,
+  "defaultEnabled": false,
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html"
+  },
+  "settings": {
+    "maxSpots": {
+      "type": "number",
+      "default": 500,
+      "min": 10,
+      "max": 1000,
+      "description": "Maximum number of spots to display"
+    },
+    "highlightNew": {
+      "type": "boolean",
+      "default": true,
+      "description": "Highlight new spots briefly"
+    }
+  }
+}

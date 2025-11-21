@@ -244,7 +244,42 @@ class SpectrumDisplay {
                 }
             }
 
-            // No bookmark or DX spot under mouse, hide tooltip
+            // Check if mouse is over a CW spot (iterate in reverse to show most recent spot on top)
+            if (window.cwSpotPositions && window.cwSpotPositions.length > 0) {
+                for (let i = window.cwSpotPositions.length - 1; i >= 0; i--) {
+                    const pos = window.cwSpotPositions[i];
+                    // Check if mouse is within CW spot bounds
+                    if (x >= pos.x - pos.width / 2 &&
+                        x <= pos.x + pos.width / 2 &&
+                        y >= pos.y &&
+                        y <= pos.y + pos.height) {
+
+                        // Show CW spot info with WPM, SNR, and country
+                        const freqStr = this.formatFrequency(pos.spot.frequency);
+                        const timeStr = pos.spot.time ? new Date(pos.spot.time).toLocaleTimeString('en-US', { hour12: false, timeZone: 'UTC' }) : 'N/A';
+                        const snrStr = pos.spot.snr >= 0 ? `+${pos.spot.snr}` : pos.spot.snr;
+                        let tooltipText = `${pos.spot.dx_call}: ${freqStr}<br>Time: ${timeStr} UTC<br>SNR: ${snrStr} dB<br>WPM: ${pos.spot.wpm}`;
+                        if (pos.spot.country) {
+                            tooltipText += `<br>Country: ${pos.spot.country}`;
+                        }
+                        if (pos.spot.comment) {
+                            tooltipText += `<br>Comment: ${pos.spot.comment}`;
+                        }
+                        this.tooltip.innerHTML = tooltipText;
+
+                        // Position tooltip near cursor
+                        const tooltipX = e.clientX + 15;
+                        const tooltipY = e.clientY - 10;
+
+                        this.tooltip.style.left = tooltipX + 'px';
+                        this.tooltip.style.top = tooltipY + 'px';
+                        this.tooltip.style.display = 'block';
+                        return;
+                    }
+                }
+            }
+
+            // No bookmark, DX spot, or CW spot under mouse, hide tooltip
             this.hideTooltip();
         });
 
@@ -253,7 +288,7 @@ class SpectrumDisplay {
             this.hideTooltip();
         });
 
-        // Add click handler for bookmarks and DX spots on overlay canvas
+        // Add click handler for bookmarks, DX spots, and CW spots on overlay canvas
         this.overlayCanvas.addEventListener('click', (e) => {
             const rect = this.overlayCanvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
@@ -272,6 +307,25 @@ class SpectrumDisplay {
                         // Tune to the DX spot
                         if (window.dxClusterExtensionInstance) {
                             window.dxClusterExtensionInstance.tuneToSpot(pos.spot);
+                        }
+                        return;
+                    }
+                }
+            }
+
+            // Check if click is on a CW spot (iterate in reverse to prioritize most recent spot)
+            if (window.cwSpotPositions && window.cwSpotPositions.length > 0) {
+                for (let i = window.cwSpotPositions.length - 1; i >= 0; i--) {
+                    const pos = window.cwSpotPositions[i];
+                    // Check if click is within CW spot bounds
+                    if (x >= pos.x - pos.width / 2 &&
+                        x <= pos.x + pos.width / 2 &&
+                        y >= pos.y &&
+                        y <= pos.y + pos.height) {
+                        
+                        // Tune to the CW spot
+                        if (window.cwSpotsExtensionInstance) {
+                            window.cwSpotsExtensionInstance.tuneToSpot(pos.spot);
                         }
                         return;
                     }

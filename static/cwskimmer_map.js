@@ -1928,6 +1928,8 @@ class CWSkimmerMap {
                         ${spot.snr !== undefined ? ` • ${spot.snr >= 0 ? '+' : ''}${spot.snr} dB` : ''}
                         ${spot.wpm ? ` • ${spot.wpm} WPM` : ''}
                         ${spot.frequency ? ` • ${(spot.frequency / 1e6).toFixed(3)} MHz` : ''}
+                        ${spot.comment && spot.comment === 'CQ' ? ` • <strong>${spot.comment}</strong>` : ''}
+                        ${spot.comment && spot.comment === 'DE' ? ` • ${spot.comment}` : ''}
                     </div>
                     ${spot.message ? `<div style="color: #aaa; font-size: 10px; margin-top: 4px;">${spot.message}</div>` : ''}
                 </div>

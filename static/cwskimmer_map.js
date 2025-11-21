@@ -1926,6 +1926,7 @@ class CWSkimmerMap {
                     <div class="live-message-details">
                         <span style="color: ${bandColor};">●</span> ${spot.band}
                         ${spot.snr !== undefined ? ` • ${spot.snr >= 0 ? '+' : ''}${spot.snr} dB` : ''}
+                        ${spot.wpm ? ` • ${spot.wpm} WPM` : ''}
                         ${spot.frequency ? ` • ${(spot.frequency / 1e6).toFixed(3)} MHz` : ''}
                     </div>
                     ${spot.message ? `<div style="color: #aaa; font-size: 10px; margin-top: 4px;">${spot.message}</div>` : ''}

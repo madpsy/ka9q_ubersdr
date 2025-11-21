@@ -2073,6 +2073,7 @@
         // Sessions management
         let currentSessions = [];
         let sessionsRefreshInterval = null;
+        let currentSessionFilter = 'all'; // Track current filter selection
         
         // Monitor health management
         let monitorRefreshInterval = null;
@@ -2128,7 +2129,10 @@
             }
         }
 
-        function renderSessions(filterType = 'all') {
+        function renderSessions(filterType = currentSessionFilter) {
+            // Update the current filter state
+            currentSessionFilter = filterType;
+            
             const container = document.getElementById('sessionsList');
             container.innerHTML = '';
             container.classList.remove('loading');
@@ -2159,7 +2163,8 @@
 
             // Add event listener to filter dropdown
             document.getElementById('sessionFilter').addEventListener('change', (e) => {
-                renderSessions(e.target.value);
+                currentSessionFilter = e.target.value;
+                renderSessions(currentSessionFilter);
             });
 
             // Separate internal sessions from user sessions

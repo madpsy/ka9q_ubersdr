@@ -24,6 +24,7 @@ type CWSkimmerConfig struct {
 	PSKReporterEnabled  bool   `yaml:"pskreporter_enabled"`  // Enable PSKReporter uploads
 	PSKReporterCallsign string `yaml:"pskreporter_callsign"` // Callsign for PSKReporter (defaults to main callsign)
 	PSKReporterLocator  string `yaml:"pskreporter_locator"`  // Grid locator for PSKReporter
+	PSKReporterAntenna  string `yaml:"pskreporter_antenna"`  // Antenna description for PSKReporter (optional)
 }
 
 // LoadCWSkimmerConfig loads CW Skimmer configuration from a YAML file

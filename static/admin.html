@@ -3691,6 +3691,14 @@
             pskReporterLocatorField.appendChild(pskReporterLocatorSmall);
             pskReporterSection.appendChild(pskReporterLocatorField);
 
+            // PSKReporter Antenna
+            const pskReporterAntennaField = createConfigField('PSKReporter Antenna', 'text', currentCWSkimmerConfig.pskreporter_antenna || '', 'pskreporter_antenna');
+            pskReporterAntennaField.querySelector('input').placeholder = 'e.g., Dipole, Vertical, Loop';
+            const pskReporterAntennaSmall = document.createElement('small');
+            pskReporterAntennaSmall.textContent = 'Optional antenna description for PSKReporter (e.g., "Dipole", "Vertical", "Loop")';
+            pskReporterAntennaField.appendChild(pskReporterAntennaSmall);
+            pskReporterSection.appendChild(pskReporterAntennaField);
+
             container.appendChild(pskReporterSection);
 
             // Add event listeners for text and number inputs

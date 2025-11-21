@@ -500,7 +500,7 @@ func main() {
 				cwskimmerConfig.PSKReporterCallsign,
 				cwskimmerConfig.PSKReporterLocator,
 				programName,
-				"", // No antenna info for CW Skimmer
+				cwskimmerConfig.PSKReporterAntenna,
 			)
 			if err != nil {
 				log.Printf("Warning: Failed to initialize PSKReporter for CW Skimmer: %v", err)

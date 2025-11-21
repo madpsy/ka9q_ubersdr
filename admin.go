@@ -2518,6 +2518,7 @@ func (ah *AdminHandler) handleGetCWSkimmerConfig(w http.ResponseWriter, r *http.
 			"pskreporter_enabled":   false,
 			"pskreporter_callsign":  "N0CALL",
 			"pskreporter_locator":   "",
+			"pskreporter_antenna":   "",
 		})
 		return
 	}

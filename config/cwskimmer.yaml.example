@@ -36,3 +36,4 @@ spots_log_data_dir: "cwskimmer_spots"  # Directory for CSV files (default: data/
 pskreporter_enabled: false
 pskreporter_callsign: "N0CALL"  # Your callsign (defaults to main callsign if not specified)
 pskreporter_locator: "IO91vl"   # Your Maidenhead grid locator (e.g., IO91vl)
+pskreporter_antenna: ""         # Antenna description (optional, e.g., "Dipole", "Vertical", "Loop")

@@ -168,6 +168,9 @@ class CWSpotsExtension extends DecoderExtension {
             if (wpmFilter) wpmFilter.value = this.wpmFilter !== null ? this.wpmFilter.toString() : 'none';
             if (distanceFilter) distanceFilter.value = this.distanceFilter !== null ? this.distanceFilter.toString() : 'none';
             if (callsignFilter) callsignFilter.value = this.callsignFilter;
+
+            // Now that DOM is ready, update band filter from current frequency
+            this.updateBandFilterFromFrequency();
         });
     }
 

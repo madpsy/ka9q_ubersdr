@@ -864,6 +864,29 @@ class CWSpotsExtension extends DecoderExtension {
         this.stopAgeUpdates();
         this.stopRadioStateMonitoring();
         this.stopFrequencyMonitoring();
+        this.stopFrequencyPolling();
+
+        if (this.unsubscribe) {
+            this.unsubscribe();
+            this.unsubscribe = null;
+        }
+
+        // Hide badges when extension is disabled
+        const container = document.getElementById('cw-spots-badges-main');
+        if (container) {
+            container.style.display = 'none';
+        }
+
+        // Invalidate spectrum marker cache to remove CW spot markers
+        if (window.spectrumDisplay) {
+            window.spectrumDisplay.invalidateMarkerCache();
+            window.spectrumDisplay.draw();
+        }
+    }
+
+    onProcessAudio(dataArray) {
+        // CW spots extension doesn't process audio
+    }
 
     scheduleBadgeUpdate() {
         // Skip if extension panel is not visible
@@ -1674,6 +1697,7 @@ class CWSpotsExtension extends DecoderExtension {
         const modal = document.getElementById('cw-country-spots-modal');
         const closeBtn = document.getElementById('cw-country-spots-modal-close');
 
+        if (closeBtn) {
             closeBtn.addEventListener('click', () => {
                 this.closeCountryModal();
             });

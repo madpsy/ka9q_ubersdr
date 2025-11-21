@@ -495,10 +495,11 @@ func main() {
 
 		// Initialize PSKReporter if enabled
 		if cwskimmerConfig.PSKReporterEnabled {
+			programName := fmt.Sprintf("%s %s", "UberSDR", Version)
 			pskReporter, err := NewPSKReporter(
 				cwskimmerConfig.PSKReporterCallsign,
 				cwskimmerConfig.PSKReporterLocator,
-				"ka9q_ubersdr",
+				programName,
 				"", // No antenna info for CW Skimmer
 			)
 			if err != nil {

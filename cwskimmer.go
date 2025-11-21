@@ -251,6 +251,19 @@ func (c *CWSkimmerClient) login() error {
 		}
 	}
 
+	// Read the prompt line (e.g., "MM3NDH de SKIMMER 2025-11-21 08:05Z CwSkimmer >")
+	// This line doesn't end with newline, so we need to read it with a timeout
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	promptBuf := make([]byte, 1024)
+	n, err = conn.Read(promptBuf)
+	if err == nil && n > 0 {
+		prompt := strings.TrimSpace(string(promptBuf[:n]))
+		if prompt != "" {
+			log.Printf("CW Skimmer: << %s", prompt)
+		}
+	}
+	// Ignore timeout errors - prompt might not be sent
+
 	log.Println("CW Skimmer: Login completed")
 
 	// Clear read deadline for normal operation

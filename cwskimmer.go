@@ -26,8 +26,8 @@ type CWSkimmerSpot struct {
 	CQZone     int      `json:"cq_zone"`
 	ITUZone    int      `json:"itu_zone"`
 	Continent  string   `json:"continent"`
-	Latitude   float64  `json:"latitude,omitempty"`
-	Longitude  float64  `json:"longitude,omitempty"`
+	Latitude   float64  `json:"latitude"`
+	Longitude  float64  `json:"longitude"`
 	DistanceKm *float64 `json:"distance_km,omitempty"`
 	BearingDeg *float64 `json:"bearing_deg,omitempty"`
 }
@@ -486,11 +486,10 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 		spot.ITUZone = info.ITUZone
 		spot.Continent = info.Continent
 
-		// Add latitude and longitude from CTY database
-		if info.Latitude != 0 || info.Longitude != 0 {
-			spot.Latitude = info.Latitude
-			spot.Longitude = info.Longitude
-		}
+		// Always set latitude and longitude from CTY database
+		// These represent the country/prefix location
+		spot.Latitude = info.Latitude
+		spot.Longitude = info.Longitude
 
 		// Calculate distance and bearing if receiver location is set
 		if c.receiverLat != 0 || c.receiverLon != 0 {

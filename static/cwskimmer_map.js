@@ -811,7 +811,7 @@ class CWSkimmerMap {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/dxcluster?user_session_id=${encodeURIComponent(this.userSessionID)}`;
 
-        console.log('[Digital Spots Map] Connecting to:', wsUrl);
+        console.log('[CW Skimmer Map] Connecting to:', wsUrl);
 
         this.ws = new WebSocket(wsUrl);
 
@@ -877,18 +877,37 @@ class CWSkimmerMap {
     }
 
     handleCWSpot(spot) {
+        // CW spots use different field names than digital spots
+        // Map CW spot fields to expected format
+        const mappedSpot = {
+            callsign: spot.dx_call,
+            frequency: spot.frequency,
+            band: spot.band,
+            snr: spot.snr,
+            timestamp: spot.time,
+            country: spot.country,
+            Continent: spot.continent,
+            CQZone: spot.cq_zone,
+            ITUZone: spot.itu_zone,
+            latitude: spot.latitude,
+            longitude: spot.longitude,
+            distance_km: spot.distance_km,
+            bearing_deg: spot.bearing_deg,
+            wpm: spot.wpm,
+            comment: spot.comment
+        };
+
         // Only process spots with valid coordinates
-        if (!spot.latitude || !spot.longitude) {
+        if (!mappedSpot.latitude || !mappedSpot.longitude) {
+            console.log('[CW Skimmer Map] Skipping spot without coordinates:', mappedSpot.callsign);
             return;
         }
 
         // Create unique key for spot (CW spots don't have mode)
-        const key = `${spot.callsign}-${spot.band}`;
+        const key = `${mappedSpot.callsign}-${mappedSpot.band}`;
 
-        // Add timestamp if not present
-        if (!spot.timestamp) {
-            spot.timestamp = new Date().toISOString();
-        }
+        // Use the mapped spot
+        spot = mappedSpot;
 
         // Track spot for rate calculation
         const now = Date.now();

@@ -230,6 +230,7 @@ class CWSpotsExtension extends DecoderExtension {
 
         // Invalidate spectrum marker cache when spots change
         if (window.spectrumDisplay) {
+            console.log('CW Spots: Invalidating marker cache and redrawing spectrum');
             window.spectrumDisplay.invalidateMarkerCache();
             window.spectrumDisplay.draw();
         }
@@ -829,6 +830,10 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
     if (!spectrumDisplay || !spectrumDisplay.overlayCtx) {
         cwSpotPositions = [];
         window.cwSpotPositions = cwSpotPositions;
+        if (shouldLog) {
+            console.log('CW Spots: No spectrum display or overlay context');
+            lastCWDebugLog = now;
+        }
         return;
     }
 
@@ -836,7 +841,31 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
     const cwExtension = cwSpotsExtensionInstance;
 
     // Only draw if extension exists, is enabled, and has spots
-    if (!cwExtension || !cwExtension.enabled || !cwExtension.spots || cwExtension.spots.length === 0) {
+    if (!cwExtension) {
+        if (shouldLog) {
+            console.log('CW Spots: Extension instance not found');
+            lastCWDebugLog = now;
+        }
+        cwSpotPositions = [];
+        window.cwSpotPositions = cwSpotPositions;
+        return;
+    }
+
+    if (!cwExtension.enabled) {
+        if (shouldLog) {
+            console.log('CW Spots: Extension not enabled');
+            lastCWDebugLog = now;
+        }
+        cwSpotPositions = [];
+        window.cwSpotPositions = cwSpotPositions;
+        return;
+    }
+
+    if (!cwExtension.spots || cwExtension.spots.length === 0) {
+        if (shouldLog) {
+            console.log('CW Spots: No spots available');
+            lastCWDebugLog = now;
+        }
         cwSpotPositions = [];
         window.cwSpotPositions = cwSpotPositions;
         return;

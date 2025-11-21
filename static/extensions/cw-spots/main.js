@@ -1,6 +1,6 @@
 // CW Spots Extension for ka9q UberSDR
 // Displays real-time CW spots from CW Skimmer
-// Version: 2025-11-21-v2
+// Version: 2025-11-21-v3-fixed
 
 class CWSpotsExtension extends DecoderExtension {
     constructor() {
@@ -814,10 +814,6 @@ class CWSpotsExtension extends DecoderExtension {
 
         if (this.unsubscribe) {
             this.unsubscribe();
-
-// Draw CW spots on spectrum display (exposed on window for spectrum-display.js access)
-// Global array for CW spot positions (for spectrum display)
-
             this.unsubscribe = null;
         }
     }
@@ -828,6 +824,9 @@ class CWSpotsExtension extends DecoderExtension {
 }
 
 // Register the extension
+// Global reference to the extension instance (must be declared before class instantiation)
+let cwSpotsExtensionInstance = null;
+
 if (window.decoderManager) {
     cwSpotsExtensionInstance = new CWSpotsExtension();
     window.decoderManager.register(cwSpotsExtensionInstance);
@@ -843,9 +842,6 @@ window.cwSpotsExtensionInstance = cwSpotsExtensionInstance;
 // Global array for CW spot positions (for spectrum display)
 let cwSpotPositions = [];
 window.cwSpotPositions = cwSpotPositions;
-
-// Global reference to the extension instance
-let cwSpotsExtensionInstance = null;
 
 let lastCWDebugLog = 0;
 function drawCWSpotsOnSpectrum(spectrumDisplay, log) {

@@ -915,8 +915,14 @@ class CWSpotsExtension extends DecoderExtension {
         const container = document.getElementById('cw-spots-badges-main');
         if (!container) return;
 
-        // Hide container if badges are disabled or extension is not enabled
-        if (!this.showBadges || !this.enabled) {
+        // Always hide container if extension is not enabled
+        if (!this.enabled) {
+            container.style.display = 'none';
+            return;
+        }
+
+        // Hide container if badges are disabled
+        if (!this.showBadges) {
             container.style.display = 'none';
             return;
         }

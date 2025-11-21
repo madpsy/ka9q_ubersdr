@@ -1051,7 +1051,7 @@ class CWSkimmerMap {
                 <b>Band:</b> ${spot.band}<br>
                 <b>Frequency:</b> ${(spot.frequency / 1e6).toFixed(3)} MHz<br>
                 <b>SNR:</b> ${spot.snr >= 0 ? '+' : ''}${spot.snr} dB<br>
-                <b>Grid:</b> ${spot.locator || 'N/A'}<br>
+                <b>WPM:</b> ${spot.wpm || 'N/A'}<br>
                 <b>Time:</b> ${time} UTC<br>
         `;
 

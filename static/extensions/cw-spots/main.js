@@ -163,14 +163,16 @@ class CWSpotsExtension extends DecoderExtension {
             const callsignFilter = document.getElementById('cw-spots-callsign-filter');
 
             if (ageFilter) ageFilter.value = this.ageFilter.toString();
-            if (bandFilter) bandFilter.value = this.bandFilter;
             if (snrFilter) snrFilter.value = this.snrFilter !== null ? this.snrFilter.toString() : 'none';
             if (wpmFilter) wpmFilter.value = this.wpmFilter !== null ? this.wpmFilter.toString() : 'none';
             if (distanceFilter) distanceFilter.value = this.distanceFilter !== null ? this.distanceFilter.toString() : 'none';
             if (callsignFilter) callsignFilter.value = this.callsignFilter;
 
-            // Now that DOM is ready, update band filter from current frequency
+            // Update band filter from current frequency FIRST (updates this.bandFilter)
             this.updateBandFilterFromFrequency();
+            
+            // THEN set dropdown to match the updated internal value
+            if (bandFilter) bandFilter.value = this.bandFilter;
         });
     }
 

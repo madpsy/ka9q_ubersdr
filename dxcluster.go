@@ -623,8 +623,6 @@ func (c *DXClusterClient) addSpotToBuffer(spot DXSpot) {
 	if len(c.spotBuffer) > c.bufferSize {
 		c.spotBuffer = c.spotBuffer[1:]
 	}
-
-	log.Printf("DX Cluster: Buffer now has %d spots (added: %s @ %.1f kHz)", len(c.spotBuffer), spot.DXCall, spot.Frequency/1000)
 }
 
 // GetBufferedSpots returns a copy of all buffered spots

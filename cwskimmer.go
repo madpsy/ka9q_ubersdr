@@ -418,7 +418,17 @@ func (c *CWSkimmerClient) parseCWSpot(line string) (CWSkimmerSpot, bool) {
 		return CWSkimmerSpot{}, false
 	}
 
-	spot.Spotter = strings.TrimSpace(parts[0])
+	// Extract spotter callsign and remove prompt suffix (e.g., "-#")
+	spotter := strings.TrimSpace(parts[0])
+	// Remove prompt suffix if present (e.g., "MM3NDH-#" -> "MM3NDH")
+	if idx := strings.LastIndex(spotter, "-"); idx > 0 {
+		// Check if what follows the dash is a single character (prompt indicator)
+		suffix := spotter[idx+1:]
+		if len(suffix) == 1 {
+			spotter = spotter[:idx]
+		}
+	}
+	spot.Spotter = spotter
 	line = strings.TrimSpace(parts[1])
 
 	// Parse frequency and rest

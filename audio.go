@@ -208,8 +208,7 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte) {
 	case session.AudioChan <- dataCopy:
 		// Successfully sent
 	default:
-		// Channel full, skip this packet
-		log.Printf("Warning: audio channel full for session %s (SSRC: %d)", session.ID, ssrc)
+		// Channel full, skip this packet silently
 	}
 }
 

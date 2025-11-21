@@ -584,13 +584,7 @@ func (nfm *NoiseFloorMonitor) calculateAndLogStatistics() {
 		// Calculate statistics from the max-hold FFT data
 		// This represents the strongest signals seen in each frequency bin over the last 10 seconds
 		measurement := nfm.calculateStatistics(timestamp, band.Name, maxHoldFFT.Data)
-
-		if DebugMode {
-			log.Printf("DEBUG: Band %s: P5=%.1f dB, P95=%.1f dB, Max=%.1f dB, range=%.1f dB (from 10s max-hold FFT, %d bins)",
-				band.Name, measurement.P5DB, measurement.P95DB, measurement.MaxDB, measurement.DynamicRange,
-				len(maxHoldFFT.Data))
-		}
-
+	
 		// Store latest measurement
 		nfm.measurementsMu.Lock()
 		nfm.latestMeasurements[band.Name] = measurement
@@ -832,8 +826,6 @@ func (nfm *NoiseFloorMonitor) rotateFile(band, dateStr string) error {
 		}
 		nfm.csvWriters[band].Flush()
 		log.Printf("Created new noise floor log file: %s", filename)
-	} else if DebugMode {
-		log.Printf("DEBUG: Appending to existing noise floor log file: %s", filename)
 	}
 
 	return nil

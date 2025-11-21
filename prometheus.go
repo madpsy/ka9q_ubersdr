@@ -678,11 +678,6 @@ func (pm *PrometheusMetrics) UpdateFromMeasurement(m *BandMeasurement) {
 	pm.occupancyPercent.With(bandLabel).Set(float64(m.OccupancyPct))
 	pm.ft8SNR.With(bandLabel).Set(float64(m.FT8SNR))
 	pm.lastUpdate.With(bandLabel).Set(float64(m.Timestamp.Unix()))
-
-	if DebugMode {
-		log.Printf("DEBUG: Updated Prometheus metrics for band %s: P5=%.1f dB, P95=%.1f dB, FT8_SNR=%.1f dB",
-			m.Band, m.P5DB, m.P95DB, m.FT8SNR)
-	}
 }
 
 // UpdateMultipleMeasurements updates metrics for multiple bands at once

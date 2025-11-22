@@ -353,6 +353,13 @@ h1 {
     animation: pulse-glow 2s ease-in-out infinite;
 }
 
+.active-now-section.active-now-inactive {
+    background: rgba(158, 158, 158, 0.15);
+    border: 2px solid rgba(158, 158, 158, 0.5);
+    box-shadow: 0 0 10px rgba(158, 158, 158, 0.2);
+    animation: none;
+}
+
 @keyframes pulse-glow {
     0%, 100% {
         box-shadow: 0 0 15px rgba(76, 175, 80, 0.3);
@@ -422,6 +429,50 @@ h1 {
 .active-now-band-info {
     font-size: 0.9em;
     opacity: 0.9;
+}
+
+.active-now-message {
+    font-size: 0.95em;
+    opacity: 0.8;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    text-align: center;
+}
+
+.next-bands-list {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.next-band-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    border-left: 3px solid #2196F3;
+    transition: all 0.3s ease;
+}
+
+.next-band-item:hover {
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateX(5px);
+}
+
+.next-band-name {
+    font-weight: bold;
+    font-size: 1.05em;
+    color: #2196F3;
+}
+
+.next-band-time {
+    font-size: 0.9em;
+    opacity: 0.9;
+    color: #FFC107;
 }
 
 /* Hourly Chart */

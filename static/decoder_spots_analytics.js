@@ -826,6 +826,36 @@
                         </div>
                     </div>
                 `;
+            } else {
+                const nextBands = getNextActiveBands(entity);
+                let nextBandsHTML = '';
+                if (nextBands.length > 0) {
+                    nextBandsHTML = `
+                        <div class="next-bands-list">
+                            ${nextBands.map(band => `
+                                <div class="next-band-item">
+                                    <span class="next-band-name">${band.band}</span>
+                                    <span class="next-band-time">opens at ${band.localTime}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+                
+                activeNowHTML = `
+                    <div class="active-now-section active-now-inactive">
+                        <div class="active-now-header">
+                            <span class="active-now-icon">⚫</span>
+                            <strong>No Active Bands Right Now</strong>
+                            <span class="active-now-time">(${getCurrentLocalTime()})</span>
+                        </div>
+                        <div class="active-now-message">
+                            Based on historical data, no bands are typically active at this time (${String(getCurrentUTCHour()).padStart(2, '0')}:00 UTC).
+                            ${nextBands.length > 0 ? '<div style="margin-top: 10px;"><strong>Try these bands next:</strong></div>' : ''}
+                        </div>
+                        ${nextBandsHTML}
+                    </div>
+                `;
             }
         }
 
@@ -950,6 +980,66 @@
         });
 
         return activeBands;
+    }
+
+    function getNextActiveBands(entity) {
+        const currentUTCHour = getCurrentUTCHour();
+        const nextBands = [];
+
+        entity.bands.forEach(band => {
+            // Get all active hours for this band
+            const activeHours = Object.entries(band.hourly_distribution)
+                .filter(([hour, count]) => count > 0)
+                .map(([hour, count]) => parseInt(hour))
+                .sort((a, b) => a - b);
+
+            if (activeHours.length === 0) return;
+
+            // Find the next active hour after current hour
+            let nextHour = null;
+            for (let hour of activeHours) {
+                if (hour > currentUTCHour) {
+                    nextHour = hour;
+                    break;
+                }
+            }
+
+            // If no hour found after current, wrap to first hour of next day
+            if (nextHour === null && activeHours.length > 0) {
+                nextHour = activeHours[0];
+            }
+
+            if (nextHour !== null) {
+                // Convert UTC hour to local time
+                const localTime = utcHourToLocalTime(nextHour);
+                
+                nextBands.push({
+                    band: band.band,
+                    utcHour: nextHour,
+                    localTime: localTime,
+                    hoursUntil: nextHour > currentUTCHour ? nextHour - currentUTCHour : (24 - currentUTCHour) + nextHour
+                });
+            }
+        });
+
+        // Sort by hours until opening (soonest first)
+        nextBands.sort((a, b) => a.hoursUntil - b.hoursUntil);
+
+        // Return top 3
+        return nextBands.slice(0, 3);
+    }
+
+    function utcHourToLocalTime(utcHour) {
+        // Create a date object with the UTC hour
+        const now = new Date();
+        const utcDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), utcHour, 0, 0));
+        
+        // Format as local time
+        return utcDate.toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
     }
 
     function createHourlyChart(hourlyDist) {

@@ -1,0 +1,32 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\UberSDRMonitor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\resource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDRShared.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\UberSDRMonitor.rc">
+      <Filter>Source Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{FFA8E85F-A895-3242-A613-A409D38A0589}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{34A8E71D-7A36-3C55-ABDD-80AF767FDFE1}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

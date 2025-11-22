@@ -1,0 +1,132 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDRIntf.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDR.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXBench.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXCancellationRequest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXConnectionState.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXDNSLookup.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXExponentialBackoff.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXGetFreePort.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXGzipCodec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttpClient.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttpServer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXNetSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterrupt.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptEvent.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptFactory.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptPipe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSetThreadName.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocket.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketConnect.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketServer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketTLSOptions.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXStrCaseCompare.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXUdpSocket.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXUrlParser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXUuid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocket.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketCloseConstants.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketHandshake.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketHttpHeaders.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflate.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflateCodec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflateOptions.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketProxyServer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketServer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketTransport.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXSocketFactoryStub.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXUserAgentStub.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDRIntf.def">
+      <Filter>Source Files</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{E81AE4E6-179B-36F8-BB40-0E30CACCFFD6}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

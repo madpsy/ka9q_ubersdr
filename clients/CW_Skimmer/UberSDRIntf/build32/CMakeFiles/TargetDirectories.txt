@@ -1,0 +1,4 @@
+C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/CMakeFiles/UberSDRIntf.dir
+C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/CMakeFiles/INSTALL.dir
+C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/CMakeFiles/ALL_BUILD.dir
+C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/CMakeFiles/ZERO_CHECK.dir

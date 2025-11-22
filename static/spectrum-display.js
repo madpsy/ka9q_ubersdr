@@ -466,6 +466,10 @@ class SpectrumDisplay {
         this.syncCheckInterval = 100; // Check every 100ms
         this.startSyncMonitoring();
 
+        // Periodic settings sync to prevent frequency/config drift
+        // Will be started when WebSocket connection is established
+        this.settingsSyncInterval = null;
+
         // Color gradient cache
         this.colorGradient = this.createColorGradient();
 
@@ -747,6 +751,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
                 // Keepalive ping is now handled by idle detector based on user activity
 
+                // Start periodic settings sync now that connection is established
+                this.startSettingsSync();
+
                 if (this.config.onConnect) {
                     this.config.onConnect();
                 }
@@ -807,6 +814,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 console.log('Spectrum WebSocket closed');
                 this.connected = false;
 
+                // Stop settings sync when connection closes
+                this.stopSettingsSync();
+
                 // Keepalive ping is now handled by idle detector
 
                 if (this.config.onDisconnect) {
@@ -843,6 +853,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
 
         // Stop sync monitoring
         this.stopSyncMonitoring();
+
+        // Stop settings sync
+        this.stopSettingsSync();
 
         this.connected = false;
     }
@@ -3589,5 +3602,67 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 this.panTo(this.currentTunedFreq);
             }
         }
+    }
+
+    // Start periodic settings sync (500ms interval)
+    // Sends current UI state to server to ensure spectrum and audio stay aligned
+    startSettingsSync() {
+        if (this.settingsSyncInterval) return;
+
+        this.settingsSyncInterval = setInterval(() => {
+            this.sendSettingsSync();
+        }, 500); // 500ms = 2 times per second
+
+        console.log('Started settings sync (500ms interval)');
+    }
+
+    // Stop periodic settings sync
+    stopSettingsSync() {
+        if (this.settingsSyncInterval) {
+            clearInterval(this.settingsSyncInterval);
+            this.settingsSyncInterval = null;
+            console.log('Stopped settings sync');
+        }
+    }
+
+    // Send settings sync message to server
+    // This tells the server what the UI wants for both spectrum and audio
+    sendSettingsSync() {
+        // Skip if not connected
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
+        // Skip while actively dragging (we're sending pan messages already)
+        if (this.isDragging) {
+            return;
+        }
+
+        // Get current audio settings from window globals
+        const audioFrequency = window.getCurrentDialFrequency ? window.getCurrentDialFrequency() : this.currentTunedFreq;
+        const audioMode = window.currentMode || 'usb';
+        const audioBandwidthLow = window.currentBandwidthLow || 50;
+        const audioBandwidthHigh = window.currentBandwidthHigh || 3000;
+
+        // Build sync message with both spectrum and audio settings
+        const syncMsg = {
+            type: 'sync',
+            // Spectrum settings (what we want to see)
+            spectrum: {
+                centerFreq: Math.round(this.centerFreq),
+                binBandwidth: this.binBandwidth,
+                binCount: this.binCount
+            },
+            // Audio settings (what we want to hear)
+            audio: {
+                frequency: Math.round(audioFrequency),
+                mode: audioMode,
+                bandwidthLow: audioBandwidthLow,
+                bandwidthHigh: audioBandwidthHigh
+            }
+        };
+
+        // Send sync message
+        this.ws.send(JSON.stringify(syncMsg));
     }
 }

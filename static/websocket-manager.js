@@ -21,6 +21,9 @@ export class WebSocketManager {
         this.connectionFailureNotified = false;
         this.lastServerError = null;
         
+        // Periodic settings sync
+        this.settingsSyncInterval = null;
+        
         // Expose ws globally for compatibility
         window.ws = null;
     }
@@ -133,6 +136,9 @@ export class WebSocketManager {
         
         // Don't reset reconnection attempts immediately - wait for first successful message
         // This prevents resetting the counter when server immediately kicks us
+        
+        // Start periodic settings sync
+        this.startSettingsSync();
     }
 
     // Handle incoming messages
@@ -173,6 +179,10 @@ export class WebSocketManager {
     handleClose(event) {
         console.log('WebSocket closed - Code:', event.code, 'Reason:', event.reason, 'Clean:', event.wasClean);
         this.log('Disconnected');
+        
+        // Stop settings sync when connection closes
+        this.stopSettingsSync();
+        
         this.onDisconnect();
         
         this.ws = null;
@@ -284,6 +294,9 @@ export class WebSocketManager {
             this.reconnectTimer = null;
         }
 
+        // Stop settings sync
+        this.stopSettingsSync();
+
         // Mark as user-initiated disconnect
         this.userDisconnected = true;
 
@@ -335,5 +348,58 @@ export class WebSocketManager {
         } else {
             return hz + ' Hz';
         }
+    }
+
+    // Start periodic settings sync (500ms interval)
+    // Sends current UI state to server to ensure audio settings stay aligned
+    startSettingsSync() {
+        if (this.settingsSyncInterval) return;
+
+        this.settingsSyncInterval = setInterval(() => {
+            this.sendSettingsSync();
+        }, 500); // 500ms = 2 times per second
+
+        console.log('Audio: Started settings sync (500ms interval)');
+    }
+
+    // Stop periodic settings sync
+    stopSettingsSync() {
+        if (this.settingsSyncInterval) {
+            clearInterval(this.settingsSyncInterval);
+            this.settingsSyncInterval = null;
+            console.log('Audio: Stopped settings sync');
+        }
+    }
+
+    // Send settings sync message to server
+    // This tells the server what the UI wants for audio
+    sendSettingsSync() {
+        // Skip if not connected
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
+        // Skip if we don't have connection parameters
+        if (!this.lastConnectionParams) {
+            return;
+        }
+
+        // Get current settings from window globals (may have changed since connection)
+        const frequency = window.getCurrentDialFrequency ? window.getCurrentDialFrequency() : this.lastConnectionParams.frequency;
+        const mode = window.currentMode || this.lastConnectionParams.mode;
+        const bandwidthLow = window.currentBandwidthLow !== undefined ? window.currentBandwidthLow : this.lastConnectionParams.bandwidthLow;
+        const bandwidthHigh = window.currentBandwidthHigh !== undefined ? window.currentBandwidthHigh : this.lastConnectionParams.bandwidthHigh;
+
+        // Build sync message
+        const syncMsg = {
+            type: 'sync',
+            frequency: Math.round(frequency),
+            mode: mode,
+            bandwidthLow: bandwidthLow,
+            bandwidthHigh: bandwidthHigh
+        };
+
+        // Send sync message
+        this.ws.send(JSON.stringify(syncMsg));
     }
 }

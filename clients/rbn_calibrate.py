@@ -300,16 +300,16 @@ class FrequencyComparator:
             for band in sorted(band_diffs.keys(), key=lambda b: AMATEUR_BANDS.get(b, (0, 0))[0] if b != 'Unknown' else 999999):
                 diffs = band_diffs[band]
                 freqs = band_freqs[band]
-                avg_diff = statistics.mean(diffs)
+                median_diff = statistics.median(diffs)
                 std_dev = statistics.stdev(diffs) if len(diffs) > 1 else 0.0
                 
-                # Calculate PPM using average frequency
-                avg_freq_khz = statistics.mean(freqs)
-                avg_freq_hz = avg_freq_khz * 1000
-                ppm = (avg_diff / avg_freq_hz) * 1e6
+                # Calculate PPM using median frequency
+                median_freq_khz = statistics.median(freqs)
+                median_freq_hz = median_freq_khz * 1000
+                ppm = (median_diff / median_freq_hz) * 1e6
                 adjustment = 1.0 + (ppm / 1e6)
                 
-                print(f"{band:<10} {len(diffs):>10} {avg_diff:>+15.1f} {std_dev:>15.1f} {ppm:>+10.1f} {adjustment:>15.12f}")
+                print(f"{band:<10} {len(diffs):>10} {median_diff:>+15.1f} {std_dev:>15.1f} {ppm:>+10.1f} {adjustment:>15.12f}")
             
             print(f"{'='*90}\n")
         
@@ -326,33 +326,35 @@ class FrequencyComparator:
                                  key=lambda b: AMATEUR_BANDS.get(b, (0, 0))[0] if b != 'Unknown' else 999999):
                     diffs = callsign_band_diffs[callsign][band]
                     freqs = callsign_band_freqs[callsign][band]
-                    avg_diff = statistics.mean(diffs)
+                    median_diff = statistics.median(diffs)
                     std_dev = statistics.stdev(diffs) if len(diffs) > 1 else 0.0
                     
-                    # Calculate PPM using average frequency
-                    avg_freq_khz = statistics.mean(freqs)
-                    avg_freq_hz = avg_freq_khz * 1000
-                    ppm = (avg_diff / avg_freq_hz) * 1e6
+                    # Calculate PPM using median frequency
+                    median_freq_khz = statistics.median(freqs)
+                    median_freq_hz = median_freq_khz * 1000
+                    ppm = (median_diff / median_freq_hz) * 1e6
                     adjustment = 1.0 + (ppm / 1e6)
                     
-                    print(f"{callsign:<12} {band:<10} {len(diffs):>10} {avg_diff:>+15.1f} {std_dev:>15.1f} {ppm:>+10.1f} {adjustment:>15.12f}")
+                    print(f"{callsign:<12} {band:<10} {len(diffs):>10} {median_diff:>+15.1f} {std_dev:>15.1f} {ppm:>+10.1f} {adjustment:>15.12f}")
             
             print(f"{'='*100}\n")
         
         # Overall statistics - moved to end for prominence
-        avg_diff = total_diff / len(matches)
+        # Use median instead of mean for robustness against outliers
+        all_diffs = [freq_diff * 1000 for _, _, freq_diff in matches]
+        median_diff = statistics.median(all_diffs)
         
-        # Calculate overall PPM using all frequencies
+        # Calculate overall PPM using median frequency
         all_freqs = [local_spot['frequency'] for local_spot, _, _ in matches]
-        avg_freq_khz = statistics.mean(all_freqs)
-        avg_freq_hz = avg_freq_khz * 1000
-        overall_ppm = (avg_diff / avg_freq_hz) * 1e6
+        median_freq_khz = statistics.median(all_freqs)
+        median_freq_hz = median_freq_khz * 1000
+        overall_ppm = (median_diff / median_freq_hz) * 1e6
         overall_adjustment = 1.0 + (overall_ppm / 1e6)
         
         print(f"\n{'='*100}")
-        print(f"OVERALL CALIBRATION SUMMARY")
+        print(f"OVERALL CALIBRATION SUMMARY (using median for robustness)")
         print(f"{'='*100}")
-        print(f"Overall average frequency difference: {avg_diff:+.1f} Hz (Local - RBN)")
+        print(f"Overall median frequency difference: {median_diff:+.1f} Hz (Local - RBN)")
         print(f"Overall PPM: {overall_ppm:+.1f}")
         print(f"Overall adjustment factor: {overall_adjustment:.12f}")
         print(f"Total matches: {len(matches)} from {len(unique_spotters)} unique remote spotters")

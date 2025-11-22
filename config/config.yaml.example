@@ -114,7 +114,7 @@ audio:
     sam: 12000    # SAM (Synchronous AM) preset in radiod uses 12 kHz
     fm: 24000     # FM preset in radiod uses 24 kHz
     nfm: 24000    # NFM (Narrow FM) preset in radiod uses 24 kHz
-    iq: 12000     # Generic IQ mode
+    iq: 10000     # Generic IQ mode
     iq48: 48000   # Wide bandwidth IQ output for 48 kHz of real bandwidth
     iq96: 96000  # Wide bandwidth IQ output for 96 kHz of real bandwidth
     iq192: 192000 # Wide bandwidth IQ output for 192 kHz of real bandwidth

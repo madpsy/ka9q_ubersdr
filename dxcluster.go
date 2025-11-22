@@ -19,6 +19,8 @@ type DXSpot struct {
 	Time      time.Time `json:"time"`      // Time of spot
 	Raw       string    `json:"raw"`       // Raw spot line
 	Band      string    `json:"band"`      // Amateur radio band (e.g., "20m", "40m")
+	Country   string    `json:"country"`   // Country name from CTY lookup
+	Continent string    `json:"continent"` // Continent code from CTY lookup
 }
 
 // frequencyToBand converts a frequency in Hz to an amateur radio band name
@@ -500,6 +502,12 @@ func (c *DXClusterClient) parseDXSpot(line string) (DXSpot, bool) {
 	// Rest is comment
 	if len(fields) > 2 {
 		spot.Comment = strings.Join(fields[2:], " ")
+	}
+
+	// Perform CTY lookup for country and continent
+	if ctyInfo := GetCallsignInfo(spot.DXCall); ctyInfo != nil {
+		spot.Country = ctyInfo.Country
+		spot.Continent = ctyInfo.Continent
 	}
 
 	return spot, true

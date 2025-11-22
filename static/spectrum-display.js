@@ -223,10 +223,29 @@ class SpectrumDisplay {
                         y >= pos.y &&
                         y <= pos.y + pos.height) {
 
+                        // Continent name mapping
+                        const continentNames = {
+                            'AF': 'Africa',
+                            'AS': 'Asia',
+                            'EU': 'Europe',
+                            'NA': 'North America',
+                            'SA': 'South America',
+                            'OC': 'Oceania',
+                            'AN': 'Antarctica'
+                        };
+
                         // Show DX spot info
                         const freqStr = this.formatFrequency(pos.spot.frequency);
                         const timeStr = pos.spot.time ? new Date(pos.spot.time).toLocaleTimeString('en-US', { hour12: false, timeZone: 'UTC' }) : 'N/A';
-                        let tooltipText = `${pos.spot.dx_call}: ${freqStr}<br>Time: ${timeStr} UTC<br>Spotter: ${pos.spot.spotter}`;
+                        let tooltipText = `${pos.spot.dx_call}: ${freqStr}<br>Time: ${timeStr} UTC`;
+                        if (pos.spot.country) {
+                            tooltipText += `<br>Country: ${pos.spot.country}`;
+                        }
+                        if (pos.spot.continent) {
+                            const continentName = continentNames[pos.spot.continent] || pos.spot.continent;
+                            tooltipText += ` (${continentName})`;
+                        }
+                        tooltipText += `<br>Spotter: ${pos.spot.spotter}`;
                         if (pos.spot.comment) {
                             tooltipText += `<br>Comment: ${pos.spot.comment}`;
                         }

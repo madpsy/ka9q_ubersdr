@@ -29,6 +29,17 @@ class DXClusterExtension extends DecoderExtension {
         this.spotIdCounter = 0; // Counter for unique spot IDs
         this.ageUpdateInterval = null; // Timer for updating spot ages
 
+        // Continent code to name mapping
+        this.continentNames = {
+            'AF': 'Africa',
+            'AS': 'Asia',
+            'EU': 'Europe',
+            'NA': 'North America',
+            'SA': 'South America',
+            'OC': 'Oceania',
+            'AN': 'Antarctica'
+        };
+
         // Band frequency ranges (in Hz)
         this.bands = {
             '160m': { min: 1800000, max: 2000000 },
@@ -344,7 +355,7 @@ class DXClusterExtension extends DecoderExtension {
             const row = tbody.insertRow();
             row.className = 'no-spots';
             const cell = row.insertCell();
-            cell.colSpan = 5;
+            cell.colSpan = 8;
             cell.textContent = this.spots.length === 0 ? 'Waiting for spots...' : 'No spots match filter';
             // Update count to show 0 filtered of total when no spots match filter
             this.updateCount(0, this.spots.length);
@@ -412,6 +423,16 @@ class DXClusterExtension extends DecoderExtension {
                 e.stopPropagation();
                 this.openQRZ(spot.dx_call);
             });
+
+            // Country
+            const countryCell = row.insertCell();
+            countryCell.className = 'spot-country';
+            countryCell.textContent = spot.country || '';
+
+            // Continent
+            const continentCell = row.insertCell();
+            continentCell.className = 'spot-continent';
+            continentCell.textContent = spot.continent ? (this.continentNames[spot.continent] || spot.continent) : '';
 
             // Spotter
             const spotterCell = row.insertCell();

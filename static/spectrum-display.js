@@ -2914,7 +2914,8 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             const now = Date.now();
 
             // Get throttle delay from global configuration (set by dropdown in app.js)
-            const SCROLL_THROTTLE_MS = window.frequencyScrollDelay || 100;
+            // Optimized for 40 cmd/sec rate limit - default 50ms (20 updates/sec)
+            const SCROLL_THROTTLE_MS = window.frequencyScrollDelay || 50;
 
             // Throttle scroll events to prevent rate limiting
             const timeSinceLastScroll = now - lastScrollTime;

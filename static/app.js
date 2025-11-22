@@ -2698,12 +2698,13 @@ function setMode(mode, preserveBandwidth = false) {
     }
 }
 
-// Throttling for bandwidth slider updates (250ms = 4 updates per second max)
+// Throttling for bandwidth slider updates (100ms = 10 updates per second max)
+// Optimized for 40 cmd/sec rate limit (using 25% of capacity)
 // Store on window to ensure persistence
 if (!window.bandwidthSliderState) {
     window.bandwidthSliderState = {
         lastUpdateTime: 0,
-        throttleMs: 250
+        throttleMs: 100
     };
 }
 
@@ -2717,7 +2718,7 @@ function updateBandwidthDisplay() {
     // Update bandwidth display in status
     updateCurrentBandwidthDisplay(bandwidthLow, bandwidthHigh);
 
-    // Throttle tune updates to 4 per second (250ms interval) - same as Z/X keys
+    // Throttle tune updates to 10 per second (100ms interval) - same as Z/X keys
     const now = Date.now();
     const timeSinceLastUpdate = now - window.bandwidthSliderState.lastUpdateTime;
 
@@ -5614,7 +5615,7 @@ function updateLowpassFilter() {
 // Spectrum Display (Full-band FFT from radiod)
 let spectrumDisplay = null;
 let lastZoomTime = 0;
-const ZOOM_THROTTLE_MS = 250;
+const ZOOM_THROTTLE_MS = 100;
 
 // Bookmark functions moved to bookmark-manager.js
 // They are imported at the top of this file and exposed on window by that module
@@ -6613,7 +6614,7 @@ window.setBufferThreshold = setBufferThreshold;
 // Frequency scroll configuration
 let frequencyScrollMode = '1000-fast'; // Default mode
 let frequencyScrollStep = 1000; // Hz
-let frequencyScrollDelay = 50; // ms (fast mode)
+let frequencyScrollDelay = 50; // ms (optimized for 40 cmd/sec rate limit)
 
 // Toggle frequency scroll dropdown visibility
 function toggleFrequencyScrollDropdown() {
@@ -6644,8 +6645,9 @@ function updateFrequencyScrollMode() {
     frequencyScrollStep = step;
     
     // Set delay based on speed
-    // "slow" = 200ms delay (5 updates/sec), "fast" = 50ms delay (20 updates/sec)
-    frequencyScrollDelay = speed === 'slow' ? 200 : 50;
+    // Optimized for 40 cmd/sec rate limit
+    // "slow" = 100ms delay (10 updates/sec), "fast" = 50ms delay (20 updates/sec)
+    frequencyScrollDelay = speed === 'slow' ? 100 : 50;
     
     // Set global variables for spectrum-display.js to use
     window.frequencyScrollStep = step;

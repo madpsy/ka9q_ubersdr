@@ -372,34 +372,18 @@ export class WebSocketManager {
     }
 
     // Send settings sync message to server
-    // This tells the server what the UI wants for audio
+    // Requests current status to re-sync UI state with server
     sendSettingsSync() {
         // Skip if not connected
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             return;
         }
 
-        // Skip if we don't have connection parameters
-        if (!this.lastConnectionParams) {
-            return;
-        }
-
-        // Get current settings from window globals (may have changed since connection)
-        const frequency = window.getCurrentDialFrequency ? window.getCurrentDialFrequency() : this.lastConnectionParams.frequency;
-        const mode = window.currentMode || this.lastConnectionParams.mode;
-        const bandwidthLow = window.currentBandwidthLow !== undefined ? window.currentBandwidthLow : this.lastConnectionParams.bandwidthLow;
-        const bandwidthHigh = window.currentBandwidthHigh !== undefined ? window.currentBandwidthHigh : this.lastConnectionParams.bandwidthHigh;
-
-        // Build sync message
-        const syncMsg = {
-            type: 'sync',
-            frequency: Math.round(frequency),
-            mode: mode,
-            bandwidthLow: bandwidthLow,
-            bandwidthHigh: bandwidthHigh
-        };
-
-        // Send sync message
-        this.ws.send(JSON.stringify(syncMsg));
+        // Request current status from server
+        // Server will respond with 'status' message containing current frequency, mode, etc.
+        // This re-synchronizes the UI with the actual server state
+        this.ws.send(JSON.stringify({
+            type: 'get_status'
+        }));
     }
 }

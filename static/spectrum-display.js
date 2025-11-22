@@ -3626,7 +3626,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     }
 
     // Send settings sync message to server
-    // This tells the server what the UI wants for both spectrum and audio
+    // Requests current status to re-sync UI state with server
     sendSettingsSync() {
         // Skip if not connected
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -3638,31 +3638,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             return;
         }
 
-        // Get current audio settings from window globals
-        const audioFrequency = window.getCurrentDialFrequency ? window.getCurrentDialFrequency() : this.currentTunedFreq;
-        const audioMode = window.currentMode || 'usb';
-        const audioBandwidthLow = window.currentBandwidthLow || 50;
-        const audioBandwidthHigh = window.currentBandwidthHigh || 3000;
-
-        // Build sync message with both spectrum and audio settings
-        const syncMsg = {
-            type: 'sync',
-            // Spectrum settings (what we want to see)
-            spectrum: {
-                centerFreq: Math.round(this.centerFreq),
-                binBandwidth: this.binBandwidth,
-                binCount: this.binCount
-            },
-            // Audio settings (what we want to hear)
-            audio: {
-                frequency: Math.round(audioFrequency),
-                mode: audioMode,
-                bandwidthLow: audioBandwidthLow,
-                bandwidthHigh: audioBandwidthHigh
-            }
-        };
-
-        // Send sync message
-        this.ws.send(JSON.stringify(syncMsg));
+        // Request current status from server
+        // Server will respond with 'config' message containing current centerFreq, binBandwidth, etc.
+        // This re-synchronizes this.centerFreq with the actual displayed spectrum data
+        this.ws.send(JSON.stringify({
+            type: 'get_status'
+        }));
     }
 }

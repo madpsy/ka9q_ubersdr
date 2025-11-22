@@ -2027,6 +2027,13 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
         );
     }
 
+    // Apply country filter
+    if (cwExtension.countryFilter && cwExtension.countryFilter !== 'all') {
+        filteredSpots = filteredSpots.filter(spot =>
+            spot.country === cwExtension.countryFilter
+        );
+    }
+
     // Apply callsign filter
     if (cwExtension.callsignFilter) {
         filteredSpots = filteredSpots.filter(spot =>

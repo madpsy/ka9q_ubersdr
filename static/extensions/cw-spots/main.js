@@ -18,6 +18,7 @@ class CWSpotsExtension extends DecoderExtension {
         this.snrFilter = null;
         this.wpmFilter = null;
         this.distanceFilter = null;
+        this.countryFilter = 'all'; // Default to all countries
         this.callsignFilter = '';
         this.highlightNew = true;
         this.showBadges = true; // Default to showing badges
@@ -56,6 +57,7 @@ class CWSpotsExtension extends DecoderExtension {
         console.log('CW Spots: onInitialize called');
         this.renderTemplate();
         this.waitForDOMAndSetupHandlers();
+        this.fetchAndPopulateCountries();
         this.updateConnectionStatus();
         this.startConnectionMonitoring();
         this.startAgeUpdates();
@@ -142,6 +144,10 @@ class CWSpotsExtension extends DecoderExtension {
             } else if (e.target.id === 'cw-spots-distance-filter') {
                 const value = e.target.value;
                 this.distanceFilter = value === 'none' ? null : parseInt(value);
+                this.showingAllRows = false;
+                this.filterAndRenderSpots();
+            } else if (e.target.id === 'cw-spots-country-filter') {
+                this.countryFilter = e.target.value;
                 this.showingAllRows = false;
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'cw-spots-show-badges') {
@@ -318,6 +324,8 @@ class CWSpotsExtension extends DecoderExtension {
             if (minDistance !== null && spot.distance_km !== undefined && spot.distance_km !== null) {
                 if (spot.distance_km < minDistance) return false;
             }
+            // Country filter
+            if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) return false;
             // Callsign filter
             if (callsignUpper &&
                 !spot.dx_call.toUpperCase().includes(callsignUpper) &&
@@ -505,6 +513,10 @@ class CWSpotsExtension extends DecoderExtension {
                     if (spot.distance_km !== undefined && spot.distance_km !== null) {
                         if (spot.distance_km < minDistance) return false;
                     }
+                }
+                // Country filter
+                if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
+                    return false;
                 }
                 // Callsign filter
                 if (callsignUpper &&
@@ -1797,7 +1809,42 @@ class CWSpotsExtension extends DecoderExtension {
             this.modalGraphRefreshInterval = null;
         }
     }
-        if (closeBtn) {
+
+    async fetchAndPopulateCountries() {
+        try {
+            const response = await fetch('/api/cty/countries');
+            const data = await response.json();
+
+            if (data.success && data.data && data.data.countries) {
+                // Sort countries alphabetically by name
+                const countries = data.data.countries.sort((a, b) =>
+                    a.name.localeCompare(b.name)
+                );
+
+                // Populate the dropdown
+                const countryFilter = document.getElementById('cw-spots-country-filter');
+                if (countryFilter) {
+                    // Keep the "All Countries" option and add countries
+                    countries.forEach(country => {
+                        const option = document.createElement('option');
+                        option.value = country.name;
+                        option.textContent = country.name;
+                        countryFilter.appendChild(option);
+                    });
+
+                    console.log(`CW Spots: Loaded ${countries.length} countries`);
+                }
+            }
+        } catch (error) {
+            console.error('CW Spots: Failed to fetch countries:', error);
+        }
+    }
+
+    onDisable() {
+        this.stopConnectionMonitoring();
+        this.stopAgeUpdates();
+        this.stopRadioStateMonitoring();
+        this.stopFrequencyMonitoring();
         this.stopFrequencyPolling();
 
         if (this.unsubscribe) {

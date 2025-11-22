@@ -17,6 +17,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.bandFilter = 'all'; // Start with 'all', will be updated on init
         this.snrFilter = null; // Default no limit
         this.distanceFilter = null; // Default no limit
+        this.countryFilter = 'all'; // Default to all countries
         this.callsignFilter = '';
         this.highlightNew = true;
         this.showBadges = true; // Default to showing badges
@@ -57,6 +58,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         console.log('Digital Spots: onInitialize called');
         this.renderTemplate();
         this.waitForDOMAndSetupHandlers();
+        this.fetchAndPopulateCountries();
         this.updateConnectionStatus();
         this.startConnectionMonitoring();
         this.startAgeUpdates();
@@ -145,6 +147,10 @@ class DigitalSpotsExtension extends DecoderExtension {
             } else if (e.target.id === 'digital-spots-distance-filter') {
                 const value = e.target.value;
                 this.distanceFilter = value === 'none' ? null : parseInt(value);
+                this.showingAllRows = false; // Reset display limit
+                this.filterAndRenderSpots();
+            } else if (e.target.id === 'digital-spots-country-filter') {
+                this.countryFilter = e.target.value;
                 this.showingAllRows = false; // Reset display limit
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'digital-spots-show-badges') {
@@ -315,6 +321,8 @@ class DigitalSpotsExtension extends DecoderExtension {
             if (minDistance !== null && spot.distance_km !== undefined && spot.distance_km !== null) {
                 if (spot.distance_km < minDistance) return false;
             }
+            // Country filter
+            if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) return false;
             // Callsign filter
             if (callsignUpper &&
                 !spot.callsign.toUpperCase().includes(callsignUpper) &&
@@ -534,6 +542,11 @@ class DigitalSpotsExtension extends DecoderExtension {
                             return false;
                         }
                     }
+                }
+
+                // Country filter
+                if (this.countryFilter !== 'all' && spot.country !== this.countryFilter) {
+                    return false;
                 }
 
                 // Callsign filter LAST - most expensive (string operations)
@@ -2028,6 +2041,36 @@ class DigitalSpotsExtension extends DecoderExtension {
         if (this.modalGraphRefreshInterval) {
             clearInterval(this.modalGraphRefreshInterval);
             this.modalGraphRefreshInterval = null;
+        }
+    }
+
+    async fetchAndPopulateCountries() {
+        try {
+            const response = await fetch('/api/cty/countries');
+            const data = await response.json();
+
+            if (data.success && data.data && data.data.countries) {
+                // Sort countries alphabetically by name
+                const countries = data.data.countries.sort((a, b) =>
+                    a.name.localeCompare(b.name)
+                );
+
+                // Populate the dropdown
+                const countryFilter = document.getElementById('digital-spots-country-filter');
+                if (countryFilter) {
+                    // Keep the "All Countries" option and add countries
+                    countries.forEach(country => {
+                        const option = document.createElement('option');
+                        option.value = country.name;
+                        option.textContent = country.name;
+                        countryFilter.appendChild(option);
+                    });
+
+                    console.log(`Digital Spots: Loaded ${countries.length} countries`);
+                }
+            }
+        } catch (error) {
+            console.error('Digital Spots: Failed to fetch countries:', error);
         }
     }
 }

@@ -29,7 +29,8 @@ var (
 	wsprPattern = regexp.MustCompile(`^(\d{6})\s+(\d{4})\s+\d+\s+(-?\d+)\s+([-\d.]+)\s+([\d.]+)\s+(\S+)\s+(.+)$`)
 
 	// Callsign pattern (basic validation)
-	callsignPattern = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z]$`)
+	// Supports standard callsigns and portable/mobile suffixes like /P, /M, /T, etc.
+	callsignPattern = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z](/[A-Z0-9]+)?$`)
 
 	// Grid locator pattern (4, 6, or 8 characters)
 	gridPattern = regexp.MustCompile(`^[A-R]{2}[0-9]{2}([a-x]{2}([0-9]{2})?)?$`)
@@ -160,7 +161,8 @@ func ParseWSPRLine(line string, dialFreq uint64) (*DecodeInfo, error) {
 	txFrequency := uint64(freqMHz * 1e6)
 
 	// Parse callsign (matches[6] now, drift removed from wsprd output)
-	callsign := strings.TrimSpace(matches[6])
+	// Strip angle brackets if present (some decoders output <CALLSIGN>)
+	callsign := strings.Trim(strings.TrimSpace(matches[6]), "<>")
 
 	// Parse the remaining fields (grid and dBm, with grid being optional)
 	remaining := strings.Fields(strings.TrimSpace(matches[7]))
@@ -265,7 +267,10 @@ func extractCallsignLocator(message string) (string, string) {
 
 // isValidCallsign checks if a string looks like a valid amateur radio callsign
 func isValidCallsign(s string) bool {
-	if len(s) < 3 || len(s) > 10 {
+	// Strip angle brackets if present (some decoders output <CALLSIGN>)
+	s = strings.Trim(s, "<>")
+
+	if len(s) < 3 || len(s) > 15 {
 		return false
 	}
 	// Convert to uppercase for pattern matching
@@ -306,7 +311,7 @@ func isValidGridLocatorForMode(s string, mode DecoderMode) bool {
 			return false
 		}
 	}
-	
+
 	return isValidGridLocator(s)
 }
 

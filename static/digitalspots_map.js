@@ -1970,6 +1970,7 @@ class DigitalSpotsMap {
                         <span style="color: ${bandColor};">●</span> ${spot.band}
                         ${spot.snr !== undefined ? ` • ${spot.snr >= 0 ? '+' : ''}${spot.snr} dB` : ''}
                         ${spot.frequency ? ` • ${(spot.frequency / 1e6).toFixed(3)} MHz` : ''}
+                        ${spot.distance_km !== undefined && spot.distance_km !== null ? ` • ${Math.round(spot.distance_km)} km` : ''}
                     </div>
                     ${spot.message ? `<div style="color: #aaa; font-size: 10px; margin-top: 4px;">${spot.message}</div>` : ''}
                 </div>

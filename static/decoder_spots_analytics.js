@@ -808,7 +808,27 @@
         let activeNowHTML = '';
         if (type === 'country') {
             const activeBands = getActiveBandsNow(entity);
+            const nextBands = getNextActiveBands(entity);
+            
+            // Show next bands if 2 or fewer active bands
+            const shouldShowNextBands = activeBands.length <= 2 && nextBands.length > 0;
+            
             if (activeBands.length > 0) {
+                let nextBandsHTML = '';
+                if (shouldShowNextBands) {
+                    nextBandsHTML = `
+                        <div class="next-bands-list" style="margin-top: 10px;">
+                            <div style="font-weight: bold; margin-bottom: 5px;">Try these bands next:</div>
+                            ${nextBands.map(band => `
+                                <div class="next-band-item">
+                                    <span class="next-band-name">${band.band}</span>
+                                    <span class="next-band-time">opens at ${band.localTime}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+                
                 activeNowHTML = `
                     <div class="active-now-section">
                         <div class="active-now-header">
@@ -824,6 +844,7 @@
                                 </div>
                             `).join('')}
                         </div>
+                        ${nextBandsHTML}
                     </div>
                 `;
             } else {

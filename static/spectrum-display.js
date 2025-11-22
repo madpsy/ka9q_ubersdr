@@ -961,12 +961,27 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 // Update zoom level: how much we've zoomed from initial
                 this.zoomLevel = this.initialBinBandwidth / this.binBandwidth;
 
-                const startFreq = this.centerFreq - this.totalBandwidth / 2;
-                const endFreq = this.centerFreq + this.totalBandwidth / 2;
-                console.log(`Spectrum config: ${this.binCount} bins @ ${this.binBandwidth.toFixed(1)} Hz (zoom ${this.zoomLevel.toFixed(2)}x)`);
-                console.log(`  Center: ${(this.centerFreq/1e6).toFixed(3)} MHz`);
-                console.log(`  Range: ${(startFreq/1e6).toFixed(3)} - ${(endFreq/1e6).toFixed(3)} MHz`);
-                console.log(`  Total BW: ${(this.totalBandwidth/1e6).toFixed(3)} MHz`);
+                // Only log config changes if they're significant (not from periodic sync)
+                // Log if this is the first config OR if values actually changed
+                if (!this.lastLoggedConfig ||
+                    this.lastLoggedConfig.centerFreq !== this.centerFreq ||
+                    this.lastLoggedConfig.binBandwidth !== this.binBandwidth ||
+                    this.lastLoggedConfig.binCount !== this.binCount) {
+                    
+                    const startFreq = this.centerFreq - this.totalBandwidth / 2;
+                    const endFreq = this.centerFreq + this.totalBandwidth / 2;
+                    console.log(`Spectrum config: ${this.binCount} bins @ ${this.binBandwidth.toFixed(1)} Hz (zoom ${this.zoomLevel.toFixed(2)}x)`);
+                    console.log(`  Center: ${(this.centerFreq/1e6).toFixed(3)} MHz`);
+                    console.log(`  Range: ${(startFreq/1e6).toFixed(3)} - ${(endFreq/1e6).toFixed(3)} MHz`);
+                    console.log(`  Total BW: ${(this.totalBandwidth/1e6).toFixed(3)} MHz`);
+                    
+                    // Store for next comparison
+                    this.lastLoggedConfig = {
+                        centerFreq: this.centerFreq,
+                        binBandwidth: this.binBandwidth,
+                        binCount: this.binCount
+                    };
+                }
 
                 // Update cursor style based on new bandwidth
                 this.updateCursorStyle();

@@ -1579,8 +1579,14 @@ function updateStatus(msg) {
     // Update page title
     updatePageTitle();
 
-    // Sample rate display removed - no longer shown in UI
-    log(`Status: ${formatFrequency(msg.frequency)} ${msg.mode.toUpperCase()}`);
+    // Only log status updates that are NOT from periodic sync (i.e., user-initiated changes)
+    // Check if this is a significant change by comparing with last logged values
+    if (!window.lastLoggedStatus ||
+        window.lastLoggedStatus.frequency !== msg.frequency ||
+        window.lastLoggedStatus.mode !== msg.mode) {
+        log(`Status: ${formatFrequency(msg.frequency)} ${msg.mode.toUpperCase()}`);
+        window.lastLoggedStatus = { frequency: msg.frequency, mode: msg.mode };
+    }
 }
 
 // Handle audio data
@@ -5653,7 +5659,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 log('Spectrum display disconnected');
             },
             onConfig: (config) => {
-                log(`Spectrum: ${config.binCount} bins @ ${config.binBandwidth} Hz, ${formatFrequency(config.centerFreq)}`);
+                // Only log config changes that are significant (not from periodic sync)
+                // Check if this is a user-initiated change
+                if (!window.lastLoggedSpectrumConfig ||
+                    window.lastLoggedSpectrumConfig.centerFreq !== config.centerFreq ||
+                    window.lastLoggedSpectrumConfig.binBandwidth !== config.binBandwidth ||
+                    window.lastLoggedSpectrumConfig.binCount !== config.binCount) {
+                    log(`Spectrum: ${config.binCount} bins @ ${config.binBandwidth} Hz, ${formatFrequency(config.centerFreq)}`);
+                    window.lastLoggedSpectrumConfig = {
+                        centerFreq: config.centerFreq,
+                        binBandwidth: config.binBandwidth,
+                        binCount: config.binCount
+                    };
+                }
                 // Update cursor with current frequency input value
                 updateSpectrumCursor();
                 // Update zoom display with new zoom level from config

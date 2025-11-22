@@ -342,6 +342,88 @@ h1 {
     transform: scale(1.05);
 }
 
+/* Active Now Section */
+.active-now-section {
+    margin-bottom: 15px;
+    padding: 15px;
+    background: rgba(76, 175, 80, 0.15);
+    border-radius: 8px;
+    border: 2px solid rgba(76, 175, 80, 0.5);
+    box-shadow: 0 0 15px rgba(76, 175, 80, 0.3);
+    animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+    0%, 100% {
+        box-shadow: 0 0 15px rgba(76, 175, 80, 0.3);
+    }
+    50% {
+        box-shadow: 0 0 25px rgba(76, 175, 80, 0.5);
+    }
+}
+
+.active-now-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 1.05em;
+}
+
+.active-now-icon {
+    font-size: 1.2em;
+    animation: blink 1.5s ease-in-out infinite;
+}
+
+@keyframes blink {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.3;
+    }
+}
+
+.active-now-time {
+    font-size: 0.9em;
+    opacity: 0.8;
+    font-weight: normal;
+    margin-left: auto;
+}
+
+.active-now-bands {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.active-now-band {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    border-left: 3px solid #4CAF50;
+    transition: all 0.3s ease;
+}
+
+.active-now-band:hover {
+    background: rgba(255, 255, 255, 0.15);
+    transform: translateX(5px);
+}
+
+.active-now-band-name {
+    font-weight: bold;
+    font-size: 1.1em;
+    color: #4CAF50;
+}
+
+.active-now-band-info {
+    font-size: 0.9em;
+    opacity: 0.9;
+}
+
 /* Hourly Chart */
 .hourly-chart {
     margin-top: 10px;

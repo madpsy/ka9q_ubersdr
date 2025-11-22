@@ -788,9 +788,9 @@
         const card = document.createElement('div');
         card.className = 'entity-card';
 
-        const name = type === 'country' ? entity.country : 
+        const name = type === 'country' ? entity.country :
                      (continentNames[entity.continent] || entity.continent);
-        const subtitle = type === 'country' ? 
+        const subtitle = type === 'country' ?
                         (continentNames[entity.continent] || entity.continent) :
                         `${entity.countries_count} countries`;
 
@@ -803,6 +803,31 @@
                 <div class="entity-spots">${entity.total_spots.toLocaleString()} spots</div>
             </div>
         `;
+
+        // Add "Active Now" section for countries
+        let activeNowHTML = '';
+        if (type === 'country') {
+            const activeBands = getActiveBandsNow(entity);
+            if (activeBands.length > 0) {
+                activeNowHTML = `
+                    <div class="active-now-section">
+                        <div class="active-now-header">
+                            <span class="active-now-icon">🔴</span>
+                            <strong>Active Bands Right Now</strong>
+                            <span class="active-now-time">(${getCurrentLocalTime()})</span>
+                        </div>
+                        <div class="active-now-bands">
+                            ${activeBands.map(band => `
+                                <div class="active-now-band">
+                                    <span class="active-now-band-name">${band.band}</span>
+                                    <span class="active-now-band-info">${band.info}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+        }
 
         // Find the band with most spots
         const maxBandSpots = Math.max(...entity.bands.map(b => b.spots));
@@ -871,8 +896,60 @@
             `;
         });
 
-        card.innerHTML = headerHTML + '<div class="bands-container">' + bandsHTML + '</div>';
+        card.innerHTML = headerHTML + activeNowHTML + '<div class="bands-container">' + bandsHTML + '</div>';
         return card;
+    }
+
+    function getCurrentLocalTime() {
+        const now = new Date();
+        return now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    function getCurrentUTCHour() {
+        const now = new Date();
+        return now.getUTCHours();
+    }
+
+    function getActiveBandsNow(entity) {
+        const currentUTCHour = getCurrentUTCHour();
+        const activeBands = [];
+
+        entity.bands.forEach(band => {
+            // Check if current UTC hour is in the active hours for this band
+            const activeHours = Object.entries(band.hourly_distribution)
+                .filter(([hour, count]) => count > 0)
+                .map(([hour, count]) => parseInt(hour));
+
+            if (activeHours.includes(currentUTCHour)) {
+                // Get the spot count for this hour
+                const hourKey = String(currentUTCHour).padStart(2, '0');
+                const spotsThisHour = band.hourly_distribution[hourKey] || 0;
+                
+                // Check if this is one of the best hours
+                const isBestHour = band.best_hours_utc.includes(currentUTCHour);
+                
+                let info = `${spotsThisHour} spots this hour`;
+                if (isBestHour) {
+                    info += ' ⭐';
+                }
+
+                activeBands.push({
+                    band: band.band,
+                    info: info,
+                    spots: spotsThisHour,
+                    isBest: isBestHour
+                });
+            }
+        });
+
+        // Sort by spot count (descending) and whether it's a best hour
+        activeBands.sort((a, b) => {
+            if (a.isBest && !b.isBest) return -1;
+            if (!a.isBest && b.isBest) return 1;
+            return b.spots - a.spots;
+        });
+
+        return activeBands;
     }
 
     function createHourlyChart(hourlyDist) {

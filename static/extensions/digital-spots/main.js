@@ -2056,19 +2056,28 @@ class DigitalSpotsExtension extends DecoderExtension {
                     a.name.localeCompare(b.name)
                 );
 
-                // Populate the dropdown
-                const countryFilter = document.getElementById('digital-spots-country-filter');
-                if (countryFilter) {
-                    // Keep the "All Countries" option and add countries
-                    countries.forEach(country => {
-                        const option = document.createElement('option');
-                        option.value = country.name;
-                        option.textContent = country.name;
-                        countryFilter.appendChild(option);
-                    });
+                // Wait for DOM element to be available
+                const waitForDropdown = (attempts = 0) => {
+                    const maxAttempts = 20;
+                    const countryFilter = document.getElementById('digital-spots-country-filter');
 
-                    console.log(`Digital Spots: Loaded ${countries.length} countries`);
-                }
+                    if (countryFilter) {
+                        // Keep the "All Countries" option and add countries
+                        countries.forEach(country => {
+                            const option = document.createElement('option');
+                            option.value = country.name;
+                            option.textContent = country.name;
+                            countryFilter.appendChild(option);
+                        });
+                        console.log(`Digital Spots: Loaded ${countries.length} countries`);
+                    } else if (attempts < maxAttempts) {
+                        setTimeout(() => waitForDropdown(attempts + 1), 100);
+                    } else {
+                        console.error('Digital Spots: Country filter dropdown not found after', maxAttempts, 'attempts');
+                    }
+                };
+
+                waitForDropdown();
             }
         } catch (error) {
             console.error('Digital Spots: Failed to fetch countries:', error);

@@ -1016,6 +1016,11 @@
 
             if (activeHours.length === 0) return;
 
+            // Skip this band if it's currently active
+            if (activeHours.includes(currentUTCHour)) {
+                return;
+            }
+
             // Find the next active hour after current hour
             let nextHour = null;
             for (let hour of activeHours) {

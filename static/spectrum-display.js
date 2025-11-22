@@ -944,12 +944,14 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 // Track server-confirmed center frequency for prediction sync
                 this.lastServerCenterFreq = msg.centerFreq;
 
-                // Reset prediction offset when server confirms new position
+                // CRITICAL FIX: Always clear prediction offset when not dragging
+                // This prevents lingering offsets from causing cursor/spectrum desync
                 if (this.isDragging) {
                     // Adjust offset to account for server's actual position
                     const serverOffset = msg.centerFreq - this.dragStartFreq;
                     this.predictedFreqOffset = serverOffset;
                 } else {
+                    // Always reset prediction when server confirms position and we're not dragging
                     this.predictedFreqOffset = 0;
                 }
 
@@ -2126,8 +2128,11 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
     drawTunedFrequencyCursorOnly() {
         if (!this.currentTunedFreq || !this.totalBandwidth) return;
 
-        // Apply client-side prediction offset during dragging
-        const effectiveCenterFreq = this.centerFreq + this.predictedFreqOffset;
+        // CRITICAL FIX: Use server frequency directly for cursor position
+        // Only apply prediction offset during active dragging to prevent desync
+        const effectiveCenterFreq = this.isDragging ?
+            this.centerFreq + this.predictedFreqOffset :
+            this.centerFreq;
 
         // Calculate frequency range from server data
         const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
@@ -3593,8 +3598,20 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             return;
         }
 
+        // CRITICAL FIX: Clear any lingering prediction offset when not dragging
+        // This prevents cursor/spectrum desync from persisting
+        if (!this.isDragging && this.predictedFreqOffset !== 0) {
+            console.log('Sync check: Clearing lingering prediction offset to prevent desync');
+            this.predictedFreqOffset = 0;
+            // Redraw to apply correction immediately
+            if (this.spectrumData && this.spectrumData.length > 0) {
+                this.draw();
+            }
+            return;
+        }
+
         // Skip check while actively dragging (prediction is intentionally offset)
-        if (this.isDragging || this.predictedFreqOffset !== 0) {
+        if (this.isDragging) {
             return;
         }
 

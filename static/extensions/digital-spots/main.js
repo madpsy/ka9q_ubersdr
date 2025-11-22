@@ -152,6 +152,7 @@ class DigitalSpotsExtension extends DecoderExtension {
             } else if (e.target.id === 'digital-spots-country-filter') {
                 this.countryFilter = e.target.value;
                 this.showingAllRows = false; // Reset display limit
+                this.filteredSpotsCache = null; // Invalidate cache
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'digital-spots-show-badges') {
                 this.showBadges = e.target.checked;

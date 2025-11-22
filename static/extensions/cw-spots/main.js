@@ -149,6 +149,7 @@ class CWSpotsExtension extends DecoderExtension {
             } else if (e.target.id === 'cw-spots-country-filter') {
                 this.countryFilter = e.target.value;
                 this.showingAllRows = false;
+                this.filteredSpotsCache = null; // Invalidate cache
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'cw-spots-show-badges') {
                 this.showBadges = e.target.checked;
@@ -259,7 +260,6 @@ class CWSpotsExtension extends DecoderExtension {
 
         // Invalidate spectrum marker cache when spots change
         if (window.spectrumDisplay) {
-            console.log('CW Spots: Invalidating marker cache and redrawing spectrum');
             window.spectrumDisplay.invalidateMarkerCache();
             window.spectrumDisplay.draw();
         }
@@ -1920,10 +1920,6 @@ function drawCWSpotsOnSpectrum(spectrumDisplay, log) {
     }
 
     if (!cwExtension.enabled) {
-        if (shouldLog) {
-            console.log('CW Spots: Extension not enabled');
-            lastCWDebugLog = now;
-        }
         cwSpotPositions = [];
         window.cwSpotPositions = cwSpotPositions;
         return;

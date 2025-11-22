@@ -428,6 +428,13 @@ class DigitalSpotsExtension extends DecoderExtension {
         const countryCell = document.createElement('td');
         countryCell.className = 'spot-country';
         countryCell.textContent = spot.country || '';
+        if (spot.country) {
+            countryCell.style.cursor = 'pointer';
+            countryCell.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.filterByCountry(spot.country);
+            });
+        }
         row.appendChild(countryCell);
 
         // Grid
@@ -655,6 +662,13 @@ class DigitalSpotsExtension extends DecoderExtension {
                 const countryCell = document.createElement('td');
                 countryCell.className = 'spot-country';
                 countryCell.textContent = spot.country || '';
+                if (spot.country) {
+                    countryCell.style.cursor = 'pointer';
+                    countryCell.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.filterByCountry(spot.country);
+                    });
+                }
                 row.appendChild(countryCell);
 
                 // Grid
@@ -2042,6 +2056,18 @@ class DigitalSpotsExtension extends DecoderExtension {
         if (this.modalGraphRefreshInterval) {
             clearInterval(this.modalGraphRefreshInterval);
             this.modalGraphRefreshInterval = null;
+        }
+    }
+
+    filterByCountry(country) {
+        // Set the country filter dropdown
+        const countryFilter = document.getElementById('digital-spots-country-filter');
+        if (countryFilter) {
+            countryFilter.value = country;
+            this.countryFilter = country;
+            this.showingAllRows = false;
+            this.filteredSpotsCache = null;
+            this.filterAndRenderSpots();
         }
     }
 

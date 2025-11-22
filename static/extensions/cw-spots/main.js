@@ -151,6 +151,11 @@ class CWSpotsExtension extends DecoderExtension {
                 this.showingAllRows = false;
                 this.filteredSpotsCache = null; // Invalidate cache
                 this.filterAndRenderSpots();
+                // Redraw spectrum markers with new filter
+                if (window.spectrumDisplay) {
+                    window.spectrumDisplay.invalidateMarkerCache();
+                    window.spectrumDisplay.draw();
+                }
             } else if (e.target.id === 'cw-spots-show-badges') {
                 this.showBadges = e.target.checked;
                 this.updateBadges();
@@ -419,6 +424,13 @@ class CWSpotsExtension extends DecoderExtension {
         const countryCell = document.createElement('td');
         countryCell.className = 'spot-country';
         countryCell.textContent = spot.country || '';
+        if (spot.country) {
+            countryCell.style.cursor = 'pointer';
+            countryCell.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.filterByCountry(spot.country);
+            });
+        }
         row.appendChild(countryCell);
 
         // Distance
@@ -1807,6 +1819,23 @@ class CWSpotsExtension extends DecoderExtension {
         if (this.modalGraphRefreshInterval) {
             clearInterval(this.modalGraphRefreshInterval);
             this.modalGraphRefreshInterval = null;
+        }
+    }
+
+    filterByCountry(country) {
+        // Set the country filter dropdown
+        const countryFilter = document.getElementById('cw-spots-country-filter');
+        if (countryFilter) {
+            countryFilter.value = country;
+            this.countryFilter = country;
+            this.showingAllRows = false;
+            this.filteredSpotsCache = null;
+            this.filterAndRenderSpots();
+            // Redraw spectrum markers with new filter
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.invalidateMarkerCache();
+                window.spectrumDisplay.draw();
+            }
         }
     }
 

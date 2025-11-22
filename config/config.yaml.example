@@ -64,8 +64,8 @@ server:
   # This limits how many commands (tune, zoom, pan, etc.) a user can send per second
   # Applies separately to audio and spectrum channels (e.g., 20 means 20 audio commands/sec + 20 spectrum commands/sec)
   # Set to 0 to disable rate limiting
-  # Recommended: 20 (allows smooth dragging with 50ms throttle while preventing abuse)
-  cmd_rate_limit: 20
+  # Recommended: 40 (allows smooth dragging while preventing abuse)
+  cmd_rate_limit: 40
   # WebSocket connection rate limit per IP (connections per second)
   # This limits how many new WebSocket connections can be established from a single IP per second
   # Helps prevent connection flooding and DoS attacks

@@ -1,13 +1,13 @@
 // Bandwidth Control Module
 // Handles keyboard shortcuts (z/x) for adjusting bandwidth with mode-specific behavior
 
-// Throttling for bandwidth adjustments (100ms = 10 updates per second max)
-// Optimized for 40 cmd/sec rate limit (using 25% of capacity)
+// Throttling for bandwidth adjustments (25ms = 40 updates per second max)
+// Optimized for 40 cmd/sec rate limit (using full capacity)
 // Store on window to ensure persistence across module reloads
 if (!window.bandwidthControlState) {
     window.bandwidthControlState = {
         lastAdjustTime: 0,
-        throttleMs: 100
+        throttleMs: 25
     };
 }
 
@@ -16,7 +16,7 @@ if (!window.bandwidthControlState) {
  * @param {number} direction - 1 for increase, -1 for decrease
  */
 export function adjustBandwidth(direction) {
-    // Throttle updates to 10 per second (100ms interval)
+    // Throttle updates to 40 per second (25ms interval)
     const now = Date.now();
     const timeSinceLastAdjust = now - window.bandwidthControlState.lastAdjustTime;
     

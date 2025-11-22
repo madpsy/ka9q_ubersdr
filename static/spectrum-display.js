@@ -992,13 +992,9 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 break;
 
             case 'spectrum':
-                // DEBUG: Check if spectrum message has frequency info
-                if (msg.frequency) {
-                    console.log(`SPECTRUM DATA DEBUG: Message includes frequency=${(msg.frequency/1e6).toFixed(6)} MHz`);
-                    console.log(`SPECTRUM DATA DEBUG: Current this.centerFreq=${(this.centerFreq/1e6).toFixed(6)} MHz`);
-                    if (Math.abs(msg.frequency - this.centerFreq) > 1000) {
-                        console.warn(`⚠️ SPECTRUM MISMATCH: Data freq ${(msg.frequency/1e6).toFixed(6)} MHz != UI centerFreq ${(this.centerFreq/1e6).toFixed(6)} MHz (diff: ${((msg.frequency - this.centerFreq)/1000).toFixed(1)} kHz)`);
-                    }
+                // Check if spectrum data frequency mismatches UI state (indicates drift)
+                if (msg.frequency && Math.abs(msg.frequency - this.centerFreq) > 1000) {
+                    console.warn(`⚠️ SPECTRUM MISMATCH: Data=${(msg.frequency/1e6).toFixed(3)} MHz, UI=${(this.centerFreq/1e6).toFixed(3)} MHz, diff=${((msg.frequency - this.centerFreq)/1000).toFixed(1)} kHz`);
                 }
                 
                 // Unwrap FFT bin ordering from radiod
@@ -1842,14 +1838,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             if (!lineGraphDragDidMove && this.config.onFrequencyClick && x >= 0 && x < this.width) {
                 // Calculate frequency from click position
                 const startFreq = this.centerFreq - this.totalBandwidth / 2;
-                const endFreq = this.centerFreq + this.totalBandwidth / 2;
                 let freq = startFreq + (x / this.width) * this.totalBandwidth;
-
-                // DEBUG: Log click calculation details
-                console.log(`LINE GRAPH CLICK DEBUG: x=${x}, width=${this.width}, centerFreq=${(this.centerFreq/1e6).toFixed(6)} MHz`);
-                console.log(`LINE GRAPH CLICK DEBUG: startFreq=${(startFreq/1e6).toFixed(6)} MHz, endFreq=${(endFreq/1e6).toFixed(6)} MHz`);
-                console.log(`LINE GRAPH CLICK DEBUG: totalBandwidth=${(this.totalBandwidth/1e6).toFixed(6)} MHz`);
-                console.log(`LINE GRAPH CLICK DEBUG: calculated freq=${(freq/1e6).toFixed(6)} MHz (before snap)`);
 
                 // Apply 1 KHz snap if enabled and in USB/LSB mode
                 if (this.snapEnabled) {
@@ -1863,7 +1852,6 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                         const adjustedFreq = freq - 200;
                         freq = Math.round(adjustedFreq / 1000) * 1000;
                     }
-                    console.log(`LINE GRAPH CLICK DEBUG: after snap freq=${(freq/1e6).toFixed(6)} MHz`);
                 }
 
                 // Set flag to skip auto-pan since this frequency change is from clicking
@@ -2830,14 +2818,7 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 if (this.config.onFrequencyClick) {
                     // Calculate frequency from server data range
                     const startFreq = this.centerFreq - this.totalBandwidth / 2;
-                    const endFreq = this.centerFreq + this.totalBandwidth / 2;
                     let freq = startFreq + (x / this.width) * this.totalBandwidth;
-
-                    // DEBUG: Log click calculation details
-                    console.log(`CLICK DEBUG: x=${x}, width=${this.width}, centerFreq=${(this.centerFreq/1e6).toFixed(6)} MHz`);
-                    console.log(`CLICK DEBUG: startFreq=${(startFreq/1e6).toFixed(6)} MHz, endFreq=${(endFreq/1e6).toFixed(6)} MHz`);
-                    console.log(`CLICK DEBUG: totalBandwidth=${(this.totalBandwidth/1e6).toFixed(6)} MHz`);
-                    console.log(`CLICK DEBUG: calculated freq=${(freq/1e6).toFixed(6)} MHz (before snap)`);
 
                     // Apply 1 KHz snap if enabled and in USB/LSB mode
                     if (this.snapEnabled) {
@@ -2851,7 +2832,6 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                             const adjustedFreq = freq - 200;
                             freq = Math.round(adjustedFreq / 1000) * 1000;
                         }
-                        console.log(`CLICK DEBUG: after snap freq=${(freq/1e6).toFixed(6)} MHz`);
                     }
 
                     // Set flag to skip auto-pan since this frequency change is from clicking

@@ -992,6 +992,15 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
                 break;
 
             case 'spectrum':
+                // DEBUG: Check if spectrum message has frequency info
+                if (msg.frequency) {
+                    console.log(`SPECTRUM DATA DEBUG: Message includes frequency=${(msg.frequency/1e6).toFixed(6)} MHz`);
+                    console.log(`SPECTRUM DATA DEBUG: Current this.centerFreq=${(this.centerFreq/1e6).toFixed(6)} MHz`);
+                    if (Math.abs(msg.frequency - this.centerFreq) > 1000) {
+                        console.warn(`⚠️ SPECTRUM MISMATCH: Data freq ${(msg.frequency/1e6).toFixed(6)} MHz != UI centerFreq ${(this.centerFreq/1e6).toFixed(6)} MHz (diff: ${((msg.frequency - this.centerFreq)/1000).toFixed(1)} kHz)`);
+                    }
+                }
+                
                 // Unwrap FFT bin ordering from radiod
                 // radiod sends: [positive freqs (DC to +Nyquist), negative freqs (-Nyquist to DC)]
                 // We need: [negative freqs, positive freqs] for low-to-high frequency display

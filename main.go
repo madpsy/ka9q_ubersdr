@@ -27,6 +27,9 @@ var DebugMode bool
 // Global stats flag
 var StatsMode bool
 
+// Global start time for process uptime tracking
+var StartTime time.Time
+
 // responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
 	http.ResponseWriter
@@ -146,6 +149,9 @@ func gzipHandler(fn http.HandlerFunc) http.HandlerFunc {
 }
 
 func main() {
+	// Record start time for uptime tracking
+	StartTime = time.Now()
+	
 	// Parse command line flags
 	configDir := flag.String("config-dir", ".", "Directory containing configuration files")
 	configFile := flag.String("config", "config.yaml", "Path to configuration file")

@@ -875,13 +875,13 @@
                 document.getElementById('cwskimmerButtons').style.display = 'flex';
                 loadCWSkimmerConfig();
             } else if (tab === 'monitor') {
-                document.querySelector('.tab:nth-child(8)').classList.add('active');
+                document.querySelector('.tab:nth-child(9)').classList.add('active');
                 document.getElementById('monitorTab').classList.add('active');
                 document.getElementById('monitorButtons').style.display = 'flex';
                 loadMonitorHealth();
                 startMonitorAutoRefresh();
             } else if (tab === 'system') {
-                document.querySelector('.tab:nth-child(9)').classList.add('active');
+                document.querySelector('.tab:nth-child(10)').classList.add('active');
                 document.getElementById('systemTab').classList.add('active');
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();
@@ -3828,6 +3828,7 @@
 
             // Create sections for each stat
             const sections = [
+                { title: 'UberSDR Process', key: 'ubersdr', icon: '🚀' },
                 { title: 'System Uptime', key: 'uptime', icon: '⏱️' },
                 { title: 'Disk Usage', key: 'disk', icon: '💾' },
                 { title: 'Memory Usage', key: 'memory', icon: '🧠' }
@@ -3841,18 +3842,48 @@
                 title.textContent = `${section.icon} ${section.title}`;
                 sectionDiv.appendChild(title);
 
-                const pre = document.createElement('pre');
-                pre.style.background = '#fff';
-                pre.style.padding = '15px';
-                pre.style.borderRadius = '5px';
-                pre.style.overflow = 'auto';
-                pre.style.fontFamily = 'monospace';
-                pre.style.fontSize = '13px';
-                pre.style.lineHeight = '1.5';
-                pre.style.whiteSpace = 'pre-wrap';
-                pre.style.wordWrap = 'break-word';
-                pre.textContent = stats[section.key] || 'No data available';
-                sectionDiv.appendChild(pre);
+                // Special handling for UberSDR process section
+                if (section.key === 'ubersdr') {
+                    const infoDiv = document.createElement('div');
+                    infoDiv.style.background = '#fff';
+                    infoDiv.style.padding = '15px';
+                    infoDiv.style.borderRadius = '5px';
+                    
+                    // Parse and format uptime
+                    const uptime = stats['ubersdr_uptime'] || 'N/A';
+                    const uptimeDiv = document.createElement('div');
+                    uptimeDiv.style.marginBottom = '10px';
+                    uptimeDiv.innerHTML = `<strong>Uptime:</strong> ${uptime}`;
+                    infoDiv.appendChild(uptimeDiv);
+                    
+                    // Display memory usage (already formatted by backend)
+                    const memory = stats['ubersdr_memory'] || 'N/A';
+                    const memoryDiv = document.createElement('div');
+                    memoryDiv.style.marginBottom = '10px';
+                    memoryDiv.innerHTML = `<strong>Memory Usage:</strong> ${memory}`;
+                    infoDiv.appendChild(memoryDiv);
+                    
+                    // Display goroutine count
+                    const goroutines = stats['ubersdr_goroutines'] || 'N/A';
+                    const goroutinesDiv = document.createElement('div');
+                    goroutinesDiv.innerHTML = `<strong>Goroutines:</strong> ${goroutines}`;
+                    infoDiv.appendChild(goroutinesDiv);
+                    
+                    sectionDiv.appendChild(infoDiv);
+                } else {
+                    const pre = document.createElement('pre');
+                    pre.style.background = '#fff';
+                    pre.style.padding = '15px';
+                    pre.style.borderRadius = '5px';
+                    pre.style.overflow = 'auto';
+                    pre.style.fontFamily = 'monospace';
+                    pre.style.fontSize = '13px';
+                    pre.style.lineHeight = '1.5';
+                    pre.style.whiteSpace = 'pre-wrap';
+                    pre.style.wordWrap = 'break-word';
+                    pre.textContent = stats[section.key] || 'No data available';
+                    sectionDiv.appendChild(pre);
+                }
 
                 container.appendChild(sectionDiv);
             });

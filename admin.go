@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -2597,6 +2598,36 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 
 	// Execute system commands and capture output
 	stats := make(map[string]interface{})
+
+	// Get UberSDR process information using Go runtime
+	uptime := time.Since(StartTime)
+	days := int(uptime.Hours() / 24)
+	hours := int(uptime.Hours()) % 24
+	minutes := int(uptime.Minutes()) % 60
+	seconds := int(uptime.Seconds()) % 60
+	
+	// Format uptime similar to ps output
+	var uptimeStr string
+	if days > 0 {
+		uptimeStr = fmt.Sprintf("%d-%02d:%02d:%02d", days, hours, minutes, seconds)
+	} else if hours > 0 {
+		uptimeStr = fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+	} else {
+		uptimeStr = fmt.Sprintf("%02d:%02d", minutes, seconds)
+	}
+	stats["ubersdr_uptime"] = uptimeStr
+	
+	// Get memory statistics using Go runtime
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	
+	// Format memory info
+	allocMB := float64(m.Alloc) / 1024 / 1024
+	sysMB := float64(m.Sys) / 1024 / 1024
+	stats["ubersdr_memory"] = fmt.Sprintf("Alloc: %.1f MB, Sys: %.1f MB", allocMB, sysMB)
+	
+	// Additional Go runtime stats
+	stats["ubersdr_goroutines"] = runtime.NumGoroutine()
 
 	// Execute uptime
 	uptimeCmd := exec.Command("uptime")

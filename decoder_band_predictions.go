@@ -95,10 +95,18 @@ func GetBandPredictions(
 	response.Filters.Continent = filterContinent
 	response.Filters.Mode = filterMode
 
-	// Collect all band predictions from country analytics
-	predictions := make([]BandPrediction, 0)
+	// OPTIMIZATION: Collect all unique hours needed for predictions first
+	uniqueHours := make(map[int]bool)
+	type bandInfo struct {
+		band         string
+		nextHour     int
+		hoursUntil   int
+		spotsForHour int
+		callsigns    int
+	}
+	bandsToProcess := make([]bandInfo, 0)
 
-	// Process each country's bands
+	// First pass: identify all bands and their opening hours
 	for _, country := range analytics.ByCountry {
 		for _, band := range country.Bands {
 			// Find next opening hour for this band
@@ -106,13 +114,6 @@ func GetBandPredictions(
 			if nextHour == -1 {
 				continue // No future activity for this band
 			}
-
-			// Get historical space weather for this hour
-			historicalKIndex, historicalSolarFlux, samples := getHistoricalSpaceWeatherForHour(
-				spaceWeatherMonitor,
-				nextHour,
-				hours,
-			)
 
 			// Calculate hours until opening
 			hoursUntil := nextHour - currentUTCHour
@@ -129,35 +130,65 @@ func GetBandPredictions(
 			hourKey := fmt.Sprintf("%02d", nextHour)
 			spotsForHour := band.HourlyDistribution[hourKey]
 
-			// Compare conditions
-			conditionsSimilar, conditionsNote := compareSpaceWeatherConditions(
-				currentSpaceWeather.KIndex,
-				currentSpaceWeather.SolarFlux,
-				historicalKIndex,
-				historicalSolarFlux,
-			)
+			// Track this hour for space weather lookup
+			uniqueHours[nextHour] = true
 
-			// Convert UTC hour to local time
-			localTime := utcHourToLocalTimeString(nextHour)
-
-			prediction := BandPrediction{
-				Band:                band.Band,
-				OpensAtUTC:          nextHour,
-				OpensAtLocal:        localTime,
-				HoursUntil:          hoursUntil,
-				HistoricalSpots:     spotsForHour,
-				HistoricalCallsigns: band.UniqueCallsigns,
-				HistoricalKIndex:    historicalKIndex,
-				HistoricalSolarFlux: historicalSolarFlux,
-				CurrentKIndex:       currentSpaceWeather.KIndex,
-				CurrentSolarFlux:    currentSpaceWeather.SolarFlux,
-				ConditionsSimilar:   conditionsSimilar,
-				ConditionsNote:      conditionsNote,
-				HistoricalSamples:   samples,
-			}
-
-			predictions = append(predictions, prediction)
+			// Store band info for second pass
+			bandsToProcess = append(bandsToProcess, bandInfo{
+				band:         band.Band,
+				nextHour:     nextHour,
+				hoursUntil:   hoursUntil,
+				spotsForHour: spotsForHour,
+				callsigns:    band.UniqueCallsigns,
+			})
 		}
+	}
+
+	// OPTIMIZATION: Fetch space weather for ALL unique hours in ONE call
+	spaceWeatherCache := getHistoricalSpaceWeatherForHours(
+		spaceWeatherMonitor,
+		uniqueHours,
+		hours,
+	)
+
+	// Second pass: build predictions using cached space weather data
+	predictions := make([]BandPrediction, 0)
+	for _, info := range bandsToProcess {
+		// Get cached space weather for this hour
+		swData, exists := spaceWeatherCache[info.nextHour]
+		if !exists {
+			// No space weather data for this hour, use zeros
+			swData = spaceWeatherData{avgKIndex: 0, avgSolarFlux: 0, samples: 0}
+		}
+
+		// Compare conditions
+		conditionsSimilar, conditionsNote := compareSpaceWeatherConditions(
+			currentSpaceWeather.KIndex,
+			currentSpaceWeather.SolarFlux,
+			swData.avgKIndex,
+			swData.avgSolarFlux,
+		)
+
+		// Convert UTC hour to local time
+		localTime := utcHourToLocalTimeString(info.nextHour)
+
+		prediction := BandPrediction{
+			Band:                info.band,
+			OpensAtUTC:          info.nextHour,
+			OpensAtLocal:        localTime,
+			HoursUntil:          info.hoursUntil,
+			HistoricalSpots:     info.spotsForHour,
+			HistoricalCallsigns: info.callsigns,
+			HistoricalKIndex:    swData.avgKIndex,
+			HistoricalSolarFlux: swData.avgSolarFlux,
+			CurrentKIndex:       currentSpaceWeather.KIndex,
+			CurrentSolarFlux:    currentSpaceWeather.SolarFlux,
+			ConditionsSimilar:   conditionsSimilar,
+			ConditionsNote:      conditionsNote,
+			HistoricalSamples:   swData.samples,
+		}
+
+		predictions = append(predictions, prediction)
 	}
 
 	// Remove duplicate bands (keep the one with soonest opening)
@@ -200,47 +231,77 @@ func findNextActiveHour(hourlyDist map[string]int, currentHour int) int {
 	return -1 // No activity found
 }
 
-// getHistoricalSpaceWeatherForHour gets average space weather for a specific UTC hour
-// across the historical period
-func getHistoricalSpaceWeatherForHour(
+// spaceWeatherData holds cached space weather averages for an hour
+type spaceWeatherData struct {
+	avgKIndex    float64
+	avgSolarFlux float64
+	samples      int
+}
+
+// getHistoricalSpaceWeatherForHours gets average space weather for multiple UTC hours
+// in a single efficient operation. This is much faster than calling per-hour.
+func getHistoricalSpaceWeatherForHours(
 	swm *SpaceWeatherMonitor,
-	targetHour int,
+	targetHours map[int]bool,
 	daysBack int,
-) (avgKIndex float64, avgSolarFlux float64, samples int) {
+) map[int]spaceWeatherData {
+
+	result := make(map[int]spaceWeatherData)
 
 	if swm == nil || !swm.config.LogToCSV {
-		return 0, 0, 0
+		return result
+	}
+
+	if len(targetHours) == 0 {
+		return result
 	}
 
 	now := time.Now()
 	toDate := now.Format("2006-01-02")
 	fromDate := now.AddDate(0, 0, -daysBack).Format("2006-01-02")
 
-	// Get historical space weather data
+	// Get historical space weather data ONCE for all hours
 	historicalData, err := swm.GetHistoricalData(fromDate, toDate, "", "", "")
 	if err != nil {
 		log.Printf("Warning: Failed to get historical space weather: %v", err)
-		return 0, 0, 0
+		return result
 	}
 
-	// Filter to only the target hour and calculate averages
-	var totalKIndex float64
-	var totalSolarFlux float64
-	count := 0
+	// Accumulate data per hour
+	type accumulator struct {
+		totalKIndex    float64
+		totalSolarFlux float64
+		count          int
+	}
+	hourAccumulators := make(map[int]*accumulator)
 
+	// Initialize accumulators for target hours
+	for hour := range targetHours {
+		hourAccumulators[hour] = &accumulator{}
+	}
+
+	// Single pass through historical data
 	for _, data := range historicalData {
-		if data.LastUpdate.UTC().Hour() == targetHour {
-			totalKIndex += float64(data.KIndex)
-			totalSolarFlux += data.SolarFlux
-			count++
+		hour := data.LastUpdate.UTC().Hour()
+		if acc, exists := hourAccumulators[hour]; exists {
+			acc.totalKIndex += float64(data.KIndex)
+			acc.totalSolarFlux += data.SolarFlux
+			acc.count++
 		}
 	}
 
-	if count == 0 {
-		return 0, 0, 0
+	// Calculate averages
+	for hour, acc := range hourAccumulators {
+		if acc.count > 0 {
+			result[hour] = spaceWeatherData{
+				avgKIndex:    acc.totalKIndex / float64(acc.count),
+				avgSolarFlux: acc.totalSolarFlux / float64(acc.count),
+				samples:      acc.count,
+			}
+		}
 	}
 
-	return totalKIndex / float64(count), totalSolarFlux / float64(count), count
+	return result
 }
 
 // compareSpaceWeatherConditions compares current and historical space weather

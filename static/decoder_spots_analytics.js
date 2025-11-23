@@ -1069,6 +1069,14 @@
         
         if (nextBands.length === 0) return nextBands;
         
+        // Only fetch predictions if a specific country is selected in the filter
+        const countryInput = document.getElementById('country-search').value.trim();
+        if (!countryInput) {
+            // No specific country selected - return bands without weather predictions
+            console.log('Skipping predictions fetch - no specific country selected');
+            return nextBands;
+        }
+
         // Try to fetch space weather predictions for these bands
         try {
             const country = entity.country || '';

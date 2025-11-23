@@ -242,9 +242,7 @@
         const clearFiltersBtn = document.getElementById('clear-filters-btn');
         const downloadBtn = document.getElementById('download-csv-btn');
         const bandSelect = document.getElementById('band-select');
-        const nameSelect = document.getElementById('name-select');
         const callsignInput = document.getElementById('callsign-input');
-        const locatorInput = document.getElementById('locator-input');
         const startTimeInput = document.getElementById('start-time-input');
         const endTimeInput = document.getElementById('end-time-input');
         const recordsPerPageSelect = document.getElementById('records-per-page');
@@ -288,7 +286,7 @@
 
         // Add Enter key handler to all form inputs to trigger load
         const formInputs = [
-            bandSelect, document.getElementById('name-select'), document.getElementById('callsign-input'), document.getElementById('locator-input'),
+            bandSelect, callsignInput,
             startTimeInput, endTimeInput,
             document.getElementById('continent-select'),
             document.getElementById('direction-select'),
@@ -355,17 +353,6 @@
             e.target.value = value;
         });
 
-        // Add locator input validation (Maidenhead grid locator format)
-        locatorInput.addEventListener('input', function(e) {
-            // Convert to uppercase and remove non-alphanumeric characters
-            let value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-            // Limit to 6 characters
-            if (value.length > 6) {
-                value = value.substring(0, 6);
-            }
-            e.target.value = value;
-        });
-
         // Populate band select with common bands
         commonBands.forEach(band => {
             const option = document.createElement('option');
@@ -381,7 +368,6 @@
     function clearFilters() {
         // Clear all filters except date
         document.getElementById('band-select').value = '';
-        document.getElementById('name-select').value = '';
         document.getElementById('callsign-input').value = '';
         document.getElementById('start-time-input').value = '';
         document.getElementById('end-time-input').value = '';
@@ -391,28 +377,6 @@
         document.getElementById('min-snr-select').value = '-999';
 
         showStatus('Filters cleared', 'success');
-    }
-
-    async function loadAvailableNames() {
-        try {
-            const response = await fetch('/api/cwskimmer/spots/names');
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json();
-            availableNames = data.names || [];
-            
-            // Populate name select
-            const nameSelect = document.getElementById('name-select');
-            availableNames.forEach(name => {
-                const option = document.createElement('option');
-                option.value = name;
-                option.textContent = name;
-                nameSelect.appendChild(option);
-            });
-        } catch (error) {
-            console.error('Error loading available names:', error);
-        }
     }
 
     function initializeDatePicker() {
@@ -611,7 +575,6 @@
         }
 
         const band = document.getElementById('band-select').value;
-        const name = document.getElementById('name-select').value;
         const callsign = document.getElementById('callsign-input').value.trim().toUpperCase();
         const startTime = document.getElementById('start-time-input').value.trim();
         const endTime = document.getElementById('end-time-input').value.trim();
@@ -621,15 +584,8 @@
         const minSNR = document.getElementById('min-snr-select').value;
 
         // Validate callsign if provided
-        if (callsign && !/^[A-Z0-9]{1,6}$/.test(callsign)) {
-            showStatus('Invalid callsign format. Use 1-6 alphanumeric characters only.', 'error');
-            document.getElementById('load-btn').disabled = false;
-            return;
-        }
-
-        // Validate locator if provided (Maidenhead format: 2 letters, 2 digits, optional 2 letters)
-        if (locator && !/^[A-R]{2}[0-9]{2}([A-X]{2})?$/.test(locator)) {
-            showStatus('Invalid locator format. Use Maidenhead grid format (e.g., FN20, FN20xr).', 'error');
+        if (callsign && !/^[A-Z0-9]{1,10}$/.test(callsign)) {
+            showStatus('Invalid callsign format. Use 1-10 alphanumeric characters only.', 'error');
             document.getElementById('load-btn').disabled = false;
             return;
         }
@@ -642,7 +598,6 @@
         try {
             let url = `/api/cwskimmer/spots?date=${selectedDate}`;
             if (band) url += `&band=${band}`;
-            if (name) url += `&name=${name}`;
             if (callsign) url += `&callsign=${encodeURIComponent(callsign)}`;
             if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
             if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
@@ -748,10 +703,8 @@
 
         // Update title
         const band = document.getElementById('band-select').value || 'All Bands';
-        const name = document.getElementById('name-select').value || 'All Names';
         let titleParts = ['CW'];
         if (band !== 'All Bands') titleParts.push(band);
-        if (name !== 'All Names') titleParts.push(`(${name})`);
         titleParts.push(selectedDate);
         title.textContent = `${titleParts.join(' - ')}`;
 
@@ -906,11 +859,10 @@
             row.innerHTML = `
                 <td>${time}</td>
                 <td>${spot.band}</td>
-                <td>${spot.name || '-'}</td>
                 <td><strong><a href="https://www.qrz.com/db/${spot.callsign}" target="_blank" class="callsign-link" style="color: inherit; text-decoration: none; cursor: pointer;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${spot.callsign}</a></strong></td>
-                <td>${spot.locator || '-'}</td>
                 <td class="${snrClass}">${snrText} dB</td>
                 <td>${freqMHz} MHz</td>
+                <td>${spot.wpm || '-'}</td>
                 <td>${distanceText}</td>
                 <td>${bearingText}</td>
                 <td>${spot.country || '-'}</td>
@@ -1230,7 +1182,14 @@
                 bands.set(spot.band, (bands.get(spot.band) || 0) + 1);
             }
 
+        let cqCount = 0;
+        let deCount = 0;
+
             // Calculate distance statistics
+            // Count CQ and DE calls
+            if (spot.comment === 'CQ') cqCount++;
+            if (spot.comment === 'DE') deCount++;
+
             if (spot.distance_km != null) {
                 totalDistance += spot.distance_km;
                 minDistance = Math.min(minDistance, spot.distance_km);
@@ -1326,7 +1285,6 @@
 
         // Build URL with all current filter parameters
         const band = document.getElementById('band-select').value;
-        const name = document.getElementById('name-select').value;
         const callsign = document.getElementById('callsign-input').value.trim().toUpperCase();
         const startTime = document.getElementById('start-time-input').value.trim();
         const endTime = document.getElementById('end-time-input').value.trim();
@@ -1337,7 +1295,6 @@
 
         let url = `/api/cwskimmer/spots/csv?date=${selectedDate}`;
         if (band) url += `&band=${band}`;
-        if (name) url += `&name=${name}`;
         if (callsign) url += `&callsign=${encodeURIComponent(callsign)}`;
         if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
         if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
@@ -1358,7 +1315,6 @@
             // Build filename based on filters
             let filename = `cw-spots-${selectedDate}`;
             if (band) filename += `-${band}`;
-            if (name) filename += `-${name}`;
             filename += '.csv';
             
             link.download = filename;

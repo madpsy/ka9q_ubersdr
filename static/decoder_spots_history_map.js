@@ -103,6 +103,29 @@ class DecoderSpotsHistoryMap {
     }
 
     /**
+     * Convert bearing degrees to cardinal direction
+     * @param {number} bearing - Bearing in degrees (0-360)
+     * @returns {string} - Cardinal direction (N, NE, E, SE, S, SW, W, NW)
+     */
+    bearingToCardinal(bearing) {
+        if (bearing === null || bearing === undefined) return '';
+        
+        // Normalize bearing to 0-360
+        bearing = bearing % 360;
+        if (bearing < 0) bearing += 360;
+        
+        if (bearing >= 337.5 || bearing < 22.5) return 'N';
+        if (bearing >= 22.5 && bearing < 67.5) return 'NE';
+        if (bearing >= 67.5 && bearing < 112.5) return 'E';
+        if (bearing >= 112.5 && bearing < 157.5) return 'SE';
+        if (bearing >= 157.5 && bearing < 202.5) return 'S';
+        if (bearing >= 202.5 && bearing < 247.5) return 'SW';
+        if (bearing >= 247.5 && bearing < 292.5) return 'W';
+        if (bearing >= 292.5 && bearing < 337.5) return 'NW';
+        return '';
+    }
+
+    /**
      * Initialize the map
      */
     async initMap() {
@@ -355,16 +378,17 @@ class DecoderSpotsHistoryMap {
             content += `<b>Country:</b> ${spot.country}<br>`;
         }
 
-        if (spot.name) {
-            content += `<b>Name:</b> ${spot.name}<br>`;
-        }
-
         content += `
                 <b>Band:</b> ${spot.band}<br>
                 <b>Mode:</b> ${spot.mode || 'CW'}<br>
                 <b>Frequency:</b> ${(spot.frequency / 1e6).toFixed(3)} MHz<br>
                 <b>SNR:</b> ${spot.snr >= 0 ? '+' : ''}${spot.snr} dB<br>
         `;
+
+        // Add WPM if available (CW spots)
+        if (spot.wpm !== undefined && spot.wpm !== null) {
+            content += `<b>WPM:</b> ${spot.wpm}<br>`;
+        }
 
         // Show grid locator if available (digital spots), otherwise show lat/lon (CW spots)
         if (spot.locator) {
@@ -381,7 +405,8 @@ class DecoderSpotsHistoryMap {
         }
 
         if (spot.bearing_deg !== undefined && spot.bearing_deg !== null) {
-            content += `<b>Bearing:</b> ${Math.round(spot.bearing_deg)}°<br>`;
+            const cardinal = this.bearingToCardinal(spot.bearing_deg);
+            content += `<b>Bearing:</b> ${Math.round(spot.bearing_deg)}° (${cardinal})<br>`;
         }
 
         if (spot.message) {
@@ -478,16 +503,37 @@ class DecoderSpotsHistoryMap {
         const data = this.markers.get(key);
         
         if (data && data.marker) {
-            // Pan to marker and open popup
-            this.map.setView(data.coords, Math.max(this.map.getZoom(), 6), {
+            // Pan to marker location with good zoom level
+            this.map.setView(data.coords, 8, {
                 animate: true,
                 duration: 0.5
             });
             
-            // Open popup after animation
+            // If marker is in a cluster, we need to spiderfy it first
+            // Wait for animation and zoom, then open popup
             setTimeout(() => {
-                data.marker.openPopup();
-            }, 500);
+                // Check if marker is in a cluster
+                if (this.markerClusterGroup && this.markerClusterGroup.hasLayer(data.marker)) {
+                    // The marker is in the cluster group
+                    // Zoom in enough to uncluster it if needed
+                    const currentZoom = this.map.getZoom();
+                    if (currentZoom < 12) {
+                        // Zoom in more to decluster
+                        this.map.setView(data.coords, 12, {
+                            animate: true,
+                            duration: 0.3
+                        });
+                        // Open popup after zoom completes
+                        setTimeout(() => {
+                            data.marker.openPopup();
+                        }, 400);
+                    } else {
+                        data.marker.openPopup();
+                    }
+                } else {
+                    data.marker.openPopup();
+                }
+            }, 600);
         }
     }
 }

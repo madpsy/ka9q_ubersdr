@@ -724,6 +724,10 @@
                 <div class="stat-label">Callsigns on Multiple Bands</div>
             </div>
             <div class="stat-card">
+                <div class="stat-value">${stats.uniqueBands}</div>
+                <div class="stat-label">Bands</div>
+            </div>
+            <div class="stat-card">
                 <div class="stat-value">${stats.cqCount}</div>
                 <div class="stat-label">CQ Calls</div>
             </div>
@@ -971,6 +975,10 @@
                 case 'frequency':
                     aVal = a.frequency;
                     bVal = b.frequency;
+                    break;
+                case 'wpm':
+                    aVal = a.wpm || 0;
+                    bVal = b.wpm || 0;
                     break;
                 case 'distance_km':
                     aVal = a.distance_km || 0;

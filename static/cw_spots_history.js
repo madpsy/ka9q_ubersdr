@@ -1147,6 +1147,8 @@
         let distanceCount = 0;
         let totalWPM = 0;
         let wpmCount = 0;
+        let cqCount = 0;
+        let deCount = 0;
 
         spots.forEach(spot => {
             callsigns.add(spot.callsign);
@@ -1180,14 +1182,11 @@
                 bands.set(spot.band, (bands.get(spot.band) || 0) + 1);
             }
 
-        let cqCount = 0;
-        let deCount = 0;
-
-            // Calculate distance statistics
             // Count CQ and DE calls
             if (spot.comment === 'CQ') cqCount++;
             if (spot.comment === 'DE') deCount++;
 
+            // Calculate distance statistics
             if (spot.distance_km != null) {
                 totalDistance += spot.distance_km;
                 minDistance = Math.min(minDistance, spot.distance_km);

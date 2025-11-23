@@ -458,16 +458,35 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name, callsign, contine
 // HTTP Handlers for CW Spots API
 
 // handleCWSpotsAPI handles the /api/cwskimmer/spots endpoint
-func (ah *AdminHandler) handleCWSpotsAPI(w http.ResponseWriter, r *http.Request) {
-	if ah.cwSkimmerSpotsLogger == nil || !ah.cwSkimmerSpotsLogger.enabled {
-		http.Error(w, "CW spots logging is not enabled", http.StatusServiceUnavailable)
+func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if cwSkimmer == nil || cwSkimmer.spotsLogger == nil || !cwSkimmer.spotsLogger.enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "CW spots logging is not enabled",
+		})
 		return
 	}
 
 	// Parse query parameters
-	date := r.URL.Query().Get("date")
-	if date == "" {
-		http.Error(w, "date parameter is required", http.StatusBadRequest)
+	fromDate := r.URL.Query().Get("date")
+	toDate := r.URL.Query().Get("to_date")
+
+	if fd := r.URL.Query().Get("from_date"); fd != "" {
+		fromDate = fd
+	}
+
+	if fromDate == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "date or from_date parameter is required (format: YYYY-MM-DD)",
+		})
 		return
 	}
 
@@ -478,99 +497,162 @@ func (ah *AdminHandler) handleCWSpotsAPI(w http.ResponseWriter, r *http.Request)
 	direction := r.URL.Query().Get("direction")
 	startTime := r.URL.Query().Get("start_time")
 	endTime := r.URL.Query().Get("end_time")
+	minDistanceStr := r.URL.Query().Get("min_distance")
+	minSNRStr := r.URL.Query().Get("min_snr")
 
-	minDistance := 0.0
-	if minDistStr := r.URL.Query().Get("min_distance"); minDistStr != "" {
-		if val, err := strconv.ParseFloat(minDistStr, 64); err == nil {
-			minDistance = val
+	minDistanceKm := 0.0
+	if minDistanceStr != "" {
+		if dist, err := strconv.ParseFloat(minDistanceStr, 64); err == nil && dist >= 0 {
+			minDistanceKm = dist
 		}
 	}
 
 	minSNR := -999
-	if minSNRStr := r.URL.Query().Get("min_snr"); minSNRStr != "" {
-		if val, err := strconv.Atoi(minSNRStr); err == nil {
-			minSNR = val
+	if minSNRStr != "" {
+		if snr, err := strconv.Atoi(minSNRStr); err == nil {
+			minSNR = snr
 		}
 	}
 
+	// Check rate limit
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("cw-spots-%s-%s-%s-%s-%s-%s-%s-%s-%d", band, name, callsign, continent, direction, fromDate, toDate, startTime, minSNR)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		return
+	}
+
 	// Get spots
-	spots, err := ah.cwSkimmerSpotsLogger.GetCWHistoricalSpots(
+	spots, err := cwSkimmer.spotsLogger.GetCWHistoricalSpots(
 		band, name, callsign, continent, direction,
-		date, "", startTime, endTime, minDistance, minSNR,
+		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR,
 	)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get spots: %v", err),
+		})
 		return
 	}
 
 	if len(spots) == 0 {
 		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "No spots available for the specified parameters",
+		})
 		return
 	}
 
-	// Return JSON response
-	response := map[string]interface{}{
-		"count": len(spots),
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"spots": spots,
+		"count": len(spots),
+	}); err != nil {
+		fmt.Printf("Error encoding CW spots: %v\n", err)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
 }
 
 // handleCWSpotsDatesAPI handles the /api/cwskimmer/spots/dates endpoint
-func (ah *AdminHandler) handleCWSpotsDatesAPI(w http.ResponseWriter, r *http.Request) {
-	if ah.cwSkimmerSpotsLogger == nil || !ah.cwSkimmerSpotsLogger.enabled {
-		http.Error(w, "CW spots logging is not enabled", http.StatusServiceUnavailable)
+func handleCWSpotsDatesAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
 		return
-	}
-
-	dates, err := ah.cwSkimmerSpotsLogger.GetCWAvailableDates()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	response := map[string]interface{}{
-		"dates": dates,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+
+	if cwSkimmer == nil || cwSkimmer.spotsLogger == nil || !cwSkimmer.spotsLogger.enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "CW spots logging is not enabled",
+		})
+		return
+	}
+
+	dates, err := cwSkimmer.spotsLogger.GetCWAvailableDates()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get available dates: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"dates": dates,
+	}); err != nil {
+		fmt.Printf("Error encoding available dates: %v\n", err)
+	}
 }
 
 // handleCWSpotsNamesAPI handles the /api/cwskimmer/spots/names endpoint
-func (ah *AdminHandler) handleCWSpotsNamesAPI(w http.ResponseWriter, r *http.Request) {
-	if ah.cwSkimmerSpotsLogger == nil || !ah.cwSkimmerSpotsLogger.enabled {
-		http.Error(w, "CW spots logging is not enabled", http.StatusServiceUnavailable)
+func handleCWSpotsNamesAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
 		return
-	}
-
-	names, err := ah.cwSkimmerSpotsLogger.GetCWAvailableNames()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	response := map[string]interface{}{
-		"names": names,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
-}
 
-// handleCWSpotsCSVAPI handles the /api/cwskimmer/spots/csv endpoint
-func (ah *AdminHandler) handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request) {
-	if ah.cwSkimmerSpotsLogger == nil || !ah.cwSkimmerSpotsLogger.enabled {
-		http.Error(w, "CW spots logging is not enabled", http.StatusServiceUnavailable)
+	if cwSkimmer == nil || cwSkimmer.spotsLogger == nil || !cwSkimmer.spotsLogger.enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "CW spots logging is not enabled",
+		})
 		return
 	}
 
-	// Parse query parameters (same as JSON endpoint)
-	date := r.URL.Query().Get("date")
-	if date == "" {
-		http.Error(w, "date parameter is required", http.StatusBadRequest)
+	names, err := cwSkimmer.spotsLogger.GetCWAvailableNames()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get available names: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"names": names,
+	}); err != nil {
+		fmt.Printf("Error encoding available names: %v\n", err)
+	}
+}
+
+// handleCWSpotsCSVAPI handles the /api/cwskimmer/spots/csv endpoint
+func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	if cwSkimmer == nil || cwSkimmer.spotsLogger == nil || !cwSkimmer.spotsLogger.enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "CW spots logging is not enabled",
+		})
+		return
+	}
+
+	// Parse query parameters
+	fromDate := r.URL.Query().Get("date")
+	toDate := r.URL.Query().Get("to_date")
+
+	if fd := r.URL.Query().Get("from_date"); fd != "" {
+		fromDate = fd
+	}
+
+	if fromDate == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "date or from_date parameter is required (format: YYYY-MM-DD)",
+		})
 		return
 	}
 
@@ -581,38 +663,65 @@ func (ah *AdminHandler) handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Reque
 	direction := r.URL.Query().Get("direction")
 	startTime := r.URL.Query().Get("start_time")
 	endTime := r.URL.Query().Get("end_time")
+	minDistanceStr := r.URL.Query().Get("min_distance")
+	minSNRStr := r.URL.Query().Get("min_snr")
 
-	minDistance := 0.0
-	if minDistStr := r.URL.Query().Get("min_distance"); minDistStr != "" {
-		if val, err := strconv.ParseFloat(minDistStr, 64); err == nil {
-			minDistance = val
+	minDistanceKm := 0.0
+	if minDistanceStr != "" {
+		if dist, err := strconv.ParseFloat(minDistanceStr, 64); err == nil && dist >= 0 {
+			minDistanceKm = dist
 		}
 	}
 
 	minSNR := -999
-	if minSNRStr := r.URL.Query().Get("min_snr"); minSNRStr != "" {
-		if val, err := strconv.Atoi(minSNRStr); err == nil {
-			minSNR = val
+	if minSNRStr != "" {
+		if snr, err := strconv.Atoi(minSNRStr); err == nil {
+			minSNR = snr
 		}
 	}
 
-	// Get CSV data
-	csvData, err := ah.cwSkimmerSpotsLogger.GetCWHistoricalCSV(
-		band, name, callsign, continent, direction,
-		date, "", startTime, endTime, minDistance, minSNR,
-	)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	// Check rate limit
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("cw-spots-csv-%s-%s-%s-%s-%s-%s-%s-%d", band, name, callsign, continent, direction, fromDate, toDate, minSNR)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
 		return
 	}
 
-	// Set headers for CSV download
-	filename := fmt.Sprintf("cw-spots-%s.csv", date)
-	if band != "" {
-		filename = fmt.Sprintf("cw-spots-%s-%s.csv", date, band)
+	// Get CSV data
+	csvData, err := cwSkimmer.spotsLogger.GetCWHistoricalCSV(
+		band, name, callsign, continent, direction,
+		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR,
+	)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get CSV data: %v", err),
+		})
+		return
 	}
 
+	// Build filename
+	filename := fmt.Sprintf("cw-spots-%s.csv", fromDate)
+	if toDate != "" && toDate != fromDate {
+		filename = fmt.Sprintf("cw-spots-%s-to-%s.csv", fromDate, toDate)
+	}
+	if band != "" {
+		filename = fmt.Sprintf("cw-spots-%s-%s.csv", band, fromDate)
+	}
+
+	// Set headers for CSV download
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
-	w.Write([]byte(csvData))
+	w.WriteHeader(http.StatusOK)
+
+	// Write CSV data
+	if _, err := w.Write([]byte(csvData)); err != nil {
+		fmt.Printf("Error writing CSV data: %v\n", err)
+	}
 }

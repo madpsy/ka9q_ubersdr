@@ -2508,18 +2508,18 @@ func (ah *AdminHandler) handleGetCWSkimmerConfig(w http.ResponseWriter, r *http.
 		// If file doesn't exist, return default empty config
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"enabled":               false,
-			"host":                  "localhost",
-			"port":                  7300,
-			"callsign":              "N0CALL",
-			"reconnect_delay":       30,
-			"keepalive_delay":       300,
-			"spots_log_enabled":     true,
-			"spots_log_data_dir":    "data/spots",
-			"pskreporter_enabled":   false,
-			"pskreporter_callsign":  "N0CALL",
-			"pskreporter_locator":   "",
-			"pskreporter_antenna":   "",
+			"enabled":              false,
+			"host":                 "localhost",
+			"port":                 7300,
+			"callsign":             "N0CALL",
+			"reconnect_delay":      30,
+			"keepalive_delay":      300,
+			"spots_log_enabled":    true,
+			"spots_log_data_dir":   "data/spots",
+			"pskreporter_enabled":  false,
+			"pskreporter_callsign": "N0CALL",
+			"pskreporter_locator":  "",
+			"pskreporter_antenna":  "",
 		})
 		return
 	}
@@ -2605,7 +2605,7 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 	hours := int(uptime.Hours()) % 24
 	minutes := int(uptime.Minutes()) % 60
 	seconds := int(uptime.Seconds()) % 60
-	
+
 	// Format uptime similar to ps output
 	var uptimeStr string
 	if days > 0 {
@@ -2616,16 +2616,16 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		uptimeStr = fmt.Sprintf("%02d:%02d", minutes, seconds)
 	}
 	stats["ubersdr_uptime"] = uptimeStr
-	
+
 	// Get memory statistics using Go runtime
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	
+
 	// Format memory info
 	allocMB := float64(m.Alloc) / 1024 / 1024
 	sysMB := float64(m.Sys) / 1024 / 1024
 	stats["ubersdr_memory"] = fmt.Sprintf("Alloc: %.1f MB, Sys: %.1f MB", allocMB, sysMB)
-	
+
 	// Additional Go runtime stats
 	stats["ubersdr_goroutines"] = runtime.NumGoroutine()
 

@@ -848,7 +848,7 @@
             const snrClass = spot.snr >= 0 ? 'snr-positive' : 'snr-negative';
             const snrText = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
 
-            const freqMHz = (spot.frequency / 1000000).toFixed(6);
+            const freqMHz = (spot.frequency / 1000000).toFixed(4);
 
             // Format distance and bearing
             const distanceText = spot.distance_km ? `${spot.distance_km.toFixed(0)} km` : '-';

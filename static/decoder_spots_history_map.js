@@ -5,6 +5,7 @@ class DecoderSpotsHistoryMap {
     constructor() {
         this.map = null;
         this.markers = new Map();
+        this.markerClusterGroup = null; // Leaflet marker cluster group
         this.receiverMarker = null;
         this.receiverLocation = null;
         
@@ -121,6 +122,36 @@ class DecoderSpotsHistoryMap {
             minZoom: 2
         }).addTo(this.map);
 
+        // Initialize marker cluster group with zoom-dependent clustering
+        this.markerClusterGroup = L.markerClusterGroup({
+            maxClusterRadius: (zoom) => {
+                // Reduce clustering radius for less aggressive clustering
+                if (zoom >= 10) return 15;  // Very tight clustering when zoomed in
+                if (zoom >= 7) return 30;   // Medium clustering
+                if (zoom >= 5) return 40;   // Looser clustering at mid-zoom
+                if (zoom >= 3) return 50;   // Even looser at world view
+                return 60;                   // Minimal clustering when fully zoomed out
+            },
+            spiderfyOnMaxZoom: true,
+            showCoverageOnHover: true,
+            zoomToBoundsOnClick: true,
+            disableClusteringAtZoom: 12, // Disable clustering when zoomed in close
+            iconCreateFunction: (cluster) => {
+                const count = cluster.getChildCount();
+                let size = 'small';
+                if (count >= 100) size = 'large';
+                else if (count >= 10) size = 'medium';
+
+                return L.divIcon({
+                    html: `<div><span>${count}</span></div>`,
+                    className: `marker-cluster marker-cluster-${size}`,
+                    iconSize: L.point(40, 40)
+                });
+            }
+        });
+
+        this.map.addLayer(this.markerClusterGroup);
+
         // Load receiver location
         await this.loadReceiverLocation();
 
@@ -185,35 +216,13 @@ class DecoderSpotsHistoryMap {
      * Clear all spot markers from map
      */
     clearMarkers() {
-        if (!this.map) return;
+        if (!this.map || !this.markerClusterGroup) return;
 
-        // Remove all markers from map
-        this.markers.forEach((data, key) => {
-            if (data.marker) {
-                try {
-                    this.map.removeLayer(data.marker);
-                } catch (e) {
-                    console.warn('[Map] Error removing marker:', key, e);
-                }
-            }
-        });
+        // Clear cluster group
+        this.markerClusterGroup.clearLayers();
 
         // Clear the markers map
         this.markers.clear();
-
-        // Also remove any orphaned layers (except tile layer and receiver marker)
-        this.map.eachLayer((layer) => {
-            // Keep tile layers and receiver marker
-            if (layer instanceof L.TileLayer) return;
-            if (layer === this.receiverMarker) return;
-
-            // Remove everything else (spot markers)
-            try {
-                this.map.removeLayer(layer);
-            } catch (e) {
-                console.warn('[Map] Error removing orphaned layer:', e);
-            }
-        });
     }
 
     /**
@@ -234,12 +243,21 @@ class DecoderSpotsHistoryMap {
 
         // Add new markers
         spots.forEach(spot => {
-            if (!spot.locator) return;
+            let coords = null;
 
-            // Convert grid locator to coordinates
-            const coords = this.gridToCoordinates(spot.locator);
-            if (!coords) {
-                console.warn('Invalid grid locator:', spot.locator);
+            // Check if spot has direct lat/lon (CW spots) or locator (digital spots)
+            if (spot.latitude !== undefined && spot.longitude !== undefined) {
+                // Use direct coordinates (CW spots)
+                coords = { lat: spot.latitude, lon: spot.longitude };
+            } else if (spot.locator) {
+                // Convert grid locator to coordinates (digital spots)
+                coords = this.gridToCoordinates(spot.locator);
+                if (!coords) {
+                    console.warn('Invalid grid locator:', spot.locator);
+                    return;
+                }
+            } else {
+                // No location data available
                 return;
             }
 
@@ -286,8 +304,8 @@ class DecoderSpotsHistoryMap {
                 offset: [0, -10]
             });
 
-            // Add to map
-            marker.addTo(this.map);
+            // Add to cluster group instead of directly to map
+            this.markerClusterGroup.addLayer(marker);
 
             // Store marker with spot data
             const key = `${spot.callsign}-${spot.band}-${spot.mode}`;
@@ -343,11 +361,19 @@ class DecoderSpotsHistoryMap {
 
         content += `
                 <b>Band:</b> ${spot.band}<br>
-                <b>Mode:</b> ${spot.mode}<br>
+                <b>Mode:</b> ${spot.mode || 'CW'}<br>
                 <b>Frequency:</b> ${(spot.frequency / 1e6).toFixed(3)} MHz<br>
                 <b>SNR:</b> ${spot.snr >= 0 ? '+' : ''}${spot.snr} dB<br>
-                <b>Grid:</b> ${spot.locator || 'N/A'}<br>
-                <b>Time:</b> ${time} UTC<br>
+        `;
+
+        // Show grid locator if available (digital spots), otherwise show lat/lon (CW spots)
+        if (spot.locator) {
+            content += `<b>Grid:</b> ${spot.locator}<br>`;
+        } else if (spot.latitude !== undefined && spot.longitude !== undefined) {
+            content += `<b>Location:</b> ${spot.latitude.toFixed(4)}°, ${spot.longitude.toFixed(4)}°<br>`;
+        }
+
+        content += `<b>Time:</b> ${time} UTC<br>
         `;
 
         if (spot.distance_km !== undefined && spot.distance_km !== null) {

@@ -26,13 +26,15 @@ type CWSpotRecord struct {
 	CQZone     int      `json:"cq_zone"`
 	ITUZone    int      `json:"itu_zone"`
 	Continent  string   `json:"continent"`
+	Latitude   *float64 `json:"latitude,omitempty"`
+	Longitude  *float64 `json:"longitude,omitempty"`
 	DistanceKm *float64 `json:"distance_km,omitempty"`
 	BearingDeg *float64 `json:"bearing_deg,omitempty"`
 	Name       string   `json:"name"` // Band name from file
 }
 
 // GetCWHistoricalSpots reads historical CW spots from CSV files
-func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name, callsign, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int) ([]CWSpotRecord, error) {
+func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name, callsign, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) ([]CWSpotRecord, error) {
 	if !sl.enabled {
 		return nil, fmt.Errorf("CW spots logging is not enabled")
 	}
@@ -73,8 +75,19 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpots(band, name, callsign, conti
 			continue
 		}
 
-		// Add spots with filtering
+		// Add spots with filtering and enrich with lat/lon
 		for _, spot := range spots {
+			// Enrich with latitude/longitude from CTY.dat
+			if ctyDatabase != nil {
+				if info := ctyDatabase.LookupCallsignFull(spot.Callsign); info != nil {
+					// CTY.dat uses West-positive longitude, negate to get standard East-positive
+					lat := info.Latitude
+					lon := -info.Longitude
+					spot.Latitude = &lat
+					spot.Longitude = &lon
+				}
+			}
+
 			// Filter by time range if specified
 			if startTime != "" || endTime != "" {
 				spotTime, err := time.Parse(time.RFC3339, spot.Timestamp)
@@ -401,9 +414,9 @@ func (sl *CWSkimmerSpotsLogger) GetCWAvailableNames() ([]string, error) {
 }
 
 // GetCWHistoricalCSV returns historical CW spots data as CSV string
-func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name, callsign, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int) (string, error) {
+func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name, callsign, continent, direction, fromDate, toDate, startTime, endTime string, minDistanceKm float64, minSNR int, ctyDatabase *CTYDatabase) (string, error) {
 	// Get the spots data using existing method
-	spots, err := sl.GetCWHistoricalSpots(band, name, callsign, continent, direction, fromDate, toDate, startTime, endTime, minDistanceKm, minSNR)
+	spots, err := sl.GetCWHistoricalSpots(band, name, callsign, continent, direction, fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase)
 	if err != nil {
 		return "", err
 	}
@@ -416,11 +429,19 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name, callsign, contine
 	var csvBuilder strings.Builder
 
 	// Write header
-	csvBuilder.WriteString("timestamp,callsign,snr,frequency,band,wpm,comment,country,cq_zone,itu_zone,continent,distance_km,bearing_deg,name\n")
+	csvBuilder.WriteString("timestamp,callsign,snr,frequency,band,wpm,comment,country,cq_zone,itu_zone,continent,latitude,longitude,distance_km,bearing_deg,name\n")
 
 	// Write data rows
 	for _, spot := range spots {
-		// Format distance and bearing
+		// Format lat/lon, distance and bearing
+		latStr := ""
+		if spot.Latitude != nil {
+			latStr = fmt.Sprintf("%.6f", *spot.Latitude)
+		}
+		lonStr := ""
+		if spot.Longitude != nil {
+			lonStr = fmt.Sprintf("%.6f", *spot.Longitude)
+		}
 		distStr := ""
 		if spot.DistanceKm != nil {
 			distStr = fmt.Sprintf("%.1f", *spot.DistanceKm)
@@ -434,7 +455,7 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name, callsign, contine
 		comment := escapeCSVField(spot.Comment)
 		country := escapeCSVField(spot.Country)
 
-		csvBuilder.WriteString(fmt.Sprintf("%s,%s,%d,%d,%s,%d,%s,%s,%d,%d,%s,%s,%s,%s\n",
+		csvBuilder.WriteString(fmt.Sprintf("%s,%s,%d,%d,%s,%d,%s,%s,%d,%d,%s,%s,%s,%s,%s,%s\n",
 			spot.Timestamp,
 			spot.Callsign,
 			spot.SNR,
@@ -446,6 +467,8 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name, callsign, contine
 			spot.CQZone,
 			spot.ITUZone,
 			spot.Continent,
+			latStr,
+			lonStr,
 			distStr,
 			bearingStr,
 			spot.Name,
@@ -458,7 +481,7 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalCSV(band, name, callsign, contine
 // HTTP Handlers for CW Spots API
 
 // handleCWSpotsAPI handles the /api/cwskimmer/spots endpoint
-func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter, ctyDatabase *CTYDatabase) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
 		return
@@ -528,7 +551,7 @@ func handleCWSpotsAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimm
 	// Get spots
 	spots, err := cwSkimmer.spotsLogger.GetCWHistoricalSpots(
 		band, name, callsign, continent, direction,
-		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR,
+		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase,
 	)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -624,7 +647,7 @@ func handleCWSpotsNamesAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CW
 }
 
 // handleCWSpotsCSVAPI handles the /api/cwskimmer/spots/csv endpoint
-func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter, ctyDatabase *CTYDatabase) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
 		return
@@ -695,7 +718,7 @@ func handleCWSpotsCSVAPI(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSk
 	// Get CSV data
 	csvData, err := cwSkimmer.spotsLogger.GetCWHistoricalCSV(
 		band, name, callsign, continent, direction,
-		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR,
+		fromDate, toDate, startTime, endTime, minDistanceKm, minSNR, ctyDatabase,
 	)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)

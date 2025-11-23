@@ -122,9 +122,9 @@
             const searchLower = clientSearchText.toLowerCase();
             filtered = filtered.filter(spot => {
                 return (spot.callsign && spot.callsign.toLowerCase().includes(searchLower)) ||
-                       (spot.locator && spot.locator.toLowerCase().includes(searchLower)) ||
                        (spot.country && spot.country.toLowerCase().includes(searchLower)) ||
-                       (spot.continent && spot.continent.toLowerCase().includes(searchLower));
+                       (spot.continent && spot.continent.toLowerCase().includes(searchLower)) ||
+                       (spot.comment && spot.comment.toLowerCase().includes(searchLower));
             });
         }
 
@@ -383,7 +383,6 @@
         document.getElementById('band-select').value = '';
         document.getElementById('name-select').value = '';
         document.getElementById('callsign-input').value = '';
-        document.getElementById('locator-input').value = '';
         document.getElementById('start-time-input').value = '';
         document.getElementById('end-time-input').value = '';
         document.getElementById('continent-select').value = '';
@@ -614,7 +613,6 @@
         const band = document.getElementById('band-select').value;
         const name = document.getElementById('name-select').value;
         const callsign = document.getElementById('callsign-input').value.trim().toUpperCase();
-        const locator = document.getElementById('locator-input').value.trim().toUpperCase();
         const startTime = document.getElementById('start-time-input').value.trim();
         const endTime = document.getElementById('end-time-input').value.trim();
         const continent = document.getElementById('continent-select').value;
@@ -646,7 +644,6 @@
             if (band) url += `&band=${band}`;
             if (name) url += `&name=${name}`;
             if (callsign) url += `&callsign=${encodeURIComponent(callsign)}`;
-            if (locator) url += `&locator=${encodeURIComponent(locator)}`;
             if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
             if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
             if (continent) url += `&continent=${continent}`;
@@ -772,12 +769,16 @@
                 <div class="stat-label">Unique Callsigns</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">${stats.uniqueLocators}</div>
-                <div class="stat-label">Unique Locators</div>
-            </div>
-            <div class="stat-card">
                 <div class="stat-value">${stats.callsignsMultipleBands}</div>
                 <div class="stat-label">Callsigns on Multiple Bands</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${stats.cqCount}</div>
+                <div class="stat-label">CQ Calls</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${stats.deCount}</div>
+                <div class="stat-label">DE Calls</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">${stats.uniqueCountries}</div>
@@ -786,6 +787,10 @@
             <div class="stat-card">
                 <div class="stat-value">${stats.uniqueContinents}</div>
                 <div class="stat-label">Continents</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${stats.avgWPM}</div>
+                <div class="stat-label">Avg WPM</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">${stats.avgSNR > 0 ? '+' : ''}${stats.avgSNR}</div>
@@ -820,15 +825,6 @@
         }
 
         // Add most common statistics
-        if (stats.mostCommonLocator) {
-            statsHTML += `
-                <div class="stat-card">
-                    <div class="stat-value">${stats.mostCommonLocator.value}</div>
-                    <div class="stat-label">Most Common Locator (${stats.mostCommonLocator.count})</div>
-                </div>
-            `;
-        }
-
         if (stats.mostCommonCountry) {
             statsHTML += `
                 <div class="stat-card">
@@ -866,15 +862,6 @@
         }
 
         // Add least common statistics (only if there are multiple)
-        if (stats.leastCommonLocator && stats.uniqueLocators > 1) {
-            statsHTML += `
-                <div class="stat-card">
-                    <div class="stat-value">${stats.leastCommonLocator.value}</div>
-                    <div class="stat-label">Least Common Locator (${stats.leastCommonLocator.count})</div>
-                </div>
-            `;
-        }
-
         if (stats.leastCommonCountry && stats.uniqueCountries > 1) {
             statsHTML += `
                 <div class="stat-card">
@@ -1198,9 +1185,8 @@
         const callsigns = new Set();
         const countries = new Map();
         const continents = new Map();
-        const locators = new Map();
         const bands = new Map();
-        const callsignBands = new Map(); // Track bands per callsign
+        const callsignBands = new Map();
         const callsignModes = new Map(); // Track modes per callsign
         let totalSNR = 0;
         let minSNR = Infinity;
@@ -1209,12 +1195,19 @@
         let minDistance = Infinity;
         let maxDistance = -Infinity;
         let distanceCount = 0;
+        let totalWPM = 0;
+        let wpmCount = 0;
 
         spots.forEach(spot => {
             callsigns.add(spot.callsign);
             totalSNR += spot.snr;
             minSNR = Math.min(minSNR, spot.snr);
             maxSNR = Math.max(maxSNR, spot.snr);
+
+            if (spot.wpm) {
+                totalWPM += spot.wpm;
+                wpmCount++;
+            }
 
             // Track bands per callsign
             if (!callsignBands.has(spot.callsign)) {
@@ -1230,11 +1223,6 @@
             // Count continents
             if (spot.continent) {
                 continents.set(spot.continent, (continents.get(spot.continent) || 0) + 1);
-            }
-
-            // Count locators
-            if (spot.locator) {
-                locators.set(spot.locator, (locators.get(spot.locator) || 0) + 1);
             }
 
             // Count bands
@@ -1291,17 +1279,17 @@
             callsignsMultipleBands: callsignsMultipleBands,
             uniqueCountries: countries.size,
             uniqueContinents: continents.size,
-            uniqueLocators: locators.size,
             uniqueBands: bands.size,
             avgSNR: spots.length > 0 ? Math.round(totalSNR / spots.length) : 0,
             minSNR: spots.length > 0 ? minSNR : 0,
             maxSNR: spots.length > 0 ? maxSNR : 0,
+            avgWPM: wpmCount > 0 ? Math.round(totalWPM / wpmCount) : 0,
+            cqCount: cqCount,
+            deCount: deCount,
             hasDistance: distanceCount > 0,
-            mostCommonLocator: getMostCommon(locators),
             mostCommonCountry: getMostCommon(countries),
             mostCommonContinent: getMostCommon(continents),
             mostCommonBand: getMostCommon(bands),
-            leastCommonLocator: getLeastCommon(locators),
             leastCommonCountry: getLeastCommon(countries),
             leastCommonContinent: getLeastCommon(continents),
             leastCommonBand: getLeastCommon(bands)
@@ -1340,7 +1328,6 @@
         const band = document.getElementById('band-select').value;
         const name = document.getElementById('name-select').value;
         const callsign = document.getElementById('callsign-input').value.trim().toUpperCase();
-        const locator = document.getElementById('locator-input').value.trim().toUpperCase();
         const startTime = document.getElementById('start-time-input').value.trim();
         const endTime = document.getElementById('end-time-input').value.trim();
         const continent = document.getElementById('continent-select').value;
@@ -1352,7 +1339,6 @@
         if (band) url += `&band=${band}`;
         if (name) url += `&name=${name}`;
         if (callsign) url += `&callsign=${encodeURIComponent(callsign)}`;
-        if (locator) url += `&locator=${encodeURIComponent(locator)}`;
         if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
         if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
         if (continent) url += `&continent=${continent}`;

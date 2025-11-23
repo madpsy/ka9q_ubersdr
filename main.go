@@ -763,7 +763,7 @@ func main() {
 
 	// CW Skimmer spots endpoints (with gzip compression, IP ban checking, and rate limiting)
 	http.HandleFunc("/api/cwskimmer/spots", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleCWSpotsAPI(w, r, cwSkimmer, ipBanManager, fftRateLimiter)
+		handleCWSpotsAPI(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)
 	}))
 	http.HandleFunc("/api/cwskimmer/spots/dates", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleCWSpotsDatesAPI(w, r, cwSkimmer, ipBanManager)
@@ -772,7 +772,7 @@ func main() {
 		handleCWSpotsNamesAPI(w, r, cwSkimmer, ipBanManager)
 	}))
 	http.HandleFunc("/api/cwskimmer/spots/csv", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleCWSpotsCSVAPI(w, r, cwSkimmer, ipBanManager, fftRateLimiter)
+		handleCWSpotsCSVAPI(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)
 	}))
 
 	// CTY API endpoints (with IP ban checking)

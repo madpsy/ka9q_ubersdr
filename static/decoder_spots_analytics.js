@@ -1108,6 +1108,8 @@
                         band.historicalKIndex = prediction.historical_k_index;
                         band.currentSolarFlux = prediction.current_solar_flux;
                         band.historicalSolarFlux = prediction.historical_solar_flux;
+                        band.confidenceScore = prediction.confidence_score;
+                        band.confidenceLevel = prediction.confidence_level;
                     } else {
                         console.log(`No prediction match for ${band.band} at ${band.utcHour}`);
                     }
@@ -1137,16 +1139,53 @@
     }
 
     function getWeatherIndicator(band) {
-        if (!band.weatherSimilar && band.weatherSimilar !== false) {
-            return ''; // No weather data available
+        // Get confidence score and level if available
+        const confidenceScore = band.confidenceScore;
+        const confidenceLevel = band.confidenceLevel;
+
+        // If no confidence data, fall back to old weather-only indicator
+        if (confidenceScore === undefined || confidenceLevel === undefined) {
+            if (!band.weatherSimilar && band.weatherSimilar !== false) {
+                return ''; // No data available
+            }
+            if (band.weatherSimilar) {
+                return ' <span style="color: #4caf50;" title="Similar space weather">✓</span>';
+            } else {
+                let tooltip = band.weatherNote || 'Different space weather';
+                return ` <span style="color: #ff9800;" title="${tooltip}">⚠️</span>`;
+            }
         }
-        
-        if (band.weatherSimilar) {
-            return ' <span style="color: #4caf50;" title="Current space weather conditions are similar to when these spots occurred">✓</span>';
+
+        // Use confidence score to determine icon and color
+        let icon = '';
+        let color = '';
+        let tooltip = '';
+
+        if (confidenceLevel === 'High') {
+            icon = '✓';
+            color = '#4caf50'; // Green
+            tooltip = `High confidence (${confidenceScore}%): Good spot count and similar space weather`;
+        } else if (confidenceLevel === 'Medium') {
+            icon = '~';
+            color = '#ff9800'; // Orange
+            tooltip = `Medium confidence (${confidenceScore}%): `;
+            if (band.weatherNote) {
+                tooltip += band.weatherNote;
+            } else {
+                tooltip += 'Moderate spot count or different space weather';
+            }
         } else {
-            let tooltip = band.weatherNote || 'Space weather conditions differ from historical data';
-            return ` <span style="color: #ff9800;" title="${tooltip}">⚠️</span>`;
+            icon = '⚠';
+            color = '#f44336'; // Red
+            tooltip = `Low confidence (${confidenceScore}%): `;
+            if (band.weatherNote) {
+                tooltip += band.weatherNote;
+            } else {
+                tooltip += 'Few spots or very different space weather';
+            }
         }
+
+        return ` <span style="color: ${color}; font-weight: bold; font-size: 1.1em;" title="${tooltip}">${icon}</span>`;
     }
 
     function createHourlyChart(hourlyDist) {

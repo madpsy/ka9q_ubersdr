@@ -22,6 +22,8 @@ type BandPrediction struct {
 	ConditionsSimilar   bool    `json:"conditions_similar"`    // Whether current conditions are similar to historical
 	ConditionsNote      string  `json:"conditions_note"`       // Human-readable note about conditions
 	HistoricalSamples   int     `json:"historical_samples"`    // Number of historical data points used
+	ConfidenceScore     int     `json:"confidence_score"`      // Confidence score 0-100 based on spots and weather similarity
+	ConfidenceLevel     string  `json:"confidence_level"`      // Human-readable: "Low", "Medium", "High"
 }
 
 // BandPredictionsResponse represents the API response for band predictions
@@ -169,6 +171,12 @@ func GetBandPredictions(
 			swData.avgSolarFlux,
 		)
 
+		// Calculate confidence score
+		confidenceScore, confidenceLevel := calculateConfidenceScore(
+			info.spotsForHour,
+			conditionsSimilar,
+		)
+
 		// Convert UTC hour to local time
 		localTime := utcHourToLocalTimeString(info.nextHour)
 
@@ -186,6 +194,8 @@ func GetBandPredictions(
 			ConditionsSimilar:   conditionsSimilar,
 			ConditionsNote:      conditionsNote,
 			HistoricalSamples:   swData.samples,
+			ConfidenceScore:     confidenceScore,
+			ConfidenceLevel:     confidenceLevel,
 		}
 
 		predictions = append(predictions, prediction)
@@ -386,4 +396,48 @@ func deduplicatePredictions(predictions []BandPrediction) []BandPrediction {
 	}
 
 	return result
+}
+
+// calculateConfidenceScore calculates a confidence score (0-100) for a band prediction
+// based on the number of historical spots and space weather similarity
+func calculateConfidenceScore(historicalSpots int, conditionsSimilar bool) (score int, level string) {
+	// Base score from spot count (0-70 points)
+	// Scale: 1-5 spots = 10-30, 6-15 spots = 31-50, 16-30 spots = 51-65, 31+ spots = 66-70
+	spotScore := 0
+	switch {
+	case historicalSpots >= 31:
+		spotScore = 70
+	case historicalSpots >= 16:
+		spotScore = 50 + (historicalSpots-16)*1 // 50-65
+	case historicalSpots >= 6:
+		spotScore = 30 + (historicalSpots-6)*2 // 30-50
+	case historicalSpots >= 1:
+		spotScore = 10 + (historicalSpots-1)*4 // 10-26
+	default:
+		spotScore = 0
+	}
+
+	// Weather similarity bonus (0-30 points)
+	weatherBonus := 0
+	if conditionsSimilar {
+		weatherBonus = 30
+	}
+
+	// Total score
+	score = spotScore + weatherBonus
+	if score > 100 {
+		score = 100
+	}
+
+	// Determine level
+	switch {
+	case score >= 70:
+		level = "High"
+	case score >= 40:
+		level = "Medium"
+	default:
+		level = "Low"
+	}
+
+	return score, level
 }

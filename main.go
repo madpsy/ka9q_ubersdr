@@ -151,7 +151,7 @@ func gzipHandler(fn http.HandlerFunc) http.HandlerFunc {
 func main() {
 	// Record start time for uptime tracking
 	StartTime = time.Now()
-	
+
 	// Parse command line flags
 	configDir := flag.String("config-dir", ".", "Directory containing configuration files")
 	configFile := flag.String("config", "config.yaml", "Path to configuration file")
@@ -757,6 +757,9 @@ func main() {
 	http.HandleFunc("/api/decoder/band-names", func(w http.ResponseWriter, r *http.Request) {
 		handleDecoderBandNames(w, r, multiDecoder, ipBanManager)
 	})
+	http.HandleFunc("/api/decoder/spots/predictions", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleBandPredictions(w, r, multiDecoder, spaceWeatherMonitor, ipBanManager, fftRateLimiter)
+	}))
 
 	// CTY API endpoints (with IP ban checking)
 	RegisterCTYAPIHandlers(ipBanManager)
@@ -2499,6 +2502,81 @@ func handleDecoderSpotsAnalyticsHourly(w http.ResponseWriter, r *http.Request, m
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(analytics); err != nil {
 		log.Printf("Error encoding decoder spots hourly analytics: %v", err)
+	}
+}
+
+// handleBandPredictions serves band opening predictions with space weather context
+func handleBandPredictions(w http.ResponseWriter, r *http.Request, md *MultiDecoder, swm *SpaceWeatherMonitor, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if md == nil || md.spotsLogger == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Decoder spots logging is not enabled",
+		})
+		return
+	}
+
+	if swm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Space weather monitoring is not enabled",
+		})
+		return
+	}
+
+	// Parse query parameters
+	country := r.URL.Query().Get("country")
+	continent := r.URL.Query().Get("continent")
+	mode := r.URL.Query().Get("mode")
+	hoursStr := r.URL.Query().Get("hours")
+
+	// Parse hours (default 24, max 168 = 7 days)
+	hours := 24
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 168 {
+			hours = h
+		}
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("predictions-%s-%s-%s-%d", country, continent, mode, hours)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Band predictions endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	// Get predictions
+	predictions, err := GetBandPredictions(
+		md.spotsLogger,
+		swm,
+		country,
+		continent,
+		mode,
+		hours,
+	)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get predictions: %v", err),
+		})
+		log.Printf("Error getting band predictions: %v", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(predictions); err != nil {
+		log.Printf("Error encoding band predictions: %v", err)
 	}
 }
 

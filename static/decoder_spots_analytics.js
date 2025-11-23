@@ -242,7 +242,7 @@
         }
     }
 
-    function displayAnalytics(data) {
+    async function displayAnalytics(data) {
         const container = document.getElementById('data-container');
         const title = document.getElementById('data-title');
         const statsGrid = document.getElementById('stats-grid');
@@ -320,10 +320,10 @@
 
         // Display country analytics
         countryList.innerHTML = '';
-        data.by_country.forEach(country => {
-            const card = createEntityCard(country, 'country');
+        for (const country of data.by_country) {
+            const card = await createEntityCard(country, 'country');
             countryList.appendChild(card);
-        });
+        }
 
         // Update country map with data
         updateCountryMap(data);
@@ -341,10 +341,10 @@
         } else {
             continentSection.style.display = 'block';
             continentList.innerHTML = '';
-            data.by_continent.forEach(continent => {
-                const card = createEntityCard(continent, 'continent');
+            for (const continent of data.by_continent) {
+                const card = await createEntityCard(continent, 'continent');
                 continentList.appendChild(card);
-            });
+            }
             
             // Update continent map with data
             updateContinentMap(data);
@@ -784,7 +784,7 @@
         return { south, west, north, east };
     }
 
-    function createEntityCard(entity, type) {
+    async function createEntityCard(entity, type) {
         const card = document.createElement('div');
         card.className = 'entity-card';
 
@@ -808,7 +808,7 @@
         let activeNowHTML = '';
         if (type === 'country') {
             const activeBands = getActiveBandsNow(entity);
-            const nextBands = getNextActiveBands(entity);
+            const nextBands = await getNextActiveBandsWithWeather(entity);
             
             // Show next bands if 2 or fewer active bands
             const shouldShowNextBands = activeBands.length <= 2 && nextBands.length > 0;
@@ -822,7 +822,7 @@
                             ${nextBands.map(band => `
                                 <div class="next-band-item">
                                     <span class="next-band-name">${band.band}</span>
-                                    <span class="next-band-time">opens at ${band.localTime}</span>
+                                    <span class="next-band-time">opens at ${band.localTime} (${band.uniqueCallsigns} callsigns, ${band.spots} spots)${getWeatherIndicator(band)}</span>
                                 </div>
                             `).join('')}
                         </div>
@@ -848,7 +848,7 @@
                     </div>
                 `;
             } else {
-                const nextBands = getNextActiveBands(entity);
+                const nextBands = await getNextActiveBandsWithWeather(entity);
                 let nextBandsHTML = '';
                 if (nextBands.length > 0) {
                     nextBandsHTML = `
@@ -856,7 +856,7 @@
                             ${nextBands.map(band => `
                                 <div class="next-band-item">
                                     <span class="next-band-name">${band.band}</span>
-                                    <span class="next-band-time">opens at ${band.localTime}</span>
+                                    <span class="next-band-time">opens at ${band.localTime} (${band.uniqueCallsigns} callsigns, ${band.spots} spots)${getWeatherIndicator(band)}</span>
                                 </div>
                             `).join('')}
                         </div>
@@ -1003,7 +1003,7 @@
         return activeBands;
     }
 
-    function getNextActiveBands(entity) {
+    async function getNextActiveBands(entity) {
         const currentUTCHour = getCurrentUTCHour();
         const nextBands = [];
 
@@ -1039,11 +1039,18 @@
                 // Convert UTC hour to local time
                 const localTime = utcHourToLocalTime(nextHour);
                 
+                // Get historical data for this hour
+                const hourKey = String(nextHour).padStart(2, '0');
+                const spotsForHour = band.hourly_distribution[hourKey] || 0;
+                const uniqueCallsignsForHour = band.unique_callsigns || 0;
+                
                 nextBands.push({
                     band: band.band,
                     utcHour: nextHour,
                     localTime: localTime,
-                    hoursUntil: nextHour > currentUTCHour ? nextHour - currentUTCHour : (24 - currentUTCHour) + nextHour
+                    hoursUntil: nextHour > currentUTCHour ? nextHour - currentUTCHour : (24 - currentUTCHour) + nextHour,
+                    spots: spotsForHour,
+                    uniqueCallsigns: uniqueCallsignsForHour
                 });
             }
         });
@@ -1053,6 +1060,57 @@
 
         // Return top 3
         return nextBands.slice(0, 3);
+    }
+
+    async function getNextActiveBandsWithWeather(entity) {
+        // Get basic next bands data
+        const nextBands = await getNextActiveBands(entity);
+        
+        if (nextBands.length === 0) return nextBands;
+        
+        // Try to fetch space weather predictions for these bands
+        try {
+            const country = entity.country || '';
+            const continent = entity.continent || '';
+            const mode = document.getElementById('mode-select').value;
+            const hours = document.getElementById('hours-select').value;
+            
+            let url = `/api/decoder/spots/predictions?hours=${hours}`;
+            if (country) url += `&country=${encodeURIComponent(country)}`;
+            if (continent) url += `&continent=${continent}`;
+            if (mode) url += `&mode=${mode}`;
+            
+            const response = await fetch(url);
+            if (!response.ok) {
+                // If predictions API fails, return bands without weather info
+                return nextBands;
+            }
+            
+            const predictions = await response.json();
+            
+            // Match predictions with our next bands
+            if (predictions && predictions.predictions) {
+                nextBands.forEach(band => {
+                    const prediction = predictions.predictions.find(p =>
+                        p.band === band.band && p.hour_utc === band.utcHour
+                    );
+                    
+                    if (prediction) {
+                        band.weatherSimilar = prediction.conditions_similar;
+                        band.weatherNote = prediction.conditions_note;
+                        band.currentKIndex = prediction.current_conditions?.k_index;
+                        band.historicalKIndex = prediction.historical_conditions?.avg_k_index;
+                        band.currentSolarFlux = prediction.current_conditions?.solar_flux;
+                        band.historicalSolarFlux = prediction.historical_conditions?.avg_solar_flux;
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Error fetching weather predictions:', error);
+            // Return bands without weather info on error
+        }
+        
+        return nextBands;
     }
 
     function utcHourToLocalTime(utcHour) {
@@ -1066,6 +1124,19 @@
             minute: '2-digit',
             hour12: false
         });
+    }
+
+    function getWeatherIndicator(band) {
+        if (!band.weatherSimilar && band.weatherSimilar !== false) {
+            return ''; // No weather data available
+        }
+        
+        if (band.weatherSimilar) {
+            return ' <span style="color: #4caf50;" title="Current space weather conditions are similar to when these spots occurred">✓</span>';
+        } else {
+            let tooltip = band.weatherNote || 'Space weather conditions differ from historical data';
+            return ` <span style="color: #ff9800;" title="${tooltip}">⚠️</span>`;
+        }
     }
 
     function createHourlyChart(hourlyDist) {

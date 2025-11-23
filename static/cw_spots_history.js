@@ -15,7 +15,6 @@
     let sortColumn = 'timestamp';
     let sortDirection = 'desc'; // Start with newest first
     let spotsMap = null; // Map instance
-    let mapMarkerLimit = 2000; // Default marker limit
 
     // Common HF band names (excluding VHF/UHF)
     const commonBands = [
@@ -311,17 +310,6 @@
                 displaySpots(currentData);
             }
         });
-
-        // Handle map marker limit change
-        const mapMarkerLimitSelect = document.getElementById('map-marker-limit');
-        if (mapMarkerLimitSelect) {
-            mapMarkerLimitSelect.addEventListener('change', function() {
-                mapMarkerLimit = parseInt(this.value);
-                if (currentData) {
-                    displaySpots(currentData);
-                }
-            });
-        }
 
         // Add click handlers to sortable table headers
         document.addEventListener('click', function(e) {
@@ -915,27 +903,8 @@
         // Clear existing markers first to ensure clean state
         spotsMap.clearMarkers();
 
-        // Show/hide limit warning
-        const limitWarning = document.getElementById('map-limit-warning');
-        if (limitWarning) {
-            if (spots.length > mapMarkerLimit) {
-                limitWarning.style.display = 'inline';
-            } else {
-                limitWarning.style.display = 'none';
-            }
-        }
-
-        // Limit markers to most recent by timestamp
-        let spotsForMap = spots;
-        if (spots.length > mapMarkerLimit) {
-            // Sort by timestamp descending (most recent first) and take the limit
-            spotsForMap = [...spots].sort((a, b) => {
-                return new Date(b.timestamp) - new Date(a.timestamp);
-            }).slice(0, mapMarkerLimit);
-        }
-
-        // Add spots to map
-        spotsMap.addSpots(spotsForMap);
+        // Add all spots to map (clustering handles performance)
+        spotsMap.addSpots(spots);
     }
 
     function sortSpots(spots, column, direction) {

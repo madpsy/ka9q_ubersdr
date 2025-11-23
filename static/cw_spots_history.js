@@ -876,7 +876,7 @@
                 }
 
                 // Open the spot on the map
-                if (spotsMap && spot.locator) {
+                if (spotsMap && (spot.latitude !== undefined && spot.longitude !== undefined)) {
                     // Scroll to map section
                     const mapSection = document.getElementById('map-section');
                     if (mapSection) {

@@ -226,11 +226,12 @@
                 return;
             }
 
-            displayAnalytics(data);
-            
             // Clear cached hourly data when filters change
             countryAnimation.hourlyData = null;
             continentAnimation.hourlyData = null;
+            
+            // Display analytics (this is async and may take time)
+            await displayAnalytics(data);
             
             showStatus(`Loaded analytics for ${data.time_range.hours} hours`, 'success');
         } catch (error) {
@@ -822,7 +823,7 @@
                             ${nextBands.map(band => `
                                 <div class="next-band-item">
                                     <span class="next-band-name">${band.band}</span>
-                                    <span class="next-band-time">opens at ${band.localTime} (${band.uniqueCallsigns} callsigns, ${band.spots} spots)${getWeatherIndicator(band)}</span>
+                                    <span class="next-band-time">opens at ${band.localTime} (${band.spots} spots)${getWeatherIndicator(band)}</span>
                                 </div>
                             `).join('')}
                         </div>
@@ -856,7 +857,7 @@
                             ${nextBands.map(band => `
                                 <div class="next-band-item">
                                     <span class="next-band-name">${band.band}</span>
-                                    <span class="next-band-time">opens at ${band.localTime} (${band.uniqueCallsigns} callsigns, ${band.spots} spots)${getWeatherIndicator(band)}</span>
+                                    <span class="next-band-time">opens at ${band.localTime} (${band.spots} spots)${getWeatherIndicator(band)}</span>
                                 </div>
                             `).join('')}
                         </div>
@@ -1080,13 +1081,17 @@
             if (continent) url += `&continent=${continent}`;
             if (mode) url += `&mode=${mode}`;
             
+            console.log('Fetching predictions from:', url);
+            
             const response = await fetch(url);
             if (!response.ok) {
+                console.warn('Predictions API returned error:', response.status, response.statusText);
                 // If predictions API fails, return bands without weather info
                 return nextBands;
             }
             
             const predictions = await response.json();
+            console.log('Received predictions:', predictions);
             
             // Match predictions with our next bands
             if (predictions && predictions.predictions) {
@@ -1096,14 +1101,19 @@
                     );
                     
                     if (prediction) {
+                        console.log(`Matched prediction for ${band.band} at ${band.utcHour}:`, prediction);
                         band.weatherSimilar = prediction.conditions_similar;
                         band.weatherNote = prediction.conditions_note;
                         band.currentKIndex = prediction.current_conditions?.k_index;
                         band.historicalKIndex = prediction.historical_conditions?.avg_k_index;
                         band.currentSolarFlux = prediction.current_conditions?.solar_flux;
                         band.historicalSolarFlux = prediction.historical_conditions?.avg_solar_flux;
+                    } else {
+                        console.log(`No prediction match for ${band.band} at ${band.utcHour}`);
                     }
                 });
+            } else {
+                console.warn('No predictions in response');
             }
         } catch (error) {
             console.error('Error fetching weather predictions:', error);

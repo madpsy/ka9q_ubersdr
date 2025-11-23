@@ -503,37 +503,25 @@ class DecoderSpotsHistoryMap {
         const data = this.markers.get(key);
         
         if (data && data.marker) {
-            // Pan to marker location with good zoom level
-            this.map.setView(data.coords, 8, {
-                animate: true,
-                duration: 0.5
-            });
-            
-            // If marker is in a cluster, we need to spiderfy it first
-            // Wait for animation and zoom, then open popup
-            setTimeout(() => {
-                // Check if marker is in a cluster
-                if (this.markerClusterGroup && this.markerClusterGroup.hasLayer(data.marker)) {
-                    // The marker is in the cluster group
-                    // Zoom in enough to uncluster it if needed
-                    const currentZoom = this.map.getZoom();
-                    if (currentZoom < 12) {
-                        // Zoom in more to decluster
-                        this.map.setView(data.coords, 12, {
-                            animate: true,
-                            duration: 0.3
-                        });
-                        // Open popup after zoom completes
-                        setTimeout(() => {
-                            data.marker.openPopup();
-                        }, 400);
-                    } else {
-                        data.marker.openPopup();
-                    }
-                } else {
+            // Use the marker cluster group's zoomToShowLayer method
+            // This will automatically handle unclustering and showing the marker
+            if (this.markerClusterGroup && this.markerClusterGroup.hasLayer(data.marker)) {
+                this.markerClusterGroup.zoomToShowLayer(data.marker, () => {
+                    // Callback after zoom completes
                     data.marker.openPopup();
-                }
-            }, 600);
+                });
+            } else {
+                // Marker not in cluster group, just pan and open
+                this.map.setView(data.coords, Math.max(this.map.getZoom(), 8), {
+                    animate: true,
+                    duration: 0.5
+                });
+                setTimeout(() => {
+                    data.marker.openPopup();
+                }, 600);
+            }
+        } else {
+            console.warn('Marker not found for key:', key);
         }
     }
 }

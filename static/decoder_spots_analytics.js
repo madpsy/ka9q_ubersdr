@@ -197,27 +197,40 @@
         document.getElementById('load-btn').disabled = true;
 
         try {
-            let url = `/api/decoder/spots/analytics?hours=${hours}`;
-            if (country) url += `&country=${encodeURIComponent(country)}`;
-            if (continent) url += `&continent=${continent}`;
-            if (mode) url += `&mode=${mode}`;
-            if (band) url += `&band=${encodeURIComponent(band)}`;
+            let analyticsUrl = `/api/decoder/spots/analytics?hours=${hours}`;
+            if (country) analyticsUrl += `&country=${encodeURIComponent(country)}`;
+            if (continent) analyticsUrl += `&continent=${continent}`;
+            if (mode) analyticsUrl += `&mode=${mode}`;
+            if (band) analyticsUrl += `&band=${encodeURIComponent(band)}`;
             if (minSNR && parseInt(minSNR) !== -999) {
-                url += `&min_snr=${minSNR}`;
+                analyticsUrl += `&min_snr=${minSNR}`;
             }
 
-            const response = await fetch(url);
-            
-            if (response.status === 429) {
+            // Start both requests in parallel if a specific country is selected
+            let analyticsPromise = fetch(analyticsUrl);
+            let predictionsPromise = null;
+
+            if (country) {
+                let predictionsUrl = `/api/decoder/spots/predictions?hours=${hours}`;
+                if (country) predictionsUrl += `&country=${encodeURIComponent(country)}`;
+                if (continent) predictionsUrl += `&continent=${continent}`;
+                if (mode) predictionsUrl += `&mode=${mode}`;
+                predictionsPromise = fetch(predictionsUrl);
+            }
+
+            // Wait for analytics response
+            const analyticsResponse = await analyticsPromise;
+
+            if (analyticsResponse.status === 429) {
                 showStatus('Rate limit exceeded. Please wait a moment before trying again.', 'error');
                 return;
             }
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+
+            if (!analyticsResponse.ok) {
+                throw new Error(`HTTP error! status: ${analyticsResponse.status}`);
             }
 
-            const data = await response.json();
+            const data = await analyticsResponse.json();
             currentData = data;
 
             if (!data.by_country || data.by_country.length === 0) {
@@ -226,13 +239,31 @@
                 return;
             }
 
+            // Wait for predictions response if it was started
+            if (predictionsPromise) {
+                try {
+                    const predictionsResponse = await predictionsPromise;
+                    if (predictionsResponse.ok) {
+                        window.cachedPredictions = await predictionsResponse.json();
+                    } else {
+                        console.warn('Predictions API returned error:', predictionsResponse.status);
+                        window.cachedPredictions = null;
+                    }
+                } catch (error) {
+                    console.error('Error fetching predictions:', error);
+                    window.cachedPredictions = null;
+                }
+            } else {
+                window.cachedPredictions = null;
+            }
+
             // Clear cached hourly data when filters change
             countryAnimation.hourlyData = null;
             continentAnimation.hourlyData = null;
-            
+
             // Display analytics (this is async and may take time)
             await displayAnalytics(data);
-            
+
             showStatus(`Loaded analytics for ${data.time_range.hours} hours`, 'success');
         } catch (error) {
             console.error('Error loading analytics:', error);
@@ -809,11 +840,12 @@
         let activeNowHTML = '';
         if (type === 'country') {
             const activeBands = getActiveBandsNow(entity);
+            // Fetch next bands once for both active and inactive cases
             const nextBands = await getNextActiveBandsWithWeather(entity);
-            
+
             // Show next bands if 2 or fewer active bands
             const shouldShowNextBands = activeBands.length <= 2 && nextBands.length > 0;
-            
+
             if (activeBands.length > 0) {
                 let nextBandsHTML = '';
                 if (shouldShowNextBands) {
@@ -829,7 +861,7 @@
                         </div>
                     `;
                 }
-                
+
                 activeNowHTML = `
                     <div class="active-now-section">
                         <div class="active-now-header">
@@ -849,7 +881,7 @@
                     </div>
                 `;
             } else {
-                const nextBands = await getNextActiveBandsWithWeather(entity);
+                // Reuse nextBands already fetched above
                 let nextBandsHTML = '';
                 if (nextBands.length > 0) {
                     nextBandsHTML = `
@@ -1066,70 +1098,45 @@
     async function getNextActiveBandsWithWeather(entity) {
         // Get basic next bands data
         const nextBands = await getNextActiveBands(entity);
-        
+
         if (nextBands.length === 0) return nextBands;
-        
-        // Only fetch predictions if a specific country is selected in the filter
+
+        // Only use predictions if a specific country is selected in the filter
         const countryInput = document.getElementById('country-search').value.trim();
         if (!countryInput) {
             // No specific country selected - return bands without weather predictions
-            console.log('Skipping predictions fetch - no specific country selected');
+            console.log('Skipping predictions - no specific country selected');
             return nextBands;
         }
 
-        // Try to fetch space weather predictions for these bands
-        try {
-            const country = entity.country || '';
-            const continent = entity.continent || '';
-            const mode = document.getElementById('mode-select').value;
-            const hours = document.getElementById('hours-select').value;
-            
-            let url = `/api/decoder/spots/predictions?hours=${hours}`;
-            if (country) url += `&country=${encodeURIComponent(country)}`;
-            if (continent) url += `&continent=${continent}`;
-            if (mode) url += `&mode=${mode}`;
-            
-            console.log('Fetching predictions from:', url);
-            
-            const response = await fetch(url);
-            if (!response.ok) {
-                console.warn('Predictions API returned error:', response.status, response.statusText);
-                // If predictions API fails, return bands without weather info
-                return nextBands;
-            }
-            
-            const predictions = await response.json();
-            console.log('Received predictions:', predictions);
-            
-            // Match predictions with our next bands
-            if (predictions && predictions.predictions) {
-                nextBands.forEach(band => {
-                    const prediction = predictions.predictions.find(p =>
-                        p.band === band.band && p.opens_at_utc === band.utcHour
-                    );
+        // Use cached predictions if available (fetched in parallel with analytics)
+        if (window.cachedPredictions && window.cachedPredictions.predictions) {
+            console.log('Using cached predictions:', window.cachedPredictions);
 
-                    if (prediction) {
-                        console.log(`Matched prediction for ${band.band} at ${band.utcHour}:`, prediction);
-                        band.weatherSimilar = prediction.conditions_similar;
-                        band.weatherNote = prediction.conditions_note;
-                        band.currentKIndex = prediction.current_k_index;
-                        band.historicalKIndex = prediction.historical_k_index;
-                        band.currentSolarFlux = prediction.current_solar_flux;
-                        band.historicalSolarFlux = prediction.historical_solar_flux;
-                        band.confidenceScore = prediction.confidence_score;
-                        band.confidenceLevel = prediction.confidence_level;
-                    } else {
-                        console.log(`No prediction match for ${band.band} at ${band.utcHour}`);
-                    }
-                });
-            } else {
-                console.warn('No predictions in response');
-            }
-        } catch (error) {
-            console.error('Error fetching weather predictions:', error);
-            // Return bands without weather info on error
+            // Match predictions with our next bands
+            nextBands.forEach(band => {
+                const prediction = window.cachedPredictions.predictions.find(p =>
+                    p.band === band.band && p.opens_at_utc === band.utcHour
+                );
+
+                if (prediction) {
+                    console.log(`Matched prediction for ${band.band} at ${band.utcHour}:`, prediction);
+                    band.weatherSimilar = prediction.conditions_similar;
+                    band.weatherNote = prediction.conditions_note;
+                    band.currentKIndex = prediction.current_k_index;
+                    band.historicalKIndex = prediction.historical_k_index;
+                    band.currentSolarFlux = prediction.current_solar_flux;
+                    band.historicalSolarFlux = prediction.historical_solar_flux;
+                    band.confidenceScore = prediction.confidence_score;
+                    band.confidenceLevel = prediction.confidence_level;
+                } else {
+                    console.log(`No prediction match for ${band.band} at ${band.utcHour}`);
+                }
+            });
+        } else {
+            console.log('No cached predictions available');
         }
-        
+
         return nextBands;
     }
 

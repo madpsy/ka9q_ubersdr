@@ -4,7 +4,6 @@
 
     let selectedDate = null;
     let availableDates = [];
-    let availableNames = [];
     let currentData = null;
     let filteredData = null; // Stores filtered spots
     let activeFilter = null; // Tracks which filter is active
@@ -362,7 +361,6 @@
         });
 
         // Fetch and populate available names
-        loadAvailableNames();
     }
 
     function clearFilters() {

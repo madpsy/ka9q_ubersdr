@@ -1097,17 +1097,17 @@
             if (predictions && predictions.predictions) {
                 nextBands.forEach(band => {
                     const prediction = predictions.predictions.find(p =>
-                        p.band === band.band && p.hour_utc === band.utcHour
+                        p.band === band.band && p.opens_at_utc === band.utcHour
                     );
-                    
+
                     if (prediction) {
                         console.log(`Matched prediction for ${band.band} at ${band.utcHour}:`, prediction);
                         band.weatherSimilar = prediction.conditions_similar;
                         band.weatherNote = prediction.conditions_note;
-                        band.currentKIndex = prediction.current_conditions?.k_index;
-                        band.historicalKIndex = prediction.historical_conditions?.avg_k_index;
-                        band.currentSolarFlux = prediction.current_conditions?.solar_flux;
-                        band.historicalSolarFlux = prediction.historical_conditions?.avg_solar_flux;
+                        band.currentKIndex = prediction.current_k_index;
+                        band.historicalKIndex = prediction.historical_k_index;
+                        band.currentSolarFlux = prediction.current_solar_flux;
+                        band.historicalSolarFlux = prediction.historical_solar_flux;
                     } else {
                         console.log(`No prediction match for ${band.band} at ${band.utcHour}`);
                     }

@@ -335,11 +335,6 @@ class DecoderSpotsHistoryMap {
             const mode = spot.mode || 'CW';
             const key = `${spot.callsign}-${spot.band}-${mode}`;
             this.markers.set(key, { marker, spot, coords: [adjustedLat, adjustedLon] });
-
-            // Debug log for first few markers
-            if (this.markers.size <= 5) {
-                console.log('Added marker with key:', key);
-            }
         });
 
         // Auto-zoom to fit all spots (excluding receiver marker)
@@ -507,8 +502,6 @@ class DecoderSpotsHistoryMap {
      */
     openSpotPopup(callsign, band, mode) {
         const key = `${callsign}-${band}-${mode}`;
-        console.log('Looking for marker with key:', key);
-        console.log('Available keys:', Array.from(this.markers.keys()).slice(0, 10));
         const data = this.markers.get(key);
 
         if (data && data.marker) {

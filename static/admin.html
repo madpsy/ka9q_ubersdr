@@ -4226,6 +4226,11 @@
                 if (data.decoder) {
                     renderDecoderHealth(container, data.decoder);
                 }
+
+                // Render CW Skimmer health status
+                if (data.cwSkimmer) {
+                    renderCWSkimmerHealth(container, data.cwSkimmer);
+                }
             }
         }
 

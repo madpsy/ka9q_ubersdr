@@ -54,6 +54,29 @@ type PrometheusMetrics struct {
 	digitalExecTime10mMin     *prometheus.GaugeVec // Minimum decoder execution time (last 10 minutes)
 	digitalExecTime10mMax     *prometheus.GaugeVec // Maximum decoder execution time (last 10 minutes)
 
+	// CW Skimmer metrics (with 'band' label)
+	cwSpotsTotal1h       *prometheus.GaugeVec // Total CW spots in last 1 hour
+	cwSpotsTotal3h       *prometheus.GaugeVec // Total CW spots in last 3 hours
+	cwSpotsTotal6h       *prometheus.GaugeVec // Total CW spots in last 6 hours
+	cwSpotsTotal12h      *prometheus.GaugeVec // Total CW spots in last 12 hours
+	cwSpotsTotal24h      *prometheus.GaugeVec // Total CW spots in last 24 hours
+	cwUniqueCallsigns1h  *prometheus.GaugeVec // Unique callsigns in last 1 hour
+	cwUniqueCallsigns3h  *prometheus.GaugeVec // Unique callsigns in last 3 hours
+	cwUniqueCallsigns6h  *prometheus.GaugeVec // Unique callsigns in last 6 hours
+	cwUniqueCallsigns12h *prometheus.GaugeVec // Unique callsigns in last 12 hours
+	cwUniqueCallsigns24h *prometheus.GaugeVec // Unique callsigns in last 24 hours
+	cwWPMAvg1m           *prometheus.GaugeVec // Average WPM (last 1 minute)
+	cwWPMMin1m           *prometheus.GaugeVec // Minimum WPM (last 1 minute)
+	cwWPMMax1m           *prometheus.GaugeVec // Maximum WPM (last 1 minute)
+	cwWPMAvg5m           *prometheus.GaugeVec // Average WPM (last 5 minutes)
+	cwWPMMin5m           *prometheus.GaugeVec // Minimum WPM (last 5 minutes)
+	cwWPMMax5m           *prometheus.GaugeVec // Maximum WPM (last 5 minutes)
+	cwWPMAvg10m          *prometheus.GaugeVec // Average WPM (last 10 minutes)
+	cwWPMMin10m          *prometheus.GaugeVec // Minimum WPM (last 10 minutes)
+	cwWPMMax10m          *prometheus.GaugeVec // Maximum WPM (last 10 minutes)
+	cwSpotsPerHour       *prometheus.GaugeVec // Spots per hour activity metric
+	cwCallsignsPerHour   *prometheus.GaugeVec // Callsigns per hour activity metric
+
 	// System metrics
 	activeSessions         prometheus.Gauge // Total active sessions (audio + spectrum)
 	activeUsers            prometheus.Gauge // Total unique users (by UUID)
@@ -119,6 +142,9 @@ type PrometheusMetrics struct {
 
 	// Digital decode metrics tracker
 	digitalMetrics *DigitalDecodeMetrics
+
+	// CW Skimmer metrics tracker
+	cwMetrics *CWSkimmerMetrics
 
 	mu sync.RWMutex // Protects metric updates
 }
@@ -372,9 +398,156 @@ func NewPrometheusMetrics() *PrometheusMetrics {
 			[]string{"mode", "band"},
 		),
 		digitalMetrics: NewDigitalDecodeMetrics(),
+		cwSpotsTotal1h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_spots_total_1h",
+				Help: "Total CW spots in the last 1 hour by band",
+			},
+			[]string{"band"},
+		),
+		cwSpotsTotal3h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_spots_total_3h",
+				Help: "Total CW spots in the last 3 hours by band",
+			},
+			[]string{"band"},
+		),
+		cwSpotsTotal6h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_spots_total_6h",
+				Help: "Total CW spots in the last 6 hours by band",
+			},
+			[]string{"band"},
+		),
+		cwSpotsTotal12h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_spots_total_12h",
+				Help: "Total CW spots in the last 12 hours by band",
+			},
+			[]string{"band"},
+		),
+		cwSpotsTotal24h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_spots_total_24h",
+				Help: "Total CW spots in the last 24 hours by band",
+			},
+			[]string{"band"},
+		),
+		cwUniqueCallsigns1h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_unique_callsigns_1h",
+				Help: "Unique callsigns in the last 1 hour by band",
+			},
+			[]string{"band"},
+		),
+		cwUniqueCallsigns3h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_unique_callsigns_3h",
+				Help: "Unique callsigns in the last 3 hours by band",
+			},
+			[]string{"band"},
+		),
+		cwUniqueCallsigns6h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_unique_callsigns_6h",
+				Help: "Unique callsigns in the last 6 hours by band",
+			},
+			[]string{"band"},
+		),
+		cwUniqueCallsigns12h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_unique_callsigns_12h",
+				Help: "Unique callsigns in the last 12 hours by band",
+			},
+			[]string{"band"},
+		),
+		cwUniqueCallsigns24h: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_unique_callsigns_24h",
+				Help: "Unique callsigns in the last 24 hours by band",
+			},
+			[]string{"band"},
+		),
+		cwWPMAvg1m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_wpm_avg_1m",
+				Help: "Average WPM in the last 1 minute by band",
+			},
+			[]string{"band"},
+		),
+		cwWPMMin1m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_wpm_min_1m",
+				Help: "Minimum WPM in the last 1 minute by band",
+			},
+			[]string{"band"},
+		),
+		cwWPMMax1m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_wpm_max_1m",
+				Help: "Maximum WPM in the last 1 minute by band",
+			},
+			[]string{"band"},
+		),
+		cwWPMAvg5m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_wpm_avg_5m",
+				Help: "Average WPM in the last 5 minutes by band",
+			},
+			[]string{"band"},
+		),
+		cwWPMMin5m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_wpm_min_5m",
+				Help: "Minimum WPM in the last 5 minutes by band",
+			},
+			[]string{"band"},
+		),
+		cwWPMMax5m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_wpm_max_5m",
+				Help: "Maximum WPM in the last 5 minutes by band",
+			},
+			[]string{"band"},
+		),
+		cwWPMAvg10m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_wpm_avg_10m",
+				Help: "Average WPM in the last 10 minutes by band",
+			},
+			[]string{"band"},
+		),
+		cwWPMMin10m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_wpm_min_10m",
+				Help: "Minimum WPM in the last 10 minutes by band",
+			},
+			[]string{"band"},
+		),
+		cwWPMMax10m: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_wpm_max_10m",
+				Help: "Maximum WPM in the last 10 minutes by band",
+			},
+			[]string{"band"},
+		),
+		cwSpotsPerHour: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_spots_per_hour",
+				Help: "CW spots per hour activity metric by band",
+			},
+			[]string{"band"},
+		),
+		cwCallsignsPerHour: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "cw_callsigns_per_hour",
+				Help: "Unique CW callsigns per hour activity metric by band",
+			},
+			[]string{"band"},
+		),
 	}
 
-	log.Println("Prometheus metrics initialized for noisefloor monitoring, system stats, and digital decodes")
+	log.Println("Prometheus metrics initialized for noisefloor monitoring, system stats, digital decodes, and CW Skimmer")
 	return pm
 }
 
@@ -1160,4 +1333,100 @@ func (pm *PrometheusMetrics) StartDigitalMetricsCleanup(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// UpdateCWMetrics updates CW Skimmer Prometheus metrics for a band
+func (pm *PrometheusMetrics) UpdateCWMetrics(band string, cwMetrics *CWSkimmerMetrics) {
+	if pm == nil || cwMetrics == nil {
+		return
+	}
+
+	labels := prometheus.Labels{"band": band}
+
+	// Update spot counts for different time windows
+	pm.cwSpotsTotal1h.With(labels).Set(float64(cwMetrics.GetTotalSpots(band, 1)))
+	pm.cwSpotsTotal3h.With(labels).Set(float64(cwMetrics.GetTotalSpots(band, 3)))
+	pm.cwSpotsTotal6h.With(labels).Set(float64(cwMetrics.GetTotalSpots(band, 6)))
+	pm.cwSpotsTotal12h.With(labels).Set(float64(cwMetrics.GetTotalSpots(band, 12)))
+	pm.cwSpotsTotal24h.With(labels).Set(float64(cwMetrics.GetTotalSpots(band, 24)))
+
+	// Update unique callsigns for different time windows
+	pm.cwUniqueCallsigns1h.With(labels).Set(float64(cwMetrics.GetUniqueCallsigns(band, 1)))
+	pm.cwUniqueCallsigns3h.With(labels).Set(float64(cwMetrics.GetUniqueCallsigns(band, 3)))
+	pm.cwUniqueCallsigns6h.With(labels).Set(float64(cwMetrics.GetUniqueCallsigns(band, 6)))
+	pm.cwUniqueCallsigns12h.With(labels).Set(float64(cwMetrics.GetUniqueCallsigns(band, 12)))
+	pm.cwUniqueCallsigns24h.With(labels).Set(float64(cwMetrics.GetUniqueCallsigns(band, 24)))
+
+	// Update WPM statistics for 1 minute window
+	avg1m, min1m, max1m := cwMetrics.GetWPMStats(band, 1)
+	pm.cwWPMAvg1m.With(labels).Set(avg1m)
+	pm.cwWPMMin1m.With(labels).Set(float64(min1m))
+	pm.cwWPMMax1m.With(labels).Set(float64(max1m))
+
+	// Update WPM statistics for 5 minute window
+	avg5m, min5m, max5m := cwMetrics.GetWPMStats(band, 5)
+	pm.cwWPMAvg5m.With(labels).Set(avg5m)
+	pm.cwWPMMin5m.With(labels).Set(float64(min5m))
+	pm.cwWPMMax5m.With(labels).Set(float64(max5m))
+
+	// Update WPM statistics for 10 minute window
+	avg10m, min10m, max10m := cwMetrics.GetWPMStats(band, 10)
+	pm.cwWPMAvg10m.With(labels).Set(avg10m)
+	pm.cwWPMMin10m.With(labels).Set(float64(min10m))
+	pm.cwWPMMax10m.With(labels).Set(float64(max10m))
+
+	// Update activity metrics (spots and callsigns per hour)
+	pm.cwSpotsPerHour.With(labels).Set(float64(cwMetrics.GetTotalSpots(band, 1)))
+	pm.cwCallsignsPerHour.With(labels).Set(float64(cwMetrics.GetUniqueCallsigns(band, 1)))
+}
+
+// UpdateAllCWMetrics updates CW Skimmer metrics for all active bands
+func (pm *PrometheusMetrics) UpdateAllCWMetrics(cwMetrics *CWSkimmerMetrics) {
+	if pm == nil || cwMetrics == nil {
+		return
+	}
+
+	// Get all active bands from CW metrics
+	bands := cwMetrics.GetAllBands()
+
+	// Update metrics for each band
+	for _, band := range bands {
+		pm.UpdateCWMetrics(band, cwMetrics)
+	}
+}
+
+// StartCWMetricsUpdater starts a goroutine to periodically update CW Skimmer metrics
+func (pm *PrometheusMetrics) StartCWMetricsUpdater(ctx context.Context, cwMetrics *CWSkimmerMetrics) {
+	if pm == nil || cwMetrics == nil {
+		return
+	}
+
+	// Store reference to CW metrics
+	pm.cwMetrics = cwMetrics
+
+	go func() {
+		// Update every minute (similar to digital metrics cleanup interval)
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		// Initial update
+		pm.UpdateAllCWMetrics(cwMetrics)
+
+		for {
+			select {
+			case <-ctx.Done():
+				if DebugMode {
+					log.Println("DEBUG: CW metrics updater stopped")
+				}
+				return
+			case <-ticker.C:
+				pm.UpdateAllCWMetrics(cwMetrics)
+				if DebugMode {
+					log.Println("DEBUG: Updated CW Skimmer Prometheus metrics")
+				}
+			}
+		}
+	}()
+
+	log.Println("Started CW Skimmer Prometheus metrics updater (1 minute interval)")
 }

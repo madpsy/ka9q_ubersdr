@@ -427,6 +427,10 @@ func main() {
 		// Start digital metrics cleanup goroutine (cleans up old data every 5 minutes)
 		prometheusMetrics.StartDigitalMetricsCleanup(ctx)
 
+		// Start CW metrics updater if CW Skimmer is enabled and has metrics
+		// This will be connected later when cwSkimmer is initialized
+		// (CW Skimmer is initialized after Prometheus setup)
+
 		// Start Pushgateway worker if enabled
 		if config.Prometheus.Pushgateway.Enabled {
 			prometheusMetrics.StartPushgatewayWorker(ctx, config)
@@ -510,6 +514,14 @@ func main() {
 			cwMetrics.StartPeriodicTasks()
 			log.Printf("CW Skimmer metrics logging enabled: dir=%s, interval=%ds",
 				cwskimmerConfig.MetricsLogDataDir, cwskimmerConfig.MetricsLogIntervalSecs)
+
+			// Start CW metrics updater for Prometheus if enabled
+			if prometheusMetrics != nil {
+				// Get context for graceful shutdown
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				prometheusMetrics.StartCWMetricsUpdater(ctx, cwMetrics)
+			}
 		}
 
 		// Set Prometheus metrics if enabled

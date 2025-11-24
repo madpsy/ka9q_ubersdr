@@ -252,6 +252,9 @@ class CWSpotsExtension extends DecoderExtension {
     handleSpot(spot) {
         const isBuffered = spot.time && (Date.now() - new Date(spot.time).getTime()) > 5000;
         this.addSpot(spot, !isBuffered);
+
+        // Update modal tuned info if this spot is on the same frequency we're tuned to
+        this.checkAndUpdateTunedInfo(spot);
     }
 
     addSpot(spot, isNewSpot = false) {
@@ -1934,6 +1937,10 @@ class CWSpotsExtension extends DecoderExtension {
         const tunedInfo = document.getElementById('cw-country-spots-tuned-info');
         if (!tunedInfo) return;
 
+        // Store the tuned frequency for future updates
+        this.tunedFrequency = spot.frequency;
+        this.tunedCallsign = spot.dx_call;
+
         tunedInfo.innerHTML = `Tuned: ${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz`;
         tunedInfo.style.display = 'flex';
     }
@@ -1943,6 +1950,26 @@ class CWSpotsExtension extends DecoderExtension {
         if (tunedInfo) {
             tunedInfo.style.display = 'none';
             tunedInfo.innerHTML = '';
+        }
+        // Clear stored tuned frequency
+        this.tunedFrequency = null;
+        this.tunedCallsign = null;
+    }
+
+    checkAndUpdateTunedInfo(spot) {
+        // Only update if modal is open and we have a tuned frequency
+        if (!this.currentModalCountry || !this.currentModalBand || !this.tunedFrequency) {
+            return;
+        }
+
+        // Check if this spot is on the same frequency (within 10 Hz tolerance)
+        if (Math.abs(spot.frequency - this.tunedFrequency) <= 10) {
+            // Update the display with the new callsign
+            const tunedInfo = document.getElementById('cw-country-spots-tuned-info');
+            if (tunedInfo && tunedInfo.style.display !== 'none') {
+                this.tunedCallsign = spot.dx_call;
+                tunedInfo.innerHTML = `Tuned: ${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz`;
+            }
         }
     }
 

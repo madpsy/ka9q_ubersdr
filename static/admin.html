@@ -4653,6 +4653,17 @@
                 const issuesList = document.createElement('ul');
                 issuesList.style.marginLeft = '20px';
                 data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            container.appendChild(statusSection);
+        }
 
         function renderCWSkimmerHealth(container, data) {
             // Only render if CW Skimmer is enabled
@@ -4736,17 +4747,6 @@
                 const issuesList = document.createElement('ul');
                 issuesList.style.marginLeft = '20px';
                 data.issues.forEach(issue => {
-                    const li = document.createElement('li');
-                    li.textContent = issue;
-                    li.style.marginBottom = '5px';
-                    issuesList.appendChild(li);
-                });
-                issuesDiv.appendChild(issuesList);
-                statusSection.appendChild(issuesDiv);
-            }
-
-            container.appendChild(statusSection);
-        }
                     const li = document.createElement('li');
                     li.textContent = issue;
                     li.style.marginBottom = '5px';

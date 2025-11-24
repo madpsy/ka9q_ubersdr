@@ -809,13 +809,12 @@ func main() {
 	}))
 	http.HandleFunc("/api/cwskimmer/metrics/summary", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleCWMetricsSummary(w, r, cwSkimmer, ipBanManager, summaryRateLimiter)
-		http.HandleFunc("/api/cwskimmer/spots/analytics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-			handleCWSpotsAnalytics(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)
-		}))
-		http.HandleFunc("/api/cwskimmer/spots/analytics/hourly", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
-			handleCWSpotsAnalyticsHourly(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)
-		}))
-
+	}))
+	http.HandleFunc("/api/cwskimmer/spots/analytics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleCWSpotsAnalytics(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)
+	}))
+	http.HandleFunc("/api/cwskimmer/spots/analytics/hourly", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleCWSpotsAnalyticsHourly(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)
 	}))
 
 	// CTY API endpoints (with IP ban checking)

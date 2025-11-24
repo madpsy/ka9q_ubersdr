@@ -36,6 +36,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.badgeUpdatePending = false; // Prevent multiple pending badge updates
         this.lastBadgeUpdate = 0; // Track last badge update time for throttling
         this.modalGraphRefreshInterval = null; // Interval for periodic graph updates
+        this.showAllCountriesInModal = false; // Track "Show All Countries" checkbox state
         
         // Performance optimization: caching and limits
         this.filteredSpotsCache = null; // Cache filtered results
@@ -1222,11 +1223,17 @@ class DigitalSpotsExtension extends DecoderExtension {
             this.modalHandlersSetup = true;
         }
 
-        // Reset mode filter to 'all' when opening modal
+        // Reset mode filter to 'all' and checkbox to unchecked when opening modal
         this.currentModalModeFilter = 'all';
         const modeFilter = document.getElementById('country-spots-modal-mode-filter');
         if (modeFilter) {
             modeFilter.value = 'all';
+        }
+
+        this.showAllCountriesInModal = false;
+        const showAllCheckbox = document.getElementById('country-spots-show-all-countries');
+        if (showAllCheckbox) {
+            showAllCheckbox.checked = false;
         }
 
         // Set default tab to graph
@@ -1289,8 +1296,11 @@ class DigitalSpotsExtension extends DecoderExtension {
             const spotTime = new Date(spot.timestamp).getTime();
             if (spotTime < tenMinutesAgo) return false;
 
-            // Band and country filters (very selective)
-            if (spot.band !== band || spot.country !== country) return false;
+            // Band filter (always apply)
+            if (spot.band !== band) return false;
+
+            // Country filter (conditional based on checkbox)
+            if (!this.showAllCountriesInModal && spot.country !== country) return false;
 
             // Mode filter last (only if not 'all')
             if (this.currentModalModeFilter !== 'all' && spot.mode !== this.currentModalModeFilter) {
@@ -1323,7 +1333,10 @@ class DigitalSpotsExtension extends DecoderExtension {
         const modalTitle = document.getElementById('country-spots-modal-title');
         if (modalTitle) {
             const count = uniqueSpots.length;
-            modalTitle.textContent = `${country} on ${band} (${count} callsign${count !== 1 ? 's' : ''})`;
+            const titleText = this.showAllCountriesInModal
+                ? `All Countries on ${band} (${count} callsign${count !== 1 ? 's' : ''})`
+                : `${country} on ${band} (${count} callsign${count !== 1 ? 's' : ''})`;
+            modalTitle.textContent = titleText;
         }
 
         // Populate modal table
@@ -1430,6 +1443,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         const modal = document.getElementById('country-spots-modal');
         const closeBtn = document.getElementById('country-spots-modal-close');
         const modeFilter = document.getElementById('country-spots-modal-mode-filter');
+        const showAllCheckbox = document.getElementById('country-spots-show-all-countries');
 
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
@@ -1440,6 +1454,15 @@ class DigitalSpotsExtension extends DecoderExtension {
         if (modeFilter) {
             modeFilter.addEventListener('change', (e) => {
                 this.currentModalModeFilter = e.target.value;
+                // Mark that graph needs refresh due to filter change
+                this._modalNeedsGraphRefresh = true;
+                this.refreshModalContent();
+            });
+        }
+
+        if (showAllCheckbox) {
+            showAllCheckbox.addEventListener('change', (e) => {
+                this.showAllCountriesInModal = e.target.checked;
                 // Mark that graph needs refresh due to filter change
                 this._modalNeedsGraphRefresh = true;
                 this.refreshModalContent();
@@ -1525,8 +1548,11 @@ class DigitalSpotsExtension extends DecoderExtension {
             const spotTime = new Date(spot.timestamp).getTime();
             if (spotTime < tenMinutesAgo) return false;
 
-            // Band and country filters (very selective)
-            if (spot.band !== band || spot.country !== country) return false;
+            // Band filter (always apply)
+            if (spot.band !== band) return false;
+
+            // Country filter (conditional based on checkbox)
+            if (!this.showAllCountriesInModal && spot.country !== country) return false;
 
             // Mode filter last (only if not 'all')
             if (this.currentModalModeFilter !== 'all' && spot.mode !== this.currentModalModeFilter) {

@@ -36,6 +36,7 @@ class CWSpotsExtension extends DecoderExtension {
         this.badgeUpdatePending = false; // Prevent multiple pending badge updates
         this.lastBadgeUpdate = 0; // Track last badge update time for throttling
         this.modalGraphRefreshInterval = null; // Interval for periodic graph updates
+        this.showAllCountriesInModal = false; // Track "Show All Countries" checkbox state
         
         // Performance optimization
         this.filteredSpotsCache = null;
@@ -1083,6 +1084,13 @@ class CWSpotsExtension extends DecoderExtension {
             this.modalHandlersSetup = true;
         }
 
+        // Reset checkbox to unchecked when opening modal
+        this.showAllCountriesInModal = false;
+        const showAllCheckbox = document.getElementById('cw-country-spots-show-all-countries');
+        if (showAllCheckbox) {
+            showAllCheckbox.checked = false;
+        }
+
         // Set default tab to graph
         this.switchModalTab('graph');
 
@@ -1143,8 +1151,11 @@ class CWSpotsExtension extends DecoderExtension {
             const spotTime = new Date(spot.time).getTime();
             if (spotTime < tenMinutesAgo) return false;
 
-            // Band and country filters (very selective)
-            if (spot.band !== band || spot.country !== country) return false;
+            // Band filter (always apply)
+            if (spot.band !== band) return false;
+
+            // Country filter (conditional based on checkbox)
+            if (!this.showAllCountriesInModal && spot.country !== country) return false;
 
             return true;
         });
@@ -1172,7 +1183,10 @@ class CWSpotsExtension extends DecoderExtension {
         const modalTitle = document.getElementById('cw-country-spots-modal-title');
         if (modalTitle) {
             const count = uniqueSpots.length;
-            modalTitle.textContent = `${country} on ${band} (${count} callsign${count !== 1 ? 's' : ''})`;
+            const titleText = this.showAllCountriesInModal
+                ? `All Countries on ${band} (${count} callsign${count !== 1 ? 's' : ''})`
+                : `${country} on ${band} (${count} callsign${count !== 1 ? 's' : ''})`;
+            modalTitle.textContent = titleText;
         }
 
         // Populate modal table
@@ -1272,8 +1286,11 @@ class CWSpotsExtension extends DecoderExtension {
             const spotTime = new Date(spot.time).getTime();
             if (spotTime < tenMinutesAgo) return false;
 
-            // Band and country filters (very selective)
-            if (spot.band !== band || spot.country !== country) return false;
+            // Band filter (always apply)
+            if (spot.band !== band) return false;
+
+            // Country filter (conditional based on checkbox)
+            if (!this.showAllCountriesInModal && spot.country !== country) return false;
 
             return true;
         });
@@ -1723,10 +1740,20 @@ class CWSpotsExtension extends DecoderExtension {
     setupModalHandlers() {
         const modal = document.getElementById('cw-country-spots-modal');
         const closeBtn = document.getElementById('cw-country-spots-modal-close');
+        const showAllCheckbox = document.getElementById('cw-country-spots-show-all-countries');
 
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
                 this.closeCountryModal();
+            });
+        }
+
+        if (showAllCheckbox) {
+            showAllCheckbox.addEventListener('change', (e) => {
+                this.showAllCountriesInModal = e.target.checked;
+                // Mark that graph needs refresh due to filter change
+                this._modalNeedsGraphRefresh = true;
+                this.refreshModalContent();
             });
         }
 

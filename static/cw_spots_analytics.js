@@ -359,19 +359,20 @@
         if (!countryMap) {
             const countryMapDiv = document.getElementById('country-map');
             countryMapDiv.style.display = 'block';
-            
+
             countryMap = L.map('country-map').setView([20, 0], 2);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap contributors'
             }).addTo(countryMap);
-            
-            countryGrid = new MaidenheadGrid(countryMap, {
-                color: '#666',
-                weight: 1,
-                opacity: 0.3,
-                showLabels: false
+
+            // Initialize marker cluster group for country map
+            window.countryMarkerCluster = L.markerClusterGroup({
+                maxClusterRadius: 50,
+                spiderfyOnMaxZoom: true,
+                showCoverageOnHover: false,
+                zoomToBoundsOnClick: true
             });
-            countryGrid.showGrid();
+            countryMap.addLayer(window.countryMarkerCluster);
 
             // Add receiver marker
             countryReceiverMarker = addReceiverMarker(countryMap, countryReceiverMarker);
@@ -403,19 +404,20 @@
         if (!continentMap) {
             const continentMapDiv = document.getElementById('continent-map');
             continentMapDiv.style.display = 'block';
-            
+
             continentMap = L.map('continent-map').setView([20, 0], 2);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap contributors'
             }).addTo(continentMap);
-            
-            continentGrid = new MaidenheadGrid(continentMap, {
-                color: '#666',
-                weight: 1,
-                opacity: 0.3,
-                showLabels: false
+
+            // Initialize marker cluster group for continent map
+            window.continentMarkerCluster = L.markerClusterGroup({
+                maxClusterRadius: 50,
+                spiderfyOnMaxZoom: true,
+                showCoverageOnHover: false,
+                zoomToBoundsOnClick: true
             });
-            continentGrid.showGrid();
+            continentMap.addLayer(window.continentMarkerCluster);
 
             // Add receiver marker
             continentReceiverMarker = addReceiverMarker(continentMap, continentReceiverMarker);
@@ -445,251 +447,186 @@
     }
 
     function updateCountryMap(data) {
-        if (!countryGrid) return;
+        if (!countryMap || !window.countryMarkerCluster) return;
 
-        // Aggregate locators across all countries and bands
-        const locatorMap = new Map();
-        
+        // Clear existing markers from cluster
+        window.countryMarkerCluster.clearLayers();
+
+        // CW spots don't have locators, so we display country markers instead
+        // Create a marker for each country with lat/lon data
+        const bounds = [];
+        const markers = [];
+
         data.by_country.forEach(country => {
-            country.bands.forEach(band => {
-                band.unique_locators.forEach(loc => {
-                    const key = loc.locator;
-                    if (!locatorMap.has(key)) {
-                        locatorMap.set(key, {
-                            locator: loc.locator,
-                            total_snr: 0,
-                            snr_count: 0,
-                            total_spots: 0,
-                            total_callsigns: 0,
-                            bands: [],
-                            countries: new Set(),
-                            callsignMap: new Map() // Use Map to deduplicate callsigns
-                        });
-                    }
-                    const agg = locatorMap.get(key);
-                    agg.total_snr += loc.avg_snr * loc.count; // Weight by count
-                    agg.snr_count += loc.count;
-                    agg.total_spots += loc.count;
-                    agg.total_callsigns += loc.unique_callsigns;
-                    agg.bands.push(band.band);
-                    agg.countries.add(country.country);
-                    // Collect callsign info and merge bands for same callsign
-                    if (loc.callsigns && loc.callsigns.length > 0) {
-                        loc.callsigns.forEach(csInfo => {
-                            if (!agg.callsignMap.has(csInfo.callsign)) {
-                                agg.callsignMap.set(csInfo.callsign, new Set());
-                            }
-                            // Add all bands for this callsign
-                            csInfo.bands.forEach(band => agg.callsignMap.get(csInfo.callsign).add(band));
-                        });
-                    }
-                });
-            });
-        });
-
-        // Convert to array with calculated averages and deduplicated callsigns
-        countryLocatorData = Array.from(locatorMap.values()).map(agg => {
-            // Convert callsign map to array of CallsignInfo objects
-            const callsigns = Array.from(agg.callsignMap.entries()).map(([callsign, bandsSet]) => ({
-                callsign: callsign,
-                bands: Array.from(bandsSet).sort()
-            }));
-            
-            return {
-                locator: agg.locator,
-                avg_snr: agg.total_snr / agg.snr_count,
-                count: agg.total_spots,
-                unique_callsigns: agg.callsignMap.size, // Use actual unique count from deduplicated map
-                bands: [...new Set(agg.bands)].join(', '),
-                countries: Array.from(agg.countries).join(', '),
-                callsigns: callsigns
-            };
-        });
-
-        // Update colors based on current mode
-        updateCountryMapColors();
-
-        // Invalidate map size and fit bounds
-        setTimeout(() => {
-            countryMap.invalidateSize();
-            if (countryLocatorData.length > 0) {
-                const bounds = calculateBounds(countryLocatorData.map(l => l.locator));
-                if (bounds) {
-                    countryMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 6 });
-                }
+            // Skip countries without coordinates
+            if (!country.latitude || !country.longitude) {
+                console.warn(`Country ${country.country} has no coordinates`);
+                return;
             }
-        }, 100);
-    }
 
-    function updateContinentMap(data) {
-        if (!continentGrid) return;
+            const lat = country.latitude;
+            const lon = country.longitude;
+            bounds.push([lat, lon]);
 
-        // Aggregate locators across all continents and bands
-        const locatorMap = new Map();
-        
-        data.by_continent.forEach(continent => {
-            continent.bands.forEach(band => {
-                band.unique_locators.forEach(loc => {
-                    const key = loc.locator;
-                    if (!locatorMap.has(key)) {
-                        locatorMap.set(key, {
-                            locator: loc.locator,
-                            total_snr: 0,
-                            snr_count: 0,
-                            total_spots: 0,
-                            total_callsigns: 0,
-                            bands: [],
-                            continents: new Set(),
-                            callsignMap: new Map() // Use Map to deduplicate callsigns
-                        });
-                    }
-                    const agg = locatorMap.get(key);
-                    agg.total_snr += loc.avg_snr * loc.count; // Weight by count
-                    agg.snr_count += loc.count;
-                    agg.total_spots += loc.count;
-                    agg.total_callsigns += loc.unique_callsigns;
-                    agg.bands.push(band.band);
-                    agg.continents.add(continent.continent_name);
-                    // Collect callsign info and merge bands for same callsign
-                    if (loc.callsigns && loc.callsigns.length > 0) {
-                        loc.callsigns.forEach(csInfo => {
-                            if (!agg.callsignMap.has(csInfo.callsign)) {
-                                agg.callsignMap.set(csInfo.callsign, new Set());
-                            }
-                            // Add all bands for this callsign
-                            csInfo.bands.forEach(band => agg.callsignMap.get(csInfo.callsign).add(band));
-                        });
-                    }
-                });
-            });
-        });
+            // Calculate color based on mode
+            const color = getCountryMarkerColor(country, countryColorMode, data.by_country);
 
-        // Convert to array with calculated averages and deduplicated callsigns
-        continentLocatorData = Array.from(locatorMap.values()).map(agg => {
-            // Convert callsign map to array of CallsignInfo objects
-            const callsigns = Array.from(agg.callsignMap.entries()).map(([callsign, bandsSet]) => ({
-                callsign: callsign,
-                bands: Array.from(bandsSet).sort()
-            }));
-            
-            return {
-                locator: agg.locator,
-                avg_snr: agg.total_snr / agg.snr_count,
-                count: agg.total_spots,
-                unique_callsigns: agg.callsignMap.size, // Use actual unique count from deduplicated map
-                bands: [...new Set(agg.bands)].join(', '),
-                continents: Array.from(agg.continents).join(', '),
-                callsigns: callsigns
-            };
-        });
-
-        // Update colors based on current mode
-        updateContinentMapColors();
-
-        // Invalidate map size and fit bounds
-        setTimeout(() => {
-            continentMap.invalidateSize();
-            if (continentLocatorData.length > 0) {
-                const bounds = calculateBounds(continentLocatorData.map(l => l.locator));
-                if (bounds) {
-                    continentMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 6 });
-                }
-            }
-        }, 100);
-    }
-
-    function updateCountryMapColors() {
-        if (!countryGrid || countryLocatorData.length === 0) return;
-
-        countryGrid.clearHighlights();
-
-        const coloredLocators = countryLocatorData.map(loc => ({
-            locator: loc.locator,
-            style: {
-                fillColor: getDynamicColor(loc, countryColorMode, countryLocatorData),
-                fillOpacity: 0.35,
+            // Create marker
+            const marker = L.circleMarker([lat, lon], {
+                radius: 8,
+                fillColor: color,
                 color: '#333',
                 weight: 1,
-                opacity: 0.6
-            },
-            data: {
-                avg_snr: loc.avg_snr,
-                count: loc.count,
-                unique_callsigns: loc.unique_callsigns,
-                bands: loc.bands,
-                countries: loc.countries,
-                callsigns: loc.callsigns // Include callsign info for popup
+                opacity: 0.8,
+                fillOpacity: 0.6
+            });
+
+            // Create popup content
+            let popupContent = `<div style="font-family: monospace; font-size: 12px;">`;
+            popupContent += `<b>${country.country}</b><br>`;
+            popupContent += `<b>Continent:</b> ${country.continent}<br>`;
+            popupContent += `<b>Total Spots:</b> ${country.total_spots.toLocaleString()}<br>`;
+            popupContent += `<b>Bands:</b> ${country.bands.map(b => b.band).join(', ')}<br>`;
+
+            // Add SNR info from best band
+            if (country.bands.length > 0) {
+                const bestBand = country.bands[0]; // Already sorted by spot count
+                popupContent += `<b>Best Band:</b> ${bestBand.band} (${bestBand.spots} spots)<br>`;
+                popupContent += `<b>SNR Range:</b> ${bestBand.min_snr.toFixed(1)} to ${bestBand.max_snr.toFixed(1)} dB<br>`;
             }
-        }));
+            popupContent += `</div>`;
 
-        countryGrid.highlightLocators(coloredLocators);
-    }
+            marker.bindPopup(popupContent);
+            markers.push(marker);
+        });
 
-    function updateContinentMapColors() {
-        if (!continentGrid || continentLocatorData.length === 0) return;
+        // Add all markers to cluster group
+        window.countryMarkerCluster.addLayers(markers);
 
-        continentGrid.clearHighlights();
-
-        const coloredLocators = continentLocatorData.map(loc => ({
-            locator: loc.locator,
-            style: {
-                fillColor: getDynamicColor(loc, continentColorMode, continentLocatorData),
-                fillOpacity: 0.35,
-                color: '#333',
-                weight: 1,
-                opacity: 0.6
-            },
-            data: {
-                avg_snr: loc.avg_snr,
-                count: loc.count,
-                unique_callsigns: loc.unique_callsigns,
-                bands: loc.bands,
-                continents: loc.continents,
-                callsigns: loc.callsigns // Include callsign info for popup
-            }
-        }));
-
-        continentGrid.highlightLocators(coloredLocators);
-    }
-
-    function getDynamicColor(locator, mode, allData) {
-        if (mode === 'snr') {
-            return getDynamicSNRColor(locator.avg_snr, allData);
-        } else {
-            return getDynamicSpotCountColor(locator.count, allData);
+        // Fit map to show all markers
+        if (bounds.length > 0) {
+            setTimeout(() => {
+                countryMap.invalidateSize();
+                countryMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 6 });
+            }, 100);
         }
     }
 
-    function getDynamicSNRColor(snr, allData) {
-        // Calculate min and max SNR from data
-        const snrValues = allData.map(l => l.avg_snr);
-        const minSNR = Math.min(...snrValues);
-        const maxSNR = Math.max(...snrValues);
-        const range = maxSNR - minSNR;
+    function updateContinentMap(data) {
+        if (!continentMap || !window.continentMarkerCluster) return;
 
-        if (range === 0) return '#7cb342'; // All same value
+        // Clear existing markers from cluster
+        window.continentMarkerCluster.clearLayers();
 
-        // Normalize to 0-1 range
-        const normalized = (snr - minSNR) / range;
+        // For continent view, show all countries from all continents
+        const bounds = [];
+        const markers = [];
+        const allCountries = data.by_country; // Use country data for markers
 
-        // Color gradient from red (0) to green (1)
-        return getColorFromGradient(normalized);
+        allCountries.forEach(country => {
+            // Skip countries without coordinates
+            if (!country.latitude || !country.longitude) {
+                return;
+            }
+
+            const lat = country.latitude;
+            const lon = country.longitude;
+            bounds.push([lat, lon]);
+
+            // Calculate color based on mode
+            const color = getCountryMarkerColor(country, continentColorMode, allCountries);
+
+            // Create marker
+            const marker = L.circleMarker([lat, lon], {
+                radius: 6,
+                fillColor: color,
+                color: '#333',
+                weight: 1,
+                opacity: 0.8,
+                fillOpacity: 0.6
+            });
+
+            // Create popup content
+            let popupContent = `<div style="font-family: monospace; font-size: 12px;">`;
+            popupContent += `<b>${country.country}</b><br>`;
+            popupContent += `<b>Continent:</b> ${country.continent}<br>`;
+            popupContent += `<b>Total Spots:</b> ${country.total_spots.toLocaleString()}<br>`;
+            popupContent += `<b>Bands:</b> ${country.bands.map(b => b.band).join(', ')}<br>`;
+            popupContent += `</div>`;
+
+            marker.bindPopup(popupContent);
+            markers.push(marker);
+        });
+
+        // Add all markers to cluster group
+        window.continentMarkerCluster.addLayers(markers);
+
+        // Fit map to show all markers
+        if (bounds.length > 0) {
+            setTimeout(() => {
+                continentMap.invalidateSize();
+                continentMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 6 });
+            }, 100);
+        }
     }
 
-    function getDynamicSpotCountColor(count, allData) {
-        // Calculate min and max spot counts from data
-        const counts = allData.map(l => l.count);
-        const minCount = Math.min(...counts);
-        const maxCount = Math.max(...counts);
-        const range = maxCount - minCount;
+    function updateCountryMapColors() {
+        // For CW, we update marker colors directly when creating them
+        // This function is called when color mode changes
+        if (!window.countryMarkerCluster || !currentData) return;
 
-        if (range === 0) return '#7cb342'; // All same value
+        // Re-render the map with new colors
+        updateCountryMap(currentData);
+    }
 
-        // Normalize to 0-1 range
-        const normalized = (count - minCount) / range;
+    function updateContinentMapColors() {
+        // For CW, we update marker colors directly when creating them
+        // This function is called when color mode changes
+        if (!window.continentMarkers || !currentData) return;
+        
+        // Re-render the map with new colors
+        updateContinentMap(currentData);
+    }
 
-        // Color gradient from red (0) to green (1)
-        return getColorFromGradient(normalized);
+    function getCountryMarkerColor(country, mode, allCountries) {
+        if (mode === 'snr') {
+            // Calculate average SNR across all bands for this country
+            let totalSNR = 0;
+            let count = 0;
+            country.bands.forEach(band => {
+                totalSNR += band.avg_snr * band.spots;
+                count += band.spots;
+            });
+            const avgSNR = count > 0 ? totalSNR / count : 0;
+            
+            // Get min/max SNR from all countries
+            const snrValues = allCountries.map(c => {
+                let total = 0;
+                let cnt = 0;
+                c.bands.forEach(b => {
+                    total += b.avg_snr * b.spots;
+                    cnt += b.spots;
+                });
+                return cnt > 0 ? total / cnt : 0;
+            });
+            const minSNR = Math.min(...snrValues);
+            const maxSNR = Math.max(...snrValues);
+            const range = maxSNR - minSNR;
+            
+            if (range === 0) return '#7cb342';
+            const normalized = (avgSNR - minSNR) / range;
+            return getColorFromGradient(normalized);
+        } else {
+            // Color by spot count
+            const counts = allCountries.map(c => c.total_spots);
+            const minCount = Math.min(...counts);
+            const maxCount = Math.max(...counts);
+            const range = maxCount - minCount;
+            
+            if (range === 0) return '#7cb342';
+            const normalized = (country.total_spots - minCount) / range;
+            return getColorFromGradient(normalized);
+        }
     }
 
     function getColorFromGradient(value) {

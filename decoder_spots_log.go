@@ -795,6 +795,8 @@ type BandAnalytics struct {
 type CountryAnalytics struct {
 	Country    string          `json:"country"`
 	Continent  string          `json:"continent"`
+	Latitude   *float64        `json:"latitude,omitempty"`  // Representative lat from CTY.dat
+	Longitude  *float64        `json:"longitude,omitempty"` // Representative lon from CTY.dat
 	TotalSpots int             `json:"total_spots"`
 	Bands      []BandAnalytics `json:"bands"`
 }

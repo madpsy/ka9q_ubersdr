@@ -189,11 +189,19 @@ func (sl *CWSkimmerSpotsLogger) GetCWSpotsAnalytics(filterCountry string, filter
 			Bands:   make([]BandAnalytics, 0),
 		}
 
-		// Find continent for this country (from first spot)
+		// Find continent and lat/lon for this country (from first spot with coordinates)
 		for _, spot := range spots {
 			if spot.Country == country {
 				countryAnalytics.Continent = spot.Continent
-				break
+				// Use the lat/lon from CTY.dat if available
+				if spot.Latitude != nil && spot.Longitude != nil {
+					countryAnalytics.Latitude = spot.Latitude
+					countryAnalytics.Longitude = spot.Longitude
+				}
+				// Break once we have both continent and coordinates
+				if countryAnalytics.Continent != "" && countryAnalytics.Latitude != nil {
+					break
+				}
 			}
 		}
 

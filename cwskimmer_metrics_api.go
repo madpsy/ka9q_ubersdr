@@ -120,16 +120,69 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 	// Get query parameters
 	band := r.URL.Query().Get("band")
 	hoursStr := r.URL.Query().Get("hours")
+	fromStr := r.URL.Query().Get("from")
+	toStr := r.URL.Query().Get("to")
 	includeTimeSeries := r.URL.Query().Get("timeseries") == "true"
 	intervalStr := r.URL.Query().Get("interval")
 
-	// Parse hours (default 24, max 168 = 7 days)
-	hours := 24
-	if hoursStr != "" {
-		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 168 {
-			hours = h
+	// Determine time range
+	var startTime, endTime time.Time
+	now := time.Now()
+
+	// Priority: from/to parameters, then hours parameter, then default 24 hours
+	if fromStr != "" && toStr != "" {
+		// Parse from/to timestamps
+		var err error
+		startTime, err = parseTimeParam(fromStr)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("Invalid 'from' parameter: %v", err),
+			})
+			return
 		}
+
+		endTime, err = parseTimeParam(toStr)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("Invalid 'to' parameter: %v", err),
+			})
+			return
+		}
+
+		// Validate time range
+		if endTime.Before(startTime) {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "'to' time must be after 'from' time",
+			})
+			return
+		}
+
+		// Limit maximum range to 7 days
+		maxDuration := 7 * 24 * time.Hour
+		if endTime.Sub(startTime) > maxDuration {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "Time range cannot exceed 7 days",
+			})
+			return
+		}
+	} else {
+		// Fall back to hours parameter (default 24, max 168 = 7 days)
+		hours := 24
+		if hoursStr != "" {
+			if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 168 {
+				hours = h
+			}
+		}
+		endTime = now
+		startTime = now.Add(-time.Duration(hours) * time.Hour)
 	}
+
+	// Calculate hours for backward compatibility
+	hours := int(endTime.Sub(startTime).Hours())
 
 	// Parse interval (default 15m)
 	interval := 15 * time.Minute
@@ -153,15 +206,53 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 
 	// Build response
 	response := CWMetricsResponse{}
-	now := time.Now()
-	startTime := now.Add(-time.Duration(hours) * time.Hour)
 
 	response.Summary.TimeWindow.Hours = hours
 	response.Summary.TimeWindow.Start = startTime
-	response.Summary.TimeWindow.End = now
+	response.Summary.TimeWindow.End = endTime
 
-	// Get all bands or filter by specific band
+	// Always try to read from files if metrics logging is enabled
+	// This ensures we have data even after restarts or for time ranges with sparse in-memory data
+	var fileSnapshots map[string][]CWMetricsSnapshot
+	if cwSkimmer.metrics.metricsLogEnabled {
+		log.Printf("Reading CW metrics from files for time range: %v to %v", startTime, endTime)
+		var err error
+		fileSnapshots, err = cwSkimmer.metrics.ReadMetricsFromFiles(startTime, endTime)
+		if err != nil {
+			log.Printf("Warning: error reading CW metrics from files: %v", err)
+		} else {
+			log.Printf("Loaded %d bands from CW metrics files", len(fileSnapshots))
+		}
+	}
+
+	// Get all bands from in-memory data
 	bands := cwSkimmer.metrics.GetAllBands()
+	log.Printf("Found %d bands in memory", len(bands))
+
+	// Also add bands from file snapshots if available
+	if fileSnapshots != nil {
+		addedFromFiles := 0
+		for fileBand := range fileSnapshots {
+			// Apply filter here - only add if it matches the requested band
+			if band == "" || fileBand == band {
+				// Check if this band already exists
+				exists := false
+				for _, b := range bands {
+					if b == fileBand {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					bands = append(bands, fileBand)
+					addedFromFiles++
+				}
+			}
+		}
+		log.Printf("Added %d bands from files (total now: %d)", addedFromFiles, len(bands))
+	}
+
+	// Filter bands if specific band requested
 	if band != "" {
 		// Filter to specific band
 		found := false
@@ -187,37 +278,100 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 			Band: b,
 		}
 
-		// Spot counts
-		metrics.SpotCounts.Last1Hour = cwSkimmer.metrics.GetTotalSpots(b, 1)
-		metrics.SpotCounts.Last3Hours = cwSkimmer.metrics.GetTotalSpots(b, 3)
-		metrics.SpotCounts.Last6Hours = cwSkimmer.metrics.GetTotalSpots(b, 6)
-		metrics.SpotCounts.Last12Hours = cwSkimmer.metrics.GetTotalSpots(b, 12)
-		metrics.SpotCounts.Last24Hours = cwSkimmer.metrics.GetTotalSpots(b, 24)
+		// Try to get data from file snapshots first for historical data
+		usedFileData := false
 
-		// Unique callsigns
-		metrics.UniqueCallsigns.Last1Hour = cwSkimmer.metrics.GetUniqueCallsigns(b, 1)
-		metrics.UniqueCallsigns.Last3Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 3)
-		metrics.UniqueCallsigns.Last6Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 6)
-		metrics.UniqueCallsigns.Last12Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 12)
-		metrics.UniqueCallsigns.Last24Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 24)
+		if fileSnapshots != nil {
+			if snapshots, exists := fileSnapshots[b]; exists && len(snapshots) > 0 {
+				// Strategy: Find a snapshot that's at least 1 hour old (to have accumulated data)
+				// but prefer more recent ones (within the time range) over very old ones
+				var bestSnapshot *CWMetricsSnapshot
+				oneHourAgo := endTime.Add(-1 * time.Hour)
 
-		// WPM stats
-		avg1m, min1m, max1m := cwSkimmer.metrics.GetWPMStats(b, 1)
-		metrics.WPMStats.Last1Min.Avg = avg1m
-		metrics.WPMStats.Last1Min.Min = min1m
-		metrics.WPMStats.Last1Min.Max = max1m
+				// First pass: try to find snapshots that are at least 1 hour old
+				for i := range snapshots {
+					s := &snapshots[i]
+					if s.Timestamp.Before(oneHourAgo) && s.SpotCounts.Last24Hour > 0 {
+						if bestSnapshot == nil || s.Timestamp.After(bestSnapshot.Timestamp) {
+							bestSnapshot = s
+						}
+					}
+				}
 
-		avg5m, min5m, max5m := cwSkimmer.metrics.GetWPMStats(b, 5)
-		metrics.WPMStats.Last5Min.Avg = avg5m
-		metrics.WPMStats.Last5Min.Min = min5m
-		metrics.WPMStats.Last5Min.Max = max5m
+				// If no snapshot older than 1 hour, use the one with highest count
+				if bestSnapshot == nil {
+					maxSpots := int64(0)
+					for i := range snapshots {
+						s := &snapshots[i]
+						if s.SpotCounts.Last24Hour > maxSpots {
+							maxSpots = s.SpotCounts.Last24Hour
+							bestSnapshot = s
+						}
+					}
+				}
 
-		avg10m, min10m, max10m := cwSkimmer.metrics.GetWPMStats(b, 10)
-		metrics.WPMStats.Last10Min.Avg = avg10m
-		metrics.WPMStats.Last10Min.Min = min10m
-		metrics.WPMStats.Last10Min.Max = max10m
+				if bestSnapshot != nil && bestSnapshot.SpotCounts.Last24Hour > 0 {
+					metrics.SpotCounts.Last1Hour = bestSnapshot.SpotCounts.Last1Hour
+					metrics.SpotCounts.Last24Hours = bestSnapshot.SpotCounts.Last24Hour
 
-		// Activity metrics
+					metrics.UniqueCallsigns.Last1Hour = bestSnapshot.UniqueCallsigns.Last1Hour
+					metrics.UniqueCallsigns.Last24Hours = bestSnapshot.UniqueCallsigns.Last24Hour
+
+					// WPM stats from file
+					metrics.WPMStats.Last1Min.Avg = bestSnapshot.WPMStats.Last1Min.AvgWPM
+					metrics.WPMStats.Last1Min.Min = bestSnapshot.WPMStats.Last1Min.MinWPM
+					metrics.WPMStats.Last1Min.Max = bestSnapshot.WPMStats.Last1Min.MaxWPM
+
+					metrics.WPMStats.Last5Min.Avg = bestSnapshot.WPMStats.Last5Min.AvgWPM
+					metrics.WPMStats.Last5Min.Min = bestSnapshot.WPMStats.Last5Min.MinWPM
+					metrics.WPMStats.Last5Min.Max = bestSnapshot.WPMStats.Last5Min.MaxWPM
+
+					metrics.WPMStats.Last10Min.Avg = bestSnapshot.WPMStats.Last10Min.AvgWPM
+					metrics.WPMStats.Last10Min.Min = bestSnapshot.WPMStats.Last10Min.MinWPM
+					metrics.WPMStats.Last10Min.Max = bestSnapshot.WPMStats.Last10Min.MaxWPM
+
+					usedFileData = true
+					log.Printf("Using file snapshot from %v for %s - Last24h: %d spots, %d callsigns (from %d snapshots)",
+						bestSnapshot.Timestamp.Format("2006-01-02 15:04:05"), b,
+						metrics.SpotCounts.Last24Hours, metrics.UniqueCallsigns.Last24Hours, len(snapshots))
+				}
+			}
+		}
+
+		// Only use in-memory data if no file data was available
+		if !usedFileData {
+			// Spot counts
+			metrics.SpotCounts.Last1Hour = cwSkimmer.metrics.GetTotalSpots(b, 1)
+			metrics.SpotCounts.Last3Hours = cwSkimmer.metrics.GetTotalSpots(b, 3)
+			metrics.SpotCounts.Last6Hours = cwSkimmer.metrics.GetTotalSpots(b, 6)
+			metrics.SpotCounts.Last12Hours = cwSkimmer.metrics.GetTotalSpots(b, 12)
+			metrics.SpotCounts.Last24Hours = cwSkimmer.metrics.GetTotalSpots(b, 24)
+
+			// Unique callsigns
+			metrics.UniqueCallsigns.Last1Hour = cwSkimmer.metrics.GetUniqueCallsigns(b, 1)
+			metrics.UniqueCallsigns.Last3Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 3)
+			metrics.UniqueCallsigns.Last6Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 6)
+			metrics.UniqueCallsigns.Last12Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 12)
+			metrics.UniqueCallsigns.Last24Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 24)
+
+			// WPM stats
+			avg1m, min1m, max1m := cwSkimmer.metrics.GetWPMStats(b, 1)
+			metrics.WPMStats.Last1Min.Avg = avg1m
+			metrics.WPMStats.Last1Min.Min = min1m
+			metrics.WPMStats.Last1Min.Max = max1m
+
+			avg5m, min5m, max5m := cwSkimmer.metrics.GetWPMStats(b, 5)
+			metrics.WPMStats.Last5Min.Avg = avg5m
+			metrics.WPMStats.Last5Min.Min = min5m
+			metrics.WPMStats.Last5Min.Max = max5m
+
+			avg10m, min10m, max10m := cwSkimmer.metrics.GetWPMStats(b, 10)
+			metrics.WPMStats.Last10Min.Avg = avg10m
+			metrics.WPMStats.Last10Min.Min = min10m
+			metrics.WPMStats.Last10Min.Max = max10m
+		}
+
+		// Activity metrics (calculate from whatever data we have)
 		if metrics.SpotCounts.Last24Hours > 0 {
 			metrics.Activity.SpotsPerHour = float64(metrics.SpotCounts.Last24Hours) / 24.0
 			metrics.Activity.CallsignsPerHour = float64(metrics.UniqueCallsigns.Last24Hours) / 24.0

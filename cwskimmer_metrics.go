@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -640,4 +641,91 @@ func (cm *CWSkimmerMetrics) UpdateSummaries() error {
 
 	// Write summaries to disk if needed (rate-limited to once per minute)
 	return cm.summaryAggregator.WriteIfNeeded()
+}
+
+// ReadMetricsFromFiles reads CW metrics snapshots from files for a given time range
+// Returns snapshots grouped by band
+func (cm *CWSkimmerMetrics) ReadMetricsFromFiles(startTime, endTime time.Time) (map[string][]CWMetricsSnapshot, error) {
+	if !cm.metricsLogEnabled {
+		return nil, nil
+	}
+
+	result := make(map[string][]CWMetricsSnapshot)
+
+	// Determine which dates to read
+	currentDate := startTime
+	for currentDate.Before(endTime) || currentDate.Equal(endTime) {
+		// Build directory path for this date
+		dirPath := filepath.Join(
+			cm.metricsLogDataDir,
+			fmt.Sprintf("%04d", currentDate.Year()),
+			fmt.Sprintf("%02d", currentDate.Month()),
+			fmt.Sprintf("%02d", currentDate.Day()),
+		)
+
+		// Check if directory exists
+		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+			// Skip to next day
+			currentDate = currentDate.AddDate(0, 0, 1)
+			continue
+		}
+
+		// Read all .jsonl files in this directory
+		files, err := filepath.Glob(filepath.Join(dirPath, "*.jsonl"))
+		if err != nil {
+			log.Printf("Warning: error reading CW metrics directory %s: %v", dirPath, err)
+			currentDate = currentDate.AddDate(0, 0, 1)
+			continue
+		}
+
+		// Read each file
+		for _, filePath := range files {
+			snapshots, err := cm.readSnapshotsFromFile(filePath, startTime, endTime)
+			if err != nil {
+				log.Printf("Warning: error reading CW metrics from %s: %v", filePath, err)
+				continue
+			}
+
+			// Group by band
+			for _, snapshot := range snapshots {
+				result[snapshot.Band] = append(result[snapshot.Band], snapshot)
+			}
+		}
+
+		// Move to next day
+		currentDate = currentDate.AddDate(0, 0, 1)
+	}
+
+	return result, nil
+}
+
+// readSnapshotsFromFile reads CW metrics snapshots from a single file within the time range
+func (cm *CWSkimmerMetrics) readSnapshotsFromFile(filePath string, startTime, endTime time.Time) ([]CWMetricsSnapshot, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var snapshots []CWMetricsSnapshot
+	decoder := json.NewDecoder(file)
+
+	for {
+		var snapshot CWMetricsSnapshot
+		if err := decoder.Decode(&snapshot); err != nil {
+			if err.Error() == "EOF" || strings.Contains(err.Error(), "EOF") {
+				break
+			}
+			// Skip malformed lines
+			continue
+		}
+
+		// Only include snapshots within the time range
+		if (snapshot.Timestamp.Equal(startTime) || snapshot.Timestamp.After(startTime)) &&
+			(snapshot.Timestamp.Equal(endTime) || snapshot.Timestamp.Before(endTime)) {
+			snapshots = append(snapshots, snapshot)
+		}
+	}
+
+	return snapshots, nil
 }

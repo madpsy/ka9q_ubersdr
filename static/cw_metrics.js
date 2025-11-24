@@ -192,10 +192,9 @@ class CWMetricsDashboard {
 
             html += `<div class="metric-row"><span class="metric-label">Total Spots:</span><span class="metric-value">${totalSpots.toLocaleString()}</span></div>`;
             
-            html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">Top Bands:</div>';
+            html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">By Band:</div>';
             Object.entries(bandBreakdown)
                 .sort((a, b) => b[1] - a[1])
-                .slice(0, 5)
                 .forEach(([band, count]) => {
                     html += `<div class="metric-row"><span class="metric-label">${band}:</span><span class="metric-value">${count.toLocaleString()}</span></div>`;
                 });
@@ -421,8 +420,321 @@ class CWMetricsDashboard {
     }
 
     async loadMetrics() {
-        this.setStatus('CW metrics endpoint not yet implemented. Coming soon!', 'info');
-        // TODO: Implement when backend endpoint is ready
+        const skimmerName = document.getElementById('skimmer-name').value;
+        const interval = document.getElementById('interval').value;
+        const dateRangeType = document.getElementById('date-range-type').value;
+
+        const params = new URLSearchParams();
+        if (skimmerName) params.append('band', skimmerName);
+        params.append('timeseries', 'true');
+        params.append('interval', interval);
+
+        if (dateRangeType === 'hours') {
+            const hours = document.getElementById('hours').value;
+            params.append('hours', hours);
+        } else {
+            const fromInput = document.getElementById('date-from').value;
+            const toInput = document.getElementById('date-to').value;
+
+            if (fromInput && toInput) {
+                const fromDate = new Date(fromInput);
+                const toDate = new Date(toInput);
+
+                if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+                    this.setStatus('Invalid date format', 'error');
+                    return;
+                }
+
+                if (fromDate >= toDate) {
+                    this.setStatus('Start date must be before end date', 'error');
+                    return;
+                }
+
+                params.append('from', fromDate.toISOString());
+                params.append('to', toDate.toISOString());
+            } else {
+                this.setStatus('Please select both start and end dates', 'error');
+                return;
+            }
+        }
+
+        const url = `/api/cwskimmer/metrics?${params.toString()}`;
+        
+        document.getElementById('loading').style.display = 'block';
+        this.setStatus('Loading metrics...', 'info');
+
+        try {
+            const response = await fetch(url);
+            
+            if (response.status === 429) {
+                this.setStatus('Rate limit exceeded. Please wait 2 seconds and try again.', 'error');
+                return;
+            }
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to load metrics');
+            }
+
+            const data = await response.json();
+
+            if (!data.metrics || data.metrics.length === 0) {
+                this.setStatus('No CW spot data available yet', 'info');
+                document.getElementById('results').innerHTML = '';
+                return;
+            }
+
+            this.displayMetrics(data);
+            this.setStatus(`Loaded metrics for ${data.metrics.length} band(s)`, 'success');
+        } catch (error) {
+            console.error('Error loading metrics:', error);
+            this.setStatus(`Error: ${error.message}`, 'error');
+            document.getElementById('results').innerHTML = '';
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+
+    displayMetrics(data) {
+        const results = document.getElementById('results');
+        let html = '';
+
+        // Summary section
+        html += '<div class="chart-container">';
+        html += '<h2>📈 Summary</h2>';
+        html += '<div class="metrics-grid">';
+        html += `<div class="metric-card">
+                    <h3>Overview</h3>
+                    <div class="metric-row"><span class="metric-label">Bands:</span><span class="metric-value">${data.summary.total_bands}</span></div>
+                    <div class="metric-row"><span class="metric-label">Time Window:</span><span class="metric-value">${data.summary.time_window.hours}h</span></div>
+                 </div>`;
+
+        // Calculate totals
+        const totalSpots24h = data.metrics.reduce((sum, m) => sum + m.spot_counts.last_24h, 0);
+        const totalUnique24h = data.metrics.reduce((sum, m) => sum + m.unique_callsigns.last_24h, 0);
+        const avgSpotsPerHour = data.metrics.reduce((sum, m) => sum + m.activity.spots_per_hour, 0) / data.metrics.length;
+
+        html += `<div class="metric-card">
+                    <h3>24-Hour Totals</h3>
+                    <div class="metric-row"><span class="metric-label">Total Spots:</span><span class="metric-value">${totalSpots24h.toLocaleString()}</span></div>
+                    <div class="metric-row"><span class="metric-label">Unique Callsigns:</span><span class="metric-value">${totalUnique24h.toLocaleString()}</span></div>
+                    <div class="metric-row"><span class="metric-label">Avg Rate:</span><span class="metric-value">${avgSpotsPerHour.toFixed(1)}/hr</span></div>
+                 </div>`;
+
+        html += '</div></div>';
+
+        // Time series chart
+        if (data.time_series && data.time_series.length > 0) {
+            html += '<div class="chart-container">';
+            html += '<h2>📊 Spots Per Hour by Band</h2>';
+            html += '<canvas id="spots-chart"></canvas>';
+            html += '</div>';
+        }
+
+        // WPM time series chart
+        if (data.wpm_time_series && data.wpm_time_series.length > 0) {
+            html += '<div class="chart-container">';
+            html += '<h2>⚡ Average WPM by Band</h2>';
+            html += '<canvas id="wpm-chart"></canvas>';
+            html += '</div>';
+        }
+
+        // Per band metrics
+        html += '<div class="chart-container">';
+        html += '<h2>📡 Detailed Metrics by Band</h2>';
+        html += '<div class="metrics-grid">';
+
+        data.metrics.forEach(metric => {
+            html += '<div class="metric-card">';
+            html += `<h3>${metric.band}</h3>`;
+            
+            html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">Spot Counts</div>';
+            html += `<div class="metric-row"><span class="metric-label">Last Hour:</span><span class="metric-value">${metric.spot_counts.last_1h}</span></div>`;
+            html += `<div class="metric-row"><span class="metric-label">Last 24h:</span><span class="metric-value">${metric.spot_counts.last_24h}</span></div>`;
+            
+            html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">Activity Rate</div>';
+            html += `<div class="metric-row"><span class="metric-label">Spots/Hour:</span><span class="metric-value">${metric.activity.spots_per_hour.toFixed(1)}</span></div>`;
+            html += `<div class="metric-row"><span class="metric-label">Callsigns/Hour:</span><span class="metric-value">${metric.activity.callsigns_per_hour.toFixed(1)}</span></div>`;
+            html += `<div class="metric-row"><span class="metric-label">Activity Score:</span><span class="metric-value">${metric.activity.activity_score.toFixed(0)}%</span></div>`;
+            
+            html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">Unique Callsigns</div>';
+            html += `<div class="metric-row"><span class="metric-label">Last Hour:</span><span class="metric-value">${metric.unique_callsigns.last_1h}</span></div>`;
+            html += `<div class="metric-row"><span class="metric-label">Last 24h:</span><span class="metric-value">${metric.unique_callsigns.last_24h}</span></div>`;
+            
+            html += '<div style="margin-top: 10px; font-size: 0.85em; opacity: 0.8;">WPM Statistics</div>';
+            const wpm1m = metric.wpm_stats.last_1m;
+            if (wpm1m && wpm1m.avg_wpm > 0) {
+                html += '<div style="margin-top: 5px; font-size: 0.8em; opacity: 0.7;">Last 1 min:</div>';
+                html += `<div class="metric-row"><span class="metric-label">Avg:</span><span class="metric-value">${wpm1m.avg_wpm.toFixed(1)} WPM</span></div>`;
+                html += `<div class="metric-row"><span class="metric-label">Range:</span><span class="metric-value">${wpm1m.min_wpm}-${wpm1m.max_wpm} WPM</span></div>`;
+            } else {
+                html += `<div class="metric-row"><span class="metric-label">Status:</span><span class="metric-value" style="opacity: 0.6;">No recent WPM data</span></div>`;
+            }
+            
+            html += '</div>';
+        });
+
+        html += '</div></div>';
+
+        results.innerHTML = html;
+
+        // Create charts if time series data exists
+        if (data.time_series && data.time_series.length > 0) {
+            this.createSpotsChart(data);
+        }
+        if (data.wpm_time_series && data.wpm_time_series.length > 0) {
+            this.createWPMChart(data);
+        }
+    }
+
+    createSpotsChart(data) {
+        const ctx = document.getElementById('spots-chart');
+        if (!ctx) return;
+
+        if (this.spotsChart) {
+            this.spotsChart.destroy();
+            this.spotsChart = null;
+        }
+
+        const datasets = [];
+        const seriesMap = new Map();
+        
+        data.time_series.forEach(point => {
+            Object.entries(point.data).forEach(([band, value]) => {
+                if (!seriesMap.has(band)) {
+                    seriesMap.set(band, []);
+                }
+                seriesMap.get(band).push({
+                    x: new Date(point.timestamp),
+                    y: value.spot_count
+                });
+            });
+        });
+
+        seriesMap.forEach((points, band) => {
+            datasets.push({
+                label: band,
+                data: points,
+                borderColor: this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)',
+                backgroundColor: (this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)') + '20',
+                tension: 0.4,
+                fill: false,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            });
+        });
+
+        this.spotsChart = new Chart(ctx, {
+            type: 'line',
+            data: { datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2.5,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    title: { display: true, text: 'Spot Count Over Time', color: '#fff', font: { size: 16 } },
+                    legend: { labels: { color: '#fff' }, position: 'top' },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => items.length ? new Date(items[0].parsed.x).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: false }) : '',
+                            label: (context) => `${context.dataset.label}: ${context.parsed.y} spots`
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: { tooltipFormat: 'yyyy-MM-dd HH:mm' },
+                        title: { display: true, text: 'Time (UTC)', color: '#fff' },
+                        ticks: { color: '#fff', source: 'auto', maxRotation: 0, autoSkip: true },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: {
+                        type: 'linear',
+                        title: { display: true, text: 'Spots', color: '#fff' },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+
+    createWPMChart(data) {
+        const ctx = document.getElementById('wpm-chart');
+        if (!ctx) return;
+
+        if (this.wpmChart) {
+            this.wpmChart.destroy();
+            this.wpmChart = null;
+        }
+
+        const datasets = [];
+        const seriesMap = new Map();
+        
+        data.wpm_time_series.forEach(point => {
+            Object.entries(point.data).forEach(([band, value]) => {
+                if (!seriesMap.has(band)) {
+                    seriesMap.set(band, []);
+                }
+                seriesMap.get(band).push({
+                    x: new Date(point.timestamp),
+                    y: value.avg_wpm
+                });
+            });
+        });
+
+        seriesMap.forEach((points, band) => {
+            datasets.push({
+                label: band,
+                data: points,
+                borderColor: this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)',
+                backgroundColor: (this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)') + '20',
+                tension: 0.4,
+                fill: false,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            });
+        });
+
+        this.wpmChart = new Chart(ctx, {
+            type: 'line',
+            data: { datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2.5,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    title: { display: true, text: 'Average WPM Over Time', color: '#fff', font: { size: 16 } },
+                    legend: { labels: { color: '#fff' }, position: 'top' },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => items.length ? new Date(items[0].parsed.x).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: false }) : '',
+                            label: (context) => `${context.dataset.label}: ${context.parsed.y.toFixed(1)} WPM`
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: { tooltipFormat: 'yyyy-MM-dd HH:mm' },
+                        title: { display: true, text: 'Time (UTC)', color: '#fff' },
+                        ticks: { color: '#fff', source: 'auto', maxRotation: 0, autoSkip: true },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: {
+                        type: 'linear',
+                        title: { display: true, text: 'WPM', color: '#fff' },
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
     }
 }
 

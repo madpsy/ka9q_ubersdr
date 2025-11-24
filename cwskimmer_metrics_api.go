@@ -2,12 +2,105 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 )
 
-// handleCWMetrics serves comprehensive CW spot metrics (placeholder for now)
+// CWMetricsResponse contains comprehensive CW spot metrics
+type CWMetricsResponse struct {
+	Summary struct {
+		TotalBands int `json:"total_bands"`
+		TimeWindow struct {
+			Hours int       `json:"hours"`
+			Start time.Time `json:"start"`
+			End   time.Time `json:"end"`
+		} `json:"time_window"`
+	} `json:"summary"`
+	Metrics       []CWBandMetrics        `json:"metrics"`
+	TimeSeries    []CWTimeSeriesPoint    `json:"time_series,omitempty"`
+	WPMTimeSeries []CWWPMTimeSeriesPoint `json:"wpm_time_series,omitempty"`
+}
+
+// CWBandMetrics contains all metrics for a specific band
+type CWBandMetrics struct {
+	Band string `json:"band"`
+
+	SpotCounts struct {
+		Last1Hour   int64 `json:"last_1h"`
+		Last3Hours  int64 `json:"last_3h"`
+		Last6Hours  int64 `json:"last_6h"`
+		Last12Hours int64 `json:"last_12h"`
+		Last24Hours int64 `json:"last_24h"`
+	} `json:"spot_counts"`
+
+	UniqueCallsigns struct {
+		Last1Hour   int `json:"last_1h"`
+		Last3Hours  int `json:"last_3h"`
+		Last6Hours  int `json:"last_6h"`
+		Last12Hours int `json:"last_12h"`
+		Last24Hours int `json:"last_24h"`
+	} `json:"unique_callsigns"`
+
+	WPMStats struct {
+		Last1Min struct {
+			Avg float64 `json:"avg_wpm"`
+			Min int     `json:"min_wpm"`
+			Max int     `json:"max_wpm"`
+		} `json:"last_1m"`
+		Last5Min struct {
+			Avg float64 `json:"avg_wpm"`
+			Min int     `json:"min_wpm"`
+			Max int     `json:"max_wpm"`
+		} `json:"last_5m"`
+		Last10Min struct {
+			Avg float64 `json:"avg_wpm"`
+			Min int     `json:"min_wpm"`
+			Max int     `json:"max_wpm"`
+		} `json:"last_10m"`
+	} `json:"wpm_stats"`
+
+	Activity struct {
+		SpotsPerHour     float64 `json:"spots_per_hour"`
+		CallsignsPerHour float64 `json:"callsigns_per_hour"`
+		ActivityScore    float64 `json:"activity_score"`
+	} `json:"activity"`
+}
+
+// CWTimeSeriesPoint represents a single point in time series data
+type CWTimeSeriesPoint struct {
+	Timestamp time.Time                `json:"timestamp"`
+	Interval  string                   `json:"interval"`
+	Data      map[string]CWBandSummary `json:"data"` // key: band
+}
+
+// CWBandSummary contains summary data for a time bucket
+type CWBandSummary struct {
+	Band            string  `json:"band"`
+	SpotCount       int     `json:"spot_count"`
+	UniqueCallsigns int     `json:"unique_callsigns"`
+	AvgWPM          float64 `json:"avg_wpm,omitempty"`
+}
+
+// CWWPMTimeSeriesPoint represents WPM data over time
+type CWWPMTimeSeriesPoint struct {
+	Timestamp time.Time                  `json:"timestamp"`
+	Interval  string                     `json:"interval"`
+	Data      map[string]CWWPMBucketData `json:"data"` // key: band
+}
+
+// CWWPMBucketData contains WPM stats for a time bucket
+type CWWPMBucketData struct {
+	Band        string  `json:"band"`
+	AvgWPM      float64 `json:"avg_wpm"`
+	MinWPM      int     `json:"min_wpm"`
+	MaxWPM      int     `json:"max_wpm"`
+	SampleCount int     `json:"sample_count"`
+}
+
+// handleCWMetrics serves comprehensive CW spot metrics
 func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
 	// Check if IP is banned
 	if checkIPBan(w, r, ipBanManager) {
@@ -16,17 +109,39 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 
 	w.Header().Set("Content-Type", "application/json")
 
-	if cwSkimmer == nil || cwSkimmer.spotsLogger == nil {
+	if cwSkimmer == nil || cwSkimmer.metrics == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "CW Skimmer spots logging is not available",
+			"error": "CW Skimmer metrics are not available",
 		})
 		return
 	}
 
+	// Get query parameters
+	band := r.URL.Query().Get("band")
+	hoursStr := r.URL.Query().Get("hours")
+	includeTimeSeries := r.URL.Query().Get("timeseries") == "true"
+	intervalStr := r.URL.Query().Get("interval")
+
+	// Parse hours (default 24, max 168 = 7 days)
+	hours := 24
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 168 {
+			hours = h
+		}
+	}
+
+	// Parse interval (default 15m)
+	interval := 15 * time.Minute
+	if intervalStr != "" {
+		if d, err := time.ParseDuration(intervalStr); err == nil && d > 0 {
+			interval = d
+		}
+	}
+
 	// Check rate limit (1 request per 2 seconds per IP)
 	clientIP := getClientIP(r)
-	rateLimitKey := "cw-metrics"
+	rateLimitKey := fmt.Sprintf("cw-metrics-%s-%d", band, hours)
 	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]string{
@@ -36,12 +151,263 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 		return
 	}
 
-	// TODO: Implement full CW metrics similar to decoder metrics
-	// For now, return a placeholder response
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{
-		"error": "CW metrics endpoint is not yet fully implemented. Coming soon!",
-	})
+	// Build response
+	response := CWMetricsResponse{}
+	now := time.Now()
+	startTime := now.Add(-time.Duration(hours) * time.Hour)
+
+	response.Summary.TimeWindow.Hours = hours
+	response.Summary.TimeWindow.Start = startTime
+	response.Summary.TimeWindow.End = now
+
+	// Get all bands or filter by specific band
+	bands := cwSkimmer.metrics.GetAllBands()
+	if band != "" {
+		// Filter to specific band
+		found := false
+		for _, b := range bands {
+			if b == band {
+				bands = []string{band}
+				found = true
+				break
+			}
+		}
+		if !found {
+			bands = []string{}
+		}
+	}
+
+	response.Summary.TotalBands = len(bands)
+
+	// Collect metrics for each band
+	response.Metrics = make([]CWBandMetrics, 0, len(bands))
+
+	for _, b := range bands {
+		metrics := CWBandMetrics{
+			Band: b,
+		}
+
+		// Spot counts
+		metrics.SpotCounts.Last1Hour = cwSkimmer.metrics.GetTotalSpots(b, 1)
+		metrics.SpotCounts.Last3Hours = cwSkimmer.metrics.GetTotalSpots(b, 3)
+		metrics.SpotCounts.Last6Hours = cwSkimmer.metrics.GetTotalSpots(b, 6)
+		metrics.SpotCounts.Last12Hours = cwSkimmer.metrics.GetTotalSpots(b, 12)
+		metrics.SpotCounts.Last24Hours = cwSkimmer.metrics.GetTotalSpots(b, 24)
+
+		// Unique callsigns
+		metrics.UniqueCallsigns.Last1Hour = cwSkimmer.metrics.GetUniqueCallsigns(b, 1)
+		metrics.UniqueCallsigns.Last3Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 3)
+		metrics.UniqueCallsigns.Last6Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 6)
+		metrics.UniqueCallsigns.Last12Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 12)
+		metrics.UniqueCallsigns.Last24Hours = cwSkimmer.metrics.GetUniqueCallsigns(b, 24)
+
+		// WPM stats
+		avg1m, min1m, max1m := cwSkimmer.metrics.GetWPMStats(b, 1)
+		metrics.WPMStats.Last1Min.Avg = avg1m
+		metrics.WPMStats.Last1Min.Min = min1m
+		metrics.WPMStats.Last1Min.Max = max1m
+
+		avg5m, min5m, max5m := cwSkimmer.metrics.GetWPMStats(b, 5)
+		metrics.WPMStats.Last5Min.Avg = avg5m
+		metrics.WPMStats.Last5Min.Min = min5m
+		metrics.WPMStats.Last5Min.Max = max5m
+
+		avg10m, min10m, max10m := cwSkimmer.metrics.GetWPMStats(b, 10)
+		metrics.WPMStats.Last10Min.Avg = avg10m
+		metrics.WPMStats.Last10Min.Min = min10m
+		metrics.WPMStats.Last10Min.Max = max10m
+
+		// Activity metrics
+		if metrics.SpotCounts.Last24Hours > 0 {
+			metrics.Activity.SpotsPerHour = float64(metrics.SpotCounts.Last24Hours) / 24.0
+			metrics.Activity.CallsignsPerHour = float64(metrics.UniqueCallsigns.Last24Hours) / 24.0
+			metrics.Activity.ActivityScore = (metrics.Activity.SpotsPerHour / 100.0) * 100.0
+			if metrics.Activity.ActivityScore > 100 {
+				metrics.Activity.ActivityScore = 100
+			}
+		}
+
+		response.Metrics = append(response.Metrics, metrics)
+	}
+
+	// Generate time series if requested
+	if includeTimeSeries {
+		response.TimeSeries = generateCWTimeSeries(cwSkimmer.metrics, bands, interval, startTime, now)
+		response.WPMTimeSeries = generateCWWPMTimeSeries(cwSkimmer.metrics, bands, interval, startTime, now)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding CW metrics: %v", err)
+	}
+}
+
+// generateCWTimeSeries creates time-bucketed spot data
+func generateCWTimeSeries(cm *CWSkimmerMetrics, bands []string, interval time.Duration, startTime, endTime time.Time) []CWTimeSeriesPoint {
+	duration := endTime.Sub(startTime)
+	numBuckets := int(duration / interval)
+	if numBuckets > 1000 {
+		numBuckets = 1000
+	}
+	if numBuckets < 1 {
+		numBuckets = 1
+	}
+
+	timeSeries := make([]CWTimeSeriesPoint, 0, numBuckets)
+
+	for i := 0; i < numBuckets; i++ {
+		bucketStart := startTime.Add(time.Duration(i) * interval)
+		bucketEnd := bucketStart.Add(interval)
+
+		point := CWTimeSeriesPoint{
+			Timestamp: bucketStart,
+			Interval:  interval.String(),
+			Data:      make(map[string]CWBandSummary),
+		}
+
+		for _, band := range bands {
+			spotCount, uniqueCallsigns, avgWPM := countCWSpotsInTimeRange(cm, band, bucketStart, bucketEnd)
+
+			if spotCount > 0 {
+				point.Data[band] = CWBandSummary{
+					Band:            band,
+					SpotCount:       spotCount,
+					UniqueCallsigns: uniqueCallsigns,
+					AvgWPM:          avgWPM,
+				}
+			}
+		}
+
+		if len(point.Data) > 0 {
+			timeSeries = append(timeSeries, point)
+		}
+	}
+
+	return timeSeries
+}
+
+// generateCWWPMTimeSeries creates time-bucketed WPM data
+func generateCWWPMTimeSeries(cm *CWSkimmerMetrics, bands []string, interval time.Duration, startTime, endTime time.Time) []CWWPMTimeSeriesPoint {
+	duration := endTime.Sub(startTime)
+	numBuckets := int(duration / interval)
+	if numBuckets > 1000 {
+		numBuckets = 1000
+	}
+	if numBuckets < 1 {
+		numBuckets = 1
+	}
+
+	timeSeries := make([]CWWPMTimeSeriesPoint, 0, numBuckets)
+
+	for i := 0; i < numBuckets; i++ {
+		bucketStart := startTime.Add(time.Duration(i) * interval)
+		bucketEnd := bucketStart.Add(interval)
+
+		point := CWWPMTimeSeriesPoint{
+			Timestamp: bucketStart,
+			Interval:  interval.String(),
+			Data:      make(map[string]CWWPMBucketData),
+		}
+
+		for _, band := range bands {
+			avgWPM, minWPM, maxWPM, count := getCWWPMStatsInRange(cm, band, bucketStart, bucketEnd)
+
+			if count > 0 {
+				point.Data[band] = CWWPMBucketData{
+					Band:        band,
+					AvgWPM:      avgWPM,
+					MinWPM:      minWPM,
+					MaxWPM:      maxWPM,
+					SampleCount: count,
+				}
+			}
+		}
+
+		if len(point.Data) > 0 {
+			timeSeries = append(timeSeries, point)
+		}
+	}
+
+	return timeSeries
+}
+
+// countCWSpotsInTimeRange counts spots in a specific time range
+func countCWSpotsInTimeRange(cm *CWSkimmerMetrics, band string, start, end time.Time) (spotCount int, uniqueCallsigns int, avgWPM float64) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	if cm.spotsByBand[band] == nil {
+		return 0, 0, 0
+	}
+
+	ts := cm.spotsByBand[band]
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+
+	callsigns := make(map[string]bool)
+	totalWPM := 0
+	wpmCount := 0
+
+	for _, event := range ts.events {
+		if (event.Timestamp.After(start) || event.Timestamp.Equal(start)) &&
+			(event.Timestamp.Before(end) || event.Timestamp.Equal(end)) {
+			spotCount++
+			callsigns[event.Callsign] = true
+			if event.WPM > 0 {
+				totalWPM += event.WPM
+				wpmCount++
+			}
+		}
+	}
+
+	uniqueCallsigns = len(callsigns)
+	if wpmCount > 0 {
+		avgWPM = float64(totalWPM) / float64(wpmCount)
+	}
+
+	return spotCount, uniqueCallsigns, avgWPM
+}
+
+// getCWWPMStatsInRange gets WPM statistics for a time range
+func getCWWPMStatsInRange(cm *CWSkimmerMetrics, band string, start, end time.Time) (avgWPM float64, minWPM, maxWPM, count int) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	if cm.wpmMeasurements[band] == nil {
+		return 0, 0, 0, 0
+	}
+
+	totalWPM := 0
+	count = 0
+	minWPM = 0
+	maxWPM = 0
+
+	for _, e := range cm.wpmMeasurements[band] {
+		if (e.Timestamp.After(start) || e.Timestamp.Equal(start)) &&
+			(e.Timestamp.Before(end) || e.Timestamp.Equal(end)) {
+			totalWPM += e.WPM
+			count++
+
+			if count == 1 {
+				minWPM = e.WPM
+				maxWPM = e.WPM
+			} else {
+				if e.WPM < minWPM {
+					minWPM = e.WPM
+				}
+				if e.WPM > maxWPM {
+					maxWPM = e.WPM
+				}
+			}
+		}
+	}
+
+	if count == 0 {
+		return 0, 0, 0, 0
+	}
+
+	avgWPM = float64(totalWPM) / float64(count)
+	return avgWPM, minWPM, maxWPM, count
 }
 
 // handleCWMetricsSummary serves aggregated CW metrics summaries

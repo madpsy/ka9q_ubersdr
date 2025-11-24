@@ -1475,16 +1475,13 @@
             const minSNR = document.getElementById('min-snr-select').value;
             const hours = document.getElementById('hours-select').value;
             
-            let url = `/api/decoder/spots/analytics/hourly?hours=${hours}`;
+            let url = `/api/cwskimmer/spots/analytics/hourly?hours=${hours}`;
             if (country) url += `&country=${encodeURIComponent(country)}`;
             if (continent) url += `&continent=${continent}`;
             if (band) url += `&band=${encodeURIComponent(band)}`;
             if (minSNR && parseInt(minSNR) !== -999) {
                 url += `&min_snr=${minSNR}`;
             }
-            
-            // Use CW-specific hourly endpoint
-            url = url.replace('/api/decoder/', '/api/cwskimmer/');
             
             const response = await fetch(url);
             
@@ -1510,10 +1507,11 @@
     
     function updateMapForHour(mapType, hourIndex) {
         const animation = mapType === 'country' ? countryAnimation : continentAnimation;
-        const grid = mapType === 'country' ? countryGrid : continentGrid;
+        const map = mapType === 'country' ? countryMap : continentMap;
+        const markerCluster = mapType === 'country' ? window.countryMarkerCluster : window.continentMarkerCluster;
         const colorMode = mapType === 'country' ? countryColorMode : continentColorMode;
         
-        if (!animation.hourlyData || !grid) return;
+        if (!animation.hourlyData || !map || !markerCluster) return;
         
         // Get data for this hour - the API returns an array of 24 hours
         if (!animation.hourlyData.hourly_data || hourIndex >= animation.hourlyData.hourly_data.length) {
@@ -1526,11 +1524,11 @@
         // Update greyline overlay for this hour
         updateGreyline(mapType, hourIndex);
         
-        // Check if we have locators for this hour (it's an array, not an object)
-        if (!hourData || !hourData.locators || hourData.locators.length === 0) {
+        // Check if we have country data for this hour
+        if (!hourData || !hourData.by_country || hourData.by_country.length === 0) {
             console.log('No data for hour', hourIndex);
             // Clear the map for this hour
-            grid.clearHighlights();
+            markerCluster.clearLayers();
             document.getElementById(`${mapType}-hour-display`).textContent = `Hour: ${String(hourIndex).padStart(2, '0')}:00 (No data)`;
             return;
         }
@@ -1539,42 +1537,52 @@
         const hourStr = String(hourIndex).padStart(2, '0') + ':00';
         document.getElementById(`${mapType}-hour-display`).textContent = `Hour: ${hourStr}`;
         
-        // Clear current highlights
-        grid.clearHighlights();
+        // Clear current markers
+        markerCluster.clearLayers();
         
-        // The hourly data structure has locators as an array of LocatorStats objects
-        const locatorData = hourData.locators.map(loc => ({
-            locator: loc.locator,
-            avg_snr: loc.avg_snr || 0,
-            count: loc.count || 0,
-            unique_callsigns: loc.unique_callsigns || 0,
-            callsigns: loc.callsigns || []
-        }));
-        
-        if (locatorData.length === 0) {
-            console.log('No valid locators for hour', hourIndex);
-            return;
-        }
-        
-        // Apply colors
-        const coloredLocators = locatorData.map(loc => ({
-            locator: loc.locator,
-            style: {
-                fillColor: getDynamicColor(loc, colorMode, locatorData),
-                fillOpacity: 0.35,
+        // Create markers for this hour's data (similar to updateCountryMap)
+        const markers = [];
+        hourData.by_country.forEach(country => {
+            // Skip countries without coordinates
+            if (!country.latitude || !country.longitude) {
+                return;
+            }
+
+            const lat = country.latitude;
+            const lon = country.longitude;
+
+            // Calculate color based on mode
+            const color = getCountryMarkerColor(country, colorMode, hourData.by_country);
+
+            // Create marker
+            const marker = L.circleMarker([lat, lon], {
+                radius: 8,
+                fillColor: color,
                 color: '#333',
                 weight: 1,
-                opacity: 0.6
-            },
-            data: {
-                avg_snr: loc.avg_snr,
-                count: loc.count,
-                unique_callsigns: loc.unique_callsigns,
-                callsigns: loc.callsigns
+                opacity: 0.8,
+                fillOpacity: 0.6
+            });
+
+            // Create popup content
+            let popupContent = `<div style="font-family: monospace; font-size: 12px;">`;
+            popupContent += `<b>${country.country}</b><br>`;
+            popupContent += `<b>Hour:</b> ${hourStr} UTC<br>`;
+            popupContent += `<b>Total Spots:</b> ${country.total_spots.toLocaleString()}<br>`;
+            if (country.bands && country.bands.length > 0) {
+                popupContent += `<b>Bands:</b> ${country.bands.map(b => b.band).join(', ')}<br>`;
+                const bestBand = country.bands[0];
+                popupContent += `<b>Best Band:</b> ${bestBand.band} (${bestBand.spots} spots)<br>`;
+                popupContent += `<b>SNR Range:</b> ${bestBand.min_snr.toFixed(1)} to ${bestBand.max_snr.toFixed(1)} dB<br>`;
             }
-        }));
+            popupContent += `</div>`;
+
+            marker.bindPopup(popupContent);
+            markers.push(marker);
+        });
         
-        grid.highlightLocators(coloredLocators);
+        // Add all markers to cluster group
+        markerCluster.addLayers(markers);
     }
 
     // Create night polygon for day/night overlay

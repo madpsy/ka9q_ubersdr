@@ -809,6 +809,13 @@ func main() {
 	}))
 	http.HandleFunc("/api/cwskimmer/metrics/summary", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleCWMetricsSummary(w, r, cwSkimmer, ipBanManager, summaryRateLimiter)
+		http.HandleFunc("/api/cwskimmer/spots/analytics", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+			handleCWSpotsAnalytics(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)
+		}))
+		http.HandleFunc("/api/cwskimmer/spots/analytics/hourly", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+			handleCWSpotsAnalyticsHourly(w, r, cwSkimmer, ipBanManager, fftRateLimiter, globalCTY)
+		}))
+
 	}))
 
 	// CTY API endpoints (with IP ban checking)
@@ -2647,4 +2654,140 @@ func handlePrometheusMetrics(w http.ResponseWriter, r *http.Request, config *Con
 
 	// IP is allowed, serve metrics
 	promhttp.Handler().ServeHTTP(w, r)
+}
+
+// handleCWSpotsAnalytics serves aggregated analytics about CW Skimmer spots
+func handleCWSpotsAnalytics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter, ctyDatabase *CTYDatabase) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if cwSkimmer == nil || cwSkimmer.spotsLogger == nil || !cwSkimmer.spotsLogger.enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "CW Skimmer spots logging is not enabled",
+		})
+		return
+	}
+
+	// Get query parameters
+	country := r.URL.Query().Get("country")
+	continent := r.URL.Query().Get("continent")
+	band := r.URL.Query().Get("band")
+	minSNRStr := r.URL.Query().Get("min_snr")
+	hoursStr := r.URL.Query().Get("hours")
+
+	// Parse minimum SNR (default -999 = no filter)
+	minSNR := -999
+	if minSNRStr != "" {
+		if snr, err := strconv.Atoi(minSNRStr); err == nil {
+			minSNR = snr
+		}
+	}
+
+	// Parse hours (default 24, max 48)
+	hours := 24
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 48 { // Max 48 hours
+			hours = h
+		}
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("cw-analytics-%s-%s-%s-%d-%d", country, continent, band, minSNR, hours)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("CW spots analytics endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	// Get analytics
+	analytics, err := cwSkimmer.spotsLogger.GetCWSpotsAnalytics(country, continent, band, minSNR, hours, ctyDatabase)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get analytics: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(analytics); err != nil {
+		log.Printf("Error encoding CW spots analytics: %v", err)
+	}
+}
+
+// handleCWSpotsAnalyticsHourly serves aggregated analytics about CW Skimmer spots broken down by hour
+func handleCWSpotsAnalyticsHourly(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimmerClient, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter, ctyDatabase *CTYDatabase) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if cwSkimmer == nil || cwSkimmer.spotsLogger == nil || !cwSkimmer.spotsLogger.enabled {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "CW Skimmer spots logging is not enabled",
+		})
+		return
+	}
+
+	// Get query parameters
+	country := r.URL.Query().Get("country")
+	continent := r.URL.Query().Get("continent")
+	band := r.URL.Query().Get("band")
+	minSNRStr := r.URL.Query().Get("min_snr")
+	hoursStr := r.URL.Query().Get("hours")
+
+	// Parse minimum SNR (default -999 = no filter)
+	minSNR := -999
+	if minSNRStr != "" {
+		if snr, err := strconv.Atoi(minSNRStr); err == nil {
+			minSNR = snr
+		}
+	}
+
+	// Parse hours (default 24, max 48)
+	hours := 24
+	if hoursStr != "" {
+		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 48 { // Max 48 hours
+			hours = h
+		}
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP)
+	clientIP := getClientIP(r)
+	rateLimitKey := fmt.Sprintf("cw-analytics-hourly-%s-%s-%s-%d-%d", country, continent, band, minSNR, hours)
+	if !rateLimiter.AllowRequest(clientIP, rateLimitKey) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 2 seconds between requests.",
+		})
+		log.Printf("CW spots analytics hourly endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	// Get hourly analytics
+	analytics, err := cwSkimmer.spotsLogger.GetCWSpotsAnalyticsHourly(country, continent, band, minSNR, hours, ctyDatabase)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to get hourly analytics: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(analytics); err != nil {
+		log.Printf("Error encoding CW spots hourly analytics: %v", err)
+	}
 }

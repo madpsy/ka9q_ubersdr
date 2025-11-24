@@ -180,4 +180,5 @@ func (sl *CWSkimmerSpotsLogger) Close() error {
 	sl.csvWriters = make(map[string]*csv.Writer)
 
 	return nil
+
 }

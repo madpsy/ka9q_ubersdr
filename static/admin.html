@@ -4002,14 +4002,15 @@
         // Monitor health management
         async function loadMonitorHealth() {
             try {
-                // Fetch noise floor, space weather, and decoder health
-                const [nfResponse, swResponse, decoderResponse] = await Promise.all([
+                // Fetch noise floor, space weather, decoder, and CW Skimmer health
+                const [nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all([
                     authenticatedFetch('/admin/noisefloor-health'),
                     authenticatedFetch('/admin/spaceweather-health'),
-                    authenticatedFetch('/admin/decoder-health')
+                    authenticatedFetch('/admin/decoder-health'),
+                    authenticatedFetch('/admin/cwskimmer-health')
                 ]);
                 
-                if (!nfResponse || !swResponse || !decoderResponse) {
+                if (!nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
@@ -4018,12 +4019,13 @@
                 const nfHealth = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swHealth = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
                 const decoderHealth = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
+                const cwSkimmerHealth = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
 
-                renderMonitorHealth({ noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth }, false);
+                renderMonitorHealth({ noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth }, false);
                 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false);
+                    const allHealthy = (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -4062,20 +4064,22 @@
 
         async function loadMonitorHealthDetailed() {
             try {
-                // Fetch noise floor, space weather, and decoder detailed diagnostics
-                const [nfResponse, swResponse, decoderResponse] = await Promise.all([
+                // Fetch noise floor, space weather, decoder, and CW Skimmer detailed diagnostics
+                const [nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all([
                     authenticatedFetch('/admin/noisefloor-health?detailed=true'),
                     authenticatedFetch('/admin/spaceweather-health?detailed=true'),
-                    authenticatedFetch('/admin/decoder-health?detailed=true')
+                    authenticatedFetch('/admin/decoder-health?detailed=true'),
+                    authenticatedFetch('/admin/cwskimmer-health?detailed=true')
                 ]);
                 
-                if (!nfResponse || !swResponse || !decoderResponse) return; // Auth failed, already handled
+                if (!nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) return; // Auth failed, already handled
 
                 const nfDiag = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swDiag = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
                 const decoderDiag = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
+                const cwSkimmerDiag = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
 
-                renderMonitorHealth({ noiseFloor: nfDiag, spaceWeather: swDiag, decoder: decoderDiag }, true);
+                renderMonitorHealth({ noiseFloor: nfDiag, spaceWeather: swDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag }, true);
                 showAlert('Detailed diagnostics loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading detailed diagnostics: ' + error.message, 'error');
@@ -4131,6 +4135,12 @@
                     if (hasDecoderIssues) {
                         const li = document.createElement('li');
                         li.innerHTML = '<strong>Decoder Monitor:</strong> ' + (data.decoder.issues && data.decoder.issues.length > 0 ? data.decoder.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
+                    
+                    if (hasCWSkimmerIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>CW Skimmer:</strong> ' + (data.cwSkimmer.issues && data.cwSkimmer.issues.length > 0 ? data.cwSkimmer.issues.join(', ') : 'System unhealthy');
                         issuesList.appendChild(li);
                     }
                     
@@ -4637,6 +4647,100 @@
                 const issuesList = document.createElement('ul');
                 issuesList.style.marginLeft = '20px';
                 data.issues.forEach(issue => {
+
+        function renderCWSkimmerHealth(container, data) {
+            // Only render if CW Skimmer is enabled
+            if (!data.enabled) {
+                return;
+            }
+
+            // Render CW Skimmer health status
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : '#dc3545';
+
+            statusSection.innerHTML = `
+                <h3 style="color: ${statusColor};">${statusIcon} CW Skimmer Health</h3>
+            `;
+
+            // Overall status
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+            
+            const connectedText = data.connected ? 'Yes' : 'No';
+            const connectedColor = data.connected ? '#28a745' : '#dc3545';
+            
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span><br>
+                <span style="color: ${connectedColor}; font-size: 14px; font-weight: bold;">Connected: ${connectedText}</span><br>
+                <span style="color: #666; font-size: 14px;">Last Activity: ${data.last_activity || 'Never'}</span><br>
+                <span style="color: #666; font-size: 14px;">Time Since Activity: ${data.time_since_activity || 'N/A'}</span>
+            `;
+            statusSection.appendChild(statusDiv);
+
+            // Connection statistics
+            const statsDiv = document.createElement('div');
+            statsDiv.style.display = 'grid';
+            statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+            statsDiv.style.gap = '15px';
+            statsDiv.style.marginBottom = '20px';
+
+            const stats = [
+                { label: 'Connection Status', value: data.connected ? 'Connected' : 'Disconnected', icon: data.connected ? '🟢' : '🔴' },
+                { label: 'Recent Spots', value: data.recent_spots ? 'Yes' : 'No', icon: data.recent_spots ? '✅' : '⚠️' }
+            ];
+
+            stats.forEach(stat => {
+                const statCard = document.createElement('div');
+                statCard.style.padding = '15px';
+                statCard.style.background = '#f8f9fa';
+                statCard.style.borderRadius = '5px';
+                statCard.style.textAlign = 'center';
+                statCard.innerHTML = `
+                    <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: #667eea; margin-bottom: 5px;">${stat.value}</div>
+                    <div style="font-size: 12px; color: #666;">${stat.label}</div>
+                `;
+                statsDiv.appendChild(statCard);
+            });
+            statusSection.appendChild(statsDiv);
+
+            // Issues list
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.padding = '15px';
+                issuesDiv.style.background = '#fff3cd';
+                issuesDiv.style.border = '1px solid #ffeaa7';
+                issuesDiv.style.borderRadius = '5px';
+                issuesDiv.style.marginBottom = '20px';
+
+                const issuesTitle = document.createElement('strong');
+                issuesTitle.textContent = '⚠️ Issues Detected:';
+                issuesTitle.style.display = 'block';
+                issuesTitle.style.marginBottom = '10px';
+                issuesDiv.appendChild(issuesTitle);
+
+                const issuesList = document.createElement('ul');
+                issuesList.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            container.appendChild(statusSection);
+        }
                     const li = document.createElement('li');
                     li.textContent = issue;
                     li.style.marginBottom = '5px';

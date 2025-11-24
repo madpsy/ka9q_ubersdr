@@ -160,6 +160,7 @@ type AdminHandler struct {
 	dxCluster           *DXClusterClient
 	spaceWeatherMonitor *SpaceWeatherMonitor
 	cwSkimmerConfig     *CWSkimmerConfig
+	cwSkimmerClient     *CWSkimmerClient
 }
 
 // restartServer triggers a server restart after a short delay
@@ -221,7 +222,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient) *AdminHandler {
 	return &AdminHandler{
 		config:              config,
 		configFile:          configFile,
@@ -236,6 +237,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		dxCluster:           dxCluster,
 		spaceWeatherMonitor: spaceWeatherMonitor,
 		cwSkimmerConfig:     cwSkimmerConfig,
+		cwSkimmerClient:     cwSkimmerClient,
 	}
 }
 
@@ -2769,5 +2771,84 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		log.Printf("Error encoding system stats: %v", err)
+	}
+}
+
+// HandleCWSkimmerHealth serves the health status of the CW Skimmer client
+// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
+func (ah *AdminHandler) HandleCWSkimmerHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Build health status response
+	status := map[string]interface{}{
+		"enabled": ah.cwSkimmerConfig.Enabled,
+		"healthy": false,
+		"issues":  []string{},
+	}
+
+	// If not enabled, return early
+	if !ah.cwSkimmerConfig.Enabled {
+		status["issues"] = []string{"CW Skimmer is not enabled"}
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			log.Printf("Error encoding CW Skimmer health status: %v", err)
+		}
+		return
+	}
+
+	// Check if client exists
+	if ah.cwSkimmerClient == nil {
+		status["issues"] = []string{"CW Skimmer client not initialized"}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			log.Printf("Error encoding CW Skimmer health status: %v", err)
+		}
+		return
+	}
+
+	// Get connection status
+	connected := ah.cwSkimmerClient.IsConnected()
+	status["connected"] = connected
+
+	// Get last activity time
+	ah.cwSkimmerClient.mu.RLock()
+	lastActivity := ah.cwSkimmerClient.lastActivityTime
+	ah.cwSkimmerClient.mu.RUnlock()
+
+	if !lastActivity.IsZero() {
+		status["last_activity"] = lastActivity.Format(time.RFC3339)
+		timeSinceActivity := time.Since(lastActivity)
+		status["seconds_since_activity"] = int(timeSinceActivity.Seconds())
+
+		// Consider unhealthy if no activity for more than 5 minutes
+		if timeSinceActivity > 5*time.Minute {
+			status["issues"] = append(status["issues"].([]string),
+				fmt.Sprintf("No activity for %d seconds", int(timeSinceActivity.Seconds())))
+		}
+	} else {
+		status["last_activity"] = nil
+		status["seconds_since_activity"] = nil
+		if connected {
+			status["issues"] = append(status["issues"].([]string), "Connected but no spots received yet")
+		}
+	}
+
+	// Check connection status
+	if !connected {
+		status["issues"] = append(status["issues"].([]string), "Not connected to CW Skimmer server")
+	}
+
+	// Determine overall health
+	issues := status["issues"].([]string)
+	if len(issues) == 0 {
+		status["healthy"] = true
+		w.WriteHeader(http.StatusOK)
+	} else {
+		status["healthy"] = false
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("Error encoding CW Skimmer health status: %v", err)
 	}
 }

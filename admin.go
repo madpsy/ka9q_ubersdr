@@ -2820,14 +2820,22 @@ func (ah *AdminHandler) HandleCWSkimmerHealth(w http.ResponseWriter, r *http.Req
 		timeSinceActivity := time.Since(lastActivity)
 		status["seconds_since_activity"] = int(timeSinceActivity.Seconds())
 
-		// Consider unhealthy if no activity for more than 5 minutes
-		if timeSinceActivity > 5*time.Minute {
+		// Format time since activity in human-readable format
+		status["time_since_activity"] = formatDuration(timeSinceActivity)
+
+		// Consider recent if activity within last 5 minutes
+		recentSpots := timeSinceActivity <= 5*time.Minute
+		status["recent_spots"] = recentSpots
+
+		if !recentSpots {
 			status["issues"] = append(status["issues"].([]string),
 				fmt.Sprintf("No activity for %d seconds", int(timeSinceActivity.Seconds())))
 		}
 	} else {
 		status["last_activity"] = nil
 		status["seconds_since_activity"] = nil
+		status["time_since_activity"] = "N/A"
+		status["recent_spots"] = false
 		if connected {
 			status["issues"] = append(status["issues"].([]string), "Connected but no spots received yet")
 		}

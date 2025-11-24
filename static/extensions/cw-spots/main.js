@@ -936,6 +936,8 @@ class CWSpotsExtension extends DecoderExtension {
     }
 
     updateBadges() {
+        console.log('CW Spots: updateBadges called - bandFilter:', this.bandFilter, 'lastBadgeBand:', this.lastBadgeBand, 'badgeCache:', !!this.badgeCache);
+
         // Use the main page container instead of the extension panel container
         const container = document.getElementById('cw-spots-badges-main');
         if (!container) return;

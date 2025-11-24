@@ -2528,14 +2528,35 @@ func (ah *AdminHandler) handleGetCWSkimmerConfig(w http.ResponseWriter, r *http.
 		return
 	}
 
-	var cwskimmerConfig map[string]interface{}
+	// Unmarshal into the proper struct to handle the YAML structure correctly
+	var cwskimmerConfig CWSkimmerConfig
 	if err := yaml.Unmarshal(data, &cwskimmerConfig); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to parse CW Skimmer config: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	// Convert struct to map for JSON response to maintain field names
+	configMap := map[string]interface{}{
+		"enabled":                   cwskimmerConfig.Enabled,
+		"host":                      cwskimmerConfig.Host,
+		"port":                      cwskimmerConfig.Port,
+		"callsign":                  cwskimmerConfig.Callsign,
+		"reconnect_delay":           cwskimmerConfig.ReconnectDelay,
+		"keepalive_delay":           cwskimmerConfig.KeepAliveDelay,
+		"spots_log_enabled":         cwskimmerConfig.SpotsLogEnabled,
+		"spots_log_data_dir":        cwskimmerConfig.SpotsLogDataDir,
+		"metrics_log_enabled":       cwskimmerConfig.MetricsLogEnabled,
+		"metrics_log_data_dir":      cwskimmerConfig.MetricsLogDataDir,
+		"metrics_log_interval_secs": cwskimmerConfig.MetricsLogIntervalSecs,
+		"metrics_summary_data_dir":  cwskimmerConfig.MetricsSummaryDataDir,
+		"pskreporter_enabled":       cwskimmerConfig.PSKReporterEnabled,
+		"pskreporter_callsign":      cwskimmerConfig.PSKReporterCallsign,
+		"pskreporter_locator":       cwskimmerConfig.PSKReporterLocator,
+		"pskreporter_antenna":       cwskimmerConfig.PSKReporterAntenna,
+	}
+
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(cwskimmerConfig)
+	json.NewEncoder(w).Encode(configMap)
 }
 
 // handleUpdateCWSkimmerConfig updates the CW Skimmer configuration

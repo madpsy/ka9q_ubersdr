@@ -3520,25 +3520,7 @@
                 if (!response.ok) throw new Error('Failed to load CW Skimmer config');
 
                 const data = await response.json();
-                // Merge nested cwskimmer object into root level to get metrics fields
-                if (data.cwskimmer) {
-                    currentCWSkimmerConfig = { ...data };
-                    // Copy metrics fields from nested object if they exist there but not at root
-                    if (data.cwskimmer.metrics_log_enabled !== undefined && data.metrics_log_enabled === undefined) {
-                        currentCWSkimmerConfig.metrics_log_enabled = data.cwskimmer.metrics_log_enabled;
-                    }
-                    if (data.cwskimmer.metrics_log_data_dir && !data.metrics_log_data_dir) {
-                        currentCWSkimmerConfig.metrics_log_data_dir = data.cwskimmer.metrics_log_data_dir;
-                    }
-                    if (data.cwskimmer.metrics_log_interval_secs && !data.metrics_log_interval_secs) {
-                        currentCWSkimmerConfig.metrics_log_interval_secs = data.cwskimmer.metrics_log_interval_secs;
-                    }
-                    if (data.cwskimmer.metrics_summary_data_dir && !data.metrics_summary_data_dir) {
-                        currentCWSkimmerConfig.metrics_summary_data_dir = data.cwskimmer.metrics_summary_data_dir;
-                    }
-                } else {
-                    currentCWSkimmerConfig = data;
-                }
+                currentCWSkimmerConfig = data;
                 renderCWSkimmerConfig();
                 showAlert('CW Skimmer configuration loaded successfully', 'success');
             } catch (error) {

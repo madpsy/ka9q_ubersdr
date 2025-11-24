@@ -656,6 +656,10 @@ class CWSpotsExtension extends DecoderExtension {
         return (hz / 1000000).toFixed(5);
     }
 
+    formatFrequencyShort(hz) {
+        return (hz / 1000000).toFixed(3);
+    }
+
     formatTime(timeStr) {
         if (!timeStr) return '';
 
@@ -1669,7 +1673,7 @@ class CWSpotsExtension extends DecoderExtension {
                     tooltip.innerHTML = `
                         <div class="tooltip-row"><strong style="color: ${snrColor}">${hoveredSpot.dx_call}</strong></div>
                         <div class="tooltip-row">Country: ${hoveredSpot.country || 'N/A'}</div>
-                        <div class="tooltip-row">Freq: ${this.formatFrequency(hoveredSpot.frequency)} MHz</div>
+                        <div class="tooltip-row">Freq: ${this.formatFrequencyShort(hoveredSpot.frequency)} MHz</div>
                         <div class="tooltip-row">SNR: ${snrText} dB</div>
                         <div class="tooltip-row">WPM: ${hoveredSpot.wpm || 'N/A'}</div>
                         <div class="tooltip-row">Distance: ${distanceText}</div>
@@ -1942,7 +1946,9 @@ class CWSpotsExtension extends DecoderExtension {
         this.tunedCallsign = spot.dx_call;
 
         const snrText = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
-        tunedInfo.innerHTML = `${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz • ${spot.wpm} WPM • ${snrText} dB`;
+        const baseCallsign = spot.dx_call.split('/')[0];
+        const qrzUrl = `https://www.qrz.com/db/${baseCallsign}`;
+        tunedInfo.innerHTML = `<a href="${qrzUrl}" target="_blank" style="color: #28a745; text-decoration: underline; font-weight: bold;">${spot.dx_call}</a> • ${this.formatFrequencyShort(spot.frequency)} MHz • ${spot.wpm} WPM • ${snrText} dB`;
         tunedInfo.style.display = 'flex';
     }
 
@@ -1970,7 +1976,9 @@ class CWSpotsExtension extends DecoderExtension {
             if (tunedInfo && tunedInfo.style.display !== 'none') {
                 this.tunedCallsign = spot.dx_call;
                 const snrText = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
-                tunedInfo.innerHTML = `${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz • ${spot.wpm} WPM • ${snrText} dB`;
+                const baseCallsign = spot.dx_call.split('/')[0];
+                const qrzUrl = `https://www.qrz.com/db/${baseCallsign}`;
+                tunedInfo.innerHTML = `<a href="${qrzUrl}" target="_blank" style="color: #28a745; text-decoration: underline; font-weight: bold;">${spot.dx_call}</a> • ${this.formatFrequencyShort(spot.frequency)} MHz • ${spot.wpm} WPM • ${snrText} dB`;
             }
         }
     }

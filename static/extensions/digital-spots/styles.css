@@ -672,7 +672,7 @@
 
 .country-spots-modal-table th:nth-child(2),
 .country-spots-modal-table td:nth-child(2) {
-    width: 150px; /* Country */
+    width: 200px; /* Country */
 }
 
 .country-spots-modal-table th:nth-child(3),

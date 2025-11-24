@@ -14,12 +14,14 @@ import sys
 import time
 import uuid
 import wave
-from typing import Optional
+from typing import Optional, List, Tuple
 
 import aiohttp
 import websockets
 from urllib.parse import urlparse, parse_qs, urlencode
 import numpy as np
+import subprocess
+import re
 
 # Import NR2 processor (optional, only if scipy is available)
 try:
@@ -28,6 +30,72 @@ try:
 except ImportError:
     NR2_AVAILABLE = False
     print("Warning: scipy not available, NR2 noise reduction disabled", file=sys.stderr)
+
+
+def get_pipewire_sinks() -> List[Tuple[str, str]]:
+    """Get list of available PipeWire audio sinks.
+    
+    Returns:
+        List of tuples (node_name, description) for audio sinks
+    """
+    try:
+        result = subprocess.run(
+            ['pw-cli', 'list-objects', 'Node'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        sinks = []
+        lines = result.stdout.split('\n')
+        
+        current_node_name = None
+        current_nick = None
+        current_media_class = None
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Look for node.name
+            if 'node.name = ' in line:
+                match = re.search(r'node\.name = "([^"]+)"', line)
+                if match:
+                    current_node_name = match.group(1)
+            
+            # Look for node.nick (friendly name)
+            elif 'node.nick = ' in line:
+                match = re.search(r'node\.nick = "([^"]+)"', line)
+                if match:
+                    current_nick = match.group(1)
+            
+            # Look for media.class
+            elif 'media.class = ' in line:
+                match = re.search(r'media\.class = "([^"]+)"', line)
+                if match:
+                    current_media_class = match.group(1)
+            
+            # When we hit a new object ID, process the previous one
+            elif line.startswith('id ') and current_node_name:
+                # Only include Audio/Sink devices
+                if current_media_class == 'Audio/Sink':
+                    description = current_nick if current_nick else current_node_name
+                    sinks.append((current_node_name, description))
+                
+                # Reset for next object
+                current_node_name = None
+                current_nick = None
+                current_media_class = None
+        
+        # Process last object if it was a sink
+        if current_node_name and current_media_class == 'Audio/Sink':
+            description = current_nick if current_nick else current_node_name
+            sinks.append((current_node_name, description))
+        
+        return sinks
+    
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+        print(f"Warning: Could not list PipeWire sinks: {e}", file=sys.stderr)
+        return []
 
 
 class RadioClient:
@@ -40,7 +108,9 @@ class RadioClient:
                  duration: Optional[float] = None, ssl: bool = False,
                  nr2_enabled: bool = False, nr2_strength: float = 40.0,
                  nr2_floor: float = 10.0, nr2_adapt_rate: float = 1.0,
-                 auto_reconnect: bool = False):
+                 auto_reconnect: bool = False, status_callback=None,
+                 volume: float = 1.0, channel_left: bool = True, channel_right: bool = True,
+                 audio_level_callback=None):
         self.url = url
         self.host = host
         self.port = port
@@ -57,6 +127,7 @@ class RadioClient:
         self.running = True
         self.start_time = None
         self.sample_rate = 12000  # Default, will be updated from server
+        self.ws = None  # WebSocket connection reference for sending messages
 
         # Determine default channels based on mode
         # IQ modes are stereo (I and Q channels), others are mono
@@ -72,6 +143,9 @@ class RadioClient:
         self.auto_reconnect = auto_reconnect
         self.retry_count = 0
         self.max_backoff = 60  # Maximum backoff time in seconds
+        
+        # Status callback for GUI integration
+        self.status_callback = status_callback
         
         # NR2 noise reduction
         self.nr2_enabled = nr2_enabled
@@ -89,6 +163,20 @@ class RadioClient:
             )
             print(f"NR2 noise reduction enabled (strength={nr2_strength}%, floor={nr2_floor}%, adapt={nr2_adapt_rate}%)", file=sys.stderr)
         
+        # Audio controls
+        self.volume = max(0.0, min(2.0, volume))  # Clamp between 0.0 and 2.0 (0-200%)
+        self.channel_left = channel_left
+        self.channel_right = channel_right
+        self.status_callback = status_callback
+        self.audio_level_callback = audio_level_callback
+        self.audio_level_update_counter = 0
+    
+    def _log(self, message: str):
+        """Log a message to stderr and optionally to status callback for GUI."""
+        print(message, file=sys.stderr)
+        if self.status_callback:
+            self.status_callback("info", message)
+    
     def build_websocket_url(self) -> str:
         """Build the WebSocket URL with query parameters."""
         # If full URL provided, parse and merge parameters
@@ -142,18 +230,21 @@ class RadioClient:
     async def setup_pipewire(self):
         """Start PipeWire playback process."""
         try:
+            # Always output as stereo to support left/right channel control
+            output_channels = 2
+            
             # Use pw-play for PipeWire audio output
             self.pipewire_process = await asyncio.create_subprocess_exec(
                 'pw-play',
                 '--format=s16',
                 '--rate', str(self.sample_rate),
-                f'--channels={self.channels}',
+                f'--channels={output_channels}',
                 '-',
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL
             )
-            print(f"PipeWire output started (sample rate: {self.sample_rate} Hz, channels: {self.channels})", file=sys.stderr)
+            print(f"PipeWire output started (sample rate: {self.sample_rate} Hz, channels: {output_channels})", file=sys.stderr)
         except FileNotFoundError:
             print("Error: pw-play not found. Please install pipewire-utils.", file=sys.stderr)
             sys.exit(1)
@@ -185,24 +276,64 @@ class RadioClient:
     
     async def output_audio(self, pcm_data: bytes):
         """Output audio data based on selected mode."""
+        # Convert PCM bytes to numpy array for processing
+        audio_array = np.frombuffer(pcm_data, dtype=np.int16)
+        
+        # Reshape for stereo if needed
+        if self.channels == 2:
+            audio_array = audio_array.reshape(-1, 2)
+        
+        # Convert to float32 for processing
+        audio_float = audio_array.astype(np.float32) / 32768.0
+        
         # Apply NR2 noise reduction if enabled
         if self.nr2_processor:
-            # Convert PCM bytes to numpy array (int16)
-            audio_array = np.frombuffer(pcm_data, dtype=np.int16)
-            
-            # Normalize to float32 range [-1.0, 1.0] for processing
-            audio_float = audio_array.astype(np.float32) / 32768.0
-            
             # Process through NR2 (expects and returns normalized float32)
-            processed_audio = self.nr2_processor.process(audio_float)
+            audio_float = self.nr2_processor.process(audio_float)
             
             # Apply -3dB makeup gain (matches UI default)
             # -3dB = 10^(-3/20) = 0.7079 gain factor
-            processed_audio = processed_audio * 0.7079
+            audio_float = audio_float * 0.7079
+        
+        # Calculate audio level before volume adjustment (for meter)
+        if self.audio_level_callback and self.audio_level_update_counter % 5 == 0:
+            # Calculate RMS level in dB (update every 5th frame to reduce overhead)
+            # Handle both mono and stereo
+            if audio_float.ndim == 2:
+                # Stereo: average both channels
+                rms = np.sqrt(np.mean(audio_float ** 2))
+            else:
+                # Mono
+                rms = np.sqrt(np.mean(audio_float ** 2))
             
-            # Convert back to int16 range and clip
-            processed_audio = np.clip(processed_audio * 32768.0, -32768, 32767).astype(np.int16)
-            pcm_data = processed_audio.tobytes()
+            if rms > 1e-10:  # Avoid log of zero
+                level_db = 20 * np.log10(rms)
+                # Clamp to reasonable range
+                level_db = max(-60, min(0, level_db))
+            else:
+                level_db = -60  # Minimum level
+            
+            self.audio_level_callback(level_db)
+        self.audio_level_update_counter += 1
+        
+        # Apply volume control
+        if self.volume != 1.0:
+            audio_float = audio_float * self.volume
+        
+        # Convert mono to stereo for output (PipeWire always expects stereo)
+        if self.channels == 1:
+            # Duplicate mono to both channels
+            audio_float = np.column_stack((audio_float, audio_float))
+        
+        # Apply channel selection (now always stereo)
+        if not self.channel_left:
+            audio_float[:, 0] = 0  # Mute left channel
+        if not self.channel_right:
+            audio_float[:, 1] = 0  # Mute right channel
+        
+        # Convert back to int16 and clip
+        audio_array = np.clip(audio_float * 32768.0, -32768, 32767).astype(np.int16)
+        pcm_data = audio_array.tobytes()
         
         if self.output_mode == 'stdout':
             # Write raw PCM to stdout
@@ -250,27 +381,29 @@ class RadioClient:
             sample_rate = message.get('sampleRate', self.sample_rate)
             channels = message.get('channels', self.channels)
             
-            # Update sample rate if changed
-            if sample_rate != self.sample_rate:
+            # Check if sample rate or channels changed (requires restarting PipeWire)
+            sample_rate_changed = sample_rate != self.sample_rate
+            channels_changed = channels != self.channels
+            
+            if sample_rate_changed:
                 self.sample_rate = sample_rate
                 print(f"Sample rate updated: {self.sample_rate} Hz", file=sys.stderr)
             
-            # Update channels if changed (requires restarting PipeWire)
-            if channels != self.channels:
+            if channels_changed:
                 self.channels = channels
                 print(f"Channels updated: {self.channels}", file=sys.stderr)
 
-                # Restart PipeWire with new channel count if active
-                if self.output_mode == 'pipewire' and self.pipewire_process:
-                    print("Restarting PipeWire with new channel configuration...", file=sys.stderr)
-                    if self.pipewire_process.stdin:
-                        self.pipewire_process.stdin.close()
-                    try:
-                        await asyncio.wait_for(self.pipewire_process.wait(), timeout=2.0)
-                    except asyncio.TimeoutError:
-                        self.pipewire_process.kill()
-                        await self.pipewire_process.wait()
-                    await self.setup_pipewire()
+            # Restart PipeWire if sample rate or channels changed
+            if (sample_rate_changed or channels_changed) and self.output_mode == 'pipewire' and self.pipewire_process:
+                print("Restarting PipeWire with new audio configuration...", file=sys.stderr)
+                if self.pipewire_process.stdin:
+                    self.pipewire_process.stdin.close()
+                try:
+                    await asyncio.wait_for(self.pipewire_process.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    self.pipewire_process.kill()
+                    await self.pipewire_process.wait()
+                await self.setup_pipewire()
 
             if audio_data:
                 pcm_data = self.decode_audio(audio_data)
@@ -329,7 +462,7 @@ class RadioClient:
             "user_session_id": self.user_session_id
         }
         
-        print(f"Checking connection permission...", file=sys.stderr)
+        self._log("Checking connection permission...")
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -346,11 +479,11 @@ class RadioClient:
                     
                     if not data.get('allowed', False):
                         reason = data.get('reason', 'Unknown reason')
-                        print(f"Connection rejected: {reason}", file=sys.stderr)
+                        self._log(f"Connection rejected: {reason}")
                         return False
                     
                     client_ip = data.get('client_ip', 'unknown')
-                    print(f"Connection allowed (client IP: {client_ip})", file=sys.stderr)
+                    self._log(f"Connection allowed (client IP: {client_ip})")
                     return True
                     
         except Exception as e:
@@ -365,11 +498,11 @@ class RadioClient:
             return 1
         
         url = self.build_websocket_url()
-        print(f"Connecting to {url}", file=sys.stderr)
-        print(f"Frequency: {self.frequency} Hz, Mode: {self.mode}", file=sys.stderr)
+        self._log(f"Connecting to {url}")
+        self._log(f"Frequency: {self.frequency} Hz, Mode: {self.mode}")
         
         if self.bandwidth_low is not None and self.bandwidth_high is not None:
-            print(f"Bandwidth: {self.bandwidth_low} to {self.bandwidth_high} Hz", file=sys.stderr)
+            self._log(f"Bandwidth: {self.bandwidth_low} to {self.bandwidth_high} Hz")
         
         try:
             async with websockets.connect(
@@ -377,7 +510,9 @@ class RadioClient:
                 ping_interval=None,
                 extra_headers={'User-Agent': 'UberSDR Client 1.0 (python)'}
             ) as websocket:
-                print("Connected!", file=sys.stderr)
+                # Store websocket reference for GUI access
+                self.ws = websocket
+                self._log("Connected!")
 
                 # Reset retry count on successful connection
                 self.retry_count = 0
@@ -414,6 +549,8 @@ class RadioClient:
             print(f"Connection error: {e}", file=sys.stderr)
             return 1
         finally:
+            # Clear websocket reference
+            self.ws = None
             await self.cleanup()
         
         return 0
@@ -491,27 +628,32 @@ def main():
 Examples:
   # Listen to 14.074 MHz USB via PipeWire
   %(prog)s -f 14074000 -m usb
-  
+
+  # Launch GUI interface
+  %(prog)s --gui -f 14074000 -m usb
+
   # Connect using full URL
   %(prog)s -u ws://radio.example.com:8073/ws -f 14074000 -m usb
-  
+
   # Record 1000 kHz AM to WAV file for 60 seconds
   %(prog)s -f 1000000 -m am -o wav -w recording.wav -t 60
-  
+
   # Output raw PCM to stdout with custom bandwidth
   %(prog)s -f 7100000 -m lsb -b -2700:-50 -o stdout > audio.pcm
         """
     )
     
+    parser.add_argument('--gui', action='store_true',
+                        help='Launch graphical user interface (Linux only, requires Tkinter)')
     parser.add_argument('-u', '--url',
                         help='Full WebSocket URL (e.g., ws://host:port/ws or wss://host/ws)')
-    parser.add_argument('-H', '--host', default='localhost',
-                        help='Server hostname (default: localhost, ignored if --url is provided)')
-    parser.add_argument('-p', '--port', type=int, default=8080,
-                        help='Server port (default: 8080, ignored if --url is provided)')
-    parser.add_argument('-f', '--frequency', type=int, required=True,
+    parser.add_argument('-H', '--host', default='ubersdr.madpsy.uk',
+                        help='Server hostname (default: ubersdr.madpsy.uk, ignored if --url is provided)')
+    parser.add_argument('-p', '--port', type=int, default=443,
+                        help='Server port (default: 443, ignored if --url is provided)')
+    parser.add_argument('-f', '--frequency', type=int,
                         help='Frequency in Hz (e.g., 14074000 for 14.074 MHz)')
-    parser.add_argument('-m', '--mode', required=True,
+    parser.add_argument('-m', '--mode',
                         choices=['am', 'sam', 'usb', 'lsb', 'fm', 'nfm', 'cwu', 'cwl', 'iq', 'iq48', 'iq96', 'iq192', 'iq384'],
                         help='Demodulation mode (iq48/iq96/iq192/iq384 require bypassed IP)')
     parser.add_argument('-b', '--bandwidth', type=parse_bandwidth,
@@ -536,15 +678,66 @@ Examples:
     parser.add_argument('--auto-reconnect', action='store_true',
                         help='Automatically reconnect on connection loss with exponential backoff (max 60s)')
     
+    parser.add_argument('--pipewire-target', type=str, default=None,
+                        help='PipeWire target device (node name). Use --list-devices to see available devices.')
+    parser.add_argument('--list-devices', action='store_true',
+                        help='List available PipeWire audio output devices and exit')
+    
     args = parser.parse_args()
     
-    # Validate arguments
+    # List devices mode
+    if args.list_devices:
+        print("Available PipeWire audio output devices:")
+        print()
+        sinks = get_pipewire_sinks()
+        if sinks:
+            for node_name, description in sinks:
+                print(f"  {node_name}")
+                print(f"    Description: {description}")
+                print()
+        else:
+            print("  No devices found or pw-cli not available")
+        sys.exit(0)
+    
+    # Parse bandwidth early for GUI
+    bandwidth_low = None
+    bandwidth_high = None
+    if args.bandwidth:
+        bandwidth_low, bandwidth_high = args.bandwidth
+    
+    # Launch GUI if requested
+    if args.gui:
+        try:
+            from radio_gui import main as gui_main
+            # Pass configuration to GUI
+            config = {
+                'url': args.url,
+                'host': args.host,
+                'port': args.port,
+                'frequency': args.frequency if args.frequency else 14074000,
+                'mode': args.mode if args.mode else 'usb',
+                'bandwidth_low': bandwidth_low if bandwidth_low is not None else 50,
+                'bandwidth_high': bandwidth_high if bandwidth_high is not None else 2700
+            }
+            gui_main(config)
+            return
+        except ImportError as e:
+            print(f"Error: Failed to import GUI module: {e}", file=sys.stderr)
+            print("Make sure Tkinter is installed (usually included with Python)", file=sys.stderr)
+            sys.exit(1)
+
+    # Validate arguments for CLI mode
+    if not args.frequency:
+        parser.error("--frequency is required (unless using --gui)")
+    if not args.mode:
+        parser.error("--mode is required (unless using --gui)")
+
     if args.output == 'wav' and not args.wav_file:
         parser.error("--wav-file is required when output mode is 'wav'")
-    
+
     if args.time and args.output != 'wav':
         parser.error("--time can only be used with output mode 'wav'")
-    
+
     # Validate NR2 parameters
     if args.nr2_strength < 0 or args.nr2_strength > 100:
         parser.error("--nr2-strength must be between 0 and 100")
@@ -563,12 +756,6 @@ Examples:
         except Exception as e:
             parser.error(f"Invalid URL: {e}")
     
-    # Parse bandwidth
-    bandwidth_low = None
-    bandwidth_high = None
-    if args.bandwidth:
-        bandwidth_low, bandwidth_high = args.bandwidth
-    
     # Create client
     client = RadioClient(
         url=args.url,
@@ -586,7 +773,11 @@ Examples:
         nr2_strength=args.nr2_strength,
         nr2_floor=args.nr2_floor,
         nr2_adapt_rate=args.nr2_adapt_rate,
-        auto_reconnect=args.auto_reconnect
+        auto_reconnect=args.auto_reconnect,
+        volume=args.volume,
+        channel_left=args.channel_left,
+        channel_right=args.channel_right,
+        pipewire_target=args.pipewire_target
     )
     
     # Setup signal handler for graceful shutdown

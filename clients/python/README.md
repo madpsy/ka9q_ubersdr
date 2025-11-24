@@ -1,13 +1,14 @@
 # Python Radio Client for ka9q_ubersdr
 
-A command-line Python client for connecting to the ka9q_ubersdr WebSocket server to receive and output radio audio.
+A command-line and GUI Python client for connecting to the ka9q_ubersdr WebSocket server to receive and output radio audio.
 
 ## Features
 
+- **Graphical User Interface**: Optional Tkinter-based GUI for easy control (Linux only)
 - **Connection validation**: Checks server permission before connecting (respects IP bans, session limits, etc.)
 - Connect to ka9q_ubersdr WebSocket server
 - Support for multiple demodulation modes (AM, USB, LSB, FM, etc.)
-- Configurable frequency and bandwidth
+- Configurable frequency and bandwidth with live updates
 - **NR2 Spectral Subtraction Noise Reduction**: FFT-based noise reduction with adaptive learning
 - Multiple output options:
   - **PipeWire**: Real-time audio playback via PipeWire
@@ -21,6 +22,7 @@ A command-line Python client for connecting to the ka9q_ubersdr WebSocket server
 - `aiohttp` library
 - `numpy` library
 - `scipy` library (optional, required for NR2 noise reduction)
+- `tkinter` library (usually included with Python, required for GUI mode)
 - For PipeWire output: `pipewire-utils` package (provides `pw-play`)
 
 ## Installation
@@ -49,7 +51,29 @@ chmod +x radio_client.py
 
 ## Usage
 
-### Basic Examples
+### GUI Mode (Recommended for Interactive Use)
+
+Launch the graphical interface:
+```bash
+./radio_client.py --gui
+```
+
+Or with initial settings:
+```bash
+./radio_client.py --gui -f 14074000 -m usb
+```
+
+The GUI provides:
+- **Server connection field**: Enter server URL or host:port
+- **Connect/Disconnect button**: Toggle connection state
+- **Frequency control**: Enter frequency or use quick band buttons (160m-10m)
+- **Mode selector**: Choose demodulation mode (AM, USB, LSB, etc.)
+- **Bandwidth controls**: Adjust filter edges with presets (Narrow, Medium, Wide)
+- **NR2 Noise Reduction**: Enable/disable noise reduction with adjustable strength and floor parameters
+- **Live updates**: Change frequency, mode, bandwidth, or NR2 settings while connected
+- **Status log**: View connection status and events
+
+### Command-Line Mode
 
 Listen to 14.074 MHz USB via PipeWire:
 ```bash
@@ -79,25 +103,31 @@ Enable NR2 noise reduction:
 ### Command-Line Options
 
 ```
-usage: radio_client.py [-h] [-u URL] [-H HOST] [-p PORT] -f FREQUENCY -m MODE
-                       [-b BANDWIDTH] [-o {pipewire,stdout,wav}]
-                       [-w FILE] [-t SECONDS] [-s]
+usage: radio_client.py [-h] [--gui] [-u URL] [-H HOST] [-p PORT] [-f FREQUENCY]
+                       [-m MODE] [-b BANDWIDTH] [-o {pipewire,stdout,wav}]
+                       [-w FILE] [-t SECONDS] [-s] [--nr2]
+                       [--nr2-strength PERCENT] [--nr2-floor PERCENT]
+                       [--nr2-adapt-rate PERCENT] [--auto-reconnect]
 
 CLI Radio Client for ka9q_ubersdr
 
 optional arguments:
   -h, --help            show this help message and exit
+  --gui                 Launch graphical user interface (Linux only, requires Tkinter)
   -u URL, --url URL     Full WebSocket URL (e.g., ws://host:port/ws or wss://host/ws)
   -H HOST, --host HOST  Server hostname (default: localhost, ignored if --url is provided)
   -p PORT, --port PORT  Server port (default: 8080, ignored if --url is provided)
   -f FREQUENCY, --frequency FREQUENCY
                         Frequency in Hz (e.g., 14074000 for 14.074 MHz)
+                        Required for CLI mode, optional for GUI mode
   -m MODE, --mode MODE  Demodulation mode
-                        Choices: am, sam, usb, lsb, fm, nfm, cwu, cwl
+                        Choices: am, sam, usb, lsb, fm, nfm, cwu, cwl, iq
+                        Required for CLI mode, optional for GUI mode
   -b BANDWIDTH, --bandwidth BANDWIDTH
                         Bandwidth in format low:high (e.g., -5000:5000)
   -o {pipewire,stdout,wav}, --output {pipewire,stdout,wav}
                         Output mode (default: pipewire)
+                        Note: GUI mode always uses pipewire
   -w FILE, --wav-file FILE
                         WAV file path (required when output=wav)
   -t SECONDS, --time SECONDS
@@ -105,10 +135,11 @@ optional arguments:
   -s, --ssl             Use WSS (WebSocket Secure, ignored if --url is provided)
   --nr2                 Enable NR2 spectral subtraction noise reduction
   --nr2-strength PERCENT
-                        NR2 noise reduction strength, 0-100% (default: 50)
-  --nr2-floor PERCENT   NR2 spectral floor to prevent musical noise, 0-10% (default: 1)
+                        NR2 noise reduction strength, 0-100% (default: 40)
+  --nr2-floor PERCENT   NR2 spectral floor to prevent musical noise, 0-10% (default: 10)
   --nr2-adapt-rate PERCENT
                         NR2 noise profile adaptation rate, 0.1-5.0% (default: 1)
+  --auto-reconnect      Automatically reconnect on connection loss with exponential backoff
 ```
 
 ### Connection Options

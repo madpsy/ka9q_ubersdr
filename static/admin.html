@@ -3520,7 +3520,7 @@
                 if (!response.ok) throw new Error('Failed to load CW Skimmer config');
 
                 const data = await response.json();
-                currentCWSkimmerConfig = data;
+                currentCWSkimmerConfig = data.cwskimmer || data;
                 renderCWSkimmerConfig();
                 showAlert('CW Skimmer configuration loaded successfully', 'success');
             } catch (error) {

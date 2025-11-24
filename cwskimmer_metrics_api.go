@@ -308,9 +308,17 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 					// These represent the state at that point in time
 					metrics.SpotCounts.Last1Hour = bestSnapshot.SpotCounts.Last1Hour
 					metrics.SpotCounts.Last24Hours = bestSnapshot.SpotCounts.Last24Hour
+					// Estimate intermediate values (snapshots only store 1h and 24h)
+					metrics.SpotCounts.Last3Hours = bestSnapshot.SpotCounts.Last24Hour
+					metrics.SpotCounts.Last6Hours = bestSnapshot.SpotCounts.Last24Hour
+					metrics.SpotCounts.Last12Hours = bestSnapshot.SpotCounts.Last24Hour
 
 					metrics.UniqueCallsigns.Last1Hour = bestSnapshot.UniqueCallsigns.Last1Hour
 					metrics.UniqueCallsigns.Last24Hours = bestSnapshot.UniqueCallsigns.Last24Hour
+					// Estimate intermediate values
+					metrics.UniqueCallsigns.Last3Hours = bestSnapshot.UniqueCallsigns.Last24Hour
+					metrics.UniqueCallsigns.Last6Hours = bestSnapshot.UniqueCallsigns.Last24Hour
+					metrics.UniqueCallsigns.Last12Hours = bestSnapshot.UniqueCallsigns.Last24Hour
 
 					// WPM stats from best snapshot
 					metrics.WPMStats.Last1Min.Avg = bestSnapshot.WPMStats.Last1Min.AvgWPM

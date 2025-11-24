@@ -220,6 +220,15 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 		log.Printf("Warning: error reading CW metrics from files: %v", err)
 	} else if fileSnapshots != nil {
 		log.Printf("Loaded %d bands from CW metrics files", len(fileSnapshots))
+		for band, snapshots := range fileSnapshots {
+			log.Printf("  Band %s: %d snapshots", band, len(snapshots))
+			if len(snapshots) > 0 {
+				log.Printf("    First snapshot: %v (Last24h: %d)", snapshots[0].Timestamp.Format("2006-01-02 15:04:05"), snapshots[0].SpotCounts.Last24Hour)
+				log.Printf("    Last snapshot: %v (Last24h: %d)", snapshots[len(snapshots)-1].Timestamp.Format("2006-01-02 15:04:05"), snapshots[len(snapshots)-1].SpotCounts.Last24Hour)
+			}
+		}
+	} else {
+		log.Printf("fileSnapshots is nil - metrics logging may not be enabled")
 	}
 
 	// Get all bands from in-memory data

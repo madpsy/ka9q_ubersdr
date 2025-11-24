@@ -672,39 +672,44 @@
 
 .country-spots-modal-table th:nth-child(2),
 .country-spots-modal-table td:nth-child(2) {
-    width: 70px; /* Mode */
+    width: 150px; /* Country */
 }
 
 .country-spots-modal-table th:nth-child(3),
 .country-spots-modal-table td:nth-child(3) {
-    width: 70px; /* SNR */
-    text-align: right;
+    width: 70px; /* Mode */
 }
 
 .country-spots-modal-table th:nth-child(4),
 .country-spots-modal-table td:nth-child(4) {
-    width: 80px; /* Grid */
+    width: 70px; /* SNR */
+    text-align: right;
 }
 
 .country-spots-modal-table th:nth-child(5),
 .country-spots-modal-table td:nth-child(5) {
-    width: 100px; /* Distance */
-    text-align: right;
+    width: 80px; /* Grid */
 }
 
 .country-spots-modal-table th:nth-child(6),
 .country-spots-modal-table td:nth-child(6) {
-    width: 80px; /* Bearing */
+    width: 100px; /* Distance */
     text-align: right;
 }
 
 .country-spots-modal-table th:nth-child(7),
 .country-spots-modal-table td:nth-child(7) {
-    width: 80px; /* Age */
+    width: 80px; /* Bearing */
+    text-align: right;
 }
 
 .country-spots-modal-table th:nth-child(8),
 .country-spots-modal-table td:nth-child(8) {
+    width: 80px; /* Age */
+}
+
+.country-spots-modal-table th:nth-child(9),
+.country-spots-modal-table td:nth-child(9) {
     width: 150px; /* Message */
 }
 
@@ -775,6 +780,10 @@
     font-family: monospace;
     color: #666;
     font-size: 11px;
+}
+
+.country-spots-modal-table .modal-country {
+    color: #17a2b8;
 }
 
 .country-spots-modal-table .modal-message {

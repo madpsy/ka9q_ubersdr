@@ -339,3 +339,66 @@
 .cw-spots-table .show-less-row:hover {
     background: #333 !important;
 }
+
+/* CW Country Spots Modal Table Column Widths */
+.country-spots-modal-table th:nth-child(1),
+.country-spots-modal-table td:nth-child(1) {
+    width: 120px; /* Callsign */
+}
+
+.country-spots-modal-table th:nth-child(2),
+.country-spots-modal-table td:nth-child(2) {
+    width: 150px; /* Country */
+}
+
+.country-spots-modal-table th:nth-child(3),
+.country-spots-modal-table td:nth-child(3) {
+    width: 70px; /* SNR */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(4),
+.country-spots-modal-table td:nth-child(4) {
+    width: 70px; /* WPM */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(5),
+.country-spots-modal-table td:nth-child(5) {
+    width: 100px; /* Distance */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(6),
+.country-spots-modal-table td:nth-child(6) {
+    width: 80px; /* Bearing */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(7),
+.country-spots-modal-table td:nth-child(7) {
+    width: 80px; /* Age */
+}
+
+.country-spots-modal-table th:nth-child(8),
+.country-spots-modal-table td:nth-child(8) {
+    width: 150px; /* Comment */
+}
+
+/* CW Modal Table Column Styles */
+.country-spots-modal-table .modal-country {
+    color: #17a2b8;
+}
+
+.country-spots-modal-table .modal-wpm {
+    font-family: monospace;
+    color: #17a2b8;
+    text-align: right;
+    font-weight: bold;
+}
+
+.country-spots-modal-table .modal-comment {
+    color: #aaa;
+    font-size: 11px;
+    font-style: italic;
+}

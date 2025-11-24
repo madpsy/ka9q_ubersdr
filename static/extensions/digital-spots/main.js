@@ -1345,7 +1345,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         if (uniqueSpots.length === 0) {
             const row = document.createElement('tr');
             const cell = document.createElement('td');
-            cell.colSpan = 8;
+            cell.colSpan = 9;
             cell.textContent = 'No spots found';
             cell.style.textAlign = 'center';
             cell.style.color = '#888';
@@ -1365,6 +1365,12 @@ class DigitalSpotsExtension extends DecoderExtension {
                     this.openQRZ(spot.callsign);
                 });
                 row.appendChild(callsignCell);
+
+                // Country
+                const countryCell = document.createElement('td');
+                countryCell.className = 'modal-country';
+                countryCell.textContent = spot.country || '';
+                row.appendChild(countryCell);
 
                 // Mode
                 const modeCell = document.createElement('td');
@@ -1968,6 +1974,7 @@ class DigitalSpotsExtension extends DecoderExtension {
 
                     tooltip.innerHTML = `
                         <div class="tooltip-row"><strong style="color: ${snrColor}">${hoveredSpot.callsign}</strong></div>
+                        <div class="tooltip-row">Country: ${hoveredSpot.country || 'N/A'}</div>
                         <div class="tooltip-row">Mode: ${hoveredSpot.mode}</div>
                         <div class="tooltip-row">Freq: ${this.formatFrequency(hoveredSpot.frequency)} MHz</div>
                         <div class="tooltip-row">SNR: ${snrText} dB</div>

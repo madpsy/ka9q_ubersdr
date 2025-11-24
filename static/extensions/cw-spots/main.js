@@ -1934,9 +1934,8 @@ class CWSpotsExtension extends DecoderExtension {
         const tunedInfo = document.getElementById('cw-country-spots-tuned-info');
         if (!tunedInfo) return;
 
-        const mode = spot.frequency < 10000000 ? 'CWL' : 'CWU';
-        tunedInfo.innerHTML = `Tuned: ${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz • ${mode}`;
-        tunedInfo.style.display = 'block';
+        tunedInfo.innerHTML = `Tuned: ${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz`;
+        tunedInfo.style.display = 'flex';
     }
 
     clearModalTunedInfo() {

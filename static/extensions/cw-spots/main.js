@@ -638,6 +638,9 @@ class CWSpotsExtension extends DecoderExtension {
         this.radio.setMode(mode, false);
 
         this.radio.log(`Tuned to ${spot.dx_call} on ${this.formatFrequency(spot.frequency)} MHz ${mode.toUpperCase()} (CW ${spot.wpm} WPM)`);
+        
+        // Update modal tuned info if modal is open
+        this.updateModalTunedInfo(spot);
     }
 
     openQRZ(callsign) {
@@ -1099,6 +1102,9 @@ class CWSpotsExtension extends DecoderExtension {
         if (showAllCheckbox) {
             showAllCheckbox.checked = false;
         }
+
+        // Clear tuned info when opening modal
+        this.clearModalTunedInfo();
 
         // Set default tab to graph
         this.switchModalTab('graph');
@@ -1747,6 +1753,9 @@ class CWSpotsExtension extends DecoderExtension {
         this.currentModalCountry = null;
         this.currentModalBand = null;
 
+        // Clear tuned info
+        this.clearModalTunedInfo();
+
         const modal = document.getElementById('cw-country-spots-modal');
         if (modal) {
             modal.style.display = 'none';
@@ -1918,6 +1927,23 @@ class CWSpotsExtension extends DecoderExtension {
             }
         } catch (error) {
             console.error('CW Spots: Failed to fetch countries:', error);
+        }
+    }
+
+    updateModalTunedInfo(spot) {
+        const tunedInfo = document.getElementById('cw-country-spots-tuned-info');
+        if (!tunedInfo) return;
+
+        const mode = spot.frequency < 10000000 ? 'CWL' : 'CWU';
+        tunedInfo.innerHTML = `Tuned: ${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz • ${mode}`;
+        tunedInfo.style.display = 'block';
+    }
+
+    clearModalTunedInfo() {
+        const tunedInfo = document.getElementById('cw-country-spots-tuned-info');
+        if (tunedInfo) {
+            tunedInfo.style.display = 'none';
+            tunedInfo.innerHTML = '';
         }
     }
 

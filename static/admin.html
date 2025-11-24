@@ -4096,8 +4096,9 @@
                 const hasNoiseFloorIssues = data.noiseFloor && !data.noiseFloor.healthy;
                 const hasSpaceWeatherIssues = data.spaceWeather && !data.spaceWeather.healthy;
                 const hasDecoderIssues = data.decoder && !data.decoder.healthy;
+                const hasCWSkimmerIssues = data.cwSkimmer && data.cwSkimmer.enabled && !data.cwSkimmer.healthy;
                 
-                if (hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues) {
+                if (hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues || hasCWSkimmerIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';

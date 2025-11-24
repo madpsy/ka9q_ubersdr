@@ -330,13 +330,25 @@ func (ah *AdminHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// AuthMiddleware checks for valid admin session
+// AuthMiddleware checks for valid admin session or password header
 func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Get session token from cookie
+		// Check for password in X-Admin-Password header first
+		if password := r.Header.Get("X-Admin-Password"); password != "" {
+			if password == ah.config.Admin.Password {
+				// Valid password, proceed
+				next(w, r)
+				return
+			}
+			// Invalid password
+			http.Error(w, "Unauthorized - invalid password", http.StatusUnauthorized)
+			return
+		}
+
+		// Fall back to cookie-based authentication
 		cookie, err := r.Cookie("admin_session")
 		if err != nil {
-			http.Error(w, "Unauthorized - no session", http.StatusUnauthorized)
+			http.Error(w, "Unauthorized - no session or password", http.StatusUnauthorized)
 			return
 		}
 

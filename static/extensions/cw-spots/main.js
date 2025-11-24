@@ -128,12 +128,15 @@ class CWSpotsExtension extends DecoderExtension {
                 this.showingAllRows = false;
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'cw-spots-band-filter') {
+                console.log('CW Spots: Band filter changed to:', e.target.value);
                 this.bandFilter = e.target.value;
                 this.badgeCache = null; // Invalidate badge cache when band changes
                 this.lastBadgeBand = null; // Clear last band tracking
                 this.lastBadgeUpdate = 0; // Reset throttle to allow immediate update
                 this.showingAllRows = false;
+                console.log('CW Spots: About to call updateBadges() synchronously');
                 this.updateBadges(); // Update badges immediately BEFORE filtering spots
+                console.log('CW Spots: updateBadges() completed, now calling filterAndRenderSpots()');
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'cw-spots-snr-filter') {
                 const value = e.target.value;
@@ -832,6 +835,10 @@ class CWSpotsExtension extends DecoderExtension {
             // Only re-filter if band actually changed
             if (this.bandFilter !== band) {
                 this.bandFilter = band;
+                this.badgeCache = null; // Invalidate badge cache
+                this.lastBadgeBand = null; // Clear last band tracking
+                this.lastBadgeUpdate = 0; // Reset throttle
+                this.updateBadges(); // Update badges immediately
                 this.filterAndRenderSpots();
                 console.log(`CW Spots: Auto-updated band filter to ${band}`);
             } else {

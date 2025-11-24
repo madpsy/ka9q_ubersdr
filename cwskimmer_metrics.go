@@ -32,6 +32,9 @@ type CWSkimmerMetrics struct {
 	lastMetricsWrite      time.Time
 	summaryUpdateInterval time.Duration
 
+	// Summary aggregator
+	summaryAggregator *CWMetricsSummaryAggregator
+
 	mu sync.RWMutex
 }
 
@@ -112,7 +115,7 @@ func NewCWSkimmerMetrics(metricsLogEnabled bool, metricsLogDataDir string, metri
 		summaryDataDir = "cwskimmer_summaries"
 	}
 
-	return &CWSkimmerMetrics{
+	cm := &CWSkimmerMetrics{
 		spotsByBand:           make(map[string]*SpotTimeSeries),
 		uniqueCallsigns:       make(map[string]map[string]map[string]bool),
 		recentSpots:           make([]SpotEvent, 0, 1000),
@@ -123,6 +126,18 @@ func NewCWSkimmerMetrics(metricsLogEnabled bool, metricsLogDataDir string, metri
 		summaryDataDir:        summaryDataDir,
 		summaryUpdateInterval: 60 * time.Second, // Update summaries every minute
 	}
+
+	// Initialize summary aggregator
+	if summaryDataDir != "" {
+		aggregator, err := NewCWMetricsSummaryAggregator(metricsLogDataDir, summaryDataDir)
+		if err != nil {
+			log.Printf("Warning: failed to create CW summary aggregator: %v", err)
+		} else {
+			cm.summaryAggregator = aggregator
+		}
+	}
+
+	return cm
 }
 
 // RecordSpot records a new CW spot event
@@ -136,6 +151,11 @@ func (cm *CWSkimmerMetrics) RecordSpot(band, callsign string, wpm int) {
 		Callsign:  callsign,
 		WPM:       wpm,
 		Timestamp: now,
+	}
+
+	// Record in summary aggregator (event-driven)
+	if cm.summaryAggregator != nil {
+		cm.summaryAggregator.RecordSpot(band, callsign, wpm, now)
 	}
 
 	// Add to recent spots (for 60-second rate calculations)
@@ -599,7 +619,7 @@ func (cm *CWSkimmerMetrics) StartPeriodicTasks() {
 		}
 	}()
 
-	// Summary update task (every minute)
+	// Summary update task (every minute) - writes summaries to disk
 	go func() {
 		ticker := time.NewTicker(cm.summaryUpdateInterval)
 		defer ticker.Stop()
@@ -612,9 +632,12 @@ func (cm *CWSkimmerMetrics) StartPeriodicTasks() {
 	}()
 }
 
-// UpdateSummaries updates pre-aggregated summary files
+// UpdateSummaries writes summary files to disk
 func (cm *CWSkimmerMetrics) UpdateSummaries() error {
-	// TODO: Implement summary aggregation similar to decoder summaries
-	// This will aggregate metrics into daily/weekly/monthly/yearly summaries
-	return nil
+	if cm.summaryAggregator == nil {
+		return nil
+	}
+
+	// Write summaries to disk if needed (rate-limited to once per minute)
+	return cm.summaryAggregator.WriteIfNeeded()
 }

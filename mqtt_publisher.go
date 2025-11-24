@@ -202,6 +202,7 @@ func (mp *MQTTPublisher) publishAllMetrics(config *Config) {
 	dxclusterMetrics := make(map[string]interface{})
 	pushgatewayMetrics := make(map[string]interface{})
 	digitalDecodeMetrics := make(map[string]map[string]interface{}) // mode_band -> metrics
+	cwSkimmerMetrics := make(map[string]map[string]interface{})     // band -> metrics
 
 	// Process each metric family
 	for _, mf := range metricFamilies {
@@ -222,6 +223,20 @@ func (mp *MQTTPublisher) publishAllMetrics(config *Config) {
 
 			// Route to appropriate category based on metric name
 			switch {
+			case len(metricName) >= 3 && metricName[:3] == "cw_":
+				// CW Skimmer metrics - group by band
+				if band, ok := labels["band"]; ok {
+					if cwSkimmerMetrics[band] == nil {
+						cwSkimmerMetrics[band] = make(map[string]interface{})
+					}
+					cwSkimmerMetrics[band][metricName] = value
+					if DebugMode {
+						log.Printf("MQTT DEBUG: Routing CW metric %s for band %s, value=%v", metricName, band, value)
+					}
+				} else if DebugMode {
+					log.Printf("MQTT DEBUG: CW metric %s has no band label", metricName)
+				}
+
 			case len(metricName) >= 7 && metricName[:7] == "digital":
 				// Digital decode metrics - group by mode and band
 				if mode, modeOk := labels["mode"]; modeOk {
@@ -321,6 +336,7 @@ func (mp *MQTTPublisher) publishAllMetrics(config *Config) {
 	mp.publishMetricCategory("dxcluster", map[string]map[string]interface{}{"metrics": dxclusterMetrics}, timestamp)
 	mp.publishMetricCategory("pushgateway", map[string]map[string]interface{}{"metrics": pushgatewayMetrics}, timestamp)
 	mp.publishDigitalDecodeMetrics(digitalDecodeMetrics, timestamp)
+	mp.publishCWSkimmerMetrics(cwSkimmerMetrics, timestamp)
 
 	// Publish space weather with text fields separately
 	mp.publishSpaceWeather(spaceweatherMetrics, timestamp)
@@ -668,6 +684,51 @@ func (mp *MQTTPublisher) publishDigitalDecodeMetrics(metrics map[string]map[stri
 		topic := fmt.Sprintf("%s/digital_decodes/%s/%s", mp.config.TopicPrefix, mode, band)
 
 		mp.publish(topic, payload)
+	}
+}
+
+// publishCWSkimmerMetrics publishes CW Skimmer metrics grouped by band
+func (mp *MQTTPublisher) publishCWSkimmerMetrics(metrics map[string]map[string]interface{}, timestamp int64) {
+	for band, data := range metrics {
+		if len(data) == 0 {
+			continue
+		}
+
+		// Convert interface{} map to float64 map for JSON serialization
+		floatMetrics := make(map[string]float64)
+		for k, v := range data {
+			switch val := v.(type) {
+			case float64:
+				floatMetrics[k] = val
+			case float32:
+				floatMetrics[k] = float64(val)
+			case int:
+				floatMetrics[k] = float64(val)
+			case int64:
+				floatMetrics[k] = float64(val)
+			}
+		}
+
+		if len(floatMetrics) == 0 {
+			continue
+		}
+
+		payload := MetricPayload{
+			Timestamp: timestamp,
+			Metrics:   floatMetrics,
+			Labels: map[string]string{
+				"band": band,
+			},
+		}
+
+		// Build topic: {prefix}/cw_skimmer/{band}
+		topic := fmt.Sprintf("%s/cw_skimmer/%s", mp.config.TopicPrefix, band)
+
+		mp.publish(topic, payload)
+
+		if DebugMode {
+			log.Printf("MQTT DEBUG: Published CW Skimmer metrics for band %s with %d metrics", band, len(floatMetrics))
+		}
 	}
 }
 

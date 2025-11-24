@@ -1,6 +1,6 @@
 // CW Spots Extension for ka9q UberSDR
 // Displays real-time CW spots from CW Skimmer
-// Version: 2025-11-21-v3-fixed
+// Version: 2025-11-24-badge-fix-v1
 
 class CWSpotsExtension extends DecoderExtension {
     constructor() {

@@ -2741,6 +2741,26 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// CW Skimmer metrics directory
+	if ah.cwSkimmerConfig != nil && ah.cwSkimmerConfig.Enabled && ah.cwSkimmerConfig.MetricsLogEnabled && ah.cwSkimmerConfig.MetricsLogDataDir != "" {
+		duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.MetricsLogDataDir)
+		if duOutput, err := duCmd.CombinedOutput(); err == nil {
+			dataDirs["cwskimmer_metrics"] = string(duOutput)
+		} else {
+			dataDirs["cwskimmer_metrics"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.cwSkimmerConfig.MetricsLogDataDir)
+		}
+	}
+
+	// CW Skimmer summaries directory
+	if ah.cwSkimmerConfig != nil && ah.cwSkimmerConfig.Enabled && ah.cwSkimmerConfig.MetricsLogEnabled && ah.cwSkimmerConfig.MetricsSummaryDataDir != "" {
+		duCmd := exec.Command("du", "-sh", ah.cwSkimmerConfig.MetricsSummaryDataDir)
+		if duOutput, err := duCmd.CombinedOutput(); err == nil {
+			dataDirs["cwskimmer_summaries"] = string(duOutput)
+		} else {
+			dataDirs["cwskimmer_summaries"] = fmt.Sprintf("Error: %v (path: %s)", err, ah.cwSkimmerConfig.MetricsSummaryDataDir)
+		}
+	}
+
 	// Add data directories to stats if any were found
 	if len(dataDirs) > 0 {
 		stats["data_directories"] = dataDirs

@@ -693,7 +693,7 @@
 
 .country-spots-modal-table th:nth-child(6),
 .country-spots-modal-table td:nth-child(6) {
-    width: 100px; /* Distance */
+    width: 110px; /* Distance */
     text-align: right;
 }
 

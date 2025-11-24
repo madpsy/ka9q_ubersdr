@@ -365,7 +365,7 @@
 
 .country-spots-modal-table th:nth-child(5),
 .country-spots-modal-table td:nth-child(5) {
-    width: 100px; /* Distance */
+    width: 110px; /* Distance */
     text-align: right;
 }
 

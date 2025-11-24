@@ -1154,8 +1154,16 @@ async function fetchSiteDescription() {
                         maxZoom: 19
                     }).addTo(map);
 
-                    // Add marker with permanent tooltip
-                    const marker = L.marker([lat, lon]).addTo(map);
+                    // Create custom icon for receiver (matching digitalspots_map.js)
+                    const receiverIcon = L.divIcon({
+                        className: '', // Empty className to avoid default Leaflet styling
+                        html: '<div style="width: 20px; height: 20px; background: #ff0000; border: 3px solid rgba(255, 255, 255, 0.9); border-radius: 50%; box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);"></div>',
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
+                    });
+
+                    // Add marker with custom icon and permanent tooltip
+                    const marker = L.marker([lat, lon], { icon: receiverIcon }).addTo(map);
                     let tooltipContent = `<strong>${name}</strong>`;
                     if (location) {
                         tooltipContent += `<br>${location}`;

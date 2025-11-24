@@ -4692,13 +4692,34 @@
             
             const connectedText = data.connected ? 'Yes' : 'No';
             const connectedColor = data.connected ? '#28a745' : '#dc3545';
+
+            // Calculate time_since_activity if not provided (backwards compatibility)
+            let timeSinceActivity = 'N/A';
+            if (data.time_since_activity) {
+                timeSinceActivity = data.time_since_activity;
+            } else if (typeof data.seconds_since_activity === 'number') {
+                const seconds = data.seconds_since_activity;
+                if (seconds < 60) {
+                    timeSinceActivity = `${seconds}s`;
+                } else if (seconds < 3600) {
+                    timeSinceActivity = `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+                } else if (seconds < 86400) {
+                    const hours = Math.floor(seconds / 3600);
+                    const mins = Math.floor((seconds % 3600) / 60);
+                    timeSinceActivity = `${hours}h ${mins}m`;
+                } else {
+                    const days = Math.floor(seconds / 86400);
+                    const hours = Math.floor((seconds % 86400) / 3600);
+                    timeSinceActivity = `${days}d ${hours}h`;
+                }
+            }
             
             statusDiv.innerHTML = `
                 <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
                 <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span><br>
                 <span style="color: ${connectedColor}; font-size: 14px; font-weight: bold;">Connected: ${connectedText}</span><br>
                 <span style="color: #666; font-size: 14px;">Last Activity: ${data.last_activity || 'Never'}</span><br>
-                <span style="color: #666; font-size: 14px;">Time Since Activity: ${data.time_since_activity || 'N/A'}</span>
+                <span style="color: #666; font-size: 14px;">Time Since Activity: ${timeSinceActivity}</span>
             `;
             statusSection.appendChild(statusDiv);
 
@@ -4709,9 +4730,15 @@
             statsDiv.style.gap = '15px';
             statsDiv.style.marginBottom = '20px';
 
+            // Calculate recent_spots if not provided (backwards compatibility)
+            let recentSpots = data.recent_spots;
+            if (recentSpots === undefined && data.seconds_since_activity != null) {
+                recentSpots = data.seconds_since_activity <= 300; // 5 minutes = 300 seconds
+            }
+
             const stats = [
                 { label: 'Connection Status', value: data.connected ? 'Connected' : 'Disconnected', icon: data.connected ? '🟢' : '🔴' },
-                { label: 'Recent Spots', value: data.recent_spots ? 'Yes' : 'No', icon: data.recent_spots ? '✅' : '⚠️' }
+                { label: 'Recent Spots', value: recentSpots ? 'Yes' : 'No', icon: recentSpots ? '✅' : '⚠️' }
             ];
 
             stats.forEach(stat => {

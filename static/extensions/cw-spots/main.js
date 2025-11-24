@@ -1941,7 +1941,8 @@ class CWSpotsExtension extends DecoderExtension {
         this.tunedFrequency = spot.frequency;
         this.tunedCallsign = spot.dx_call;
 
-        tunedInfo.innerHTML = `Tuned: ${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz`;
+        const snrText = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
+        tunedInfo.innerHTML = `${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz • ${spot.wpm} WPM • ${snrText} dB`;
         tunedInfo.style.display = 'flex';
     }
 
@@ -1968,7 +1969,8 @@ class CWSpotsExtension extends DecoderExtension {
             const tunedInfo = document.getElementById('cw-country-spots-tuned-info');
             if (tunedInfo && tunedInfo.style.display !== 'none') {
                 this.tunedCallsign = spot.dx_call;
-                tunedInfo.innerHTML = `Tuned: ${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz`;
+                const snrText = spot.snr >= 0 ? `+${spot.snr}` : spot.snr;
+                tunedInfo.innerHTML = `${spot.dx_call} • ${this.formatFrequency(spot.frequency)} MHz • ${spot.wpm} WPM • ${snrText} dB`;
             }
         }
     }

@@ -637,7 +637,15 @@ class CWMetricsDashboard {
                     legend: { labels: { color: '#fff' }, position: 'top' },
                     tooltip: {
                         callbacks: {
-                            title: (items) => items.length ? new Date(items[0].parsed.x).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: false }) : '',
+                            title: (items) => {
+                                if (items.length === 0) return '';
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    dateStyle: 'medium',
+                                    timeStyle: 'short',
+                                    hour12: false
+                                });
+                            },
                             label: (context) => `${context.dataset.label}: ${context.parsed.y} spots`
                         }
                     }
@@ -647,7 +655,20 @@ class CWMetricsDashboard {
                         type: 'time',
                         time: { tooltipFormat: 'yyyy-MM-dd HH:mm' },
                         title: { display: true, text: 'Time (UTC)', color: '#fff' },
-                        ticks: { color: '#fff', source: 'auto', maxRotation: 0, autoSkip: true },
+                        ticks: {
+                            color: '#fff',
+                            source: 'auto',
+                            maxRotation: 0,
+                            autoSkip: true,
+                            callback: function(value) {
+                                const date = new Date(value);
+                                return date.toLocaleTimeString('en-GB', {
+                                    hour12: false,
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+                            }
+                        },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     y: {
@@ -712,7 +733,15 @@ class CWMetricsDashboard {
                     legend: { labels: { color: '#fff' }, position: 'top' },
                     tooltip: {
                         callbacks: {
-                            title: (items) => items.length ? new Date(items[0].parsed.x).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', hour12: false }) : '',
+                            title: (items) => {
+                                if (items.length === 0) return '';
+                                const date = new Date(items[0].parsed.x);
+                                return date.toLocaleString('en-GB', {
+                                    dateStyle: 'medium',
+                                    timeStyle: 'short',
+                                    hour12: false
+                                });
+                            },
                             label: (context) => `${context.dataset.label}: ${context.parsed.y.toFixed(1)} WPM`
                         }
                     }
@@ -722,7 +751,20 @@ class CWMetricsDashboard {
                         type: 'time',
                         time: { tooltipFormat: 'yyyy-MM-dd HH:mm' },
                         title: { display: true, text: 'Time (UTC)', color: '#fff' },
-                        ticks: { color: '#fff', source: 'auto', maxRotation: 0, autoSkip: true },
+                        ticks: {
+                            color: '#fff',
+                            source: 'auto',
+                            maxRotation: 0,
+                            autoSkip: true,
+                            callback: function(value) {
+                                const date = new Date(value);
+                                return date.toLocaleTimeString('en-GB', {
+                                    hour12: false,
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+                            }
+                        },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     y: {

@@ -213,16 +213,13 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 
 	// Always try to read from files if metrics logging is enabled
 	// This ensures we have data even after restarts or for time ranges with sparse in-memory data
-	var fileSnapshots map[string][]CWMetricsSnapshot
-	if cwSkimmer.metrics.metricsLogEnabled {
-		log.Printf("Reading CW metrics from files for time range: %v to %v", startTime, endTime)
-		var err error
-		fileSnapshots, err = cwSkimmer.metrics.ReadMetricsFromFiles(startTime, endTime)
-		if err != nil {
-			log.Printf("Warning: error reading CW metrics from files: %v", err)
-		} else {
-			log.Printf("Loaded %d bands from CW metrics files", len(fileSnapshots))
-		}
+	// ReadMetricsFromFiles will return nil if logging is not enabled
+	log.Printf("Reading CW metrics from files for time range: %v to %v", startTime, endTime)
+	fileSnapshots, err := cwSkimmer.metrics.ReadMetricsFromFiles(startTime, endTime)
+	if err != nil {
+		log.Printf("Warning: error reading CW metrics from files: %v", err)
+	} else if fileSnapshots != nil {
+		log.Printf("Loaded %d bands from CW metrics files", len(fileSnapshots))
 	}
 
 	// Get all bands from in-memory data

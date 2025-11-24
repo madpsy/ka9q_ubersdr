@@ -280,56 +280,44 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 
 		if fileSnapshots != nil {
 			if snapshots, exists := fileSnapshots[b]; exists && len(snapshots) > 0 {
-				// Strategy: Find a snapshot that's at least 1 hour old (to have accumulated data)
-				// but prefer more recent ones (within the time range) over very old ones
-				var bestSnapshot *CWMetricsSnapshot
-				oneHourAgo := endTime.Add(-1 * time.Hour)
+				// Use the most recent snapshot that has data
+				// Snapshots are already filtered to the time range by ReadMetricsFromFiles
+				var mostRecentSnapshot *CWMetricsSnapshot
 
-				// First pass: try to find snapshots that are at least 1 hour old
 				for i := range snapshots {
 					s := &snapshots[i]
-					if s.Timestamp.Before(oneHourAgo) && s.SpotCounts.Last24Hour > 0 {
-						if bestSnapshot == nil || s.Timestamp.After(bestSnapshot.Timestamp) {
-							bestSnapshot = s
+					if s.SpotCounts.Last24Hour > 0 {
+						if mostRecentSnapshot == nil || s.Timestamp.After(mostRecentSnapshot.Timestamp) {
+							mostRecentSnapshot = s
 						}
 					}
 				}
 
-				// If no snapshot older than 1 hour, use the one with highest count
-				if bestSnapshot == nil {
-					maxSpots := int64(0)
-					for i := range snapshots {
-						s := &snapshots[i]
-						if s.SpotCounts.Last24Hour > maxSpots {
-							maxSpots = s.SpotCounts.Last24Hour
-							bestSnapshot = s
-						}
-					}
-				}
+				if mostRecentSnapshot != nil {
+					// Use the snapshot's accumulated counts directly
+					// These represent the state at that point in time
+					metrics.SpotCounts.Last1Hour = mostRecentSnapshot.SpotCounts.Last1Hour
+					metrics.SpotCounts.Last24Hours = mostRecentSnapshot.SpotCounts.Last24Hour
 
-				if bestSnapshot != nil && bestSnapshot.SpotCounts.Last24Hour > 0 {
-					metrics.SpotCounts.Last1Hour = bestSnapshot.SpotCounts.Last1Hour
-					metrics.SpotCounts.Last24Hours = bestSnapshot.SpotCounts.Last24Hour
+					metrics.UniqueCallsigns.Last1Hour = mostRecentSnapshot.UniqueCallsigns.Last1Hour
+					metrics.UniqueCallsigns.Last24Hours = mostRecentSnapshot.UniqueCallsigns.Last24Hour
 
-					metrics.UniqueCallsigns.Last1Hour = bestSnapshot.UniqueCallsigns.Last1Hour
-					metrics.UniqueCallsigns.Last24Hours = bestSnapshot.UniqueCallsigns.Last24Hour
+					// WPM stats from most recent snapshot
+					metrics.WPMStats.Last1Min.Avg = mostRecentSnapshot.WPMStats.Last1Min.AvgWPM
+					metrics.WPMStats.Last1Min.Min = mostRecentSnapshot.WPMStats.Last1Min.MinWPM
+					metrics.WPMStats.Last1Min.Max = mostRecentSnapshot.WPMStats.Last1Min.MaxWPM
 
-					// WPM stats from file
-					metrics.WPMStats.Last1Min.Avg = bestSnapshot.WPMStats.Last1Min.AvgWPM
-					metrics.WPMStats.Last1Min.Min = bestSnapshot.WPMStats.Last1Min.MinWPM
-					metrics.WPMStats.Last1Min.Max = bestSnapshot.WPMStats.Last1Min.MaxWPM
+					metrics.WPMStats.Last5Min.Avg = mostRecentSnapshot.WPMStats.Last5Min.AvgWPM
+					metrics.WPMStats.Last5Min.Min = mostRecentSnapshot.WPMStats.Last5Min.MinWPM
+					metrics.WPMStats.Last5Min.Max = mostRecentSnapshot.WPMStats.Last5Min.MaxWPM
 
-					metrics.WPMStats.Last5Min.Avg = bestSnapshot.WPMStats.Last5Min.AvgWPM
-					metrics.WPMStats.Last5Min.Min = bestSnapshot.WPMStats.Last5Min.MinWPM
-					metrics.WPMStats.Last5Min.Max = bestSnapshot.WPMStats.Last5Min.MaxWPM
-
-					metrics.WPMStats.Last10Min.Avg = bestSnapshot.WPMStats.Last10Min.AvgWPM
-					metrics.WPMStats.Last10Min.Min = bestSnapshot.WPMStats.Last10Min.MinWPM
-					metrics.WPMStats.Last10Min.Max = bestSnapshot.WPMStats.Last10Min.MaxWPM
+					metrics.WPMStats.Last10Min.Avg = mostRecentSnapshot.WPMStats.Last10Min.AvgWPM
+					metrics.WPMStats.Last10Min.Min = mostRecentSnapshot.WPMStats.Last10Min.MinWPM
+					metrics.WPMStats.Last10Min.Max = mostRecentSnapshot.WPMStats.Last10Min.MaxWPM
 
 					usedFileData = true
-					log.Printf("Using file snapshot from %v for %s - Last24h: %d spots, %d callsigns (from %d snapshots)",
-						bestSnapshot.Timestamp.Format("2006-01-02 15:04:05"), b,
+					log.Printf("Using most recent file snapshot from %v for %s - Last24h: %d spots, %d callsigns (from %d total snapshots)",
+						mostRecentSnapshot.Timestamp.Format("2006-01-02 15:04:05"), b,
 						metrics.SpotCounts.Last24Hours, metrics.UniqueCallsigns.Last24Hours, len(snapshots))
 				}
 			}

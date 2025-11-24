@@ -52,6 +52,7 @@ type CWSkimmerClient struct {
 	receiverLat       float64
 	receiverLon       float64
 	prometheusMetrics *PrometheusMetrics
+	metrics           *CWSkimmerMetrics
 }
 
 // NewCWSkimmerClient creates a new CW Skimmer client
@@ -80,6 +81,11 @@ func (c *CWSkimmerClient) SetPSKReporter(psk *PSKReporter) {
 // SetPrometheusMetrics sets the Prometheus metrics instance
 func (c *CWSkimmerClient) SetPrometheusMetrics(pm *PrometheusMetrics) {
 	c.prometheusMetrics = pm
+}
+
+// SetMetrics sets the metrics tracker instance
+func (c *CWSkimmerClient) SetMetrics(m *CWSkimmerMetrics) {
+	c.metrics = m
 }
 
 // Start begins the CW Skimmer client connection and reconnection loop
@@ -374,6 +380,11 @@ func (c *CWSkimmerClient) processLine(line string) {
 
 		// Enrich with CTY data
 		c.enrichSpot(&spot)
+
+		// Record in metrics if enabled
+		if c.metrics != nil {
+			c.metrics.RecordSpot(spot.Band, spot.DXCall, spot.WPM)
+		}
 
 		// Log to CSV if enabled
 		if c.config.SpotsLogEnabled && c.spotsLogger != nil {

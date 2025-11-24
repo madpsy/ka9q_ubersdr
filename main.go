@@ -473,6 +473,22 @@ func main() {
 		cwskimmerConfig.SpotsLogDataDir = *configDir + "/" + cwskimmerConfig.SpotsLogDataDir
 	}
 
+	// Set metrics log data directory relative to config directory (same pattern as decoder)
+	if cwskimmerConfig.Enabled && cwskimmerConfig.MetricsLogEnabled && cwskimmerConfig.MetricsLogDataDir == "" {
+		cwskimmerConfig.MetricsLogDataDir = *configDir + "/cwskimmer_metrics"
+	} else if cwskimmerConfig.Enabled && cwskimmerConfig.MetricsLogEnabled && !strings.HasPrefix(cwskimmerConfig.MetricsLogDataDir, "/") {
+		// If relative path, make it relative to config directory
+		cwskimmerConfig.MetricsLogDataDir = *configDir + "/" + cwskimmerConfig.MetricsLogDataDir
+	}
+
+	// Set metrics summary data directory relative to config directory (same pattern as decoder)
+	if cwskimmerConfig.Enabled && cwskimmerConfig.MetricsLogEnabled && cwskimmerConfig.MetricsSummaryDataDir == "" {
+		cwskimmerConfig.MetricsSummaryDataDir = *configDir + "/cwskimmer_summaries"
+	} else if cwskimmerConfig.Enabled && cwskimmerConfig.MetricsLogEnabled && !strings.HasPrefix(cwskimmerConfig.MetricsSummaryDataDir, "/") {
+		// If relative path, make it relative to config directory
+		cwskimmerConfig.MetricsSummaryDataDir = *configDir + "/" + cwskimmerConfig.MetricsSummaryDataDir
+	}
+
 	// Initialize CW Skimmer client
 	var cwSkimmer *CWSkimmerClient
 	if cwskimmerConfig.Enabled {
@@ -481,6 +497,20 @@ func main() {
 		receiverLon := config.Admin.GPS.Lon
 
 		cwSkimmer = NewCWSkimmerClient(cwskimmerConfig, globalCTY, receiverLat, receiverLon)
+
+		// Initialize metrics tracker if enabled
+		if cwskimmerConfig.MetricsLogEnabled {
+			cwMetrics := NewCWSkimmerMetrics(
+				cwskimmerConfig.MetricsLogEnabled,
+				cwskimmerConfig.MetricsLogDataDir,
+				cwskimmerConfig.MetricsLogIntervalSecs,
+				cwskimmerConfig.MetricsSummaryDataDir,
+			)
+			cwSkimmer.SetMetrics(cwMetrics)
+			cwMetrics.StartPeriodicTasks()
+			log.Printf("CW Skimmer metrics logging enabled: dir=%s, interval=%ds",
+				cwskimmerConfig.MetricsLogDataDir, cwskimmerConfig.MetricsLogIntervalSecs)
+		}
 
 		// Set Prometheus metrics if enabled
 		if prometheusMetrics != nil {

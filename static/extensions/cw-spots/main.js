@@ -1214,14 +1214,14 @@ class CWSpotsExtension extends DecoderExtension {
             uniqueSpots.forEach(spot => {
                 const row = document.createElement('tr');
 
-                // Callsign - clickable to open QRZ
+                // Callsign - clickable to tune radio
                 const callsignCell = document.createElement('td');
                 callsignCell.className = 'modal-callsign';
                 callsignCell.textContent = spot.dx_call;
                 callsignCell.style.cursor = 'pointer';
                 callsignCell.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    this.openQRZ(spot.dx_call);
+                    this.tuneToSpot(spot);
                 });
                 row.appendChild(callsignCell);
 
@@ -1710,7 +1710,7 @@ class CWSpotsExtension extends DecoderExtension {
                 canvas.style.cursor = 'default';
             };
 
-            // Click handler to open QRZ page
+            // Click handler to tune radio
             canvas._clickHandler = (e) => {
                 const rect = canvas.getBoundingClientRect();
                 const mouseX = e.clientX - rect.left;
@@ -1729,7 +1729,7 @@ class CWSpotsExtension extends DecoderExtension {
                 }
 
                 if (clickedSpot) {
-                    this.openQRZ(clickedSpot.dx_call);
+                    this.tuneToSpot(clickedSpot);
                 }
             };
 

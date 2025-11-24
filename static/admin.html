@@ -3644,6 +3644,65 @@
 
             container.appendChild(loggingSection);
 
+            // Metrics Logging Section
+            const metricsSection = document.createElement('div');
+            metricsSection.className = 'config-section';
+            metricsSection.innerHTML = '<h3>Metrics Logging (JSON Lines)</h3>';
+
+            // Metrics Log Enabled select (Yes/No dropdown)
+            const metricsLogEnabledDiv = document.createElement('div');
+            metricsLogEnabledDiv.className = 'config-field';
+            const metricsLogLabel = document.createElement('label');
+            metricsLogLabel.textContent = 'Metrics Logging Enabled';
+            metricsLogEnabledDiv.appendChild(metricsLogLabel);
+            const metricsLogSelect = document.createElement('select');
+            metricsLogSelect.dataset.key = 'metrics_log_enabled';
+            const metricsLogYes = document.createElement('option');
+            metricsLogYes.value = 'true';
+            metricsLogYes.textContent = 'Yes';
+            const metricsLogNo = document.createElement('option');
+            metricsLogNo.value = 'false';
+            metricsLogNo.textContent = 'No';
+            metricsLogSelect.appendChild(metricsLogYes);
+            metricsLogSelect.appendChild(metricsLogNo);
+            metricsLogSelect.value = (currentCWSkimmerConfig.metrics_log_enabled === true || currentCWSkimmerConfig.metrics_log_enabled === 'true') ? 'true' : 'false';
+            metricsLogSelect.addEventListener('change', (e) => {
+                currentCWSkimmerConfig.metrics_log_enabled = e.target.value === 'true';
+            });
+            metricsLogEnabledDiv.appendChild(metricsLogSelect);
+            const metricsLogSmall = document.createElement('small');
+            metricsLogSmall.textContent = 'Log CW Skimmer performance metrics (spot counts, WPM stats) to JSON Lines files for time-series analysis';
+            metricsLogEnabledDiv.appendChild(metricsLogSmall);
+            metricsSection.appendChild(metricsLogEnabledDiv);
+
+            // Metrics Log Data Dir
+            const metricsLogDataDirField = createConfigField('Metrics Log Directory', 'text', currentCWSkimmerConfig.metrics_log_data_dir || '', 'metrics_log_data_dir');
+            metricsLogDataDirField.querySelector('input').placeholder = 'e.g., cwskimmer_metrics (relative) or /var/log/cw_metrics (absolute)';
+            const metricsLogDirSmall = document.createElement('small');
+            metricsLogDirSmall.textContent = 'Directory for JSON Lines metrics files. Can be relative (to config directory) or absolute path. Leave empty to use default (cwskimmer_metrics)';
+            metricsLogDataDirField.appendChild(metricsLogDirSmall);
+            metricsSection.appendChild(metricsLogDataDirField);
+
+            // Metrics Summary Data Dir
+            const metricsSummaryDataDirField = createConfigField('Metrics Summary Directory', 'text', currentCWSkimmerConfig.metrics_summary_data_dir || '', 'metrics_summary_data_dir');
+            metricsSummaryDataDirField.querySelector('input').placeholder = 'e.g., cwskimmer_summaries (relative) or /var/summaries (absolute)';
+            const metricsSummaryDirSmall = document.createElement('small');
+            metricsSummaryDirSmall.textContent = 'Directory for pre-aggregated metrics summaries (day/week/month/year). Can be relative (to config directory) or absolute path. Leave empty to use default (cwskimmer_summaries)';
+            metricsSummaryDataDirField.appendChild(metricsSummaryDirSmall);
+            metricsSection.appendChild(metricsSummaryDataDirField);
+
+            // Metrics Log Interval
+            const metricsLogIntervalField = createConfigField('Write Interval (seconds)', 'number', currentCWSkimmerConfig.metrics_log_interval_secs || 300, 'metrics_log_interval_secs');
+            metricsLogIntervalField.querySelector('input').placeholder = '300';
+            metricsLogIntervalField.querySelector('input').min = '10';
+            metricsLogIntervalField.querySelector('input').max = '3600';
+            const metricsLogIntervalSmall = document.createElement('small');
+            metricsLogIntervalSmall.textContent = 'How often to write metrics snapshots (default: 300 seconds = 5 minutes)';
+            metricsLogIntervalField.appendChild(metricsLogIntervalSmall);
+            metricsSection.appendChild(metricsLogIntervalField);
+
+            container.appendChild(metricsSection);
+
             // PSKReporter Settings Section
             const pskReporterSection = document.createElement('div');
             pskReporterSection.className = 'config-section';

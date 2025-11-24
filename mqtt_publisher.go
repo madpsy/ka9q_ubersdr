@@ -565,6 +565,59 @@ func (mp *MQTTPublisher) PublishDigitalDecode(decode DecodeInfo, bandName string
 	}
 }
 
+// PublishCWSpot publishes a CW Skimmer spot to MQTT
+// Topic structure: {prefix}/cw_spots/{band}
+// Uses the same JSON format as websocket messages for consistency
+func (mp *MQTTPublisher) PublishCWSpot(spot CWSkimmerSpot) {
+	if mp == nil || !mp.client.IsConnected() {
+		return
+	}
+
+	// Create spot payload matching websocket format (see dxcluster_websocket.go BroadcastCWSpot)
+	spotPayload := map[string]interface{}{
+		"frequency": spot.Frequency,
+		"dx_call":   spot.DXCall,
+		"spotter":   spot.Spotter,
+		"snr":       spot.SNR,
+		"wpm":       spot.WPM,
+		"comment":   spot.Comment,
+		"time":      spot.Time,
+		"band":      spot.Band,
+		"country":   spot.Country,
+		"cq_zone":   spot.CQZone,
+		"itu_zone":  spot.ITUZone,
+		"continent": spot.Continent,
+		"latitude":  spot.Latitude,
+		"longitude": spot.Longitude,
+	}
+
+	// Add optional distance and bearing if present
+	if spot.DistanceKm != nil {
+		spotPayload["distance_km"] = *spot.DistanceKm
+	}
+	if spot.BearingDeg != nil {
+		spotPayload["bearing_deg"] = *spot.BearingDeg
+	}
+
+	// Build topic: {prefix}/cw_spots/{band}
+	// e.g., ubersdr/metrics/cw_spots/40m
+	topic := fmt.Sprintf("%s/cw_spots/%s",
+		mp.config.TopicPrefix,
+		spot.Band)
+
+	data, err := json.Marshal(spotPayload)
+	if err != nil {
+		log.Printf("MQTT ERROR: Failed to marshal CW spot payload: %v", err)
+		return
+	}
+
+	token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+	if token.Wait() && token.Error() != nil {
+		log.Printf("MQTT ERROR: Failed to publish CW spot to %s: %v", topic, token.Error())
+		return
+	}
+}
+
 // publishDigitalDecodeMetrics publishes digital decode metrics grouped by mode and band
 func (mp *MQTTPublisher) publishDigitalDecodeMetrics(metrics map[string]map[string]interface{}, timestamp int64) {
 	for _, data := range metrics {

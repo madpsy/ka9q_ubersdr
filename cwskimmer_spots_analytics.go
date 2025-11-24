@@ -398,8 +398,79 @@ func (sl *CWSkimmerSpotsLogger) GetCWSpotsAnalyticsHourly(filterCountry string, 
 			continue
 		}
 
-		// For CW, we don't have locators, so we'll just return empty locator data
-		// The frontend can handle this gracefully
+		// For CW, aggregate by country instead of locator
+		// Use LocatorStats structure but populate with country data
+		countryMap := make(map[string]*locatorAggregator)
+		callsignsByCountry := make(map[string]map[string]bool) // country -> callsign -> true
+
+		for _, spot := range spotsForHour {
+			if spot.Country == "" {
+				continue
+			}
+
+			if countryMap[spot.Country] == nil {
+				countryMap[spot.Country] = &locatorAggregator{
+					callsigns: make(map[string]bool),
+				}
+			}
+
+			agg := countryMap[spot.Country]
+			agg.totalSNR += float64(spot.SNR)
+			agg.count++
+			if spot.Callsign != "" {
+				agg.callsigns[spot.Callsign] = true
+			}
+
+			// Track callsigns per country
+			if spot.Callsign != "" {
+				if callsignsByCountry[spot.Country] == nil {
+					callsignsByCountry[spot.Country] = make(map[string]bool)
+				}
+				callsignsByCountry[spot.Country][spot.Callsign] = true
+			}
+		}
+
+		// Convert to LocatorStats (using country as "locator" field)
+		for country, agg := range countryMap {
+			// Build CallsignInfo list
+			callsignInfoList := make([]CallsignInfo, 0)
+			if callsignsByCountry[country] != nil {
+				for callsign := range callsignsByCountry[country] {
+					callsignInfoList = append(callsignInfoList, CallsignInfo{
+						Callsign: callsign,
+						Bands:    []string{}, // CW doesn't track bands in hourly view
+					})
+				}
+			}
+			// Sort callsigns alphabetically
+			sort.Slice(callsignInfoList, func(i, j int) bool {
+				return callsignInfoList[i].Callsign < callsignInfoList[j].Callsign
+			})
+
+			// Create a LocatorStats entry with country data
+			// The frontend will look up lat/lon from the country name
+			locatorStat := LocatorStats{
+				Locator:         country, // Use country name as the "locator"
+				AvgSNR:          agg.totalSNR / float64(agg.count),
+				Count:           agg.count,
+				UniqueCallsigns: len(agg.callsigns),
+				Callsigns:       callsignInfoList,
+			}
+
+			// Note: We need to pass lat/lon to the frontend somehow
+			// The LocatorStats struct doesn't have lat/lon fields
+			// The frontend will need to look up coordinates from the country name
+			// Or we need to modify the struct (which would affect decoder too)
+			// For now, the frontend can use the country name to look up coordinates
+
+			hourData.Locators = append(hourData.Locators, locatorStat)
+		}
+
+		// Sort by country name
+		sort.Slice(hourData.Locators, func(i, j int) bool {
+			return hourData.Locators[i].Locator < hourData.Locators[j].Locator
+		})
+
 		response.HourlyData = append(response.HourlyData, hourData)
 	}
 

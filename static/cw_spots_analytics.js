@@ -1525,7 +1525,8 @@
         updateGreyline(mapType, hourIndex);
         
         // Check if we have country data for this hour
-        if (!hourData || !hourData.by_country || hourData.by_country.length === 0) {
+        // The API returns country names in the "locator" field
+        if (!hourData || !hourData.locators || hourData.locators.length === 0) {
             console.log('No data for hour', hourIndex);
             // Clear the map for this hour
             markerCluster.clearLayers();
@@ -1540,19 +1541,47 @@
         // Clear current markers
         markerCluster.clearLayers();
         
-        // Create markers for this hour's data (similar to updateCountryMap)
+        // Create markers for this hour's data
+        // The API returns country names in the "locator" field, we need to look up lat/lon
         const markers = [];
-        hourData.by_country.forEach(country => {
-            // Skip countries without coordinates
-            if (!country.latitude || !country.longitude) {
-                return;
+        hourData.locators.forEach(countryData => {
+            const countryName = countryData.locator; // Country name is in the locator field
+            const spots = countryData.count || 0;
+            const avgSNR = countryData.avg_snr || 0;
+            const uniqueCallsigns = countryData.unique_callsigns || 0;
+
+            // Look up lat/lon from the main analytics data (stored globally in currentData)
+            let lat = null;
+            let lon = null;
+
+            if (currentData && currentData.by_country) {
+                const countryInfo = currentData.by_country.find(c => c.country === countryName);
+                if (countryInfo && countryInfo.latitude && countryInfo.longitude) {
+                    lat = countryInfo.latitude;
+                    lon = countryInfo.longitude;
+                }
             }
 
-            const lat = country.latitude;
-            const lon = country.longitude;
+            if (!lat || !lon) {
+                return; // Skip if we don't have coordinates
+            }
+
+            // Create a temporary country object for color calculation
+            const tempCountry = {
+                country: countryName,
+                total_spots: spots,
+                bands: [{
+                    avg_snr: avgSNR,
+                    spots: spots
+                }]
+            };
 
             // Calculate color based on mode
-            const color = getCountryMarkerColor(country, colorMode, hourData.by_country);
+            const color = getCountryMarkerColor(tempCountry, colorMode, hourData.locators.map(c => ({
+                country: c.locator,
+                total_spots: c.count,
+                bands: [{ avg_snr: c.avg_snr, spots: c.count }]
+            })));
 
             // Create marker
             const marker = L.circleMarker([lat, lon], {
@@ -1566,15 +1595,11 @@
 
             // Create popup content
             let popupContent = `<div style="font-family: monospace; font-size: 12px;">`;
-            popupContent += `<b>${country.country}</b><br>`;
+            popupContent += `<b>${countryName}</b><br>`;
             popupContent += `<b>Hour:</b> ${hourStr} UTC<br>`;
-            popupContent += `<b>Total Spots:</b> ${country.total_spots.toLocaleString()}<br>`;
-            if (country.bands && country.bands.length > 0) {
-                popupContent += `<b>Bands:</b> ${country.bands.map(b => b.band).join(', ')}<br>`;
-                const bestBand = country.bands[0];
-                popupContent += `<b>Best Band:</b> ${bestBand.band} (${bestBand.spots} spots)<br>`;
-                popupContent += `<b>SNR Range:</b> ${bestBand.min_snr.toFixed(1)} to ${bestBand.max_snr.toFixed(1)} dB<br>`;
-            }
+            popupContent += `<b>Spots:</b> ${spots.toLocaleString()}<br>`;
+            popupContent += `<b>Unique Callsigns:</b> ${uniqueCallsigns}<br>`;
+            popupContent += `<b>Avg SNR:</b> ${avgSNR.toFixed(1)} dB<br>`;
             popupContent += `</div>`;
 
             marker.bindPopup(popupContent);

@@ -389,8 +389,8 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 
 	// Generate time series if requested
 	if includeTimeSeries {
-		response.TimeSeries = generateCWTimeSeries(cwSkimmer.metrics, bands, interval, startTime, now)
-		response.WPMTimeSeries = generateCWWPMTimeSeries(cwSkimmer.metrics, bands, interval, startTime, now)
+		response.TimeSeries = generateCWTimeSeriesWithFiles(cwSkimmer.metrics, bands, interval, startTime, endTime, fileSnapshots)
+		response.WPMTimeSeries = generateCWWPMTimeSeriesWithFiles(cwSkimmer.metrics, bands, interval, startTime, endTime, fileSnapshots)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -399,8 +399,8 @@ func handleCWMetrics(w http.ResponseWriter, r *http.Request, cwSkimmer *CWSkimme
 	}
 }
 
-// generateCWTimeSeries creates time-bucketed spot data
-func generateCWTimeSeries(cm *CWSkimmerMetrics, bands []string, interval time.Duration, startTime, endTime time.Time) []CWTimeSeriesPoint {
+// generateCWTimeSeriesWithFiles creates time-bucketed spot data using both in-memory and file data
+func generateCWTimeSeriesWithFiles(cm *CWSkimmerMetrics, bands []string, interval time.Duration, startTime, endTime time.Time, fileSnapshots map[string][]CWMetricsSnapshot) []CWTimeSeriesPoint {
 	duration := endTime.Sub(startTime)
 	numBuckets := int(duration / interval)
 	if numBuckets > 1000 {
@@ -423,7 +423,22 @@ func generateCWTimeSeries(cm *CWSkimmerMetrics, bands []string, interval time.Du
 		}
 
 		for _, band := range bands {
-			spotCount, uniqueCallsigns, avgWPM := countCWSpotsInTimeRange(cm, band, bucketStart, bucketEnd)
+			spotCount := 0
+			uniqueCallsigns := 0
+			avgWPM := 0.0
+
+			// Prefer file snapshots for historical data (more complete)
+			if fileSnapshots != nil {
+				snapshots := fileSnapshots[band]
+				if len(snapshots) > 0 {
+					spotCount, uniqueCallsigns = estimateCWCountsFromSnapshots(snapshots, bucketStart, bucketEnd, interval)
+				}
+			}
+
+			// Only use in-memory data if no file data available (e.g., very recent data not yet written)
+			if spotCount == 0 {
+				spotCount, uniqueCallsigns, avgWPM = countCWSpotsInTimeRange(cm, band, bucketStart, bucketEnd)
+			}
 
 			if spotCount > 0 {
 				point.Data[band] = CWBandSummary{
@@ -443,8 +458,102 @@ func generateCWTimeSeries(cm *CWSkimmerMetrics, bands []string, interval time.Du
 	return timeSeries
 }
 
-// generateCWWPMTimeSeries creates time-bucketed WPM data
-func generateCWWPMTimeSeries(cm *CWSkimmerMetrics, bands []string, interval time.Duration, startTime, endTime time.Time) []CWWPMTimeSeriesPoint {
+// estimateCWCountsFromSnapshots estimates spot counts for a time bucket from file snapshots
+// Uses the difference between snapshots to calculate per-interval counts
+func estimateCWCountsFromSnapshots(snapshots []CWMetricsSnapshot, bucketStart, bucketEnd time.Time, interval time.Duration) (spotCount int, uniqueCallsigns int) {
+	if len(snapshots) == 0 {
+		return 0, 0
+	}
+
+	// Find snapshots that bracket this time bucket
+	var beforeSnapshot *CWMetricsSnapshot
+	var afterSnapshot *CWMetricsSnapshot
+	var withinSnapshot *CWMetricsSnapshot
+
+	for i := range snapshots {
+		s := &snapshots[i]
+
+		// Find snapshot within the bucket
+		if (s.Timestamp.After(bucketStart) || s.Timestamp.Equal(bucketStart)) &&
+			(s.Timestamp.Before(bucketEnd) || s.Timestamp.Equal(bucketEnd)) {
+			if withinSnapshot == nil || s.Timestamp.After(withinSnapshot.Timestamp) {
+				withinSnapshot = s
+			}
+		}
+
+		// Find snapshot before bucket start (closest to start)
+		if s.Timestamp.Before(bucketStart) {
+			if beforeSnapshot == nil || s.Timestamp.After(beforeSnapshot.Timestamp) {
+				beforeSnapshot = s
+			}
+		}
+
+		// Find snapshot after bucket end (closest to end)
+		if s.Timestamp.After(bucketEnd) {
+			if afterSnapshot == nil || s.Timestamp.Before(afterSnapshot.Timestamp) {
+				afterSnapshot = s
+			}
+		}
+	}
+
+	// Strategy 1: If we have a snapshot within the bucket, use its activity rate
+	if withinSnapshot != nil && withinSnapshot.Activity.SpotsPerHour > 0 {
+		bucketHours := interval.Hours()
+		spotCount = int(withinSnapshot.Activity.SpotsPerHour * bucketHours)
+		uniqueCallsigns = int(withinSnapshot.Activity.CallsignsPerHour * bucketHours)
+		return spotCount, uniqueCallsigns
+	}
+
+	// Strategy 2: If we have before and after snapshots, interpolate
+	if beforeSnapshot != nil && afterSnapshot != nil {
+		// Calculate the rate of change between the two snapshots
+		timeDiff := afterSnapshot.Timestamp.Sub(beforeSnapshot.Timestamp).Seconds()
+		if timeDiff > 0 {
+			// Use the difference in Last1Hour counts as a proxy for activity
+			spotDiff := afterSnapshot.SpotCounts.Last1Hour - beforeSnapshot.SpotCounts.Last1Hour
+			callsignDiff := int64(afterSnapshot.UniqueCallsigns.Last1Hour - beforeSnapshot.UniqueCallsigns.Last1Hour)
+
+			// Ensure non-negative
+			if spotDiff < 0 {
+				spotDiff = 0
+			}
+			if callsignDiff < 0 {
+				callsignDiff = 0
+			}
+
+			// Calculate rate per second and apply to bucket
+			bucketSeconds := interval.Seconds()
+			spotRate := float64(spotDiff) / timeDiff
+			callsignRate := float64(callsignDiff) / timeDiff
+
+			spotCount = int(spotRate * bucketSeconds)
+			uniqueCallsigns = int(callsignRate * bucketSeconds)
+			return spotCount, uniqueCallsigns
+		}
+	}
+
+	// Strategy 3: Use the closest snapshot's activity rate
+	var closestSnapshot *CWMetricsSnapshot
+	if beforeSnapshot != nil {
+		closestSnapshot = beforeSnapshot
+	}
+	if afterSnapshot != nil && (closestSnapshot == nil ||
+		afterSnapshot.Timestamp.Sub(bucketStart).Abs() < bucketStart.Sub(closestSnapshot.Timestamp).Abs()) {
+		closestSnapshot = afterSnapshot
+	}
+
+	if closestSnapshot != nil && closestSnapshot.Activity.SpotsPerHour > 0 {
+		bucketHours := interval.Hours()
+		spotCount = int(closestSnapshot.Activity.SpotsPerHour * bucketHours)
+		uniqueCallsigns = int(closestSnapshot.Activity.CallsignsPerHour * bucketHours)
+		return spotCount, uniqueCallsigns
+	}
+
+	return 0, 0
+}
+
+// generateCWWPMTimeSeriesWithFiles creates time-bucketed WPM data using both in-memory and file data
+func generateCWWPMTimeSeriesWithFiles(cm *CWSkimmerMetrics, bands []string, interval time.Duration, startTime, endTime time.Time, fileSnapshots map[string][]CWMetricsSnapshot) []CWWPMTimeSeriesPoint {
 	duration := endTime.Sub(startTime)
 	numBuckets := int(duration / interval)
 	if numBuckets > 1000 {
@@ -467,14 +576,38 @@ func generateCWWPMTimeSeries(cm *CWSkimmerMetrics, bands []string, interval time
 		}
 
 		for _, band := range bands {
-			avgWPM, minWPM, maxWPM, count := getCWWPMStatsInRange(cm, band, bucketStart, bucketEnd)
+			var avgWPM, minWPM, maxWPM float64
+			var count int
+
+			// First, try to get data from files for this bucket
+			if fileSnapshots != nil {
+				snapshots := fileSnapshots[band]
+				for _, snapshot := range snapshots {
+					if (snapshot.Timestamp.After(bucketStart) || snapshot.Timestamp.Equal(bucketStart)) &&
+						(snapshot.Timestamp.Before(bucketEnd) || snapshot.Timestamp.Equal(bucketEnd)) {
+						avgWPM = snapshot.WPMStats.Last1Min.AvgWPM
+						minWPM = float64(snapshot.WPMStats.Last1Min.MinWPM)
+						maxWPM = float64(snapshot.WPMStats.Last1Min.MaxWPM)
+						count = 1
+						break // Use first matching snapshot
+					}
+				}
+			}
+
+			// If no file data, try in-memory data
+			if count == 0 {
+				var minWPMInt, maxWPMInt int
+				avgWPM, minWPMInt, maxWPMInt, count = getCWWPMStatsInRange(cm, band, bucketStart, bucketEnd)
+				minWPM = float64(minWPMInt)
+				maxWPM = float64(maxWPMInt)
+			}
 
 			if count > 0 {
 				point.Data[band] = CWWPMBucketData{
 					Band:        band,
 					AvgWPM:      avgWPM,
-					MinWPM:      minWPM,
-					MaxWPM:      maxWPM,
+					MinWPM:      int(minWPM),
+					MaxWPM:      int(maxWPM),
 					SampleCount: count,
 				}
 			}

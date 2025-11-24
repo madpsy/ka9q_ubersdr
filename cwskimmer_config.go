@@ -20,6 +20,14 @@ type CWSkimmerConfig struct {
 	SpotsLogEnabled bool   `yaml:"spots_log_enabled"`  // Enable CSV logging
 	SpotsLogDataDir string `yaml:"spots_log_data_dir"` // Directory for spots CSV files (default: data/spots)
 
+	// Metrics Logging (JSON Lines format for time-series data)
+	MetricsLogEnabled      bool   `yaml:"metrics_log_enabled"`       // Enable JSON Lines logging of CW metrics
+	MetricsLogDataDir      string `yaml:"metrics_log_data_dir"`      // Directory for metrics files (default: cwskimmer_metrics)
+	MetricsLogIntervalSecs int    `yaml:"metrics_log_interval_secs"` // Write interval in seconds (default: 300 = 5 minutes)
+
+	// Metrics Summary (Pre-aggregated time-series summaries)
+	MetricsSummaryDataDir string `yaml:"metrics_summary_data_dir"` // Directory for summary files (default: cwskimmer_summaries)
+
 	// PSKReporter configuration
 	PSKReporterEnabled  bool   `yaml:"pskreporter_enabled"`  // Enable PSKReporter uploads
 	PSKReporterCallsign string `yaml:"pskreporter_callsign"` // Callsign for PSKReporter (defaults to main callsign)
@@ -51,6 +59,15 @@ func LoadCWSkimmerConfig(filename string) (*CWSkimmerConfig, error) {
 	}
 	if config.SpotsLogDataDir == "" {
 		config.SpotsLogDataDir = "data/spots" // Default to same directory as decoder spots
+	}
+	if config.MetricsLogDataDir == "" {
+		config.MetricsLogDataDir = "cwskimmer_metrics"
+	}
+	if config.MetricsLogIntervalSecs == 0 {
+		config.MetricsLogIntervalSecs = 300 // 5 minutes default
+	}
+	if config.MetricsSummaryDataDir == "" {
+		config.MetricsSummaryDataDir = "cwskimmer_summaries"
 	}
 	// Default PSKReporter callsign to main callsign if not specified
 	if config.PSKReporterCallsign == "" {

@@ -129,6 +129,8 @@ class CWSpotsExtension extends DecoderExtension {
                 this.filterAndRenderSpots();
             } else if (e.target.id === 'cw-spots-band-filter') {
                 this.bandFilter = e.target.value;
+                this.badgeCache = null; // Invalidate badge cache when band changes
+                this.lastBadgeBand = null; // Clear last band tracking
                 this.showingAllRows = false;
                 this.filterAndRenderSpots();
                 this.updateBadges();

@@ -467,20 +467,26 @@ class RadioGUI:
         mode_lock_check = ttk.Checkbutton(bw_frame, text="Lock", variable=self.mode_lock_var)
         mode_lock_check.grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
 
-        # Bandwidth controls (third row)
+        # Bandwidth controls (third row) - using sliders
         ttk.Label(bw_frame, text="Low (Hz):").grid(row=2, column=0, sticky=tk.W, padx=(0, 5))
-        self.bw_low_var = tk.StringVar(value=str(self.config.get('bandwidth_low', 50)))
-        bw_low_entry = ttk.Entry(bw_frame, textvariable=self.bw_low_var, width=10)
-        bw_low_entry.grid(row=2, column=1, sticky=tk.W, padx=(0, 20))
+        self.bw_low_var = tk.IntVar(value=self.config.get('bandwidth_low', 50))
+        self.bw_low_scale = ttk.Scale(bw_frame, from_=-10000, to=10000, orient=tk.HORIZONTAL,
+                                      variable=self.bw_low_var, command=self.update_bandwidth_display,
+                                      length=150)
+        self.bw_low_scale.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
 
-        ttk.Label(bw_frame, text="High (Hz):").grid(row=2, column=2, sticky=tk.W, padx=(0, 5))
-        self.bw_high_var = tk.StringVar(value=str(self.config.get('bandwidth_high', 2700)))
-        bw_high_entry = ttk.Entry(bw_frame, textvariable=self.bw_high_var, width=10)
-        bw_high_entry.grid(row=2, column=3, sticky=tk.W, padx=(0, 10))
+        self.bw_low_label = ttk.Label(bw_frame, text=f"{self.config.get('bandwidth_low', 50)} Hz", width=10)
+        self.bw_low_label.grid(row=2, column=2, sticky=tk.W, padx=(0, 20))
 
-        self.apply_bw_btn = ttk.Button(bw_frame, text="Apply", command=self.apply_bandwidth)
-        self.apply_bw_btn.grid(row=2, column=4, sticky=tk.W)
-        self.apply_bw_btn.state(['disabled'])
+        ttk.Label(bw_frame, text="High (Hz):").grid(row=2, column=3, sticky=tk.W, padx=(0, 5))
+        self.bw_high_var = tk.IntVar(value=self.config.get('bandwidth_high', 2700))
+        self.bw_high_scale = ttk.Scale(bw_frame, from_=-10000, to=10000, orient=tk.HORIZONTAL,
+                                       variable=self.bw_high_var, command=self.update_bandwidth_display,
+                                       length=150)
+        self.bw_high_scale.grid(row=2, column=4, sticky=(tk.W, tk.E), padx=(0, 5))
+
+        self.bw_high_label = ttk.Label(bw_frame, text=f"{self.config.get('bandwidth_high', 2700)} Hz", width=10)
+        self.bw_high_label.grid(row=2, column=5, sticky=tk.W)
 
         # Preset bandwidth buttons (will be updated based on mode)
         self.preset_frame = ttk.Frame(bw_frame)
@@ -815,10 +821,47 @@ class RadioGUI:
         except ValueError:
             raise ValueError("Invalid frequency value")
 
+    def update_bandwidth_display(self, value=None):
+        """Update bandwidth labels when sliders change."""
+        low = int(self.bw_low_var.get())
+        high = int(self.bw_high_var.get())
+
+        # Update labels
+        self.bw_low_label.config(text=f"{low} Hz")
+        self.bw_high_label.config(text=f"{high} Hz")
+
+        # Update spectrum display bandwidth visualization
+        if self.spectrum:
+            self.spectrum.update_bandwidth(low, high)
+
+        # Update waterfall display bandwidth visualization
+        if self.waterfall_display:
+            self.waterfall_display.update_bandwidth(low, high)
+
+        # Update audio spectrum display bandwidth
+        if self.audio_spectrum_display:
+            self.audio_spectrum_display.update_bandwidth(low, high)
+
+        # Update waterfall window's spectrum and waterfall if open
+        if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
+            self.waterfall_spectrum.update_bandwidth(low, high)
+        if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
+            self.waterfall_waterfall.update_bandwidth(low, high)
+
+        # Apply bandwidth dynamically if connected
+        if self.connected and self.client:
+            self.client.bandwidth_low = low
+            self.client.bandwidth_high = high
+            self.send_tune_message()
+
     def set_bandwidth(self, low: int, high: int):
         """Set bandwidth from preset button."""
-        self.bw_low_var.set(str(low))
-        self.bw_high_var.set(str(high))
+        self.bw_low_var.set(low)
+        self.bw_high_var.set(high)
+
+        # Update labels
+        self.bw_low_label.config(text=f"{low} Hz")
+        self.bw_high_label.config(text=f"{high} Hz")
 
         # Update spectrum display bandwidth visualization
         if self.spectrum:
@@ -1371,34 +1414,31 @@ class RadioGUI:
         if not self.connected or not self.client:
             return
 
-        try:
-            low = int(self.bw_low_var.get())
-            high = int(self.bw_high_var.get())
-            self.client.bandwidth_low = low
-            self.client.bandwidth_high = high
+        low = self.bw_low_var.get()
+        high = self.bw_high_var.get()
+        self.client.bandwidth_low = low
+        self.client.bandwidth_high = high
 
-            # Update spectrum display bandwidth visualization
-            if self.spectrum:
-                self.spectrum.update_bandwidth(low, high)
+        # Update spectrum display bandwidth visualization
+        if self.spectrum:
+            self.spectrum.update_bandwidth(low, high)
 
-            # Update waterfall display if open
-            if self.waterfall_display:
-                self.waterfall_display.update_bandwidth(low, high)
+        # Update waterfall display if open
+        if self.waterfall_display:
+            self.waterfall_display.update_bandwidth(low, high)
 
-            # Update audio spectrum display if open
-            if self.audio_spectrum_display:
-                self.audio_spectrum_display.update_bandwidth(low, high)
+        # Update audio spectrum display if open
+        if self.audio_spectrum_display:
+            self.audio_spectrum_display.update_bandwidth(low, high)
 
-            # Update waterfall window's spectrum and waterfall if open
-            if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
-                self.waterfall_spectrum.update_bandwidth(low, high)
-            if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
-                self.waterfall_waterfall.update_bandwidth(low, high)
+        # Update waterfall window's spectrum and waterfall if open
+        if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
+            self.waterfall_spectrum.update_bandwidth(low, high)
+        if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
+            self.waterfall_waterfall.update_bandwidth(low, high)
 
-            self.log_status(f"Adjusting bandwidth to {low} to {high} Hz...")
-            self.send_tune_message()
-        except ValueError:
-            messagebox.showerror("Error", "Invalid bandwidth values")
+        self.log_status(f"Adjusting bandwidth to {low} to {high} Hz...")
+        self.send_tune_message()
 
     def update_volume(self, value):
         """Update volume level."""
@@ -2248,8 +2288,12 @@ class RadioGUI:
         # Get defaults for current mode
         if mode in mode_defaults:
             low, high = mode_defaults[mode]
-            self.bw_low_var.set(str(low))
-            self.bw_high_var.set(str(high))
+            self.bw_low_var.set(low)
+            self.bw_high_var.set(high)
+
+            # Update labels
+            self.bw_low_label.config(text=f"{low} Hz")
+            self.bw_high_label.config(text=f"{high} Hz")
 
             # Update spectrum display bandwidth visualization
             if self.spectrum:
@@ -2512,7 +2556,6 @@ class RadioGUI:
         self.connect_btn.config(text="Connect", state='normal')
         self.cancel_btn.grid_remove()  # Hide cancel button
         self.apply_freq_btn.state(['disabled'])
-        self.apply_bw_btn.state(['disabled'])
 
     def disconnect(self):
         """Stop the radio client connection."""
@@ -2537,7 +2580,6 @@ class RadioGUI:
         self.connected = False
         self.connect_btn.config(text="Connect")
         self.apply_freq_btn.state(['disabled'])
-        self.apply_bw_btn.state(['disabled'])
         self.rec_btn.state(['disabled'])
 
         # Hide receiver name
@@ -2625,7 +2667,6 @@ class RadioGUI:
                         self.connect_btn.config(text="Disconnect", state='normal')
                         self.cancel_btn.grid_remove()  # Hide cancel button
                         self.apply_freq_btn.state(['!disabled'])
-                        self.apply_bw_btn.state(['!disabled'])
                         self.rec_btn.state(['!disabled'])
                         if "✓" not in msg:  # Don't duplicate success message
                             self.log_status("✓ Successfully connected!")
@@ -2707,7 +2748,6 @@ class RadioGUI:
                     self.connect_btn.config(text="Connect", state='normal')
                     self.cancel_btn.grid_remove()  # Hide cancel button
                     self.apply_freq_btn.state(['disabled'])
-                    self.apply_bw_btn.state(['disabled'])
                     self.log_status("✗ Connection failed")
                 elif msg_type == "connection_cancelled":
                     # Connection cancelled by user
@@ -2716,7 +2756,6 @@ class RadioGUI:
                     self.connect_btn.config(text="Connect", state='normal')
                     self.cancel_btn.grid_remove()  # Hide cancel button
                     self.apply_freq_btn.state(['disabled'])
-                    self.apply_bw_btn.state(['disabled'])
                 elif msg_type == "disconnected":
                     if self.connected:
                         self.disconnect()

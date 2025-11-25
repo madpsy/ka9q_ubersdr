@@ -431,21 +431,12 @@ class RadioClient:
         # Apply audio bandpass filter if enabled
         if self.audio_filter_enabled and self.audio_filter_sos is not None:
             try:
-                # Measure RMS before filtering for gain compensation
-                rms_before = np.sqrt(np.mean(audio_float ** 2))
-                
                 # Apply filter using second-order sections for numerical stability
                 audio_float = scipy_signal.sosfilt(self.audio_filter_sos, audio_float)
                 
-                # Normalize to maintain consistent RMS level (prevent clipping/gain changes)
-                if rms_before > 1e-10:  # Avoid division by zero
-                    rms_after = np.sqrt(np.mean(audio_float ** 2))
-                    if rms_after > 1e-10:
-                        # Apply gain compensation to maintain original RMS level
-                        gain_compensation = rms_before / rms_after
-                        # Limit gain compensation to reasonable range (0.5 to 2.0)
-                        gain_compensation = max(0.5, min(2.0, gain_compensation))
-                        audio_float = audio_float * gain_compensation
+                # Soft clip to prevent hard clipping distortion
+                # Use tanh for smooth limiting (keeps signal in -1 to +1 range)
+                audio_float = np.tanh(audio_float)
             except Exception as e:
                 # Disable filter on error to avoid repeated failures
                 print(f"Warning: Audio filter error: {e}", file=sys.stderr)

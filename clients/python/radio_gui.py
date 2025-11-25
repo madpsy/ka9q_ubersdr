@@ -11,6 +11,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Optional, List, Tuple
 import queue
+import socket
 
 # Import spectrum display
 try:
@@ -94,6 +95,15 @@ def find_next_fifo_path() -> str:
     return f"{base_path}99.fifo"
 
 
+# Import rigctl client
+try:
+    from rigctl import RigctlClient
+    RIGCTL_AVAILABLE = True
+except ImportError:
+    RIGCTL_AVAILABLE = False
+    print("Warning: rigctl module not available")
+
+
 class RadioGUI:
     """Tkinter-based GUI for the radio client."""
     
@@ -130,6 +140,11 @@ class RadioGUI:
         self.status_queue = queue.Queue()
         self.audio_level_queue = queue.Queue()
         self.pipewire_devices: List[Tuple[str, str]] = []
+        
+        # Rigctl client
+        self.rigctl: Optional[RigctlClient] = None
+        self.rigctl_connected = False
+        self.rigctl_sync_enabled = False
         
         # Band buttons dictionary for highlighting
         self.band_buttons = {}
@@ -216,6 +231,27 @@ class RadioGUI:
         self.receiver_name_label = ttk.Label(conn_frame, textvariable=self.receiver_name_var, foreground='blue')
         self.receiver_name_label.grid(row=1, column=1, columnspan=4, sticky=tk.W)
         self.receiver_name_label.grid_remove()  # Hide initially until connected
+        
+        # Rigctl connection (third row, optional)
+        ttk.Label(conn_frame, text="Rigctl:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5))
+        self.rigctl_host_var = tk.StringVar(value=self.config.get('rigctl_host', 'localhost'))
+        rigctl_host_entry = ttk.Entry(conn_frame, textvariable=self.rigctl_host_var, width=15)
+        rigctl_host_entry.grid(row=2, column=1, sticky=tk.W, padx=(0, 5))
+
+        ttk.Label(conn_frame, text="Port:").grid(row=2, column=2, sticky=tk.W, padx=(0, 5))
+        self.rigctl_port_var = tk.StringVar(value=str(self.config.get('rigctl_port', 4532)))
+        rigctl_port_entry = ttk.Entry(conn_frame, textvariable=self.rigctl_port_var, width=6)
+        rigctl_port_entry.grid(row=2, column=3, sticky=tk.W, padx=(0, 5))
+
+        self.rigctl_connect_btn = ttk.Button(conn_frame, text="Connect Rig", command=self.toggle_rigctl_connection)
+        self.rigctl_connect_btn.grid(row=2, column=4, sticky=tk.W, padx=(0, 5))
+
+        # Sync checkbox (initially hidden until rigctl connected)
+        self.rigctl_sync_var = tk.BooleanVar(value=False)
+        self.rigctl_sync_check = ttk.Checkbutton(conn_frame, text="Sync", variable=self.rigctl_sync_var,
+                                                  command=self.toggle_rigctl_sync)
+        self.rigctl_sync_check.grid(row=2, column=5, sticky=tk.W)
+        self.rigctl_sync_check.grid_remove()  # Hide initially
         
         conn_frame.columnconfigure(1, weight=1)
         
@@ -797,6 +833,10 @@ class RadioGUI:
             # Send tune message
             self.log_status(f"Tuning to {freq_hz/1e6:.6f} MHz...")
             self.send_tune_message()
+
+            # Sync to rigctl if enabled
+            if self.rigctl_sync_enabled:
+                self.sync_frequency_to_rigctl()
         except ValueError as e:
             messagebox.showerror("Error", f"Invalid frequency: {e}")
     
@@ -2302,10 +2342,127 @@ class RadioGUI:
         if self.audio_spectrum_display:
             self.audio_spectrum_display.add_audio_data(audio_float)
     
+    def toggle_rigctl_connection(self):
+        """Connect or disconnect from rigctld."""
+        if not self.rigctl_connected:
+            self.connect_rigctl()
+        else:
+            self.disconnect_rigctl()
+
+    def connect_rigctl(self):
+        """Connect to rigctld server."""
+        try:
+            host = self.rigctl_host_var.get().strip()
+            port_str = self.rigctl_port_var.get().strip()
+
+            if not host or not port_str:
+                messagebox.showerror("Error", "Please enter rigctl host and port")
+                return
+
+            try:
+                port = int(port_str)
+            except ValueError:
+                messagebox.showerror("Error", "Invalid port number")
+                return
+
+            # Create and connect rigctl client
+            self.rigctl = RigctlClient(host, port)
+            self.rigctl.connect()
+
+            self.rigctl_connected = True
+            self.rigctl_connect_btn.config(text="Disconnect Rig")
+            self.rigctl_sync_check.grid()  # Show sync checkbox
+            self.log_status(f"✓ Connected to rigctld at {host}:{port}")
+
+            # If sync is enabled, start syncing
+            if self.rigctl_sync_var.get():
+                self.start_rigctl_sync()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to connect to rigctld: {e}")
+            self.log_status(f"ERROR: Failed to connect to rigctld - {e}")
+            if self.rigctl:
+                self.rigctl.disconnect()
+                self.rigctl = None
+
+    def disconnect_rigctl(self):
+        """Disconnect from rigctld server."""
+        if self.rigctl:
+            self.rigctl.disconnect()
+            self.rigctl = None
+
+        self.rigctl_connected = False
+        self.rigctl_sync_enabled = False
+        self.rigctl_connect_btn.config(text="Connect Rig")
+        self.rigctl_sync_check.grid_remove()  # Hide sync checkbox
+        self.rigctl_sync_var.set(False)
+        self.log_status("Disconnected from rigctld")
+
+    def toggle_rigctl_sync(self):
+        """Toggle rigctl frequency synchronization."""
+        if self.rigctl_sync_var.get():
+            self.start_rigctl_sync()
+        else:
+            self.stop_rigctl_sync()
+
+    def start_rigctl_sync(self):
+        """Start syncing frequency with rigctld."""
+        if not self.rigctl_connected or not self.rigctl:
+            self.rigctl_sync_var.set(False)
+            return
+
+        self.rigctl_sync_enabled = True
+        self.log_status("Rigctl sync enabled - radio will follow SDR frequency")
+        self.sync_frequency_to_rigctl()
+
+    def stop_rigctl_sync(self):
+        """Stop syncing frequency with rigctld."""
+        self.rigctl_sync_enabled = False
+        self.log_status("Rigctl sync disabled")
+
+    def sync_frequency_to_rigctl(self):
+        """Sync current SDR frequency to rigctld (called after frequency changes)."""
+        if not self.rigctl_sync_enabled or not self.rigctl_connected or not self.rigctl:
+            return
+
+        try:
+            # Get current SDR frequency
+            freq_hz = self.get_frequency_hz()
+
+            # Set rigctl frequency
+            self.rigctl.set_frequency(freq_hz)
+
+            # Get current mode and sync it too
+            mode_display = self.mode_var.get()
+            mode = self._parse_mode_name(mode_display)
+
+            # Map SDR modes to rigctl modes
+            mode_map = {
+                'usb': 'USB',
+                'lsb': 'LSB',
+                'am': 'AM',
+                'sam': 'AM',
+                'cwu': 'CW',
+                'cwl': 'CW',
+                'fm': 'FM',
+                'nfm': 'FM'
+            }
+
+            rigctl_mode = mode_map.get(mode, 'USB')
+            self.rigctl.set_mode(rigctl_mode)
+
+        except Exception as e:
+            self.log_status(f"Rigctl sync error: {e}")
+            # Don't disable sync on error - might be temporary
+
     def on_closing(self):
         """Handle window close event."""
         if self.connected:
             self.disconnect()
+
+        # Disconnect rigctl if connected
+        if self.rigctl_connected:
+            self.disconnect_rigctl()
 
         # Close waterfall window if open
         if self.waterfall_window and self.waterfall_window.winfo_exists():
@@ -2350,12 +2507,63 @@ def main(config=None):
             'bandwidth_high': 2700,
             'ssl': False
         }
-    
+
     # Create and run GUI
     root = tk.Tk()
     app = RadioGUI(root, config)
+
+    # Auto-connect to rigctl if specified in config
+    if config.get('rigctl_host') and config.get('rigctl_port'):
+        # Schedule rigctl connection after GUI is ready
+        def auto_connect_rigctl():
+            try:
+                app.connect_rigctl()
+                # Enable sync if requested
+                if config.get('rigctl_sync', False):
+                    app.rigctl_sync_var.set(True)
+                    app.start_rigctl_sync()
+            except Exception as e:
+                app.log_status(f"Auto-connect to rigctl failed: {e}")
+
+        root.after(500, auto_connect_rigctl)
+
     root.mainloop()
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description='ka9q_ubersdr Radio GUI Client')
+    parser.add_argument('--host', type=str, help='Server host')
+    parser.add_argument('--port', type=int, help='Server port')
+    parser.add_argument('--url', type=str, help='Server URL (alternative to host:port)')
+    parser.add_argument('--frequency', type=float, help='Initial frequency in MHz')
+    parser.add_argument('--mode', type=str, help='Initial mode (USB, LSB, etc.)')
+    parser.add_argument('--ssl', action='store_true', help='Use TLS/SSL')
+    parser.add_argument('--auto-connect', action='store_true', help='Auto-connect on startup')
+    parser.add_argument('--rigctl-host', type=str, help='Rigctl host (e.g., localhost)')
+    parser.add_argument('--rigctl-port', type=int, help='Rigctl port (default: 4532)')
+    parser.add_argument('--rigctl-sync', action='store_true', help='Enable rigctl sync on connect')
+
+    args = parser.parse_args()
+
+    # Build config from arguments
+    config = {
+        'url': args.url,
+        'host': args.host or 'localhost',
+        'port': args.port or 8080,
+        'frequency': int(args.frequency * 1e6) if args.frequency else 14074000,
+        'mode': args.mode or 'usb',
+        'bandwidth_low': 50,
+        'bandwidth_high': 2700,
+        'ssl': args.ssl,
+        'auto_connect': args.auto_connect
+    }
+
+    # Add rigctl config if specified
+    if args.rigctl_host:
+        config['rigctl_host'] = args.rigctl_host
+        config['rigctl_port'] = args.rigctl_port or 4532
+        config['rigctl_sync'] = args.rigctl_sync
+
+    main(config)

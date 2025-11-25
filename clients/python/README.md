@@ -5,6 +5,7 @@ A command-line and GUI Python client for connecting to the ka9q_ubersdr WebSocke
 ## Features
 
 - **Graphical User Interface**: Optional Tkinter-based GUI for easy control (Linux only)
+- **Rigctl Integration**: Control external radios via Hamlib's rigctld network protocol
 - **Connection validation**: Checks server permission before connecting (respects IP bans, session limits, etc.)
 - Connect to ka9q_ubersdr WebSocket server
 - Support for multiple demodulation modes (AM, USB, LSB, FM, etc.)
@@ -71,6 +72,7 @@ The GUI provides:
 - **Mode selector**: Choose demodulation mode (AM, USB, LSB, etc.)
 - **Bandwidth controls**: Adjust filter edges with presets (Narrow, Medium, Wide)
 - **NR2 Noise Reduction**: Enable/disable noise reduction with adjustable strength and floor parameters
+- **Rigctl Control**: Connect to rigctld to sync SDR frequency/mode with external radio
 - **Live updates**: Change frequency, mode, bandwidth, or NR2 settings while connected
 - **Status log**: View connection status and events
 
@@ -109,7 +111,8 @@ usage: radio_client.py [-h] [--gui] [-u URL] [-H HOST] [-p PORT] [-f FREQUENCY]
                        [-w FILE] [-t SECONDS] [-s] [--nr2]
                        [--nr2-strength PERCENT] [--nr2-floor PERCENT]
                        [--nr2-adapt-rate PERCENT] [--auto-reconnect]
-                       [--fifo-path PATH]
+                       [--fifo-path PATH] [--rigctl-host HOST]
+                       [--rigctl-port PORT] [--rigctl-sync]
 
 CLI Radio Client for ka9q_ubersdr
 
@@ -144,6 +147,9 @@ optional arguments:
   --auto-reconnect      Automatically reconnect on connection loss with exponential backoff
   --fifo-path PATH      Also write audio to named pipe (FIFO) at this path (non-blocking,
                         works with any output mode)
+  --rigctl-host HOST    Rigctl host (e.g., localhost) for controlling external radio
+  --rigctl-port PORT    Rigctl port (default: 4532)
+  --rigctl-sync         Enable rigctl frequency/mode sync on connect
 ```
 
 ### Connection Options
@@ -293,6 +299,95 @@ The client automatically converts to little-endian for compatibility with most a
 # Using secure WebSocket URL (recommended)
 ./radio_client.py -u wss://radio.example.com/ws -f 14074000 -m usb
 ```
+
+## Rigctl Integration
+
+The Python client can control external radios via Hamlib's `rigctld` network protocol. This allows you to synchronize your physical radio with the SDR frequency and mode.
+
+### Requirements
+
+- Hamlib's `rigctld` daemon running and accessible over the network
+- Your radio connected and configured with rigctld
+
+### Starting rigctld
+
+Example for a Kenwood TS-590SG on /dev/ttyUSB0:
+```bash
+rigctld -m 2014 -r /dev/ttyUSB0 -s 57600
+```
+
+Example for a Yaesu FT-991A:
+```bash
+rigctld -m 1035 -r /dev/ttyUSB0 -s 38400
+```
+
+See `rigctl -l` for a list of supported radio models.
+
+### Using Rigctl in GUI Mode
+
+1. Launch the GUI:
+   ```bash
+   ./radio_client.py --gui
+   ```
+
+2. In the Connection section, enter:
+   - **Rigctl host**: `localhost` (or remote host)
+   - **Rigctl port**: `4532` (default rigctld port)
+
+3. Click **"Connect Rig"** to establish connection
+
+4. Enable **"Sync"** checkbox to synchronize frequency/mode changes
+
+When sync is enabled, changing the SDR frequency or mode will automatically update your physical radio.
+
+### Using Rigctl from Command Line
+
+Auto-connect to rigctld and enable sync:
+```bash
+./radio_client.py --gui --rigctl-host localhost --rigctl-port 4532 --rigctl-sync
+```
+
+Connect to remote rigctld:
+```bash
+./radio_client.py --gui --rigctl-host 192.168.1.100 --rigctl-port 4532
+```
+
+### Rigctl Features
+
+- **Frequency Sync**: SDR frequency changes are sent to the radio
+- **Mode Sync**: SDR mode changes are mapped to radio modes:
+  - USB → USB
+  - LSB → LSB
+  - AM/SAM → AM
+  - CWU/CWL → CW
+  - FM/NFM → FM
+- **Non-blocking**: Rigctl errors won't interrupt SDR operation
+- **Auto-reconnect**: Connection can be toggled without restarting the GUI
+
+### Rigctl Use Cases
+
+- **Antenna switching**: Use radio's antenna tuner while monitoring on SDR
+- **Transmit coordination**: Keep radio on same frequency as SDR for quick TX
+- **Dual monitoring**: Listen on SDR while radio scans or monitors another frequency
+- **Remote operation**: Control remote radio via rigctld over network
+
+### Troubleshooting Rigctl
+
+**Connection refused:**
+- Verify rigctld is running: `ps aux | grep rigctld`
+- Check rigctld is listening: `netstat -an | grep 4532`
+- Test with rigctl: `rigctl -m 2 -r localhost:4532 f`
+
+**Sync not working:**
+- Ensure "Sync" checkbox is enabled in GUI
+- Check rigctld logs for errors
+- Verify radio is powered on and connected
+- Try manual rigctl command: `echo "F 14074000" | nc localhost 4532`
+
+**Mode not changing:**
+- Some radios have limited mode support via CAT
+- Check your radio's CAT command documentation
+- Try setting mode manually on radio first
 
 ## NR2 Noise Reduction
 

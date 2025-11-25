@@ -165,14 +165,19 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	// Send connection status
 	h.sendConnectionStatus(conn)
 
-	// Send buffered DX spots to new client
-	h.sendBufferedSpots(conn)
+	// Send buffered spots after a short delay to ensure WebSocket is fully ready
+	go func() {
+		time.Sleep(200 * time.Millisecond)
 
-	// Send buffered digital spots to new client
-	h.sendBufferedDigitalSpots(conn)
+		// Send buffered DX spots to new client
+		h.sendBufferedSpots(conn)
 
-	// Send buffered CW spots to new client
-	h.sendBufferedCWSpots(conn)
+		// Send buffered digital spots to new client
+		h.sendBufferedDigitalSpots(conn)
+
+		// Send buffered CW spots to new client
+		h.sendBufferedCWSpots(conn)
+	}()
 
 	// Handle client messages (mainly for ping/pong)
 	go h.handleClient(conn)
@@ -535,15 +540,21 @@ func (h *DXClusterWebSocketHandler) sendBufferedCWSpots(conn *websocket.Conn) {
 	log.Printf("DX Cluster WebSocket: Sending %d buffered CW spots to new client", len(bufferedSpots))
 
 	// Send each spot as an individual message
-	for _, spotData := range bufferedSpots {
+	for i, spotData := range bufferedSpots {
 		message := map[string]interface{}{
 			"type": "cw_spot",
 			"data": spotData,
 		}
 
 		if err := h.sendMessage(conn, message); err != nil {
-			log.Printf("DX Cluster WebSocket: Failed to send buffered CW spot: %v", err)
+			log.Printf("DX Cluster WebSocket: Failed to send buffered CW spot %d/%d: %v", i+1, len(bufferedSpots), err)
 			// Continue sending other spots even if one fails
+		} else {
+			// Log first spot to verify data structure
+			if i == 0 {
+				log.Printf("DX Cluster WebSocket: Successfully sent first CW spot: callsign=%v, freq=%v, band=%v",
+					spotData["dx_call"], spotData["frequency"], spotData["band"])
+			}
 		}
 	}
 }

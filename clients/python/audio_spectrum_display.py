@@ -90,6 +90,7 @@ class AudioSpectrumDisplay:
         # Mouse interaction
         self.canvas.bind('<Motion>', self.on_motion)
         self.tooltip_id = None
+        self.tooltip_bg_id = None  # Track background rectangle
         self.cursor_line_id = None
         self.last_mouse_x = -1
         self.last_mouse_y = -1
@@ -368,6 +369,7 @@ class AudioSpectrumDisplay:
         # Clear canvas
         self.canvas.delete('all')
         self.tooltip_id = None
+        self.tooltip_bg_id = None
         self.cursor_line_id = None
         
         # Draw title
@@ -739,7 +741,10 @@ class AudioSpectrumDisplay:
         )
     
     def _draw_tooltip(self, x: int, y: int, text: str):
-        """Draw tooltip at position."""
+        """Draw tooltip at position with white background and black text."""
+        # Delete previous tooltip (both background and text)
+        if self.tooltip_bg_id:
+            self.canvas.delete(self.tooltip_bg_id)
         if self.tooltip_id:
             self.canvas.delete(self.tooltip_id)
         
@@ -751,11 +756,35 @@ class AudioSpectrumDisplay:
             tooltip_x = x + 10
             anchor = tk.W
         
+        # Estimate text size (rough approximation for multi-line text)
+        lines = text.split('\n')
+        text_width = max(len(line) for line in lines) * 7
+        text_height = len(lines) * 14
+
+        if anchor == tk.E:
+            # Text anchored to right
+            bg_x1 = tooltip_x - text_width - 4
+            bg_x2 = tooltip_x + 2
+        else:
+            # Text anchored to left
+            bg_x1 = tooltip_x - 2
+            bg_x2 = tooltip_x + text_width + 4
+
+        bg_y1 = y - 10 - text_height // 2 - 2
+        bg_y2 = y - 10 + text_height // 2 + 2
+
+        # Draw background and track its ID
+        self.tooltip_bg_id = self.canvas.create_rectangle(
+            bg_x1, bg_y1, bg_x2, bg_y2,
+            fill='white', outline='black', width=1
+        )
+
+        # Draw text
         self.tooltip_id = self.canvas.create_text(
             tooltip_x, y - 10,
             text=text,
-            fill='yellow',
-            font=('monospace', 9),
+            fill='black',
+            font=('monospace', 9, 'bold'),
             anchor=anchor
         )
     

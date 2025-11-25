@@ -98,6 +98,7 @@ class WaterfallDisplay:
         
         # Tooltip and cursor
         self.tooltip_id = None
+        self.tooltip_bg_id = None  # Track background rectangle
         self.cursor_line_id = None
         self.cursor_x = -1
         self.last_mouse_x = -1
@@ -251,6 +252,7 @@ class WaterfallDisplay:
         # Clear canvas and redraw
         self.canvas.delete('all')
         self.tooltip_id = None
+        self.tooltip_bg_id = None
         self.cursor_line_id = None
         
         # Draw waterfall image
@@ -451,6 +453,9 @@ class WaterfallDisplay:
     
     def _draw_tooltip(self, x: int, y: int, text: str):
         """Draw tooltip at position with white background and black text."""
+        # Delete previous tooltip (both background and text)
+        if self.tooltip_bg_id:
+            self.canvas.delete(self.tooltip_bg_id)
         if self.tooltip_id:
             self.canvas.delete(self.tooltip_id)
         
@@ -479,11 +484,10 @@ class WaterfallDisplay:
         bg_y1 = y - 10 - text_height // 2 - 2
         bg_y2 = y - 10 + text_height // 2 + 2
         
-        # Draw background
-        self.canvas.create_rectangle(
+        # Draw background and track its ID
+        self.tooltip_bg_id = self.canvas.create_rectangle(
             bg_x1, bg_y1, bg_x2, bg_y2,
-            fill='white', outline='black', width=1,
-            tags='tooltip_bg'
+            fill='white', outline='black', width=1
         )
         
         # Draw text
@@ -492,8 +496,7 @@ class WaterfallDisplay:
             text=text,
             fill='black',
             font=('monospace', 9, 'bold'),
-            anchor=anchor,
-            tags='tooltip_text'
+            anchor=anchor
         )
     
     def _draw_cursor_line(self, x: int):

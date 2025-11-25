@@ -200,9 +200,7 @@ class CWSpotsDisplay:
         
     def _handle_spot(self, spot_data):
         """Handle incoming CW spot from WebSocket."""
-        print(f"DEBUG CW Display: _handle_spot called with callsign={spot_data.get('dx_call')}")
         self.update_queue.put(("spot", spot_data))
-        print(f"DEBUG CW Display: Spot added to queue, queue size={self.update_queue.qsize()}")
         
     def _handle_status(self, connected):
         """Handle connection status change."""
@@ -227,7 +225,6 @@ class CWSpotsDisplay:
         
     def _add_spot(self, spot_data):
         """Add a spot to the display."""
-        print(f"DEBUG CW Display: _add_spot called with callsign={spot_data.get('dx_call')}, total spots before={len(self.spots)}")
         # Add to spots list
         self.spots.insert(0, spot_data)
         
@@ -235,7 +232,6 @@ class CWSpotsDisplay:
         if len(self.spots) > self.max_spots:
             self.spots = self.spots[:self.max_spots]
         
-        print(f"DEBUG CW Display: Calling apply_filters, spots list now has {len(self.spots)} spots")
         # Apply filters and update display
         self.apply_filters()
         

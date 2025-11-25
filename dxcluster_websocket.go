@@ -704,7 +704,7 @@ func (h *DXClusterWebSocketHandler) sendBufferedSpots(conn *websocket.Conn) {
 	// Send each spot as an individual message
 	for _, spot := range bufferedSpots {
 		message := map[string]interface{}{
-			"type": "spot",
+			"type": "dx_spot",
 			"data": spot,
 		}
 

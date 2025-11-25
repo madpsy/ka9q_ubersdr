@@ -28,6 +28,14 @@ except ImportError:
     WATERFALL_AVAILABLE = False
     print("Warning: Waterfall display not available (missing dependencies)")
 
+# Import audio spectrum display
+try:
+    from audio_spectrum_display import create_audio_spectrum_window
+    AUDIO_SPECTRUM_AVAILABLE = True
+except ImportError:
+    AUDIO_SPECTRUM_AVAILABLE = False
+    print("Warning: Audio spectrum display not available (missing dependencies)")
+
 # Check if NR2 is available
 try:
     from nr2 import create_nr2_processor
@@ -91,6 +99,10 @@ class RadioGUI:
         # Waterfall display (separate window)
         self.waterfall_window = None
         self.waterfall_display = None
+        
+        # Audio spectrum display (separate window)
+        self.audio_spectrum_window = None
+        self.audio_spectrum_display = None
         
         # Create UI
         self.create_widgets()
@@ -370,11 +382,19 @@ class RadioGUI:
             except ValueError:
                 pass  # Use defaults if values are invalid
 
-            # Add waterfall button
+            # Add waterfall and audio spectrum buttons
+            button_frame = ttk.Frame(spectrum_frame)
+            button_frame.pack(side=tk.TOP, pady=(0, 5))
+            
             if WATERFALL_AVAILABLE:
-                waterfall_btn = ttk.Button(spectrum_frame, text="Open Waterfall",
+                waterfall_btn = ttk.Button(button_frame, text="Open Waterfall",
                                           command=self.open_waterfall_window)
-                waterfall_btn.pack(side=tk.TOP, pady=(0, 5))
+                waterfall_btn.pack(side=tk.LEFT, padx=(0, 5))
+            
+            if AUDIO_SPECTRUM_AVAILABLE:
+                audio_btn = ttk.Button(button_frame, text="Open Audio",
+                                      command=self.open_audio_spectrum_window)
+                audio_btn.pack(side=tk.LEFT)
 
             spectrum_frame.columnconfigure(0, weight=1)
             spectrum_frame.rowconfigure(0, weight=1)
@@ -488,6 +508,10 @@ class RadioGUI:
         # Update waterfall display bandwidth visualization
         if self.waterfall_display:
             self.waterfall_display.update_bandwidth(low, high)
+
+        # Update audio spectrum display bandwidth
+        if self.audio_spectrum_display:
+            self.audio_spectrum_display.update_bandwidth(low, high)
         
         if self.connected:
             self.apply_bandwidth()
@@ -639,6 +663,10 @@ class RadioGUI:
             # Update waterfall display if open
             if self.waterfall_display:
                 self.waterfall_display.update_bandwidth(low, high)
+
+            # Update audio spectrum display if open
+            if self.audio_spectrum_display:
+                self.audio_spectrum_display.update_bandwidth(low, high)
             
             self.log_status(f"Adjusting bandwidth to {low} to {high} Hz...")
             self.send_tune_message()
@@ -927,6 +955,29 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open waterfall: {e}")
             self.log_status(f"ERROR: Failed to open waterfall - {e}")
 
+    def open_audio_spectrum_window(self):
+        """Open a separate audio spectrum display window."""
+        # Don't open multiple windows
+        if self.audio_spectrum_window and self.audio_spectrum_window.winfo_exists():
+            self.audio_spectrum_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        try:
+            from audio_spectrum_display import create_audio_spectrum_window
+
+            # Create audio spectrum window
+            self.audio_spectrum_window, self.audio_spectrum_display = create_audio_spectrum_window(self)
+
+            self.log_status("Audio spectrum window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open audio spectrum: {e}")
+            self.log_status(f"ERROR: Failed to open audio spectrum - {e}")
+
     def adjust_bandwidth_for_mode(self, mode: str):
         """Set bandwidth defaults based on mode (matching web application behavior)."""
         # Default bandwidth values for each mode (from static/app.js setMode function lines 2556-2606)
@@ -954,6 +1005,10 @@ class RadioGUI:
             # Update waterfall display bandwidth visualization
             if self.waterfall_display:
                 self.waterfall_display.update_bandwidth(low, high)
+
+            # Update audio spectrum display bandwidth
+            if self.audio_spectrum_display:
+                self.audio_spectrum_display.update_bandwidth(low, high)
 
             # Only update client if it exists (connected)
             if self.client:
@@ -1446,6 +1501,10 @@ class RadioGUI:
         """
         if self.recording:
             self.recording_data.append(audio_float.copy())
+
+        # Also send to audio spectrum display if open
+        if self.audio_spectrum_display:
+            self.audio_spectrum_display.add_audio_data(audio_float)
     
     def on_closing(self):
         """Handle window close event."""
@@ -1455,6 +1514,10 @@ class RadioGUI:
         # Close waterfall window if open
         if self.waterfall_window and self.waterfall_window.winfo_exists():
             self.waterfall_window.destroy()
+
+        # Close audio spectrum window if open
+        if self.audio_spectrum_window and self.audio_spectrum_window.winfo_exists():
+            self.audio_spectrum_window.destroy()
 
         # Stop recording if active
         if self.recording:

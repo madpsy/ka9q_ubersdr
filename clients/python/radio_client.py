@@ -6,9 +6,12 @@ Connects to the WebSocket server and outputs audio to PipeWire, stdout, or WAV f
 
 import argparse
 import asyncio
+import atexit
 import base64
 import json
+import os
 import signal
+import stat
 import struct
 import sys
 import time
@@ -110,7 +113,7 @@ class RadioClient:
                  nr2_floor: float = 10.0, nr2_adapt_rate: float = 1.0,
                  auto_reconnect: bool = False, status_callback=None,
                  volume: float = 1.0, channel_left: bool = True, channel_right: bool = True,
-                 audio_level_callback=None, recording_callback=None):
+                 audio_level_callback=None, recording_callback=None, fifo_path: Optional[str] = None):
         self.url = url
         self.host = host
         self.port = port
@@ -128,6 +131,15 @@ class RadioClient:
         self.start_time = None
         self.sample_rate = 12000  # Default, will be updated from server
         self.ws = None  # WebSocket connection reference for sending messages
+
+        # FIFO (named pipe) output
+        self.fifo_path = fifo_path
+        self.fifo_fd = None
+        self.fifo_created_by_us = False  # Track if we created the FIFO
+
+        # Register cleanup handler for FIFO
+        if self.fifo_path:
+            atexit.register(self._cleanup_fifo_on_exit)
 
         # Determine default channels based on mode
         # IQ modes are stereo (I and Q channels), others are mono
@@ -228,12 +240,36 @@ class RadioClient:
             self.wav_writer.setframerate(self.sample_rate)
             print(f"Recording to WAV file: {self.wav_file} ({self.channels} channel(s))", file=sys.stderr)
     
+    def setup_fifo(self):
+        """Create FIFO file (doesn't open it yet)."""
+        if self.fifo_path is None:
+            return
+
+        try:
+            # Check if path exists
+            if os.path.exists(self.fifo_path):
+                # Verify it's a FIFO
+                if not stat.S_ISFIFO(os.stat(self.fifo_path).st_mode):
+                    raise ValueError(f"{self.fifo_path} exists but is not a FIFO")
+                print(f"Using existing FIFO: {self.fifo_path}", file=sys.stderr)
+            else:
+                # Create new FIFO
+                os.mkfifo(self.fifo_path)
+                self.fifo_created_by_us = True
+                print(f"Created FIFO: {self.fifo_path}", file=sys.stderr)
+
+            print(f"FIFO ready at: {self.fifo_path} (will open when reader connects)", file=sys.stderr)
+
+        except Exception as e:
+            print(f"Warning: Failed to setup FIFO: {e}", file=sys.stderr)
+            self.fifo_path = None
+
     async def setup_pipewire(self):
         """Start PipeWire playback process."""
         try:
             # Always output as stereo to support left/right channel control
             output_channels = 2
-            
+
             # Use pw-play for PipeWire audio output
             self.pipewire_process = await asyncio.create_subprocess_exec(
                 'pw-play',
@@ -277,25 +313,51 @@ class RadioClient:
     
     async def output_audio(self, pcm_data: bytes):
         """Output audio data based on selected mode."""
+        # Write raw PCM to FIFO FIRST (before any processing)
+        # This gives the FIFO the original audio straight from the source
+        if self.fifo_path is not None:
+            # Try to open FIFO if not already open
+            if self.fifo_fd is None:
+                try:
+                    # Try to open in non-blocking mode
+                    self.fifo_fd = os.open(self.fifo_path, os.O_WRONLY | os.O_NONBLOCK)
+                    print(f"FIFO reader connected!", file=sys.stderr)
+                except (OSError, BlockingIOError):
+                    # No reader yet, skip this write
+                    pass
+
+            # Write to FIFO if open
+            if self.fifo_fd is not None:
+                try:
+                    os.write(self.fifo_fd, pcm_data)
+                except (BrokenPipeError, OSError) as e:
+                    # Reader disconnected or other error
+                    print(f"FIFO reader disconnected", file=sys.stderr)
+                    try:
+                        os.close(self.fifo_fd)
+                    except:
+                        pass
+                    self.fifo_fd = None
+
         # Convert PCM bytes to numpy array for processing
         audio_array = np.frombuffer(pcm_data, dtype=np.int16)
-        
+
         # Reshape for stereo if needed
         if self.channels == 2:
             audio_array = audio_array.reshape(-1, 2)
-        
+
         # Convert to float32 for processing
         audio_float = audio_array.astype(np.float32) / 32768.0
-        
+
         # Apply NR2 noise reduction if enabled
         if self.nr2_processor:
             # Process through NR2 (expects and returns normalized float32)
             audio_float = self.nr2_processor.process(audio_float)
-            
+
             # Apply -3dB makeup gain (matches UI default)
             # -3dB = 10^(-3/20) = 0.7079 gain factor
             audio_float = audio_float * 0.7079
-        
+
         # Send mono audio to recording callback BEFORE stereo conversion
         # This captures the mono signal before it's duplicated to stereo
         if self.recording_callback and self.channels == 1:
@@ -523,7 +585,10 @@ class RadioClient:
 
                 # Reset retry count on successful connection
                 self.retry_count = 0
-                
+
+                # Setup FIFO if configured (independent of output mode)
+                self.setup_fifo()
+
                 # Setup output based on mode
                 if self.output_mode == 'pipewire':
                     await self.setup_pipewire()
@@ -596,15 +661,48 @@ class RadioClient:
 
         return 0
     
+    def _cleanup_fifo_on_exit(self):
+        """Cleanup FIFO on exit (called by atexit)."""
+        if self.fifo_fd is not None:
+            try:
+                os.close(self.fifo_fd)
+            except:
+                pass
+            self.fifo_fd = None
+
+        # Remove FIFO file only if we created it
+        if self.fifo_path and self.fifo_created_by_us and os.path.exists(self.fifo_path):
+            try:
+                os.unlink(self.fifo_path)
+            except:
+                pass
+
     async def cleanup(self):
         """Clean up resources."""
         print("\nCleaning up...", file=sys.stderr)
-        
+
+        # Close FIFO
+        if self.fifo_fd is not None:
+            try:
+                os.close(self.fifo_fd)
+                print(f"FIFO closed: {self.fifo_path}", file=sys.stderr)
+            except Exception as e:
+                print(f"Error closing FIFO: {e}", file=sys.stderr)
+            self.fifo_fd = None
+
+            # Remove FIFO file only if we created it
+            if self.fifo_path and self.fifo_created_by_us and os.path.exists(self.fifo_path):
+                try:
+                    os.unlink(self.fifo_path)
+                    print(f"FIFO removed: {self.fifo_path}", file=sys.stderr)
+                except Exception as e:
+                    print(f"Error removing FIFO: {e}", file=sys.stderr)
+
         # Close WAV file
         if self.wav_writer:
             self.wav_writer.close()
             print(f"WAV file closed: {self.wav_file}", file=sys.stderr)
-        
+
         # Close PipeWire process
         if self.pipewire_process:
             if self.pipewire_process.stdin:
@@ -689,6 +787,8 @@ Examples:
                         help='PipeWire target device (node name). Use --list-devices to see available devices.')
     parser.add_argument('--list-devices', action='store_true',
                         help='List available PipeWire audio output devices and exit')
+    parser.add_argument('--fifo-path', type=str, metavar='PATH',
+                        help='Also write audio to named pipe (FIFO) at this path (non-blocking, works with any output mode)')
     
     args = parser.parse_args()
     
@@ -796,7 +896,8 @@ Examples:
         nr2_strength=args.nr2_strength,
         nr2_floor=args.nr2_floor,
         nr2_adapt_rate=args.nr2_adapt_rate,
-        auto_reconnect=args.auto_reconnect
+        auto_reconnect=args.auto_reconnect,
+        fifo_path=args.fifo_path
     )
     
     # Setup signal handler for graceful shutdown

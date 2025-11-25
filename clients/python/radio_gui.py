@@ -36,6 +36,25 @@ except ImportError:
     NR2_AVAILABLE = False
 
 
+def find_next_fifo_path() -> str:
+    """Find the next available FIFO path (/tmp/ubersdr.fifo, ubersdr1.fifo, etc.)."""
+    import os
+
+    # Try /tmp/ubersdr.fifo first
+    base_path = "/tmp/ubersdr"
+    if not os.path.exists(f"{base_path}.fifo"):
+        return f"{base_path}.fifo"
+
+    # Try numbered versions
+    for i in range(1, 100):
+        path = f"{base_path}{i}.fifo"
+        if not os.path.exists(path):
+            return path
+
+    # Fallback if all are taken
+    return f"{base_path}99.fifo"
+
+
 class RadioGUI:
     """Tkinter-based GUI for the radio client."""
     
@@ -252,7 +271,14 @@ class RadioGUI:
         
         # Load initial device list
         self.refresh_devices()
-        
+
+        # FIFO path (to the right of device selector)
+        ttk.Label(audio_frame, text="FIFO:").grid(row=0, column=5, sticky=tk.W, padx=(20, 5))
+
+        self.fifo_var = tk.StringVar(value=find_next_fifo_path())
+        self.fifo_entry = ttk.Entry(audio_frame, textvariable=self.fifo_var, width=25)
+        self.fifo_entry.grid(row=0, column=6, sticky=(tk.W, tk.E), padx=(0, 5))
+
         # Volume control
         ttk.Label(audio_frame, text="Volume:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
         self.volume_var = tk.IntVar(value=70)
@@ -1084,6 +1110,11 @@ class RadioGUI:
             channel_left = self.channel_left_var.get()
             channel_right = self.channel_right_var.get()
             
+            # Get FIFO path from GUI
+            fifo_path = self.fifo_var.get().strip()
+            if not fifo_path:
+                fifo_path = None
+
             # Create client (disable auto_reconnect for GUI - we'll handle retries)
             self.client = RadioClient(
                 url=url,
@@ -1101,7 +1132,8 @@ class RadioGUI:
                 channel_right=channel_right,
                 audio_level_callback=lambda level_db: self.audio_level_queue.put(level_db),
                 recording_callback=self.add_recording_frame,
-                ssl=self.tls_var.get()  # Use TLS if checkbox is checked
+                ssl=self.tls_var.get(),  # Use TLS if checkbox is checked
+                fifo_path=fifo_path  # Pass FIFO path to client
             )
             
             # Set connection timeout and retry parameters
@@ -1121,9 +1153,10 @@ class RadioGUI:
             self.connect_btn.config(text="Connecting...", state='disabled')
             self.cancel_btn.grid()  # Show cancel button
             
-            # Disable device selection while connecting/connected
+            # Disable device selection and FIFO path while connecting/connected
             self.device_combo.config(state='disabled')
             self.refresh_devices_btn.config(state='disabled')
+            self.fifo_entry.config(state='disabled')
             
             # Connect spectrum display after a delay to ensure audio connection is established
             if self.spectrum and SPECTRUM_AVAILABLE:
@@ -1192,9 +1225,10 @@ class RadioGUI:
         if self.recording:
             self.stop_recording()
         
-        # Re-enable device selection
+        # Re-enable device selection and FIFO path
         self.device_combo.config(state='readonly')
         self.refresh_devices_btn.config(state='normal')
+        self.fifo_entry.config(state='normal')
     
     def run_client(self):
         """Run the client in a separate thread with its own event loop."""

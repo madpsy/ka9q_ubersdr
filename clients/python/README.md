@@ -14,6 +14,7 @@ A command-line and GUI Python client for connecting to the ka9q_ubersdr WebSocke
   - **PipeWire**: Real-time audio playback via PipeWire
   - **stdout**: Raw PCM output to stdout (for piping to other tools)
   - **WAV file**: Record to PCM WAV file with optional time limit
+  - **FIFO (named pipe)**: Additional output to named pipe for multi-consumer streaming
 
 ## Requirements
 
@@ -108,6 +109,7 @@ usage: radio_client.py [-h] [--gui] [-u URL] [-H HOST] [-p PORT] [-f FREQUENCY]
                        [-w FILE] [-t SECONDS] [-s] [--nr2]
                        [--nr2-strength PERCENT] [--nr2-floor PERCENT]
                        [--nr2-adapt-rate PERCENT] [--auto-reconnect]
+                       [--fifo-path PATH]
 
 CLI Radio Client for ka9q_ubersdr
 
@@ -140,6 +142,8 @@ optional arguments:
   --nr2-adapt-rate PERCENT
                         NR2 noise profile adaptation rate, 0.1-5.0% (default: 1)
   --auto-reconnect      Automatically reconnect on connection loss with exponential backoff
+  --fifo-path PATH      Also write audio to named pipe (FIFO) at this path (non-blocking,
+                        works with any output mode)
 ```
 
 ### Connection Options
@@ -203,6 +207,43 @@ Record to a WAV file with optional time limit:
 # Record indefinitely (stop with Ctrl+C)
 ./radio_client.py -f 7100000 -m lsb -o wav -w recording.wav
 ```
+
+#### FIFO (Named Pipe)
+Stream audio to a named pipe (FIFO) in addition to the primary output mode. This allows multiple programs to read the same audio stream simultaneously:
+
+```bash
+# Stream to PipeWire AND a FIFO
+./radio_client.py -f 14074000 -m usb --fifo-path /tmp/radio.fifo
+
+# In another terminal, read from the FIFO (mono modes: USB, LSB, AM, FM, CW)
+cat /tmp/radio.fifo | aplay -f S16_LE -r 12000 -c 1 -v
+
+# For IQ modes only (stereo)
+cat /tmp/radio.fifo | aplay -f S16_LE -r 12000 -c 2 -v
+
+# Or pipe to sox for processing (mono)
+cat /tmp/radio.fifo | sox -t raw -r 12000 -e signed -b 16 -c 1 - output.wav
+
+# Or use with ffmpeg (mono)
+ffmpeg -f s16le -ar 12000 -ac 1 -i /tmp/radio.fifo output.mp3
+
+# Combine with stdout output
+./radio_client.py -f 14074000 -m usb -o stdout --fifo-path /tmp/radio.fifo > /dev/null
+```
+
+**FIFO Features:**
+- **Raw audio**: Outputs unprocessed audio directly from source (no volume, NR2, or channel processing)
+- **Non-blocking**: Won't slow down primary audio output if no reader is attached
+- **Multi-consumer**: Multiple programs can read from the same FIFO
+- **Works with any output mode**: Can be used alongside PipeWire, stdout, or WAV output
+- **Automatic cleanup**: FIFO is automatically created and removed on exit
+- **Mono output**: Outputs mono (1 channel) for most modes, stereo (2 channels) for IQ modes
+
+**Use Cases:**
+- Monitor audio while recording to WAV
+- Feed audio to multiple processing tools simultaneously
+- Create audio analysis pipelines without affecting playback
+- Tap audio stream for real-time visualization or logging
 
 ## Audio Format
 

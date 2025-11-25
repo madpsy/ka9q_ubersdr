@@ -36,6 +36,14 @@ except ImportError:
     AUDIO_SPECTRUM_AVAILABLE = False
     print("Warning: Audio spectrum display not available (missing dependencies)")
 
+# Import digital spots display
+try:
+    from digital_spots_display import create_digital_spots_window
+    DIGITAL_SPOTS_AVAILABLE = True
+except ImportError:
+    DIGITAL_SPOTS_AVAILABLE = False
+    print("Warning: Digital spots display not available (missing dependencies)")
+
 # Check if NR2 is available
 try:
     from nr2 import create_nr2_processor
@@ -103,6 +111,10 @@ class RadioGUI:
         # Audio spectrum display (separate window)
         self.audio_spectrum_window = None
         self.audio_spectrum_display = None
+
+        # Digital spots display (separate window)
+        self.digital_spots_window = None
+        self.digital_spots_display = None
         
         # Create UI
         self.create_widgets()
@@ -394,7 +406,12 @@ class RadioGUI:
             if AUDIO_SPECTRUM_AVAILABLE:
                 audio_btn = ttk.Button(button_frame, text="Open Audio",
                                       command=self.open_audio_spectrum_window)
-                audio_btn.pack(side=tk.LEFT, padx=(0, 15))
+                audio_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            if DIGITAL_SPOTS_AVAILABLE:
+                spots_btn = ttk.Button(button_frame, text="Open Digital Spots",
+                                      command=self.open_digital_spots_window)
+                spots_btn.pack(side=tk.LEFT, padx=(0, 15))
             
             # Scroll mode selector (zoom vs pan)
             ttk.Label(button_frame, text="Scroll:").pack(side=tk.LEFT, padx=(0, 5))
@@ -1025,6 +1042,29 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open audio spectrum: {e}")
             self.log_status(f"ERROR: Failed to open audio spectrum - {e}")
 
+    def open_digital_spots_window(self):
+        """Open a separate digital spots display window."""
+        # Don't open multiple windows
+        if self.digital_spots_window and self.digital_spots_window.winfo_exists():
+            self.digital_spots_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        try:
+            from digital_spots_display import create_digital_spots_window
+
+            # Create digital spots window
+            self.digital_spots_window, self.digital_spots_display = create_digital_spots_window(self)
+
+            self.log_status("Digital spots window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open digital spots: {e}")
+            self.log_status(f"ERROR: Failed to open digital spots - {e}")
+
     def adjust_bandwidth_for_mode(self, mode: str):
         """Set bandwidth defaults based on mode (matching web application behavior)."""
         # Default bandwidth values for each mode (from static/app.js setMode function lines 2556-2606)
@@ -1570,6 +1610,10 @@ class RadioGUI:
         # Close audio spectrum window if open
         if self.audio_spectrum_window and self.audio_spectrum_window.winfo_exists():
             self.audio_spectrum_window.destroy()
+
+        # Close digital spots window if open
+        if self.digital_spots_window and self.digital_spots_window.winfo_exists():
+            self.digital_spots_window.destroy()
 
         # Stop recording if active
         if self.recording:

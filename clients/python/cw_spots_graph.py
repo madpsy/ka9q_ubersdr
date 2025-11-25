@@ -12,6 +12,7 @@ matplotlib.use('TkAgg')
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.dates as mdates
+from matplotlib.patches import Rectangle
 
 
 class CWSpotsGraphWindow:
@@ -28,6 +29,9 @@ class CWSpotsGraphWindow:
         self.parent_display = parent_display
         self.on_close_callback = on_close
         self.spot_positions = []  # Store spot positions for click detection
+        self.tooltip_annotation = None  # For hover tooltip
+        self.tooltip_rect = None  # Background rectangle for tooltip
+        self.last_hover_event = None  # Store last hover event to restore tooltip after redraw
         
         # Create window
         self.window = tk.Toplevel()
@@ -82,8 +86,9 @@ class CWSpotsGraphWindow:
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
-        # Connect click event
+        # Connect click and hover events
         self.canvas.mpl_connect('button_press_event', self._on_graph_click)
+        self.canvas.mpl_connect('motion_notify_event', self._on_hover)
         
         # Initial draw
         self._draw_graph()
@@ -169,6 +174,12 @@ class CWSpotsGraphWindow:
         # Clear the plot and spot positions
         self.ax.clear()
         self.spot_positions = []
+        # Reset tooltip references since ax.clear() removes all artists
+        self.tooltip_annotation = None
+        self.tooltip_rect = None
+
+        # Store whether we need to restore tooltip after redraw
+        restore_tooltip = self.last_hover_event is not None
         
         # Get filtered spots from parent display
         if not self.parent_display:
@@ -236,9 +247,8 @@ class CWSpotsGraphWindow:
         # Plot spots
         scatter = self.ax.scatter(times, frequencies, c=colors, s=50, alpha=0.7, edgecolors='white', linewidths=0.5, picker=True)
         
-        # Add callsign labels for recent spots (to avoid clutter, only show last 20)
-        recent_count = min(20, len(times))
-        for i in range(recent_count):
+        # Add callsign labels for all spots
+        for i in range(len(times)):
             self.ax.annotate(callsigns[i],
                            (times[i], frequencies[i]),
                            xytext=(5, 5),
@@ -269,6 +279,10 @@ class CWSpotsGraphWindow:
         
         # Redraw canvas
         self.canvas.draw()
+
+        # Restore tooltip if mouse was hovering over a spot
+        if restore_tooltip and self.last_hover_event is not None:
+            self._on_hover(self.last_hover_event)
     
     def _get_filtered_spots_from_parent(self):
         """Get filtered spots from parent display using same filter logic."""
@@ -350,6 +364,119 @@ class CWSpotsGraphWindow:
             return " - " + ", ".join(parts)
         return ""
     
+    def _on_hover(self, event):
+        """Handle mouse hover to show tooltip with spot details."""
+        # Store the event for tooltip restoration after redraw
+        if event.inaxes == self.ax:
+            self.last_hover_event = event
+        else:
+            self.last_hover_event = None
+
+        if event.inaxes != self.ax:
+            # Hide tooltip if mouse leaves the plot area
+            if self.tooltip_annotation:
+                self.tooltip_annotation.set_visible(False)
+                if self.tooltip_rect:
+                    self.tooltip_rect.set_visible(False)
+                self.canvas.draw_idle()
+            return
+
+        # Find the closest spot to the hover position
+        if not self.spot_positions:
+            return
+
+        hover_x = event.xdata
+        hover_y = event.ydata
+
+        if hover_x is None or hover_y is None:
+            return
+
+        # Convert hover_x from matplotlib date to timestamp
+        from matplotlib.dates import num2date
+        hover_time = num2date(hover_x).replace(tzinfo=None)
+
+        # Find closest spot within a reasonable distance
+        min_distance = float('inf')
+        closest_spot = None
+        closest_time = None
+        closest_freq = None
+
+        for spot_data in self.spot_positions:
+            spot_time = spot_data['time']
+            spot_freq = spot_data['frequency']
+
+            # Calculate distance (normalize time and frequency to similar scales)
+            time_diff = abs((hover_time - spot_time).total_seconds()) / 60.0  # minutes
+            freq_diff = abs(hover_y - spot_freq)  # MHz
+
+            # Weight time and frequency differences
+            distance = (time_diff * 0.01) + (freq_diff * 10)
+
+            if distance < min_distance:
+                min_distance = distance
+                closest_spot = spot_data['spot']
+                closest_time = spot_time
+                closest_freq = spot_freq
+
+        # Show tooltip if we found a spot within reasonable distance
+        if closest_spot and min_distance < 0.5:  # Threshold for hover detection
+            self._show_tooltip(closest_spot, closest_time, closest_freq)
+        else:
+            # Hide tooltip if no spot is close enough
+            self.last_hover_event = None
+            if self.tooltip_annotation:
+                self.tooltip_annotation.set_visible(False)
+                if self.tooltip_rect:
+                    self.tooltip_rect.set_visible(False)
+                self.canvas.draw_idle()
+
+    def _show_tooltip(self, spot, spot_time, spot_freq):
+        """Display tooltip with spot details."""
+        # Build tooltip text
+        lines = []
+        lines.append(f"Callsign: {spot.get('dx_call', 'N/A')}")
+        lines.append(f"Band: {spot.get('band', 'N/A')}")
+        lines.append(f"Country: {spot.get('country', 'N/A')}")
+        lines.append(f"SNR: {spot.get('snr', 'N/A')} dB")
+        lines.append(f"WPM: {spot.get('wpm', 'N/A')}")
+
+        # Add distance if available
+        if 'distance_km' in spot:
+            lines.append(f"Distance: {spot['distance_km']:.0f} km")
+
+        # Add bearing if available
+        if 'bearing' in spot:
+            lines.append(f"Bearing: {spot['bearing']:.0f}°")
+
+        # Add comment if it has a value
+        comment = spot.get('comment', '').strip()
+        if comment:
+            lines.append(f"Comment: {comment}")
+
+        tooltip_text = '\n'.join(lines)
+
+        # Create or update tooltip annotation
+        if self.tooltip_annotation is None:
+            # Create new annotation with background
+            self.tooltip_annotation = self.ax.annotate(
+                tooltip_text,
+                xy=(spot_time, spot_freq),
+                xytext=(15, 15),
+                textcoords='offset points',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='#2a2a2a', edgecolor='#666', alpha=0.95),
+                fontsize=9,
+                color='#eee',
+                weight='normal',
+                zorder=1000
+            )
+        else:
+            # Update existing annotation
+            self.tooltip_annotation.set_text(tooltip_text)
+            self.tooltip_annotation.xy = (spot_time, spot_freq)
+            self.tooltip_annotation.set_visible(True)
+
+        self.canvas.draw_idle()
+
     def refresh(self):
         """Refresh the graph (called by parent when filters change)."""
         self._draw_graph()

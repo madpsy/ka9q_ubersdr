@@ -17,20 +17,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// mapModeToRadiodPreset maps frontend mode names to radiod preset names
-// This allows the web interface to use user-friendly names while sending
-// the correct preset names to radiod
-func mapModeToRadiodPreset(mode string) string {
-	switch mode {
-	case "fm":
-		return "pm" // Phase Modulation preset for wideband FM
-	case "nfm":
-		return "npm" // Narrow Phase Modulation preset for narrowband FM
-	default:
-		return mode // All other modes pass through unchanged
-	}
-}
-
 // UUID validation regex (RFC 4122 compliant)
 var uuidRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
@@ -476,9 +462,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Create initial session with IP tracking and user session ID
-	// Map frontend mode name to radiod preset name (e.g., "fm" -> "pm", "nfm" -> "npm")
-	radiodMode := mapModeToRadiodPreset(mode)
-	session, err := wsh.sessions.CreateSessionWithUserID(frequency, radiodMode, sourceIP, clientIP, userSessionID)
+	session, err := wsh.sessions.CreateSessionWithUserID(frequency, mode, sourceIP, clientIP, userSessionID)
 	if err != nil {
 		log.Printf("Failed to create session: %v", err)
 
@@ -762,9 +746,7 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 						updateFreq = newFreq
 					}
 
-					// Map frontend mode name to radiod preset name
-					radiodNewMode := mapModeToRadiodPreset(newMode)
-					if err := wsh.sessions.UpdateSessionWithEdges(currentSession.ID, updateFreq, radiodNewMode, 0, 0, false); err != nil {
+					if err := wsh.sessions.UpdateSessionWithEdges(currentSession.ID, updateFreq, newMode, 0, 0, false); err != nil {
 						wsh.sendError(conn, "Failed to update mode: "+err.Error())
 						continue
 					}

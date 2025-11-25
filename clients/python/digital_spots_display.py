@@ -154,10 +154,14 @@ class DigitalSpotsDisplay:
                                     state='readonly', width=15)
         country_combo.grid(row=0, column=12, sticky=tk.W, padx=(0, 15))
         country_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_filters())
-        
+
+        # Reset Filters button
+        ttk.Button(filter_frame, text="Reset Filters",
+                  command=self.reset_filters).grid(row=0, column=13, sticky=tk.W, padx=(0, 5))
+
         # Clear button
         ttk.Button(filter_frame, text="Clear All",
-                  command=self.clear_spots).grid(row=0, column=13, sticky=tk.W)
+                  command=self.clear_spots).grid(row=0, column=14, sticky=tk.W)
         
         # Spots table with scrollbar
         table_frame = ttk.Frame(main_frame)
@@ -199,6 +203,9 @@ class DigitalSpotsDisplay:
         
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
+
+        # Bind single-click event to set filters
+        self.tree.bind("<Button-1>", self._on_row_click)
         
         # Configure main frame weights
         main_frame.columnconfigure(0, weight=1)
@@ -441,6 +448,16 @@ class DigitalSpotsDisplay:
             # Schedule next update in 1 second
             self.window.after(1000, self.update_ages)
     
+    def reset_filters(self):
+        """Reset all filters to their default values."""
+        self.mode_filter.set("all")
+        self.age_filter.set(10)
+        self.band_filter.set("all")
+        self.snr_filter.set("none")
+        self.callsign_filter.set("")
+        self.country_filter.set("all")
+        self.apply_filters()
+
     def clear_spots(self):
         """Clear all spots."""
         self.spots = []
@@ -482,6 +499,51 @@ class DigitalSpotsDisplay:
             self.on_close_callback()
         
         self.window.destroy()
+
+    def _on_row_click(self, event):
+        """Handle single-click on a row to set filters based on column."""
+        # Identify which column was clicked
+        column = self.tree.identify_column(event.x)
+        item = self.tree.identify_row(event.y)
+
+        if not item:
+            return
+
+        # Get column index (format is '#N' where N is 1-based)
+        try:
+            col_index = int(column.replace('#', '')) - 1
+        except (ValueError, AttributeError):
+            return
+
+        # Get column names
+        columns = ('time', 'age', 'mode', 'freq', 'band', 'callsign',
+                   'country', 'grid', 'distance', 'bearing', 'snr', 'message')
+
+        if col_index < 0 or col_index >= len(columns):
+            return
+
+        col_name = columns[col_index]
+
+        # Get the value from the clicked cell
+        values = self.tree.item(item, 'values')
+        if col_index >= len(values):
+            return
+
+        clicked_value = values[col_index]
+
+        # Set filter based on column
+        if col_name == "mode" and clicked_value:
+            # Set mode filter (e.g., "FT8", "FT4", "WSPR")
+            self.mode_filter.set(clicked_value)
+            self.apply_filters()
+        elif col_name == "band" and clicked_value:
+            # Extract band value (e.g., "40m" from the cell)
+            self.band_filter.set(clicked_value)
+            self.apply_filters()
+        elif col_name == "country" and clicked_value:
+            # Set country filter
+            self.country_filter.set(clicked_value)
+            self.apply_filters()
 
 
 def create_digital_spots_window(websocket_manager, on_close=None, countries=None):

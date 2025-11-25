@@ -142,9 +142,13 @@ class CWSpotsDisplay:
         graph_btn = ttk.Button(filter_frame, text="Graph", command=self.open_graph_window)
         graph_btn.grid(row=1, column=6, padx=5, pady=5)
 
+        # Reset Filters button
+        reset_btn = ttk.Button(filter_frame, text="Reset Filters", command=self.reset_filters)
+        reset_btn.grid(row=1, column=7, padx=5, pady=5)
+
         # Clear button
         clear_btn = ttk.Button(filter_frame, text="Clear Spots", command=self.clear_spots)
-        clear_btn.grid(row=1, column=7, padx=5, pady=5)
+        clear_btn.grid(row=1, column=8, padx=5, pady=5)
         
         # Table frame
         table_frame = ttk.Frame(self.window)
@@ -197,6 +201,9 @@ class CWSpotsDisplay:
 
         # Bind double-click event to tune to frequency
         self.tree.bind("<Double-Button-1>", self._on_row_double_click)
+
+        # Bind single-click event to set filters
+        self.tree.bind("<Button-1>", self._on_row_click)
         
     def _handle_spot(self, spot_data):
         """Handle incoming CW spot from WebSocket."""
@@ -486,6 +493,16 @@ class CWSpotsDisplay:
         # Store the actual frequency value in our dictionary
         self.item_frequencies[item_id] = freq_hz
         
+    def reset_filters(self):
+        """Reset all filters to their default values."""
+        self.age_var.set("10")
+        self.band_var.set("all")
+        self.snr_var.set("none")
+        self.wpm_var.set("none")
+        self.callsign_var.set("")
+        self.country_var.set("all")
+        self.apply_filters()
+
     def clear_spots(self):
         """Clear all spots."""
         self.spots = []
@@ -544,6 +561,47 @@ class CWSpotsDisplay:
 
         except (ValueError, KeyError) as e:
             print(f"Error tuning to frequency: {e}")
+
+    def _on_row_click(self, event):
+        """Handle single-click on a row to set filters based on column."""
+        # Identify which column was clicked
+        column = self.tree.identify_column(event.x)
+        item = self.tree.identify_row(event.y)
+
+        if not item:
+            return
+
+        # Get column index (format is '#N' where N is 1-based)
+        try:
+            col_index = int(column.replace('#', '')) - 1
+        except (ValueError, AttributeError):
+            return
+
+        # Get column names
+        columns = ("time", "age", "frequency", "band", "callsign", "country",
+                   "distance", "bearing", "snr", "wpm", "comment")
+
+        if col_index < 0 or col_index >= len(columns):
+            return
+
+        col_name = columns[col_index]
+
+        # Get the value from the clicked cell
+        values = self.tree.item(item, 'values')
+        if col_index >= len(values):
+            return
+
+        clicked_value = values[col_index]
+
+        # Set filter based on column
+        if col_name == "band" and clicked_value:
+            # Extract band value (e.g., "40m" from the cell)
+            self.band_var.set(clicked_value)
+            self.apply_filters()
+        elif col_name == "country" and clicked_value:
+            # Set country filter
+            self.country_var.set(clicked_value)
+            self.apply_filters()
 
 
 def create_cw_spots_window(websocket_manager, on_close=None, radio_gui=None, countries=None):

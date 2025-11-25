@@ -110,7 +110,7 @@ class BandConditionsDisplay:
         info_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         
         info_label = ttk.Label(info_frame, 
-                              text="ℹ️ This chart shows a rolling 24-hour window. Data to the left of the \"Now\" marker is from today, data to the right is from yesterday.",
+                              text="ℹThis chart shows a rolling 24-hour window. Data to the left of the \"Now\" marker is from today, data to the right is from yesterday.",
                               wraplength=1100, padding="10")
         info_label.pack()
         
@@ -203,7 +203,12 @@ class BandConditionsDisplay:
             
             for point in valid_points:
                 snr = point['ft8_snr']
-                timestamp = datetime.fromisoformat(point['timestamp'].replace('Z', '+00:00'))
+                original_time = datetime.fromisoformat(point['timestamp'].replace('Z', '+00:00'))
+                
+                # Normalize timestamp to today's date (matching bandconditions.js lines 434-436)
+                # This creates a rolling 24-hour window where data from yesterday appears on the right
+                today = datetime.utcnow().date()
+                normalized_time = datetime.combine(today, original_time.time())
                 
                 # Determine state based on SNR (matching bandconditions.js lines 424-432)
                 if snr < 6:
@@ -216,7 +221,7 @@ class BandConditionsDisplay:
                     state = 3  # EXCELLENT
                 
                 all_points.append({
-                    'time': timestamp,
+                    'time': normalized_time,
                     'band': band,
                     'state': state,
                     'snr': snr
@@ -242,14 +247,14 @@ class BandConditionsDisplay:
         now = datetime.utcnow()
         self.ax.axvline(now, color='white', linestyle='--', linewidth=2, alpha=0.8)
         
-        # Add "Now" label at the top of the chart
+        # Add "Now" label above the chart (outside the data area)
         # Get the y-axis limits to position the label
         y_min, y_max = self.ax.get_ylim()
-        # Position label at top of chart
-        self.ax.text(now, y_max, f' Now\n {now.strftime("%H:%M")} UTC',
+        # Position label above the top of the chart using transform coordinates
+        self.ax.text(now, y_max + 0.5, f'Now\n{now.strftime("%H:%M")} UTC',
                     color='black', fontsize=9, fontweight='bold',
                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.9, edgecolor='none'),
-                    verticalalignment='top', horizontalalignment='left')
+                    verticalalignment='bottom', horizontalalignment='center')
         
         # Configure axes
         self.ax.set_yticks(range(len(bands_with_data)))
@@ -257,10 +262,12 @@ class BandConditionsDisplay:
         self.ax.set_ylabel('Band', color='white', fontweight='bold')
         self.ax.set_xlabel('Time (UTC)', color='white', fontweight='bold')
         
-        # Set x-axis to show 24 hours
-        start_time = now - timedelta(hours=24)
-        end_time = now
-        self.ax.set_xlim(start_time, end_time)
+        # Set x-axis to show full 24-hour day (00:00 to 23:59 UTC today)
+        # This matches bandconditions.js lines 481-486
+        today = datetime.utcnow().date()
+        start_of_day = datetime.combine(today, datetime.min.time())
+        end_of_day = datetime.combine(today, datetime.max.time())
+        self.ax.set_xlim(start_of_day, end_of_day)
         
         # Format x-axis
         self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))

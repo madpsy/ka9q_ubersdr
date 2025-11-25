@@ -245,13 +245,11 @@ func NewWebSocketHandler(sessions *SessionManager, audioReceiver *AudioReceiver,
 
 // ClientMessage represents a message from the client
 type ClientMessage struct {
-	Type          string   `json:"type"`
-	Frequency     uint64   `json:"frequency,omitempty"`
-	Mode          string   `json:"mode,omitempty"`
-	BandwidthLow  *int     `json:"bandwidthLow,omitempty"`  // Pointer to distinguish between 0 and not-sent
-	BandwidthHigh *int     `json:"bandwidthHigh,omitempty"` // Pointer to distinguish between 0 and not-sent
-	SquelchOpen   *float32 `json:"squelchOpen,omitempty"`   // Squelch opening threshold in dB SNR (optional)
-	SquelchClose  *float32 `json:"squelchClose,omitempty"`  // Squelch closing threshold in dB SNR (optional)
+	Type          string `json:"type"`
+	Frequency     uint64 `json:"frequency,omitempty"`
+	Mode          string `json:"mode,omitempty"`
+	BandwidthLow  *int   `json:"bandwidthLow,omitempty"`  // Pointer to distinguish between 0 and not-sent
+	BandwidthHigh *int   `json:"bandwidthHigh,omitempty"` // Pointer to distinguish between 0 and not-sent
 }
 
 // ServerMessage represents a message to the client
@@ -686,53 +684,13 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			freqChanged := newFreq != currentSession.Frequency
 			modeChanged := newMode != currentSession.Mode
 			bandwidthChanged := newBandwidthLow != currentSession.BandwidthLow || newBandwidthHigh != currentSession.BandwidthHigh
-			squelchChanged := msg.SquelchOpen != nil || msg.SquelchClose != nil
 
-			if freqChanged || modeChanged || bandwidthChanged || squelchChanged {
+			if freqChanged || modeChanged || bandwidthChanged {
 				// Validate bandwidth if it changed
 				if bandwidthChanged {
 					if newBandwidthLow == newBandwidthHigh {
 						wsh.sendError(conn, fmt.Sprintf("Invalid bandwidth: low and high edges cannot be the same (%d Hz)", newBandwidthLow))
 						continue // Non-fatal, keep connection open
-					}
-				}
-
-				// Validate squelch if provided
-				if squelchChanged {
-					// Validate individual values first
-					if msg.SquelchOpen != nil {
-						// Allow -999 as special value to force squelch open, otherwise 0-50 dB range
-						if *msg.SquelchOpen != -999 && (*msg.SquelchOpen < 0.0 || *msg.SquelchOpen > 50.0) {
-							wsh.sendError(conn, fmt.Sprintf("Invalid squelch open threshold: %.1f dB (must be -999 or 0-50 dB SNR)", *msg.SquelchOpen))
-							continue // Non-fatal, keep connection open
-						}
-					}
-					if msg.SquelchClose != nil {
-						// Allow -999 as special value to force squelch open, otherwise 0-50 dB range
-						if *msg.SquelchClose != -999 && (*msg.SquelchClose < 0.0 || *msg.SquelchClose > 50.0) {
-							wsh.sendError(conn, fmt.Sprintf("Invalid squelch close threshold: %.1f dB (must be -999 or 0-50 dB SNR)", *msg.SquelchClose))
-							continue // Non-fatal, keep connection open
-						}
-					}
-					// Validate relationship between open and close (if both provided)
-					if msg.SquelchOpen != nil && msg.SquelchClose != nil {
-						// Special case: -999 means force squelch open (both must be -999)
-						if *msg.SquelchOpen == -999 || *msg.SquelchClose == -999 {
-							if *msg.SquelchOpen != -999 || *msg.SquelchClose != -999 {
-								wsh.sendError(conn, "Invalid squelch: both open and close must be -999 to force squelch open")
-								continue
-							}
-							// Both are -999, this is valid
-						} else {
-							// Normal validation for non-special values
-							if *msg.SquelchOpen < *msg.SquelchClose {
-								wsh.sendError(conn, fmt.Sprintf("Invalid squelch: open threshold (%.1f dB) must be greater than or equal to close threshold (%.1f dB)", *msg.SquelchOpen, *msg.SquelchClose))
-								continue // Non-fatal, keep connection open
-							} else if *msg.SquelchOpen-*msg.SquelchClose < 1.0 && *msg.SquelchOpen-*msg.SquelchClose > 0 {
-								// Warn if hysteresis is too small (less than 1 dB but not zero)
-								log.Printf("Warning: Small squelch hysteresis (%.1f dB) may cause rapid squelch chattering", *msg.SquelchOpen-*msg.SquelchClose)
-							}
-						}
 					}
 				}
 
@@ -810,14 +768,6 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 						// Wide IQ mode - use preset bandwidth values, don't override
 						log.Printf("Using preset bandwidth for wide IQ mode after mode change: %s", newMode)
 					}
-
-					// Send squelch update after mode change if provided
-					if squelchChanged && msg.SquelchOpen != nil && msg.SquelchClose != nil {
-						if err := wsh.sessions.UpdateSquelch(currentSession.ID, *msg.SquelchOpen, *msg.SquelchClose); err != nil {
-							wsh.sendError(conn, "Failed to update squelch after mode change: "+err.Error())
-							continue
-						}
-					}
 				} else {
 					// No mode change - send frequency and/or bandwidth changes together
 					updateFreq := uint64(0)
@@ -837,14 +787,6 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					if err := wsh.sessions.UpdateSessionWithEdges(currentSession.ID, updateFreq, "", updateBandwidthLow, updateBandwidthHigh, sendBandwidth); err != nil {
 						wsh.sendError(conn, "Failed to update channel: "+err.Error())
 						continue
-					}
-
-					// Send squelch update if provided
-					if squelchChanged && msg.SquelchOpen != nil && msg.SquelchClose != nil {
-						if err := wsh.sessions.UpdateSquelch(currentSession.ID, *msg.SquelchOpen, *msg.SquelchClose); err != nil {
-							wsh.sendError(conn, "Failed to update squelch: "+err.Error())
-							continue
-						}
 					}
 				}
 

@@ -256,13 +256,8 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	// Translate mode for radiod (e.g., "fm" -> "pm")
 	radiodMode := translateModeForRadiod(mode)
 
-	// Create radiod channel with unique random SSRC, bandwidth, and default squelch
-	// Default squelch: -999 dB (force squelch always open initially)
-	// User can adjust via squelch knob to enable threshold-based squelch
+	// Create radiod channel with unique random SSRC and bandwidth
 	// For wide IQ modes (iq48, iq96, iq192, iq384), don't send bandwidth - use preset values
-	squelchOpen := float32(-999.0)
-	squelchClose := float32(-999.0)
-
 	// Check if this is a wide IQ mode
 	wideIQModes := map[string]bool{
 		"iq48": true, "iq96": true, "iq192": true, "iq384": true,
@@ -271,13 +266,13 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	if wideIQModes[mode] {
 		// Wide IQ mode - create channel without bandwidth parameter (use preset)
 		// We pass 0 for bandwidth which signals radiod to use preset values
-		if err := sm.radiod.CreateChannelWithSquelch(channelName, frequency, radiodMode, sampleRate, ssrc, 0, &squelchOpen, &squelchClose); err != nil {
+		if err := sm.radiod.CreateChannelWithBandwidth(channelName, frequency, radiodMode, sampleRate, ssrc, 0); err != nil {
 			return nil, fmt.Errorf("failed to create radiod channel: %w", err)
 		}
 		log.Printf("WIDEIQ_CREATE_CHANNEL: mode=%s channel=%s ssrc=0x%08x", mode, channelName, ssrc)
 	} else {
 		// Normal mode - create channel with specified bandwidth
-		if err := sm.radiod.CreateChannelWithSquelch(channelName, frequency, radiodMode, sampleRate, ssrc, bandwidth, &squelchOpen, &squelchClose); err != nil {
+		if err := sm.radiod.CreateChannelWithBandwidth(channelName, frequency, radiodMode, sampleRate, ssrc, bandwidth); err != nil {
 			return nil, fmt.Errorf("failed to create radiod channel: %w", err)
 		}
 	}
@@ -1088,13 +1083,13 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 	sessions := make([]map[string]interface{}, 0, len(sm.sessions))
 	for _, session := range sm.sessions {
 		session.mu.RLock()
-		
+
 		// Check if this session's IP is bypassed
 		isBypassed := sm.config.Server.IsIPTimeoutBypassed(session.ClientIP)
-		
+
 		// Check if this is an internal session (no client IP = internal system session)
 		isInternal := session.ClientIP == ""
-		
+
 		info := map[string]interface{}{
 			"id":              session.ID,
 			"channel":         session.ChannelName,

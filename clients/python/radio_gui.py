@@ -9,9 +9,11 @@ import sys
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 import queue
 import socket
+import requests
+import time
 
 # Import spectrum display
 try:
@@ -121,10 +123,27 @@ class RadioGUI:
         '10m': {'min': 28000000, 'max': 29700000}
     }
 
+    # SNR thresholds for band status (matching static/bands_state.js)
+    SNR_THRESHOLDS = {
+        'POOR': 6,      # SNR < 6 dB
+        'FAIR': 20,     # 6 <= SNR < 20 dB
+        'GOOD': 30,     # 20 <= SNR < 30 dB
+        'EXCELLENT': 30 # SNR >= 30 dB
+    }
+
+    # Colors for band status (matching static/style.css)
+    BAND_COLORS = {
+        'POOR': '#ef4444',      # Red
+        'FAIR': '#ff9800',      # Orange
+        'GOOD': '#fbbf24',      # Yellow/Amber
+        'EXCELLENT': '#22c55e', # Green
+        'UNKNOWN': '#22c55e'    # Green (default when no data, same as EXCELLENT)
+    }
+
     def __init__(self, root: tk.Tk, initial_config: dict):
         self.root = root
         self.root.title("ka9q_ubersdr Radio Client")
-        self.root.geometry("800x850")  # Increased height to better see status messages
+        self.root.geometry("800x920")  # Increased height for mode buttons and band buttons
         self.root.resizable(True, True)
 
         # Configuration
@@ -151,6 +170,11 @@ class RadioGUI:
 
         # Band buttons dictionary for highlighting
         self.band_buttons = {}
+
+        # Band state monitoring
+        self.band_states: Dict[str, str] = {}  # band_name -> status
+        self.band_state_poll_job = None
+        self.last_band_state_update = 0
 
         # Recording state
         self.recording = False
@@ -196,9 +220,36 @@ class RadioGUI:
 
     def create_widgets(self):
         """Create all GUI widgets."""
-        # Configure custom style for active band buttons
+        # Configure custom styles for band buttons
         style = ttk.Style()
-        style.configure('Active.TButton', background='green', foreground='white')
+
+        # Status-based styles (background colors based on SNR, white bold text)
+        style.configure('Poor.TButton', background=self.BAND_COLORS['POOR'], foreground='white', font=('TkDefaultFont', 9, 'bold'))
+        style.configure('Fair.TButton', background=self.BAND_COLORS['FAIR'], foreground='white', font=('TkDefaultFont', 9, 'bold'))
+        style.configure('Good.TButton', background=self.BAND_COLORS['GOOD'], foreground='white', font=('TkDefaultFont', 9, 'bold'))
+        style.configure('Excellent.TButton', background=self.BAND_COLORS['EXCELLENT'], foreground='white', font=('TkDefaultFont', 9, 'bold'))
+        style.configure('Unknown.TButton', background=self.BAND_COLORS['UNKNOWN'], foreground='white', font=('TkDefaultFont', 9, 'bold'))
+
+        # Hover styles (raised relief to "pop out")
+        style.map('Poor.TButton', background=[('active', self.BAND_COLORS['POOR'])], relief=[('active', 'raised')])
+        style.map('Fair.TButton', background=[('active', self.BAND_COLORS['FAIR'])], relief=[('active', 'raised')])
+        style.map('Good.TButton', background=[('active', self.BAND_COLORS['GOOD'])], relief=[('active', 'raised')])
+        style.map('Excellent.TButton', background=[('active', self.BAND_COLORS['EXCELLENT'])], relief=[('active', 'raised')])
+        style.map('Unknown.TButton', background=[('active', self.BAND_COLORS['UNKNOWN'])], relief=[('active', 'raised')])
+
+        # Active styles (with border for active band, white bold text)
+        style.configure('Poor.Active.TButton', background=self.BAND_COLORS['POOR'], foreground='white', font=('TkDefaultFont', 9, 'bold'), relief='solid', borderwidth=3)
+        style.configure('Fair.Active.TButton', background=self.BAND_COLORS['FAIR'], foreground='white', font=('TkDefaultFont', 9, 'bold'), relief='solid', borderwidth=3)
+        style.configure('Good.Active.TButton', background=self.BAND_COLORS['GOOD'], foreground='white', font=('TkDefaultFont', 9, 'bold'), relief='solid', borderwidth=3)
+        style.configure('Excellent.Active.TButton', background=self.BAND_COLORS['EXCELLENT'], foreground='white', font=('TkDefaultFont', 9, 'bold'), relief='solid', borderwidth=3)
+        style.configure('Unknown.Active.TButton', background=self.BAND_COLORS['UNKNOWN'], foreground='white', font=('TkDefaultFont', 9, 'bold'), relief='solid', borderwidth=3)
+
+        # Hover styles for active buttons (keep border, add raised relief)
+        style.map('Poor.Active.TButton', background=[('active', self.BAND_COLORS['POOR'])], relief=[('active', 'raised')])
+        style.map('Fair.Active.TButton', background=[('active', self.BAND_COLORS['FAIR'])], relief=[('active', 'raised')])
+        style.map('Good.Active.TButton', background=[('active', self.BAND_COLORS['GOOD'])], relief=[('active', 'raised')])
+        style.map('Excellent.Active.TButton', background=[('active', self.BAND_COLORS['EXCELLENT'])], relief=[('active', 'raised')])
+        style.map('Unknown.Active.TButton', background=[('active', self.BAND_COLORS['UNKNOWN'])], relief=[('active', 'raised')])
 
         # Main container with padding
         main_frame = ttk.Frame(self.root, padding="10")
@@ -353,39 +404,63 @@ class RadioGUI:
         bw_frame = ttk.LabelFrame(main_frame, text="Mode", padding="10")
         bw_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
 
-        # Mode selection (first row)
-        ttk.Label(bw_frame, text="Demodulation:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        # Mode selection (first row) - now using buttons instead of dropdown
+        # Create mode button styles
+        style.configure('Mode.TButton', background='#22c55e', foreground='white', font=('TkDefaultFont', 9, 'bold'))
+        style.configure('ModeActive.TButton', background='#16a34a', foreground='white', font=('TkDefaultFont', 9, 'bold'))
+        style.map('Mode.TButton', background=[('active', '#22c55e')], relief=[('active', 'raised')])
+        style.map('ModeActive.TButton', background=[('active', '#16a34a')], relief=[('active', 'raised')])
 
-        modes = ['AM', 'SAM', 'USB', 'LSB', 'FM', 'NFM', 'CWU', 'CWL', 'IQ', 'IQ (48 kHz)', 'IQ (96 kHz)', 'IQ (192 kHz)', 'IQ (384 kHz)']
+        # Mode buttons frame
+        mode_buttons_frame = ttk.Frame(bw_frame)
+        mode_buttons_frame.grid(row=0, column=0, columnspan=10, sticky=tk.W)
+
+        # Define modes with their display names
+        modes = [
+            ('AM', 'AM'), ('SAM', 'SAM'), ('USB', 'USB'), ('LSB', 'LSB'),
+            ('FM', 'FM'), ('NFM', 'NFM'), ('CWU', 'CWU'), ('CWL', 'CWL'),
+            ('IQ', 'IQ'), ('IQ48', 'IQ (48 kHz)'), ('IQ96', 'IQ (96 kHz)'),
+            ('IQ192', 'IQ (192 kHz)'), ('IQ384', 'IQ (384 kHz)')
+        ]
+
         self.mode_var = tk.StringVar(value=self.config.get('mode', 'USB').upper())
-        mode_combo = ttk.Combobox(bw_frame, textvariable=self.mode_var, values=modes,
-                                 state='readonly', width=15)
-        mode_combo.grid(row=0, column=1, sticky=tk.W, padx=(0, 10))
-        mode_combo.bind('<<ComboboxSelected>>', lambda e: self.on_mode_changed())
+        self.mode_buttons = {}
 
-        # Mode lock checkbox
+        # Create mode buttons in rows (8 on first row, rest on second)
+        for i, (mode_value, mode_display) in enumerate(modes):
+            row = i // 8  # 8 buttons on first row
+            col = i % 8
+            btn = ttk.Button(mode_buttons_frame, text=mode_display, width=10,
+                           command=lambda m=mode_value: self.select_mode(m))
+            btn.grid(row=row, column=col, padx=1, pady=1)
+            self.mode_buttons[mode_value] = btn
+
+        # Update initial button states
+        self.update_mode_buttons()
+
+        # Mode lock checkbox (moved to next row)
         self.mode_lock_var = tk.BooleanVar(value=False)
         mode_lock_check = ttk.Checkbutton(bw_frame, text="Lock", variable=self.mode_lock_var)
-        mode_lock_check.grid(row=0, column=2, sticky=tk.W, padx=(0, 10))
+        mode_lock_check.grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
 
-        # Bandwidth controls (second row)
-        ttk.Label(bw_frame, text="Low (Hz):").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
+        # Bandwidth controls (third row)
+        ttk.Label(bw_frame, text="Low (Hz):").grid(row=2, column=0, sticky=tk.W, padx=(0, 5))
         self.bw_low_var = tk.StringVar(value=str(self.config.get('bandwidth_low', 50)))
         bw_low_entry = ttk.Entry(bw_frame, textvariable=self.bw_low_var, width=10)
-        bw_low_entry.grid(row=1, column=1, sticky=tk.W, padx=(0, 20))
+        bw_low_entry.grid(row=2, column=1, sticky=tk.W, padx=(0, 20))
 
-        ttk.Label(bw_frame, text="High (Hz):").grid(row=1, column=2, sticky=tk.W, padx=(0, 5))
+        ttk.Label(bw_frame, text="High (Hz):").grid(row=2, column=2, sticky=tk.W, padx=(0, 5))
         self.bw_high_var = tk.StringVar(value=str(self.config.get('bandwidth_high', 2700)))
         bw_high_entry = ttk.Entry(bw_frame, textvariable=self.bw_high_var, width=10)
-        bw_high_entry.grid(row=1, column=3, sticky=tk.W, padx=(0, 10))
+        bw_high_entry.grid(row=2, column=3, sticky=tk.W, padx=(0, 10))
 
         self.apply_bw_btn = ttk.Button(bw_frame, text="Apply", command=self.apply_bandwidth)
-        self.apply_bw_btn.grid(row=1, column=4, sticky=tk.W)
+        self.apply_bw_btn.grid(row=2, column=4, sticky=tk.W)
         self.apply_bw_btn.state(['disabled'])
 
         # Preset bandwidth buttons (will be updated based on mode)
         self.preset_frame = ttk.Frame(bw_frame)
-        self.preset_frame.grid(row=2, column=0, columnspan=5, sticky=tk.W, pady=(5, 0))
+        self.preset_frame.grid(row=3, column=0, columnspan=5, sticky=tk.W, pady=(5, 0))
 
         ttk.Label(self.preset_frame, text="Presets:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
 
@@ -559,12 +634,12 @@ class RadioGUI:
             button_frame.pack(side=tk.TOP, pady=(5, 5))
 
             if WATERFALL_AVAILABLE:
-                waterfall_btn = ttk.Button(button_frame, text="Open Spectrum & Waterfall",
+                waterfall_btn = ttk.Button(button_frame, text="RF Spectrum",
                                           command=self.open_waterfall_window)
                 waterfall_btn.pack(side=tk.LEFT, padx=(0, 5))
 
             if AUDIO_SPECTRUM_AVAILABLE:
-                self.audio_spectrum_btn = ttk.Button(button_frame, text="Open Audio",
+                self.audio_spectrum_btn = ttk.Button(button_frame, text="Audio Spectrum",
                                       command=self.open_audio_spectrum_window)
                 self.audio_spectrum_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
@@ -572,7 +647,7 @@ class RadioGUI:
 
             # Digital spots button (conditionally shown based on server capability)
             if DIGITAL_SPOTS_AVAILABLE:
-                self.digital_spots_btn = ttk.Button(button_frame, text="Open Digital Spots",
+                self.digital_spots_btn = ttk.Button(button_frame, text="Digital Spots",
                                       command=self.open_digital_spots_window)
                 # Don't pack yet - will be shown after connection if server supports it
             else:
@@ -580,7 +655,7 @@ class RadioGUI:
 
             # CW spots button (conditionally shown based on server capability)
             if CW_SPOTS_AVAILABLE:
-                self.cw_spots_btn = ttk.Button(button_frame, text="Open CW Spots",
+                self.cw_spots_btn = ttk.Button(button_frame, text="CW Spots",
                                          command=self.open_cw_spots_window)
                 # Don't pack yet - will be shown after connection if server supports it
             else:
@@ -801,13 +876,21 @@ class RadioGUI:
         for band_name, button in self.band_buttons.items():
             if band_name in self.BAND_RANGES:
                 band_range = self.BAND_RANGES[band_name]
-                if band_range['min'] <= freq_hz <= band_range['max']:
-                    # Frequency is within this band - highlight with green background and white text
-                    button.configure(style='Active.TButton')
+                is_active = band_range['min'] <= freq_hz <= band_range['max']
+
+                if is_active:
                     current_band = band_name
+
+                # Get band status (SNR-based color)
+                status = self.band_states.get(band_name, 'UNKNOWN')
+
+                # Apply style based on status and active state
+                if is_active:
+                    # Active band: use status color with border
+                    button.configure(style=f'{status.capitalize()}.Active.TButton')
                 else:
-                    # Frequency is outside this band - use default style
-                    button.configure(style='TButton')
+                    # Inactive band: use status color without border
+                    button.configure(style=f'{status.capitalize()}.TButton')
 
         # Update band filter in digital spots window if open
         if self.digital_spots_display and current_band:
@@ -818,6 +901,233 @@ class RadioGUI:
         if self.cw_spots_display and current_band:
             self.cw_spots_display.band_var.set(current_band)
             self.cw_spots_display.apply_filters()
+
+    def fetch_band_states(self):
+        """Fetch band states from the noise floor aggregate API and update button colors."""
+        if not self.connected:
+            self.log_status("DEBUG: fetch_band_states called but not connected")
+            return
+
+        try:
+            from datetime import datetime, timedelta
+            
+            # Get server URL
+            server = self.server_var.get()
+            use_tls = self.tls_var.get()
+
+            # Build API URL
+            if '://' in server:
+                # Full URL provided
+                base_url = server
+            else:
+                # Host:port format
+                protocol = 'https' if use_tls else 'http'
+                base_url = f"{protocol}://{server}"
+
+            # Use /api/noisefloor/aggregate endpoint (matching bands_state.js)
+            api_url = f"{base_url}/api/noisefloor/aggregate"
+
+            # Get the previous 10 minutes time range in UTC (matching bands_state.js)
+            now = datetime.utcnow()
+            to_time = now.isoformat() + 'Z'
+            from_time = (now - timedelta(minutes=10)).isoformat() + 'Z'
+            
+            # Build request body (matching bands_state.js format)
+            request_body = {
+                'primary': {
+                    'from': from_time,
+                    'to': to_time
+                },
+                'bands': list(self.BAND_RANGES.keys()),
+                'fields': ['ft8_snr'],
+                'interval': 'minute'
+            }
+
+            self.log_status(f"Fetching band states from {api_url}")
+
+            # POST request with JSON body
+            response = requests.post(
+                api_url,
+                json=request_body,
+                headers={'Content-Type': 'application/json'},
+                timeout=5
+            )
+
+            response.raise_for_status()
+            data = response.json()
+
+            if not data or 'primary' not in data:
+                self.log_status("No band data available")
+                return
+
+            self.log_status(f"Band state data received")
+
+            # Process band data (aggregate format)
+            self.process_band_data_aggregate(data)
+
+            # Update last update time
+            self.last_band_state_update = time.time()
+
+        except requests.exceptions.RequestException as e:
+            # Log connection errors for debugging
+            self.log_status(f"Band state fetch error: {e}")
+        except Exception as e:
+            # Log unexpected errors
+            self.log_status(f"Band state update error: {e}")
+
+    def process_band_data(self, data: dict):
+        """Process noise floor data and determine band status.
+
+        Args:
+            data: Noise floor latest data from API (format: {band_name: {ft8_snr: value, ...}})
+        """
+        # Process each band
+        for band_name in self.BAND_RANGES.keys():
+            # Get band data from API response
+            band_data = data.get(band_name, {})
+
+            if not band_data or 'ft8_snr' not in band_data:
+                # No data for this band - treat as UNKNOWN (green)
+                self.band_states[band_name] = 'UNKNOWN'
+                continue
+
+            # Get the FT8 SNR value directly (latest endpoint returns single value per band)
+            snr = band_data.get('ft8_snr')
+
+            if snr is None or snr <= 0:
+                # No valid SNR data - treat as UNKNOWN (green)
+                self.band_states[band_name] = 'UNKNOWN'
+                continue
+
+            # Determine status based on SNR thresholds (matching bandconditions.js logic)
+            if snr < self.SNR_THRESHOLDS['POOR']:
+                status = 'POOR'
+            elif snr < self.SNR_THRESHOLDS['FAIR']:
+                status = 'FAIR'
+            elif snr < self.SNR_THRESHOLDS['GOOD']:
+                status = 'GOOD'
+            else:
+                status = 'EXCELLENT'
+
+            self.band_states[band_name] = status
+            self.log_status(f"{band_name}: {status} ({snr:.1f} dB)")
+
+        # Update button colors
+        try:
+            current_freq = self.get_frequency_hz()
+            self.update_band_buttons(current_freq)
+        except ValueError:
+            # If frequency is invalid, just update all buttons without active state
+            for band_name, button in self.band_buttons.items():
+                status = self.band_states.get(band_name, 'UNKNOWN')
+                button.configure(style=f'{status.capitalize()}.TButton')
+
+    def process_band_data_aggregate(self, data: dict):
+        """Process aggregate noise floor data and determine band status.
+
+        Args:
+            data: Aggregate API response with format: {primary: {band_name: [{timestamp, values: {ft8_snr: ...}}]}}
+        """
+        primary_data = data.get('primary', {})
+
+        # Process each band
+        for band_name in self.BAND_RANGES.keys():
+            band_data = primary_data.get(band_name, [])
+
+            if not band_data or len(band_data) == 0:
+                # No data for this band - treat as UNKNOWN (green)
+                self.band_states[band_name] = 'UNKNOWN'
+                continue
+
+            # Calculate average SNR across all data points in the 10-minute window
+            # (matching bands_state.js processBandData logic)
+            total_snr = 0
+            total_samples = 0
+
+            for data_point in band_data:
+                values = data_point.get('values', {})
+                snr = values.get('ft8_snr')
+
+                if snr is not None and snr > 0:
+                    total_snr += snr
+                    total_samples += 1
+
+            if total_samples == 0:
+                # No valid SNR data - treat as UNKNOWN (green)
+                self.band_states[band_name] = 'UNKNOWN'
+                continue
+
+            # Calculate average SNR
+            avg_snr = total_snr / total_samples
+
+            # Determine status based on SNR thresholds (matching bands_state.js logic)
+            if avg_snr < self.SNR_THRESHOLDS['POOR']:
+                status = 'POOR'
+            elif avg_snr < self.SNR_THRESHOLDS['FAIR']:
+                status = 'FAIR'
+            elif avg_snr < self.SNR_THRESHOLDS['GOOD']:
+                status = 'GOOD'
+            else:
+                status = 'EXCELLENT'
+
+            self.band_states[band_name] = status
+            self.log_status(f"{band_name}: {status} ({avg_snr:.1f} dB)")
+
+        # Update button colors
+        try:
+            current_freq = self.get_frequency_hz()
+            self.update_band_buttons(current_freq)
+        except ValueError:
+            # If frequency is invalid, just update all buttons without active state
+            for band_name, button in self.band_buttons.items():
+                status = self.band_states.get(band_name, 'UNKNOWN')
+                button.configure(style=f'{status.capitalize()}.TButton')
+
+    def start_band_state_polling(self):
+        """Start periodic polling of band states (every 60 seconds)."""
+        self.log_status(f"start_band_state_polling called, connected={self.connected}")
+
+        if not self.connected:
+            self.log_status("Band state polling skipped - not connected")
+            return
+
+        self.log_status("Starting band state polling...")
+
+        # Fetch immediately on start
+        self.fetch_band_states()
+
+        # Schedule next poll in 60 seconds
+        self.band_state_poll_job = self.root.after(60000, self.poll_band_states)
+
+    def poll_band_states(self):
+        """Poll band states periodically."""
+        if not self.connected:
+            return
+
+        # Fetch band states
+        self.fetch_band_states()
+
+        # Schedule next poll in 60 seconds
+        self.band_state_poll_job = self.root.after(60000, self.poll_band_states)
+
+    def stop_band_state_polling(self):
+        """Stop periodic polling of band states."""
+        if self.band_state_poll_job:
+            self.root.after_cancel(self.band_state_poll_job)
+            self.band_state_poll_job = None
+
+        # Reset band states to UNKNOWN
+        for band_name in self.BAND_RANGES.keys():
+            self.band_states[band_name] = 'UNKNOWN'
+
+        # Update button colors
+        try:
+            current_freq = self.get_frequency_hz()
+            self.update_band_buttons(current_freq)
+        except ValueError:
+            # If frequency is invalid, just update all buttons
+            for band_name, button in self.band_buttons.items():
+                button.configure(style='Unknown.TButton')
 
     def apply_frequency(self):
         """Apply frequency change by sending tune message."""
@@ -893,10 +1203,34 @@ class RadioGUI:
             mode = mode_display.lower()
         return mode
 
+    def select_mode(self, mode_value: str):
+        """Handle mode button click."""
+        # Update mode variable
+        self.mode_var.set(mode_value)
+        
+        # Update button states
+        self.update_mode_buttons()
+        
+        # Trigger mode change handler
+        self.on_mode_changed()
+
+    def update_mode_buttons(self):
+        """Update mode button styles based on current selection."""
+        current_mode = self.mode_var.get().upper()
+        
+        for mode_value, button in self.mode_buttons.items():
+            if mode_value.upper() == current_mode:
+                button.configure(style='ModeActive.TButton')
+            else:
+                button.configure(style='Mode.TButton')
+
     def on_mode_changed(self, skip_apply=False):
-        """Handle mode change from dropdown - updates bandwidth and presets immediately."""
+        """Handle mode change - updates bandwidth and presets immediately."""
         mode_display = self.mode_var.get()
         mode = self._parse_mode_name(mode_display)
+        
+        # Update mode button styles
+        self.update_mode_buttons()
 
         # Check if this is an IQ mode
         is_iq_mode = mode in ['iq', 'iq48', 'iq96', 'iq192', 'iq384']
@@ -2076,6 +2410,9 @@ class RadioGUI:
             self.client.running = False
             self.log_status("Disconnecting...")
 
+        # Stop band state polling
+        self.stop_band_state_polling()
+
         # Disconnect spectrum display
         if self.spectrum:
             self.spectrum.disconnect()
@@ -2242,6 +2579,11 @@ class RadioGUI:
                             # Add 2000ms delay (same as spectrum) before connecting DX cluster WebSocket
                             if CW_SPOTS_AVAILABLE and desc.get('cw_skimmer', False):
                                 self.root.after(2800, self.auto_open_cw_spots)
+
+                        # Start band state polling after connection is established
+                        # Add delay to allow other connections to establish first
+                        self.root.after(3000, self.start_band_state_polling)
+
                 elif msg_type == "error":
                     self.log_status(f"ERROR: {msg}")
                 elif msg_type == "server_error":

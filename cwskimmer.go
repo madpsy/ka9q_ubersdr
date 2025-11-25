@@ -618,10 +618,11 @@ func (c *CWSkimmerClient) resetInactivityTimer() {
 
 // checkInactivity checks if the connection has been inactive and triggers reconnection
 func (c *CWSkimmerClient) checkInactivity() {
-	c.mu.RLock()
+	c.mu.Lock()
 	lastActivity := c.lastActivityTime
 	connected := c.connected
-	c.mu.RUnlock()
+	conn := c.conn
+	c.mu.Unlock()
 
 	if !connected {
 		return
@@ -631,7 +632,11 @@ func (c *CWSkimmerClient) checkInactivity() {
 	inactiveDuration := time.Since(lastActivity)
 	if inactiveDuration >= 5*time.Minute {
 		log.Printf("CW Skimmer: No activity for %v, reconnecting", inactiveDuration)
-		c.disconnect()
+		// Force close the connection to trigger reconnection
+		// This will cause the read in handleConnection to fail and exit
+		if conn != nil {
+			conn.Close()
+		}
 	}
 }
 

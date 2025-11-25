@@ -42,6 +42,7 @@ class SpectrumDisplay:
         self.bin_count: int = 0
         self.bin_bandwidth: float = 0
         self.total_bandwidth: float = 0
+        self.initial_bin_bandwidth: float = 0  # Store initial for zoom calculations
         
         # Current tuned frequency and bandwidth (for filter visualization)
         self.tuned_freq: float = 0
@@ -50,6 +51,10 @@ class SpectrumDisplay:
         
         # Frequency step size for click-to-tune snapping (in Hz)
         self.step_size_hz: int = 1000  # Default 1 kHz
+        
+        # Zoom state
+        self.zoom_level: float = 1.0  # 1.0 = no zoom, 2.0 = 2x zoom, etc.
+        self.scroll_mode: str = 'zoom'  # 'zoom' or 'pan'
         
         # WebSocket connection
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
@@ -83,7 +88,7 @@ class SpectrumDisplay:
         # Mouse interaction
         self.canvas.bind('<Button-1>', self.on_click)
         self.canvas.bind('<Motion>', self.on_motion)
-        # Mouse wheel for frequency stepping (Linux/Windows)
+        # Mouse wheel for zoom/pan (Linux/Windows)
         self.canvas.bind('<Button-4>', self.on_scroll_up)  # Linux scroll up
         self.canvas.bind('<Button-5>', self.on_scroll_down)  # Linux scroll down
         self.canvas.bind('<MouseWheel>', self.on_mousewheel)  # Windows/Mac
@@ -106,7 +111,7 @@ class SpectrumDisplay:
         
         Args:
             server_url: Server URL (e.g., 'localhost:8080' or 'http://server:8080')
-            frequency: Initial center frequency in Hz
+            frequency: Initial tuned frequency in Hz (where we're listening)
             user_session_id: User session ID (same as audio channel UUID)
             use_tls: Whether to use WSS (WebSocket Secure) instead of WS
         """
@@ -134,7 +139,9 @@ class SpectrumDisplay:
             ws_url = f'{ws_url}?{params}'
         
         self.ws_url = ws_url
-        self.center_freq = frequency
+        # Store the tuned frequency (where we're listening)
+        # center_freq will be updated from server's config messages
+        self.tuned_freq = frequency
         self.running = True
         
         # Start WebSocket thread
@@ -213,18 +220,32 @@ class SpectrumDisplay:
                 self.bin_bandwidth = data.get('binBandwidth', 0)
                 self.total_bandwidth = data.get('totalBandwidth', 0)
                 
+                # CRITICAL: Update center_freq from server's config
+                # The server tells us where the spectrum is actually centered
+                self.center_freq = server_center_freq
+                
+                # Store initial bin bandwidth for zoom calculations
+                if self.initial_bin_bandwidth == 0:
+                    self.initial_bin_bandwidth = self.bin_bandwidth
+                
+                # Update zoom level based on current vs initial bandwidth
+                if self.initial_bin_bandwidth > 0:
+                    self.zoom_level = self.initial_bin_bandwidth / self.bin_bandwidth
+                
                 # Debug: Print what we received
-                print(f"Spectrum config received: {self.bin_count} bins @ {self.bin_bandwidth:.2f} Hz/bin = {self.total_bandwidth/1000:.1f} KHz total")
-                print(f"Server center freq: {server_center_freq/1e6:.6f} MHz, Desired center freq: {self.center_freq/1e6:.6f} MHz")
+                print(f"Spectrum config received: {self.bin_count} bins @ {self.bin_bandwidth:.2f} Hz/bin = {self.total_bandwidth/1000:.1f} KHz total (zoom {self.zoom_level:.2f}x)")
+                print(f"Server center freq: {server_center_freq/1e6:.6f} MHz, Client center freq: {self.center_freq/1e6:.6f} MHz")
                 
                 # If this is the first config (bin_count was 0), send zoom command for 200 KHz
-                # Use our desired center_freq, not the server's default
+                # Use the tuned frequency (where we're listening), not the server's default center
                 if old_bin_count == 0 and self.bin_count > 0:
                     # Calculate binBandwidth for 200 KHz total bandwidth
                     desired_bandwidth = 200000  # 200 KHz
                     bin_bandwidth = desired_bandwidth / self.bin_count
-                    print(f"Sending initial zoom: {desired_bandwidth/1000:.1f} KHz ({bin_bandwidth:.2f} Hz/bin with {self.bin_count} bins) at {self.center_freq/1e6:.6f} MHz")
-                    await self._send_zoom_command(self.center_freq, desired_bandwidth)
+                    # Use tuned_freq if set, otherwise fall back to center_freq
+                    zoom_freq = self.tuned_freq if self.tuned_freq != 0 else self.center_freq
+                    print(f"Sending initial zoom: {desired_bandwidth/1000:.1f} KHz ({bin_bandwidth:.2f} Hz/bin with {self.bin_count} bins) at {zoom_freq/1e6:.6f} MHz")
+                    await self._send_zoom_command(zoom_freq, desired_bandwidth)
                 
             elif msg_type == 'spectrum':
                 # Spectrum data update
@@ -288,20 +309,33 @@ class SpectrumDisplay:
         await self.ws.send(json.dumps(command))
     
     def update_center_frequency(self, frequency: float):
-        """Update spectrum center frequency.
+        """Update tuned frequency and pan spectrum if zoomed in.
         
         Args:
-            frequency: New center frequency in Hz
+            frequency: New tuned frequency in Hz
         """
-        self.center_freq = frequency
+        # Constrain frequency to valid range (100 kHz - 30 MHz)
+        frequency = max(100000, min(30000000, frequency))
+        
+        # Update tuned frequency (this is what we're listening to)
         self.tuned_freq = frequency
         
-        # Send pan command if connected
+        # If zoomed in (not at full bandwidth), pan to follow the tuned frequency
+        # This keeps the tuned frequency visible when zoomed in
         if self.connected and self.event_loop and self.event_loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                self._send_pan_command(frequency),
-                self.event_loop
-            )
+            if self.initial_bin_bandwidth > 0 and self.bin_bandwidth < self.initial_bin_bandwidth:
+                # We're zoomed in - pan to follow tuned frequency
+                # Constrain to keep view within 100 kHz - 30 MHz
+                if self.total_bandwidth > 0:
+                    half_bandwidth = self.total_bandwidth / 2
+                    min_center = 100000 + half_bandwidth
+                    max_center = 30000000 - half_bandwidth
+                    pan_center = max(min_center, min(max_center, frequency))
+                    
+                    asyncio.run_coroutine_threadsafe(
+                        self._send_pan_command(pan_center),
+                        self.event_loop
+                    )
     
     def update_bandwidth(self, low: int, high: int):
         """Update filter bandwidth for visualization.
@@ -444,8 +478,21 @@ class SpectrumDisplay:
                                text="dB", fill='white', font=('monospace', 9, 'bold'))
     
     def _draw_center_marker(self):
-        """Draw marker at center frequency."""
-        x = self.margin_left + self.graph_width / 2
+        """Draw marker at tuned frequency."""
+        if self.tuned_freq == 0 or self.total_bandwidth == 0:
+            return
+        
+        # Calculate position of tuned frequency in current view
+        start_freq = self.center_freq - self.total_bandwidth / 2
+        end_freq = self.center_freq + self.total_bandwidth / 2
+        
+        # Check if tuned frequency is visible in current view
+        if self.tuned_freq < start_freq or self.tuned_freq > end_freq:
+            return  # Tuned frequency is outside visible range
+        
+        # Calculate x position for tuned frequency
+        freq_offset = self.tuned_freq - start_freq
+        x = self.margin_left + (freq_offset / self.total_bandwidth) * self.graph_width
         
         # Draw vertical line
         self.canvas.create_line(x, self.margin_top,
@@ -453,7 +500,7 @@ class SpectrumDisplay:
                                fill='orange', width=2, dash=(5, 5))
         
         # Draw frequency label
-        freq_mhz = self.center_freq / 1e6
+        freq_mhz = self.tuned_freq / 1e6
         self.canvas.create_text(x, self.margin_top - 10,
                                text=f"{freq_mhz:.6f} MHz",
                                fill='orange', font=('monospace', 10, 'bold'))
@@ -527,7 +574,9 @@ class SpectrumDisplay:
         Args:
             event: Mouse event
         """
-        if self.frequency_step_callback:
+        if self.scroll_mode == 'zoom':
+            self.zoom_in()
+        elif self.frequency_step_callback:
             self.frequency_step_callback(1)  # Step up
     
     def on_scroll_down(self, event):
@@ -536,7 +585,9 @@ class SpectrumDisplay:
         Args:
             event: Mouse event
         """
-        if self.frequency_step_callback:
+        if self.scroll_mode == 'zoom':
+            self.zoom_out()
+        elif self.frequency_step_callback:
             self.frequency_step_callback(-1)  # Step down
     
     def on_mousewheel(self, event):
@@ -545,7 +596,12 @@ class SpectrumDisplay:
         Args:
             event: Mouse event
         """
-        if self.frequency_step_callback:
+        if self.scroll_mode == 'zoom':
+            if event.delta > 0:
+                self.zoom_in()
+            else:
+                self.zoom_out()
+        elif self.frequency_step_callback:
             # event.delta is positive for scroll up, negative for scroll down
             direction = 1 if event.delta > 0 else -1
             self.frequency_step_callback(direction)
@@ -689,3 +745,117 @@ class SpectrumDisplay:
             step_hz: Step size in Hz
         """
         self.step_size_hz = step_hz
+    
+    def set_scroll_mode(self, mode: str):
+        """Set scroll mode to 'zoom' or 'pan'.
+        
+        Args:
+            mode: Either 'zoom' or 'pan'
+        """
+        if mode in ['zoom', 'pan']:
+            self.scroll_mode = mode
+            print(f"Spectrum scroll mode set to: {mode}")
+    
+    def zoom_in(self):
+        """Zoom in by 2x (halve the bandwidth)."""
+        if not self.connected or not self.ws or self.bin_count == 0:
+            return
+        
+        # Halve the bin bandwidth = half the total bandwidth = 2x zoom
+        new_bin_bandwidth = self.bin_bandwidth / 2
+        
+        # Minimum practical limit - let server enforce its own limits
+        # Server will adjust bin_count or bandwidth as needed
+        if new_bin_bandwidth < 1:
+            print(f"Maximum zoom reached (1 Hz/bin minimum)")
+            return
+        
+        # Calculate new total bandwidth
+        new_total_bandwidth = new_bin_bandwidth * self.bin_count
+        
+        # Always center on current tuned frequency (this is where we're listening)
+        # If tuned_freq is not set, use center_freq as fallback
+        zoom_center = self.tuned_freq if self.tuned_freq != 0 else self.center_freq
+        
+        # Debug: Show what we're zooming to
+        print(f"Zooming to {zoom_center/1e6:.6f} MHz (tuned_freq: {self.tuned_freq/1e6:.6f} MHz)")
+        
+        # Constrain center frequency to keep view within 100 kHz - 30 MHz
+        half_bandwidth = new_total_bandwidth / 2
+        min_center = 100000 + half_bandwidth  # 100 kHz + half bandwidth
+        max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
+        zoom_center = max(min_center, min(max_center, zoom_center))
+        
+        print(f"Zoom in: {self.total_bandwidth/1000:.1f} KHz -> {new_total_bandwidth/1000:.1f} KHz ({new_bin_bandwidth:.2f} Hz/bin)")
+        
+        if self.event_loop and self.event_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self._send_zoom_command(zoom_center, new_total_bandwidth),
+                self.event_loop
+            )
+    
+    def zoom_out(self):
+        """Zoom out by 2x (double the bandwidth)."""
+        if not self.connected or not self.ws or self.bin_count == 0:
+            return
+        
+        # Minimum 1x zoom (can't zoom out past initial bandwidth)
+        if self.initial_bin_bandwidth > 0 and self.bin_bandwidth >= self.initial_bin_bandwidth:
+            print("Already at full bandwidth")
+            return
+        
+        # Double the bin bandwidth = double the total bandwidth = 0.5x zoom
+        new_bin_bandwidth = self.bin_bandwidth * 2
+        
+        # Don't zoom out past initial bandwidth
+        if self.initial_bin_bandwidth > 0 and new_bin_bandwidth > self.initial_bin_bandwidth:
+            new_bin_bandwidth = self.initial_bin_bandwidth
+        
+        # Calculate new total bandwidth
+        new_total_bandwidth = new_bin_bandwidth * self.bin_count
+        
+        # Always center on current tuned frequency (this is where we're listening)
+        # If tuned_freq is not set, use center_freq as fallback
+        zoom_center = self.tuned_freq if self.tuned_freq != 0 else self.center_freq
+        
+        # Debug: Show what we're zooming to
+        print(f"Zooming to {zoom_center/1e6:.6f} MHz (tuned_freq: {self.tuned_freq/1e6:.6f} MHz)")
+        
+        # Constrain center frequency to keep view within 100 kHz - 30 MHz
+        half_bandwidth = new_total_bandwidth / 2
+        min_center = 100000 + half_bandwidth  # 100 kHz + half bandwidth
+        max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
+        zoom_center = max(min_center, min(max_center, zoom_center))
+        
+        print(f"Zoom out: {self.total_bandwidth/1000:.1f} KHz -> {new_total_bandwidth/1000:.1f} KHz ({new_bin_bandwidth:.2f} Hz/bin)")
+        
+        if self.event_loop and self.event_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self._send_zoom_command(zoom_center, new_total_bandwidth),
+                self.event_loop
+            )
+    
+    def reset_zoom(self):
+        """Reset zoom to initial bandwidth (200 KHz default)."""
+        if not self.connected or not self.ws or self.bin_count == 0:
+            return
+        
+        # Reset to 200 KHz
+        desired_bandwidth = 200000  # 200 KHz
+        
+        # Center on current tuned frequency or spectrum center
+        zoom_center = self.tuned_freq if self.tuned_freq != 0 else self.center_freq
+        
+        # Constrain center frequency to keep view within 100 kHz - 30 MHz
+        half_bandwidth = desired_bandwidth / 2
+        min_center = 100000 + half_bandwidth  # 100 kHz + half bandwidth
+        max_center = 30000000 - half_bandwidth  # 30 MHz - half bandwidth
+        zoom_center = max(min_center, min(max_center, zoom_center))
+        
+        print(f"Reset zoom to {desired_bandwidth/1000:.1f} KHz")
+        
+        if self.event_loop and self.event_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self._send_zoom_command(zoom_center, desired_bandwidth),
+                self.event_loop
+            )

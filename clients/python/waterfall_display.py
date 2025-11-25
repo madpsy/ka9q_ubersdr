@@ -55,12 +55,15 @@ class WaterfallDisplay:
         # Frequency step size for click-to-tune snapping (in Hz)
         self.step_size_hz: int = 1000  # Default 1 kHz
         
+        # Scroll mode (zoom or pan) - delegates to spectrum display
+        self.scroll_mode: str = 'zoom'  # 'zoom' or 'pan'
+        
         # Frequency change callback
         self.frequency_callback: Optional[Callable[[float], None]] = None
         self.frequency_step_callback: Optional[Callable[[int], None]] = None
         
         # Drawing parameters
-        self.margin_top = 30
+        self.margin_top = 40
         self.margin_bottom = 10
         self.margin_left = 50
         self.margin_right = 20
@@ -303,12 +306,13 @@ class WaterfallDisplay:
             self.canvas.create_text(x, self.margin_top - 15,
                                    text=label, fill='white', font=('monospace', 9))
         
-        # Draw center frequency marker
+        # Draw tuned frequency marker (with padding from top)
+        # Show the actual listening frequency, not the spectrum center
         x = self.margin_left + self.waterfall_width / 2
-        freq_mhz = center_freq / 1e6
-        self.canvas.create_text(x, 5,
-                               text=f"{freq_mhz:.6f} MHz",
-                               fill='orange', font=('monospace', 10, 'bold'))
+        freq_mhz = self.tuned_freq / 1e6 if self.tuned_freq != 0 else center_freq / 1e6
+        self.canvas.create_text(x, 8,
+                                text=f"{freq_mhz:.6f} MHz",
+                                fill='orange', font=('monospace', 10, 'bold'))
     
     def _draw_bandwidth_filter(self):
         """Draw bandwidth filter visualization with yellow overlay."""
@@ -375,17 +379,26 @@ class WaterfallDisplay:
     
     def on_scroll_up(self, event):
         """Handle mouse scroll up (Linux)."""
-        if self.frequency_step_callback:
+        if self.scroll_mode == 'zoom' and self.spectrum_display:
+            self.spectrum_display.zoom_in()
+        elif self.frequency_step_callback:
             self.frequency_step_callback(1)
     
     def on_scroll_down(self, event):
         """Handle mouse scroll down (Linux)."""
-        if self.frequency_step_callback:
+        if self.scroll_mode == 'zoom' and self.spectrum_display:
+            self.spectrum_display.zoom_out()
+        elif self.frequency_step_callback:
             self.frequency_step_callback(-1)
     
     def on_mousewheel(self, event):
         """Handle mouse wheel (Windows/Mac)."""
-        if self.frequency_step_callback:
+        if self.scroll_mode == 'zoom' and self.spectrum_display:
+            if event.delta > 0:
+                self.spectrum_display.zoom_in()
+            else:
+                self.spectrum_display.zoom_out()
+        elif self.frequency_step_callback:
             direction = 1 if event.delta > 0 else -1
             self.frequency_step_callback(direction)
     
@@ -505,6 +518,16 @@ class WaterfallDisplay:
     def set_step_size(self, step_hz: int):
         """Set frequency step size for click-to-tune snapping."""
         self.step_size_hz = step_hz
+    
+    def set_scroll_mode(self, mode: str):
+        """Set scroll mode to 'zoom' or 'pan'.
+        
+        Args:
+            mode: Either 'zoom' or 'pan'
+        """
+        if mode in ['zoom', 'pan']:
+            self.scroll_mode = mode
+            print(f"Waterfall scroll mode set to: {mode}")
 
 
 def create_waterfall_window(parent_gui):

@@ -382,7 +382,7 @@ class RadioGUI:
             except ValueError:
                 pass  # Use defaults if values are invalid
 
-            # Add waterfall and audio spectrum buttons
+            # Add waterfall and audio spectrum buttons, plus scroll mode selector
             button_frame = ttk.Frame(spectrum_frame)
             button_frame.pack(side=tk.TOP, pady=(0, 5))
             
@@ -394,7 +394,19 @@ class RadioGUI:
             if AUDIO_SPECTRUM_AVAILABLE:
                 audio_btn = ttk.Button(button_frame, text="Open Audio",
                                       command=self.open_audio_spectrum_window)
-                audio_btn.pack(side=tk.LEFT)
+                audio_btn.pack(side=tk.LEFT, padx=(0, 15))
+            
+            # Scroll mode selector (zoom vs pan)
+            ttk.Label(button_frame, text="Scroll:").pack(side=tk.LEFT, padx=(0, 5))
+            
+            self.scroll_mode_var = tk.StringVar(value="zoom")
+            zoom_radio = ttk.Radiobutton(button_frame, text="Zoom", variable=self.scroll_mode_var,
+                                        value="zoom", command=self.on_scroll_mode_changed)
+            zoom_radio.pack(side=tk.LEFT, padx=(0, 5))
+            
+            pan_radio = ttk.Radiobutton(button_frame, text="Pan", variable=self.scroll_mode_var,
+                                       value="pan", command=self.on_scroll_mode_changed)
+            pan_radio.pack(side=tk.LEFT)
 
             spectrum_frame.columnconfigure(0, weight=1)
             spectrum_frame.rowconfigure(0, weight=1)
@@ -906,6 +918,20 @@ class RadioGUI:
                 self.apply_frequency()
         except ValueError:
             pass
+    
+    def on_scroll_mode_changed(self):
+        """Handle scroll mode change (zoom vs pan)."""
+        mode = self.scroll_mode_var.get()
+        
+        # Update spectrum display scroll mode
+        if self.spectrum:
+            self.spectrum.set_scroll_mode(mode)
+        
+        # Update waterfall display scroll mode
+        if self.waterfall_display:
+            self.waterfall_display.set_scroll_mode(mode)
+        
+        self.log_status(f"Scroll mode: {mode}")
 
     def auto_open_waterfall(self):
         """Automatically open waterfall window on connection (no error dialogs)."""

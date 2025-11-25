@@ -131,6 +131,7 @@ class RadioClient:
         self.start_time = None
         self.sample_rate = 12000  # Default, will be updated from server
         self.ws = None  # WebSocket connection reference for sending messages
+        self.server_description = {}  # Server description from /api/description
 
         # FIFO (named pipe) output
         self.fifo_path = fifo_path
@@ -510,6 +511,38 @@ class RadioClient:
                 print(f"Keepalive error: {e}", file=sys.stderr)
                 break
     
+    async def fetch_description(self) -> dict:
+        """Fetch server description from /api/description endpoint."""
+        # Build HTTP URL for description
+        protocol = 'https' if self.ssl else 'http'
+        
+        if self.url:
+            # Extract host and port from WebSocket URL
+            parsed = urlparse(self.url)
+            host = parsed.hostname
+            port = parsed.port or (443 if parsed.scheme == 'wss' else 80)
+        else:
+            host = self.host
+            port = self.port
+        
+        http_url = f"{protocol}://{host}:{port}/api/description"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    http_url,
+                    headers={
+                        'User-Agent': 'UberSDR Client 1.0 (python)'
+                    },
+                    ssl=False if not self.ssl else None
+                ) as response:
+                    data = await response.json()
+                    return data
+                    
+        except Exception as e:
+            print(f"Failed to fetch description: {e}", file=sys.stderr)
+            return {}
+    
     async def check_connection_allowed(self) -> bool:
         """Check if connection is allowed via /connection endpoint."""
         # Build HTTP URL for connection check
@@ -565,7 +598,16 @@ class RadioClient:
         # Check if connection is allowed before attempting WebSocket connection
         if not await self.check_connection_allowed():
             return 1
-        
+
+        # Fetch server description
+        description = await self.fetch_description()
+        if description:
+            # Store description data for GUI access
+            self.server_description = description
+            receiver_name = description.get('receiver', {}).get('name', '')
+            if receiver_name:
+                self._log(f"Receiver: {receiver_name}")
+
         url = self.build_websocket_url()
         self._log(f"Connecting to {url}")
         self._log(f"Frequency: {self.frequency} Hz, Mode: {self.mode}")

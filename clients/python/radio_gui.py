@@ -182,6 +182,13 @@ class RadioGUI:
         self.cancel_btn.grid(row=0, column=4)
         self.cancel_btn.grid_remove()  # Hide initially
         
+        # Receiver name label (second row, initially hidden)
+        ttk.Label(conn_frame, text="Receiver:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
+        self.receiver_name_var = tk.StringVar(value="")
+        self.receiver_name_label = ttk.Label(conn_frame, textvariable=self.receiver_name_var, foreground='blue')
+        self.receiver_name_label.grid(row=1, column=1, columnspan=4, sticky=tk.W)
+        self.receiver_name_label.grid_remove()  # Hide initially until connected
+        
         conn_frame.columnconfigure(1, weight=1)
         
         # Frequency control frame
@@ -431,18 +438,24 @@ class RadioGUI:
                                       command=self.open_audio_spectrum_window)
                 audio_btn.pack(side=tk.LEFT, padx=(0, 5))
 
+            # Digital spots button (conditionally shown based on server capability)
             if DIGITAL_SPOTS_AVAILABLE:
-                spots_btn = ttk.Button(button_frame, text="Open Digital Spots",
+                self.digital_spots_btn = ttk.Button(button_frame, text="Open Digital Spots",
                                       command=self.open_digital_spots_window)
-                spots_btn.pack(side=tk.LEFT, padx=(0, 5))
+                # Don't pack yet - will be shown after connection if server supports it
+            else:
+                self.digital_spots_btn = None
             
+            # CW spots button (conditionally shown based on server capability)
             if CW_SPOTS_AVAILABLE:
-                cw_spots_btn = ttk.Button(button_frame, text="Open CW Spots",
+                self.cw_spots_btn = ttk.Button(button_frame, text="Open CW Spots",
                                          command=self.open_cw_spots_window)
-                cw_spots_btn.pack(side=tk.LEFT, padx=(0, 15))
+                # Don't pack yet - will be shown after connection if server supports it
+            else:
+                self.cw_spots_btn = None
             
-            # Scroll mode selector (zoom vs pan)
-            ttk.Label(button_frame, text="Scroll:").pack(side=tk.LEFT, padx=(0, 5))
+            # Scroll mode selector (zoom vs pan) - always at the end
+            ttk.Label(button_frame, text="Scroll:").pack(side=tk.LEFT, padx=(15, 5))
             
             self.scroll_mode_var = tk.StringVar(value="zoom")
             zoom_radio = ttk.Radiobutton(button_frame, text="Zoom", variable=self.scroll_mode_var,
@@ -1020,6 +1033,63 @@ class RadioGUI:
             # Silent failure for auto-open (user can manually open if needed)
             self.log_status(f"Note: Audio spectrum auto-open failed - {e}")
 
+    def auto_open_digital_spots(self):
+        """Automatically open digital spots window on connection (no error dialogs)."""
+        # Don't open multiple windows
+        if self.digital_spots_window and self.digital_spots_window.winfo_exists():
+            return
+
+        if not self.connected:
+            return
+
+        try:
+            # Ensure shared WebSocket is connected
+            ws_manager = self._ensure_dxcluster_ws()
+
+            from digital_spots_display import create_digital_spots_window
+
+            # Create digital spots window with shared WebSocket
+            self.digital_spots_display = create_digital_spots_window(
+                ws_manager,
+                on_close=self._on_digital_spots_closed
+            )
+            self.digital_spots_window = self.digital_spots_display.window
+
+            self.log_status("Digital spots window opened automatically")
+
+        except Exception as e:
+            # Silent failure for auto-open (user can manually open if needed)
+            self.log_status(f"Note: Digital spots auto-open failed - {e}")
+
+    def auto_open_cw_spots(self):
+        """Automatically open CW spots window on connection (no error dialogs)."""
+        # Don't open multiple windows
+        if self.cw_spots_window and self.cw_spots_window.winfo_exists():
+            return
+
+        if not self.connected:
+            return
+
+        try:
+            # Ensure shared WebSocket is connected
+            ws_manager = self._ensure_dxcluster_ws()
+
+            from cw_spots_display import create_cw_spots_window
+
+            # Create CW spots window with shared WebSocket
+            self.cw_spots_display = create_cw_spots_window(
+                ws_manager,
+                on_close=self._on_cw_spots_closed,
+                radio_gui=self
+            )
+            self.cw_spots_window = self.cw_spots_display.window
+
+            self.log_status("CW spots window opened automatically")
+
+        except Exception as e:
+            # Silent failure for auto-open (user can manually open if needed)
+            self.log_status(f"Note: CW spots auto-open failed - {e}")
+
     def open_waterfall_window(self):
         """Open a separate waterfall display window."""
         # Don't open multiple windows
@@ -1472,6 +1542,16 @@ class RadioGUI:
         self.apply_bw_btn.state(['disabled'])
         self.rec_btn.state(['disabled'])
         
+        # Hide receiver name
+        self.receiver_name_label.grid_remove()
+        self.receiver_name_var.set("")
+        
+        # Hide spots buttons
+        if self.digital_spots_btn:
+            self.digital_spots_btn.pack_forget()
+        if self.cw_spots_btn:
+            self.cw_spots_btn.pack_forget()
+        
         # Stop recording if active
         if self.recording:
             self.stop_recording()
@@ -1552,6 +1632,44 @@ class RadioGUI:
                         if "✓" not in msg:  # Don't duplicate success message
                             self.log_status("✓ Successfully connected!")
 
+                        # Update receiver name and spots buttons based on server description
+                        if self.client and hasattr(self.client, 'server_description'):
+                            desc = self.client.server_description
+                            receiver_name = desc.get('receiver', {}).get('name', '')
+                            if receiver_name:
+                                self.receiver_name_var.set(receiver_name)
+                                self.receiver_name_label.grid()  # Show receiver name
+                            
+                            # Show spots buttons based on server capabilities
+                            # Pack them before the Scroll label by using pack with before parameter
+                            # Find the Scroll label widget to insert before it
+                            button_frame = self.digital_spots_btn.master if self.digital_spots_btn else (self.cw_spots_btn.master if self.cw_spots_btn else None)
+                            if button_frame:
+                                # Find the "Scroll:" label widget
+                                scroll_label = None
+                                for widget in button_frame.winfo_children():
+                                    if isinstance(widget, ttk.Label) and widget.cget('text') == 'Scroll:':
+                                        scroll_label = widget
+                                        break
+                                
+                                # Pack digital spots button if enabled
+                                if self.digital_spots_btn and desc.get('digital_decodes', False):
+                                    if scroll_label:
+                                        self.digital_spots_btn.pack(side=tk.LEFT, padx=(0, 5), before=scroll_label)
+                                    else:
+                                        self.digital_spots_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                elif self.digital_spots_btn:
+                                    self.digital_spots_btn.pack_forget()
+                                
+                                # Pack CW spots button if enabled
+                                if self.cw_spots_btn and desc.get('cw_skimmer', False):
+                                    if scroll_label:
+                                        self.cw_spots_btn.pack(side=tk.LEFT, padx=(0, 5), before=scroll_label)
+                                    else:
+                                        self.cw_spots_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                elif self.cw_spots_btn:
+                                    self.cw_spots_btn.pack_forget()
+
                         # Auto-open waterfall window on successful connection
                         if WATERFALL_AVAILABLE and self.spectrum:
                             # Delay waterfall opening slightly to ensure spectrum is connected
@@ -1561,6 +1679,18 @@ class RadioGUI:
                         if AUDIO_SPECTRUM_AVAILABLE:
                             # Delay audio spectrum opening slightly
                             self.root.after(600, self.auto_open_audio_spectrum)
+                        
+                        # Auto-open digital spots window if enabled
+                        # Add 2000ms delay (same as spectrum) before connecting DX cluster WebSocket
+                        if self.client and hasattr(self.client, 'server_description'):
+                            desc = self.client.server_description
+                            if DIGITAL_SPOTS_AVAILABLE and desc.get('digital_decodes', False):
+                                self.root.after(2700, self.auto_open_digital_spots)
+                            
+                            # Auto-open CW spots window if enabled
+                            # Add 2000ms delay (same as spectrum) before connecting DX cluster WebSocket
+                            if CW_SPOTS_AVAILABLE and desc.get('cw_skimmer', False):
+                                self.root.after(2800, self.auto_open_cw_spots)
                 elif msg_type == "error":
                     self.log_status(f"ERROR: {msg}")
                 elif msg_type == "connection_failed":

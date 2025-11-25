@@ -45,6 +45,13 @@ class DXClusterWebSocket:
             return
             
         self.running = True
+        self._create_websocket()
+
+        self.ws_thread = threading.Thread(target=self._run_websocket, daemon=True)
+        self.ws_thread.start()
+
+    def _create_websocket(self):
+        """Create a new WebSocket instance."""
         self.ws = websocket.WebSocketApp(
             self.ws_url,
             on_open=self._on_open,
@@ -52,9 +59,6 @@ class DXClusterWebSocket:
             on_error=self._on_error,
             on_close=self._on_close
         )
-        
-        self.ws_thread = threading.Thread(target=self._run_websocket, daemon=True)
-        self.ws_thread.start()
         
     def disconnect(self):
         """Stop the WebSocket connection."""
@@ -75,6 +79,8 @@ class DXClusterWebSocket:
             if self.running:
                 # Wait before reconnecting
                 time.sleep(2.0)
+                # Create a new WebSocket instance for reconnection
+                self._create_websocket()
                 
     def _on_open(self, ws):
         """Handle WebSocket connection opened."""

@@ -67,6 +67,13 @@ try:
 except ImportError:
     NR2_AVAILABLE = False
 
+# Check if scipy is available (for audio filter)
+try:
+    from scipy import signal as scipy_signal
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+
 
 def find_next_fifo_path() -> str:
     """Find the next available FIFO path (/tmp/ubersdr.fifo, ubersdr1.fifo, etc.)."""
@@ -424,16 +431,50 @@ class RadioGUI:
         nr2_floor_entry = ttk.Entry(nr2_container, textvariable=self.nr2_floor_var, width=8)
         nr2_floor_entry.grid(row=0, column=5, sticky=tk.W, padx=(0, 5))
         ttk.Label(nr2_container, text="%").grid(row=0, column=6, sticky=tk.W, padx=(0, 20))
-        
+
         # Recording controls (same row as NR2, to the right)
         self.rec_btn = ttk.Button(nr2_container, text="⏺ Record", width=10,
                                    command=self.toggle_recording)
         self.rec_btn.grid(row=0, column=7, sticky=tk.W, padx=(0, 10))
         self.rec_btn.state(['disabled'])  # Disabled until connected
-        
+
         self.rec_status_label = ttk.Label(nr2_container, text="", foreground='red')
         self.rec_status_label.grid(row=0, column=8, sticky=tk.W)
-        
+
+        # Audio bandpass filter (row 4) - use a frame to avoid column weight issues
+        filter_container = ttk.Frame(audio_frame)
+        filter_container.grid(row=4, column=0, columnspan=7, sticky=(tk.W, tk.E), pady=(5, 0))
+
+        self.audio_filter_enabled_var = tk.BooleanVar(value=False)
+        filter_check = ttk.Checkbutton(filter_container, text="Enable Audio Filter", variable=self.audio_filter_enabled_var,
+                                       command=self.toggle_audio_filter)
+        filter_check.grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
+
+        # Low frequency slider (will be updated based on mode)
+        ttk.Label(filter_container, text="Low:").grid(row=0, column=1, sticky=tk.W, padx=(0, 5))
+        self.audio_filter_low_var = tk.IntVar(value=300)
+        self.filter_low_scale = ttk.Scale(filter_container, from_=50, to=3000, orient=tk.HORIZONTAL,
+                                          variable=self.audio_filter_low_var, command=self.update_audio_filter_display,
+                                          length=150)
+        self.filter_low_scale.grid(row=0, column=2, sticky=(tk.W, tk.E), padx=(0, 5))
+
+        self.audio_filter_low_label = ttk.Label(filter_container, text="300 Hz", width=8)
+        self.audio_filter_low_label.grid(row=0, column=3, sticky=tk.W, padx=(0, 20))
+
+        # High frequency slider (will be updated based on mode)
+        ttk.Label(filter_container, text="High:").grid(row=0, column=4, sticky=tk.W, padx=(0, 5))
+        self.audio_filter_high_var = tk.IntVar(value=2700)
+        self.filter_high_scale = ttk.Scale(filter_container, from_=100, to=6000, orient=tk.HORIZONTAL,
+                                           variable=self.audio_filter_high_var, command=self.update_audio_filter_display,
+                                           length=150)
+        self.filter_high_scale.grid(row=0, column=5, sticky=(tk.W, tk.E), padx=(0, 5))
+
+        self.audio_filter_high_label = ttk.Label(filter_container, text="2700 Hz", width=8)
+        self.audio_filter_high_label.grid(row=0, column=6, sticky=tk.W)
+
+        filter_container.columnconfigure(2, weight=1)
+        filter_container.columnconfigure(5, weight=1)
+
         audio_frame.columnconfigure(1, weight=1)
         audio_frame.columnconfigure(4, weight=1)
         
@@ -760,11 +801,14 @@ class RadioGUI:
     def on_mode_changed(self, skip_apply=False):
         """Handle mode change from dropdown - updates bandwidth and presets immediately."""
         mode = self.mode_var.get().lower()
-        
+
         # Always update bandwidth defaults and presets when mode changes
         self.adjust_bandwidth_for_mode(mode)
         self.update_preset_buttons()
-        
+
+        # Update audio filter slider ranges based on mode bandwidth
+        self.update_audio_filter_ranges()
+
         # If connected, also apply the change to the client (unless skip_apply is True)
         if self.connected and self.client and not skip_apply:
             self.apply_mode()
@@ -965,7 +1009,196 @@ class RadioGUI:
         except ValueError:
             messagebox.showerror("Error", "Invalid NR2 parameter values")
             self.nr2_enabled_var.set(not enabled)
-    
+
+    def update_audio_filter_ranges(self):
+        """Update audio filter slider ranges based on current mode bandwidth."""
+        try:
+            # Get current bandwidth
+            low = int(self.bw_low_var.get())
+            high = int(self.bw_high_var.get())
+
+            # Check if this is CW mode (narrow symmetric bandwidth)
+            abs_low = abs(low)
+            abs_high = abs(high)
+            is_cw_mode = (low < 0 and high > 0 and abs_low < 500 and abs_high < 500)
+
+            if is_cw_mode:
+                # CW mode: audio is centered at 500 Hz due to pitch offset
+                # Bandwidth -200 to +200 means audio is at 300-700 Hz
+                cw_offset = 500
+                margin = 0.1
+
+                # Calculate actual audio frequency range
+                audio_low = cw_offset - abs_low
+                audio_high = cw_offset + abs_high
+
+                # Both sliders should have the same full range to allow narrow filters
+                range_min = max(0, int(audio_low * (1 - margin)))
+                range_max = int(audio_high * (1 + margin))
+            else:
+                # Non-CW modes: use absolute bandwidth values
+                margin = 0.1
+                range_min = max(0, int(abs_low * (1 - margin)))
+                range_max = int(abs_high * (1 + margin))
+
+            # Update both slider ranges to the same full range
+            self.filter_low_scale.config(from_=range_min, to=range_max)
+            self.filter_high_scale.config(from_=range_min, to=range_max)
+
+            # Adjust current values if they're outside the new range
+            current_low = self.audio_filter_low_var.get()
+            current_high = self.audio_filter_high_var.get()
+
+            if current_low < range_min:
+                self.audio_filter_low_var.set(range_min)
+            elif current_low > range_max:
+                self.audio_filter_low_var.set(range_max)
+
+            if current_high < range_min:
+                self.audio_filter_high_var.set(range_min)
+            elif current_high > range_max:
+                self.audio_filter_high_var.set(range_max)
+
+        except ValueError:
+            # If bandwidth values are invalid, use defaults
+            pass
+
+    def update_audio_filter_display(self, value=None):
+        """Update audio filter frequency labels and apply filter dynamically."""
+        low = int(self.audio_filter_low_var.get())
+        high = int(self.audio_filter_high_var.get())
+
+        # Update labels
+        self.audio_filter_low_label.config(text=f"{low} Hz")
+        self.audio_filter_high_label.config(text=f"{high} Hz")
+
+        # Update audio spectrum display if open
+        if self.audio_spectrum_display:
+            enabled = self.audio_filter_enabled_var.get()
+            self.audio_spectrum_display.update_audio_filter(enabled, low, high)
+
+        # Apply filter dynamically if enabled and connected
+        if self.connected and self.client and self.audio_filter_enabled_var.get():
+            # Validate before applying
+            if low < high:
+                self.client.update_audio_filter(float(low), float(high))
+
+    def toggle_audio_filter(self):
+        """Toggle audio bandpass filter on/off."""
+        if not self.connected or not self.client:
+            return
+
+        enabled = self.audio_filter_enabled_var.get()
+
+        try:
+            # If enabling, first ensure values are within current mode's bandwidth range
+            if enabled:
+                # Get current bandwidth
+                bw_low = int(self.bw_low_var.get())
+                bw_high = int(self.bw_high_var.get())
+                abs_low = abs(bw_low)
+                abs_high = abs(bw_high)
+                
+                # Check if this is CW mode
+                is_cw_mode = (bw_low < 0 and bw_high > 0 and abs_low < 500 and abs_high < 500)
+                
+                if is_cw_mode:
+                    # CW mode: audio is centered at 500 Hz
+                    # Set filter to 80% of the audio bandwidth around 500 Hz
+                    cw_offset = 500
+                    audio_low = cw_offset - abs_low
+                    audio_high = cw_offset + abs_high
+                    
+                    # Use 80% of the range
+                    range_span = audio_high - audio_low
+                    margin = range_span * 0.1
+                    default_low = int(audio_low + margin)
+                    default_high = int(audio_high - margin)
+                else:
+                    # Non-CW modes: use absolute bandwidth values
+                    # Use 80% of the bandwidth range
+                    margin = 0.1
+                    default_low = int(abs_low * (1 + margin))
+                    default_high = int(abs_high * (1 - margin))
+                    
+                    # Ensure low < high
+                    if default_low >= default_high:
+                        default_low = int(abs_low)
+                        default_high = int(abs_high)
+                
+                # Update slider values to reasonable defaults
+                self.audio_filter_low_var.set(default_low)
+                self.audio_filter_high_var.set(default_high)
+                
+                # Update display
+                self.update_audio_filter_display()
+            
+            low = float(self.audio_filter_low_var.get())
+            high = float(self.audio_filter_high_var.get())
+
+            # Validate parameters
+            if low <= 0 or high <= 0:
+                messagebox.showerror("Error", "Filter frequencies must be positive")
+                self.audio_filter_enabled_var.set(not enabled)
+                return
+            if low >= high:
+                messagebox.showerror("Error", "Low frequency must be less than high frequency")
+                self.audio_filter_enabled_var.set(not enabled)
+                return
+
+            if enabled:
+                # Enable audio filter
+                if not SCIPY_AVAILABLE:
+                    messagebox.showerror("Error", "Audio filter requires scipy. Install with: pip install scipy")
+                    self.audio_filter_enabled_var.set(False)
+                    return
+
+                self.client.audio_filter_enabled = True
+                self.client.audio_filter_low = low
+                self.client.audio_filter_high = high
+                self.client._init_audio_filter()
+                self.log_status(f"Audio filter enabled ({low:.0f}-{high:.0f} Hz)")
+            else:
+                # Disable audio filter
+                self.client.audio_filter_enabled = False
+                self.log_status("Audio filter disabled")
+
+            # Update audio spectrum display
+            if self.audio_spectrum_display:
+                self.audio_spectrum_display.update_audio_filter(enabled, low, high)
+
+        except ValueError:
+            messagebox.showerror("Error", "Invalid audio filter parameter values")
+            self.audio_filter_enabled_var.set(not enabled)
+
+    def apply_audio_filter(self):
+        """Apply audio filter parameter changes."""
+        if not self.connected or not self.client:
+            return
+
+        if not self.audio_filter_enabled_var.get():
+            messagebox.showinfo("Info", "Audio filter is not enabled")
+            return
+
+        try:
+            low = float(self.audio_filter_low_var.get())
+            high = float(self.audio_filter_high_var.get())
+
+            # Validate parameters
+            if low <= 0 or high <= 0:
+                messagebox.showerror("Error", "Filter frequencies must be positive")
+                return
+            if low >= high:
+                messagebox.showerror("Error", "Low frequency must be less than high frequency")
+                return
+
+            # Update filter
+            self.client.update_audio_filter(low, high)
+            self.log_status(f"Audio filter updated ({low:.0f}-{high:.0f} Hz)")
+
+        except ValueError:
+            messagebox.showerror("Error", "Invalid audio filter parameter values")
+
     def toggle_spectrum(self):
         """Toggle spectrum display visibility and connection."""
         enabled = self.spectrum_enabled_var.get()
@@ -1666,6 +1899,7 @@ class RadioGUI:
         self.apply_freq_btn.state(['disabled'])
         self.apply_bw_btn.state(['disabled'])
         self.rec_btn.state(['disabled'])
+        self.apply_filter_btn.state(['disabled'])
         
         # Hide receiver name
         self.receiver_name_label.grid_remove()

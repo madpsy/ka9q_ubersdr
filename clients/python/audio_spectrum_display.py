@@ -49,6 +49,11 @@ class AudioSpectrumDisplay:
         self.bandwidth_low: int = 50
         self.bandwidth_high: int = 2700
         
+        # Audio filter parameters (for displaying filter bandwidth)
+        self.audio_filter_enabled: bool = False
+        self.audio_filter_low: int = 300
+        self.audio_filter_high: int = 2700
+        
         # Frequency range for display (dynamically adjusted based on bandwidth)
         self.display_freq_min = 0
         self.display_freq_max = 3000
@@ -159,6 +164,18 @@ class AudioSpectrumDisplay:
         # Ensure minimum display range
         if self.display_freq_max < 500:
             self.display_freq_max = 500
+
+    def update_audio_filter(self, enabled: bool, low: int, high: int):
+        """Update audio filter parameters for display.
+
+        Args:
+            enabled: Whether audio filter is enabled
+            low: Low cutoff frequency in Hz
+            high: High cutoff frequency in Hz
+        """
+        self.audio_filter_enabled = enabled
+        self.audio_filter_low = low
+        self.audio_filter_high = high
     
     def add_audio_data(self, audio_float: np.ndarray):
         """Add audio data for FFT processing.
@@ -539,8 +556,12 @@ class AudioSpectrumDisplay:
             text="Hz", fill='white', font=('monospace', 9)
         )
         
-        # Draw bandwidth markers
+        # Draw bandwidth markers (demodulator bandwidth - yellow dashed)
         self._draw_bandwidth_markers(scale_y)
+        
+        # Draw audio filter markers (if enabled - red solid)
+        if self.audio_filter_enabled:
+            self._draw_audio_filter_markers(scale_y)
     
     def _draw_bandwidth_markers(self, scale_y: int):
         """Draw vertical lines showing the actual bandwidth edges."""
@@ -616,7 +637,51 @@ class AudioSpectrumDisplay:
                         high_x, scale_y - 5,
                         fill='yellow', width=2, dash=(5, 3)
                     )
-    
+
+    def _draw_audio_filter_markers(self, scale_y: int):
+        """Draw vertical lines showing the audio filter bandwidth (red solid lines)."""
+        if not self.audio_filter_enabled:
+            return
+
+        freq_range = self.display_freq_max - self.display_freq_min
+        abs_low = abs(self.audio_filter_low)
+        abs_high = abs(self.audio_filter_high)
+
+        # Check if this is CW mode (same logic as bandwidth markers)
+        is_cw_mode = (self.bandwidth_low < 0 and self.bandwidth_high > 0 and
+                      abs(self.bandwidth_low) < 500 and abs(self.bandwidth_high) < 500)
+
+        if is_cw_mode:
+            # CW mode: audio filter frequencies are relative to 500 Hz offset
+            # The audio filter values are absolute frequencies in the audio spectrum
+            # which is already centered at 500 Hz for CW
+            low_marker = abs_low
+            high_marker = abs_high
+        else:
+            # Non-CW modes: use absolute values directly
+            low_marker = abs_low
+            high_marker = abs_high
+
+        # Draw low edge marker (red solid)
+        if self.display_freq_min <= low_marker <= self.display_freq_max:
+            low_x = self.margin_left + ((low_marker - self.display_freq_min) / freq_range) * self.graph_width
+            if self.margin_left <= low_x <= self.margin_left + self.graph_width:
+                self.canvas.create_line(
+                    low_x, self.margin_top,
+                    low_x, scale_y - 5,
+                    fill='red', width=2
+                )
+
+        # Draw high edge marker (red solid)
+        if self.display_freq_min <= high_marker <= self.display_freq_max:
+            high_x = self.margin_left + ((high_marker - self.display_freq_min) / freq_range) * self.graph_width
+            if self.margin_left <= high_x <= self.margin_left + self.graph_width:
+                self.canvas.create_line(
+                    high_x, self.margin_top,
+                    high_x, scale_y - 5,
+                    fill='red', width=2
+                )
+
     def on_motion(self, event):
         """Handle mouse motion for tooltip."""
         self.last_mouse_x = event.x

@@ -34,6 +34,14 @@ except ImportError:
     NR2_AVAILABLE = False
     print("Warning: scipy not available, NR2 noise reduction disabled", file=sys.stderr)
 
+# Import scipy for audio filter (optional)
+try:
+    from scipy import signal as scipy_signal
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    print("Warning: scipy not available, audio bandpass filter disabled", file=sys.stderr)
+
 
 def get_pipewire_sinks() -> List[Tuple[str, str]]:
     """Get list of available PipeWire audio sinks.
@@ -113,7 +121,9 @@ class RadioClient:
                  nr2_floor: float = 10.0, nr2_adapt_rate: float = 1.0,
                  auto_reconnect: bool = False, status_callback=None,
                  volume: float = 1.0, channel_left: bool = True, channel_right: bool = True,
-                 audio_level_callback=None, recording_callback=None, fifo_path: Optional[str] = None):
+                 audio_level_callback=None, recording_callback=None, fifo_path: Optional[str] = None,
+                 audio_filter_enabled: bool = False, audio_filter_low: float = 300.0,
+                 audio_filter_high: float = 2700.0):
         self.url = url
         self.host = host
         self.port = port
@@ -185,7 +195,65 @@ class RadioClient:
         self.audio_level_callback = audio_level_callback
         self.audio_level_update_counter = 0
         self.recording_callback = recording_callback
+        
+        # Audio bandpass filter
+        self.audio_filter_enabled = audio_filter_enabled
+        self.audio_filter_low = audio_filter_low
+        self.audio_filter_high = audio_filter_high
+        self.audio_filter_sos = None
+        if self.audio_filter_enabled:
+            if not SCIPY_AVAILABLE:
+                print("Error: Audio filter requested but scipy not available", file=sys.stderr)
+                print("Install scipy with: pip install scipy", file=sys.stderr)
+                sys.exit(1)
+            self._init_audio_filter()
+            print(f"Audio bandpass filter enabled ({audio_filter_low:.0f}-{audio_filter_high:.0f} Hz)", file=sys.stderr)
     
+    def _init_audio_filter(self):
+        """Initialize audio bandpass filter coefficients."""
+        if not SCIPY_AVAILABLE:
+            return
+
+        # Design Butterworth bandpass filter
+        # Use 4th order for good selectivity without excessive ringing
+        nyquist = self.sample_rate / 2.0
+        low_norm = self.audio_filter_low / nyquist
+        high_norm = self.audio_filter_high / nyquist
+
+        # Clamp to valid range (0, 1)
+        low_norm = max(0.001, min(0.999, low_norm))
+        high_norm = max(0.001, min(0.999, high_norm))
+
+        # Ensure low < high
+        if low_norm >= high_norm:
+            print(f"Warning: Invalid filter range {self.audio_filter_low}-{self.audio_filter_high} Hz", file=sys.stderr)
+            self.audio_filter_enabled = False
+            return
+
+        try:
+            self.audio_filter_sos = scipy_signal.butter(
+                4,  # 4th order filter
+                [low_norm, high_norm],
+                btype='band',
+                output='sos'
+            )
+        except Exception as e:
+            print(f"Warning: Failed to create audio filter: {e}", file=sys.stderr)
+            self.audio_filter_enabled = False
+
+    def update_audio_filter(self, low: float, high: float):
+        """Update audio filter parameters dynamically.
+
+        Args:
+            low: Low cutoff frequency in Hz
+            high: High cutoff frequency in Hz
+        """
+        self.audio_filter_low = low
+        self.audio_filter_high = high
+
+        if self.audio_filter_enabled and SCIPY_AVAILABLE:
+            self._init_audio_filter()
+
     def _log(self, message: str):
         """Log a message to stderr and optionally to status callback for GUI."""
         print(message, file=sys.stderr)
@@ -360,6 +428,29 @@ class RadioClient:
             # -3dB = 10^(-3/20) = 0.7079 gain factor
             audio_float = audio_float * 0.7079
 
+        # Apply audio bandpass filter if enabled
+        if self.audio_filter_enabled and self.audio_filter_sos is not None:
+            try:
+                # Measure RMS before filtering for gain compensation
+                rms_before = np.sqrt(np.mean(audio_float ** 2))
+                
+                # Apply filter using second-order sections for numerical stability
+                audio_float = scipy_signal.sosfilt(self.audio_filter_sos, audio_float)
+                
+                # Normalize to maintain consistent RMS level (prevent clipping/gain changes)
+                if rms_before > 1e-10:  # Avoid division by zero
+                    rms_after = np.sqrt(np.mean(audio_float ** 2))
+                    if rms_after > 1e-10:
+                        # Apply gain compensation to maintain original RMS level
+                        gain_compensation = rms_before / rms_after
+                        # Limit gain compensation to reasonable range (0.5 to 2.0)
+                        gain_compensation = max(0.5, min(2.0, gain_compensation))
+                        audio_float = audio_float * gain_compensation
+            except Exception as e:
+                # Disable filter on error to avoid repeated failures
+                print(f"Warning: Audio filter error: {e}", file=sys.stderr)
+                self.audio_filter_enabled = False
+
         # Send mono audio to recording callback BEFORE stereo conversion
         # This captures the mono signal before it's duplicated to stereo
         if self.recording_callback and self.channels == 1:
@@ -455,11 +546,16 @@ class RadioClient:
             # Check if sample rate or channels changed (requires restarting PipeWire)
             sample_rate_changed = sample_rate != self.sample_rate
             channels_changed = channels != self.channels
-            
+
             if sample_rate_changed:
                 self.sample_rate = sample_rate
                 print(f"Sample rate updated: {self.sample_rate} Hz", file=sys.stderr)
-            
+
+                # Reinitialize audio filter with new sample rate
+                if self.audio_filter_enabled and SCIPY_AVAILABLE:
+                    self._init_audio_filter()
+                    print(f"Audio filter reinitialized for {self.sample_rate} Hz", file=sys.stderr)
+
             if channels_changed:
                 self.channels = channels
                 print(f"Channels updated: {self.channels}", file=sys.stderr)
@@ -872,7 +968,14 @@ Examples:
                         help='List available PipeWire audio output devices and exit')
     parser.add_argument('--fifo-path', type=str, metavar='PATH',
                         help='Also write audio to named pipe (FIFO) at this path (non-blocking, works with any output mode)')
-    
+
+    parser.add_argument('--audio-filter', action='store_true',
+                        help='Enable audio bandpass filter')
+    parser.add_argument('--audio-filter-low', type=float, default=300.0, metavar='HZ',
+                        help='Audio filter low cutoff frequency in Hz (default: 300)')
+    parser.add_argument('--audio-filter-high', type=float, default=2700.0, metavar='HZ',
+                        help='Audio filter high cutoff frequency in Hz (default: 2700)')
+
     args = parser.parse_args()
     
     # List devices mode
@@ -980,7 +1083,10 @@ Examples:
         nr2_floor=args.nr2_floor,
         nr2_adapt_rate=args.nr2_adapt_rate,
         auto_reconnect=args.auto_reconnect,
-        fifo_path=args.fifo_path
+        fifo_path=args.fifo_path,
+        audio_filter_enabled=args.audio_filter,
+        audio_filter_low=args.audio_filter_low,
+        audio_filter_high=args.audio_filter_high
     )
     
     # Setup signal handler for graceful shutdown

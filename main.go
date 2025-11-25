@@ -566,10 +566,7 @@ func main() {
 
 		// Register spot handler for logging
 		cwSkimmer.OnSpot(func(spot CWSkimmerSpot) {
-			if DebugMode {
-				log.Printf("CW Skimmer Spot: %.1f kHz %s by %s - %d dB %d WPM %s",
-					spot.Frequency/1000, spot.DXCall, spot.Spotter, spot.SNR, spot.WPM, spot.Comment)
-			}
+			// Spot logging removed
 		})
 
 		if err := cwSkimmer.Start(); err != nil {
@@ -631,10 +628,7 @@ func main() {
 
 	// Register DX spot handler for logging
 	dxCluster.OnSpot(func(spot DXSpot) {
-		if DebugMode {
-			log.Printf("DX Spot: %.1f kHz %s by %s - %s",
-				spot.Frequency/1000, spot.DXCall, spot.Spotter, spot.Comment)
-		}
+		// Spot logging removed
 	})
 
 	// Start multi-decoder and register callback for digital spots

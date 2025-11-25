@@ -8,6 +8,7 @@ from tkinter import ttk
 import queue
 from datetime import datetime
 from typing import Optional, Callable
+from cw_spots_graph import create_cw_spots_graph_window
 
 
 class CWSpotsDisplay:
@@ -29,6 +30,9 @@ class CWSpotsDisplay:
         self.countries = countries or []
         self.spots = []
         self.max_spots = 1000
+
+        # Graph window reference
+        self.graph_window = None
 
         # Dictionary to map tree item IDs to frequency values
         self.item_frequencies = {}
@@ -134,6 +138,10 @@ class CWSpotsDisplay:
         country_combo.grid(row=1, column=3, padx=5, pady=5)
         country_combo.bind("<<ComboboxSelected>>", lambda e: self.apply_filters())
         
+        # Graph button
+        graph_btn = ttk.Button(filter_frame, text="Graph", command=self.open_graph_window)
+        graph_btn.grid(row=1, column=6, padx=5, pady=5)
+
         # Clear button
         clear_btn = ttk.Button(filter_frame, text="Clear Spots", command=self.clear_spots)
         clear_btn.grid(row=1, column=7, padx=5, pady=5)
@@ -234,6 +242,22 @@ class CWSpotsDisplay:
         else:
             self.status_label.config(text="Disconnected", foreground="red")
             
+    def open_graph_window(self):
+        """Open the graph window."""
+        if self.graph_window is None or not self.graph_window.window.winfo_exists():
+            self.graph_window = create_cw_spots_graph_window(
+                self,
+                on_close=self._on_graph_window_closed
+            )
+        else:
+            # Window already exists, just raise it
+            self.graph_window.window.lift()
+            self.graph_window.window.focus_force()
+
+    def _on_graph_window_closed(self):
+        """Handle graph window close."""
+        self.graph_window = None
+
     def apply_filters(self):
         """Apply filters and update the display."""
         # Get filter values
@@ -249,7 +273,11 @@ class CWSpotsDisplay:
         
         self.callsign_filter = self.callsign_var.get().upper()
         self.country_filter = self.country_var.get()
-        
+
+        # Refresh graph window if open (it will use our filters)
+        if self.graph_window and self.graph_window.window.winfo_exists():
+            self.graph_window.refresh()
+
         # Filter spots
         filtered_spots = []
         now = datetime.utcnow()

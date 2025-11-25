@@ -30,7 +30,8 @@ var (
 
 	// Callsign pattern (basic validation)
 	// Supports standard callsigns and portable/mobile suffixes like /P, /M, /T, etc.
-	callsignPattern = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z](/[A-Z0-9]+)?$`)
+	// Also supports prefix notation like TA4/G8SCU or G8SCU/P
+	callsignPattern = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z]$|^[A-Z0-9/]+[0-9][A-Z0-9/]+$`)
 
 	// Grid locator pattern (4, 6, or 8 characters)
 	gridPattern = regexp.MustCompile(`^[A-R]{2}[0-9]{2}([a-x]{2}([0-9]{2})?)?$`)

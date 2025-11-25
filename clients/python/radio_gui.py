@@ -63,6 +63,14 @@ except ImportError:
     BAND_CONDITIONS_AVAILABLE = False
     print("Warning: Band conditions display not available (missing dependencies)")
 
+# Import space weather display
+try:
+    from space_weather_display import create_space_weather_window
+    SPACE_WEATHER_AVAILABLE = True
+except ImportError:
+    SPACE_WEATHER_AVAILABLE = False
+    print("Warning: Space weather display not available (missing dependencies)")
+
 # Import shared WebSocket manager
 try:
     from dxcluster_websocket import DXClusterWebSocket
@@ -216,6 +224,10 @@ class RadioGUI:
         # Band conditions display (separate window)
         self.band_conditions_window = None
         self.band_conditions_display = None
+
+        # Space weather display (separate window)
+        self.space_weather_window = None
+        self.space_weather_display = None
 
         # Create UI
         self.create_widgets()
@@ -680,6 +692,14 @@ class RadioGUI:
                 self.band_conditions_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
                 self.band_conditions_btn = None
+
+            # Space weather button (always available)
+            if SPACE_WEATHER_AVAILABLE:
+                self.space_weather_btn = ttk.Button(button_frame, text="Weather",
+                                                   command=self.open_space_weather_window)
+                self.space_weather_btn.pack(side=tk.LEFT, padx=(0, 5))
+            else:
+                self.space_weather_btn = None
 
             # Scroll mode selector (zoom vs pan) - always at the end
             ttk.Label(button_frame, text="Scroll:").pack(side=tk.LEFT, padx=(15, 5))
@@ -2164,6 +2184,48 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open band conditions: {e}")
             self.log_status(f"ERROR: Failed to open band conditions - {e}")
 
+    def open_space_weather_window(self):
+        """Open a separate space weather display window."""
+        # Don't open multiple windows
+        if self.space_weather_window and self.space_weather_window.winfo_exists():
+            self.space_weather_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        try:
+            from space_weather_display import create_space_weather_window
+
+            # Get server URL and TLS setting
+            server = self.server_var.get()
+            use_tls = self.tls_var.get()
+
+            # Get GPS coordinates and location from client
+            gps_coords = None
+            location_name = None
+            if self.client and hasattr(self.client, 'server_description'):
+                desc = self.client.server_description
+                if desc.get('receiver', {}).get('gps'):
+                    gps = desc['receiver']['gps']
+                    if gps.get('lat') and gps.get('lon'):
+                        gps_coords = {'lat': gps['lat'], 'lon': gps['lon']}
+                if desc.get('receiver', {}).get('location'):
+                    location_name = desc['receiver']['location']
+
+            # Create space weather window
+            self.space_weather_display = create_space_weather_window(
+                self.root, server, use_tls, gps_coords, location_name
+            )
+            self.space_weather_window = self.space_weather_display.window
+
+            self.log_status("Space weather window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open space weather: {e}")
+            self.log_status(f"ERROR: Failed to open space weather - {e}")
+
     def adjust_bandwidth_for_mode(self, mode: str):
         """Set bandwidth defaults based on mode (matching web application behavior)."""
         # Default bandwidth values for each mode (from static/app.js setMode function lines 2556-2606)
@@ -3055,6 +3117,10 @@ class RadioGUI:
         # Close band conditions window if open
         if self.band_conditions_window and self.band_conditions_window.winfo_exists():
             self.band_conditions_window.destroy()
+
+        # Close space weather window if open
+        if self.space_weather_window and self.space_weather_window.winfo_exists():
+            self.space_weather_window.destroy()
 
         # Disconnect shared DX cluster WebSocket
         if self.dxcluster_ws:

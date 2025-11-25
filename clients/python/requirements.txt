@@ -3,3 +3,4 @@ aiohttp>=3.9.0
 scipy>=1.11.0
 numpy>=1.24.0
 matplotlib>=3.7.0
+astral>=3.2

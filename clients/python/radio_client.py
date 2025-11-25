@@ -200,7 +200,8 @@ class RadioClient:
         self.audio_filter_enabled = audio_filter_enabled
         self.audio_filter_low = audio_filter_low
         self.audio_filter_high = audio_filter_high
-        self.audio_filter_sos = None
+        self.audio_filter_taps = None  # FIR filter coefficients
+        self.audio_filter_zi = None    # Filter state for continuous filtering
         if self.audio_filter_enabled:
             if not SCIPY_AVAILABLE:
                 print("Error: Audio filter requested but scipy not available", file=sys.stderr)
@@ -210,33 +211,38 @@ class RadioClient:
             print(f"Audio bandpass filter enabled ({audio_filter_low:.0f}-{audio_filter_high:.0f} Hz)", file=sys.stderr)
     
     def _init_audio_filter(self):
-        """Initialize audio bandpass filter coefficients."""
+        """Initialize audio bandpass filter using FIR design."""
         if not SCIPY_AVAILABLE:
             return
 
-        # Design Butterworth bandpass filter
-        # Use 4th order for good selectivity without excessive ringing
-        nyquist = self.sample_rate / 2.0
-        low_norm = self.audio_filter_low / nyquist
-        high_norm = self.audio_filter_high / nyquist
-
-        # Clamp to valid range (0, 1)
-        low_norm = max(0.001, min(0.999, low_norm))
-        high_norm = max(0.001, min(0.999, high_norm))
-
-        # Ensure low < high
-        if low_norm >= high_norm:
+        # Validate filter parameters
+        if self.audio_filter_low >= self.audio_filter_high:
             print(f"Warning: Invalid filter range {self.audio_filter_low}-{self.audio_filter_high} Hz", file=sys.stderr)
             self.audio_filter_enabled = False
             return
 
+        nyquist = self.sample_rate / 2.0
+        if self.audio_filter_high >= nyquist:
+            print(f"Warning: Filter high cutoff {self.audio_filter_high} Hz exceeds Nyquist {nyquist} Hz", file=sys.stderr)
+            self.audio_filter_enabled = False
+            return
+
         try:
-            self.audio_filter_sos = scipy_signal.butter(
-                4,  # 4th order filter
-                [low_norm, high_norm],
-                btype='band',
-                output='sos'
+            # Design an FIR bandpass filter using firwin
+            # FIR filters have linear phase and no overshoot/ringing issues
+            # Use a reasonable number of taps based on sample rate
+            numtaps = min(int(self.sample_rate / 10), 1001)  # Cap at 1001 taps
+            if numtaps % 2 == 0:
+                numtaps += 1  # Must be odd for bandpass
+
+            self.audio_filter_taps = scipy_signal.firwin(
+                numtaps,
+                [self.audio_filter_low, self.audio_filter_high],
+                pass_zero=False,  # Bandpass filter
+                fs=self.sample_rate
             )
+            # Initialize filter state for continuous filtering
+            self.audio_filter_zi = scipy_signal.lfilter_zi(self.audio_filter_taps, 1.0) * 0.0
         except Exception as e:
             print(f"Warning: Failed to create audio filter: {e}", file=sys.stderr)
             self.audio_filter_enabled = False
@@ -429,14 +435,15 @@ class RadioClient:
             audio_float = audio_float * 0.7079
 
         # Apply audio bandpass filter if enabled
-        if self.audio_filter_enabled and self.audio_filter_sos is not None:
+        if self.audio_filter_enabled and self.audio_filter_taps is not None:
             try:
-                # Apply filter using second-order sections for numerical stability
-                audio_float = scipy_signal.sosfilt(self.audio_filter_sos, audio_float)
-                
-                # Soft clip to prevent hard clipping distortion
-                # Use tanh for smooth limiting (keeps signal in -1 to +1 range)
-                audio_float = np.tanh(audio_float)
+                # Apply FIR filter with state for continuous filtering
+                if self.audio_filter_zi is not None:
+                    audio_float, self.audio_filter_zi = scipy_signal.lfilter(
+                        self.audio_filter_taps, 1.0, audio_float, zi=self.audio_filter_zi
+                    )
+                else:
+                    audio_float = scipy_signal.lfilter(self.audio_filter_taps, 1.0, audio_float)
             except Exception as e:
                 # Disable filter on error to avoid repeated failures
                 print(f"Warning: Audio filter error: {e}", file=sys.stderr)

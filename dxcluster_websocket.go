@@ -385,6 +385,7 @@ func (h *DXClusterWebSocketHandler) sendBufferedDigitalSpots(conn *websocket.Con
 	h.digitalSpotBufferMu.RUnlock()
 
 	if len(bufferedSpots) == 0 {
+		log.Printf("DX Cluster WebSocket: No buffered digital spots to send to new client")
 		return
 	}
 
@@ -527,6 +528,7 @@ func (h *DXClusterWebSocketHandler) sendBufferedCWSpots(conn *websocket.Conn) {
 	h.cwSpotBufferMu.RUnlock()
 
 	if len(bufferedSpots) == 0 {
+		log.Printf("DX Cluster WebSocket: No buffered CW spots to send to new client (buffer is empty)")
 		return
 	}
 

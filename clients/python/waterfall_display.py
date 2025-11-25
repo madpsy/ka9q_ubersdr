@@ -26,23 +26,28 @@ class WaterfallDisplay:
     its own WebSocket connection.
     """
     
-    def __init__(self, parent: tk.Widget, spectrum_display, width: int = 800, height: int = 400):
+    def __init__(self, parent: tk.Widget, spectrum_display, width: int = 800, height: int = 400, spectrum_height: int = 200):
         """Initialize waterfall display widget.
         
         Args:
-            parent: Parent tkinter widget (can be Toplevel window)
+            parent: Parent tkinter widget (can be Toplevel window or Frame)
             spectrum_display: SpectrumDisplay instance to share data with
             width: Canvas width in pixels
-            height: Canvas height in pixels
+            height: Canvas height in pixels (for waterfall only)
+            spectrum_height: Height of spectrum display on top (unused, kept for compatibility)
         """
         self.parent = parent
         self.width = width
         self.height = height
+        self.spectrum_height = spectrum_height
         self.spectrum_display = spectrum_display
         
-        # Create canvas for waterfall display
-        self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=1)
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+        # Share cursor tracking with spectrum display
+        self.shared_cursor_x = -1
+        
+        # Create canvas for waterfall display (no container needed - parent handles layout)
+        self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=0)
+        self.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=0)
         
         # Spectrum data (shared from spectrum display)
         self.spectrum_data: Optional[np.ndarray] = None
@@ -62,10 +67,10 @@ class WaterfallDisplay:
         self.frequency_callback: Optional[Callable[[float], None]] = None
         self.frequency_step_callback: Optional[Callable[[int], None]] = None
         
-        # Drawing parameters
-        self.margin_top = 40
+        # Drawing parameters - no top margin since frequency scale is in spectrum
+        self.margin_top = 0  # No top margin - connects directly to spectrum
         self.margin_bottom = 10
-        self.margin_left = 50
+        self.margin_left = 50  # Match spectrum's left margin for dB scale alignment
         self.margin_right = 20
         self.waterfall_height = height - self.margin_top - self.margin_bottom
         self.waterfall_width = width - self.margin_left - self.margin_right
@@ -276,45 +281,10 @@ class WaterfallDisplay:
             self._update_tooltip_at_position(self.last_mouse_x, self.last_mouse_y)
     
     def _draw_frequency_scale(self):
-        """Draw frequency scale at top."""
-        if not self.spectrum_display or self.spectrum_display.total_bandwidth == 0:
-            return
-        
-        center_freq = self.spectrum_display.center_freq
-        total_bandwidth = self.spectrum_display.total_bandwidth
-        start_freq = center_freq - total_bandwidth / 2
-        end_freq = center_freq + total_bandwidth / 2
-        
-        # Draw background for frequency scale
-        self.canvas.create_rectangle(
-            self.margin_left, 0,
-            self.margin_left + self.waterfall_width, self.margin_top,
-            fill='#1a1a1a', outline=''
-        )
-        
-        # Draw 5 frequency markers
-        for i in range(5):
-            freq = start_freq + (i / 4) * total_bandwidth
-            x = self.margin_left + (i / 4) * self.waterfall_width
-            
-            # Draw tick
-            self.canvas.create_line(x, self.margin_top - 5,
-                                   x, self.margin_top,
-                                   fill='white', width=1)
-            
-            # Draw label
-            freq_mhz = freq / 1e6
-            label = f"{freq_mhz:.3f}"
-            self.canvas.create_text(x, self.margin_top - 15,
-                                   text=label, fill='white', font=('monospace', 9))
-        
-        # Draw tuned frequency marker (with padding from top)
-        # Show the actual listening frequency, not the spectrum center
-        x = self.margin_left + self.waterfall_width / 2
-        freq_mhz = self.tuned_freq / 1e6 if self.tuned_freq != 0 else center_freq / 1e6
-        self.canvas.create_text(x, 8,
-                                text=f"{freq_mhz:.6f} MHz",
-                                fill='orange', font=('monospace', 10, 'bold'))
+        """Draw frequency scale - now handled by spectrum display above."""
+        # Frequency scale is now drawn by the spectrum display above
+        # No need to draw it here anymore
+        pass
     
     def _draw_bandwidth_filter(self):
         """Draw bandwidth filter visualization with yellow overlay."""
@@ -405,7 +375,7 @@ class WaterfallDisplay:
             self.frequency_step_callback(direction)
     
     def on_motion(self, event):
-        """Handle mouse motion for tooltip."""
+        """Handle mouse motion for tooltip - shares cursor with spectrum."""
         if not self.spectrum_display or self.spectrum_display.total_bandwidth == 0:
             return
         
@@ -418,15 +388,32 @@ class WaterfallDisplay:
             self.cursor_x = -1
             self.last_mouse_x = -1
             self.last_mouse_y = -1
+            self.shared_cursor_x = -1
             if self.tooltip_id:
                 self.canvas.delete(self.tooltip_id)
                 self.tooltip_id = None
+            if self.tooltip_bg_id:
+                self.canvas.delete(self.tooltip_bg_id)
+                self.tooltip_bg_id = None
             if self.cursor_line_id:
                 self.canvas.delete(self.cursor_line_id)
                 self.cursor_line_id = None
+            # Also clear spectrum's cursor
+            if self.spectrum_display:
+                self.spectrum_display.cursor_x = -1
+                if self.spectrum_display.cursor_line_id:
+                    self.spectrum_display.canvas.delete(self.spectrum_display.cursor_line_id)
+                    self.spectrum_display.cursor_line_id = None
             return
         
         self.cursor_x = event.x
+        self.shared_cursor_x = event.x
+        
+        # Update spectrum's cursor too
+        if self.spectrum_display:
+            self.spectrum_display.cursor_x = event.x
+            self.spectrum_display._draw_cursor_line(event.x)
+        
         self._update_tooltip_at_position(event.x, event.y)
     
     def _update_tooltip_at_position(self, x: int, y: int):
@@ -444,20 +431,40 @@ class WaterfallDisplay:
         freq_offset = (graph_x / self.waterfall_width - 0.5) * total_bandwidth
         freq = center_freq + freq_offset
         
-        # Draw cursor line
+        # Get dB value from spectrum if available
+        if self.spectrum_display.spectrum_data is not None and len(self.spectrum_display.spectrum_data) > 0:
+            bin_index = int((graph_x / self.waterfall_width) * len(self.spectrum_display.spectrum_data))
+            if 0 <= bin_index < len(self.spectrum_display.spectrum_data):
+                db = self.spectrum_display.spectrum_data[bin_index]
+                tooltip_text = f"{freq/1e6:.6f} MHz\n{db:.1f} dB"
+            else:
+                tooltip_text = f"{freq/1e6:.6f} MHz"
+        else:
+            tooltip_text = f"{freq/1e6:.6f} MHz"
+        
+        # Draw cursor line in both spectrum and waterfall
         self._draw_cursor_line(x)
         
-        # Draw tooltip
-        tooltip_text = f"{freq/1e6:.6f} MHz"
-        self._draw_tooltip(x, y, tooltip_text)
+        # Draw tooltip on waterfall canvas
+        # If mouse is over spectrum, adjust y to be relative to waterfall canvas
+        if y < self.spectrum_display.height:
+            # Mouse is over spectrum - use y position relative to waterfall
+            tooltip_y = y + 10  # Small offset below cursor
+        else:
+            # Mouse is over waterfall - adjust for spectrum height
+            tooltip_y = y - self.spectrum_display.height
+        
+        self._draw_tooltip(x, tooltip_y, tooltip_text)
     
     def _draw_tooltip(self, x: int, y: int, text: str):
-        """Draw tooltip at position with white background and black text."""
-        # Delete previous tooltip (both background and text)
+        """Draw tooltip at position with white background and black text on waterfall canvas."""
+        # Delete previous tooltip
         if self.tooltip_bg_id:
             self.canvas.delete(self.tooltip_bg_id)
+            self.tooltip_bg_id = None
         if self.tooltip_id:
             self.canvas.delete(self.tooltip_id)
+            self.tooltip_id = None
         
         # Position tooltip
         if x > self.width / 2:
@@ -468,9 +475,10 @@ class WaterfallDisplay:
             anchor = tk.W
         
         # Create white background rectangle for tooltip
-        # Estimate text size (rough approximation)
-        text_width = len(text) * 7
-        text_height = 14
+        # Estimate text size for multi-line text
+        lines = text.split('\n')
+        text_width = max(len(line) for line in lines) * 7
+        text_height = len(lines) * 14
         
         if anchor == tk.E:
             # Text anchored to right
@@ -534,7 +542,7 @@ class WaterfallDisplay:
 
 
 def create_waterfall_window(parent_gui):
-    """Create a standalone waterfall window that shares data with spectrum display.
+    """Create a standalone waterfall window with spectrum on top and waterfall below.
     
     Args:
         parent_gui: Parent RadioGUI instance
@@ -542,13 +550,149 @@ def create_waterfall_window(parent_gui):
     Returns:
         Tuple of (window, waterfall_display)
     """
-    # Create toplevel window
-    window = Toplevel(parent_gui.root)
-    window.title("Waterfall Display")
-    window.geometry("800x400")
+    from spectrum_display import SpectrumDisplay
     
-    # Create waterfall display sharing spectrum's data
-    waterfall = WaterfallDisplay(window, parent_gui.spectrum, width=800, height=400)
+    # Create toplevel window (taller to accommodate title, spectrum and waterfall)
+    window = Toplevel(parent_gui.root)
+    window.title("Spectrum & Waterfall Display")
+    window.geometry("800x650")
+    
+    # Create container frame
+    container = tk.Frame(window, bg='#000000')
+    container.pack(fill=tk.BOTH, expand=True)
+    
+    # Create title and info frame at top
+    info_frame = tk.Frame(container, bg='#000000', height=60)
+    info_frame.pack(side=tk.TOP, fill=tk.X)
+    info_frame.pack_propagate(False)  # Prevent frame from shrinking
+    
+    # Title label (centered)
+    title_label = tk.Label(info_frame, text="RF Spectrum & Waterfall",
+                          bg='#000000', fg='white',
+                          font=('sans-serif', 12, 'bold'))
+    title_label.place(relx=0.5, y=15, anchor=tk.CENTER)
+    
+    # Bandwidth info (centered below title)
+    bw_label = tk.Label(info_frame, text="",
+                       bg='#000000', fg='yellow',
+                       font=('monospace', 9))
+    bw_label.place(relx=0.5, y=35, anchor=tk.CENTER)
+    
+    # Peak frequency info (right side, top line)
+    peak_freq_label = tk.Label(info_frame, text="",
+                               bg='#000000', fg='yellow',
+                               font=('monospace', 10, 'bold'))
+    peak_freq_label.place(relx=1.0, y=15, anchor=tk.E, x=-5)
+    
+    # Peak level info (right side, bottom line)
+    peak_level_label = tk.Label(info_frame, text="",
+                                bg='#000000', fg='yellow',
+                                font=('monospace', 10, 'bold'))
+    peak_level_label.place(relx=1.0, y=35, anchor=tk.E, x=-5)
+    
+    # Create NEW spectrum display in this window
+    spectrum = SpectrumDisplay(container, width=800, height=200)
+    spectrum.set_frequency_callback(parent_gui.on_spectrum_frequency_click)
+    spectrum.set_frequency_step_callback(parent_gui.on_spectrum_frequency_step)
+    spectrum.set_step_size(parent_gui.get_step_size_hz())
+    
+    # Set scroll mode from parent GUI
+    if hasattr(parent_gui, 'scroll_mode_var'):
+        spectrum.set_scroll_mode(parent_gui.scroll_mode_var.get())
+    
+    # Unbind spectrum's motion handler - waterfall will handle cursor for both
+    spectrum.canvas.unbind('<Motion>')
+    
+    # Initialize with current settings BEFORE connecting
+    try:
+        freq_hz = parent_gui.get_frequency_hz()
+        spectrum.tuned_freq = freq_hz  # Set tuned frequency
+        spectrum.update_center_frequency(freq_hz)
+        spectrum.update_bandwidth(
+            int(parent_gui.bw_low_var.get()),
+            int(parent_gui.bw_high_var.get())
+        )
+    except ValueError:
+        pass
+    
+    # Connect spectrum to server after window is ready (delayed)
+    def connect_spectrum_delayed():
+        if parent_gui.connected and parent_gui.client:
+            try:
+                server = parent_gui.server_var.get()
+                frequency = parent_gui.get_frequency_hz()
+                use_tls = parent_gui.tls_var.get()
+                # Connect with the tuned frequency
+                spectrum.connect(server, frequency, parent_gui.client.user_session_id, use_tls=use_tls)
+                print(f"Spectrum connected in waterfall window to {server} at {frequency/1e6:.6f} MHz")
+            except Exception as e:
+                print(f"Failed to connect spectrum in waterfall window: {e}")
+                import traceback
+                traceback.print_exc()
+    
+    # Delay connection slightly to allow window to fully initialize
+    window.after(200, connect_spectrum_delayed)
+    
+    # Create waterfall display below spectrum (shares spectrum's data)
+    waterfall = WaterfallDisplay(container, spectrum, width=800, height=400, spectrum_height=200)
+    
+    # Set scroll mode on waterfall too
+    if hasattr(parent_gui, 'scroll_mode_var'):
+        waterfall.set_scroll_mode(parent_gui.scroll_mode_var.get())
+    
+    # Bind spectrum canvas motion to waterfall's handler for unified cursor
+    def unified_motion_handler(event):
+        # Convert spectrum canvas coordinates to waterfall coordinates
+        # Both have the same width and margins, so x coordinate is the same
+        waterfall.on_motion(event)
+    
+    spectrum.canvas.bind('<Motion>', unified_motion_handler)
+    
+    # Function to update info labels periodically
+    def update_info_labels():
+        if not window.winfo_exists():
+            return
+        
+        try:
+            # Update RF spectrum bandwidth info (total bandwidth being displayed)
+            if spectrum.total_bandwidth > 0:
+                bw_khz = spectrum.total_bandwidth / 1000
+                bw_text = f"RF Spectrum BW: {bw_khz:.1f} kHz"
+                bw_label.config(text=bw_text)
+            else:
+                bw_label.config(text="")
+            
+            # Find peak in spectrum data
+            if spectrum.spectrum_data is not None and len(spectrum.spectrum_data) > 0:
+                import numpy as np
+                valid_data = spectrum.spectrum_data[np.isfinite(spectrum.spectrum_data)]
+                if len(valid_data) > 0:
+                    peak_idx = np.argmax(spectrum.spectrum_data)
+                    peak_db = spectrum.spectrum_data[peak_idx]
+                    
+                    # Calculate peak frequency
+                    if spectrum.total_bandwidth > 0:
+                        freq_offset = (peak_idx / len(spectrum.spectrum_data) - 0.5) * spectrum.total_bandwidth
+                        peak_freq = spectrum.center_freq + freq_offset
+                        peak_freq_label.config(text=f"Peak: {peak_freq/1e6:.6f} MHz")
+                        peak_level_label.config(text=f"{peak_db:.1f} dB")
+                    else:
+                        peak_freq_label.config(text="")
+                        peak_level_label.config(text="")
+                else:
+                    peak_freq_label.config(text="")
+                    peak_level_label.config(text="")
+            else:
+                peak_freq_label.config(text="")
+                peak_level_label.config(text="")
+        except Exception as e:
+            pass
+        
+        # Schedule next update
+        window.after(100, update_info_labels)
+    
+    # Start info label updates
+    update_info_labels()
     
     # Set callbacks to parent GUI's methods
     waterfall.set_frequency_callback(parent_gui.on_spectrum_frequency_click)
@@ -562,9 +706,19 @@ def create_waterfall_window(parent_gui):
         int(parent_gui.bw_high_var.get())
     )
     
+    # Store references to spectrum and waterfall in parent GUI for scroll mode updates
+    parent_gui.waterfall_spectrum = spectrum
+    parent_gui.waterfall_waterfall = waterfall
+    
     # Handle window close
     def on_close():
         waterfall.disconnect()
+        spectrum.disconnect()
+        # Clear references
+        if hasattr(parent_gui, 'waterfall_spectrum'):
+            parent_gui.waterfall_spectrum = None
+        if hasattr(parent_gui, 'waterfall_waterfall'):
+            parent_gui.waterfall_waterfall = None
         window.destroy()
     
     window.protocol("WM_DELETE_WINDOW", on_close)

@@ -124,7 +124,7 @@ class RadioGUI:
     def __init__(self, root: tk.Tk, initial_config: dict):
         self.root = root
         self.root.title("ka9q_ubersdr Radio Client")
-        self.root.geometry("800x1000")  # Increased height for spectrum display
+        self.root.geometry("800x850")  # Increased height to better see status messages
         self.root.resizable(True, True)
         
         # Configuration
@@ -234,24 +234,29 @@ class RadioGUI:
         
         # Rigctl connection (third row, optional)
         ttk.Label(conn_frame, text="Rigctl:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5))
+        
+        # Create a frame to hold rigctl controls so they stay together
+        rigctl_controls = ttk.Frame(conn_frame)
+        rigctl_controls.grid(row=2, column=1, columnspan=4, sticky=tk.W)
+        
         self.rigctl_host_var = tk.StringVar(value=self.config.get('rigctl_host', 'localhost'))
-        rigctl_host_entry = ttk.Entry(conn_frame, textvariable=self.rigctl_host_var, width=15)
-        rigctl_host_entry.grid(row=2, column=1, sticky=tk.W, padx=(0, 5))
+        rigctl_host_entry = ttk.Entry(rigctl_controls, textvariable=self.rigctl_host_var, width=15)
+        rigctl_host_entry.pack(side=tk.LEFT, padx=(0, 5))
 
-        ttk.Label(conn_frame, text="Port:").grid(row=2, column=2, sticky=tk.W, padx=(0, 5))
+        ttk.Label(rigctl_controls, text="Port:").pack(side=tk.LEFT, padx=(0, 5))
         self.rigctl_port_var = tk.StringVar(value=str(self.config.get('rigctl_port', 4532)))
-        rigctl_port_entry = ttk.Entry(conn_frame, textvariable=self.rigctl_port_var, width=6)
-        rigctl_port_entry.grid(row=2, column=3, sticky=tk.W, padx=(0, 5))
+        rigctl_port_entry = ttk.Entry(rigctl_controls, textvariable=self.rigctl_port_var, width=6)
+        rigctl_port_entry.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.rigctl_connect_btn = ttk.Button(conn_frame, text="Connect Rig", command=self.toggle_rigctl_connection)
-        self.rigctl_connect_btn.grid(row=2, column=4, sticky=tk.W, padx=(0, 5))
+        self.rigctl_connect_btn = ttk.Button(rigctl_controls, text="Connect Rig", command=self.toggle_rigctl_connection)
+        self.rigctl_connect_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         # Sync checkbox (initially hidden until rigctl connected)
         self.rigctl_sync_var = tk.BooleanVar(value=False)
-        self.rigctl_sync_check = ttk.Checkbutton(conn_frame, text="Sync", variable=self.rigctl_sync_var,
+        self.rigctl_sync_check = ttk.Checkbutton(rigctl_controls, text="Sync", variable=self.rigctl_sync_var,
                                                   command=self.toggle_rigctl_sync)
-        self.rigctl_sync_check.grid(row=2, column=5, sticky=tk.W)
-        self.rigctl_sync_check.grid_remove()  # Hide initially
+        self.rigctl_sync_check.pack(side=tk.LEFT)
+        self.rigctl_sync_check.pack_forget()  # Hide initially
         
         conn_frame.columnconfigure(1, weight=1)
         
@@ -514,12 +519,17 @@ class RadioGUI:
         audio_frame.columnconfigure(1, weight=1)
         audio_frame.columnconfigure(4, weight=1)
         
-        # Spectrum display (always visible if available)
+        # Controls frame (buttons for opening windows)
         if SPECTRUM_AVAILABLE:
-            spectrum_frame = ttk.LabelFrame(main_frame, text="Spectrum", padding="10")
-            spectrum_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+            controls_frame = ttk.LabelFrame(main_frame, text="Controls", padding="10")
+            controls_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
 
-            self.spectrum = SpectrumDisplay(spectrum_frame, width=800, height=200)
+            # Create a hidden frame for spectrum display (will be moved to waterfall window)
+            spectrum_container = tk.Frame(controls_frame)
+            # Don't pack spectrum_container - it stays hidden
+            
+            # Create spectrum display in hidden container
+            self.spectrum = SpectrumDisplay(spectrum_container, width=800, height=200)
             self.spectrum.set_frequency_callback(self.on_spectrum_frequency_click)
             self.spectrum.set_frequency_step_callback(self.on_spectrum_frequency_step)
 
@@ -531,15 +541,15 @@ class RadioGUI:
             except ValueError:
                 pass  # Use defaults if values are invalid
 
-            # Add waterfall and audio spectrum buttons, plus scroll mode selector
-            button_frame = ttk.Frame(spectrum_frame)
-            button_frame.pack(side=tk.TOP, pady=(0, 5))
-            
+            # Add buttons for opening windows
+            button_frame = ttk.Frame(controls_frame)
+            button_frame.pack(side=tk.TOP, pady=(5, 5))
+
             if WATERFALL_AVAILABLE:
-                waterfall_btn = ttk.Button(button_frame, text="Open Waterfall",
+                waterfall_btn = ttk.Button(button_frame, text="Open Spectrum & Waterfall",
                                           command=self.open_waterfall_window)
                 waterfall_btn.pack(side=tk.LEFT, padx=(0, 5))
-            
+
             if AUDIO_SPECTRUM_AVAILABLE:
                 self.audio_spectrum_btn = ttk.Button(button_frame, text="Open Audio",
                                       command=self.open_audio_spectrum_window)
@@ -554,7 +564,7 @@ class RadioGUI:
                 # Don't pack yet - will be shown after connection if server supports it
             else:
                 self.digital_spots_btn = None
-            
+
             # CW spots button (conditionally shown based on server capability)
             if CW_SPOTS_AVAILABLE:
                 self.cw_spots_btn = ttk.Button(button_frame, text="Open CW Spots",
@@ -562,21 +572,20 @@ class RadioGUI:
                 # Don't pack yet - will be shown after connection if server supports it
             else:
                 self.cw_spots_btn = None
-            
+
             # Scroll mode selector (zoom vs pan) - always at the end
             ttk.Label(button_frame, text="Scroll:").pack(side=tk.LEFT, padx=(15, 5))
-            
+
             self.scroll_mode_var = tk.StringVar(value="zoom")
             zoom_radio = ttk.Radiobutton(button_frame, text="Zoom", variable=self.scroll_mode_var,
                                         value="zoom", command=self.on_scroll_mode_changed)
             zoom_radio.pack(side=tk.LEFT, padx=(0, 5))
-            
+
             pan_radio = ttk.Radiobutton(button_frame, text="Pan", variable=self.scroll_mode_var,
                                        value="pan", command=self.on_scroll_mode_changed)
             pan_radio.pack(side=tk.LEFT)
 
-            spectrum_frame.columnconfigure(0, weight=1)
-            spectrum_frame.rowconfigure(0, weight=1)
+            controls_frame.columnconfigure(0, weight=1)
         
         # Status frame
         status_frame = ttk.LabelFrame(main_frame, text="Status", padding="10")
@@ -830,6 +839,12 @@ class RadioGUI:
             if self.waterfall_display:
                 self.waterfall_display.update_center_frequency(freq_hz)
             
+            # Update waterfall window's spectrum if open
+            if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
+                self.waterfall_spectrum.update_center_frequency(freq_hz)
+            if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
+                self.waterfall_waterfall.update_center_frequency(freq_hz)
+            
             # Send tune message
             self.log_status(f"Tuning to {freq_hz/1e6:.6f} MHz...")
             self.send_tune_message()
@@ -982,6 +997,12 @@ class RadioGUI:
             # Update audio spectrum display if open
             if self.audio_spectrum_display:
                 self.audio_spectrum_display.update_bandwidth(low, high)
+            
+            # Update waterfall window's spectrum and waterfall if open
+            if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
+                self.waterfall_spectrum.update_bandwidth(low, high)
+            if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
+                self.waterfall_waterfall.update_bandwidth(low, high)
             
             self.log_status(f"Adjusting bandwidth to {low} to {high} Hz...")
             self.send_tune_message()
@@ -1423,6 +1444,12 @@ class RadioGUI:
         if self.waterfall_display:
             self.waterfall_display.set_scroll_mode(mode)
         
+        # Update waterfall window's spectrum and waterfall if open
+        if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
+            self.waterfall_spectrum.set_scroll_mode(mode)
+        if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
+            self.waterfall_waterfall.set_scroll_mode(mode)
+        
         self.log_status(f"Scroll mode: {mode}")
 
     def auto_open_waterfall(self):
@@ -1774,6 +1801,12 @@ class RadioGUI:
             # Update audio spectrum display bandwidth
             if self.audio_spectrum_display:
                 self.audio_spectrum_display.update_bandwidth(low, high)
+            
+            # Update waterfall window's spectrum and waterfall if open
+            if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
+                self.waterfall_spectrum.update_bandwidth(low, high)
+            if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
+                self.waterfall_waterfall.update_bandwidth(low, high)
 
             # Only update client if it exists (connected)
             if self.client:

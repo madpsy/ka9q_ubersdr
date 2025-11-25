@@ -716,6 +716,20 @@ Examples:
     if args.gui:
         try:
             from radio_gui import main as gui_main
+            # Determine if we should auto-connect
+            # Auto-connect if --url is provided, or if --host/--port were explicitly set (not defaults)
+            auto_connect = False
+            if args.url:
+                # URL was explicitly provided
+                auto_connect = True
+            else:
+                # Check if host or port were explicitly provided (not using defaults)
+                # We detect this by checking if they differ from the defaults
+                import sys
+                # Parse command line to see if --host or --port were actually specified
+                if '--host' in sys.argv or '-H' in sys.argv or '--port' in sys.argv or '-p' in sys.argv:
+                    auto_connect = True
+
             # Pass configuration to GUI
             config = {
                 'url': args.url,
@@ -725,7 +739,8 @@ Examples:
                 'frequency': args.frequency if args.frequency else 14074000,
                 'mode': args.mode if args.mode else 'usb',
                 'bandwidth_low': bandwidth_low if bandwidth_low is not None else 50,
-                'bandwidth_high': bandwidth_high if bandwidth_high is not None else 2700
+                'bandwidth_high': bandwidth_high if bandwidth_high is not None else 2700,
+                'auto_connect': auto_connect
             }
             gui_main(config)
             return

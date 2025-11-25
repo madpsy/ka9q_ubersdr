@@ -81,6 +81,10 @@ class RadioGUI:
         
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # Auto-connect if requested (after UI is ready)
+        if self.config.get('auto_connect', False):
+            self.root.after(100, self.connect)  # Delay slightly to ensure UI is fully initialized
     
     def create_widgets(self):
         """Create all GUI widgets."""
@@ -849,6 +853,27 @@ class RadioGUI:
         except ValueError:
             pass
 
+    def auto_open_waterfall(self):
+        """Automatically open waterfall window on connection (no error dialogs)."""
+        # Don't open multiple windows
+        if self.waterfall_window and self.waterfall_window.winfo_exists():
+            return
+
+        if not self.connected or not self.spectrum:
+            return
+
+        try:
+            from waterfall_display import create_waterfall_window
+
+            # Create waterfall window (shares spectrum's data)
+            self.waterfall_window, self.waterfall_display = create_waterfall_window(self)
+
+            self.log_status("Waterfall window opened automatically")
+
+        except Exception as e:
+            # Silent failure for auto-open (user can manually open if needed)
+            self.log_status(f"Note: Waterfall auto-open failed - {e}")
+
     def open_waterfall_window(self):
         """Open a separate waterfall display window."""
         # Don't open multiple windows
@@ -1241,6 +1266,11 @@ class RadioGUI:
                         self.rec_btn.state(['!disabled'])
                         if "✓" not in msg:  # Don't duplicate success message
                             self.log_status("✓ Successfully connected!")
+
+                        # Auto-open waterfall window on successful connection
+                        if WATERFALL_AVAILABLE and self.spectrum:
+                            # Delay waterfall opening slightly to ensure spectrum is connected
+                            self.root.after(500, self.auto_open_waterfall)
                 elif msg_type == "error":
                     self.log_status(f"ERROR: {msg}")
                 elif msg_type == "connection_failed":

@@ -584,7 +584,7 @@ func (nfm *NoiseFloorMonitor) calculateAndLogStatistics() {
 		// Calculate statistics from the max-hold FFT data
 		// This represents the strongest signals seen in each frequency bin over the last 10 seconds
 		measurement := nfm.calculateStatistics(timestamp, band.Name, maxHoldFFT.Data)
-	
+
 		// Store latest measurement
 		nfm.measurementsMu.Lock()
 		nfm.latestMeasurements[band.Name] = measurement
@@ -930,11 +930,6 @@ func (nfm *NoiseFloorMonitor) GetRecentData(band string) ([]*BandMeasurement, er
 		dates = append([]string{startDate}, dates...)
 	}
 
-	if DebugMode {
-		log.Printf("DEBUG: GetRecentData - now=%s, startTime=%s, dates=%v, band=%s",
-			now.Format(time.RFC3339), startTime.Format(time.RFC3339), dates, band)
-	}
-
 	var allMeasurements []*BandMeasurement
 
 	// Read data from relevant dates
@@ -942,13 +937,7 @@ func (nfm *NoiseFloorMonitor) GetRecentData(band string) ([]*BandMeasurement, er
 		for _, d := range dates {
 			measurements, err := nfm.readBandFile(band, d)
 			if err != nil {
-				if DebugMode {
-					log.Printf("DEBUG: GetRecentData - failed to read band %s for date %s: %v", band, d, err)
-				}
 				continue
-			}
-			if DebugMode {
-				log.Printf("DEBUG: GetRecentData - read %d measurements from band %s for date %s", len(measurements), band, d)
 			}
 			allMeasurements = append(allMeasurements, measurements...)
 		}
@@ -958,21 +947,11 @@ func (nfm *NoiseFloorMonitor) GetRecentData(band string) ([]*BandMeasurement, er
 			for _, bandConfig := range nfm.config.NoiseFloor.Bands {
 				measurements, err := nfm.readBandFile(bandConfig.Name, d)
 				if err != nil {
-					if DebugMode {
-						log.Printf("DEBUG: GetRecentData - failed to read band %s for date %s: %v", bandConfig.Name, d, err)
-					}
 					continue
-				}
-				if DebugMode {
-					log.Printf("DEBUG: GetRecentData - read %d measurements from band %s for date %s", len(measurements), bandConfig.Name, d)
 				}
 				allMeasurements = append(allMeasurements, measurements...)
 			}
 		}
-	}
-
-	if DebugMode {
-		log.Printf("DEBUG: GetRecentData - total measurements read: %d", len(allMeasurements))
 	}
 
 	// Filter to last hour
@@ -982,10 +961,6 @@ func (nfm *NoiseFloorMonitor) GetRecentData(band string) ([]*BandMeasurement, er
 			(m.Timestamp.Before(now) || m.Timestamp.Equal(now)) {
 			recentMeasurements = append(recentMeasurements, m)
 		}
-	}
-
-	if DebugMode {
-		log.Printf("DEBUG: GetRecentData - filtered to %d recent measurements (last hour)", len(recentMeasurements))
 	}
 
 	// Sort by timestamp (oldest first)

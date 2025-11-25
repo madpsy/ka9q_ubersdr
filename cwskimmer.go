@@ -159,14 +159,18 @@ func (c *CWSkimmerClient) connectionLoop() {
 	for {
 		select {
 		case <-c.stopChan:
+			log.Println("CW Skimmer: Connection loop stopped")
 			return
 		default:
+			log.Println("CW Skimmer: Attempting connection...")
 			if err := c.connect(); err != nil {
 				log.Printf("CW Skimmer: Connection failed: %v", err)
 				c.scheduleReconnect()
 			} else {
 				// Connection succeeded, handle it
+				log.Println("CW Skimmer: Connection successful, entering message handler")
 				c.handleConnection()
+				log.Println("CW Skimmer: Message handler exited, will reconnect")
 			}
 		}
 	}
@@ -175,9 +179,10 @@ func (c *CWSkimmerClient) connectionLoop() {
 // connect establishes a connection to the CW Skimmer server
 func (c *CWSkimmerClient) connect() error {
 	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
-	log.Printf("CW Skimmer: Connecting to %s", addr)
+	log.Printf("CW Skimmer: Connecting to %s (timeout: 10s)", addr)
 
-	conn, err := net.DialTimeout("tcp", addr, 30*time.Second)
+	// Use 10 second timeout for connection
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
@@ -189,15 +194,26 @@ func (c *CWSkimmerClient) connect() error {
 	c.lastActivityTime = time.Now()
 	c.mu.Unlock()
 
-	log.Printf("CW Skimmer: Connected to %s", addr)
+	log.Printf("CW Skimmer: TCP connection established to %s", addr)
 
-	// Perform login
-	if err := c.login(); err != nil {
+	// Perform login with timeout
+	loginDone := make(chan error, 1)
+	go func() {
+		loginDone <- c.login()
+	}()
+
+	select {
+	case err := <-loginDone:
+		if err != nil {
+			c.disconnect()
+			return fmt.Errorf("login failed: %w", err)
+		}
+		log.Println("CW Skimmer: Login successful")
+		return nil
+	case <-time.After(10 * time.Second):
 		c.disconnect()
-		return fmt.Errorf("login failed: %w", err)
+		return fmt.Errorf("login timeout after 10 seconds")
 	}
-
-	return nil
 }
 
 // disconnect closes the connection
@@ -643,13 +659,15 @@ func (c *CWSkimmerClient) submitToPSKReporter(spot *CWSkimmerSpot) error {
 // scheduleReconnect schedules a reconnection attempt
 func (c *CWSkimmerClient) scheduleReconnect() {
 	delay := time.Duration(c.config.ReconnectDelay) * time.Second
-	log.Printf("CW Skimmer: Reconnecting in %v", delay)
+	log.Printf("CW Skimmer: Scheduling reconnection in %v", delay)
 
 	// Sleep in the connection loop to actually wait
 	select {
 	case <-c.stopChan:
+		log.Println("CW Skimmer: Reconnection cancelled (stop requested)")
 		return
 	case <-time.After(delay):
+		log.Printf("CW Skimmer: Reconnection delay elapsed, will retry connection")
 		// Continue to reconnect
 	}
 }

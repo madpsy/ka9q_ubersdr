@@ -230,11 +230,6 @@ func (mp *MQTTPublisher) publishAllMetrics(config *Config) {
 						cwSkimmerMetrics[band] = make(map[string]interface{})
 					}
 					cwSkimmerMetrics[band][metricName] = value
-					if DebugMode {
-						log.Printf("MQTT DEBUG: Routing CW metric %s for band %s, value=%v", metricName, band, value)
-					}
-				} else if DebugMode {
-					log.Printf("MQTT DEBUG: CW metric %s has no band label", metricName)
 				}
 
 			case len(metricName) >= 7 && metricName[:7] == "digital":
@@ -725,10 +720,6 @@ func (mp *MQTTPublisher) publishCWSkimmerMetrics(metrics map[string]map[string]i
 		topic := fmt.Sprintf("%s/cw_skimmer/%s", mp.config.TopicPrefix, band)
 
 		mp.publish(topic, payload)
-
-		if DebugMode {
-			log.Printf("MQTT DEBUG: Published CW Skimmer metrics for band %s with %d metrics", band, len(floatMetrics))
-		}
 	}
 }
 

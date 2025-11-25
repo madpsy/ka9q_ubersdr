@@ -6,20 +6,27 @@ Shows real-time FT8, FT4, and WSPR spots from the multi-decoder via DX cluster W
 
 import tkinter as tk
 from tkinter import ttk
-import asyncio
-import websockets
-import json
-import threading
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Callable
 import queue
 
 
 class DigitalSpotsDisplay:
     """Display window for digital mode spots (FT8, FT4, WSPR)."""
     
-    def __init__(self, parent_window: tk.Toplevel):
-        self.window = parent_window
+    def __init__(self, websocket_manager, on_close: Optional[Callable] = None):
+        """
+        Initialize the digital spots display.
+        
+        Args:
+            websocket_manager: Shared DXClusterWebSocket instance
+            on_close: Optional callback when window is closed
+        """
+        self.websocket_manager = websocket_manager
+        self.on_close_callback = on_close
+        
+        # Create window
+        self.window = tk.Toplevel()
         self.window.title("Digital Spots - ka9q_ubersdr")
         self.window.geometry("1400x700")
         
@@ -28,15 +35,10 @@ class DigitalSpotsDisplay:
         self.max_spots = 5000
         self.filtered_spots: List[Dict] = []
         
-        # WebSocket connection
-        self.ws: Optional[websockets.WebSocketClientProtocol] = None
-        self.ws_thread: Optional[threading.Thread] = None
-        self.event_loop: Optional[asyncio.AbstractEventLoop] = None
-        self.running = False
-        self.connected = False
-        
         # Update queue for thread-safe GUI updates
         self.update_queue = queue.Queue()
+        
+        self.running = True
         
         # Filter state
         self.mode_filter = tk.StringVar(value="all")
@@ -45,17 +47,32 @@ class DigitalSpotsDisplay:
         self.snr_filter = tk.StringVar(value="none")
         self.callsign_filter = tk.StringVar(value="")
         
+        # Sorting state
+        self.sort_column = "time"
+        self.sort_reverse = True  # Most recent first by default
+        
         # Create UI
         self.create_widgets()
         
-        # Start update checker
-        self.check_updates()
-        
-        # Start age update timer
-        self.update_ages()
+        # Register callbacks with shared WebSocket manager
+        self.websocket_manager.on_digital_spot(self._handle_spot)
+        self.websocket_manager.on_status(self._handle_status)
         
         # Handle window close
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # Start update checker and age updater AFTER window is fully initialized
+        # Use after() to ensure the window event loop is running
+        self.window.after(100, self.check_updates)
+        self.window.after(1000, self.update_ages)
+    
+    def _handle_spot(self, spot_data: Dict):
+        """Handle incoming digital spot from WebSocket."""
+        self.update_queue.put(('spot', spot_data))
+    
+    def _handle_status(self, connected: bool):
+        """Handle connection status change."""
+        self.update_queue.put(('status', connected))
     
     def create_widgets(self):
         """Create all GUI widgets."""
@@ -139,19 +156,10 @@ class DigitalSpotsDisplay:
                   'country', 'grid', 'distance', 'bearing', 'snr', 'message')
         self.tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=25)
         
-        # Define column headings
-        self.tree.heading('time', text='Time (UTC)')
-        self.tree.heading('age', text='Age')
-        self.tree.heading('mode', text='Mode')
-        self.tree.heading('freq', text='Freq (MHz)')
-        self.tree.heading('band', text='Band')
-        self.tree.heading('callsign', text='Callsign')
-        self.tree.heading('country', text='Country')
-        self.tree.heading('grid', text='Grid')
-        self.tree.heading('distance', text='Distance')
-        self.tree.heading('bearing', text='Bearing')
-        self.tree.heading('snr', text='SNR')
-        self.tree.heading('message', text='Message')
+        # Define column headings with sort commands
+        for col in columns:
+            self.tree.heading(col, text=self._get_column_title(col),
+                            command=lambda c=col: self._sort_by_column(c))
         
         # Define column widths
         self.tree.column('time', width=80)
@@ -184,100 +192,14 @@ class DigitalSpotsDisplay:
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(2, weight=1)
     
-    def connect(self, server: str, user_session_id: str, use_tls: bool = False):
-        """Connect to DX cluster WebSocket for digital spots.
-        
-        Args:
-            server: Server address (host:port or full URL)
-            user_session_id: User session ID for authentication
-            use_tls: Whether to use TLS/SSL
-        """
-        if self.running:
-            return
-        
-        self.running = True
-        
-        # Parse server URL
-        if '://' in server:
-            # Full URL provided - convert to WebSocket URL
-            ws_url = server.replace('http://', 'ws://').replace('https://', 'wss://')
-            # Remove any existing path and add /ws/dxcluster
-            if '/' in ws_url.split('://', 1)[1]:
-                # Has a path, replace it
-                base = ws_url.split('/', 3)[:3]  # protocol://host:port
-                ws_url = '/'.join(base) + '/ws/dxcluster'
-            else:
-                # No path, add it
-                ws_url = f"{ws_url}/ws/dxcluster"
-        else:
-            # Host:port format
-            protocol = 'wss' if use_tls else 'ws'
-            ws_url = f"{protocol}://{server}/ws/dxcluster"
-        
-        # Add user_session_id query parameter (required by server)
-        ws_url = f"{ws_url}?user_session_id={user_session_id}"
-        
-        print(f"Digital Spots: Connecting to {ws_url}")
-        
-        # Start WebSocket thread
-        self.ws_thread = threading.Thread(target=self.run_websocket, args=(ws_url,), daemon=True)
-        self.ws_thread.start()
-    
-    def run_websocket(self, url: str):
-        """Run WebSocket connection in separate thread."""
-        self.event_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.event_loop)
-        
-        try:
-            self.event_loop.run_until_complete(self.websocket_handler(url))
-        except Exception as e:
-            self.update_queue.put(('error', f"WebSocket error: {e}"))
-        finally:
-            self.event_loop.close()
-    
-    async def websocket_handler(self, url: str):
-        """Handle WebSocket connection and messages."""
-        try:
-            print(f"Digital Spots: Attempting WebSocket connection to {url}")
-            async with websockets.connect(url) as websocket:
-                self.ws = websocket
-                print("Digital Spots: WebSocket connected successfully")
-                self.update_queue.put(('connected', None))
-                
-                # Receive messages (no subscription needed - DX cluster auto-sends)
-                while self.running:
-                    try:
-                        message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
-                        data = json.loads(message)
-                        
-                        print(f"Digital Spots: Received message type: {data.get('type')}")
-                        
-                        # Handle digital spot messages
-                        if data.get('type') == 'digital_spot':
-                            self.update_queue.put(('spot', data.get('data', data)))
-                    
-                    except asyncio.TimeoutError:
-                        continue
-                    except websockets.exceptions.ConnectionClosed:
-                        print("Digital Spots: WebSocket connection closed")
-                        break
-        
-        except Exception as e:
-            print(f"Digital Spots: WebSocket error: {e}")
-            import traceback
-            traceback.print_exc()
-            self.update_queue.put(('error', f"Connection failed: {e}"))
-        finally:
-            self.update_queue.put(('disconnected', None))
-    
     def add_spot(self, spot: Dict):
         """Add a new spot to the list."""
         self.spots.insert(0, spot)  # Add to beginning
-        
+
         # Limit stored spots
         if len(self.spots) > self.max_spots:
             self.spots = self.spots[:self.max_spots]
-        
+
         # Update last update time
         self.last_update_label.config(text=f"Last: {datetime.now().strftime('%H:%M:%S')}")
         
@@ -330,14 +252,93 @@ class DigitalSpotsDisplay:
         # Update display
         self.update_display()
     
+    def _get_column_title(self, column):
+        """Get display title for column."""
+        titles = {
+            "time": "Time (UTC)",
+            "age": "Age",
+            "mode": "Mode",
+            "freq": "Freq (MHz)",
+            "band": "Band",
+            "callsign": "Callsign",
+            "country": "Country",
+            "grid": "Grid",
+            "distance": "Distance",
+            "bearing": "Bearing",
+            "snr": "SNR",
+            "message": "Message"
+        }
+        title = titles.get(column, column)
+        # Add sort indicator
+        if column == self.sort_column:
+            title += " ▼" if self.sort_reverse else " ▲"
+        return title
+    
+    def _sort_by_column(self, column):
+        """Sort spots by the specified column."""
+        # Toggle sort direction if clicking same column
+        if column == self.sort_column:
+            self.sort_reverse = not self.sort_reverse
+        else:
+            self.sort_column = column
+            # Default sort direction based on column type
+            self.sort_reverse = column in ["time", "snr", "distance"]
+        
+        # Update column headings to show sort indicator
+        for col in ('time', 'age', 'mode', 'freq', 'band', 'callsign',
+                   'country', 'grid', 'distance', 'bearing', 'snr', 'message'):
+            self.tree.heading(col, text=self._get_column_title(col))
+        
+        # Re-apply filters (which will trigger display update with new sort)
+        self.apply_filters()
+    
+    def _get_sort_key(self, spot, column):
+        """Get sort key for a spot based on column."""
+        if column == "time":
+            return spot.get('timestamp', '')
+        elif column == "age":
+            # Sort by timestamp (inverse of age)
+            return spot.get('timestamp', '')
+        elif column == "mode":
+            return spot.get('mode', '').upper()
+        elif column == "freq":
+            return spot.get('frequency', 0)
+        elif column == "band":
+            # Sort bands numerically (160m, 80m, etc.)
+            band = spot.get('band', '')
+            try:
+                return int(band.replace('m', ''))
+            except:
+                return 999
+        elif column == "callsign":
+            return spot.get('callsign', '').upper()
+        elif column == "country":
+            return spot.get('country', '').upper()
+        elif column == "grid":
+            return spot.get('locator', '').upper()
+        elif column == "distance":
+            return spot.get('distance_km', 0) or 0
+        elif column == "bearing":
+            return spot.get('bearing_deg', 0) or 0
+        elif column == "snr":
+            return spot.get('snr', -999)
+        elif column == "message":
+            return spot.get('message', '').upper()
+        return ''
+    
     def update_display(self):
         """Update the spots table display."""
         # Clear existing items
         for item in self.tree.get_children():
             self.tree.delete(item)
         
-        # Add filtered spots (limit to 500 for performance)
-        for spot in self.filtered_spots[:500]:
+        # Sort filtered spots by current sort column
+        sorted_spots = sorted(self.filtered_spots[:500],
+                            key=lambda s: self._get_sort_key(s, self.sort_column),
+                            reverse=self.sort_reverse)
+        
+        # Add sorted spots
+        for spot in sorted_spots:
             # Format time
             try:
                 spot_time = datetime.fromisoformat(spot['timestamp'].replace('Z', '+00:00'))
@@ -434,67 +435,46 @@ class DigitalSpotsDisplay:
         try:
             while True:
                 msg_type, data = self.update_queue.get_nowait()
-                
-                if msg_type == 'connected':
-                    self.connected = True
-                    self.status_label.config(text="Connected", foreground='green')
-                elif msg_type == 'disconnected':
-                    self.connected = False
-                    self.status_label.config(text="Disconnected", foreground='red')
+
+                if msg_type == 'status':
+                    # data is boolean connected status
+                    if data:
+                        self.status_label.config(text="Connected", foreground='green')
+                    else:
+                        self.status_label.config(text="Disconnected", foreground='red')
                 elif msg_type == 'spot':
-                    # Data might be wrapped in 'data' key or be the spot itself
-                    spot_data = data.get('data', data) if isinstance(data, dict) else data
-                    self.add_spot(spot_data)
-                elif msg_type == 'error':
-                    self.status_label.config(text=f"Error: {data}", foreground='red')
-        
+                    self.add_spot(data)
+
         except queue.Empty:
             pass
-        
+
         # Schedule next check
         if self.running:
             self.window.after(100, self.check_updates)
     
-    def disconnect(self):
-        """Disconnect from WebSocket."""
-        self.running = False
-        if self.ws and self.event_loop:
-            try:
-                asyncio.run_coroutine_threadsafe(self.ws.close(), self.event_loop)
-            except Exception:
-                pass
-    
     def on_closing(self):
         """Handle window close."""
-        self.disconnect()
+        self.running = False
+        
+        # Remove callbacks from shared WebSocket manager
+        self.websocket_manager.remove_digital_spot_callback(self._handle_spot)
+        self.websocket_manager.remove_status_callback(self._handle_status)
+        
+        # Call close callback if provided
+        if self.on_close_callback:
+            self.on_close_callback()
+        
         self.window.destroy()
 
 
-def create_digital_spots_window(parent_gui) -> tuple:
+def create_digital_spots_window(websocket_manager, on_close=None):
     """Create and return a digital spots display window.
     
     Args:
-        parent_gui: The RadioGUI instance
+        websocket_manager: Shared DXClusterWebSocket instance
+        on_close: Optional callback when window is closed
         
     Returns:
-        Tuple of (window, display) objects
+        DigitalSpotsDisplay instance
     """
-    window = tk.Toplevel(parent_gui.root)
-    display = DigitalSpotsDisplay(window)
-    
-    # Connect to server with user session ID from the radio client
-    server = parent_gui.server_var.get()
-    use_tls = parent_gui.tls_var.get()
-    
-    # Get user_session_id from the radio client
-    if parent_gui.client and hasattr(parent_gui.client, 'user_session_id'):
-        user_session_id = parent_gui.client.user_session_id
-        display.connect(server, user_session_id, use_tls)
-    else:
-        # If no client or no session ID, show error
-        import tkinter.messagebox as messagebox
-        messagebox.showerror("Error", "No active radio session. Please ensure you're connected to the server.")
-        window.destroy()
-        return None, None
-    
-    return window, display
+    return DigitalSpotsDisplay(websocket_manager, on_close)

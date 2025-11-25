@@ -44,6 +44,22 @@ except ImportError:
     DIGITAL_SPOTS_AVAILABLE = False
     print("Warning: Digital spots display not available (missing dependencies)")
 
+# Import CW spots display
+try:
+    from cw_spots_display import create_cw_spots_window
+    CW_SPOTS_AVAILABLE = True
+except ImportError:
+    CW_SPOTS_AVAILABLE = False
+    print("Warning: CW spots display not available (missing dependencies)")
+
+# Import shared WebSocket manager
+try:
+    from dxcluster_websocket import DXClusterWebSocket
+    DXCLUSTER_WS_AVAILABLE = True
+except ImportError:
+    DXCLUSTER_WS_AVAILABLE = False
+    print("Warning: DX cluster WebSocket not available (missing dependencies)")
+
 # Check if NR2 is available
 try:
     from nr2 import create_nr2_processor
@@ -112,9 +128,16 @@ class RadioGUI:
         self.audio_spectrum_window = None
         self.audio_spectrum_display = None
 
+        # Shared DX cluster WebSocket manager
+        self.dxcluster_ws = None
+        
         # Digital spots display (separate window)
         self.digital_spots_window = None
         self.digital_spots_display = None
+        
+        # CW spots display (separate window)
+        self.cw_spots_window = None
+        self.cw_spots_display = None
         
         # Create UI
         self.create_widgets()
@@ -411,7 +434,12 @@ class RadioGUI:
             if DIGITAL_SPOTS_AVAILABLE:
                 spots_btn = ttk.Button(button_frame, text="Open Digital Spots",
                                       command=self.open_digital_spots_window)
-                spots_btn.pack(side=tk.LEFT, padx=(0, 15))
+                spots_btn.pack(side=tk.LEFT, padx=(0, 5))
+            
+            if CW_SPOTS_AVAILABLE:
+                cw_spots_btn = ttk.Button(button_frame, text="Open CW Spots",
+                                         command=self.open_cw_spots_window)
+                cw_spots_btn.pack(side=tk.LEFT, padx=(0, 15))
             
             # Scroll mode selector (zoom vs pan)
             ttk.Label(button_frame, text="Scroll:").pack(side=tk.LEFT, padx=(0, 5))
@@ -1042,6 +1070,37 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open audio spectrum: {e}")
             self.log_status(f"ERROR: Failed to open audio spectrum - {e}")
 
+    def _ensure_dxcluster_ws(self):
+        """Ensure shared DX cluster WebSocket is connected."""
+        if not self.dxcluster_ws and DXCLUSTER_WS_AVAILABLE:
+            # Create shared WebSocket manager
+            server = self.server_var.get()
+            use_tls = self.tls_var.get()
+            
+            # Parse server URL
+            if '://' in server:
+                # Full URL provided - convert to WebSocket URL
+                ws_url = server.replace('http://', 'ws://').replace('https://', 'wss://')
+                # Remove any existing path
+                if '/' in ws_url.split('://', 1)[1]:
+                    base = ws_url.split('/', 3)[:3]
+                    ws_url = '/'.join(base)
+            else:
+                # Host:port format
+                protocol = 'wss' if use_tls else 'ws'
+                ws_url = f"{protocol}://{server}"
+            
+            # Get user_session_id from the radio client
+            if self.client and hasattr(self.client, 'user_session_id'):
+                user_session_id = self.client.user_session_id
+                self.dxcluster_ws = DXClusterWebSocket(ws_url, user_session_id)
+                self.dxcluster_ws.connect()
+                self.log_status("DX cluster WebSocket connected")
+            else:
+                raise Exception("No active radio session")
+        
+        return self.dxcluster_ws
+
     def open_digital_spots_window(self):
         """Open a separate digital spots display window."""
         # Don't open multiple windows
@@ -1054,16 +1113,65 @@ class RadioGUI:
             return
 
         try:
+            # Ensure shared WebSocket is connected
+            ws_manager = self._ensure_dxcluster_ws()
+            
             from digital_spots_display import create_digital_spots_window
 
-            # Create digital spots window
-            self.digital_spots_window, self.digital_spots_display = create_digital_spots_window(self)
+            # Create digital spots window with shared WebSocket
+            self.digital_spots_display = create_digital_spots_window(
+                ws_manager,
+                on_close=self._on_digital_spots_closed
+            )
+            self.digital_spots_window = self.digital_spots_display.window
 
             self.log_status("Digital spots window opened")
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open digital spots: {e}")
             self.log_status(f"ERROR: Failed to open digital spots - {e}")
+    
+    def _on_digital_spots_closed(self):
+        """Handle digital spots window close."""
+        self.digital_spots_window = None
+        self.digital_spots_display = None
+        self.log_status("Digital spots window closed")
+    
+    def open_cw_spots_window(self):
+        """Open a separate CW spots display window."""
+        # Don't open multiple windows
+        if self.cw_spots_window and self.cw_spots_window.winfo_exists():
+            self.cw_spots_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        try:
+            # Ensure shared WebSocket is connected
+            ws_manager = self._ensure_dxcluster_ws()
+            
+            from cw_spots_display import create_cw_spots_window
+
+            # Create CW spots window with shared WebSocket
+            self.cw_spots_display = create_cw_spots_window(
+                ws_manager,
+                on_close=self._on_cw_spots_closed
+            )
+            self.cw_spots_window = self.cw_spots_display.window
+
+            self.log_status("CW spots window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open CW spots: {e}")
+            self.log_status(f"ERROR: Failed to open CW spots - {e}")
+    
+    def _on_cw_spots_closed(self):
+        """Handle CW spots window close."""
+        self.cw_spots_window = None
+        self.cw_spots_display = None
+        self.log_status("CW spots window closed")
 
     def adjust_bandwidth_for_mode(self, mode: str):
         """Set bandwidth defaults based on mode (matching web application behavior)."""
@@ -1614,6 +1722,15 @@ class RadioGUI:
         # Close digital spots window if open
         if self.digital_spots_window and self.digital_spots_window.winfo_exists():
             self.digital_spots_window.destroy()
+        
+        # Close CW spots window if open
+        if self.cw_spots_window and self.cw_spots_window.winfo_exists():
+            self.cw_spots_window.destroy()
+        
+        # Disconnect shared DX cluster WebSocket
+        if self.dxcluster_ws:
+            self.dxcluster_ws.disconnect()
+            self.dxcluster_ws = None
 
         # Stop recording if active
         if self.recording:

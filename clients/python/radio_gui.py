@@ -928,6 +928,27 @@ class RadioGUI:
             # Silent failure for auto-open (user can manually open if needed)
             self.log_status(f"Note: Waterfall auto-open failed - {e}")
 
+    def auto_open_audio_spectrum(self):
+        """Automatically open audio spectrum window on connection (no error dialogs)."""
+        # Don't open multiple windows
+        if self.audio_spectrum_window and self.audio_spectrum_window.winfo_exists():
+            return
+
+        if not self.connected:
+            return
+
+        try:
+            from audio_spectrum_display import create_audio_spectrum_window
+
+            # Create audio spectrum window
+            self.audio_spectrum_window, self.audio_spectrum_display = create_audio_spectrum_window(self)
+
+            self.log_status("Audio spectrum window opened automatically")
+
+        except Exception as e:
+            # Silent failure for auto-open (user can manually open if needed)
+            self.log_status(f"Note: Audio spectrum auto-open failed - {e}")
+
     def open_waterfall_window(self):
         """Open a separate waterfall display window."""
         # Don't open multiple windows
@@ -1360,6 +1381,11 @@ class RadioGUI:
                         if WATERFALL_AVAILABLE and self.spectrum:
                             # Delay waterfall opening slightly to ensure spectrum is connected
                             self.root.after(500, self.auto_open_waterfall)
+                        
+                        # Auto-open audio spectrum window on successful connection
+                        if AUDIO_SPECTRUM_AVAILABLE:
+                            # Delay audio spectrum opening slightly
+                            self.root.after(600, self.auto_open_audio_spectrum)
                 elif msg_type == "error":
                     self.log_status(f"ERROR: {msg}")
                 elif msg_type == "connection_failed":

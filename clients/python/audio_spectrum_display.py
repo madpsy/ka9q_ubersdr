@@ -67,6 +67,11 @@ class AudioSpectrumDisplay:
         self.history_timestamps = deque(maxlen=self.max_history)
         self.auto_level_window_seconds = 2.0
         
+        # Peak tracking with averaging
+        self.peak_history = deque(maxlen=10)  # Store last 10 peaks (500ms at 50ms update rate)
+        self.peak_timestamps = deque(maxlen=10)
+        self.peak_average_window = 0.5  # 500ms averaging window
+        
         # Color mapping for dB values
         self.min_db = -80
         self.max_db = -20
@@ -229,6 +234,9 @@ class AudioSpectrumDisplay:
         if self.spectrum_data is None or len(self.spectrum_data) == 0:
             return
         
+        # Find peak frequency and level within filter bandwidth
+        peak_freq, peak_db = self._find_peak_in_bandwidth()
+        
         # Auto-range dB scale using recent data ONLY within filter bandwidth
         import time
         current_time = time.time()
@@ -294,13 +302,30 @@ class AudioSpectrumDisplay:
             fill='white', font=('sans-serif', 12, 'bold')
         )
         
-        # Draw info text
+        # Draw info text (bandwidth)
         bw_text = f"Audio BW: {self.bandwidth_low} to {self.bandwidth_high} Hz"
         self.canvas.create_text(
             self.width // 2, 35,
             text=bw_text,
             fill='yellow', font=('monospace', 9)
         )
+        
+        # Draw peak info (top right, yellow text)
+        if peak_freq is not None and peak_db is not None:
+            peak_text = f"Peak: {peak_freq:.0f} Hz"
+            self.canvas.create_text(
+                self.width - self.margin_right - 5, 15,
+                text=peak_text,
+                fill='yellow', font=('monospace', 10, 'bold'),
+                anchor=tk.E
+            )
+            level_text = f"{peak_db:.1f} dB"
+            self.canvas.create_text(
+                self.width - self.margin_right - 5, 35,
+                text=level_text,
+                fill='yellow', font=('monospace', 10, 'bold'),
+                anchor=tk.E
+            )
         
         # Draw spectrum line chart
         self._draw_spectrum()
@@ -565,6 +590,75 @@ class AudioSpectrumDisplay:
             font=('monospace', 9),
             anchor=anchor
         )
+    
+    def _find_peak_in_bandwidth(self):
+        """Find the peak frequency and level within the filter bandwidth with 500ms averaging.
+        
+        Returns:
+            Tuple of (peak_frequency_hz, peak_db) or (None, None) if no valid data
+        """
+        if self.spectrum_data is None or len(self.spectrum_data) == 0:
+            return None, None
+        
+        # Calculate bin range for filter bandwidth
+        nyquist = self.sample_rate / 2
+        abs_low = abs(self.bandwidth_low)
+        abs_high = abs(self.bandwidth_high)
+        
+        low_bin = int((abs_low / nyquist) * len(self.spectrum_data))
+        high_bin = int((abs_high / nyquist) * len(self.spectrum_data))
+        
+        # Ensure valid range
+        low_bin = max(0, min(low_bin, len(self.spectrum_data) - 1))
+        high_bin = max(low_bin + 1, min(high_bin, len(self.spectrum_data)))
+        
+        # Find peak within bandwidth
+        bandwidth_data = self.spectrum_data[low_bin:high_bin]
+        valid_data = bandwidth_data[np.isfinite(bandwidth_data)]
+        
+        if len(valid_data) == 0:
+            return None, None
+        
+        # Find instantaneous peak
+        peak_idx = np.argmax(bandwidth_data)
+        peak_db = bandwidth_data[peak_idx]
+        
+        # Convert bin index to frequency
+        actual_bin = low_bin + peak_idx
+        peak_freq = (actual_bin / len(self.spectrum_data)) * nyquist
+        
+        # Add to history with timestamp
+        import time
+        current_time = time.time()
+        self.peak_history.append((peak_freq, peak_db))
+        self.peak_timestamps.append(current_time)
+        
+        # Average peaks over last 500ms
+        cutoff_time = current_time - self.peak_average_window
+        recent_peaks = []
+        for i, timestamp in enumerate(self.peak_timestamps):
+            if timestamp >= cutoff_time:
+                recent_peaks.append(self.peak_history[i])
+        
+        if len(recent_peaks) == 0:
+            return peak_freq, peak_db
+        
+        # Calculate weighted average (more recent = higher weight)
+        total_weight = 0
+        weighted_freq = 0
+        weighted_db = 0
+        
+        for i, (freq, db) in enumerate(recent_peaks):
+            # Linear weight: newer samples get higher weight
+            weight = i + 1
+            weighted_freq += freq * weight
+            weighted_db += db * weight
+            total_weight += weight
+        
+        avg_freq = weighted_freq / total_weight
+        avg_db = weighted_db / total_weight
+        
+        return avg_freq, avg_db
 
 
 def create_audio_spectrum_window(parent_gui):

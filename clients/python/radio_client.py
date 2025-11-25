@@ -110,7 +110,7 @@ class RadioClient:
                  nr2_floor: float = 10.0, nr2_adapt_rate: float = 1.0,
                  auto_reconnect: bool = False, status_callback=None,
                  volume: float = 1.0, channel_left: bool = True, channel_right: bool = True,
-                 audio_level_callback=None):
+                 audio_level_callback=None, recording_callback=None):
         self.url = url
         self.host = host
         self.port = port
@@ -170,6 +170,7 @@ class RadioClient:
         self.status_callback = status_callback
         self.audio_level_callback = audio_level_callback
         self.audio_level_update_counter = 0
+        self.recording_callback = recording_callback
     
     def _log(self, message: str):
         """Log a message to stderr and optionally to status callback for GUI."""
@@ -294,6 +295,12 @@ class RadioClient:
             # Apply -3dB makeup gain (matches UI default)
             # -3dB = 10^(-3/20) = 0.7079 gain factor
             audio_float = audio_float * 0.7079
+        
+        # Send mono audio to recording callback BEFORE stereo conversion
+        # This captures the mono signal before it's duplicated to stereo
+        if self.recording_callback and self.channels == 1:
+            # audio_float is mono at this point
+            self.recording_callback(audio_float)
         
         # Calculate audio level before volume adjustment (for meter)
         if self.audio_level_callback and self.audio_level_update_counter % 5 == 0:
@@ -647,10 +654,10 @@ Examples:
                         help='Launch graphical user interface (Linux only, requires Tkinter)')
     parser.add_argument('-u', '--url',
                         help='Full WebSocket URL (e.g., ws://host:port/ws or wss://host/ws)')
-    parser.add_argument('-H', '--host', default='ubersdr.madpsy.uk',
-                        help='Server hostname (default: ubersdr.madpsy.uk, ignored if --url is provided)')
-    parser.add_argument('-p', '--port', type=int, default=443,
-                        help='Server port (default: 443, ignored if --url is provided)')
+    parser.add_argument('-H', '--host', default='localhost',
+                        help='Server hostname (default: localhost, ignored if --url is provided)')
+    parser.add_argument('-p', '--port', type=int, default=8080,
+                        help='Server port (default: 8080, ignored if --url is provided)')
     parser.add_argument('-f', '--frequency', type=int,
                         help='Frequency in Hz (e.g., 14074000 for 14.074 MHz)')
     parser.add_argument('-m', '--mode',
@@ -714,6 +721,7 @@ Examples:
                 'url': args.url,
                 'host': args.host,
                 'port': args.port,
+                'ssl': args.ssl,
                 'frequency': args.frequency if args.frequency else 14074000,
                 'mode': args.mode if args.mode else 'usb',
                 'bandwidth_low': bandwidth_low if bandwidth_low is not None else 50,
@@ -773,11 +781,7 @@ Examples:
         nr2_strength=args.nr2_strength,
         nr2_floor=args.nr2_floor,
         nr2_adapt_rate=args.nr2_adapt_rate,
-        auto_reconnect=args.auto_reconnect,
-        volume=args.volume,
-        channel_left=args.channel_left,
-        channel_right=args.channel_right,
-        pipewire_target=args.pipewire_target
+        auto_reconnect=args.auto_reconnect
     )
     
     # Setup signal handler for graceful shutdown

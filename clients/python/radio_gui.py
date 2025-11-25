@@ -8,7 +8,7 @@ import asyncio
 import sys
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from typing import Optional, List, Tuple
 import queue
 
@@ -19,6 +19,14 @@ try:
 except ImportError:
     SPECTRUM_AVAILABLE = False
     print("Warning: Spectrum display not available (missing dependencies)")
+
+# Import waterfall display
+try:
+    from waterfall_display import create_waterfall_window
+    WATERFALL_AVAILABLE = True
+except ImportError:
+    WATERFALL_AVAILABLE = False
+    print("Warning: Waterfall display not available (missing dependencies)")
 
 # Check if NR2 is available
 try:
@@ -51,9 +59,19 @@ class RadioGUI:
         self.audio_level_queue = queue.Queue()
         self.pipewire_devices: List[Tuple[str, str]] = []
         
+        # Recording state
+        self.recording = False
+        self.recording_start_time = None
+        self.recording_data = []
+        self.recording_max_duration = 300  # 300 seconds limit
+        
         # Spectrum display (always enabled)
         self.spectrum: Optional[SpectrumDisplay] = None
         self.spectrum_frame = None
+
+        # Waterfall display (separate window)
+        self.waterfall_window = None
+        self.waterfall_display = None
         
         # Create UI
         self.create_widgets()
@@ -77,12 +95,12 @@ class RadioGUI:
         conn_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         ttk.Label(conn_frame, text="Server:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        self.server_var = tk.StringVar(value=self.config.get('url') or f"{self.config.get('host', 'ubersdr.madpsy.uk')}:{self.config.get('port', 443)}")
+        self.server_var = tk.StringVar(value=self.config.get('url') or f"{self.config.get('host', 'localhost')}:{self.config.get('port', 8080)}")
         server_entry = ttk.Entry(conn_frame, textvariable=self.server_var, width=40)
         server_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
         
-        # TLS checkbox
-        self.tls_var = tk.BooleanVar(value=True)
+        # TLS checkbox - default from config or False
+        self.tls_var = tk.BooleanVar(value=self.config.get('ssl', False))
         tls_check = ttk.Checkbutton(conn_frame, text="TLS", variable=self.tls_var)
         tls_check.grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
         
@@ -163,47 +181,43 @@ class RadioGUI:
         
         freq_frame.columnconfigure(8, weight=1)
         
-        # Mode control frame
-        mode_frame = ttk.LabelFrame(main_frame, text="Mode", padding="10")
-        mode_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        # Mode & Bandwidth control frame (combined)
+        bw_frame = ttk.LabelFrame(main_frame, text="Mode", padding="10")
+        bw_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
-        ttk.Label(mode_frame, text="Demodulation:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        # Mode selection (first row)
+        ttk.Label(bw_frame, text="Demodulation:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         
         modes = ['AM', 'SAM', 'USB', 'LSB', 'FM', 'NFM', 'CWU', 'CWL', 'IQ']
         self.mode_var = tk.StringVar(value=self.config.get('mode', 'USB').upper())
-        mode_combo = ttk.Combobox(mode_frame, textvariable=self.mode_var, values=modes,
+        mode_combo = ttk.Combobox(bw_frame, textvariable=self.mode_var, values=modes,
                                  state='readonly', width=10)
         mode_combo.grid(row=0, column=1, sticky=tk.W, padx=(0, 10))
         mode_combo.bind('<<ComboboxSelected>>', lambda e: self.on_mode_changed())
         
         # Mode lock checkbox
         self.mode_lock_var = tk.BooleanVar(value=False)
-        mode_lock_check = ttk.Checkbutton(mode_frame, text="Lock", variable=self.mode_lock_var)
+        mode_lock_check = ttk.Checkbutton(bw_frame, text="Lock", variable=self.mode_lock_var)
         mode_lock_check.grid(row=0, column=2, sticky=tk.W, padx=(0, 10))
         
-        mode_frame.columnconfigure(3, weight=1)
-        
-        # Bandwidth control frame
-        bw_frame = ttk.LabelFrame(main_frame, text="Bandwidth", padding="10")
-        bw_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        
-        ttk.Label(bw_frame, text="Low (Hz):").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        # Bandwidth controls (second row)
+        ttk.Label(bw_frame, text="Low (Hz):").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
         self.bw_low_var = tk.StringVar(value=str(self.config.get('bandwidth_low', 50)))
         bw_low_entry = ttk.Entry(bw_frame, textvariable=self.bw_low_var, width=10)
-        bw_low_entry.grid(row=0, column=1, sticky=tk.W, padx=(0, 20))
+        bw_low_entry.grid(row=1, column=1, sticky=tk.W, padx=(0, 20))
         
-        ttk.Label(bw_frame, text="High (Hz):").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        ttk.Label(bw_frame, text="High (Hz):").grid(row=1, column=2, sticky=tk.W, padx=(0, 5))
         self.bw_high_var = tk.StringVar(value=str(self.config.get('bandwidth_high', 2700)))
         bw_high_entry = ttk.Entry(bw_frame, textvariable=self.bw_high_var, width=10)
-        bw_high_entry.grid(row=0, column=3, sticky=tk.W, padx=(0, 10))
+        bw_high_entry.grid(row=1, column=3, sticky=tk.W, padx=(0, 10))
         
         self.apply_bw_btn = ttk.Button(bw_frame, text="Apply", command=self.apply_bandwidth)
-        self.apply_bw_btn.grid(row=0, column=4, sticky=tk.W)
+        self.apply_bw_btn.grid(row=1, column=4, sticky=tk.W)
         self.apply_bw_btn.state(['disabled'])
         
         # Preset bandwidth buttons (will be updated based on mode)
         self.preset_frame = ttk.Frame(bw_frame)
-        self.preset_frame.grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(5, 0))
+        self.preset_frame.grid(row=2, column=0, columnspan=5, sticky=tk.W, pady=(5, 0))
         
         ttk.Label(self.preset_frame, text="Presets:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         
@@ -215,32 +229,9 @@ class RadioGUI:
         
         bw_frame.columnconfigure(5, weight=1)
         
-        # NR2 Noise Reduction frame
-        nr2_frame = ttk.LabelFrame(main_frame, text="NR2 Noise Reduction", padding="10")
-        nr2_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        
-        self.nr2_enabled_var = tk.BooleanVar(value=False)
-        nr2_check = ttk.Checkbutton(nr2_frame, text="Enable NR2", variable=self.nr2_enabled_var,
-                                    command=self.toggle_nr2)
-        nr2_check.grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
-        
-        ttk.Label(nr2_frame, text="Strength:").grid(row=0, column=1, sticky=tk.W, padx=(0, 5))
-        self.nr2_strength_var = tk.StringVar(value="40")
-        nr2_strength_entry = ttk.Entry(nr2_frame, textvariable=self.nr2_strength_var, width=8)
-        nr2_strength_entry.grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
-        ttk.Label(nr2_frame, text="%").grid(row=0, column=3, sticky=tk.W, padx=(0, 20))
-        
-        ttk.Label(nr2_frame, text="Floor:").grid(row=0, column=4, sticky=tk.W, padx=(0, 5))
-        self.nr2_floor_var = tk.StringVar(value="10")
-        nr2_floor_entry = ttk.Entry(nr2_frame, textvariable=self.nr2_floor_var, width=8)
-        nr2_floor_entry.grid(row=0, column=5, sticky=tk.W, padx=(0, 5))
-        ttk.Label(nr2_frame, text="%").grid(row=0, column=6, sticky=tk.W)
-        
-        nr2_frame.columnconfigure(7, weight=1)
-        
-        # Audio control frame
+        # Audio control frame (includes NR2)
         audio_frame = ttk.LabelFrame(main_frame, text="Audio", padding="10")
-        audio_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        audio_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         # Output device selector
         ttk.Label(audio_frame, text="Output Device:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
@@ -299,24 +290,68 @@ class RadioGUI:
                                       command=self.update_channels)
         right_check.grid(row=2, column=2, sticky=tk.W, pady=(5, 0))
         
+        # NR2 Noise Reduction (row 3) - use a frame to avoid column weight issues
+        nr2_container = ttk.Frame(audio_frame)
+        nr2_container.grid(row=3, column=0, columnspan=7, sticky=tk.W, pady=(5, 0))
+        
+        self.nr2_enabled_var = tk.BooleanVar(value=False)
+        nr2_check = ttk.Checkbutton(nr2_container, text="Enable NR2", variable=self.nr2_enabled_var,
+                                    command=self.toggle_nr2)
+        nr2_check.grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
+        
+        ttk.Label(nr2_container, text="Strength:").grid(row=0, column=1, sticky=tk.W, padx=(0, 5))
+        self.nr2_strength_var = tk.StringVar(value="40")
+        nr2_strength_entry = ttk.Entry(nr2_container, textvariable=self.nr2_strength_var, width=8)
+        nr2_strength_entry.grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        ttk.Label(nr2_container, text="%").grid(row=0, column=3, sticky=tk.W, padx=(0, 20))
+        
+        ttk.Label(nr2_container, text="Floor:").grid(row=0, column=4, sticky=tk.W, padx=(0, 5))
+        self.nr2_floor_var = tk.StringVar(value="10")
+        nr2_floor_entry = ttk.Entry(nr2_container, textvariable=self.nr2_floor_var, width=8)
+        nr2_floor_entry.grid(row=0, column=5, sticky=tk.W, padx=(0, 5))
+        ttk.Label(nr2_container, text="%").grid(row=0, column=6, sticky=tk.W, padx=(0, 20))
+        
+        # Recording controls (same row as NR2, to the right)
+        self.rec_btn = ttk.Button(nr2_container, text="⏺ Record", width=10,
+                                   command=self.toggle_recording)
+        self.rec_btn.grid(row=0, column=7, sticky=tk.W, padx=(0, 10))
+        self.rec_btn.state(['disabled'])  # Disabled until connected
+        
+        self.rec_status_label = ttk.Label(nr2_container, text="", foreground='red')
+        self.rec_status_label.grid(row=0, column=8, sticky=tk.W)
+        
         audio_frame.columnconfigure(1, weight=1)
         audio_frame.columnconfigure(4, weight=1)
         
         # Spectrum display (always visible if available)
         if SPECTRUM_AVAILABLE:
             spectrum_frame = ttk.LabelFrame(main_frame, text="Spectrum", padding="10")
-            spectrum_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-            
+            spectrum_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+
             self.spectrum = SpectrumDisplay(spectrum_frame, width=800, height=200)
             self.spectrum.set_frequency_callback(self.on_spectrum_frequency_click)
             self.spectrum.set_frequency_step_callback(self.on_spectrum_frequency_step)
-            
+
+            # Initialize spectrum with current bandwidth values
+            try:
+                initial_low = int(self.bw_low_var.get())
+                initial_high = int(self.bw_high_var.get())
+                self.spectrum.update_bandwidth(initial_low, initial_high)
+            except ValueError:
+                pass  # Use defaults if values are invalid
+
+            # Add waterfall button
+            if WATERFALL_AVAILABLE:
+                waterfall_btn = ttk.Button(spectrum_frame, text="Open Waterfall",
+                                          command=self.open_waterfall_window)
+                waterfall_btn.pack(side=tk.TOP, pady=(0, 5))
+
             spectrum_frame.columnconfigure(0, weight=1)
             spectrum_frame.rowconfigure(0, weight=1)
         
         # Status frame
         status_frame = ttk.LabelFrame(main_frame, text="Status", padding="10")
-        status_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        status_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         
         self.status_text = tk.Text(status_frame, height=8, width=50, state='disabled', 
                                    wrap=tk.WORD, bg='#f0f0f0')
@@ -331,7 +366,7 @@ class RadioGUI:
         
         # Configure main frame weights
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(7, weight=1)
+        main_frame.rowconfigure(5, weight=1)
         
         # Initial status
         self.log_status("Ready to connect")
@@ -419,6 +454,10 @@ class RadioGUI:
         # Update spectrum display bandwidth visualization
         if self.spectrum:
             self.spectrum.update_bandwidth(low, high)
+        
+        # Update waterfall display bandwidth visualization
+        if self.waterfall_display:
+            self.waterfall_display.update_bandwidth(low, high)
         
         if self.connected:
             self.apply_bandwidth()
@@ -515,11 +554,13 @@ class RadioGUI:
                         self.on_mode_changed()
                         self.log_status(f"Auto-switched to USB (≥ 10 MHz)")
             
-            # Update spectrum display center frequency and tuned frequency
+            # Update spectrum display center frequency (also sets tuned frequency)
             if self.spectrum:
                 self.spectrum.update_center_frequency(freq_hz)
-                # Also update the tuned frequency for bandwidth filter visualization
-                self.spectrum.tuned_freq = freq_hz
+
+            # Update waterfall display if open
+            if self.waterfall_display:
+                self.waterfall_display.update_center_frequency(freq_hz)
             
             # Send tune message
             self.log_status(f"Tuning to {freq_hz/1e6:.6f} MHz...")
@@ -564,6 +605,10 @@ class RadioGUI:
             # Update spectrum display bandwidth visualization
             if self.spectrum:
                 self.spectrum.update_bandwidth(low, high)
+
+            # Update waterfall display if open
+            if self.waterfall_display:
+                self.waterfall_display.update_bandwidth(low, high)
             
             self.log_status(f"Adjusting bandwidth to {low} to {high} Hz...")
             self.send_tune_message()
@@ -803,7 +848,34 @@ class RadioGUI:
                 self.apply_frequency()
         except ValueError:
             pass
-    
+
+    def open_waterfall_window(self):
+        """Open a separate waterfall display window."""
+        # Don't open multiple windows
+        if self.waterfall_window and self.waterfall_window.winfo_exists():
+            self.waterfall_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        if not self.spectrum:
+            messagebox.showerror("Error", "Spectrum display not available")
+            return
+
+        try:
+            from waterfall_display import create_waterfall_window
+
+            # Create waterfall window (shares spectrum's data)
+            self.waterfall_window, self.waterfall_display = create_waterfall_window(self)
+
+            self.log_status("Waterfall window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open waterfall: {e}")
+            self.log_status(f"ERROR: Failed to open waterfall - {e}")
+
     def adjust_bandwidth_for_mode(self, mode: str):
         """Set bandwidth defaults based on mode (matching web application behavior)."""
         # Default bandwidth values for each mode (from static/app.js setMode function lines 2556-2606)
@@ -817,17 +889,21 @@ class RadioGUI:
             'fm': (-8000, 8000),
             'nfm': (-5000, 5000)
         }
-        
+
         # Get defaults for current mode
         if mode in mode_defaults:
             low, high = mode_defaults[mode]
             self.bw_low_var.set(str(low))
             self.bw_high_var.set(str(high))
-            
+
             # Update spectrum display bandwidth visualization
             if self.spectrum:
                 self.spectrum.update_bandwidth(low, high)
-            
+
+            # Update waterfall display bandwidth visualization
+            if self.waterfall_display:
+                self.waterfall_display.update_bandwidth(low, high)
+
             # Only update client if it exists (connected)
             if self.client:
                 self.client.bandwidth_low = low
@@ -999,6 +1075,7 @@ class RadioGUI:
                 channel_left=channel_left,
                 channel_right=channel_right,
                 audio_level_callback=lambda level_db: self.audio_level_queue.put(level_db),
+                recording_callback=self.add_recording_frame,
                 ssl=self.tls_var.get()  # Use TLS if checkbox is checked
             )
             
@@ -1030,6 +1107,8 @@ class RadioGUI:
                         # Pass the audio channel's user_session_id and TLS setting to spectrum
                         use_tls = self.tls_var.get()
                         self.spectrum.connect(server, frequency, self.client.user_session_id, use_tls=use_tls)
+                        # Set tuned frequency for bandwidth filter visualization
+                        self.spectrum.tuned_freq = frequency
                         self.log_status("Spectrum display connected")
                     except Exception as e:
                         self.log_status(f"Spectrum display error: {e}")
@@ -1071,12 +1150,22 @@ class RadioGUI:
         if self.spectrum:
             self.spectrum.disconnect()
             self.log_status("Spectrum display disconnected")
+
+        # Disconnect waterfall display
+        if self.waterfall_display:
+            self.waterfall_display.disconnect()
+            self.log_status("Waterfall display disconnected")
         
         # Update UI
         self.connected = False
         self.connect_btn.config(text="Connect")
         self.apply_freq_btn.state(['disabled'])
         self.apply_bw_btn.state(['disabled'])
+        self.rec_btn.state(['disabled'])
+        
+        # Stop recording if active
+        if self.recording:
+            self.stop_recording()
         
         # Re-enable device selection
         self.device_combo.config(state='readonly')
@@ -1149,6 +1238,7 @@ class RadioGUI:
                         self.cancel_btn.grid_remove()  # Hide cancel button
                         self.apply_freq_btn.state(['!disabled'])
                         self.apply_bw_btn.state(['!disabled'])
+                        self.rec_btn.state(['!disabled'])
                         if "✓" not in msg:  # Don't duplicate success message
                             self.log_status("✓ Successfully connected!")
                 elif msg_type == "error":
@@ -1180,10 +1270,131 @@ class RadioGUI:
         # Schedule next check
         self.root.after(100, self.check_status_updates)
     
+    def toggle_recording(self):
+        """Toggle audio recording on/off."""
+        if not self.recording:
+            self.start_recording()
+        else:
+            self.stop_recording()
+
+    def start_recording(self):
+        """Start recording audio."""
+        if not self.connected or not self.client:
+            messagebox.showerror("Error", "Not connected to server")
+            return
+
+        import time
+        self.recording = True
+        self.recording_start_time = time.time()
+        self.recording_data = []
+
+        # Update UI
+        self.rec_btn.config(text="⏹ Stop")
+        self.rec_status_label.config(text="Recording...")
+        self.log_status("Recording started (mono, max 300s)")
+
+        # Start recording timer check
+        self.check_recording_duration()
+
+    def stop_recording(self):
+        """Stop recording and prompt to save."""
+        if not self.recording:
+            return
+
+        import time
+        self.recording = False
+        elapsed = time.time() - self.recording_start_time if self.recording_start_time else 0
+
+        # Update UI
+        self.rec_btn.config(text="⏺ Record")
+        self.rec_status_label.config(text="")
+
+        # Check if we have data
+        if not self.recording_data:
+            self.log_status("Recording stopped (no data)")
+            return
+
+        self.log_status(f"Recording stopped ({elapsed:.1f}s, {len(self.recording_data)} frames)")
+
+        # Prompt for save location
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".wav",
+            filetypes=[("WAV files", "*.wav"), ("All files", "*.*")],
+            title="Save Recording As"
+        )
+
+        if filename:
+            self.save_recording(filename)
+        else:
+            self.log_status("Recording discarded")
+            self.recording_data = []
+
+    def save_recording(self, filename: str):
+        """Save recorded audio to WAV file."""
+        try:
+            import wave
+            import numpy as np
+
+            # Concatenate all recorded frames
+            audio_data = np.concatenate(self.recording_data)
+
+            # Open WAV file
+            with wave.open(filename, 'wb') as wav_file:
+                wav_file.setnchannels(1)  # Mono
+                wav_file.setsampwidth(2)  # 16-bit
+                wav_file.setframerate(self.client.sample_rate)
+
+                # Convert float32 to int16
+                audio_int16 = np.clip(audio_data * 32768.0, -32768, 32767).astype(np.int16)
+                wav_file.writeframes(audio_int16.tobytes())
+
+            self.log_status(f"Recording saved: {filename}")
+            self.recording_data = []
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save recording: {e}")
+            self.log_status(f"ERROR: Failed to save recording - {e}")
+
+    def check_recording_duration(self):
+        """Check if recording has reached the time limit."""
+        if not self.recording:
+            return
+
+        import time
+        elapsed = time.time() - self.recording_start_time
+        remaining = self.recording_max_duration - elapsed
+
+        if remaining <= 0:
+            # Time limit reached
+            self.log_status(f"Recording limit reached ({self.recording_max_duration}s)")
+            self.stop_recording()
+        else:
+            # Update status with remaining time
+            self.rec_status_label.config(text=f"Recording... ({int(remaining)}s remaining)")
+            # Check again in 1 second
+            self.root.after(1000, self.check_recording_duration)
+
+    def add_recording_frame(self, audio_float):
+        """Add audio frame to recording buffer (called from client).
+
+        Args:
+            audio_float: Mono audio data as float32 numpy array (normalized -1.0 to 1.0)
+        """
+        if self.recording:
+            self.recording_data.append(audio_float.copy())
+    
     def on_closing(self):
         """Handle window close event."""
         if self.connected:
             self.disconnect()
+
+        # Close waterfall window if open
+        if self.waterfall_window and self.waterfall_window.winfo_exists():
+            self.waterfall_window.destroy()
+
+        # Stop recording if active
+        if self.recording:
+            self.stop_recording()
         
         # Wait a bit for cleanup
         self.root.after(500, self.root.destroy)
@@ -1195,12 +1406,13 @@ def main(config=None):
     if config is None:
         config = {
             'url': None,
-            'host': 'ubersdr.madpsy.uk',
-            'port': 443,
+            'host': 'localhost',
+            'port': 8080,
             'frequency': 14074000,
             'mode': 'usb',
             'bandwidth_low': 50,      # USB defaults (positive bandwidth)
-            'bandwidth_high': 2700
+            'bandwidth_high': 2700,
+            'ssl': False
         }
     
     # Create and run GUI

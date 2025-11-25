@@ -208,20 +208,22 @@ class SpectrumDisplay:
             if msg_type == 'config':
                 # Configuration update
                 old_bin_count = self.bin_count
-                self.center_freq = data.get('centerFreq', 0)
+                server_center_freq = data.get('centerFreq', 0)
                 self.bin_count = data.get('binCount', 0)
                 self.bin_bandwidth = data.get('binBandwidth', 0)
                 self.total_bandwidth = data.get('totalBandwidth', 0)
                 
                 # Debug: Print what we received
                 print(f"Spectrum config received: {self.bin_count} bins @ {self.bin_bandwidth:.2f} Hz/bin = {self.total_bandwidth/1000:.1f} KHz total")
+                print(f"Server center freq: {server_center_freq/1e6:.6f} MHz, Desired center freq: {self.center_freq/1e6:.6f} MHz")
                 
                 # If this is the first config (bin_count was 0), send zoom command for 200 KHz
+                # Use our desired center_freq, not the server's default
                 if old_bin_count == 0 and self.bin_count > 0:
                     # Calculate binBandwidth for 200 KHz total bandwidth
                     desired_bandwidth = 200000  # 200 KHz
                     bin_bandwidth = desired_bandwidth / self.bin_count
-                    print(f"Sending initial zoom: {desired_bandwidth/1000:.1f} KHz ({bin_bandwidth:.2f} Hz/bin with {self.bin_count} bins)")
+                    print(f"Sending initial zoom: {desired_bandwidth/1000:.1f} KHz ({bin_bandwidth:.2f} Hz/bin with {self.bin_count} bins) at {self.center_freq/1e6:.6f} MHz")
                     await self._send_zoom_command(self.center_freq, desired_bandwidth)
                 
             elif msg_type == 'spectrum':
@@ -339,11 +341,17 @@ class SpectrumDisplay:
                                 self.last_mouse_x >= self.margin_left and
                                 self.last_mouse_x <= self.margin_left + self.graph_width)
         
-        # Auto-range dB scale
+        # Auto-range dB scale using percentiles for better noise floor detection
+        # This matches the approach in the main application (spectrum-display.js)
         valid_data = self.spectrum_data[np.isfinite(self.spectrum_data)]
         if len(valid_data) > 0:
-            self.min_db = np.min(valid_data) - 5
-            self.max_db = np.max(valid_data) + 5
+            # Use 1st percentile as true noise floor (captures actual noise floor)
+            # Use 99th percentile for signal peaks (ignore extreme outliers)
+            p1 = np.percentile(valid_data, 1)   # True noise floor
+            p99 = np.percentile(valid_data, 99)  # Signal peaks
+
+            self.min_db = p1 - 2   # Noise floor with minimal margin
+            self.max_db = p99 + 5  # Peak with small margin
         
         db_range = self.max_db - self.min_db
         if db_range == 0:
@@ -373,7 +381,7 @@ class SpectrumDisplay:
             self.canvas.create_polygon(fill_points, fill='#1e90ff', outline='', stipple='gray50')
             
             # Draw line
-            self.canvas.create_line(points, fill='#00ff00', width=2)
+            self.canvas.create_line(points, fill='#00ff00', width=1)
         
         # Draw bandwidth filter visualization
         self._draw_bandwidth_filter()

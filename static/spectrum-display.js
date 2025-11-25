@@ -427,10 +427,11 @@ class SpectrumDisplay {
         this.actualMinDb = this.config.minDb;
         this.actualMaxDb = this.config.maxDb;
         
-        // Auto-range history for temporal smoothing
-        this.autoRangeMinHistory = [];
-        this.autoRangeMaxHistory = [];
-        this.autoRangeHistorySize = 80; // 80 samples for 40 second window (at ~500ms per frame)
+        // Auto-range history for temporal smoothing (matching app.js waterfall behavior)
+        this.autoRangeMinHistory = []; // Track minimum values over time for stable noise floor
+        this.autoRangeMaxHistory = []; // Track maximum values over time for stable ceiling
+        this.autoRangeMinHistoryMaxAge = 2000; // 2 second window for noise floor (matches app.js)
+        this.autoRangeMaxHistoryMaxAge = 20000; // 20 second window for maximum (handles FT8 cycles, matches app.js)
 
         // Waterfall
         this.waterfallImageData = null;
@@ -2308,12 +2309,13 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
         this.lastMarkerDisplayMode = null;
     }
 
-    // Update auto-range based on current data
+    // Update auto-range based on current data (matching app.js waterfall behavior)
     updateAutoRange() {
         if (!this.spectrumData || this.spectrumData.length === 0) {
             return;
         }
 
+        const now = Date.now();
         let min = Infinity;
         let max = -Infinity;
 
@@ -2330,26 +2332,17 @@ console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
             const targetMin = Math.floor(min - this.config.rangeMargin);
             const targetMax = Math.ceil(max + this.config.rangeMargin);
 
-            // Add to history for temporal smoothing
-            this.autoRangeMinHistory.push(targetMin);
-            this.autoRangeMaxHistory.push(targetMax);
+            // Track minimum values over time for stable noise floor (2 second window)
+            this.autoRangeMinHistory.push({ value: targetMin, timestamp: now });
+            this.autoRangeMinHistory = this.autoRangeMinHistory.filter(m => now - m.timestamp <= this.autoRangeMinHistoryMaxAge);
 
-            // Keep only last N samples
-            if (this.autoRangeMinHistory.length > this.autoRangeHistorySize) {
-                this.autoRangeMinHistory.shift();
-            }
-            if (this.autoRangeMaxHistory.length > this.autoRangeHistorySize) {
-                this.autoRangeMaxHistory.shift();
-            }
+            // Track maximum values over time for stable ceiling (20 second window for FT8 cycles)
+            this.autoRangeMaxHistory.push({ value: targetMax, timestamp: now });
+            this.autoRangeMaxHistory = this.autoRangeMaxHistory.filter(m => now - m.timestamp <= this.autoRangeMaxHistoryMaxAge);
 
-            // Need enough history before adjusting (prevents instant changes)
-            if (this.autoRangeMinHistory.length < this.autoRangeHistorySize) {
-                return;
-            }
-
-            // Calculate smoothed values (average of history)
-            const avgMin = this.autoRangeMinHistory.reduce((sum, val) => sum + val, 0) / this.autoRangeMinHistory.length;
-            const avgMax = this.autoRangeMaxHistory.reduce((sum, val) => sum + val, 0) / this.autoRangeMaxHistory.length;
+            // Calculate smoothed values (average of recent history)
+            const avgMin = this.autoRangeMinHistory.reduce((sum, m) => sum + m.value, 0) / this.autoRangeMinHistory.length;
+            const avgMax = this.autoRangeMaxHistory.reduce((sum, m) => sum + m.value, 0) / this.autoRangeMaxHistory.length;
 
             // Apply smoothed values
             this.actualMinDb = avgMin;

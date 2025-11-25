@@ -730,7 +730,7 @@ func main() {
 		handleExtensions(w, r, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config)
+		handleDescription(w, r, config, cwskimmerConfig)
 	})
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(w, r, config)
@@ -1261,7 +1261,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -1285,6 +1285,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config) {
 		"space_weather":   config.SpaceWeather.Enabled,
 		"noise_floor":     config.NoiseFloor.Enabled,
 		"digital_decodes": config.Decoder.Enabled,
+		"cw_skimmer":      cwskimmerConfig.Enabled,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

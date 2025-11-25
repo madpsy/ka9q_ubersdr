@@ -40,7 +40,8 @@ class AudioSpectrumDisplay:
         
         # Audio parameters
         self.sample_rate = 12000  # Will be updated from client
-        self.fft_size = 2048
+        self.base_fft_size = 2048
+        self.fft_size = 2048  # Will be dynamically adjusted based on bandwidth
         self.audio_queue = queue.Queue(maxsize=100)
         
         # Spectrum data
@@ -101,24 +102,63 @@ class AudioSpectrumDisplay:
         self.sample_rate = sample_rate
     
     def update_bandwidth(self, low: int, high: int):
-        """Update filter bandwidth and adjust display range."""
+        """Update filter bandwidth and adjust display range and FFT size."""
         self.bandwidth_low = low
         self.bandwidth_high = high
-        
+
         # Calculate display range based on bandwidth
-        # Use absolute values and add some margin
+        # CW modes have a 500 Hz pitch offset in the audio from radiod
         abs_low = abs(low)
         abs_high = abs(high)
-        max_freq = max(abs_low, abs_high)
-        
-        # Add 20% margin on each side
-        margin = max_freq * 0.2
-        self.display_freq_min = 0
-        self.display_freq_max = max_freq + margin
-        
-        # Ensure minimum display range of 1 kHz
-        if self.display_freq_max < 1000:
-            self.display_freq_max = 1000
+
+        # Check if this is CW mode (narrow symmetric bandwidth)
+        is_cw_mode = (low < 0 and high > 0 and abs_low < 500 and abs_high < 500)
+
+        # Calculate bandwidth span for FFT size adjustment
+        if is_cw_mode or (low < 0 and high > 0):
+            bandwidth_span = abs_low + abs_high
+        else:
+            bandwidth_span = max(abs_low, abs_high)
+
+        # Dynamically adjust FFT size based on bandwidth for better frequency resolution
+        # For narrow bandwidths (< 1000 Hz), use larger FFT for better resolution
+        # FFT bin resolution = sample_rate / fft_size
+        # Balance between resolution and update rate
+        if bandwidth_span < 1000:
+            # Narrow mode (CW): aim for ~3 Hz per bin
+            # At 12 kHz sample rate: 12000 / 4096 = 2.93 Hz per bin
+            # 4096 samples = 341ms at 12kHz, fast enough for responsive display
+            self.fft_size = 4096
+        elif bandwidth_span < 2000:
+            # Medium narrow: aim for ~6 Hz per bin
+            # At 12 kHz: 12000 / 2048 = 5.86 Hz per bin
+            self.fft_size = 2048
+        else:
+            # Wide mode: standard resolution
+            self.fft_size = self.base_fft_size
+
+        if is_cw_mode:
+            # CW mode: audio is centered at 500 Hz (pitch offset)
+            # Display range should show 500 Hz ± bandwidth
+            cw_offset = 500
+            self.display_freq_min = max(0, cw_offset - bandwidth_span // 2 - 100)
+            self.display_freq_max = cw_offset + bandwidth_span // 2 + 100
+        elif (low < 0 and high > 0):
+            # Symmetric bandwidth (e.g., AM: -5000 to +5000, FM: -8000 to +8000)
+            max_freq = bandwidth_span / 2
+            margin = max_freq * 0.3
+            self.display_freq_min = 0
+            self.display_freq_max = max_freq + margin
+        else:
+            # Asymmetric bandwidth (e.g., USB: 50 to 2700, LSB: -2700 to -50)
+            max_freq = max(abs_low, abs_high)
+            margin = max_freq * 0.3
+            self.display_freq_min = 0
+            self.display_freq_max = max_freq + margin
+
+        # Ensure minimum display range
+        if self.display_freq_max < 500:
+            self.display_freq_max = 500
     
     def add_audio_data(self, audio_float: np.ndarray):
         """Add audio data for FFT processing.
@@ -152,7 +192,8 @@ class AudioSpectrumDisplay:
                 while len(audio_buffer) >= self.fft_size:
                     # Take FFT-sized chunk
                     chunk = audio_buffer[:self.fft_size]
-                    audio_buffer = audio_buffer[self.fft_size // 2:]  # 50% overlap
+                    # Use 50% overlap for smooth updates
+                    audio_buffer = audio_buffer[self.fft_size // 2:]
                     
                     # Apply window function
                     window = np.hanning(self.fft_size)
@@ -252,11 +293,28 @@ class AudioSpectrumDisplay:
             nyquist = self.sample_rate / 2
             abs_low = abs(self.bandwidth_low)
             abs_high = abs(self.bandwidth_high)
-            
-            # Calculate bin indices for filter bandwidth
-            low_bin = int((abs_low / nyquist) * len(recent_data[0]))
-            high_bin = int((abs_high / nyquist) * len(recent_data[0]))
-            
+
+            # Check if this is CW mode
+            is_cw_mode = (self.bandwidth_low < 0 and self.bandwidth_high > 0 and
+                          abs_low < 500 and abs_high < 500)
+
+            if is_cw_mode:
+                # CW mode: analyze around 500 Hz ± bandwidth
+                cw_offset = 500
+                search_low = cw_offset - abs_low
+                search_high = cw_offset + abs_high
+                low_bin = int((search_low / nyquist) * len(recent_data[0]))
+                high_bin = int((search_high / nyquist) * len(recent_data[0]))
+            elif (self.bandwidth_low < 0 and self.bandwidth_high > 0):
+                # Other symmetric modes: bandwidth spans from 0 to (abs(low) + abs(high))
+                bandwidth_span = abs_low + abs_high
+                low_bin = 0
+                high_bin = int((bandwidth_span / nyquist) * len(recent_data[0]))
+            else:
+                # Asymmetric mode: use absolute values
+                low_bin = int((abs_low / nyquist) * len(recent_data[0]))
+                high_bin = int((abs_high / nyquist) * len(recent_data[0]))
+
             # Ensure valid range
             low_bin = max(0, min(low_bin, len(recent_data[0]) - 1))
             high_bin = max(low_bin + 1, min(high_bin, len(recent_data[0])))
@@ -488,31 +546,76 @@ class AudioSpectrumDisplay:
         """Draw vertical lines showing the actual bandwidth edges."""
         if self.bandwidth_low == 0 and self.bandwidth_high == 0:
             return
-        
+
         freq_range = self.display_freq_max - self.display_freq_min
-        
-        # Calculate positions for bandwidth edges (using absolute values)
-        low_freq = abs(self.bandwidth_low)
-        high_freq = abs(self.bandwidth_high)
-        
-        # Only draw if within display range
-        if low_freq <= self.display_freq_max:
-            low_x = self.margin_left + ((low_freq - self.display_freq_min) / freq_range) * self.graph_width
-            if self.margin_left <= low_x <= self.margin_left + self.graph_width:
-                self.canvas.create_line(
-                    low_x, self.margin_top,
-                    low_x, scale_y - 5,
-                    fill='yellow', width=2, dash=(5, 3)
-                )
-        
-        if high_freq <= self.display_freq_max:
-            high_x = self.margin_left + ((high_freq - self.display_freq_min) / freq_range) * self.graph_width
-            if self.margin_left <= high_x <= self.margin_left + self.graph_width:
-                self.canvas.create_line(
-                    high_x, self.margin_top,
-                    high_x, scale_y - 5,
-                    fill='yellow', width=2, dash=(5, 3)
-                )
+        abs_low = abs(self.bandwidth_low)
+        abs_high = abs(self.bandwidth_high)
+
+        # Check if this is CW mode
+        is_cw_mode = (self.bandwidth_low < 0 and self.bandwidth_high > 0 and
+                      abs_low < 500 and abs_high < 500)
+
+        if is_cw_mode:
+            # CW mode: show markers at 500 Hz ± bandwidth edges
+            cw_offset = 500
+            low_marker = cw_offset - abs_low
+            high_marker = cw_offset + abs_high
+
+            # Draw low edge marker
+            if self.display_freq_min <= low_marker <= self.display_freq_max:
+                low_x = self.margin_left + ((low_marker - self.display_freq_min) / freq_range) * self.graph_width
+                if self.margin_left <= low_x <= self.margin_left + self.graph_width:
+                    self.canvas.create_line(
+                        low_x, self.margin_top,
+                        low_x, scale_y - 5,
+                        fill='yellow', width=2, dash=(5, 3)
+                    )
+
+            # Draw high edge marker
+            if self.display_freq_min <= high_marker <= self.display_freq_max:
+                high_x = self.margin_left + ((high_marker - self.display_freq_min) / freq_range) * self.graph_width
+                if self.margin_left <= high_x <= self.margin_left + self.graph_width:
+                    self.canvas.create_line(
+                        high_x, self.margin_top,
+                        high_x, scale_y - 5,
+                        fill='yellow', width=2, dash=(5, 3)
+                    )
+        elif (self.bandwidth_low < 0 and self.bandwidth_high > 0):
+            # Other symmetric modes (AM, FM): show the full span
+            bandwidth_span = abs_low + abs_high
+
+            # Draw marker at the full bandwidth edge
+            if bandwidth_span <= self.display_freq_max:
+                marker_x = self.margin_left + ((bandwidth_span - self.display_freq_min) / freq_range) * self.graph_width
+                if self.margin_left <= marker_x <= self.margin_left + self.graph_width:
+                    self.canvas.create_line(
+                        marker_x, self.margin_top,
+                        marker_x, scale_y - 5,
+                        fill='yellow', width=2, dash=(5, 3)
+                    )
+        else:
+            # Asymmetric mode (USB, LSB): show individual edges
+            low_freq = abs_low
+            high_freq = abs_high
+
+            # Only draw if within display range
+            if low_freq <= self.display_freq_max:
+                low_x = self.margin_left + ((low_freq - self.display_freq_min) / freq_range) * self.graph_width
+                if self.margin_left <= low_x <= self.margin_left + self.graph_width:
+                    self.canvas.create_line(
+                        low_x, self.margin_top,
+                        low_x, scale_y - 5,
+                        fill='yellow', width=2, dash=(5, 3)
+                    )
+
+            if high_freq <= self.display_freq_max:
+                high_x = self.margin_left + ((high_freq - self.display_freq_min) / freq_range) * self.graph_width
+                if self.margin_left <= high_x <= self.margin_left + self.graph_width:
+                    self.canvas.create_line(
+                        high_x, self.margin_top,
+                        high_x, scale_y - 5,
+                        fill='yellow', width=2, dash=(5, 3)
+                    )
     
     def on_motion(self, event):
         """Handle mouse motion for tooltip."""
@@ -593,36 +696,54 @@ class AudioSpectrumDisplay:
     
     def _find_peak_in_bandwidth(self):
         """Find the peak frequency and level within the filter bandwidth with 500ms averaging.
-        
+
         Returns:
             Tuple of (peak_frequency_hz, peak_db) or (None, None) if no valid data
         """
         if self.spectrum_data is None or len(self.spectrum_data) == 0:
             return None, None
-        
+
         # Calculate bin range for filter bandwidth
         nyquist = self.sample_rate / 2
         abs_low = abs(self.bandwidth_low)
         abs_high = abs(self.bandwidth_high)
-        
-        low_bin = int((abs_low / nyquist) * len(self.spectrum_data))
-        high_bin = int((abs_high / nyquist) * len(self.spectrum_data))
-        
+
+        # Check if this is CW mode
+        is_cw_mode = (self.bandwidth_low < 0 and self.bandwidth_high > 0 and
+                      abs_low < 500 and abs_high < 500)
+
+        if is_cw_mode:
+            # CW mode: search around 500 Hz ± bandwidth
+            cw_offset = 500
+            search_low = cw_offset - abs_low
+            search_high = cw_offset + abs_high
+            low_bin = int((search_low / nyquist) * len(self.spectrum_data))
+            high_bin = int((search_high / nyquist) * len(self.spectrum_data))
+        elif (self.bandwidth_low < 0 and self.bandwidth_high > 0):
+            # Other symmetric modes: bandwidth spans from 0 to (abs(low) + abs(high))
+            bandwidth_span = abs_low + abs_high
+            low_bin = 0
+            high_bin = int((bandwidth_span / nyquist) * len(self.spectrum_data))
+        else:
+            # Asymmetric mode: use absolute values
+            low_bin = int((abs_low / nyquist) * len(self.spectrum_data))
+            high_bin = int((abs_high / nyquist) * len(self.spectrum_data))
+
         # Ensure valid range
         low_bin = max(0, min(low_bin, len(self.spectrum_data) - 1))
         high_bin = max(low_bin + 1, min(high_bin, len(self.spectrum_data)))
-        
+
         # Find peak within bandwidth
         bandwidth_data = self.spectrum_data[low_bin:high_bin]
         valid_data = bandwidth_data[np.isfinite(bandwidth_data)]
-        
+
         if len(valid_data) == 0:
             return None, None
-        
+
         # Find instantaneous peak
         peak_idx = np.argmax(bandwidth_data)
         peak_db = bandwidth_data[peak_idx]
-        
+
         # Convert bin index to frequency
         actual_bin = low_bin + peak_idx
         peak_freq = (actual_bin / len(self.spectrum_data)) * nyquist

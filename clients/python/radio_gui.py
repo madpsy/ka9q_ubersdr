@@ -1157,7 +1157,8 @@ class RadioGUI:
             # Create CW spots window with shared WebSocket
             self.cw_spots_display = create_cw_spots_window(
                 ws_manager,
-                on_close=self._on_cw_spots_closed
+                on_close=self._on_cw_spots_closed,
+                radio_gui=self
             )
             self.cw_spots_window = self.cw_spots_display.window
 

@@ -13,18 +13,23 @@ from typing import Optional, Callable
 class CWSpotsDisplay:
     """Display window for CW spots."""
     
-    def __init__(self, websocket_manager, on_close: Optional[Callable] = None):
+    def __init__(self, websocket_manager, on_close: Optional[Callable] = None, radio_gui=None):
         """
         Initialize the CW spots display.
         
         Args:
             websocket_manager: Shared DXClusterWebSocket instance
             on_close: Optional callback when window is closed
+            radio_gui: Optional reference to RadioGUI for frequency tuning
         """
         self.websocket_manager = websocket_manager
         self.on_close_callback = on_close
+        self.radio_gui = radio_gui
         self.spots = []
         self.max_spots = 1000
+
+        # Dictionary to map tree item IDs to frequency values
+        self.item_frequencies = {}
         
         # Queue for thread-safe updates
         self.update_queue = queue.Queue()
@@ -169,6 +174,9 @@ class CWSpotsDisplay:
         
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
+
+        # Bind double-click event to tune to frequency
+        self.tree.bind("<Double-Button-1>", self._on_row_double_click)
         
     def _handle_spot(self, spot_data):
         """Handle incoming CW spot from WebSocket."""
@@ -343,8 +351,10 @@ class CWSpotsDisplay:
     
     def _update_display(self, spots):
         """Update the treeview with filtered spots."""
-        # Clear existing items
+        # Clear existing items and frequency mapping
         for item in self.tree.get_children():
+            if item in self.item_frequencies:
+                del self.item_frequencies[item]
             self.tree.delete(item)
         
         # Sort spots by current sort column
@@ -426,7 +436,10 @@ class CWSpotsDisplay:
             spot.get('comment', '')
         )
         
-        self.tree.insert("", "end", values=values, tags=(snr_tag,))
+        # Store frequency in item for retrieval on double-click
+        item_id = self.tree.insert("", "end", values=values, tags=(snr_tag,))
+        # Store the actual frequency value in our dictionary
+        self.item_frequencies[item_id] = freq_hz
         
     def clear_spots(self):
         """Clear all spots."""
@@ -446,16 +459,58 @@ class CWSpotsDisplay:
         # Destroy window
         self.window.destroy()
 
+    def _on_row_double_click(self, event):
+        """Handle double-click on a row to tune to that frequency."""
+        # Get the clicked item
+        item = self.tree.identify_row(event.y)
+        if not item:
+            return
 
-def create_cw_spots_window(websocket_manager, on_close=None):
+        # Get the frequency from our dictionary
+        try:
+            freq_hz = self.item_frequencies.get(item)
+            if freq_hz is None:
+                print("No frequency data for this item")
+                return
+
+            # Determine mode based on frequency (CWU >= 10 MHz, CWL < 10 MHz)
+            if freq_hz < 10000000:
+                mode = 'CWL'
+            else:
+                mode = 'CWU'
+
+            # If we have a radio GUI reference, tune to the frequency
+            if self.radio_gui:
+                # Set frequency display
+                self.radio_gui.set_frequency_hz(freq_hz)
+
+                # Set mode if not locked
+                if not self.radio_gui.mode_lock_var.get():
+                    self.radio_gui.mode_var.set(mode)
+                    self.radio_gui.on_mode_changed()
+
+                # Apply changes if connected
+                if self.radio_gui.connected:
+                    self.radio_gui.apply_frequency()
+
+                print(f"Tuned to {freq_hz/1e6:.6f} MHz ({mode})")
+            else:
+                print(f"No radio GUI reference - would tune to {freq_hz/1e6:.6f} MHz ({mode})")
+
+        except (ValueError, KeyError) as e:
+            print(f"Error tuning to frequency: {e}")
+
+
+def create_cw_spots_window(websocket_manager, on_close=None, radio_gui=None):
     """
     Create and return a CW spots display window.
-    
+
     Args:
         websocket_manager: Shared DXClusterWebSocket instance
         on_close: Optional callback when window is closed
-        
+        radio_gui: Optional reference to RadioGUI for frequency tuning
+
     Returns:
         CWSpotsDisplay instance
     """
-    return CWSpotsDisplay(websocket_manager, on_close)
+    return CWSpotsDisplay(websocket_manager, on_close, radio_gui)

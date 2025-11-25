@@ -54,10 +54,10 @@ class CWSpotsGraphWindow:
         top_frame = ttk.Frame(self.window)
         top_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        # Info label
-        info_label = ttk.Label(top_frame, text="Graph shows spots from main window filters",
-                              foreground="gray")
-        info_label.pack(side=tk.LEFT, padx=5)
+        # Dynamic status label (shows callsign info when dial frequency matches a spot)
+        self.status_label = ttk.Label(top_frame, text="",
+                                     foreground="green", font=("TkDefaultFont", 10, "bold"))
+        self.status_label.pack(side=tk.LEFT, padx=5)
         
         # Spot count
         self.count_label = ttk.Label(top_frame, text="0 spots")
@@ -169,6 +169,60 @@ class CWSpotsGraphWindow:
         
         print(f"Tuned to {spot['dx_call']} at {freq_hz/1e6:.6f} MHz ({mode})")
     
+    def _update_status_label(self):
+        """Update status label with current dial frequency spot info."""
+        if not self.parent_display or not self.parent_display.radio_gui:
+            self.status_label.config(text="")
+            return
+
+        try:
+            # Get current dial frequency from radio GUI
+            current_freq_hz = self.parent_display.radio_gui.get_frequency_hz()
+            current_freq_mhz = current_freq_hz / 1e6
+
+            # Get filtered spots
+            filtered_spots = self._get_filtered_spots_from_parent()
+
+            # Find the most recent spot matching the current frequency (within 100 Hz tolerance)
+            tolerance_hz = 100
+            matching_spots = []
+
+            for spot in filtered_spots:
+                spot_freq_hz = spot['frequency']
+                if abs(spot_freq_hz - current_freq_hz) <= tolerance_hz:
+                    matching_spots.append(spot)
+
+            if matching_spots:
+                # Sort by time to get the latest spot
+                matching_spots.sort(key=lambda s: s['time'], reverse=True)
+                latest_spot = matching_spots[0]
+
+                # Format status text
+                callsign = latest_spot.get('dx_call', 'N/A')
+                freq_mhz = latest_spot['frequency'] / 1e6
+                snr = latest_spot.get('snr', 0)
+                wpm = latest_spot.get('wpm', 'N/A')
+
+                status_text = f"{callsign}  {freq_mhz:.3f} MHz  SNR {snr} dB  {wpm} WPM"
+
+                # Set color based on SNR (matching graph color scheme)
+                if snr >= 15:
+                    color = '#28a745'  # Green - strong
+                elif snr >= 5:
+                    color = '#ffc107'  # Yellow - good
+                elif snr >= -5:
+                    color = '#ff8c00'  # Orange - weak
+                else:
+                    color = '#dc3545'  # Red - very weak
+
+                self.status_label.config(text=status_text, foreground=color)
+            else:
+                # No matching spot
+                self.status_label.config(text="")
+
+        except (ValueError, AttributeError):
+            self.status_label.config(text="")
+
     def _draw_graph(self):
         """Draw the frequency vs time graph using spots from parent display."""
         # Clear the plot and spot positions
@@ -279,6 +333,9 @@ class CWSpotsGraphWindow:
         
         # Redraw canvas
         self.canvas.draw()
+
+        # Update status label with current dial frequency info
+        self._update_status_label()
 
         # Restore tooltip if mouse was hovering over a spot
         if restore_tooltip and self.last_hover_event is not None:

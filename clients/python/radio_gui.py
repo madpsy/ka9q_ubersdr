@@ -55,6 +55,14 @@ except ImportError:
     CW_SPOTS_AVAILABLE = False
     print("Warning: CW spots display not available (missing dependencies)")
 
+# Import band conditions display
+try:
+    from band_conditions_display import create_band_conditions_window
+    BAND_CONDITIONS_AVAILABLE = True
+except ImportError:
+    BAND_CONDITIONS_AVAILABLE = False
+    print("Warning: Band conditions display not available (missing dependencies)")
+
 # Import shared WebSocket manager
 try:
     from dxcluster_websocket import DXClusterWebSocket
@@ -204,6 +212,10 @@ class RadioGUI:
         # CW spots display (separate window)
         self.cw_spots_window = None
         self.cw_spots_display = None
+
+        # Band conditions display (separate window)
+        self.band_conditions_window = None
+        self.band_conditions_display = None
 
         # Create UI
         self.create_widgets()
@@ -660,6 +672,14 @@ class RadioGUI:
                 # Don't pack yet - will be shown after connection if server supports it
             else:
                 self.cw_spots_btn = None
+
+            # Band conditions button (always available)
+            if BAND_CONDITIONS_AVAILABLE:
+                self.band_conditions_btn = ttk.Button(button_frame, text="Conditions",
+                                                     command=self.open_band_conditions_window)
+                self.band_conditions_btn.pack(side=tk.LEFT, padx=(0, 5))
+            else:
+                self.band_conditions_btn = None
 
             # Scroll mode selector (zoom vs pan) - always at the end
             ttk.Label(button_frame, text="Scroll:").pack(side=tk.LEFT, padx=(15, 5))
@@ -2116,6 +2136,34 @@ class RadioGUI:
         self.cw_spots_display = None
         self.log_status("CW spots window closed")
 
+    def open_band_conditions_window(self):
+        """Open a separate band conditions display window."""
+        # Don't open multiple windows
+        if self.band_conditions_window and self.band_conditions_window.winfo_exists():
+            self.band_conditions_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        try:
+            from band_conditions_display import create_band_conditions_window
+
+            # Get server URL and TLS setting
+            server = self.server_var.get()
+            use_tls = self.tls_var.get()
+
+            # Create band conditions window
+            self.band_conditions_display = create_band_conditions_window(self.root, server, use_tls)
+            self.band_conditions_window = self.band_conditions_display.window
+
+            self.log_status("Band conditions window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open band conditions: {e}")
+            self.log_status(f"ERROR: Failed to open band conditions - {e}")
+
     def adjust_bandwidth_for_mode(self, mode: str):
         """Set bandwidth defaults based on mode (matching web application behavior)."""
         # Default bandwidth values for each mode (from static/app.js setMode function lines 2556-2606)
@@ -3003,6 +3051,10 @@ class RadioGUI:
         # Close CW spots window if open
         if self.cw_spots_window and self.cw_spots_window.winfo_exists():
             self.cw_spots_window.destroy()
+
+        # Close band conditions window if open
+        if self.band_conditions_window and self.band_conditions_window.winfo_exists():
+            self.band_conditions_window.destroy()
 
         # Disconnect shared DX cluster WebSocket
         if self.dxcluster_ws:

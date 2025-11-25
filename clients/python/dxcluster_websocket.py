@@ -95,12 +95,21 @@ class DXClusterWebSocket:
             msg_type = data.get('type')
             
             if msg_type == 'cw_spot':
-                self._notify_cw_spot(data.get('data', {}))
+                spot_data = data.get('data', {})
+                # Check if this has a 'time' field to distinguish buffered vs live
+                has_time = 'time' in spot_data
+                print(f"DEBUG: Received CW spot: callsign={spot_data.get('dx_call')}, freq={spot_data.get('frequency')}, band={spot_data.get('band')}, has_time={has_time}, keys={list(spot_data.keys())[:5]}")
+                self._notify_cw_spot(spot_data)
             elif msg_type == 'digital_spot':
                 self._notify_digital_spot(data.get('data', {}))
             elif msg_type == 'status':
                 self.connected = data.get('connected', False)
                 self._notify_status(self.connected)
+            elif msg_type == 'spot' or msg_type == 'dx_spot':
+                # DX cluster spots - ignore for now (not implemented in Python client)
+                pass
+            else:
+                print(f"DEBUG: Received unknown message type: {msg_type}")
                 
         except json.JSONDecodeError as e:
             print(f"Failed to decode WebSocket message: {e}")
@@ -120,11 +129,15 @@ class DXClusterWebSocket:
     def _notify_cw_spot(self, spot_data: Dict[str, Any]):
         """Notify all CW spot callbacks."""
         with self.callback_lock:
+            print(f"DEBUG: _notify_cw_spot called, {len(self.cw_spot_callbacks)} callbacks registered")
             for callback in self.cw_spot_callbacks:
                 try:
+                    print(f"DEBUG: Calling CW spot callback: {callback}")
                     callback(spot_data)
                 except Exception as e:
                     print(f"Error in CW spot callback: {e}")
+                    import traceback
+                    traceback.print_exc()
                     
     def _notify_digital_spot(self, spot_data: Dict[str, Any]):
         """Notify all digital spot callbacks."""

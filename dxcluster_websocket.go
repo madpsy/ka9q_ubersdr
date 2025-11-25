@@ -165,9 +165,9 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	// Send connection status
 	h.sendConnectionStatus(conn)
 
-	// Send buffered spots after a short delay to ensure WebSocket is fully ready
+	// Send buffered spots after a delay to allow client to initialize and register callbacks
 	go func() {
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(1000 * time.Millisecond)
 
 		// Send buffered DX spots to new client
 		h.sendBufferedSpots(conn)

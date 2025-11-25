@@ -14,16 +14,18 @@ import queue
 class DigitalSpotsDisplay:
     """Display window for digital mode spots (FT8, FT4, WSPR)."""
     
-    def __init__(self, websocket_manager, on_close: Optional[Callable] = None):
+    def __init__(self, websocket_manager, on_close: Optional[Callable] = None, countries: Optional[List[Dict]] = None):
         """
         Initialize the digital spots display.
         
         Args:
             websocket_manager: Shared DXClusterWebSocket instance
             on_close: Optional callback when window is closed
+            countries: Optional list of countries from /api/cty/countries
         """
         self.websocket_manager = websocket_manager
         self.on_close_callback = on_close
+        self.countries = countries or []
         
         # Create window
         self.window = tk.Toplevel()
@@ -46,6 +48,7 @@ class DigitalSpotsDisplay:
         self.band_filter = tk.StringVar(value="all")
         self.snr_filter = tk.StringVar(value="none")
         self.callsign_filter = tk.StringVar(value="")
+        self.country_filter = tk.StringVar(value="all")
         
         # Sorting state
         self.sort_column = "time"
@@ -143,9 +146,18 @@ class DigitalSpotsDisplay:
         callsign_entry.grid(row=0, column=10, sticky=tk.W, padx=(0, 15))
         callsign_entry.bind('<KeyRelease>', lambda e: self.window.after(300, self.apply_filters))
         
+        # Country filter
+        ttk.Label(filter_frame, text="Country:").grid(row=0, column=11, sticky=tk.W, padx=(0, 5))
+        country_values = ["all"] + [c['name'] for c in self.countries]
+        country_combo = ttk.Combobox(filter_frame, textvariable=self.country_filter,
+                                    values=country_values,
+                                    state='readonly', width=15)
+        country_combo.grid(row=0, column=12, sticky=tk.W, padx=(0, 15))
+        country_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_filters())
+        
         # Clear button
-        ttk.Button(filter_frame, text="Clear All", 
-                  command=self.clear_spots).grid(row=0, column=11, sticky=tk.W)
+        ttk.Button(filter_frame, text="Clear All",
+                  command=self.clear_spots).grid(row=0, column=13, sticky=tk.W)
         
         # Spots table with scrollbar
         table_frame = ttk.Frame(main_frame)
@@ -215,6 +227,7 @@ class DigitalSpotsDisplay:
         snr_str = self.snr_filter.get()
         min_snr = None if snr_str == "none" else int(snr_str)
         callsign = self.callsign_filter.get().upper()
+        country = self.country_filter.get()
         
         self.filtered_spots = []
         
@@ -246,6 +259,10 @@ class DigitalSpotsDisplay:
                 spot_msg = spot.get('message', '').upper()
                 if callsign not in spot_callsign and callsign not in spot_grid and callsign not in spot_msg:
                     continue
+            
+            # Country filter
+            if country != "all" and spot.get('country', '') != country:
+                continue
             
             self.filtered_spots.append(spot)
         
@@ -467,14 +484,15 @@ class DigitalSpotsDisplay:
         self.window.destroy()
 
 
-def create_digital_spots_window(websocket_manager, on_close=None):
+def create_digital_spots_window(websocket_manager, on_close=None, countries=None):
     """Create and return a digital spots display window.
     
     Args:
         websocket_manager: Shared DXClusterWebSocket instance
         on_close: Optional callback when window is closed
+        countries: Optional list of countries from /api/cty/countries
         
     Returns:
         DigitalSpotsDisplay instance
     """
-    return DigitalSpotsDisplay(websocket_manager, on_close)
+    return DigitalSpotsDisplay(websocket_manager, on_close, countries)

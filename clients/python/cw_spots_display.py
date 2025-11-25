@@ -13,7 +13,7 @@ from typing import Optional, Callable
 class CWSpotsDisplay:
     """Display window for CW spots."""
     
-    def __init__(self, websocket_manager, on_close: Optional[Callable] = None, radio_gui=None):
+    def __init__(self, websocket_manager, on_close: Optional[Callable] = None, radio_gui=None, countries=None):
         """
         Initialize the CW spots display.
         
@@ -21,10 +21,12 @@ class CWSpotsDisplay:
             websocket_manager: Shared DXClusterWebSocket instance
             on_close: Optional callback when window is closed
             radio_gui: Optional reference to RadioGUI for frequency tuning
+            countries: Optional list of countries from /api/cty/countries
         """
         self.websocket_manager = websocket_manager
         self.on_close_callback = on_close
         self.radio_gui = radio_gui
+        self.countries = countries or []
         self.spots = []
         self.max_spots = 1000
 
@@ -40,6 +42,7 @@ class CWSpotsDisplay:
         self.snr_filter = None
         self.wpm_filter = None
         self.callsign_filter = ""
+        self.country_filter = "all"
         
         # Sorting state
         self.sort_column = "time"
@@ -121,6 +124,15 @@ class CWSpotsDisplay:
         callsign_entry = ttk.Entry(filter_frame, textvariable=self.callsign_var, width=15)
         callsign_entry.grid(row=1, column=1, padx=5, pady=5)
         callsign_entry.bind("<KeyRelease>", lambda e: self.apply_filters())
+        
+        # Country filter
+        ttk.Label(filter_frame, text="Country:").grid(row=1, column=2, padx=5, sticky=tk.W)
+        self.country_var = tk.StringVar(value="all")
+        country_values = ["all"] + [c['name'] for c in self.countries]
+        country_combo = ttk.Combobox(filter_frame, textvariable=self.country_var, width=15,
+                                    values=country_values)
+        country_combo.grid(row=1, column=3, padx=5, pady=5)
+        country_combo.bind("<<ComboboxSelected>>", lambda e: self.apply_filters())
         
         # Clear button
         clear_btn = ttk.Button(filter_frame, text="Clear Spots", command=self.clear_spots)
@@ -236,6 +248,7 @@ class CWSpotsDisplay:
         self.wpm_filter = None if wpm_str == "none" else int(wpm_str)
         
         self.callsign_filter = self.callsign_var.get().upper()
+        self.country_filter = self.country_var.get()
         
         # Filter spots
         filtered_spots = []
@@ -272,6 +285,10 @@ class CWSpotsDisplay:
                 country = spot.get('country', '').upper()
                 if self.callsign_filter not in callsign and self.callsign_filter not in country:
                     continue
+            
+            # Country filter
+            if self.country_filter != "all" and spot.get('country', '') != self.country_filter:
+                continue
             
             filtered_spots.append(spot)
         
@@ -501,7 +518,7 @@ class CWSpotsDisplay:
             print(f"Error tuning to frequency: {e}")
 
 
-def create_cw_spots_window(websocket_manager, on_close=None, radio_gui=None):
+def create_cw_spots_window(websocket_manager, on_close=None, radio_gui=None, countries=None):
     """
     Create and return a CW spots display window.
 
@@ -509,8 +526,9 @@ def create_cw_spots_window(websocket_manager, on_close=None, radio_gui=None):
         websocket_manager: Shared DXClusterWebSocket instance
         on_close: Optional callback when window is closed
         radio_gui: Optional reference to RadioGUI for frequency tuning
+        countries: Optional list of countries from /api/cty/countries
 
     Returns:
         CWSpotsDisplay instance
     """
-    return CWSpotsDisplay(websocket_manager, on_close, radio_gui)
+    return CWSpotsDisplay(websocket_manager, on_close, radio_gui, countries)

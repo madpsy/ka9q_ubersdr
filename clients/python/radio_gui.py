@@ -1048,10 +1048,14 @@ class RadioGUI:
 
             from digital_spots_display import create_digital_spots_window
 
-            # Create digital spots window with shared WebSocket
+            # Get countries list from client
+            countries = self.client.countries if self.client and hasattr(self.client, 'countries') else []
+
+            # Create digital spots window with shared WebSocket and countries
             self.digital_spots_display = create_digital_spots_window(
                 ws_manager,
-                on_close=self._on_digital_spots_closed
+                on_close=self._on_digital_spots_closed,
+                countries=countries
             )
             self.digital_spots_window = self.digital_spots_display.window
 
@@ -1076,11 +1080,15 @@ class RadioGUI:
 
             from cw_spots_display import create_cw_spots_window
 
-            # Create CW spots window with shared WebSocket
+            # Get countries list from client
+            countries = self.client.countries if self.client and hasattr(self.client, 'countries') else []
+
+            # Create CW spots window with shared WebSocket and countries
             self.cw_spots_display = create_cw_spots_window(
                 ws_manager,
                 on_close=self._on_cw_spots_closed,
-                radio_gui=self
+                radio_gui=self,
+                countries=countries
             )
             self.cw_spots_window = self.cw_spots_display.window
 
@@ -1188,10 +1196,14 @@ class RadioGUI:
             
             from digital_spots_display import create_digital_spots_window
 
-            # Create digital spots window with shared WebSocket
+            # Get countries list from client
+            countries = self.client.countries if self.client and hasattr(self.client, 'countries') else []
+
+            # Create digital spots window with shared WebSocket and countries
             self.digital_spots_display = create_digital_spots_window(
                 ws_manager,
-                on_close=self._on_digital_spots_closed
+                on_close=self._on_digital_spots_closed,
+                countries=countries
             )
             self.digital_spots_window = self.digital_spots_display.window
 
@@ -1224,11 +1236,15 @@ class RadioGUI:
             
             from cw_spots_display import create_cw_spots_window
 
-            # Create CW spots window with shared WebSocket
+            # Get countries list from client
+            countries = self.client.countries if self.client and hasattr(self.client, 'countries') else []
+
+            # Create CW spots window with shared WebSocket and countries
             self.cw_spots_display = create_cw_spots_window(
                 ws_manager,
                 on_close=self._on_cw_spots_closed,
-                radio_gui=self
+                radio_gui=self,
+                countries=countries
             )
             self.cw_spots_window = self.cw_spots_display.window
 

@@ -132,6 +132,7 @@ class RadioClient:
         self.sample_rate = 12000  # Default, will be updated from server
         self.ws = None  # WebSocket connection reference for sending messages
         self.server_description = {}  # Server description from /api/description
+        self.countries = []  # Country list from /api/cty/countries
 
         # FIFO (named pipe) output
         self.fifo_path = fifo_path
@@ -542,6 +543,40 @@ class RadioClient:
         except Exception as e:
             print(f"Failed to fetch description: {e}", file=sys.stderr)
             return {}
+
+    async def fetch_countries(self) -> list:
+        """Fetch country list from /api/cty/countries endpoint."""
+        # Build HTTP URL for countries
+        protocol = 'https' if self.ssl else 'http'
+        
+        if self.url:
+            # Extract host and port from WebSocket URL
+            parsed = urlparse(self.url)
+            host = parsed.hostname
+            port = parsed.port or (443 if parsed.scheme == 'wss' else 80)
+        else:
+            host = self.host
+            port = self.port
+        
+        http_url = f"{protocol}://{host}:{port}/api/cty/countries"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    http_url,
+                    headers={
+                        'User-Agent': 'UberSDR Client 1.0 (python)'
+                    },
+                    ssl=False if not self.ssl else None
+                ) as response:
+                    data = await response.json()
+                    if data.get('success') and 'data' in data:
+                        return data['data'].get('countries', [])
+                    return []
+                    
+        except Exception as e:
+            print(f"Failed to fetch countries: {e}", file=sys.stderr)
+            return []
     
     async def check_connection_allowed(self) -> bool:
         """Check if connection is allowed via /connection endpoint."""
@@ -607,6 +642,12 @@ class RadioClient:
             receiver_name = description.get('receiver', {}).get('name', '')
             if receiver_name:
                 self._log(f"Receiver: {receiver_name}")
+
+        # Fetch country list
+        countries = await self.fetch_countries()
+        if countries:
+            self.countries = countries
+            self._log(f"Loaded {len(countries)} countries")
 
         url = self.build_websocket_url()
         self._log(f"Connecting to {url}")

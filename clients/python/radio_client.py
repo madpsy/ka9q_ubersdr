@@ -586,9 +586,11 @@ class RadioClient:
             print(f"Status: Session {session_id}, {freq} Hz, mode {mode}", file=sys.stderr)
         
         elif msg_type == 'error':
-            # Print error message
+            # Print error message and notify via callback
             error = message.get('error', 'Unknown error')
             print(f"Server error: {error}", file=sys.stderr)
+            if self.status_callback:
+                self.status_callback("server_error", error)
             self.running = False
         
         elif msg_type == 'pong':

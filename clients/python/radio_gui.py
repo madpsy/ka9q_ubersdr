@@ -302,10 +302,10 @@ class RadioGUI:
         # Mode selection (first row)
         ttk.Label(bw_frame, text="Demodulation:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         
-        modes = ['AM', 'SAM', 'USB', 'LSB', 'FM', 'NFM', 'CWU', 'CWL', 'IQ']
+        modes = ['AM', 'SAM', 'USB', 'LSB', 'FM', 'NFM', 'CWU', 'CWL', 'IQ', 'IQ (48 kHz)', 'IQ (96 kHz)', 'IQ (192 kHz)', 'IQ (384 kHz)']
         self.mode_var = tk.StringVar(value=self.config.get('mode', 'USB').upper())
         mode_combo = ttk.Combobox(bw_frame, textvariable=self.mode_var, values=modes,
-                                 state='readonly', width=10)
+                                 state='readonly', width=15)
         mode_combo.grid(row=0, column=1, sticky=tk.W, padx=(0, 10))
         mode_combo.bind('<<ComboboxSelected>>', lambda e: self.on_mode_changed())
         
@@ -373,9 +373,9 @@ class RadioGUI:
         # Volume control
         ttk.Label(audio_frame, text="Volume:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
         self.volume_var = tk.IntVar(value=70)
-        volume_scale = ttk.Scale(audio_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+        self.volume_scale = ttk.Scale(audio_frame, from_=0, to=100, orient=tk.HORIZONTAL,
                                 variable=self.volume_var, command=self.update_volume)
-        volume_scale.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        self.volume_scale.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
         
         self.volume_label = ttk.Label(audio_frame, text="70%", width=5)
         self.volume_label.grid(row=1, column=2, sticky=tk.W, padx=(0, 20))
@@ -403,22 +403,22 @@ class RadioGUI:
         self.channel_left_var = tk.BooleanVar(value=True)
         self.channel_right_var = tk.BooleanVar(value=True)
 
-        left_check = ttk.Checkbutton(audio_frame, text="Left", variable=self.channel_left_var,
+        self.left_check = ttk.Checkbutton(audio_frame, text="Left", variable=self.channel_left_var,
                                      command=self.update_channels)
-        left_check.grid(row=2, column=1, sticky=tk.W, pady=(5, 0))
+        self.left_check.grid(row=2, column=1, sticky=tk.W, pady=(5, 0))
 
-        right_check = ttk.Checkbutton(audio_frame, text="Right", variable=self.channel_right_var,
+        self.right_check = ttk.Checkbutton(audio_frame, text="Right", variable=self.channel_right_var,
                                       command=self.update_channels)
-        right_check.grid(row=2, column=2, sticky=tk.W, pady=(5, 0))
+        self.right_check.grid(row=2, column=2, sticky=tk.W, pady=(5, 0))
         
         # NR2 Noise Reduction (row 3) - use a frame to avoid column weight issues
         nr2_container = ttk.Frame(audio_frame)
         nr2_container.grid(row=3, column=0, columnspan=7, sticky=tk.W, pady=(5, 0))
         
         self.nr2_enabled_var = tk.BooleanVar(value=False)
-        nr2_check = ttk.Checkbutton(nr2_container, text="Enable NR2", variable=self.nr2_enabled_var,
+        self.nr2_check = ttk.Checkbutton(nr2_container, text="Enable NR2", variable=self.nr2_enabled_var,
                                     command=self.toggle_nr2)
-        nr2_check.grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
+        self.nr2_check.grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
         
         ttk.Label(nr2_container, text="Strength:").grid(row=0, column=1, sticky=tk.W, padx=(0, 5))
         self.nr2_strength_var = tk.StringVar(value="40")
@@ -446,9 +446,9 @@ class RadioGUI:
         filter_container.grid(row=4, column=0, columnspan=7, sticky=(tk.W, tk.E), pady=(5, 0))
 
         self.audio_filter_enabled_var = tk.BooleanVar(value=False)
-        filter_check = ttk.Checkbutton(filter_container, text="Enable Audio Filter", variable=self.audio_filter_enabled_var,
+        self.filter_check = ttk.Checkbutton(filter_container, text="Enable Audio Filter", variable=self.audio_filter_enabled_var,
                                        command=self.toggle_audio_filter)
-        filter_check.grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
+        self.filter_check.grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
 
         # Low frequency slider (will be updated based on mode)
         ttk.Label(filter_container, text="Low:").grid(row=0, column=1, sticky=tk.W, padx=(0, 5))
@@ -505,9 +505,11 @@ class RadioGUI:
                 waterfall_btn.pack(side=tk.LEFT, padx=(0, 5))
             
             if AUDIO_SPECTRUM_AVAILABLE:
-                audio_btn = ttk.Button(button_frame, text="Open Audio",
+                self.audio_spectrum_btn = ttk.Button(button_frame, text="Open Audio",
                                       command=self.open_audio_spectrum_window)
-                audio_btn.pack(side=tk.LEFT, padx=(0, 5))
+                self.audio_spectrum_btn.pack(side=tk.LEFT, padx=(0, 5))
+            else:
+                self.audio_spectrum_btn = None
 
             # Digital spots button (conditionally shown based on server capability)
             if DIGITAL_SPOTS_AVAILABLE:
@@ -798,9 +800,102 @@ class RadioGUI:
         except ValueError as e:
             messagebox.showerror("Error", f"Invalid frequency: {e}")
     
+    def _parse_mode_name(self, mode_display: str) -> str:
+        """Parse mode display name to actual mode name.
+
+        Args:
+            mode_display: Display name from dropdown (e.g., "IQ (48 kHz)" or "USB")
+
+        Returns:
+            Actual mode name for server (e.g., "iq48" or "usb")
+        """
+        # Extract actual mode name (handle both "IQ48" and "IQ (48 kHz)" formats)
+        if '(' in mode_display:
+            mode = mode_display.split()[0].lower()  # "IQ (48 kHz)" -> "iq"
+            # Map display format to actual mode
+            if '48' in mode_display:
+                mode = 'iq48'
+            elif '96' in mode_display:
+                mode = 'iq96'
+            elif '192' in mode_display:
+                mode = 'iq192'
+            elif '384' in mode_display:
+                mode = 'iq384'
+        else:
+            mode = mode_display.lower()
+        return mode
+
     def on_mode_changed(self, skip_apply=False):
         """Handle mode change from dropdown - updates bandwidth and presets immediately."""
-        mode = self.mode_var.get().lower()
+        mode_display = self.mode_var.get()
+        mode = self._parse_mode_name(mode_display)
+
+        # Check if this is an IQ mode
+        is_iq_mode = mode in ['iq', 'iq48', 'iq96', 'iq192', 'iq384']
+
+        if is_iq_mode:
+            # IQ mode: mute audio and disable audio controls
+            self.volume_var.set(0)
+            self.volume_scale.config(state='disabled')
+            self.volume_label.config(text="Muted")
+
+            # Disable channel checkboxes
+            self.left_check.config(state='disabled')
+            self.right_check.config(state='disabled')
+
+            # Disable NR2
+            if self.nr2_enabled_var.get():
+                self.nr2_enabled_var.set(False)
+                self.toggle_nr2()
+            self.nr2_check.config(state='disabled')
+
+            # Disable audio filter
+            if self.audio_filter_enabled_var.get():
+                self.audio_filter_enabled_var.set(False)
+                self.toggle_audio_filter()
+            self.filter_check.config(state='disabled')
+
+            # Disable recording
+            if self.recording:
+                self.stop_recording()
+            self.rec_btn.config(state='disabled')
+
+            # Close audio spectrum window if open and disable button
+            if self.audio_spectrum_window and self.audio_spectrum_window.winfo_exists():
+                self.audio_spectrum_window.destroy()
+                self.audio_spectrum_window = None
+                self.audio_spectrum_display = None
+                self.log_status("Audio spectrum window closed (IQ mode)")
+
+            # Disable audio spectrum button
+            if self.audio_spectrum_btn:
+                self.audio_spectrum_btn.config(state='disabled')
+
+            self.log_status(f"IQ mode selected - audio output disabled (data still sent to FIFO)")
+        else:
+            # Non-IQ mode: re-enable audio controls
+            self.volume_scale.config(state='normal')
+            if self.volume_var.get() == 0:
+                self.volume_var.set(70)
+            self.volume_label.config(text=f"{self.volume_var.get()}%")
+
+            # Re-enable channel checkboxes
+            self.left_check.config(state='normal')
+            self.right_check.config(state='normal')
+
+            # Re-enable NR2 checkbox
+            self.nr2_check.config(state='normal')
+
+            # Re-enable audio filter checkbox
+            self.filter_check.config(state='normal')
+
+            # Re-enable recording if connected
+            if self.connected:
+                self.rec_btn.config(state='normal')
+
+            # Re-enable audio spectrum button
+            if self.audio_spectrum_btn:
+                self.audio_spectrum_btn.config(state='normal')
 
         # Always update bandwidth defaults and presets when mode changes
         self.adjust_bandwidth_for_mode(mode)
@@ -818,7 +913,8 @@ class RadioGUI:
         if not self.connected or not self.client:
             return
         
-        mode = self.mode_var.get().lower()
+        mode_display = self.mode_var.get()
+        mode = self._parse_mode_name(mode_display)
         self.client.mode = mode
         
         self.log_status(f"Switching to {mode.upper()} mode...")
@@ -1650,7 +1746,8 @@ class RadioGUI:
             btn.destroy()
         self.preset_buttons.clear()
         
-        mode = self.mode_var.get().lower()
+        mode_display = self.mode_var.get()
+        mode = self._parse_mode_name(mode_display)
         
         # Define mode-specific presets
         mode_presets = {
@@ -1774,7 +1871,8 @@ class RadioGUI:
             
             # Get frequency and mode
             frequency = self.get_frequency_hz()
-            mode = self.mode_var.get().lower()
+            mode_display = self.mode_var.get()
+            mode = self._parse_mode_name(mode_display)
             
             # Get bandwidth
             try:
@@ -1899,7 +1997,6 @@ class RadioGUI:
         self.apply_freq_btn.state(['disabled'])
         self.apply_bw_btn.state(['disabled'])
         self.rec_btn.state(['disabled'])
-        self.apply_filter_btn.state(['disabled'])
         
         # Hide receiver name
         self.receiver_name_label.grid_remove()
@@ -2052,6 +2149,10 @@ class RadioGUI:
                                 self.root.after(2800, self.auto_open_cw_spots)
                 elif msg_type == "error":
                     self.log_status(f"ERROR: {msg}")
+                elif msg_type == "server_error":
+                    # Server error - show alert box AND log to status
+                    self.log_status(f"SERVER ERROR: {msg}")
+                    messagebox.showerror("Server Error", msg)
                 elif msg_type == "connection_failed":
                     # Connection attempt failed
                     self.connected = False

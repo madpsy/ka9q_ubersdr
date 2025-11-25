@@ -165,12 +165,13 @@ func (c *CWSkimmerClient) connectionLoop() {
 			log.Println("CW Skimmer: Attempting connection...")
 			if err := c.connect(); err != nil {
 				log.Printf("CW Skimmer: Connection failed: %v", err)
-				c.scheduleReconnect()
+				c.waitBeforeReconnect()
 			} else {
 				// Connection succeeded, handle it
 				log.Println("CW Skimmer: Connection successful, entering message handler")
 				c.handleConnection()
 				log.Println("CW Skimmer: Message handler exited, will reconnect")
+				c.waitBeforeReconnect()
 			}
 		}
 	}
@@ -325,7 +326,6 @@ func (c *CWSkimmerClient) handleConnection() {
 			if err != nil {
 				log.Printf("CW Skimmer: Read error: %v", err)
 				c.disconnect()
-				c.scheduleReconnect()
 				return
 			}
 
@@ -579,7 +579,6 @@ func (c *CWSkimmerClient) sendKeepalive() {
 	if err := c.writeLine(""); err != nil {
 		log.Printf("CW Skimmer: Keepalive failed: %v", err)
 		c.disconnect()
-		c.scheduleReconnect()
 		return
 	}
 
@@ -633,7 +632,6 @@ func (c *CWSkimmerClient) checkInactivity() {
 	if inactiveDuration >= 5*time.Minute {
 		log.Printf("CW Skimmer: No activity for %v, reconnecting", inactiveDuration)
 		c.disconnect()
-		c.scheduleReconnect()
 	}
 }
 
@@ -656,18 +654,15 @@ func (c *CWSkimmerClient) submitToPSKReporter(spot *CWSkimmerSpot) error {
 	return c.pskReporter.Submit(decode)
 }
 
-// scheduleReconnect schedules a reconnection attempt
-func (c *CWSkimmerClient) scheduleReconnect() {
+// waitBeforeReconnect waits before attempting reconnection
+func (c *CWSkimmerClient) waitBeforeReconnect() {
 	delay := time.Duration(c.config.ReconnectDelay) * time.Second
 	log.Printf("CW Skimmer: Scheduling reconnection in %v", delay)
 
-	// Sleep in the connection loop to actually wait
 	select {
 	case <-c.stopChan:
 		log.Println("CW Skimmer: Reconnection cancelled (stop requested)")
-		return
 	case <-time.After(delay):
 		log.Printf("CW Skimmer: Reconnection delay elapsed, will retry connection")
-		// Continue to reconnect
 	}
 }

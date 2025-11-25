@@ -90,6 +90,20 @@ def find_next_fifo_path() -> str:
 class RadioGUI:
     """Tkinter-based GUI for the radio client."""
     
+    # Band frequency ranges (in Hz) - UK RSGB allocations (from static/app.js)
+    BAND_RANGES = {
+        '160m': {'min': 1810000, 'max': 2000000},
+        '80m': {'min': 3500000, 'max': 3800000},
+        '60m': {'min': 5258500, 'max': 5406500},
+        '40m': {'min': 7000000, 'max': 7200000},
+        '30m': {'min': 10100000, 'max': 10150000},
+        '20m': {'min': 14000000, 'max': 14350000},
+        '17m': {'min': 18068000, 'max': 18168000},
+        '15m': {'min': 21000000, 'max': 21450000},
+        '12m': {'min': 24890000, 'max': 24990000},
+        '10m': {'min': 28000000, 'max': 29700000}
+    }
+    
     def __init__(self, root: tk.Tk, initial_config: dict):
         self.root = root
         self.root.title("ka9q_ubersdr Radio Client")
@@ -109,6 +123,9 @@ class RadioGUI:
         self.status_queue = queue.Queue()
         self.audio_level_queue = queue.Queue()
         self.pipewire_devices: List[Tuple[str, str]] = []
+        
+        # Band buttons dictionary for highlighting
+        self.band_buttons = {}
         
         # Recording state
         self.recording = False
@@ -154,6 +171,10 @@ class RadioGUI:
     
     def create_widgets(self):
         """Create all GUI widgets."""
+        # Configure custom style for active band buttons
+        style = ttk.Style()
+        style.configure('Active.TButton', background='green', foreground='white')
+        
         # Main container with padding
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -255,6 +276,15 @@ class RadioGUI:
             btn = ttk.Button(quick_frame, text=label, width=5,
                            command=lambda f=freq_hz: self.set_frequency_and_mode(f))
             btn.grid(row=row, column=col, padx=1, pady=1)
+            # Store button reference for highlighting
+            self.band_buttons[label] = btn
+        
+        # Initialize band button highlighting with current frequency
+        try:
+            initial_freq_hz = self.get_frequency_hz()
+            self.update_band_buttons(initial_freq_hz)
+        except ValueError:
+            pass  # Ignore if frequency is invalid
         
         freq_frame.columnconfigure(8, weight=1)
         
@@ -536,6 +566,9 @@ class RadioGUI:
         else:  # Hz
             self.freq_var.set(str(freq_hz))
         
+        # Update band button highlighting
+        self.update_band_buttons(freq_hz)
+        
         # Set mode based on frequency (LSB below 10 MHz, USB at/above 10 MHz) only if not locked
         if not self.mode_lock_var.get():
             if freq_hz < 10000000:  # Below 10 MHz
@@ -652,6 +685,38 @@ class RadioGUI:
             self.freq_var.set(f"{freq_hz / 1000:.3f}")
         else:  # MHz
             self.freq_var.set(f"{freq_hz / 1e6:.6f}")
+        
+        # Update band button highlighting
+        self.update_band_buttons(freq_hz)
+    
+    def update_band_buttons(self, freq_hz: int):
+        """Update band button highlighting based on current frequency.
+        
+        Args:
+            freq_hz: Current frequency in Hz
+        """
+        current_band = None
+        
+        for band_name, button in self.band_buttons.items():
+            if band_name in self.BAND_RANGES:
+                band_range = self.BAND_RANGES[band_name]
+                if band_range['min'] <= freq_hz <= band_range['max']:
+                    # Frequency is within this band - highlight with green background and white text
+                    button.configure(style='Active.TButton')
+                    current_band = band_name
+                else:
+                    # Frequency is outside this band - use default style
+                    button.configure(style='TButton')
+        
+        # Update band filter in digital spots window if open
+        if self.digital_spots_display and current_band:
+            self.digital_spots_display.band_filter.set(current_band)
+            self.digital_spots_display.apply_filters()
+        
+        # Update band filter in CW spots window if open
+        if self.cw_spots_display and current_band:
+            self.cw_spots_display.band_var.set(current_band)
+            self.cw_spots_display.apply_filters()
     
     def apply_frequency(self):
         """Apply frequency change by sending tune message."""
@@ -1058,6 +1123,17 @@ class RadioGUI:
                 countries=countries
             )
             self.digital_spots_window = self.digital_spots_display.window
+            
+            # Set initial band filter to current band if one is active
+            try:
+                current_freq = self.get_frequency_hz()
+                for band_name, band_range in self.BAND_RANGES.items():
+                    if band_range['min'] <= current_freq <= band_range['max']:
+                        self.digital_spots_display.band_filter.set(band_name)
+                        self.digital_spots_display.apply_filters()
+                        break
+            except (ValueError, AttributeError):
+                pass
 
             self.log_status("Digital spots window opened automatically")
 
@@ -1091,6 +1167,17 @@ class RadioGUI:
                 countries=countries
             )
             self.cw_spots_window = self.cw_spots_display.window
+            
+            # Set initial band filter to current band if one is active
+            try:
+                current_freq = self.get_frequency_hz()
+                for band_name, band_range in self.BAND_RANGES.items():
+                    if band_range['min'] <= current_freq <= band_range['max']:
+                        self.cw_spots_display.band_var.set(band_name)
+                        self.cw_spots_display.apply_filters()
+                        break
+            except (ValueError, AttributeError):
+                pass
 
             self.log_status("CW spots window opened automatically")
 
@@ -1206,6 +1293,17 @@ class RadioGUI:
                 countries=countries
             )
             self.digital_spots_window = self.digital_spots_display.window
+            
+            # Set initial band filter to current band if one is active
+            try:
+                current_freq = self.get_frequency_hz()
+                for band_name, band_range in self.BAND_RANGES.items():
+                    if band_range['min'] <= current_freq <= band_range['max']:
+                        self.digital_spots_display.band_filter.set(band_name)
+                        self.digital_spots_display.apply_filters()
+                        break
+            except (ValueError, AttributeError):
+                pass
 
             self.log_status("Digital spots window opened")
 
@@ -1247,6 +1345,17 @@ class RadioGUI:
                 countries=countries
             )
             self.cw_spots_window = self.cw_spots_display.window
+            
+            # Set initial band filter to current band if one is active
+            try:
+                current_freq = self.get_frequency_hz()
+                for band_name, band_range in self.BAND_RANGES.items():
+                    if band_range['min'] <= current_freq <= band_range['max']:
+                        self.cw_spots_display.band_var.set(band_name)
+                        self.cw_spots_display.apply_filters()
+                        break
+            except (ValueError, AttributeError):
+                pass
 
             self.log_status("CW spots window opened")
 

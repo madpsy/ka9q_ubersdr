@@ -68,7 +68,7 @@ class SpaceWeatherDisplay:
         # Create window
         self.window = tk.Toplevel(parent)
         self.window.title("Space Weather Forecast")
-        self.window.geometry("800x750")
+        self.window.geometry("800x680")
         
         # Create UI
         self.create_widgets()

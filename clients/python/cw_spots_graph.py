@@ -37,6 +37,7 @@ class CWSpotsGraphWindow:
         self.window = tk.Toplevel()
         self.window.title("CW Spots Graph")
         self.window.geometry("1000x600")
+        self.window.configure(bg='#000000')  # Black background
         
         # Setup UI
         self._setup_ui()
@@ -50,21 +51,23 @@ class CWSpotsGraphWindow:
         
     def _setup_ui(self):
         """Setup the user interface."""
-        # Top frame for info
-        top_frame = ttk.Frame(self.window)
+        # Top frame for info with black background
+        top_frame = tk.Frame(self.window, bg='#000000')
         top_frame.pack(fill=tk.X, padx=5, pady=5)
         
         # Dynamic status label (shows callsign info when dial frequency matches a spot)
-        self.status_label = ttk.Label(top_frame, text="",
-                                     foreground="green", font=("TkDefaultFont", 10, "bold"))
+        self.status_label = tk.Label(top_frame, text="",
+                                     foreground="green", font=("TkDefaultFont", 10, "bold"),
+                                     bg='#000000')
         self.status_label.pack(side=tk.LEFT, padx=5)
         
         # Spot count
-        self.count_label = ttk.Label(top_frame, text="0 spots")
+        self.count_label = tk.Label(top_frame, text="0 spots",
+                                    foreground="#aaa", bg='#000000')
         self.count_label.pack(side=tk.RIGHT, padx=10)
         
-        # Graph frame
-        graph_frame = ttk.Frame(self.window)
+        # Graph frame with black background
+        graph_frame = tk.Frame(self.window, bg='#000000')
         graph_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Create matplotlib figure
@@ -206,14 +209,14 @@ class CWSpotsGraphWindow:
                 status_text = f"{callsign}  {freq_mhz:.3f} MHz  SNR {snr} dB  {wpm} WPM"
 
                 # Set color based on SNR (matching graph color scheme)
-                if snr >= 15:
-                    color = '#28a745'  # Green - strong
-                elif snr >= 5:
+                if snr > 26:
+                    color = '#28a745'  # Green - excellent
+                elif snr >= 13:
                     color = '#ffc107'  # Yellow - good
-                elif snr >= -5:
-                    color = '#ff8c00'  # Orange - weak
+                elif snr >= 6:
+                    color = '#ff8c00'  # Orange - fair
                 else:
-                    color = '#dc3545'  # Red - very weak
+                    color = '#dc3545'  # Red - weak (0-5)
 
                 self.status_label.config(text=status_text, foreground=color)
             else:
@@ -281,14 +284,14 @@ class CWSpotsGraphWindow:
         # Color mapping based on SNR
         colors = []
         for snr in snrs:
-            if snr >= 15:
-                colors.append('#28a745')  # Green - strong
-            elif snr >= 5:
+            if snr > 26:
+                colors.append('#28a745')  # Green - excellent
+            elif snr >= 13:
                 colors.append('#ffc107')  # Yellow - good
-            elif snr >= -5:
-                colors.append('#ff8c00')  # Orange - weak
+            elif snr >= 6:
+                colors.append('#ff8c00')  # Orange - fair
             else:
-                colors.append('#dc3545')  # Red - very weak
+                colors.append('#dc3545')  # Red - weak (0-5)
         
         # Store spot positions for click detection
         for i in range(len(times)):

@@ -457,15 +457,15 @@ class CWSpotsDisplay:
         snr = spot.get('snr', 0)
         snr_str = f"+{snr}" if snr >= 0 else str(snr)
         
-        # Determine SNR tag
-        if snr >= 15:
-            snr_tag = "snr_high"
-        elif snr >= 5:
-            snr_tag = "snr_good"
-        elif snr >= -5:
-            snr_tag = "snr_weak"
+        # Determine SNR tag (matching graph color scheme)
+        if snr > 26:
+            snr_tag = "snr_high"  # Green - excellent
+        elif snr >= 13:
+            snr_tag = "snr_good"  # Yellow - good
+        elif snr >= 6:
+            snr_tag = "snr_weak"  # Orange - fair
         else:
-            snr_tag = "snr_poor"
+            snr_tag = "snr_poor"  # Red - weak (0-5)
         
         values = (
             time_str,

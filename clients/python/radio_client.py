@@ -501,8 +501,9 @@ class RadioClient:
             sys.stdout.buffer.flush()
         
         elif self.output_mode == 'pipewire':
-            # Write to PipeWire process
-            if self.pipewire_process and self.pipewire_process.stdin:
+            # Write to PipeWire process (skip if in IQ mode)
+            is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+            if not is_iq_mode and self.pipewire_process and self.pipewire_process.stdin:
                 try:
                     self.pipewire_process.stdin.write(pcm_data)
                     await self.pipewire_process.stdin.drain()

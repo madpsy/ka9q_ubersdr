@@ -45,6 +45,7 @@ type CWSkimmerClient struct {
 	inactivityTimer   *time.Timer
 	lastActivityTime  time.Time
 	lastPingTime      time.Time
+	lastSpotTime      time.Time // Time when last actual CW spot was received
 	spotHandlers      []func(CWSkimmerSpot)
 	messageHandlers   []func(string)
 	spotsLogger       *CWSkimmerSpotsLogger
@@ -406,6 +407,11 @@ func (c *CWSkimmerClient) processLine(line string) {
 			// Silently discard spots outside the 0-30 MHz range
 			return
 		}
+
+		// Update last spot time for health monitoring
+		c.mu.Lock()
+		c.lastSpotTime = time.Now()
+		c.mu.Unlock()
 
 		// Enrich with CTY data
 		c.enrichSpot(&spot)

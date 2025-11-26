@@ -2822,35 +2822,46 @@ func (ah *AdminHandler) HandleCWSkimmerHealth(w http.ResponseWriter, r *http.Req
 	connected := ah.cwSkimmerClient.IsConnected()
 	status["connected"] = connected
 
-	// Get last activity time
+	// Get last spot time (actual CW spots, not just ping/pong)
 	ah.cwSkimmerClient.mu.RLock()
+	lastSpot := ah.cwSkimmerClient.lastSpotTime
 	lastActivity := ah.cwSkimmerClient.lastActivityTime
 	ah.cwSkimmerClient.mu.RUnlock()
 
-	if !lastActivity.IsZero() {
-		status["last_activity"] = lastActivity.Format(time.RFC3339)
-		timeSinceActivity := time.Since(lastActivity)
-		status["seconds_since_activity"] = int(timeSinceActivity.Seconds())
+	// Report last spot time (actual CW activity)
+	if !lastSpot.IsZero() {
+		status["last_spot"] = lastSpot.Format(time.RFC3339)
+		timeSinceSpot := time.Since(lastSpot)
+		status["seconds_since_spot"] = int(timeSinceSpot.Seconds())
 
-		// Format time since activity in human-readable format
-		status["time_since_activity"] = formatDuration(timeSinceActivity)
+		// Format time since last spot in human-readable format
+		status["time_since_spot"] = formatDuration(timeSinceSpot)
 
-		// Consider recent if activity within last 5 minutes
-		recentSpots := timeSinceActivity <= 5*time.Minute
+		// Consider recent if spot within last 5 minutes
+		recentSpots := timeSinceSpot <= 5*time.Minute
 		status["recent_spots"] = recentSpots
 
 		if !recentSpots {
 			status["issues"] = append(status["issues"].([]string),
-				fmt.Sprintf("No activity for %d seconds", int(timeSinceActivity.Seconds())))
+				fmt.Sprintf("No CW spots for %d seconds", int(timeSinceSpot.Seconds())))
 		}
 	} else {
-		status["last_activity"] = nil
-		status["seconds_since_activity"] = nil
-		status["time_since_activity"] = "N/A"
+		status["last_spot"] = nil
+		status["seconds_since_spot"] = nil
+		status["time_since_spot"] = "N/A"
 		status["recent_spots"] = false
 		if connected {
 			status["issues"] = append(status["issues"].([]string), "Connected but no spots received yet")
 		}
+	}
+
+	// Also report last activity time (includes ping/pong for connection health)
+	if !lastActivity.IsZero() {
+		status["last_activity"] = lastActivity.Format(time.RFC3339)
+		status["seconds_since_activity"] = int(time.Since(lastActivity).Seconds())
+	} else {
+		status["last_activity"] = nil
+		status["seconds_since_activity"] = nil
 	}
 
 	// Check connection status

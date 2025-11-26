@@ -4714,12 +4714,35 @@
                 }
             }
             
+            // Calculate time_since_spot if not provided (backwards compatibility)
+            let timeSinceSpot = 'N/A';
+            if (data.time_since_spot) {
+                timeSinceSpot = data.time_since_spot;
+            } else if (typeof data.seconds_since_spot === 'number') {
+                const seconds = data.seconds_since_spot;
+                if (seconds < 60) {
+                    timeSinceSpot = `${seconds}s`;
+                } else if (seconds < 3600) {
+                    timeSinceSpot = `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+                } else if (seconds < 86400) {
+                    const hours = Math.floor(seconds / 3600);
+                    const mins = Math.floor((seconds % 3600) / 60);
+                    timeSinceSpot = `${hours}h ${mins}m`;
+                } else {
+                    const days = Math.floor(seconds / 86400);
+                    const hours = Math.floor((seconds % 86400) / 3600);
+                    timeSinceSpot = `${days}d ${hours}h`;
+                }
+            }
+
             statusDiv.innerHTML = `
                 <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
                 <span style="color: #666; font-size: 14px;">Enabled: ${data.enabled ? 'Yes' : 'No'}</span><br>
                 <span style="color: ${connectedColor}; font-size: 14px; font-weight: bold;">Connected: ${connectedText}</span><br>
                 <span style="color: #666; font-size: 14px;">Last Activity: ${data.last_activity || 'Never'}</span><br>
-                <span style="color: #666; font-size: 14px;">Time Since Activity: ${timeSinceActivity}</span>
+                <span style="color: #666; font-size: 14px;">Time Since Activity: ${timeSinceActivity}</span><br>
+                <span style="color: #667eea; font-size: 14px; font-weight: bold;">Last Spot: ${data.last_spot || 'Never'}</span><br>
+                <span style="color: #667eea; font-size: 14px; font-weight: bold;">Time Since Spot: ${timeSinceSpot}</span>
             `;
             statusSection.appendChild(statusDiv);
 

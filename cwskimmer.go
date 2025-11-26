@@ -316,53 +316,24 @@ func (c *CWSkimmerClient) login() error {
 
 // handleConnection reads and processes messages from the skimmer
 func (c *CWSkimmerClient) handleConnection() {
-	// Create a buffered channel for read results to prevent goroutine blocking
-	readChan := make(chan struct {
-		line string
-		err  error
-	}, 1)
-
-	// Start a goroutine to read lines
-	go func() {
-		for {
-			line, err := c.readLine()
-			select {
-			case readChan <- struct {
-				line string
-				err  error
-			}{line, err}:
-				if err != nil {
-					return
-				}
-			case <-c.stopChan:
-				return
-			}
-		}
-	}()
-
 	for {
-		select {
-		case <-c.stopChan:
+		line, err := c.readLine()
+		if err != nil {
+			log.Printf("CW Skimmer: Read error: %v", err)
 			c.disconnect()
 			return
-		case result := <-readChan:
-			if result.err != nil {
-				log.Printf("CW Skimmer: Read error: %v", result.err)
-				c.disconnect()
-				return
-			}
-
-			// Update last activity time on successful read
-			c.mu.Lock()
-			c.lastActivityTime = time.Now()
-			c.mu.Unlock()
-
-			// Reset inactivity timer
-			c.resetInactivityTimer()
-
-			// Process the line
-			c.processLine(result.line)
 		}
+
+		// Update last activity time on successful read
+		c.mu.Lock()
+		c.lastActivityTime = time.Now()
+		c.mu.Unlock()
+
+		// Reset inactivity timer
+		c.resetInactivityTimer()
+
+		// Process the line
+		c.processLine(line)
 	}
 }
 

@@ -458,8 +458,8 @@ class RadioGUI:
             ('IQ', 'IQ')
         ]
         modes_row2 = [
-            ('IQ48', 'IQ (48 kHz)'), ('IQ96', 'IQ (96 kHz)'),
-            ('IQ192', 'IQ (192 kHz)'), ('IQ384', 'IQ (384 kHz)')
+            ('IQ48', 'IQ (48)'), ('IQ96', 'IQ (96)'),
+            ('IQ192', 'IQ (192)'), ('IQ384', 'IQ (384)')
         ]
 
         self.mode_var = tk.StringVar(value=self.config.get('mode', 'USB').upper())

@@ -508,6 +508,8 @@ class MIDIController:
             "Volume: Set",
             "Bandwidth: Low",
             "Bandwidth: High",
+            "Audio Filter: Low",
+            "Audio Filter: High",
             "Step Size: 10 Hz",
             "Step Size: 100 Hz",
             "Step Size: 1 kHz",
@@ -650,6 +652,28 @@ class MIDIController:
                 gui.select_mode('FM')
             elif function_name == "Mode: CW":
                 gui.select_mode('CWU')
+            elif function_name == "Mode: Next":
+                # Cycle to next mode
+                modes = ['USB', 'LSB', 'CWU', 'CWL', 'AM', 'FM']
+                try:
+                    current_mode = gui.mode_var.get()
+                    current_index = modes.index(current_mode)
+                    next_index = (current_index + 1) % len(modes)
+                    gui.select_mode(modes[next_index])
+                except (ValueError, AttributeError):
+                    # If current mode not found or error, default to USB
+                    gui.select_mode('USB')
+            elif function_name == "Mode: Previous":
+                # Cycle to previous mode
+                modes = ['USB', 'LSB', 'CWU', 'CWL', 'AM', 'FM']
+                try:
+                    current_mode = gui.mode_var.get()
+                    current_index = modes.index(current_mode)
+                    prev_index = (current_index - 1) % len(modes)
+                    gui.select_mode(modes[prev_index])
+                except (ValueError, AttributeError):
+                    # If current mode not found or error, default to USB
+                    gui.select_mode('USB')
 
             # Band controls
             elif function_name.startswith("Band: "):
@@ -677,16 +701,61 @@ class MIDIController:
 
             # Bandwidth controls
             elif function_name == "Bandwidth: Low":
-                # Map MIDI value to bandwidth range
-                current_low = gui.bw_low_var.get()
-                # Adjust based on current mode
-                gui.bw_low_var.set(current_low)
-                gui.update_bandwidth_display()
+                # Map MIDI 0-127 to current bandwidth low slider range
+                try:
+                    # Get current slider range
+                    slider_min = gui.bw_low_scale.cget('from')
+                    slider_max = gui.bw_low_scale.cget('to')
+
+                    # Map MIDI value to slider range
+                    bw_low = int(slider_min + (value / 127) * (slider_max - slider_min))
+                    gui.bw_low_var.set(bw_low)
+                    gui.update_bandwidth_display()
+                except (ValueError, AttributeError):
+                    pass
 
             elif function_name == "Bandwidth: High":
-                current_high = gui.bw_high_var.get()
-                gui.bw_high_var.set(current_high)
-                gui.update_bandwidth_display()
+                # Map MIDI 0-127 to current bandwidth high slider range
+                try:
+                    # Get current slider range
+                    slider_min = gui.bw_high_scale.cget('from')
+                    slider_max = gui.bw_high_scale.cget('to')
+
+                    # Map MIDI value to slider range
+                    bw_high = int(slider_min + (value / 127) * (slider_max - slider_min))
+                    gui.bw_high_var.set(bw_high)
+                    gui.update_bandwidth_display()
+                except (ValueError, AttributeError):
+                    pass
+
+            # Audio filter controls
+            elif function_name == "Audio Filter: Low":
+                # Map MIDI 0-127 to current audio filter low slider range
+                try:
+                    # Get current slider range
+                    slider_min = gui.filter_low_scale.cget('from')
+                    slider_max = gui.filter_low_scale.cget('to')
+
+                    # Map MIDI value to slider range
+                    filter_low = int(slider_min + (value / 127) * (slider_max - slider_min))
+                    gui.audio_filter_low_var.set(filter_low)
+                    gui.update_audio_filter_display()
+                except (ValueError, AttributeError):
+                    pass
+
+            elif function_name == "Audio Filter: High":
+                # Map MIDI 0-127 to current audio filter high slider range
+                try:
+                    # Get current slider range
+                    slider_min = gui.filter_high_scale.cget('from')
+                    slider_max = gui.filter_high_scale.cget('to')
+
+                    # Map MIDI value to slider range
+                    filter_high = int(slider_min + (value / 127) * (slider_max - slider_min))
+                    gui.audio_filter_high_var.set(filter_high)
+                    gui.update_audio_filter_display()
+                except (ValueError, AttributeError):
+                    pass
 
             # Step size controls
             elif function_name.startswith("Step Size: "):

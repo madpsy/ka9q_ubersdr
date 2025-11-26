@@ -45,9 +45,14 @@ class MIDIController:
         # Last used device name
         self.last_device_name = None
 
+        # Track if mappings have been modified since last save
+        self.mappings_modified = False
+        self.saved_mappings_hash = None
+
         # Load saved mappings and device
         self.config_file = os.path.expanduser("~/.ubersdr_midi_mappings.json")
         self.load_mappings()
+        self._update_saved_hash()
 
     def create_window(self, root):
         """Create MIDI configuration window."""
@@ -151,14 +156,23 @@ class MIDIController:
         self.function_combo['values'] = self.get_available_functions()
         self.function_combo.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
 
-        ttk.Label(self.learn_frame, text="2. Move/press MIDI control:").grid(row=2, column=0, sticky=tk.W, pady=(0, 5))
+        # Map both press and release checkbox
+        self.map_both_var = tk.BooleanVar(value=False)
+        self.map_both_check = ttk.Checkbutton(
+            self.learn_frame,
+            text="Map both press and release (for momentary control)",
+            variable=self.map_both_var
+        )
+        self.map_both_check.grid(row=2, column=0, sticky=tk.W, pady=(0, 10))
+
+        ttk.Label(self.learn_frame, text="2. Press and release MIDI control:").grid(row=3, column=0, sticky=tk.W, pady=(0, 5))
 
         self.learn_status_label = ttk.Label(self.learn_frame, text="Waiting for MIDI input...",
                                            foreground='blue', font=('TkDefaultFont', 10, 'bold'))
-        self.learn_status_label.grid(row=3, column=0, sticky=tk.W, pady=(0, 10))
+        self.learn_status_label.grid(row=4, column=0, sticky=tk.W, pady=(0, 10))
 
         learn_buttons_frame = ttk.Frame(self.learn_frame)
-        learn_buttons_frame.grid(row=4, column=0, sticky=tk.W)
+        learn_buttons_frame.grid(row=5, column=0, sticky=tk.W)
 
         self.cancel_learn_btn = ttk.Button(learn_buttons_frame, text="Cancel",
                                           command=self.cancel_learn_mode)
@@ -276,43 +290,73 @@ class MIDIController:
             data1 = msg_bytes[1] if len(msg_bytes) > 1 else 0
             data2 = msg_bytes[2] if len(msg_bytes) > 2 else 0
 
-            # Ignore Note Off messages in learn mode (only capture Note On for buttons)
             # Note Off is 0x80, or Note On (0x90) with velocity 0
             is_note_off = (msg_type == 0x80) or (msg_type == 0x90 and data2 == 0)
+            is_note_on = (msg_type == 0x90 and data2 > 0)
 
             # Create mapping key
             key = (msg_type, channel, data1)
 
             # Check if learn frame exists and is visible (learn mode active)
             if self.learn_frame and self.learn_frame.winfo_exists() and self.learn_frame.winfo_ismapped():
-                # In learn mode - ignore Note Off messages
-                if is_note_off:
-                    return
-
                 # Check if function is selected
                 if self.function_var.get():
-                    # Function selected - capture this control
-                    self.learning = True
-                    if self.window and self.window.winfo_exists():
-                        self.window.after(0, lambda: self.complete_learn(key, msg_type, channel, data1))
+                    map_both = self.map_both_var.get()
+
+                    if map_both:
+                        # Map both press and release mode
+                        if is_note_on:
+                            # Got press - store it and wait for release
+                            self.learn_press_key = key
+                            if self.window and self.window.winfo_exists():
+                                self.window.after(0, lambda: self.learn_status_label.config(
+                                    text="Press captured! Now release the button...", foreground='orange'))
+                        elif is_note_off and hasattr(self, 'learn_press_key'):
+                            # Got release - create both mappings
+                            press_key = self.learn_press_key
+                            release_key = key
+                            if self.window and self.window.winfo_exists():
+                                self.window.after(0, lambda: self.complete_learn_both(press_key, release_key, msg_type, channel, data1))
+                            delattr(self, 'learn_press_key')
+                    else:
+                        # Single mapping mode - ignore Note Off messages (only capture press/CC/encoder)
+                        if is_note_off:
+                            return
+
+                        self.learning = True
+                        if self.window and self.window.winfo_exists():
+                            self.window.after(0, lambda: self.complete_learn(key, msg_type, channel, data1))
                 else:
                     # No function selected yet - show reminder
                     if self.window and self.window.winfo_exists():
                         self.window.after(0, lambda: self.learn_status_label.config(
                             text="Please select a function first!", foreground='red'))
             elif key in self.mappings:
-                # Execute mapped function (also ignore Note Off for execution)
-                if is_note_off:
-                    return
-
+                # Execute mapped function - both press and release can have separate mappings
                 function_name, params = self.mappings[key]
 
                 # Check if throttling is configured for this mapping
                 throttle_ms = params.get('throttle_ms', 0) if isinstance(params, dict) else 0
                 mode = params.get('mode', 'debounce') if isinstance(params, dict) else 'debounce'
 
-                if throttle_ms > 0:
-                    # Use throttled execution
+                if throttle_ms > 0 and mode == 'rate_limit':
+                    # Rate limit: Check immediately in MIDI thread to prevent queuing excess messages
+                    import time
+                    current_time = time.time()
+                    last_time = self.last_execution.get(key, 0)
+                    time_since_last = (current_time - last_time) * 1000  # Convert to ms
+
+                    if time_since_last >= throttle_ms:
+                        # Enough time has passed, execute now
+                        self.last_execution[key] = current_time
+                        if self.window and self.window.winfo_exists():
+                            self.window.after(0, lambda: self.execute_function(function_name, params, data2))
+                        else:
+                            self.execute_function(function_name, params, data2)
+                    # else: ignore this message (too soon)
+
+                elif throttle_ms > 0 and mode == 'debounce':
+                    # Debounce: Queue the throttled execution (needs GUI thread for timer management)
                     if self.window and self.window.winfo_exists():
                         self.window.after(0, lambda: self.execute_throttled(key, function_name, params, data2, throttle_ms, mode))
                     else:
@@ -351,11 +395,18 @@ class MIDIController:
         """Complete learn mode with captured MIDI control."""
         function_name = self.function_var.get()
 
-        # Default parameters - no throttling
-        params = {}
+        # Default parameters - automatically add 100ms rate_limit for encoder functions
+        if function_name.startswith("Frequency: Encoder"):
+            params = {
+                'throttle_ms': 100,
+                'mode': 'rate_limit'
+            }
+        else:
+            params = {}
 
-        # Store mapping
+        # Store mapping (can map both Note On and Note Off separately)
         self.mappings[key] = (function_name, params)
+        self.mappings_modified = True
 
         # Update display
         self.update_mappings_display()
@@ -369,12 +420,50 @@ class MIDIController:
 
         self.parent_gui.log_status(f"MIDI mapping created: {control_name} → {function_name}")
 
+    def complete_learn_both(self, press_key, release_key, msg_type, channel, data1):
+        """Complete learn mode with both press and release captured."""
+        function_name = self.function_var.get()
+
+        # Default parameters - automatically add 100ms rate_limit for encoder functions
+        if function_name.startswith("Frequency: Encoder"):
+            params = {
+                'throttle_ms': 100,
+                'mode': 'rate_limit'
+            }
+        else:
+            params = {}
+
+        # Store both mappings
+        self.mappings[press_key] = (function_name, params.copy())
+        self.mappings[release_key] = (function_name, params.copy())
+        self.mappings_modified = True
+
+        # Update display
+        self.update_mappings_display()
+
+        # Show success
+        press_name = self.format_midi_control(press_key[0], press_key[1], press_key[2])
+        release_name = self.format_midi_control(release_key[0], release_key[1], release_key[2])
+        self.learn_status_label.config(
+            text=f"Mapped both: {press_name} and {release_name}",
+            foreground='green'
+        )
+
+        # Exit learn mode after short delay
+        self.window.after(1500, self.cancel_learn_mode)
+
+        self.parent_gui.log_status(f"MIDI mappings created: {press_name} and {release_name} → {function_name}")
+
     def cancel_learn_mode(self):
         """Cancel learn mode."""
         self.learning = False
         self.learn_frame.grid_remove()
         self.learn_btn.config(state='normal')
         self.function_var.set('')
+        self.map_both_var.set(False)
+        # Clean up any pending press capture
+        if hasattr(self, 'learn_press_key'):
+            delattr(self, 'learn_press_key')
 
     def format_midi_control(self, msg_type, channel, data1):
         """Format MIDI control for display."""
@@ -758,6 +847,7 @@ class MIDIController:
 
                 # Update mapping
                 self.mappings[mapping_key] = (function_name, new_params)
+                self.mappings_modified = True
                 self.update_mappings_display()
                 dialog.destroy()
                 self.parent_gui.log_status(f"MIDI mapping updated: {control_name}")
@@ -793,6 +883,7 @@ class MIDIController:
             msg_type, channel, data1 = key
             if self.format_midi_control(msg_type, channel, data1) == control_name:
                 del self.mappings[key]
+                self.mappings_modified = True
                 break
 
         self.update_mappings_display()
@@ -802,6 +893,7 @@ class MIDIController:
         """Clear all mappings."""
         if messagebox.askyesno("Confirm", "Delete all MIDI mappings?"):
             self.mappings.clear()
+            self.mappings_modified = True
             self.update_mappings_display()
             self.parent_gui.log_status("All MIDI mappings cleared")
 
@@ -823,6 +915,8 @@ class MIDIController:
             with open(self.config_file, 'w') as f:
                 json.dump(config, f, indent=2)
 
+            self.mappings_modified = False
+            self._update_saved_hash()
             messagebox.showinfo("Success", f"Mappings saved to {self.config_file}")
             self.parent_gui.log_status("MIDI mappings saved")
 
@@ -858,8 +952,43 @@ class MIDIController:
         except Exception as e:
             print(f"Failed to load MIDI mappings: {e}")
 
+    def _update_saved_hash(self):
+        """Update hash of saved mappings for change detection."""
+        import hashlib
+        mappings_str = json.dumps(sorted(self.mappings.items()), sort_keys=True)
+        self.saved_mappings_hash = hashlib.md5(mappings_str.encode()).hexdigest()
+
+    def _check_unsaved_changes(self):
+        """Check if there are unsaved changes.
+
+        Returns:
+            bool: True if there are unsaved changes
+        """
+        if not self.mappings_modified:
+            return False
+
+        # Double-check by comparing hash
+        import hashlib
+        current_str = json.dumps(sorted(self.mappings.items()), sort_keys=True)
+        current_hash = hashlib.md5(current_str.encode()).hexdigest()
+
+        return current_hash != self.saved_mappings_hash
+
     def on_close(self):
         """Handle window close - keep MIDI active in background."""
+        # Check for unsaved changes
+        if self._check_unsaved_changes():
+            response = messagebox.askyesnocancel(
+                "Unsaved Changes",
+                "You have unsaved MIDI mapping changes.\n\nDo you want to save them before closing?",
+                icon='warning'
+            )
+
+            if response is None:  # Cancel
+                return
+            elif response:  # Yes - save
+                self.save_mappings()
+
         # Hide window but keep MIDI connection active
         self.window.withdraw()
         self.parent_gui.midi_window = None

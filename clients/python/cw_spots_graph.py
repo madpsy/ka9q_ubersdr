@@ -33,6 +33,7 @@ class CWSpotsGraphWindow:
         self.tooltip_rect = None  # Background rectangle for tooltip
         self.last_hover_event = None  # Store last hover event to restore tooltip after redraw
         self.last_spot_time = None  # Track last filtered spot time
+        self.freq_line = None  # Reference to current frequency line
 
         # Create window
         self.window = tk.Toplevel()
@@ -43,9 +44,11 @@ class CWSpotsGraphWindow:
         # Setup UI
         self._setup_ui()
 
-        # Start periodic updates (every 1 second to stay in sync with table)
+        # Start periodic updates
         self.update_timer = None
+        self.freq_update_timer = None
         self._schedule_update()
+        self._schedule_freq_update()
 
         # Handle window close
         self.window.protocol("WM_DELETE_WINDOW", self._on_closing)
@@ -106,11 +109,19 @@ class CWSpotsGraphWindow:
     def _schedule_update(self):
         """Schedule periodic status and time updates without full graph redraw."""
         if self.window.winfo_exists():
-            # Only update status label and last spot time - don't redraw entire graph
+            # Update status label and last spot time every second
             self._update_status_label()
             self._update_last_spot_time_label()
             # Schedule next update in 1 second
             self.update_timer = self.window.after(1000, self._schedule_update)
+
+    def _schedule_freq_update(self):
+        """Schedule frequent frequency line updates (every 100ms for smooth tracking)."""
+        if self.window.winfo_exists():
+            # Update frequency line position
+            self._update_frequency_line()
+            # Schedule next update in 100ms
+            self.freq_update_timer = self.window.after(100, self._schedule_freq_update)
 
     def _on_graph_click(self, event):
         """Handle click on graph to tune radio."""
@@ -243,6 +254,7 @@ class CWSpotsGraphWindow:
         # Reset tooltip references since ax.clear() removes all artists
         self.tooltip_annotation = None
         self.tooltip_rect = None
+        self.freq_line = None  # Reset frequency line reference
 
         # Store whether we need to restore tooltip after redraw
         restore_tooltip = self.last_hover_event is not None
@@ -350,6 +362,9 @@ class CWSpotsGraphWindow:
 
         # Style ticks
         self.ax.tick_params(colors='#aaa', which='both')
+
+        # Draw current frequency line if within range
+        self._draw_frequency_line()
 
         # Redraw canvas
         self.canvas.draw()
@@ -580,16 +595,84 @@ class CWSpotsGraphWindow:
 
         self.canvas.draw_idle()
 
+    def _draw_frequency_line(self):
+        """Draw a dashed white horizontal line at the current tuned frequency."""
+        if not self.parent_display or not self.parent_display.radio_gui:
+            return
+
+        try:
+            # Get current frequency in MHz
+            current_freq_hz = self.parent_display.radio_gui.get_frequency_hz()
+            current_freq_mhz = current_freq_hz / 1e6
+
+            # Get current y-axis limits
+            ylim = self.ax.get_ylim()
+
+            # Only draw line if frequency is within the y-axis range
+            if ylim[0] <= current_freq_mhz <= ylim[1]:
+                # Draw dashed white horizontal line
+                self.freq_line = self.ax.axhline(
+                    y=current_freq_mhz,
+                    color='white',
+                    linestyle='--',
+                    linewidth=1.5,
+                    alpha=0.5,
+                    zorder=5
+                )
+        except (ValueError, AttributeError):
+            pass
+
+    def _update_frequency_line(self):
+        """Update the frequency line position without full redraw."""
+        if not self.parent_display or not self.parent_display.radio_gui:
+            return
+
+        try:
+            # Get current frequency in MHz
+            current_freq_hz = self.parent_display.radio_gui.get_frequency_hz()
+            current_freq_mhz = current_freq_hz / 1e6
+
+            # Get current y-axis limits
+            ylim = self.ax.get_ylim()
+
+            # Check if frequency is within the y-axis range
+            if ylim[0] <= current_freq_mhz <= ylim[1]:
+                # If line exists, update its position
+                if self.freq_line:
+                    self.freq_line.set_ydata([current_freq_mhz, current_freq_mhz])
+                    self.freq_line.set_visible(True)
+                else:
+                    # Create new line if it doesn't exist
+                    self.freq_line = self.ax.axhline(
+                        y=current_freq_mhz,
+                        color='white',
+                        linestyle='--',
+                        linewidth=1.5,
+                        alpha=0.5,
+                        zorder=5
+                    )
+                self.canvas.draw_idle()
+            else:
+                # Hide line if frequency is out of range
+                if self.freq_line:
+                    self.freq_line.set_visible(False)
+                    self.canvas.draw_idle()
+        except (ValueError, AttributeError):
+            pass
+
     def refresh(self):
         """Refresh the graph (called by parent when filters change)."""
         self._draw_graph()
 
     def _on_closing(self):
         """Handle window close event."""
-        # Cancel update timer
+        # Cancel update timers
         if self.update_timer:
             self.window.after_cancel(self.update_timer)
             self.update_timer = None
+        if self.freq_update_timer:
+            self.window.after_cancel(self.freq_update_timer)
+            self.freq_update_timer = None
 
         # Call close callback if provided
         if self.on_close_callback:

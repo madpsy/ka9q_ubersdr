@@ -930,6 +930,7 @@ type ConnectionCheckResponse struct {
 	Reason         string `json:"reason,omitempty"`
 	SessionTimeout int    `json:"session_timeout"`  // Session inactivity timeout in seconds (0 = no timeout)
 	MaxSessionTime int    `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
+	Bypassed       bool   `json:"bypassed"`         // Whether the IP is in the timeout bypass list
 }
 
 // handleConnectionCheck checks if a connection will be allowed before WebSocket upgrade
@@ -980,9 +981,10 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	}
 
 	// Check if this IP is in the timeout bypass list
+	isBypassed := sessions.config.Server.IsIPTimeoutBypassed(clientIP)
 	sessionTimeout := sessions.config.Server.SessionTimeout
 	maxSessionTime := sessions.config.Server.MaxSessionTime
-	if sessions.config.Server.IsIPTimeoutBypassed(clientIP) {
+	if isBypassed {
 		// Bypassed IPs get 0 for both timeouts (unlimited)
 		sessionTimeout = 0
 		maxSessionTime = 0
@@ -993,6 +995,7 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		Allowed:        true,
 		SessionTimeout: sessionTimeout,
 		MaxSessionTime: maxSessionTime,
+		Bypassed:       isBypassed,
 	}
 
 	// Check if IP is banned

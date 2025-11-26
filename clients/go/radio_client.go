@@ -81,9 +81,12 @@ type ConnectionCheckRequest struct {
 
 // ConnectionCheckResponse from /connection endpoint
 type ConnectionCheckResponse struct {
-	Allowed  bool   `json:"allowed"`
-	Reason   string `json:"reason,omitempty"`
-	ClientIP string `json:"client_ip,omitempty"`
+	Allowed        bool   `json:"allowed"`
+	Reason         string `json:"reason,omitempty"`
+	ClientIP       string `json:"client_ip,omitempty"`
+	SessionTimeout int    `json:"session_timeout"`
+	MaxSessionTime int    `json:"max_session_time"`
+	Bypassed       bool   `json:"bypassed"`
 }
 
 // NewRadioClient creates a new radio client instance

@@ -60,6 +60,12 @@ class SpaceWeatherDisplay:
         # Data storage
         self.weather_data: Optional[Dict] = None
         
+        # Widget references for updates
+        self.metric_labels = {}
+        self.day_badges = {}
+        self.night_badges = {}
+        self.widgets_created = False
+        
         # Refresh control
         self.refresh_job = None
         self.clock_job = None
@@ -115,15 +121,106 @@ class SpaceWeatherDisplay:
         self.countdown_label = ttk.Label(status_frame, text="", foreground='gray')
         self.countdown_label.pack(side=tk.RIGHT)
     
+    def create_persistent_widgets(self):
+        """Create persistent widgets that will be updated (not recreated)."""
+        if self.widgets_created:
+            return
+        
+        # Hide loading message
+        self.loading_label.pack_forget()
+        
+        # Day/Night status frame
+        if self.gps_coords and ASTRAL_AVAILABLE:
+            self.dn_frame = ttk.LabelFrame(self.content_frame, padding="10")
+            self.dn_frame.pack(fill=tk.X, pady=(0, 10))
+            
+            self.sunrise_sunset_label = ttk.Label(self.dn_frame, font=('TkDefaultFont', 10))
+            self.sunrise_sunset_label.pack(anchor=tk.W)
+            
+            self.clock_label = ttk.Label(self.dn_frame, text="", font=('TkDefaultFont', 10, 'bold'))
+            self.clock_label.pack(anchor=tk.W, pady=(5, 0))
+        elif not ASTRAL_AVAILABLE:
+            info_frame = ttk.Frame(self.content_frame, relief=tk.RIDGE, borderwidth=1, padding="10")
+            info_frame.pack(fill=tk.X, pady=(0, 10))
+            ttk.Label(info_frame,
+                     text="ℹ Install 'astral' package for sunrise/sunset times: pip install astral",
+                     font=('TkDefaultFont', 9), foreground='blue').pack()
+        
+        # Forecast frame (initially hidden)
+        self.forecast_frame = ttk.Frame(self.content_frame, relief=tk.RIDGE, borderwidth=2)
+        self.forecast_inner = ttk.Frame(self.forecast_frame, padding="10")
+        self.forecast_inner.pack(fill=tk.X)
+        
+        self.forecast_title_label = ttk.Label(self.forecast_inner, font=('TkDefaultFont', 11, 'bold'), foreground='#ff9800')
+        self.forecast_summary_label = ttk.Label(self.forecast_inner, font=('TkDefaultFont', 10), wraplength=750)
+        
+        # Last update label
+        self.last_update_label = ttk.Label(self.content_frame, font=('TkDefaultFont', 9), foreground='gray')
+        self.last_update_label.pack(pady=(0, 10))
+        
+        # Key metrics
+        metrics_frame = ttk.LabelFrame(self.content_frame, text="Key Metrics", padding="10")
+        metrics_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        metrics_grid = ttk.Frame(metrics_frame)
+        metrics_grid.pack(fill=tk.X)
+        
+        # Configure grid columns
+        for i in range(5):
+            metrics_grid.columnconfigure(i, weight=1)
+        
+        # Create metric boxes
+        self.metric_labels['solar_flux'] = self.create_metric_box(metrics_grid, 0, 0, "Solar Flux", "0 SFU")
+        self.metric_labels['k_index'] = self.create_metric_box(metrics_grid, 0, 1, "K-Index", "0")
+        self.metric_labels['a_index'] = self.create_metric_box(metrics_grid, 0, 2, "A-Index", "0")
+        self.metric_labels['solar_wind'] = self.create_metric_box(metrics_grid, 0, 3, "Solar Wind Bz", "0 nT")
+        self.metric_labels['propagation'] = self.create_metric_box(metrics_grid, 0, 4, "Propagation", "Unknown")
+        
+        # Day conditions
+        self.day_frame = ttk.LabelFrame(self.content_frame, text="☀️ Day Conditions", padding="10")
+        self.day_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        day_container = ttk.Frame(self.day_frame)
+        day_container.pack(expand=True)
+        
+        day_badges = ttk.Frame(day_container)
+        day_badges.pack()
+        
+        for band in self.BAND_ORDER:
+            badge = tk.Label(day_badges, text=band, bg='#9ca3af', fg='white',
+                           font=('TkDefaultFont', 9, 'bold'), padx=8, pady=4,
+                           relief=tk.RAISED, borderwidth=1)
+            badge.pack(side=tk.LEFT, padx=3, pady=2)
+            self.day_badges[band] = badge
+        
+        # Night conditions
+        self.night_frame = ttk.LabelFrame(self.content_frame, text="🌙 Night Conditions", padding="10")
+        self.night_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        night_container = ttk.Frame(self.night_frame)
+        night_container.pack(expand=True)
+        
+        night_badges = ttk.Frame(night_container)
+        night_badges.pack()
+        
+        for band in self.BAND_ORDER:
+            badge = tk.Label(night_badges, text=band, bg='#9ca3af', fg='white',
+                           font=('TkDefaultFont', 9, 'bold'), padx=8, pady=4,
+                           relief=tk.RAISED, borderwidth=1)
+            badge.pack(side=tk.LEFT, padx=3, pady=2)
+            self.night_badges[band] = badge
+        
+        self.widgets_created = True
+    
     def update_display(self, data: Dict):
         """Update display with space weather data."""
         self.weather_data = data
         
-        # Clear content
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
+        # Create widgets on first update
+        if not self.widgets_created:
+            self.create_persistent_widgets()
         
-        # Day/Night status
+        # Update Day/Night status
         if self.gps_coords and ASTRAL_AVAILABLE:
             try:
                 location = LocationInfo(
@@ -142,56 +239,47 @@ class SpaceWeatherDisplay:
                 day_night_icon = '☀️' if is_daytime else '🌙'
                 day_night_text = 'Day' if is_daytime else 'Night'
                 
-                # Format location text (matching bandconditions.js line 221)
                 location_text = f" ({self.location_name})" if self.location_name else ""
                 
-                # Day/Night frame with larger, more prominent title
-                dn_frame = ttk.LabelFrame(self.content_frame,
-                                         text=f"{day_night_icon} Currently: {day_night_text}{location_text}",
-                                         padding="10")
-                dn_frame.pack(fill=tk.X, pady=(0, 10))
+                # Update frame title
+                self.dn_frame.configure(text=f"{day_night_icon} Currently: {day_night_text}{location_text}")
                 
-                # Sunrise/Sunset on one line (matching web version)
-                ttk.Label(dn_frame,
-                         text=f"🌅 Sunrise: {sunrise.strftime('%H:%M')} UTC  •  🌇 Sunset: {sunset.strftime('%H:%M')} UTC",
-                         font=('TkDefaultFont', 10)).pack(anchor=tk.W)
+                # Update sunrise/sunset label
+                self.sunrise_sunset_label.config(
+                    text=f"🌅 Sunrise: {sunrise.strftime('%H:%M')} UTC  •  🌇 Sunset: {sunset.strftime('%H:%M')} UTC"
+                )
                 
-                # UTC clock
-                self.clock_label = ttk.Label(dn_frame, text="", font=('TkDefaultFont', 10, 'bold'))
-                self.clock_label.pack(anchor=tk.W, pady=(5, 0))
+                # Update day/night frame highlighting
+                if is_daytime:
+                    self.day_frame.configure(relief=tk.SOLID, borderwidth=3)
+                    self.night_frame.configure(relief=tk.GROOVE, borderwidth=1)
+                else:
+                    self.day_frame.configure(relief=tk.GROOVE, borderwidth=1)
+                    self.night_frame.configure(relief=tk.SOLID, borderwidth=3)
                 
             except Exception as e:
                 print(f"Error calculating sunrise/sunset: {e}")
-                import traceback
-                traceback.print_exc()
-        elif not ASTRAL_AVAILABLE:
-            # Show message about missing library
-            info_frame = ttk.Frame(self.content_frame, relief=tk.RIDGE, borderwidth=1, padding="10")
-            info_frame.pack(fill=tk.X, pady=(0, 10))
-            ttk.Label(info_frame,
-                     text="ℹInstall 'astral' package for sunrise/sunset times: pip install astral",
-                     font=('TkDefaultFont', 9), foreground='blue').pack()
         
-        # Forecast at the top (if significant)
+        # Update forecast (show/hide as needed)
         if 'forecast' in data and data['forecast'].get('summary'):
-            # Only show if not the default "quiet" message
             if data['forecast']['summary'] != "Quiet conditions expected for the next 24 hours.":
-                forecast_frame = ttk.Frame(self.content_frame, relief=tk.RIDGE, borderwidth=2)
-                forecast_frame.configure(style='Warning.TFrame')
-                forecast_frame.pack(fill=tk.X, pady=(0, 10))
-                
-                # Inner padding frame
-                forecast_inner = ttk.Frame(forecast_frame, padding="10")
-                forecast_inner.pack(fill=tk.X)
-                
+                # Update forecast content
                 if data['forecast'].get('geomagnetic_storm'):
-                    ttk.Label(forecast_inner, text=f"⚠️ Forecast: {data['forecast']['geomagnetic_storm']}",
-                             font=('TkDefaultFont', 11, 'bold'), foreground='#ff9800').pack(anchor=tk.W)
+                    self.forecast_title_label.config(text=f"⚠️ Forecast: {data['forecast']['geomagnetic_storm']}")
+                    self.forecast_title_label.pack(anchor=tk.W)
+                else:
+                    self.forecast_title_label.pack_forget()
                 
-                ttk.Label(forecast_inner, text=data['forecast']['summary'],
-                         font=('TkDefaultFont', 10), wraplength=750).pack(anchor=tk.W, pady=(5, 0))
+                self.forecast_summary_label.config(text=data['forecast']['summary'])
+                self.forecast_summary_label.pack(anchor=tk.W, pady=(5, 0))
+                
+                self.forecast_frame.pack(fill=tk.X, pady=(0, 10), before=self.last_update_label)
+            else:
+                self.forecast_frame.pack_forget()
+        else:
+            self.forecast_frame.pack_forget()
         
-        # Last update
+        # Update last update time
         if 'last_update' in data:
             last_update = datetime.fromisoformat(data['last_update'].replace('Z', '+00:00'))
             now = datetime.utcnow()
@@ -206,40 +294,20 @@ class SpaceWeatherDisplay:
             else:
                 time_ago = f'{minutes_ago // 60} hours ago'
             
-            ttk.Label(self.content_frame, text=f"Last updated: {time_ago}",
-                     font=('TkDefaultFont', 9), foreground='gray').pack(pady=(0, 10))
+            self.last_update_label.config(text=f"Last updated: {time_ago}")
         
-        # Key metrics
-        metrics_frame = ttk.LabelFrame(self.content_frame, text="Key Metrics", padding="10")
-        metrics_frame.pack(fill=tk.X, pady=(0, 10))
+        # Update key metrics
+        self.metric_labels['solar_flux'].config(text=f"{data.get('solar_flux', 0):.0f} SFU")
         
-        metrics_grid = ttk.Frame(metrics_frame)
-        metrics_grid.pack(fill=tk.X)
-        
-        # Configure grid columns
-        for i in range(5):
-            metrics_grid.columnconfigure(i, weight=1)
-        
-        # Solar Flux
-        self.create_metric_box(metrics_grid, 0, 0, "Solar Flux", 
-                              f"{data.get('solar_flux', 0):.0f} SFU")
-        
-        # K-Index
         k_status = data.get('k_index_status', '')
-        self.create_metric_box(metrics_grid, 0, 1, "K-Index",
-                              f"{data.get('k_index', 0)} ({k_status})")
+        self.metric_labels['k_index'].config(text=f"{data.get('k_index', 0)} ({k_status})")
         
-        # A-Index
-        self.create_metric_box(metrics_grid, 0, 2, "A-Index",
-                              f"{data.get('a_index', 0)}")
+        self.metric_labels['a_index'].config(text=f"{data.get('a_index', 0)}")
         
-        # Solar Wind Bz
         bz = data.get('solar_wind_bz', 0)
         bz_dir = 'Southward' if bz < 0 else 'Northward'
-        self.create_metric_box(metrics_grid, 0, 3, "Solar Wind Bz",
-                              f"{bz:.1f} nT\n({bz_dir})")
+        self.metric_labels['solar_wind'].config(text=f"{bz:.1f} nT\n({bz_dir})")
         
-        # Propagation Quality
         quality = data.get('propagation_quality', 'Unknown')
         quality_colors = {
             'Excellent': '#22c55e',
@@ -248,89 +316,38 @@ class SpaceWeatherDisplay:
             'Poor': '#ef4444'
         }
         quality_color = quality_colors.get(quality, '#9ca3af')
-        self.create_metric_box(metrics_grid, 0, 4, "Propagation",
-                              quality, color=quality_color)
+        self.metric_labels['propagation'].config(text=quality, foreground=quality_color)
         
-        # Band conditions
-        if 'band_conditions_day' in data and 'band_conditions_night' in data:
-            # Determine if currently day or night
-            is_daytime = False
-            if self.gps_coords and ASTRAL_AVAILABLE:
-                try:
-                    location = LocationInfo(
-                        name=self.location_name or "Receiver",
-                        region="",
-                        timezone="UTC",
-                        latitude=self.gps_coords['lat'],
-                        longitude=self.gps_coords['lon']
-                    )
-                    s = sun(location.observer, date=datetime.utcnow())
-                    now = datetime.now(s['sunrise'].tzinfo)
-                    is_daytime = s['sunrise'] <= now < s['sunset']
-                except:
-                    pass
-            
-            # Day conditions
-            day_frame = ttk.LabelFrame(self.content_frame, text="☀️ Day Conditions", padding="10")
-            if is_daytime:
-                day_frame.configure(relief=tk.SOLID, borderwidth=3)
-            day_frame.pack(fill=tk.X, pady=(0, 5))
-            
-            # Center the badges
-            day_container = ttk.Frame(day_frame)
-            day_container.pack(expand=True)
-            
-            day_badges = ttk.Frame(day_container)
-            day_badges.pack()
-            
+        # Update band conditions
+        if 'band_conditions_day' in data:
             for band in self.BAND_ORDER:
                 if band in data['band_conditions_day']:
                     condition = data['band_conditions_day'][band]
                     color = self.CONDITION_COLORS.get(condition, '#9ca3af')
-                    
-                    # Create colored badge matching web version
-                    badge = tk.Label(day_badges, text=band, bg=color, fg='white',
-                                   font=('TkDefaultFont', 9, 'bold'), padx=8, pady=4,
-                                   relief=tk.RAISED, borderwidth=1)
-                    badge.pack(side=tk.LEFT, padx=3, pady=2)
-            
-            # Night conditions
-            night_frame = ttk.LabelFrame(self.content_frame, text="🌙 Night Conditions", padding="10")
-            if not is_daytime:
-                night_frame.configure(relief=tk.SOLID, borderwidth=3)
-            night_frame.pack(fill=tk.X, pady=(0, 10))
-            
-            # Center the badges
-            night_container = ttk.Frame(night_frame)
-            night_container.pack(expand=True)
-            
-            night_badges = ttk.Frame(night_container)
-            night_badges.pack()
-            
+                    self.day_badges[band].config(bg=color)
+        
+        if 'band_conditions_night' in data:
             for band in self.BAND_ORDER:
                 if band in data['band_conditions_night']:
                     condition = data['band_conditions_night'][band]
                     color = self.CONDITION_COLORS.get(condition, '#9ca3af')
-                    
-                    # Create colored badge matching web version
-                    badge = tk.Label(night_badges, text=band, bg=color, fg='white',
-                                   font=('TkDefaultFont', 9, 'bold'), padx=8, pady=4,
-                                   relief=tk.RAISED, borderwidth=1)
-                    badge.pack(side=tk.LEFT, padx=3, pady=2)
+                    self.night_badges[band].config(bg=color)
         
         self.status_label.config(text="✓ Data loaded successfully", foreground='green')
     
-    def create_metric_box(self, parent, row, col, title, value, color=None):
-        """Create a metric display box."""
+    def create_metric_box(self, parent, row, col, title, initial_value, color=None):
+        """Create a metric display box and return the value label."""
         frame = ttk.Frame(parent, relief=tk.RIDGE, borderwidth=1)
         frame.grid(row=row, column=col, padx=5, pady=5, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         ttk.Label(frame, text=title, font=('TkDefaultFont', 9)).pack(pady=(5, 0))
         
-        value_label = ttk.Label(frame, text=value, font=('TkDefaultFont', 11, 'bold'))
+        value_label = ttk.Label(frame, text=initial_value, font=('TkDefaultFont', 11, 'bold'))
         if color:
             value_label.configure(foreground=color)
         value_label.pack(pady=(0, 5))
+        
+        return value_label
     
     def update_clock(self):
         """Update UTC clock display."""

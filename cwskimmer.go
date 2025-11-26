@@ -385,18 +385,16 @@ func (c *CWSkimmerClient) processLine(line string) {
 		c.mu.Lock()
 		pingTime := c.lastPingTime
 		c.lastActivityTime = time.Now()
-		// Stop the inactivity timer - we got a response, connection is alive
-		// Timer will restart when next ping is sent
-		if c.inactivityTimer != nil {
-			c.inactivityTimer.Stop()
-			c.inactivityTimer = nil
-		}
 		c.mu.Unlock()
 
 		if !pingTime.IsZero() {
 			responseTime := time.Since(pingTime)
 			log.Printf("CW Skimmer: Ping response received in %v", responseTime)
 		}
+
+		// Reset the inactivity timer to keep monitoring the connection
+		// This ensures we maintain continuous monitoring after each ping/pong cycle
+		c.resetInactivityTimer()
 		return
 	}
 
@@ -609,14 +607,9 @@ func (c *CWSkimmerClient) sendKeepalive() {
 		return
 	}
 
-	// Start inactivity monitor after first ping (expects response within 2 seconds)
-	c.mu.RLock()
-	hasInactivityTimer := c.inactivityTimer != nil
-	c.mu.RUnlock()
-
-	if !hasInactivityTimer {
-		c.startInactivityMonitor()
-	}
+	// Always reset/start the inactivity monitor when sending a ping
+	// This ensures we have exactly one active timer monitoring for the response
+	c.resetInactivityTimer()
 
 	// Schedule next keepalive
 	c.startKeepalive()
@@ -624,30 +617,27 @@ func (c *CWSkimmerClient) sendKeepalive() {
 
 // startInactivityMonitor starts the inactivity monitoring timer
 // Expects response to ping within 2 seconds (ping sent every 60s)
+// DEPRECATED: Use resetInactivityTimer() instead for consistency
 func (c *CWSkimmerClient) startInactivityMonitor() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.inactivityTimer != nil {
-		c.inactivityTimer.Stop()
-	}
-
-	// Set 2 second inactivity timeout (should get ping response within 1s)
-	c.inactivityTimer = time.AfterFunc(2*time.Second, func() {
-		c.checkInactivity()
-	})
+	c.resetInactivityTimer()
 }
 
 // resetInactivityTimer resets the inactivity timer
+// This function ensures we always have exactly one active timer by stopping any existing timer
+// before creating a new one. This prevents stale timers from firing.
 func (c *CWSkimmerClient) resetInactivityTimer() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Stop any existing timer - this is critical to prevent stale timers from firing
 	if c.inactivityTimer != nil {
 		c.inactivityTimer.Stop()
+		// Note: timer.Stop() doesn't guarantee the callback won't execute if already queued,
+		// but by immediately creating a new timer and updating the reference, we ensure
+		// that checkInactivity() will see the most recent lastActivityTime
 	}
 
-	// Reset 2 second inactivity timeout
+	// Create new 2 second inactivity timeout
 	c.inactivityTimer = time.AfterFunc(2*time.Second, func() {
 		c.checkInactivity()
 	})

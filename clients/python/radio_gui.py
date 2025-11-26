@@ -1077,15 +1077,17 @@ class RadioGUI:
                     # Inactive band: use status color without border
                     button.configure(style=f'{status.capitalize()}.TButton')
 
-        # Update band filter in digital spots window if open
+        # Update band filter in digital spots window if open - only if band actually changed
         if self.digital_spots_display and current_band:
-            self.digital_spots_display.band_filter.set(current_band)
-            self.digital_spots_display.apply_filters()
+            if self.digital_spots_display.band_filter.get() != current_band:
+                self.digital_spots_display.band_filter.set(current_band)
+                self.digital_spots_display.apply_filters()
 
-        # Update band filter in CW spots window if open
+        # Update band filter in CW spots window if open - only if band actually changed
         if self.cw_spots_display and current_band:
-            self.cw_spots_display.band_var.set(current_band)
-            self.cw_spots_display.apply_filters()
+            if self.cw_spots_display.band_var.get() != current_band:
+                self.cw_spots_display.band_var.set(current_band)
+                self.cw_spots_display.apply_filters()
 
     def fetch_band_states(self):
         """Fetch band states from the noise floor aggregate API and update button colors."""
@@ -1368,7 +1370,7 @@ class RadioGUI:
                 self.waterfall_waterfall.update_center_frequency(freq_hz)
 
             # Send tune message
-            self.log_status(f"Tuning to {freq_hz/1e6:.6f} MHz...")
+            # self.log_status(f"Tuning to {freq_hz/1e6:.6f} MHz...")  # Removed: too verbose during rapid frequency changes
             self.send_tune_message()
 
             # Sync to rigctl if enabled
@@ -2136,8 +2138,10 @@ class RadioGUI:
                 current_freq = self.get_frequency_hz()
                 for band_name, band_range in self.BAND_RANGES.items():
                     if band_range['min'] <= current_freq <= band_range['max']:
-                        self.digital_spots_display.band_filter.set(band_name)
-                        self.digital_spots_display.apply_filters()
+                        # Only set if different from current value
+                        if self.digital_spots_display.band_filter.get() != band_name:
+                            self.digital_spots_display.band_filter.set(band_name)
+                            self.digital_spots_display.apply_filters()
                         break
             except (ValueError, AttributeError):
                 pass
@@ -2180,8 +2184,10 @@ class RadioGUI:
                 current_freq = self.get_frequency_hz()
                 for band_name, band_range in self.BAND_RANGES.items():
                     if band_range['min'] <= current_freq <= band_range['max']:
-                        self.cw_spots_display.band_var.set(band_name)
-                        self.cw_spots_display.apply_filters()
+                        # Only set if different from current value
+                        if self.cw_spots_display.band_var.get() != band_name:
+                            self.cw_spots_display.band_var.set(band_name)
+                            self.cw_spots_display.apply_filters()
                         break
             except (ValueError, AttributeError):
                 pass
@@ -2306,8 +2312,10 @@ class RadioGUI:
                 current_freq = self.get_frequency_hz()
                 for band_name, band_range in self.BAND_RANGES.items():
                     if band_range['min'] <= current_freq <= band_range['max']:
-                        self.digital_spots_display.band_filter.set(band_name)
-                        self.digital_spots_display.apply_filters()
+                        # Only set if different from current value
+                        if self.digital_spots_display.band_filter.get() != band_name:
+                            self.digital_spots_display.band_filter.set(band_name)
+                            self.digital_spots_display.apply_filters()
                         break
             except (ValueError, AttributeError):
                 pass
@@ -2358,8 +2366,10 @@ class RadioGUI:
                 current_freq = self.get_frequency_hz()
                 for band_name, band_range in self.BAND_RANGES.items():
                     if band_range['min'] <= current_freq <= band_range['max']:
-                        self.cw_spots_display.band_var.set(band_name)
-                        self.cw_spots_display.apply_filters()
+                        # Only set if different from current value
+                        if self.cw_spots_display.band_var.get() != band_name:
+                            self.cw_spots_display.band_var.set(band_name)
+                            self.cw_spots_display.apply_filters()
                         break
             except (ValueError, AttributeError):
                 pass
@@ -2746,7 +2756,7 @@ class RadioGUI:
                 # Wait for completion with timeout
                 future.result(timeout=2.0)
 
-                self.log_status(f"Sent tune: {self.client.frequency/1e6:.3f} MHz {self.client.mode.upper()} ({self.client.bandwidth_low} to {self.client.bandwidth_high} Hz)")
+                # self.log_status(f"Sent tune: {self.client.frequency/1e6:.3f} MHz {self.client.mode.upper()} ({self.client.bandwidth_low} to {self.client.bandwidth_high} Hz)")  # Removed: too verbose during rapid frequency changes
             else:
                 self.log_status("ERROR: Event loop not running")
         except Exception as e:

@@ -441,10 +441,40 @@ class DigitalSpotsDisplay:
             self.count_label.config(text=f"{filtered} spots")
     
     def update_ages(self):
-        """Update age column periodically."""
+        """Update age column periodically without full table rebuild."""
         if self.running:
-            # Re-apply filters to update ages
-            self.update_display()
+            # Update ages in-place without rebuilding the entire table
+            now = datetime.utcnow()
+            for item in self.tree.get_children():
+                values = list(self.tree.item(item, 'values'))
+                if len(values) >= 2:
+                    # Get timestamp from the first column (time)
+                    time_str = values[0]
+                    try:
+                        # Parse time and calculate new age
+                        # Reconstruct full timestamp from time string (assumes today's date)
+                        spot_time = datetime.strptime(time_str, '%H:%M:%S')
+                        # Use current date with parsed time
+                        spot_time = now.replace(hour=spot_time.hour, minute=spot_time.minute, second=spot_time.second)
+
+                        # Handle day rollover (if spot time is in future, it was yesterday)
+                        if spot_time > now:
+                            spot_time = spot_time - timedelta(days=1)
+
+                        age = now - spot_time
+                        if age.seconds < 60:
+                            age_str = f"{age.seconds}s"
+                        elif age.seconds < 3600:
+                            age_str = f"{age.seconds // 60}m{age.seconds % 60}s"
+                        else:
+                            age_str = f"{age.seconds // 3600}h{(age.seconds % 3600) // 60}m"
+
+                        # Update only the age column (index 1)
+                        values[1] = age_str
+                        self.tree.item(item, values=values)
+                    except (ValueError, AttributeError):
+                        pass
+
             # Schedule next update in 1 second
             self.window.after(1000, self.update_ages)
     

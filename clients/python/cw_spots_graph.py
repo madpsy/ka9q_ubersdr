@@ -104,10 +104,12 @@ class CWSpotsGraphWindow:
         self._draw_graph()
 
     def _schedule_update(self):
-        """Schedule periodic graph update."""
+        """Schedule periodic status and time updates without full graph redraw."""
         if self.window.winfo_exists():
-            self._draw_graph()
-            # Update every second to stay in sync with table
+            # Only update status label and last spot time - don't redraw entire graph
+            self._update_status_label()
+            self._update_last_spot_time_label()
+            # Schedule next update in 1 second
             self.update_timer = self.window.after(1000, self._schedule_update)
 
     def _on_graph_click(self, event):
@@ -352,10 +354,8 @@ class CWSpotsGraphWindow:
         # Redraw canvas
         self.canvas.draw()
 
-        # Update status label with current dial frequency info
+        # Update status label and time after redraw
         self._update_status_label()
-
-        # Update last spot time indicator
         self._update_last_spot_time_label()
 
         # Restore tooltip if mouse was hovering over a spot

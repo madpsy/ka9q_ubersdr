@@ -587,7 +587,7 @@ class RadioClient:
             session_id = message.get('sessionId', 'unknown')
             freq = message.get('frequency', 0)
             mode = message.get('mode', 'unknown')
-            print(f"Status: Session {session_id}, {freq} Hz, mode {mode}", file=sys.stderr)
+            # print(f"Status: Session {session_id}, {freq} Hz, mode {mode}", file=sys.stderr)  # Removed: too verbose during rapid frequency changes
         
         elif msg_type == 'error':
             # Print error message and notify via callback

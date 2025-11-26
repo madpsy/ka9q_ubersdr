@@ -239,9 +239,9 @@ class SpectrumDisplay:
                 if self.initial_bin_bandwidth > 0:
                     self.zoom_level = self.initial_bin_bandwidth / self.bin_bandwidth
                 
-                # Debug: Print what we received
-                print(f"Spectrum config received: {self.bin_count} bins @ {self.bin_bandwidth:.2f} Hz/bin = {self.total_bandwidth/1000:.1f} KHz total (zoom {self.zoom_level:.2f}x)")
-                print(f"Server center freq: {server_center_freq/1e6:.6f} MHz, Client center freq: {self.center_freq/1e6:.6f} MHz")
+                # Debug: Print what we received (commented out - too verbose during rapid frequency changes)
+                # print(f"Spectrum config received: {self.bin_count} bins @ {self.bin_bandwidth:.2f} Hz/bin = {self.total_bandwidth/1000:.1f} KHz total (zoom {self.zoom_level:.2f}x)")
+                # print(f"Server center freq: {server_center_freq/1e6:.6f} MHz, Client center freq: {self.center_freq/1e6:.6f} MHz")
                 
                 # If this is the first config (bin_count was 0), send zoom command for 200 KHz
                 # Use the tuned frequency (where we're listening), not the server's default center

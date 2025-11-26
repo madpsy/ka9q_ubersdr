@@ -180,6 +180,7 @@ class RadioGUI:
         self.connection_start_time = None  # Time when connection was established
         self.session_timer_job = None  # Timer job for updating session countdown
         self.bandwidth_update_job = None  # Debounce timer for bandwidth updates
+        self.last_mode = None  # Track last mode to detect actual mode changes
 
         # Rigctl client
         self.rigctl: Optional[RigctlClient] = None
@@ -1352,6 +1353,24 @@ class RadioGUI:
         # Update mode button styles
         self.update_mode_buttons()
 
+        # Disable audio filter only if mode actually changed (silently, without validation)
+        # because bandwidth ranges change and filter settings may become invalid
+        if self.last_mode is not None and self.last_mode != mode:
+            if self.audio_filter_enabled_var.get():
+                self.audio_filter_enabled_var.set(False)
+                # Disable directly in client without calling toggle_audio_filter
+                if self.client:
+                    self.client.audio_filter_enabled = False
+                # Update audio spectrum display
+                if self.audio_spectrum_display:
+                    self.audio_spectrum_display.update_audio_filter(False,
+                        int(self.audio_filter_low_var.get()),
+                        int(self.audio_filter_high_var.get()))
+                self.log_status("Audio filter disabled (mode changed)")
+        
+        # Update last mode
+        self.last_mode = mode
+
         # Check if this is an IQ mode
         is_iq_mode = mode in ['iq', 'iq48', 'iq96', 'iq192', 'iq384']
 
@@ -1371,10 +1390,18 @@ class RadioGUI:
                 self.toggle_nr2()
             self.nr2_check.config(state='disabled')
 
-            # Disable audio filter
+            # Disable audio filter (silently, without validation)
             if self.audio_filter_enabled_var.get():
                 self.audio_filter_enabled_var.set(False)
-                self.toggle_audio_filter()
+                # Disable directly in client without calling toggle_audio_filter
+                if self.client:
+                    self.client.audio_filter_enabled = False
+                # Update audio spectrum display
+                if self.audio_spectrum_display:
+                    self.audio_spectrum_display.update_audio_filter(False,
+                        int(self.audio_filter_low_var.get()),
+                        int(self.audio_filter_high_var.get()))
+                self.log_status("Audio filter disabled (IQ mode)")
             self.filter_check.config(state='disabled')
 
             # Disable recording
@@ -1716,8 +1743,8 @@ class RadioGUI:
         enabled = self.audio_filter_enabled_var.get()
 
         try:
-            # If enabling, first ensure values are within current mode's bandwidth range
             if enabled:
+                # Only validate and set up filter when enabling
                 # Get current bandwidth
                 bw_low = int(self.bw_low_var.get())
                 bw_high = int(self.bw_high_var.get())
@@ -1758,20 +1785,19 @@ class RadioGUI:
                 # Update display
                 self.update_audio_filter_display()
 
-            low = float(self.audio_filter_low_var.get())
-            high = float(self.audio_filter_high_var.get())
+                low = float(self.audio_filter_low_var.get())
+                high = float(self.audio_filter_high_var.get())
 
-            # Validate parameters
-            if low <= 0 or high <= 0:
-                messagebox.showerror("Error", "Filter frequencies must be positive")
-                self.audio_filter_enabled_var.set(not enabled)
-                return
-            if low >= high:
-                messagebox.showerror("Error", "Low frequency must be less than high frequency")
-                self.audio_filter_enabled_var.set(not enabled)
-                return
+                # Validate parameters only when enabling
+                if low <= 0 or high <= 0:
+                    messagebox.showerror("Error", "Filter frequencies must be positive")
+                    self.audio_filter_enabled_var.set(False)
+                    return
+                if low >= high:
+                    messagebox.showerror("Error", "Low frequency must be less than high frequency")
+                    self.audio_filter_enabled_var.set(False)
+                    return
 
-            if enabled:
                 # Enable audio filter
                 if not SCIPY_AVAILABLE:
                     messagebox.showerror("Error", "Audio filter requires scipy. Install with: pip install scipy")
@@ -2825,25 +2851,15 @@ class RadioGUI:
                                 elif self.cw_spots_btn:
                                     self.cw_spots_btn.pack_forget()
 
-                        # Auto-open waterfall window on successful connection
-                        if WATERFALL_AVAILABLE and self.spectrum:
-                            # Delay waterfall opening slightly to ensure spectrum is connected
-                            self.root.after(500, self.auto_open_waterfall)
-
                         # Auto-open audio spectrum window on successful connection
                         if AUDIO_SPECTRUM_AVAILABLE:
                             # Delay audio spectrum opening slightly
                             self.root.after(600, self.auto_open_audio_spectrum)
 
-                        # Auto-open digital spots window if enabled
+                        # Auto-open CW spots window if enabled
                         # Add 2000ms delay (same as spectrum) before connecting DX cluster WebSocket
                         if self.client and hasattr(self.client, 'server_description'):
                             desc = self.client.server_description
-                            if DIGITAL_SPOTS_AVAILABLE and desc.get('digital_decodes', False):
-                                self.root.after(2700, self.auto_open_digital_spots)
-
-                            # Auto-open CW spots window if enabled
-                            # Add 2000ms delay (same as spectrum) before connecting DX cluster WebSocket
                             if CW_SPOTS_AVAILABLE and desc.get('cw_skimmer', False):
                                 self.root.after(2800, self.auto_open_cw_spots)
 

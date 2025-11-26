@@ -22,17 +22,19 @@ class AudioSpectrumDisplay:
     to show the spectrum of what you're actually hearing.
     """
     
-    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 400):
+    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 400, toggle_filter_callback: Optional[Callable] = None):
         """Initialize audio spectrum display widget.
         
         Args:
             parent: Parent tkinter widget (can be Toplevel window)
             width: Canvas width in pixels
             height: Canvas height in pixels
+            toggle_filter_callback: Optional callback to toggle audio filter in main GUI
         """
         self.parent = parent
         self.width = width
         self.height = height
+        self.toggle_filter_callback = toggle_filter_callback
         
         # Create canvas for display
         self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=1)
@@ -89,6 +91,7 @@ class AudioSpectrumDisplay:
         
         # Mouse interaction
         self.canvas.bind('<Motion>', self.on_motion)
+        self.canvas.bind('<Button-1>', self.on_click)  # Left click to toggle filter
         self.tooltip_id = None
         self.tooltip_bg_id = None  # Track background rectangle
         self.cursor_line_id = None
@@ -703,6 +706,14 @@ class AudioSpectrumDisplay:
         
         self._update_tooltip_at_position(event.x, event.y)
     
+    def on_click(self, event):
+        """Handle mouse click to toggle audio filter."""
+        # Only toggle if click is within the graph area
+        x = event.x - self.margin_left
+        if 0 <= x <= self.graph_width:
+            if self.toggle_filter_callback:
+                self.toggle_filter_callback()
+    
     def _update_tooltip_at_position(self, x: int, y: int):
         """Update tooltip at position."""
         if self.spectrum_data is None:
@@ -890,8 +901,13 @@ def create_audio_spectrum_window(parent_gui):
     window.title("Audio Spectrum Display")
     window.geometry("800x500")
     
-    # Create audio spectrum display
-    audio_spectrum = AudioSpectrumDisplay(window, width=800, height=500)
+    # Create audio spectrum display with toggle callback
+    def toggle_audio_filter():
+        """Toggle the audio filter in the main GUI."""
+        parent_gui.audio_filter_enabled_var.set(not parent_gui.audio_filter_enabled_var.get())
+        parent_gui.toggle_audio_filter()
+    
+    audio_spectrum = AudioSpectrumDisplay(window, width=800, height=500, toggle_filter_callback=toggle_audio_filter)
     
     # Set sample rate from client
     if parent_gui.client:

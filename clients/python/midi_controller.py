@@ -38,6 +38,10 @@ class MIDIController:
         # MIDI mappings: {(msg_type, channel, data1): (function_name, params)}
         self.mappings: Dict[tuple, tuple] = {}
 
+        # Throttling: track last execution time and pending timers for each mapping
+        self.last_execution: Dict[tuple, float] = {}
+        self.pending_timers: Dict[tuple, Any] = {}
+
         # Last used device name
         self.last_device_name = None
 
@@ -115,17 +119,21 @@ class MIDIController:
                                     command=self.start_learn_mode)
         self.learn_btn.grid(row=0, column=0, padx=(0, 5))
 
+        self.edit_btn = ttk.Button(buttons_frame, text="Edit Mapping",
+                                   command=self.edit_mapping)
+        self.edit_btn.grid(row=0, column=1, padx=(0, 5))
+
         self.delete_btn = ttk.Button(buttons_frame, text="Delete Mapping",
                                      command=self.delete_mapping)
-        self.delete_btn.grid(row=0, column=1, padx=(0, 5))
+        self.delete_btn.grid(row=0, column=2, padx=(0, 5))
 
         self.clear_btn = ttk.Button(buttons_frame, text="Clear All",
                                     command=self.clear_all_mappings)
-        self.clear_btn.grid(row=0, column=2, padx=(0, 5))
+        self.clear_btn.grid(row=0, column=3, padx=(0, 5))
 
         self.save_btn = ttk.Button(buttons_frame, text="Save Mappings",
                                    command=self.save_mappings)
-        self.save_btn.grid(row=0, column=3)
+        self.save_btn.grid(row=0, column=4)
 
         mappings_frame.columnconfigure(0, weight=1)
         mappings_frame.rowconfigure(0, weight=1)
@@ -280,7 +288,7 @@ class MIDIController:
                 # In learn mode - ignore Note Off messages
                 if is_note_off:
                     return
-                
+
                 # Check if function is selected
                 if self.function_var.get():
                     # Function selected - capture this control
@@ -296,13 +304,25 @@ class MIDIController:
                 # Execute mapped function (also ignore Note Off for execution)
                 if is_note_off:
                     return
-                    
+
                 function_name, params = self.mappings[key]
-                if self.window and self.window.winfo_exists():
-                    self.window.after(0, lambda: self.execute_function(function_name, params, data2))
+
+                # Check if throttling is configured for this mapping
+                throttle_ms = params.get('throttle_ms', 0) if isinstance(params, dict) else 0
+                mode = params.get('mode', 'debounce') if isinstance(params, dict) else 'debounce'
+
+                if throttle_ms > 0:
+                    # Use throttled execution
+                    if self.window and self.window.winfo_exists():
+                        self.window.after(0, lambda: self.execute_throttled(key, function_name, params, data2, throttle_ms, mode))
+                    else:
+                        self.execute_throttled(key, function_name, params, data2, throttle_ms, mode)
                 else:
-                    # Window doesn't exist, execute directly
-                    self.execute_function(function_name, params, data2)
+                    # Execute immediately without throttling
+                    if self.window and self.window.winfo_exists():
+                        self.window.after(0, lambda: self.execute_function(function_name, params, data2))
+                    else:
+                        self.execute_function(function_name, params, data2)
         except Exception as e:
             # Handle any errors gracefully - don't crash on MIDI errors
             print(f"MIDI message handling error: {e}")
@@ -322,7 +342,7 @@ class MIDIController:
         self.learn_frame.grid()
         self.learn_status_label.config(text="Select a function above, then move/press a MIDI control", foreground='blue')
         self.learn_btn.config(state='disabled')
-        
+
         # Don't start learning until function is selected
         # Learning will start when MIDI input is received and function is set
         self.learning = False
@@ -331,8 +351,11 @@ class MIDIController:
         """Complete learn mode with captured MIDI control."""
         function_name = self.function_var.get()
 
+        # Default parameters - no throttling
+        params = {}
+
         # Store mapping
-        self.mappings[key] = (function_name, {})
+        self.mappings[key] = (function_name, params)
 
         # Update display
         self.update_mappings_display()
@@ -404,6 +427,78 @@ class MIDIController:
             "Audio Filter: Toggle",
             "Mute: Toggle",
         ]
+
+    def execute_throttled(self, key, function_name, params, value, throttle_ms, mode):
+        """Execute function with throttling (debounce or rate limit).
+
+        Args:
+            key: Mapping key tuple
+            function_name: Name of function to execute
+            params: Function parameters
+            value: MIDI value (0-127)
+            throttle_ms: Throttle time in milliseconds
+            mode: 'debounce' or 'rate_limit'
+        """
+        import time
+
+        current_time = time.time()
+
+        if mode == 'debounce':
+            # Debounce: Cancel pending execution and schedule new one
+            # Only the last call within the throttle window will execute
+
+            # Cancel any pending timer for this mapping
+            if key in self.pending_timers:
+                try:
+                    if self.window and self.window.winfo_exists():
+                        self.window.after_cancel(self.pending_timers[key])
+                except:
+                    pass
+                del self.pending_timers[key]
+
+            # Schedule new execution
+            if self.window and self.window.winfo_exists():
+                timer_id = self.window.after(throttle_ms,
+                    lambda: self._execute_debounced(key, function_name, params, value))
+                self.pending_timers[key] = timer_id
+            else:
+                # No window, execute after delay using threading
+                def delayed_exec():
+                    time.sleep(throttle_ms / 1000.0)
+                    if key in self.pending_timers:
+                        self.execute_function(function_name, params, value)
+                        del self.pending_timers[key]
+
+                timer = threading.Timer(throttle_ms / 1000.0, delayed_exec)
+                timer.daemon = True
+                timer.start()
+                self.pending_timers[key] = timer
+
+        elif mode == 'rate_limit':
+            # Rate limit: Execute immediately if enough time has passed
+            # Ignore calls that come too quickly
+
+            last_time = self.last_execution.get(key, 0)
+            time_since_last = (current_time - last_time) * 1000  # Convert to ms
+
+            if time_since_last >= throttle_ms:
+                # Enough time has passed, execute now
+                self.execute_function(function_name, params, value)
+                self.last_execution[key] = current_time
+            # else: ignore this call (too soon)
+
+    def _execute_debounced(self, key, function_name, params, value):
+        """Internal helper for debounced execution."""
+        # Clean up timer reference
+        if key in self.pending_timers:
+            del self.pending_timers[key]
+
+        # Execute the function
+        self.execute_function(function_name, params, value)
+
+        # Update last execution time
+        import time
+        self.last_execution[key] = time.time()
 
     def execute_function(self, function_name, params, value):
         """Execute mapped function.
@@ -550,8 +645,136 @@ class MIDIController:
         for key, (function_name, params) in self.mappings.items():
             msg_type, channel, data1 = key
             control_name = self.format_midi_control(msg_type, channel, data1)
-            params_str = str(params) if params else ""
+
+            # Format parameters for display
+            if isinstance(params, dict) and params:
+                parts = []
+                if 'throttle_ms' in params:
+                    parts.append(f"{params['throttle_ms']}ms")
+                if 'mode' in params:
+                    parts.append(params['mode'])
+                params_str = ", ".join(parts) if parts else ""
+            else:
+                params_str = ""
+
             self.mappings_tree.insert('', 'end', values=(control_name, function_name, params_str))
+
+    def edit_mapping(self):
+        """Edit selected mapping parameters."""
+        selection = self.mappings_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a mapping to edit")
+            return
+
+        # Get selected item
+        item = selection[0]
+        values = self.mappings_tree.item(item, 'values')
+        control_name = values[0]
+        function_name = values[1]
+
+        # Find mapping key
+        mapping_key = None
+        for key in self.mappings.keys():
+            msg_type, channel, data1 = key
+            if self.format_midi_control(msg_type, channel, data1) == control_name:
+                mapping_key = key
+                break
+
+        if not mapping_key:
+            return
+
+        # Get current parameters
+        _, current_params = self.mappings[mapping_key]
+        if not isinstance(current_params, dict):
+            current_params = {}
+
+        # Create edit dialog
+        dialog = tk.Toplevel(self.window)
+        dialog.title(f"Edit Mapping: {control_name}")
+        dialog.geometry("400x300")
+        dialog.transient(self.window)
+        dialog.grab_set()
+
+        # Main frame
+        frame = ttk.Frame(dialog, padding="20")
+        frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+
+        # Function display
+        ttk.Label(frame, text="Function:", font=('TkDefaultFont', 10, 'bold')).grid(
+            row=0, column=0, sticky=tk.W, pady=(0, 5))
+        ttk.Label(frame, text=function_name).grid(row=0, column=1, sticky=tk.W, pady=(0, 5))
+
+        # Throttle enable
+        ttk.Label(frame, text="Enable Throttling:", font=('TkDefaultFont', 10, 'bold')).grid(
+            row=1, column=0, sticky=tk.W, pady=(10, 5))
+
+        throttle_enabled_var = tk.BooleanVar(value=current_params.get('throttle_ms', 0) > 0)
+        throttle_check = ttk.Checkbutton(frame, variable=throttle_enabled_var,
+                                        command=lambda: self._toggle_throttle_fields(
+                                            throttle_enabled_var.get(), throttle_entry, mode_combo))
+        throttle_check.grid(row=1, column=1, sticky=tk.W, pady=(10, 5))
+
+        # Throttle time
+        ttk.Label(frame, text="Throttle Time (ms):").grid(row=2, column=0, sticky=tk.W, pady=(5, 5))
+        throttle_var = tk.StringVar(value=str(current_params.get('throttle_ms', 100)))
+        throttle_entry = ttk.Entry(frame, textvariable=throttle_var, width=10)
+        throttle_entry.grid(row=2, column=1, sticky=tk.W, pady=(5, 5))
+
+        # Throttle mode
+        ttk.Label(frame, text="Throttle Mode:").grid(row=3, column=0, sticky=tk.W, pady=(5, 5))
+        mode_var = tk.StringVar(value=current_params.get('mode', 'debounce'))
+        mode_combo = ttk.Combobox(frame, textvariable=mode_var, state='readonly', width=15)
+        mode_combo['values'] = ['debounce', 'rate_limit']
+        mode_combo.grid(row=3, column=1, sticky=tk.W, pady=(5, 5))
+
+        # Mode descriptions
+        desc_frame = ttk.LabelFrame(frame, text="Mode Descriptions", padding="10")
+        desc_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 10))
+
+        ttk.Label(desc_frame, text="• Debounce: Only last input within time window executes",
+                 wraplength=350, justify=tk.LEFT).grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(desc_frame, text="• Rate Limit: Ignores inputs that come too quickly",
+                 wraplength=350, justify=tk.LEFT).grid(row=1, column=0, sticky=tk.W)
+
+        # Initial state
+        self._toggle_throttle_fields(throttle_enabled_var.get(), throttle_entry, mode_combo)
+
+        # Buttons
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=5, column=0, columnspan=2, pady=(10, 0))
+
+        def save_changes():
+            try:
+                if throttle_enabled_var.get():
+                    throttle_ms = int(throttle_var.get())
+                    if throttle_ms < 0:
+                        raise ValueError("Throttle time must be positive")
+                    new_params = {
+                        'throttle_ms': throttle_ms,
+                        'mode': mode_var.get()
+                    }
+                else:
+                    new_params = {}
+
+                # Update mapping
+                self.mappings[mapping_key] = (function_name, new_params)
+                self.update_mappings_display()
+                dialog.destroy()
+                self.parent_gui.log_status(f"MIDI mapping updated: {control_name}")
+
+            except ValueError as e:
+                messagebox.showerror("Error", f"Invalid throttle time: {e}")
+
+        ttk.Button(button_frame, text="Save", command=save_changes).grid(row=0, column=0, padx=(0, 5))
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).grid(row=0, column=1)
+
+        frame.columnconfigure(1, weight=1)
+
+    def _toggle_throttle_fields(self, enabled, entry, combo):
+        """Enable/disable throttle fields based on checkbox."""
+        state = 'normal' if enabled else 'disabled'
+        entry.config(state=state)
+        combo.config(state='readonly' if enabled else 'disabled')
 
     def delete_mapping(self):
         """Delete selected mapping."""
@@ -641,7 +864,7 @@ class MIDIController:
         self.window.withdraw()
         self.parent_gui.midi_window = None
         self.parent_gui.log_status("MIDI window closed (controller still active)")
-    
+
     def disconnect(self):
         """Disconnect MIDI and clean up (called when main GUI closes)."""
         # Stop MIDI input
@@ -650,7 +873,7 @@ class MIDIController:
             self.midi_in.close_port()
             del self.midi_in
             self.midi_in = None
-        
+
         # Destroy window if it exists
         if self.window:
             self.window.destroy()

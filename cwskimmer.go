@@ -328,16 +328,10 @@ func (c *CWSkimmerClient) handleConnection() {
 		// Update last activity time on successful read
 		c.mu.Lock()
 		c.lastActivityTime = time.Now()
-		hasInactivityTimer := c.inactivityTimer != nil
 		c.mu.Unlock()
 
-		// Only reset inactivity timer if it's already running
-		// (it starts after first ping is sent)
-		if hasInactivityTimer {
-			c.resetInactivityTimer()
-		}
-
-		// Process the line
+		// Process the line - processLine() will handle timer management for ping responses
+		// For spot data, we don't need to reset the timer as spots indicate an active connection
 		c.processLine(line)
 	}
 }
@@ -385,16 +379,18 @@ func (c *CWSkimmerClient) processLine(line string) {
 		c.mu.Lock()
 		pingTime := c.lastPingTime
 		c.lastActivityTime = time.Now()
+		// Stop the inactivity timer - we got a response, connection is alive
+		// Timer will be restarted when next ping is sent
+		if c.inactivityTimer != nil {
+			c.inactivityTimer.Stop()
+			c.inactivityTimer = nil
+		}
 		c.mu.Unlock()
 
 		if !pingTime.IsZero() {
 			responseTime := time.Since(pingTime)
 			log.Printf("CW Skimmer: Ping response received in %v", responseTime)
 		}
-
-		// Reset the inactivity timer to keep monitoring the connection
-		// This ensures we maintain continuous monitoring after each ping/pong cycle
-		c.resetInactivityTimer()
 		return
 	}
 

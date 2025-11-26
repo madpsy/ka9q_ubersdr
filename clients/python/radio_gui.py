@@ -425,6 +425,7 @@ class RadioGUI:
             # Store button reference for highlighting
             self.band_buttons[label] = btn
 
+
         # Initialize band button highlighting with current frequency
         try:
             initial_freq_hz = self.get_frequency_hz()

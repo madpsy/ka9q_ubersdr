@@ -36,6 +36,11 @@ class SpectrumDisplay:
         self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=1)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         
+        # Signal meter state
+        self.signal_meter_mode = 'snr'  # 'snr' or 'dbfs'
+        self.last_signal_update = 0
+        self.signal_update_interval = 250  # Update every 250ms
+        
         # Spectrum data
         self.spectrum_data: Optional[np.ndarray] = None
         self.center_freq: float = 0
@@ -499,7 +504,7 @@ class SpectrumDisplay:
                                x, self.margin_top + self.graph_height,
                                fill='orange', width=2, dash=(5, 5))
         
-        # Draw frequency label
+        # Draw frequency label (centered)
         freq_mhz = self.tuned_freq / 1e6
         self.canvas.create_text(x, self.margin_top - 10,
                                text=f"{freq_mhz:.6f} MHz",
@@ -859,3 +864,74 @@ class SpectrumDisplay:
                 self._send_zoom_command(zoom_center, desired_bandwidth),
                 self.event_loop
             )
+    
+    def get_bandwidth_signal(self, bandwidth_low: int, bandwidth_high: int) -> tuple:
+        """Calculate signal metrics within the specified bandwidth.
+        
+        This matches the main application's signal meter calculation in static/signal-meter.js
+        lines 106-112, which finds the peak (maximum) dB value within the bandwidth.
+        
+        Args:
+            bandwidth_low: Low edge of bandwidth in Hz (relative to tuned frequency)
+            bandwidth_high: High edge of bandwidth in Hz (relative to tuned frequency)
+        
+        Returns:
+            Tuple of (peak_db, floor_db, snr_db) or (None, None, None) if no data
+        """
+        if self.spectrum_data is None or len(self.spectrum_data) == 0:
+            return (None, None, None)
+        
+        if self.total_bandwidth == 0 or self.tuned_freq == 0:
+            return (None, None, None)
+        
+        # Calculate absolute frequencies for bandwidth edges
+        filter_low_freq = self.tuned_freq + bandwidth_low
+        filter_high_freq = self.tuned_freq + bandwidth_high
+        
+        # Calculate spectrum view range
+        start_freq = self.center_freq - self.total_bandwidth / 2
+        end_freq = self.center_freq + self.total_bandwidth / 2
+        
+        # Check if bandwidth is within visible spectrum
+        if filter_low_freq < start_freq or filter_high_freq > end_freq:
+            return (None, None, None)
+        
+        # Map frequencies to bin indices
+        # Bin index = (freq - start_freq) / total_bandwidth * num_bins
+        low_bin = int((filter_low_freq - start_freq) / self.total_bandwidth * len(self.spectrum_data))
+        high_bin = int((filter_high_freq - start_freq) / self.total_bandwidth * len(self.spectrum_data))
+        
+        # Clamp to valid range
+        low_bin = max(0, min(len(self.spectrum_data) - 1, low_bin))
+        high_bin = max(0, min(len(self.spectrum_data) - 1, high_bin))
+        
+        # Ensure low < high
+        if low_bin >= high_bin:
+            return (None, None, None)
+        
+        # Extract bandwidth data
+        bandwidth_data = self.spectrum_data[low_bin:high_bin+1]
+        
+        # Filter out invalid values
+        valid_data = bandwidth_data[np.isfinite(bandwidth_data)]
+        
+        if len(valid_data) == 0:
+            return (None, None, None)
+        
+        # Find peak (maximum) dB across the bandwidth
+        # This matches signal-meter.js lines 106-112
+        peak_db = np.max(valid_data)
+        
+        # For noise floor, use the minimum value in the full spectrum
+        # This matches signal-meter.js updateNoiseFloor() method (lines 55-73)
+        full_spectrum_valid = self.spectrum_data[np.isfinite(self.spectrum_data)]
+        if len(full_spectrum_valid) > 0:
+            floor_db = np.min(full_spectrum_valid)
+        else:
+            floor_db = -120  # Default fallback
+        
+        # Calculate SNR
+        snr_db = peak_db - floor_db
+        
+        return (peak_db, floor_db, snr_db)
+    

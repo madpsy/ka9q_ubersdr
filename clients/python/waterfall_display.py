@@ -566,6 +566,19 @@ def create_waterfall_window(parent_gui):
     info_frame.pack(side=tk.TOP, fill=tk.X)
     info_frame.pack_propagate(False)  # Prevent frame from shrinking
     
+    # Signal meter (left side, top line) - clickable
+    signal_meter_label = tk.Label(info_frame, text="SNR: -- dB",
+                                  bg='#000000', fg='#666666',
+                                  font=('monospace', 10, 'bold'),
+                                  cursor='hand2')
+    signal_meter_label.place(x=5, y=15, anchor=tk.W)
+    
+    # Signal meter mode indicator (left side, below signal meter)
+    signal_meter_mode_label = tk.Label(info_frame, text="(click to toggle)",
+                                       bg='#000000', fg='#666666',
+                                       font=('monospace', 8))
+    signal_meter_mode_label.place(x=5, y=35, anchor=tk.W)
+    
     # Title label (centered)
     title_label = tk.Label(info_frame, text="RF Spectrum & Waterfall",
                           bg='#000000', fg='white',
@@ -589,6 +602,20 @@ def create_waterfall_window(parent_gui):
                                 bg='#000000', fg='yellow',
                                 font=('monospace', 10, 'bold'))
     peak_level_label.place(relx=1.0, y=35, anchor=tk.E, x=-5)
+    
+    # Signal meter state
+    signal_meter_mode = ['snr']  # Use list to allow modification in nested function
+    last_signal_update = [0]
+    signal_update_interval = 250  # ms
+    
+    # Signal meter click handler
+    def toggle_signal_meter_mode(event):
+        signal_meter_mode[0] = 'dbfs' if signal_meter_mode[0] == 'snr' else 'snr'
+        mode_text = signal_meter_mode[0].upper()
+        print(f"Signal meter mode: {mode_text}")
+    
+    signal_meter_label.bind('<Button-1>', toggle_signal_meter_mode)
+    signal_meter_mode_label.bind('<Button-1>', toggle_signal_meter_mode)
     
     # Create NEW spectrum display in this window
     spectrum = SpectrumDisplay(container, width=800, height=200)
@@ -654,6 +681,45 @@ def create_waterfall_window(parent_gui):
             return
         
         try:
+            # Update signal meter (throttled to 250ms)
+            import time
+            now = time.time() * 1000
+            if now - last_signal_update[0] >= signal_update_interval:
+                last_signal_update[0] = now
+                
+                # Get signal metrics from spectrum
+                try:
+                    bw_low = int(parent_gui.bw_low_var.get())
+                    bw_high = int(parent_gui.bw_high_var.get())
+                    peak_db, floor_db, snr_db = spectrum.get_bandwidth_signal(bw_low, bw_high)
+                    
+                    if peak_db is not None and floor_db is not None and snr_db is not None:
+                        if signal_meter_mode[0] == 'snr':
+                            text = f"SNR: {snr_db:.1f} dB"
+                            # Color based on SNR quality
+                            if snr_db >= 20:
+                                color = '#00ff00'  # Green - excellent
+                            elif snr_db >= 10:
+                                color = '#ffff00'  # Yellow - good
+                            else:
+                                color = '#ff6600'  # Orange - poor
+                        else:  # dbfs mode
+                            text = f"Peak: {peak_db:.1f} dBFS"
+                            # Color based on peak level
+                            if peak_db >= -20:
+                                color = '#00ff00'  # Green - strong
+                            elif peak_db >= -40:
+                                color = '#ffff00'  # Yellow - moderate
+                            else:
+                                color = '#ff6600'  # Orange - weak
+                    else:
+                        text = f"{signal_meter_mode[0].upper()}: -- dB"
+                        color = '#666666'
+                    
+                    signal_meter_label.config(text=text, fg=color)
+                except (ValueError, AttributeError):
+                    signal_meter_label.config(text=f"{signal_meter_mode[0].upper()}: -- dB", fg='#666666')
+            
             # Update RF spectrum bandwidth info (total bandwidth being displayed)
             if spectrum.total_bandwidth > 0:
                 bw_khz = spectrum.total_bandwidth / 1000

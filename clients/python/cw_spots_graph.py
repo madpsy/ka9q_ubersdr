@@ -17,11 +17,11 @@ from matplotlib.patches import Rectangle
 
 class CWSpotsGraphWindow:
     """Graph window for CW spots showing frequency vs time."""
-    
+
     def __init__(self, parent_display, on_close: Optional[Callable] = None):
         """
         Initialize the CW spots graph window.
-        
+
         Args:
             parent_display: Reference to parent CWSpotsDisplay to get filtered spots
             on_close: Optional callback when window is closed
@@ -32,48 +32,55 @@ class CWSpotsGraphWindow:
         self.tooltip_annotation = None  # For hover tooltip
         self.tooltip_rect = None  # Background rectangle for tooltip
         self.last_hover_event = None  # Store last hover event to restore tooltip after redraw
-        
+        self.last_spot_time = None  # Track last filtered spot time
+
         # Create window
         self.window = tk.Toplevel()
         self.window.title("CW Spots Graph")
         self.window.geometry("1000x600")
         self.window.configure(bg='#000000')  # Black background
-        
+
         # Setup UI
         self._setup_ui()
-        
+
         # Start periodic updates (every 1 second to stay in sync with table)
         self.update_timer = None
         self._schedule_update()
-        
+
         # Handle window close
         self.window.protocol("WM_DELETE_WINDOW", self._on_closing)
-        
+
     def _setup_ui(self):
         """Setup the user interface."""
         # Top frame for info with black background
         top_frame = tk.Frame(self.window, bg='#000000')
         top_frame.pack(fill=tk.X, padx=5, pady=5)
-        
+
         # Dynamic status label (shows callsign info when dial frequency matches a spot)
         self.status_label = tk.Label(top_frame, text="",
                                      foreground="green", font=("TkDefaultFont", 10, "bold"),
                                      bg='#000000')
         self.status_label.pack(side=tk.LEFT, padx=5)
-        
+
+        # Last spot time indicator (top right, inline with spot count)
+        self.last_spot_label = tk.Label(top_frame, text="",
+                                        foreground="#888", bg='#000000',
+                                        font=("TkDefaultFont", 9))
+        self.last_spot_label.pack(side=tk.RIGHT, padx=10)
+
         # Spot count
         self.count_label = tk.Label(top_frame, text="0 spots",
                                     foreground="#aaa", bg='#000000')
         self.count_label.pack(side=tk.RIGHT, padx=10)
-        
+
         # Graph frame with black background
         graph_frame = tk.Frame(self.window, bg='#000000')
         graph_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
+
         # Create matplotlib figure
         self.figure = Figure(figsize=(10, 6), facecolor='#1a1a1a')
         self.ax = self.figure.add_subplot(111, facecolor='#1a1a1a')
-        
+
         # Style the plot
         self.ax.tick_params(colors='#aaa', which='both')
         self.ax.spines['bottom'].set_color('#444')
@@ -83,95 +90,95 @@ class CWSpotsGraphWindow:
         self.ax.xaxis.label.set_color('#888')
         self.ax.yaxis.label.set_color('#888')
         self.ax.title.set_color('#aaa')
-        
+
         # Create canvas
         self.canvas = FigureCanvasTkAgg(self.figure, master=graph_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
+
         # Connect click and hover events
         self.canvas.mpl_connect('button_press_event', self._on_graph_click)
         self.canvas.mpl_connect('motion_notify_event', self._on_hover)
-        
+
         # Initial draw
         self._draw_graph()
-        
+
     def _schedule_update(self):
         """Schedule periodic graph update."""
         if self.window.winfo_exists():
             self._draw_graph()
             # Update every second to stay in sync with table
             self.update_timer = self.window.after(1000, self._schedule_update)
-        
+
     def _on_graph_click(self, event):
         """Handle click on graph to tune radio."""
         if event.inaxes != self.ax:
             return
-        
+
         # Find the closest spot to the click
         if not self.spot_positions:
             return
-        
+
         click_x = event.xdata
         click_y = event.ydata
-        
+
         if click_x is None or click_y is None:
             return
-        
+
         # Convert click_x from matplotlib date to timestamp
         from matplotlib.dates import num2date
         click_time = num2date(click_x).replace(tzinfo=None)
-        
+
         # Find closest spot
         min_distance = float('inf')
         closest_spot = None
-        
+
         for spot_data in self.spot_positions:
             spot_time = spot_data['time']
             spot_freq = spot_data['frequency']
-            
+
             # Calculate distance (normalize time and frequency to similar scales)
             time_diff = abs((click_time - spot_time).total_seconds()) / 60.0  # minutes
             freq_diff = abs(click_y - spot_freq)  # MHz
-            
+
             # Weight time and frequency differences
             distance = (time_diff * 0.01) + (freq_diff * 10)
-            
+
             if distance < min_distance:
                 min_distance = distance
                 closest_spot = spot_data['spot']
-        
+
         # If we found a spot within reasonable distance, tune to it
         if closest_spot and min_distance < 1.0:  # Threshold for "close enough"
             self._tune_to_spot(closest_spot)
-    
+
     def _tune_to_spot(self, spot):
         """Tune radio to the spot frequency."""
         if not self.parent_display or not self.parent_display.radio_gui:
             return
-        
+
         freq_hz = spot['frequency']
-        
+
         # Determine mode based on frequency (CWU >= 10 MHz, CWL < 10 MHz)
         if freq_hz < 10000000:
             mode = 'CWL'
         else:
             mode = 'CWU'
-        
+
         # Set frequency display
         self.parent_display.radio_gui.set_frequency_hz(freq_hz)
-        
+
         # Set mode if not locked
         if not self.parent_display.radio_gui.mode_lock_var.get():
             self.parent_display.radio_gui.mode_var.set(mode)
             self.parent_display.radio_gui.on_mode_changed()
-        
+
         # Apply changes if connected
         if self.parent_display.radio_gui.connected:
             self.parent_display.radio_gui.apply_frequency()
-        
+
         print(f"Tuned to {spot['dx_call']} at {freq_hz/1e6:.6f} MHz ({mode})")
-    
+
     def _update_status_label(self):
         """Update status label with current dial frequency spot info."""
         if not self.parent_display or not self.parent_display.radio_gui:
@@ -237,17 +244,25 @@ class CWSpotsGraphWindow:
 
         # Store whether we need to restore tooltip after redraw
         restore_tooltip = self.last_hover_event is not None
-        
+
         # Get filtered spots from parent display
         if not self.parent_display:
             return
-        
+
         # Use the parent's spots list and apply the same filters
         filtered_spots = self._get_filtered_spots_from_parent()
-        
+
+        # Update last spot time from filtered spots
+        if filtered_spots:
+            try:
+                latest_spot = max(filtered_spots, key=lambda s: s.get('time', ''))
+                self.last_spot_time = datetime.fromisoformat(latest_spot['time'].replace('Z', '+00:00')).replace(tzinfo=None)
+            except Exception:
+                pass
+
         # Update count
         self.count_label.config(text=f"{len(filtered_spots)} spots")
-        
+
         if len(filtered_spots) == 0:
             self.ax.text(0.5, 0.5, 'No spots in the last 10 minutes',
                         horizontalalignment='center',
@@ -259,13 +274,13 @@ class CWSpotsGraphWindow:
             self.ax.set_ylabel('Frequency (MHz)', color='#888')
             self.canvas.draw()
             return
-        
+
         # Prepare data for plotting
         times = []
         frequencies = []
         callsigns = []
         snrs = []
-        
+
         for spot in filtered_spots:
             try:
                 spot_time = datetime.fromisoformat(spot['time'].replace('Z', '+00:00'))
@@ -276,11 +291,11 @@ class CWSpotsGraphWindow:
                 snrs.append(spot.get('snr', 0))
             except Exception:
                 continue
-        
+
         if len(times) == 0:
             self.canvas.draw()
             return
-        
+
         # Color mapping based on SNR
         colors = []
         for snr in snrs:
@@ -292,7 +307,7 @@ class CWSpotsGraphWindow:
                 colors.append('#ff8c00')  # Orange - fair
             else:
                 colors.append('#dc3545')  # Red - weak (0-5)
-        
+
         # Store spot positions for click detection
         for i in range(len(times)):
             self.spot_positions.append({
@@ -300,10 +315,10 @@ class CWSpotsGraphWindow:
                 'frequency': frequencies[i],
                 'spot': filtered_spots[i]
             })
-        
+
         # Plot spots
         scatter = self.ax.scatter(times, frequencies, c=colors, s=50, alpha=0.7, edgecolors='white', linewidths=0.5, picker=True)
-        
+
         # Add callsign labels for all spots
         for i in range(len(times)):
             self.ax.annotate(callsigns[i],
@@ -314,47 +329,50 @@ class CWSpotsGraphWindow:
                            color=colors[i],
                            weight='bold',
                            alpha=0.9)
-        
+
         # Format x-axis (time)
         self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S', tz=None))
         self.ax.xaxis.set_major_locator(mdates.AutoDateLocator())
         self.figure.autofmt_xdate()
-        
+
         # Labels
         self.ax.set_xlabel('Time (UTC)', color='#888', fontsize=12)
         self.ax.set_ylabel('Frequency (MHz)', color='#888', fontsize=12)
-        
+
         # Get filter description from parent
         filter_desc = self._get_filter_description()
         self.ax.set_title(f'CW Spots{filter_desc}', color='#aaa', fontsize=14)
-        
+
         # Grid
         self.ax.grid(True, alpha=0.2, color='#444')
-        
+
         # Style ticks
         self.ax.tick_params(colors='#aaa', which='both')
-        
+
         # Redraw canvas
         self.canvas.draw()
 
         # Update status label with current dial frequency info
         self._update_status_label()
 
+        # Update last spot time indicator
+        self._update_last_spot_time_label()
+
         # Restore tooltip if mouse was hovering over a spot
         if restore_tooltip and self.last_hover_event is not None:
             self._on_hover(self.last_hover_event)
-    
+
     def _get_filtered_spots_from_parent(self):
         """Get filtered spots from parent display using same filter logic."""
         if not self.parent_display:
             return []
-        
+
         now = datetime.utcnow()
         max_age_ms = self.parent_display.age_filter * 60 * 1000 if self.parent_display.age_filter is not None else None
         min_snr = self.parent_display.snr_filter
         min_wpm = self.parent_display.wpm_filter
         callsign_upper = self.parent_display.callsign_filter.upper()
-        
+
         filtered_spots = []
         for spot in self.parent_display.spots:
             try:
@@ -365,65 +383,90 @@ class CWSpotsGraphWindow:
                     age_ms = (now - spot_time).total_seconds() * 1000
                     if age_ms > max_age_ms:
                         continue
-                
+
                 # Band filter
                 if self.parent_display.band_filter != "all" and spot.get('band') != self.parent_display.band_filter:
                     continue
-                
+
                 # SNR filter
                 if min_snr is not None and spot.get('snr', -999) < min_snr:
                     continue
-                
+
                 # WPM filter
                 if min_wpm is not None and spot.get('wpm', 0) < min_wpm:
                     continue
-                
+
                 # Callsign filter
                 if callsign_upper:
                     callsign = spot.get('dx_call', '').upper()
                     country = spot.get('country', '').upper()
                     if callsign_upper not in callsign and callsign_upper not in country:
                         continue
-                
+
                 # Country filter
                 if self.parent_display.country_filter != "all" and spot.get('country', '') != self.parent_display.country_filter:
                     continue
-                
+
                 filtered_spots.append(spot)
             except Exception:
                 continue
-        
+
         return filtered_spots
-    
+
     def _get_filter_description(self):
         """Get a description of active filters from parent."""
         if not self.parent_display:
             return ""
-        
+
         parts = []
-        
+
         if self.parent_display.band_filter != "all":
             parts.append(self.parent_display.band_filter)
-        
+
         if self.parent_display.age_filter is not None:
             parts.append(f"{self.parent_display.age_filter}min")
-        
+
         if self.parent_display.snr_filter is not None:
             parts.append(f"SNR≥{self.parent_display.snr_filter}")
-        
+
         if self.parent_display.wpm_filter is not None:
             parts.append(f"WPM≥{self.parent_display.wpm_filter}")
-        
+
         if self.parent_display.country_filter != "all":
             parts.append(self.parent_display.country_filter)
-        
+
         if self.parent_display.callsign_filter:
             parts.append(f"'{self.parent_display.callsign_filter}'")
-        
+
         if parts:
             return " - " + ", ".join(parts)
         return ""
-    
+
+    def _update_last_spot_time_label(self):
+        """Update the last spot time label at bottom right of window."""
+        if self.last_spot_time is None:
+            self.last_spot_label.config(text="")
+            return
+
+        try:
+            now = datetime.utcnow()
+            age_seconds = (now - self.last_spot_time).total_seconds()
+
+            if age_seconds < 60:
+                time_ago = f"{int(age_seconds)}s"
+            elif age_seconds < 3600:
+                minutes = int(age_seconds / 60)
+                seconds = int(age_seconds % 60)
+                time_ago = f"{minutes}m {seconds}s"
+            else:
+                hours = int(age_seconds / 3600)
+                minutes = int((age_seconds % 3600) / 60)
+                time_ago = f"{hours}h {minutes}m"
+
+            self.last_spot_label.config(text=f"Last: {time_ago}")
+        except Exception:
+            self.last_spot_label.config(text="")
+
     def _on_hover(self, event):
         """Handle mouse hover to show tooltip with spot details."""
         # Store the event for tooltip restoration after redraw
@@ -540,18 +583,18 @@ class CWSpotsGraphWindow:
     def refresh(self):
         """Refresh the graph (called by parent when filters change)."""
         self._draw_graph()
-        
+
     def _on_closing(self):
         """Handle window close event."""
         # Cancel update timer
         if self.update_timer:
             self.window.after_cancel(self.update_timer)
             self.update_timer = None
-        
+
         # Call close callback if provided
         if self.on_close_callback:
             self.on_close_callback()
-        
+
         # Destroy window
         self.window.destroy()
 
@@ -559,11 +602,11 @@ class CWSpotsGraphWindow:
 def create_cw_spots_graph_window(parent_display, on_close=None):
     """
     Create and return a CW spots graph window.
-    
+
     Args:
         parent_display: Reference to parent CWSpotsDisplay to get filtered spots
         on_close: Optional callback when window is closed
-    
+
     Returns:
         CWSpotsGraphWindow instance
     """

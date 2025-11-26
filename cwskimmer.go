@@ -316,11 +316,11 @@ func (c *CWSkimmerClient) login() error {
 
 // handleConnection reads and processes messages from the skimmer
 func (c *CWSkimmerClient) handleConnection() {
-	// Create a channel for read results
+	// Create a buffered channel for read results to prevent goroutine blocking
 	readChan := make(chan struct {
 		line string
 		err  error
-	})
+	}, 1)
 
 	// Start a goroutine to read lines
 	go func() {

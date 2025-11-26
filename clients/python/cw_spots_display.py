@@ -70,6 +70,9 @@ class CWSpotsDisplay:
         # Handle window close
         self.window.protocol("WM_DELETE_WINDOW", self._on_closing)
         
+        # Auto-open graph window
+        self.window.after(500, self.open_graph_window)
+        
     def _setup_ui(self):
         """Setup the user interface."""
         # Top frame for status and controls
@@ -510,6 +513,11 @@ class CWSpotsDisplay:
         
     def _on_closing(self):
         """Handle window close event."""
+        # Close graph window if open
+        if self.graph_window and self.graph_window.window.winfo_exists():
+            self.graph_window.window.destroy()
+            self.graph_window = None
+        
         # Remove callbacks
         self.websocket_manager.remove_cw_spot_callback(self._handle_spot)
         self.websocket_manager.remove_status_callback(self._handle_status)

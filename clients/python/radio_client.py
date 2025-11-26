@@ -437,7 +437,7 @@ class RadioClient:
             # -3dB = 10^(-3/20) = 0.7079 gain factor
             audio_float = audio_float * 0.7079
 
-        # Apply audio bandpass filter if enabled
+        # Apply audio bandpass filter if enabled (BEFORE sending to recording callback)
         if self.audio_filter_enabled and self.audio_filter_taps is not None:
             try:
                 # Apply FIR filter with state for continuous filtering
@@ -452,10 +452,10 @@ class RadioClient:
                 print(f"Warning: Audio filter error: {e}", file=sys.stderr)
                 self.audio_filter_enabled = False
 
-        # Send mono audio to recording callback BEFORE stereo conversion
-        # This captures the mono signal before it's duplicated to stereo
+        # Send mono audio to recording callback AFTER filtering but BEFORE stereo conversion
+        # This captures the filtered mono signal (if filter is enabled) before it's duplicated to stereo
         if self.recording_callback and self.channels == 1:
-            # audio_float is mono at this point
+            # audio_float is mono at this point, and filtered if audio_filter_enabled
             self.recording_callback(audio_float)
         
         # Calculate audio level before volume adjustment (for meter)

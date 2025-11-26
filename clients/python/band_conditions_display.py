@@ -81,7 +81,7 @@ class BandConditionsDisplay:
         # Create window
         self.window = tk.Toplevel(parent)
         self.window.title("Band Conditions")
-        self.window.geometry("1200x700")
+        self.window.geometry("1200x620")
         
         # Create UI
         self.create_widgets()
@@ -100,24 +100,19 @@ class BandConditionsDisplay:
         self.window.columnconfigure(0, weight=1)
         self.window.rowconfigure(0, weight=1)
         
-        # Title
-        title_label = ttk.Label(main_frame, text="🌐 Band Conditions", 
-                               font=('TkDefaultFont', 16, 'bold'))
-        title_label.grid(row=0, column=0, pady=(0, 5))
-        
         # Info box
         info_frame = ttk.Frame(main_frame, relief=tk.RIDGE, borderwidth=2)
-        info_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        info_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         
         info_label = ttk.Label(info_frame, 
-                              text="ℹThis chart shows a rolling 24-hour window. Data to the left of the \"Now\" marker is from today, data to the right is from yesterday.",
+                              text="This chart shows a rolling 24-hour window. Data to the left of the \"Now\" marker is from today, data to the right is from yesterday.",
                               wraplength=1100, padding="10")
         info_label.pack()
         
         # Real-Time Data section
         data_frame = ttk.LabelFrame(main_frame, text="📡 Real-Time Data from SDR", padding="10")
-        data_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        main_frame.rowconfigure(2, weight=1)
+        data_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        main_frame.rowconfigure(1, weight=1)
         
         # Loading message
         self.loading_label = ttk.Label(data_frame, text="⏳ Waiting for initial data from SDR... This may take a few minutes.",
@@ -167,7 +162,7 @@ class BandConditionsDisplay:
         
         # Status bar
         status_frame = ttk.Frame(main_frame)
-        status_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
         
         self.status_label = ttk.Label(status_frame, text="Loading...", foreground='blue')
         self.status_label.pack(side=tk.LEFT)

@@ -29,7 +29,7 @@ class DigitalSpotsDisplay:
         
         # Create window
         self.window = tk.Toplevel()
-        self.window.title("Digital Spots - ka9q_ubersdr")
+        self.window.title("Digital Spots")
         self.window.geometry("1400x700")
         
         # Data storage

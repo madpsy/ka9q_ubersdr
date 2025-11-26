@@ -158,7 +158,7 @@ class RadioGUI:
 
     def __init__(self, root: tk.Tk, initial_config: dict):
         self.root = root
-        self.root.title("ka9q_ubersdr Radio Client")
+        self.root.title("Radio Client")
         self.root.geometry("800x920")  # Increased height for mode buttons and band buttons
         self.root.resizable(True, True)
 
@@ -175,6 +175,10 @@ class RadioGUI:
         self.status_queue = queue.Queue()
         self.audio_level_queue = queue.Queue()
         self.pipewire_devices: List[Tuple[str, str]] = []
+        self.bypassed = False  # Track if connection is bypassed (allows higher IQ bandwidths)
+        self.max_session_time = 0  # Maximum session time in seconds (0 = unlimited)
+        self.connection_start_time = None  # Time when connection was established
+        self.session_timer_job = None  # Timer job for updating session countdown
 
         # Rigctl client
         self.rigctl: Optional[RigctlClient] = None
@@ -307,8 +311,14 @@ class RadioGUI:
         ttk.Label(conn_frame, text="Receiver:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
         self.receiver_name_var = tk.StringVar(value="")
         self.receiver_name_label = ttk.Label(conn_frame, textvariable=self.receiver_name_var, foreground='blue')
-        self.receiver_name_label.grid(row=1, column=1, columnspan=4, sticky=tk.W)
+        self.receiver_name_label.grid(row=1, column=1, columnspan=2, sticky=tk.W)
         self.receiver_name_label.grid_remove()  # Hide initially until connected
+
+        # Session timer label (same row as receiver, right side)
+        self.session_timer_var = tk.StringVar(value="")
+        self.session_timer_label = ttk.Label(conn_frame, textvariable=self.session_timer_var, foreground='blue', font=('TkDefaultFont', 9, 'bold'))
+        self.session_timer_label.grid(row=1, column=3, columnspan=2, sticky=tk.E)
+        self.session_timer_label.grid_remove()  # Hide initially until connected
 
         # Rigctl connection (third row, optional)
         ttk.Label(conn_frame, text="Rigctl:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5))
@@ -386,7 +396,7 @@ class RadioGUI:
         ttk.Button(freq_frame, text="▲", width=3, command=self.step_frequency_up).grid(row=0, column=6, sticky=tk.W, padx=1)
         ttk.Button(freq_frame, text="▼", width=3, command=self.step_frequency_down).grid(row=0, column=7, sticky=tk.W, padx=1)
 
-        # Quick frequency buttons - all amateur bands from 160m to 10m (2 rows)
+        # Quick frequency buttons - all amateur bands from 160m to 10m (single row)
         # Moved to second row
         quick_frame = ttk.Frame(freq_frame)
         quick_frame.grid(row=1, column=0, columnspan=8, sticky=tk.W, pady=(5, 0))
@@ -405,13 +415,11 @@ class RadioGUI:
             ("10m", 28074000)    # 10m band - USB
         ]
 
-        # Arrange in 2 rows of 5 buttons each
+        # Arrange in single row
         for i, (label, freq_hz) in enumerate(quick_freqs):
-            row = i // 5  # First 5 in row 0, next 5 in row 1
-            col = i % 5   # Column position within the row
             btn = ttk.Button(quick_frame, text=label, width=5,
                            command=lambda f=freq_hz: self.set_frequency_and_mode(f))
-            btn.grid(row=row, column=col, padx=1, pady=1)
+            btn.grid(row=0, column=i, padx=1, pady=1)
             # Store button reference for highlighting
             self.band_buttons[label] = btn
 
@@ -440,24 +448,37 @@ class RadioGUI:
         mode_buttons_frame.grid(row=0, column=0, columnspan=10, sticky=tk.W)
 
         # Define modes with their display names
-        modes = [
+        # First row: AM, SAM, USB, LSB, FM, NFM, CWU, CWL, IQ (9 buttons)
+        # Second row: IQ48, IQ96, IQ192, IQ384 (only shown if bypassed=true)
+        modes_row1 = [
             ('AM', 'AM'), ('SAM', 'SAM'), ('USB', 'USB'), ('LSB', 'LSB'),
             ('FM', 'FM'), ('NFM', 'NFM'), ('CWU', 'CWU'), ('CWL', 'CWL'),
-            ('IQ', 'IQ'), ('IQ48', 'IQ (48 kHz)'), ('IQ96', 'IQ (96 kHz)'),
+            ('IQ', 'IQ')
+        ]
+        modes_row2 = [
+            ('IQ48', 'IQ (48 kHz)'), ('IQ96', 'IQ (96 kHz)'),
             ('IQ192', 'IQ (192 kHz)'), ('IQ384', 'IQ (384 kHz)')
         ]
 
         self.mode_var = tk.StringVar(value=self.config.get('mode', 'USB').upper())
         self.mode_buttons = {}
+        self.mode_buttons_row2 = []  # Track second row buttons for show/hide
 
-        # Create mode buttons in rows (8 on first row, rest on second)
-        for i, (mode_value, mode_display) in enumerate(modes):
-            row = i // 8  # 8 buttons on first row
-            col = i % 8
+        # Create first row mode buttons
+        for i, (mode_value, mode_display) in enumerate(modes_row1):
             btn = ttk.Button(mode_buttons_frame, text=mode_display, width=10,
                            command=lambda m=mode_value: self.select_mode(m))
-            btn.grid(row=row, column=col, padx=1, pady=1)
+            btn.grid(row=0, column=i, padx=1, pady=1)
             self.mode_buttons[mode_value] = btn
+
+        # Create second row mode buttons (initially hidden)
+        for i, (mode_value, mode_display) in enumerate(modes_row2):
+            btn = ttk.Button(mode_buttons_frame, text=mode_display, width=10,
+                           command=lambda m=mode_value: self.select_mode(m))
+            btn.grid(row=1, column=i, padx=1, pady=1)
+            btn.grid_remove()  # Hide initially
+            self.mode_buttons[mode_value] = btn
+            self.mode_buttons_row2.append(btn)
 
         # Update initial button states
         self.update_mode_buttons()
@@ -2582,9 +2603,10 @@ class RadioGUI:
         self.apply_freq_btn.state(['disabled'])
         self.rec_btn.state(['disabled'])
 
-        # Hide receiver name
+        # Hide receiver name and session timer
         self.receiver_name_label.grid_remove()
         self.receiver_name_var.set("")
+        self.stop_session_timer()
 
         # Hide spots buttons
         if self.digital_spots_btn:
@@ -2671,7 +2693,7 @@ class RadioGUI:
                         if "✓" not in msg:  # Don't duplicate success message
                             self.log_status("✓ Successfully connected!")
 
-                        # Update receiver name and spots buttons based on server description
+                        # Update receiver name and session timer
                         if self.client and hasattr(self.client, 'server_description'):
                             desc = self.client.server_description
                             receiver_name = desc.get('receiver', {}).get('name', '')
@@ -2679,7 +2701,31 @@ class RadioGUI:
                                 self.receiver_name_var.set(receiver_name)
                                 self.receiver_name_label.grid()  # Show receiver name
 
-                            # Show spots buttons based on server capabilities
+                        # Check bypassed status and show/hide second row of mode buttons
+                        if self.client and hasattr(self.client, 'bypassed'):
+                            self.bypassed = self.client.bypassed
+                            if self.bypassed:
+                                # Show second row of IQ bandwidth buttons
+                                for btn in self.mode_buttons_row2:
+                                    btn.grid()
+                                self.log_status("High bandwidth IQ modes enabled (bypassed connection)")
+                            else:
+                                # Hide second row of IQ bandwidth buttons
+                                for btn in self.mode_buttons_row2:
+                                    btn.grid_remove()
+
+                        # Start session timer (always show, displays "Unlimited" if max_session_time=0)
+                        if self.client and hasattr(self.client, 'max_session_time'):
+                            self.max_session_time = self.client.max_session_time
+                            if hasattr(self.client, 'connection_start_time'):
+                                self.connection_start_time = self.client.connection_start_time
+                            self.log_status(f"DEBUG: max_session_time={self.max_session_time}, connection_start_time={self.connection_start_time}")
+                            self.start_session_timer()
+
+                        # Show spots buttons based on server capabilities
+                        if self.client and hasattr(self.client, 'server_description'):
+                            desc = self.client.server_description
+
                             # Pack them before the Scroll label by using pack with before parameter
                             # Find the Scroll label widget to insert before it
                             button_frame = self.digital_spots_btn.master if self.digital_spots_btn else (self.cw_spots_btn.master if self.cw_spots_btn else None)
@@ -3128,10 +3174,83 @@ class RadioGUI:
         # Schedule next poll (100ms)
         self.rigctl_poll_job = self.root.after(100, self.poll_rigctl_frequency)
 
+    def format_time(self, seconds: int) -> str:
+        """Format seconds as MM:SS."""
+        minutes = seconds // 60
+        secs = seconds % 60
+        return f"{minutes:02d}:{secs:02d}"
+
+    def start_session_timer(self):
+        """Start the session countdown timer."""
+        self.log_status(f"DEBUG: start_session_timer called - max_session_time={self.max_session_time}, connection_start_time={self.connection_start_time}")
+
+        # Always show the timer label when connected
+        self.session_timer_label.grid()
+
+        if self.max_session_time <= 0:
+            # No time limit - show "Unlimited" in blue
+            self.session_timer_var.set("Session: Unlimited")
+            self.session_timer_label.config(foreground='blue')
+            self.log_status("Session timer: Unlimited")
+        else:
+            # Has time limit - start countdown
+            self.log_status(f"Session timer: {self.max_session_time} seconds")
+            self.update_session_timer()
+
+    def update_session_timer(self):
+        """Update the session timer display."""
+        if not self.connected:
+            return
+
+        if self.max_session_time <= 0:
+            # No time limit - blue
+            self.session_timer_var.set("Session: Unlimited")
+            self.session_timer_label.config(foreground='blue')
+            return
+
+        if self.connection_start_time is None:
+            self.log_status("DEBUG: connection_start_time is None, cannot update timer")
+            return
+
+        # Calculate elapsed time
+        import time
+        elapsed = time.time() - self.connection_start_time
+        remaining = max(0, self.max_session_time - int(elapsed))
+
+        # Update display
+        self.session_timer_var.set(f"Session: {self.format_time(remaining)}")
+
+        # Change color based on remaining time
+        # Blue when > 5 minutes (300 seconds), red when ≤ 5 minutes
+        if remaining > 300:
+            self.session_timer_label.config(foreground='blue')
+        else:
+            self.session_timer_label.config(foreground='red')
+
+        # Schedule next update if still connected
+        if self.connected and remaining > 0:
+            self.session_timer_job = self.root.after(1000, self.update_session_timer)
+        elif remaining == 0:
+            self.session_timer_var.set("Session: 00:00")
+            self.session_timer_label.config(foreground='red')
+
+    def stop_session_timer(self):
+        """Stop the session countdown timer."""
+        if self.session_timer_job:
+            self.root.after_cancel(self.session_timer_job)
+            self.session_timer_job = None
+
+        # Hide the timer label
+        self.session_timer_label.grid_remove()
+        self.session_timer_var.set("")
+
     def on_closing(self):
         """Handle window close event."""
         if self.connected:
             self.disconnect()
+
+        # Stop session timer
+        self.stop_session_timer()
 
         # Disconnect rigctl if connected
         if self.rigctl_connected:

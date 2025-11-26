@@ -514,6 +514,9 @@ class MIDIController:
             "Step Size: 100 Hz",
             "Step Size: 1 kHz",
             "Step Size: 10 kHz",
+            "Spectrum: Zoom In",
+            "Spectrum: Zoom Out",
+            "Spectrum: Zoom Reset",
             "NR2: Toggle",
             "Audio Filter: Toggle",
             "Mute: Toggle",
@@ -768,6 +771,67 @@ class MIDIController:
                 if function_name in step_map:
                     gui.step_size_var.set(step_map[function_name])
                     gui.on_step_size_changed()
+
+            # Spectrum zoom controls (only work if spectrum/waterfall window is open)
+            elif function_name == "Spectrum: Zoom In" and value > 0:
+                # Check if waterfall window is open and has spectrum display
+                if hasattr(gui, 'waterfall_spectrum') and gui.waterfall_spectrum:
+                    try:
+                        gui.waterfall_spectrum.zoom_in()
+                    except AttributeError:
+                        pass
+                # Also zoom main spectrum if available
+                if gui.spectrum:
+                    try:
+                        gui.spectrum.zoom_in()
+                    except AttributeError:
+                        pass
+                # Also zoom waterfall display if available
+                if hasattr(gui, 'waterfall_waterfall') and gui.waterfall_waterfall:
+                    try:
+                        gui.waterfall_waterfall.zoom_in()
+                    except AttributeError:
+                        pass
+
+            elif function_name == "Spectrum: Zoom Out" and value > 0:
+                # Check if waterfall window is open and has spectrum display
+                if hasattr(gui, 'waterfall_spectrum') and gui.waterfall_spectrum:
+                    try:
+                        gui.waterfall_spectrum.zoom_out()
+                    except AttributeError:
+                        pass
+                # Also zoom main spectrum if available
+                if gui.spectrum:
+                    try:
+                        gui.spectrum.zoom_out()
+                    except AttributeError:
+                        pass
+                # Also zoom waterfall display if available
+                if hasattr(gui, 'waterfall_waterfall') and gui.waterfall_waterfall:
+                    try:
+                        gui.waterfall_waterfall.zoom_out()
+                    except AttributeError:
+                        pass
+
+            elif function_name == "Spectrum: Zoom Reset" and value > 0:
+                # Check if waterfall window is open and has spectrum display
+                if hasattr(gui, 'waterfall_spectrum') and gui.waterfall_spectrum:
+                    try:
+                        gui.waterfall_spectrum.reset_zoom()
+                    except AttributeError:
+                        pass
+                # Also reset main spectrum if available
+                if gui.spectrum:
+                    try:
+                        gui.spectrum.reset_zoom()
+                    except AttributeError:
+                        pass
+                # Also reset waterfall display if available
+                if hasattr(gui, 'waterfall_waterfall') and gui.waterfall_waterfall:
+                    try:
+                        gui.waterfall_waterfall.reset_zoom()
+                    except AttributeError:
+                        pass
 
             # Toggle controls (trigger on button press, value > 0)
             elif value > 0:

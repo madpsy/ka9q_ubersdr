@@ -935,6 +935,12 @@ class RadioGUI:
         if self.connected and self.client:
             self.client.bandwidth_low = low
             self.client.bandwidth_high = high
+
+            # Reset NR2 learning when bandwidth changes (noise profile will be different)
+            if self.client.nr2_enabled and self.client.nr2_processor:
+                self.client.nr2_processor.reset_learning()
+                self.log_status("NR2 relearning noise profile (bandwidth changed)")
+
             self.send_tune_message()
         self.bandwidth_update_job = None
 
@@ -1314,6 +1320,11 @@ class RadioGUI:
 
             self.client.frequency = freq_hz
 
+            # Reset NR2 learning when frequency changes (noise profile will be different)
+            if self.client.nr2_enabled and self.client.nr2_processor:
+                self.client.nr2_processor.reset_learning()
+                self.log_status("NR2 relearning noise profile (frequency changed)")
+
             # Auto-select appropriate mode based on frequency (LSB < 10 MHz, USB >= 10 MHz)
             # Only auto-switch for SSB modes (USB/LSB) and if mode is not locked
             if not self.mode_lock_var.get():
@@ -1520,6 +1531,11 @@ class RadioGUI:
         mode_display = self.mode_var.get()
         mode = self._parse_mode_name(mode_display)
         self.client.mode = mode
+
+        # Reset NR2 learning when mode changes (noise profile will be different)
+        if self.client.nr2_enabled and self.client.nr2_processor:
+            self.client.nr2_processor.reset_learning()
+            self.log_status("NR2 relearning noise profile (mode changed)")
 
         self.log_status(f"Switching to {mode.upper()} mode...")
         self.send_tune_message()

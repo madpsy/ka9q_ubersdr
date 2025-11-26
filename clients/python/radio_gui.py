@@ -1938,6 +1938,13 @@ class RadioGUI:
 
         self.log_status(f"Scroll mode: {mode}")
 
+    def unmute_audio(self):
+        """Unmute audio after main window opens."""
+        if self.client and hasattr(self.client, '_desired_volume'):
+            desired_volume = self.client._desired_volume
+            self.client.volume = desired_volume
+            self.log_status(f"Audio enabled (volume: {int(desired_volume * 100)}%)")
+
     def auto_open_waterfall(self):
         """Automatically open waterfall window on connection (no error dialogs)."""
         # Don't open multiple windows
@@ -2585,6 +2592,7 @@ class RadioGUI:
                 fifo_path = None
 
             # Create client (disable auto_reconnect for GUI - we'll handle retries)
+            # Start with audio muted (volume=0) - will be enabled after window opens
             self.client = RadioClient(
                 url=url,
                 host=host,
@@ -2596,7 +2604,7 @@ class RadioGUI:
                 output_mode='pipewire',
                 auto_reconnect=False,  # GUI handles connection attempts
                 status_callback=lambda msg_type, msg: self.status_queue.put((msg_type, msg)),
-                volume=volume,
+                volume=0,  # Start muted, will unmute after window opens
                 channel_left=channel_left,
                 channel_right=channel_right,
                 audio_level_callback=lambda level_db: self.audio_level_queue.put(level_db),
@@ -2604,6 +2612,9 @@ class RadioGUI:
                 ssl=self.tls_var.get(),  # Use TLS if checkbox is checked
                 fifo_path=fifo_path  # Pass FIFO path to client
             )
+
+            # Store the desired volume to restore after window opens
+            self.client._desired_volume = volume
 
             # Set connection timeout and retry parameters
             self.connection_attempts = 0
@@ -2842,6 +2853,15 @@ class RadioGUI:
                                         self.cw_spots_btn.pack(side=tk.LEFT, padx=(0, 5))
                                 elif self.cw_spots_btn:
                                     self.cw_spots_btn.pack_forget()
+
+                        # Auto-open waterfall window first (main display window)
+                        if WATERFALL_AVAILABLE:
+                            # Open waterfall immediately and unmute audio after it opens
+                            def open_waterfall_and_unmute():
+                                self.auto_open_waterfall()
+                                # Unmute audio after waterfall window opens (500ms delay)
+                                self.root.after(500, self.unmute_audio)
+                            self.root.after(100, open_waterfall_and_unmute)
 
                         # Auto-open audio spectrum window on successful connection
                         if AUDIO_SPECTRUM_AVAILABLE:

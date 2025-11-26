@@ -26,7 +26,7 @@ class WaterfallDisplay:
     its own WebSocket connection.
     """
     
-    def __init__(self, parent: tk.Widget, spectrum_display, width: int = 800, height: int = 400, spectrum_height: int = 200):
+    def __init__(self, parent: tk.Widget, spectrum_display, width: int = 800, height: int = 400, spectrum_height: int = 200, click_tune_var=None):
         """Initialize waterfall display widget.
         
         Args:
@@ -35,12 +35,14 @@ class WaterfallDisplay:
             width: Canvas width in pixels
             height: Canvas height in pixels (for waterfall only)
             spectrum_height: Height of spectrum display on top (unused, kept for compatibility)
+            click_tune_var: BooleanVar to control click-to-tune behavior
         """
         self.parent = parent
         self.width = width
         self.height = height
         self.spectrum_height = spectrum_height
         self.spectrum_display = spectrum_display
+        self.click_tune_var = click_tune_var
         
         # Share cursor tracking with spectrum display
         self.shared_cursor_x = -1
@@ -329,6 +331,10 @@ class WaterfallDisplay:
     
     def on_click(self, event):
         """Handle mouse click on waterfall."""
+        # Check if click-to-tune is enabled
+        if self.click_tune_var and not self.click_tune_var.get():
+            return
+        
         if not self.spectrum_display or self.spectrum_display.total_bandwidth == 0:
             return
         
@@ -615,6 +621,20 @@ def create_waterfall_window(parent_gui):
                        font=('monospace', 9))
     bw_label.place(relx=0.5, y=35, anchor=tk.CENTER)
     
+    # Click Tune checkbox (between title and peak freq, vertically centered)
+    click_tune_var = tk.BooleanVar(value=True)
+    
+    # Create custom style for checkbox with black background
+    style.configure('Black.TCheckbutton', background='#000000', foreground='white')
+    style.map('Black.TCheckbutton',
+              background=[('active', '#000000'), ('!active', '#000000')],
+              foreground=[('active', 'white'), ('!active', 'white')])
+    
+    click_tune_check = ttk.Checkbutton(info_frame, text="Click Tune",
+                                       variable=click_tune_var,
+                                       style='Black.TCheckbutton')
+    click_tune_check.place(relx=0.72, y=25, anchor=tk.CENTER)
+    
     # Peak frequency info (right side, top line)
     peak_freq_label = tk.Label(info_frame, text="",
                                bg='#000000', fg='yellow',
@@ -642,7 +662,7 @@ def create_waterfall_window(parent_gui):
     signal_meter_mode_label.bind('<Button-1>', toggle_signal_meter_mode)
     
     # Create NEW spectrum display in this window
-    spectrum = SpectrumDisplay(container, width=800, height=200)
+    spectrum = SpectrumDisplay(container, width=800, height=200, click_tune_var=click_tune_var)
     spectrum.set_frequency_callback(parent_gui.on_spectrum_frequency_click)
     spectrum.set_frequency_step_callback(parent_gui.on_spectrum_frequency_step)
     spectrum.set_step_size(parent_gui.get_step_size_hz())
@@ -685,7 +705,7 @@ def create_waterfall_window(parent_gui):
     window.after(200, connect_spectrum_delayed)
     
     # Create waterfall display below spectrum (shares spectrum's data)
-    waterfall = WaterfallDisplay(container, spectrum, width=800, height=400, spectrum_height=200)
+    waterfall = WaterfallDisplay(container, spectrum, width=800, height=400, spectrum_height=200, click_tune_var=click_tune_var)
     
     # Set scroll mode on waterfall too
     if hasattr(parent_gui, 'scroll_mode_var'):

@@ -20,17 +20,19 @@ from urllib.parse import urlencode
 class SpectrumDisplay:
     """Spectrum display widget showing RF spectrum as a line chart."""
     
-    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 200):
+    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 200, click_tune_var=None):
         """Initialize spectrum display widget.
         
         Args:
             parent: Parent tkinter widget
             width: Canvas width in pixels
             height: Canvas height in pixels
+            click_tune_var: BooleanVar to control click-to-tune behavior
         """
         self.parent = parent
         self.width = width
         self.height = height
+        self.click_tune_var = click_tune_var
         
         # Create canvas for spectrum display
         self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=1)
@@ -555,6 +557,10 @@ class SpectrumDisplay:
         Args:
             event: Mouse event
         """
+        # Check if click-to-tune is enabled
+        if self.click_tune_var and not self.click_tune_var.get():
+            return
+
         if self.total_bandwidth == 0:
             return
         

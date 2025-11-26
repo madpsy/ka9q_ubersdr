@@ -179,6 +179,7 @@ class RadioGUI:
         self.max_session_time = 0  # Maximum session time in seconds (0 = unlimited)
         self.connection_start_time = None  # Time when connection was established
         self.session_timer_job = None  # Timer job for updating session countdown
+        self.bandwidth_update_job = None  # Debounce timer for bandwidth updates
 
         # Rigctl client
         self.rigctl: Optional[RigctlClient] = None
@@ -873,11 +874,22 @@ class RadioGUI:
         if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
             self.waterfall_waterfall.update_bandwidth(low, high)
 
-        # Apply bandwidth dynamically if connected
+        # Apply bandwidth dynamically if connected (with debouncing)
+        if self.connected and self.client:
+            # Cancel any pending bandwidth update
+            if self.bandwidth_update_job:
+                self.root.after_cancel(self.bandwidth_update_job)
+
+            # Schedule new bandwidth update after 100ms
+            self.bandwidth_update_job = self.root.after(100, lambda: self._apply_bandwidth_update(low, high))
+
+    def _apply_bandwidth_update(self, low: int, high: int):
+        """Apply bandwidth update to server (called after debounce delay)."""
         if self.connected and self.client:
             self.client.bandwidth_low = low
             self.client.bandwidth_high = high
             self.send_tune_message()
+        self.bandwidth_update_job = None
 
     def set_bandwidth(self, low: int, high: int):
         """Set bandwidth from preset button."""
@@ -2401,11 +2413,6 @@ class RadioGUI:
 
     def update_preset_buttons(self):
         """Update bandwidth preset buttons based on current mode."""
-        # Clear existing preset buttons
-        for btn in self.preset_buttons:
-            btn.destroy()
-        self.preset_buttons.clear()
-
         mode_display = self.mode_var.get()
         mode = self._parse_mode_name(mode_display)
 
@@ -2456,12 +2463,19 @@ class RadioGUI:
         # Get presets for current mode (default to USB if unknown)
         presets = mode_presets.get(mode, mode_presets['usb'])
 
-        # Create new preset buttons
-        for i, (label, low, high) in enumerate(presets):
-            btn = ttk.Button(self.preset_frame, text=label, width=8,
-                           command=lambda l=low, h=high: self.set_bandwidth(l, h))
-            btn.grid(row=0, column=i+1, padx=2)
-            self.preset_buttons.append(btn)
+        # Create buttons on first call, otherwise just update their commands
+        if not self.preset_buttons:
+            # Create preset buttons for the first time
+            for i, (label, low, high) in enumerate(presets):
+                btn = ttk.Button(self.preset_frame, text=label, width=8,
+                               command=lambda l=low, h=high: self.set_bandwidth(l, h))
+                btn.grid(row=0, column=i+1, padx=2)
+                self.preset_buttons.append(btn)
+        else:
+            # Update existing button commands with new preset values
+            for i, (label, low, high) in enumerate(presets):
+                if i < len(self.preset_buttons):
+                    self.preset_buttons[i].config(command=lambda l=low, h=high: self.set_bandwidth(l, h))
 
     def send_tune_message(self):
         """Send tune message to change frequency/mode/bandwidth without reconnecting."""

@@ -74,6 +74,15 @@ class BandConditionsDisplay:
         self.latest_data: Dict[str, Dict] = {}
         self.band_states: Dict[str, str] = {}
         
+        # Chart state
+        self.chart_initialized = False
+        self.scatter_collection = None
+        self.now_line = None
+        self.now_text = None
+        
+        # Badge references
+        self.band_badges = {}
+        
         # Refresh control
         self.refresh_job = None
         self.running = True
@@ -104,7 +113,7 @@ class BandConditionsDisplay:
         info_frame = ttk.Frame(main_frame, relief=tk.RIDGE, borderwidth=2)
         info_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         
-        info_label = ttk.Label(info_frame, 
+        info_label = ttk.Label(info_frame,
                               text="This chart shows a rolling 24-hour window. Data to the left of the \"Now\" marker is from today, data to the right is from yesterday.",
                               wraplength=1100, padding="10")
         info_label.pack()
@@ -131,8 +140,11 @@ class BandConditionsDisplay:
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.chart_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
-        # Band status badges
+        # Band status badges frame
         self.badges_frame = ttk.Frame(data_frame)
+        
+        # Create badge container (will hold persistent badges)
+        self.badge_container = tk.Frame(self.badges_frame)
         
         # Legend
         legend_frame = ttk.Frame(data_frame)
@@ -172,10 +184,51 @@ class BandConditionsDisplay:
         
         main_frame.columnconfigure(0, weight=1)
     
-    def update_chart(self):
-        """Update the band state chart with current data."""
-        self.ax.clear()
+    def initialize_chart(self, bands_with_data):
+        """Initialize chart with static elements (called once)."""
+        if self.chart_initialized:
+            return
         
+        # Configure axes (static setup)
+        self.ax.set_yticks(range(len(bands_with_data)))
+        self.ax.set_yticklabels(bands_with_data)
+        self.ax.set_ylabel('Band', color='white', fontweight='bold')
+        self.ax.set_xlabel('Time (UTC)', color='white', fontweight='bold')
+        
+        # Set x-axis to show full 24-hour day
+        today = datetime.utcnow().date()
+        start_of_day = datetime.combine(today, datetime.min.time())
+        end_of_day = datetime.combine(today, datetime.max.time())
+        self.ax.set_xlim(start_of_day, end_of_day)
+        
+        # Format x-axis
+        self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        self.ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
+        self.fig.autofmt_xdate()
+        
+        # Style (static)
+        self.ax.tick_params(colors='white')
+        self.ax.spines['bottom'].set_color('white')
+        self.ax.spines['left'].set_color('white')
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        self.ax.grid(True, alpha=0.1, color='white')
+        
+        # Create "Now" line (will be updated, not recreated)
+        now = datetime.utcnow()
+        self.now_line = self.ax.axvline(now, color='white', linestyle='--', linewidth=2, alpha=0.8)
+        
+        # Create "Now" text label (will be updated, not recreated)
+        y_min, y_max = self.ax.get_ylim()
+        self.now_text = self.ax.text(now, y_max + 0.5, f'Now\n{now.strftime("%H:%M")} UTC',
+                    color='black', fontsize=9, fontweight='bold',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.9, edgecolor='none'),
+                    verticalalignment='bottom', horizontalalignment='center')
+        
+        self.chart_initialized = True
+    
+    def update_chart(self):
+        """Update the band state chart with current data (optimized for speed)."""
         if not self.trend_data:
             return
         
@@ -200,12 +253,11 @@ class BandConditionsDisplay:
                 snr = point['ft8_snr']
                 original_time = datetime.fromisoformat(point['timestamp'].replace('Z', '+00:00'))
                 
-                # Normalize timestamp to today's date (matching bandconditions.js lines 434-436)
-                # This creates a rolling 24-hour window where data from yesterday appears on the right
+                # Normalize timestamp to today's date
                 today = datetime.utcnow().date()
                 normalized_time = datetime.combine(today, original_time.time())
                 
-                # Determine state based on SNR (matching bandconditions.js lines 424-432)
+                # Determine state based on SNR
                 if snr < 6:
                     state = 0  # POOR
                 elif snr < 20:
@@ -223,107 +275,110 @@ class BandConditionsDisplay:
                 })
         
         if not all_points:
-            self.ax.text(0.5, 0.5, 'No FT8 data available', 
+            # Clear chart and show message
+            if self.scatter_collection:
+                self.scatter_collection.remove()
+                self.scatter_collection = None
+            self.ax.text(0.5, 0.5, 'No FT8 data available',
                         ha='center', va='center', transform=self.ax.transAxes,
                         color='white', fontsize=12)
-            self.canvas.draw()
+            self.canvas.draw_idle()
             return
         
-        # Plot points as larger rectangles (matching web version)
+        # Initialize chart on first data
+        if not self.chart_initialized:
+            self.initialize_chart(bands_with_data)
+        
+        # Prepare arrays for batch scatter plot (much faster than individual calls)
+        times = []
+        band_indices = []
+        colors = []
+        
         for point in all_points:
-            band_idx = bands_with_data.index(point['band'])
-            color = self.STATE_COLORS[point['state']]
-            # Use larger markers (s=200) to make them more visible like the web version
-            # matplotlib needs tuple format for rgba: (r, g, b, a) with values 0-1
-            self.ax.scatter(point['time'], band_idx, c=color, s=200, marker='s',
+            times.append(point['time'])
+            band_indices.append(bands_with_data.index(point['band']))
+            colors.append(self.STATE_COLORS[point['state']])
+        
+        # Update or create scatter collection
+        if self.scatter_collection:
+            # Update existing collection (fast)
+            offsets = np.column_stack([mdates.date2num(times), band_indices])
+            self.scatter_collection.set_offsets(offsets)
+            self.scatter_collection.set_facecolors(colors)
+        else:
+            # Create new collection (first time only)
+            self.scatter_collection = self.ax.scatter(times, band_indices, c=colors, s=200, marker='s',
                            edgecolors=(1, 1, 1, 0.3), linewidths=0.5, alpha=0.9)
         
-        # Add "Now" line with UTC time label (matching bandconditions.js lines 492-511)
+        # Update "Now" line position
         now = datetime.utcnow()
-        self.ax.axvline(now, color='white', linestyle='--', linewidth=2, alpha=0.8)
+        self.now_line.set_xdata([now, now])
         
-        # Add "Now" label above the chart (outside the data area)
-        # Get the y-axis limits to position the label
-        y_min, y_max = self.ax.get_ylim()
-        # Position label above the top of the chart using transform coordinates
-        self.ax.text(now, y_max + 0.5, f'Now\n{now.strftime("%H:%M")} UTC',
-                    color='black', fontsize=9, fontweight='bold',
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.9, edgecolor='none'),
-                    verticalalignment='bottom', horizontalalignment='center')
+        # Update "Now" text
+        self.now_text.set_position((now, self.ax.get_ylim()[1] + 0.5))
+        self.now_text.set_text(f'Now\n{now.strftime("%H:%M")} UTC')
         
-        # Configure axes
-        self.ax.set_yticks(range(len(bands_with_data)))
-        self.ax.set_yticklabels(bands_with_data)
-        self.ax.set_ylabel('Band', color='white', fontweight='bold')
-        self.ax.set_xlabel('Time (UTC)', color='white', fontweight='bold')
-        
-        # Set x-axis to show full 24-hour day (00:00 to 23:59 UTC today)
-        # This matches bandconditions.js lines 481-486
-        today = datetime.utcnow().date()
-        start_of_day = datetime.combine(today, datetime.min.time())
-        end_of_day = datetime.combine(today, datetime.max.time())
-        self.ax.set_xlim(start_of_day, end_of_day)
-        
-        # Format x-axis
-        self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        self.ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
-        self.fig.autofmt_xdate()
-        
-        # Style
-        self.ax.tick_params(colors='white')
-        self.ax.spines['bottom'].set_color('white')
-        self.ax.spines['left'].set_color('white')
-        self.ax.spines['top'].set_visible(False)
-        self.ax.spines['right'].set_visible(False)
-        self.ax.grid(True, alpha=0.1, color='white')
-        
-        self.canvas.draw()
+        # Fast redraw (only changed elements)
+        self.canvas.draw_idle()
     
-    def update_band_badges(self):
-        """Update band status badges display."""
-        # Clear existing badges
-        for widget in self.badges_frame.winfo_children():
-            widget.destroy()
+    def create_band_badges(self):
+        """Create persistent band badges (called once)."""
+        if self.band_badges:
+            return  # Already created
         
-        if not self.latest_data:
-            return
+        self.badge_container.pack(expand=True)
         
-        # Create a container frame to center the badges
-        container = tk.Frame(self.badges_frame)
-        container.pack(expand=True)
-        
-        # Create badges for each band with data
+        # Create badges for all bands
         for band in self.BAND_ORDER:
-            if band not in self.latest_data:
-                continue
-            
-            band_data = self.latest_data[band]
-            if not band_data.get('ft8_snr'):
-                continue
-            
-            snr = band_data['ft8_snr']
-            status = self.band_states.get(band, 'UNKNOWN')
-            color = self.BADGE_COLORS[status]
-            
-            # Create badge in the container (which will be centered)
-            badge = tk.Label(container, text=band, bg=color, fg='white',
+            badge = tk.Label(self.badge_container, text=band, bg=self.BADGE_COLORS['UNKNOWN'], fg='white',
                            font=('TkDefaultFont', 10, 'bold'), padx=16, pady=8,
                            relief=tk.RAISED, borderwidth=2)
             badge.pack(side=tk.LEFT, padx=5)
+            self.band_badges[band] = badge
             
-            # Add tooltip
-            badge.bind('<Enter>', lambda e, b=band, s=status, sn=snr:
-                      self.show_tooltip(e, f"{b}: {s} ({sn:.1f} dB)"))
+            # Add tooltip bindings
+            badge.bind('<Enter>', lambda e, b=band: self.show_badge_tooltip(e, b))
             badge.bind('<Leave>', lambda e: self.hide_tooltip())
+    
+    def update_band_badges(self):
+        """Update band status badges (only colors, not recreation)."""
+        if not self.latest_data:
+            return
+        
+        # Create badges on first update
+        if not self.band_badges:
+            self.create_band_badges()
+        
+        # Update badge colors and visibility
+        for band in self.BAND_ORDER:
+            badge = self.band_badges[band]
+            
+            if band not in self.latest_data or not self.latest_data[band].get('ft8_snr'):
+                # Hide badge if no data
+                badge.pack_forget()
+                continue
+            
+            # Show badge and update color
+            if not badge.winfo_ismapped():
+                badge.pack(side=tk.LEFT, padx=5)
+            
+            status = self.band_states.get(band, 'UNKNOWN')
+            color = self.BADGE_COLORS[status]
+            badge.config(bg=color)
+    
+    def show_badge_tooltip(self, event, band):
+        """Show tooltip for badge on hover."""
+        if band in self.latest_data and self.latest_data[band].get('ft8_snr'):
+            snr = self.latest_data[band]['ft8_snr']
+            status = self.band_states.get(band, 'UNKNOWN')
+            self.status_label.config(text=f"{band}: {status} ({snr:.1f} dB)", foreground='blue')
     
     def show_tooltip(self, event, text):
         """Show tooltip on hover."""
-        # Simple status bar tooltip
         self.status_label.config(text=text, foreground='blue')
     
     def hide_tooltip(self):
         """Hide tooltip."""
-        # Restore status
         if self.latest_data:
             self.status_label.config(text="✓ Data loaded successfully", foreground='green')
     
@@ -381,7 +436,7 @@ class BandConditionsDisplay:
     
     def update_display_no_data(self):
         """Update display when no data is available."""
-        self.status_label.config(text="No data available yet. Waiting for measurements...", 
+        self.status_label.config(text="No data available yet. Waiting for measurements...",
                                 foreground='orange')
         self.loading_label.pack(pady=20)
         self.chart_frame.pack_forget()
@@ -420,7 +475,7 @@ class BandConditionsDisplay:
         self.chart_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         self.badges_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Update chart and badges
+        # Update chart and badges (optimized - no recreation)
         self.update_chart()
         self.update_band_badges()
         

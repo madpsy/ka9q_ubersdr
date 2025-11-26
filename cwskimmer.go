@@ -44,6 +44,7 @@ type CWSkimmerClient struct {
 	keepaliveTimer    *time.Timer
 	inactivityTimer   *time.Timer
 	lastActivityTime  time.Time
+	lastPingTime      time.Time
 	spotHandlers      []func(CWSkimmerSpot)
 	messageHandlers   []func(string)
 	spotsLogger       *CWSkimmerSpotsLogger
@@ -375,6 +376,19 @@ func (c *CWSkimmerClient) writeLine(line string) error {
 
 // processLine processes a line from the skimmer
 func (c *CWSkimmerClient) processLine(line string) {
+	// Check for ping response
+	if strings.Contains(line, "Unknown command") && strings.Contains(line, "PING") {
+		c.mu.RLock()
+		pingTime := c.lastPingTime
+		c.mu.RUnlock()
+
+		if !pingTime.IsZero() {
+			responseTime := time.Since(pingTime)
+			log.Printf("CW Skimmer: Ping response received in %v", responseTime)
+		}
+		return
+	}
+
 	// Skip empty lines
 	if line == "" {
 		return
@@ -549,7 +563,7 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 	}
 }
 
-// startKeepalive starts the keepalive timer
+// startKeepalive starts the keepalive timer (sends ping every 60 seconds)
 func (c *CWSkimmerClient) startKeepalive() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -558,29 +572,41 @@ func (c *CWSkimmerClient) startKeepalive() {
 		c.keepaliveTimer.Stop()
 	}
 
-	c.keepaliveTimer = time.AfterFunc(time.Duration(c.config.KeepAliveDelay)*time.Second, func() {
+	// Send ping every 60 seconds instead of using config value
+	c.keepaliveTimer = time.AfterFunc(60*time.Second, func() {
 		c.sendKeepalive()
 	})
 }
 
-// sendKeepalive sends a keepalive message
+// sendKeepalive sends a ping command and expects "Unknown command" response
 func (c *CWSkimmerClient) sendKeepalive() {
 	if !c.IsConnected() {
 		return
 	}
 
-	// Send empty line as keepalive
-	if err := c.writeLine(""); err != nil {
-		log.Printf("CW Skimmer: Keepalive failed: %v", err)
+	// Record ping time
+	c.mu.Lock()
+	c.lastPingTime = time.Now()
+	c.mu.Unlock()
+
+	log.Println("CW Skimmer: Sending ping")
+
+	// Send "ping" command - server will respond with "Unknown command: "PING""
+	if err := c.writeLine("ping"); err != nil {
+		log.Printf("CW Skimmer: Keepalive write failed: %v", err)
 		c.disconnect()
 		return
 	}
+
+	// Note: We don't wait for response here - the response will be received
+	// by handleConnection and will reset the inactivity timer
 
 	// Schedule next keepalive
 	c.startKeepalive()
 }
 
 // startInactivityMonitor starts the inactivity monitoring timer
+// Expects response to ping within 2 seconds (ping sent every 60s)
 func (c *CWSkimmerClient) startInactivityMonitor() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -589,8 +615,8 @@ func (c *CWSkimmerClient) startInactivityMonitor() {
 		c.inactivityTimer.Stop()
 	}
 
-	// Set 5 minute inactivity timeout
-	c.inactivityTimer = time.AfterFunc(5*time.Minute, func() {
+	// Set 2 second inactivity timeout (should get ping response within 1s)
+	c.inactivityTimer = time.AfterFunc(2*time.Second, func() {
 		c.checkInactivity()
 	})
 }
@@ -604,8 +630,8 @@ func (c *CWSkimmerClient) resetInactivityTimer() {
 		c.inactivityTimer.Stop()
 	}
 
-	// Reset 5 minute inactivity timeout
-	c.inactivityTimer = time.AfterFunc(5*time.Minute, func() {
+	// Reset 2 second inactivity timeout
+	c.inactivityTimer = time.AfterFunc(2*time.Second, func() {
 		c.checkInactivity()
 	})
 }
@@ -621,9 +647,9 @@ func (c *CWSkimmerClient) checkInactivity() {
 		return
 	}
 
-	// Check if we've been inactive for more than 5 minutes
+	// Check if we've been inactive for more than 2 seconds
 	inactiveDuration := time.Since(lastActivity)
-	if inactiveDuration >= 5*time.Minute {
+	if inactiveDuration >= 2*time.Second {
 		log.Printf("CW Skimmer: No activity for %v, reconnecting", inactiveDuration)
 		// Use disconnect() to properly clean up timers and close connection
 		// This will cause the read in handleConnection to fail and exit

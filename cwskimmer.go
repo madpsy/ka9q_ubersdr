@@ -385,15 +385,18 @@ func (c *CWSkimmerClient) processLine(line string) {
 		c.mu.Lock()
 		pingTime := c.lastPingTime
 		c.lastActivityTime = time.Now()
+		// Stop the inactivity timer - we got a response, connection is alive
+		// Timer will restart when next ping is sent
+		if c.inactivityTimer != nil {
+			c.inactivityTimer.Stop()
+			c.inactivityTimer = nil
+		}
 		c.mu.Unlock()
 
 		if !pingTime.IsZero() {
 			responseTime := time.Since(pingTime)
 			log.Printf("CW Skimmer: Ping response received in %v", responseTime)
 		}
-
-		// Reset inactivity timer since we got a response
-		c.resetInactivityTimer()
 		return
 	}
 

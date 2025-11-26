@@ -295,6 +295,7 @@ class RadioGUI:
         self.server_var = tk.StringVar(value=self.config.get('url') or f"{self.config.get('host', 'localhost')}:{self.config.get('port', 8080)}")
         server_entry = ttk.Entry(conn_frame, textvariable=self.server_var, width=40)
         server_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        server_entry.bind('<Return>', lambda e: self.toggle_connection())
 
         # TLS checkbox - default from config or False
         self.tls_var = tk.BooleanVar(value=self.config.get('ssl', False))
@@ -332,11 +333,13 @@ class RadioGUI:
         self.rigctl_host_var = tk.StringVar(value=self.config.get('rigctl_host', 'localhost'))
         rigctl_host_entry = ttk.Entry(rigctl_controls, textvariable=self.rigctl_host_var, width=15)
         rigctl_host_entry.pack(side=tk.LEFT, padx=(0, 5))
+        rigctl_host_entry.bind('<Return>', lambda e: self.toggle_rigctl_connection())
 
         ttk.Label(rigctl_controls, text="Port:").pack(side=tk.LEFT, padx=(0, 5))
         self.rigctl_port_var = tk.StringVar(value=str(self.config.get('rigctl_port', 4532)))
         rigctl_port_entry = ttk.Entry(rigctl_controls, textvariable=self.rigctl_port_var, width=6)
         rigctl_port_entry.pack(side=tk.LEFT, padx=(0, 5))
+        rigctl_port_entry.bind('<Return>', lambda e: self.toggle_rigctl_connection())
 
         self.rigctl_connect_btn = ttk.Button(rigctl_controls, text="Connect Rig", command=self.toggle_rigctl_connection)
         self.rigctl_connect_btn.pack(side=tk.LEFT, padx=(0, 5))
@@ -373,12 +376,15 @@ class RadioGUI:
         self.freq_var = tk.StringVar(value=f"{initial_freq_mhz:.6f}")
         freq_entry = ttk.Entry(freq_frame, textvariable=self.freq_var, width=12)
         freq_entry.grid(row=0, column=1, sticky=tk.W, padx=(0, 5))
+        freq_entry.bind('<Return>', lambda e: self.apply_frequency())
 
         # Unit selector (Hz, kHz, MHz)
         self.freq_unit_var = tk.StringVar(value="MHz")
+        self.prev_freq_unit = "MHz"  # Track previous unit for conversion
         unit_combo = ttk.Combobox(freq_frame, textvariable=self.freq_unit_var,
                                   values=["Hz", "kHz", "MHz"], state='readonly', width=6)
         unit_combo.grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        unit_combo.bind('<<ComboboxSelected>>', lambda e: self.on_freq_unit_changed())
 
         # Apply button (moved to top row)
         self.apply_freq_btn = ttk.Button(freq_frame, text="Apply", command=self.apply_frequency)
@@ -736,7 +742,7 @@ class RadioGUI:
                 self.space_weather_btn = None
 
             # Scroll mode selector removed from here - now in waterfall window title section
-            self.scroll_mode_var = tk.StringVar(value="zoom")
+            self.scroll_mode_var = tk.StringVar(value="pan")
 
             controls_frame.columnconfigure(0, weight=1)
 
@@ -839,6 +845,38 @@ class RadioGUI:
                 return int(freq_value)
         except ValueError:
             raise ValueError("Invalid frequency value")
+
+    def on_freq_unit_changed(self):
+        """Handle frequency unit change - convert current value to new unit."""
+        try:
+            # Get current value and convert from previous unit to Hz
+            freq_value = float(self.freq_var.get())
+            old_unit = self.prev_freq_unit
+
+            # Convert from old unit to Hz
+            if old_unit == "MHz":
+                freq_hz = int(freq_value * 1e6)
+            elif old_unit == "kHz":
+                freq_hz = int(freq_value * 1e3)
+            else:  # Hz
+                freq_hz = int(freq_value)
+
+            # Convert from Hz to new unit
+            new_unit = self.freq_unit_var.get()
+            if new_unit == "MHz":
+                new_value = freq_hz / 1e6
+                self.freq_var.set(f"{new_value:.6f}")
+            elif new_unit == "kHz":
+                new_value = freq_hz / 1e3
+                self.freq_var.set(f"{new_value:.3f}")
+            else:  # Hz
+                self.freq_var.set(str(freq_hz))
+
+            # Update previous unit for next conversion
+            self.prev_freq_unit = new_unit
+        except ValueError:
+            # If conversion fails, just update the previous unit
+            self.prev_freq_unit = self.freq_unit_var.get()
 
     def update_bandwidth_display(self, value=None):
         """Update bandwidth labels when sliders change."""
@@ -1249,6 +1287,15 @@ class RadioGUI:
 
         try:
             freq_hz = self.get_frequency_hz()
+
+            # Validate frequency range: 100 kHz to 30 MHz
+            if freq_hz < 100000:  # 100 kHz
+                messagebox.showerror("Invalid Frequency", "Frequency must be at least 100 kHz")
+                return
+            if freq_hz > 30000000:  # 30 MHz
+                messagebox.showerror("Invalid Frequency", "Frequency must not exceed 30 MHz")
+                return
+
             self.client.frequency = freq_hz
 
             # Auto-select appropriate mode based on frequency (LSB < 10 MHz, USB >= 10 MHz)

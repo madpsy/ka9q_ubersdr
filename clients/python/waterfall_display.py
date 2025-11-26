@@ -582,7 +582,7 @@ def create_waterfall_window(parent_gui):
     # Scroll mode selector (between signal meter and title) - stacked vertically
     # Create frame for radio buttons to stack them vertically
     scroll_frame = tk.Frame(info_frame, bg='#000000')
-    scroll_frame.place(x=120, y=25, anchor=tk.W)
+    scroll_frame.place(x=150, y=25, anchor=tk.W)
 
     from tkinter import ttk
     # Create custom style for radio buttons with black background

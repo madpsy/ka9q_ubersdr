@@ -333,8 +333,15 @@ class AudioSpectrumDisplay:
                 high_bin = int((bandwidth_span / nyquist) * len(recent_data[0]))
             else:
                 # Asymmetric mode: use absolute values
-                low_bin = int((abs_low / nyquist) * len(recent_data[0]))
-                high_bin = int((abs_high / nyquist) * len(recent_data[0]))
+                # For LSB/CWL (both negative), swap the values since -2700 to -50 means audio 50 to 2700
+                if self.bandwidth_low < 0 and self.bandwidth_high < 0:
+                    # LSB mode: swap abs values
+                    low_bin = int((abs_high / nyquist) * len(recent_data[0]))
+                    high_bin = int((abs_low / nyquist) * len(recent_data[0]))
+                else:
+                    # USB mode: use normal order
+                    low_bin = int((abs_low / nyquist) * len(recent_data[0]))
+                    high_bin = int((abs_high / nyquist) * len(recent_data[0]))
 
             # Ensure valid range
             low_bin = max(0, min(low_bin, len(recent_data[0]) - 1))
@@ -830,8 +837,15 @@ class AudioSpectrumDisplay:
             high_bin = int((bandwidth_span / nyquist) * len(self.spectrum_data))
         else:
             # Asymmetric mode: use absolute values
-            low_bin = int((abs_low / nyquist) * len(self.spectrum_data))
-            high_bin = int((abs_high / nyquist) * len(self.spectrum_data))
+            # For LSB/CWL (both negative), swap the values since -2700 to -50 means audio 50 to 2700
+            if self.bandwidth_low < 0 and self.bandwidth_high < 0:
+                # LSB mode: swap abs values
+                low_bin = int((abs_high / nyquist) * len(self.spectrum_data))
+                high_bin = int((abs_low / nyquist) * len(self.spectrum_data))
+            else:
+                # USB mode: use normal order
+                low_bin = int((abs_low / nyquist) * len(self.spectrum_data))
+                high_bin = int((abs_high / nyquist) * len(self.spectrum_data))
 
         # Ensure valid range
         low_bin = max(0, min(low_bin, len(self.spectrum_data) - 1))

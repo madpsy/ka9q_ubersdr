@@ -2215,7 +2215,7 @@ class RadioGUI:
             self.log_status(f"ERROR: Failed to open audio spectrum - {e}")
 
     def _ensure_dxcluster_ws(self):
-        """Ensure shared DX cluster WebSocket is connected."""
+        """Ensure shared DX cluster WebSocket manager exists (connection is automatic)."""
         if not self.dxcluster_ws and DXCLUSTER_WS_AVAILABLE:
             # Create shared WebSocket manager
             server = self.server_var.get()
@@ -2238,8 +2238,8 @@ class RadioGUI:
             if self.client and hasattr(self.client, 'user_session_id'):
                 user_session_id = self.client.user_session_id
                 self.dxcluster_ws = DXClusterWebSocket(ws_url, user_session_id)
-                self.dxcluster_ws.connect()
-                self.log_status("DX cluster WebSocket connected")
+                # Note: Connection happens automatically when first callback is registered
+                self.log_status("DX cluster WebSocket manager created")
             else:
                 raise Exception("No active radio session")
 
@@ -2818,11 +2818,14 @@ class RadioGUI:
             self.space_weather_display = None
             self.log_status("Space weather window closed")
 
-        # Disconnect shared DX cluster WebSocket
+        # Clean up shared DX cluster WebSocket manager
+        # Note: Actual disconnection happens automatically when last callback is removed
         if self.dxcluster_ws:
-            self.dxcluster_ws.disconnect()
+            # Force disconnect in case there are lingering connections
+            if self.dxcluster_ws.running:
+                self.dxcluster_ws.disconnect()
             self.dxcluster_ws = None
-            self.log_status("DX cluster WebSocket disconnected")
+            self.log_status("DX cluster WebSocket manager cleaned up")
 
         # Disconnect main spectrum display (in main window)
         if self.spectrum:
@@ -3517,9 +3520,11 @@ class RadioGUI:
         if self.space_weather_window and self.space_weather_window.winfo_exists():
             self.space_weather_window.destroy()
 
-        # Disconnect shared DX cluster WebSocket
+        # Clean up shared DX cluster WebSocket manager
         if self.dxcluster_ws:
-            self.dxcluster_ws.disconnect()
+            # Force disconnect in case there are lingering connections
+            if self.dxcluster_ws.running:
+                self.dxcluster_ws.disconnect()
             self.dxcluster_ws = None
 
         # Stop recording if active

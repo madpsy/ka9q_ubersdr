@@ -150,22 +150,44 @@ class DXClusterWebSocket:
     def on_cw_spot(self, callback: Callable[[Dict[str, Any]], None]):
         """
         Register a callback for CW spots.
-        
+        Auto-connects the websocket if this is the first callback.
+
         Args:
             callback: Function to call when a CW spot is received
         """
         with self.callback_lock:
+            # Check if this is the first callback (before adding)
+            was_empty = len(self.cw_spot_callbacks) == 0 and len(self.digital_spot_callbacks) == 0
             self.cw_spot_callbacks.append(callback)
-            
+            # Check if we now have callbacks (after adding)
+            has_callbacks = len(self.cw_spot_callbacks) > 0 or len(self.digital_spot_callbacks) > 0
+            should_connect = was_empty and has_callbacks
+
+        # Connect outside the lock to avoid deadlock
+        if should_connect:
+            print("DX Cluster WebSocket: First callback registered, connecting...")
+            self.connect()
+
     def on_digital_spot(self, callback: Callable[[Dict[str, Any]], None]):
         """
         Register a callback for digital spots.
-        
+        Auto-connects the websocket if this is the first callback.
+
         Args:
             callback: Function to call when a digital spot is received
         """
         with self.callback_lock:
+            # Check if this is the first callback (before adding)
+            was_empty = len(self.cw_spot_callbacks) == 0 and len(self.digital_spot_callbacks) == 0
             self.digital_spot_callbacks.append(callback)
+            # Check if we now have callbacks (after adding)
+            has_callbacks = len(self.cw_spot_callbacks) > 0 or len(self.digital_spot_callbacks) > 0
+            should_connect = was_empty and has_callbacks
+
+        # Connect outside the lock to avoid deadlock
+        if should_connect:
+            print("DX Cluster WebSocket: First callback registered, connecting...")
+            self.connect()
             
     def on_status(self, callback: Callable[[bool], None]):
         """
@@ -183,16 +205,36 @@ class DXClusterWebSocket:
                 print(f"Error notifying new status callback: {e}")
             
     def remove_cw_spot_callback(self, callback: Callable[[Dict[str, Any]], None]):
-        """Remove a CW spot callback."""
+        """
+        Remove a CW spot callback.
+        Auto-disconnects the websocket if this was the last callback.
+        """
         with self.callback_lock:
             if callback in self.cw_spot_callbacks:
                 self.cw_spot_callbacks.remove(callback)
-                
+            # Check if we have any callbacks remaining (after removal)
+            should_disconnect = len(self.cw_spot_callbacks) == 0 and len(self.digital_spot_callbacks) == 0
+
+        # Disconnect outside the lock to avoid deadlock
+        if should_disconnect:
+            print("DX Cluster WebSocket: No callbacks remaining, disconnecting...")
+            self.disconnect()
+
     def remove_digital_spot_callback(self, callback: Callable[[Dict[str, Any]], None]):
-        """Remove a digital spot callback."""
+        """
+        Remove a digital spot callback.
+        Auto-disconnects the websocket if this was the last callback.
+        """
         with self.callback_lock:
             if callback in self.digital_spot_callbacks:
                 self.digital_spot_callbacks.remove(callback)
+            # Check if we have any callbacks remaining (after removal)
+            should_disconnect = len(self.cw_spot_callbacks) == 0 and len(self.digital_spot_callbacks) == 0
+
+        # Disconnect outside the lock to avoid deadlock
+        if should_disconnect:
+            print("DX Cluster WebSocket: No callbacks remaining, disconnecting...")
+            self.disconnect()
                 
     def remove_status_callback(self, callback: Callable[[bool], None]):
         """Remove a status callback."""

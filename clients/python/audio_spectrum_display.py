@@ -564,9 +564,8 @@ class AudioSpectrumDisplay:
         # Draw bandwidth markers (demodulator bandwidth - yellow dashed)
         self._draw_bandwidth_markers(scale_y)
         
-        # Draw audio filter markers (if enabled - red solid)
-        if self.audio_filter_enabled:
-            self._draw_audio_filter_markers(scale_y)
+        # Draw audio filter markers (red solid lines - only when enabled)
+        self._draw_audio_filter_markers(scale_y)
     
     def _draw_bandwidth_markers(self, scale_y: int):
         """Draw vertical lines showing the actual bandwidth edges."""

@@ -887,6 +887,22 @@ class RadioGUI:
         self.bw_low_label.config(text=f"{low} Hz")
         self.bw_high_label.config(text=f"{high} Hz")
 
+        # Disable audio filter when bandwidth changes (silently, without validation)
+        if self.audio_filter_enabled_var.get():
+            self.audio_filter_enabled_var.set(False)
+            # Disable directly in client without calling toggle_audio_filter
+            if self.client:
+                self.client.audio_filter_enabled = False
+            # Update audio spectrum display
+            if self.audio_spectrum_display:
+                self.audio_spectrum_display.update_audio_filter(False,
+                    int(self.audio_filter_low_var.get()),
+                    int(self.audio_filter_high_var.get()))
+            self.log_status("Audio filter disabled (bandwidth changed)")
+
+        # Update audio filter ranges when bandwidth changes
+        self.update_audio_filter_ranges()
+
         # Update spectrum display bandwidth visualization
         if self.spectrum:
             self.spectrum.update_bandwidth(low, high)
@@ -1728,9 +1744,19 @@ class RadioGUI:
                 range_max = int(audio_high * (1 + margin))
             else:
                 # Non-CW modes: use absolute bandwidth values
+                # For LSB/CWL modes, bandwidth is negative (e.g., -2700 to -50)
+                # but audio filter works with positive frequencies (50 to 2700)
                 margin = 0.1
-                range_min = max(0, int(abs_low * (1 - margin)))
-                range_max = int(abs_high * (1 + margin))
+
+                # Check if both values are negative (LSB or CWL mode)
+                if low < 0 and high < 0:
+                    # Swap abs values since bandwidth is backwards for LSB/CWL
+                    range_min = max(0, int(abs_high * (1 - margin)))
+                    range_max = int(abs_low * (1 + margin))
+                else:
+                    # USB and other modes - use normal order
+                    range_min = max(0, int(abs_low * (1 - margin)))
+                    range_max = int(abs_high * (1 + margin))
 
             # Update both slider ranges to the same full range
             self.filter_low_scale.config(from_=range_min, to=range_max)
@@ -1809,13 +1835,26 @@ class RadioGUI:
                     # Non-CW modes: use absolute bandwidth values
                     # Use 80% of the bandwidth range
                     margin = 0.1
-                    default_low = int(abs_low * (1 + margin))
-                    default_high = int(abs_high * (1 - margin))
+
+                    # Check if both values are negative (LSB or CWL mode)
+                    if bw_low < 0 and bw_high < 0:
+                        # LSB/CWL: bandwidth is backwards (e.g., -2700 to -50)
+                        # Audio filter needs normal order (50 to 2700)
+                        default_low = int(abs_high * (1 + margin))
+                        default_high = int(abs_low * (1 - margin))
+                    else:
+                        # USB and other modes - use normal order
+                        default_low = int(abs_low * (1 + margin))
+                        default_high = int(abs_high * (1 - margin))
 
                     # Ensure low < high
                     if default_low >= default_high:
-                        default_low = int(abs_low)
-                        default_high = int(abs_high)
+                        if bw_low < 0 and bw_high < 0:
+                            default_low = int(abs_high)
+                            default_high = int(abs_low)
+                        else:
+                            default_low = int(abs_low)
+                            default_high = int(abs_high)
 
                 # Update slider values to reasonable defaults
                 self.audio_filter_low_var.set(default_low)
@@ -1824,8 +1863,9 @@ class RadioGUI:
                 # Update display
                 self.update_audio_filter_display()
 
-                low = float(self.audio_filter_low_var.get())
-                high = float(self.audio_filter_high_var.get())
+                # Use the default values we just calculated (not read from sliders)
+                low = float(default_low)
+                high = float(default_high)
 
                 # Validate parameters only when enabling
                 if low <= 0 or high <= 0:
@@ -1855,6 +1895,9 @@ class RadioGUI:
 
             # Update audio spectrum display
             if self.audio_spectrum_display:
+                # Get current filter values for display update
+                low = int(self.audio_filter_low_var.get())
+                high = int(self.audio_filter_high_var.get())
                 self.audio_spectrum_display.update_audio_filter(enabled, low, high)
 
         except ValueError:

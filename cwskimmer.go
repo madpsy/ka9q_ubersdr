@@ -306,11 +306,11 @@ func (c *CWSkimmerClient) login() error {
 	c.lastActivityTime = time.Now()
 	c.mu.Unlock()
 
-	// Start keepalive timer
+	// Start keepalive timer (will send first ping in 60 seconds)
 	c.startKeepalive()
 
-	// Start inactivity monitor
-	c.startInactivityMonitor()
+	// Don't start inactivity monitor yet - it will be started after first ping is sent
+	// This prevents false timeout during initial connection when no data is expected
 
 	return nil
 }
@@ -598,8 +598,14 @@ func (c *CWSkimmerClient) sendKeepalive() {
 		return
 	}
 
-	// Note: We don't wait for response here - the response will be received
-	// by handleConnection and will reset the inactivity timer
+	// Start inactivity monitor after first ping (expects response within 2 seconds)
+	c.mu.RLock()
+	hasInactivityTimer := c.inactivityTimer != nil
+	c.mu.RUnlock()
+
+	if !hasInactivityTimer {
+		c.startInactivityMonitor()
+	}
 
 	// Schedule next keepalive
 	c.startKeepalive()

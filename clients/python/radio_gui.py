@@ -2733,15 +2733,64 @@ class RadioGUI:
         # Stop band state polling
         self.stop_band_state_polling()
 
-        # Disconnect spectrum display
+        # Close waterfall window (which will disconnect its spectrum and waterfall)
+        if self.waterfall_window and self.waterfall_window.winfo_exists():
+            self.waterfall_window.destroy()
+            self.waterfall_window = None
+            self.waterfall_display = None
+            self.log_status("Waterfall window closed")
+
+        # Close audio spectrum window
+        if self.audio_spectrum_window and self.audio_spectrum_window.winfo_exists():
+            self.audio_spectrum_window.destroy()
+            self.audio_spectrum_window = None
+            self.audio_spectrum_display = None
+            self.log_status("Audio spectrum window closed")
+
+        # Close digital spots window
+        if self.digital_spots_window and self.digital_spots_window.winfo_exists():
+            self.digital_spots_window.destroy()
+            self.digital_spots_window = None
+            self.digital_spots_display = None
+            self.log_status("Digital spots window closed")
+
+        # Close CW spots window
+        if self.cw_spots_window and self.cw_spots_window.winfo_exists():
+            self.cw_spots_window.destroy()
+            self.cw_spots_window = None
+            self.cw_spots_display = None
+            self.log_status("CW spots window closed")
+
+        # Close band conditions window
+        if self.band_conditions_window and self.band_conditions_window.winfo_exists():
+            self.band_conditions_window.destroy()
+            self.band_conditions_window = None
+            self.band_conditions_display = None
+            self.log_status("Band conditions window closed")
+
+        # Close space weather window
+        if self.space_weather_window and self.space_weather_window.winfo_exists():
+            self.space_weather_window.destroy()
+            self.space_weather_window = None
+            self.space_weather_display = None
+            self.log_status("Space weather window closed")
+
+        # Disconnect shared DX cluster WebSocket
+        if self.dxcluster_ws:
+            self.dxcluster_ws.disconnect()
+            self.dxcluster_ws = None
+            self.log_status("DX cluster WebSocket disconnected")
+
+        # Disconnect main spectrum display (in main window)
         if self.spectrum:
             self.spectrum.disconnect()
             self.log_status("Spectrum display disconnected")
 
-        # Disconnect waterfall display
-        if self.waterfall_display:
-            self.waterfall_display.disconnect()
-            self.log_status("Waterfall display disconnected")
+        # Clear waterfall spectrum/waterfall references
+        if hasattr(self, 'waterfall_spectrum'):
+            self.waterfall_spectrum = None
+        if hasattr(self, 'waterfall_waterfall'):
+            self.waterfall_waterfall = None
 
         # Update UI
         self.connected = False

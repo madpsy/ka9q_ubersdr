@@ -328,10 +328,14 @@ func (c *CWSkimmerClient) handleConnection() {
 		// Update last activity time on successful read
 		c.mu.Lock()
 		c.lastActivityTime = time.Now()
+		hasInactivityTimer := c.inactivityTimer != nil
 		c.mu.Unlock()
 
-		// Reset inactivity timer
-		c.resetInactivityTimer()
+		// Only reset inactivity timer if it's already running
+		// (it starts after first ping is sent)
+		if hasInactivityTimer {
+			c.resetInactivityTimer()
+		}
 
 		// Process the line
 		c.processLine(line)

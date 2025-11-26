@@ -235,6 +235,10 @@ class RadioGUI:
         self.space_weather_window = None
         self.space_weather_display = None
 
+        # MIDI controller (separate window)
+        self.midi_window = None
+        self.midi_controller = None
+
         # Create UI
         self.create_widgets()
 
@@ -243,6 +247,9 @@ class RadioGUI:
 
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # Auto-initialize MIDI controller if mappings exist (after UI is ready)
+        self.root.after(100, self.auto_init_midi)
 
         # Auto-connect if requested (after UI is ready)
         if self.config.get('auto_connect', False):
@@ -740,6 +747,11 @@ class RadioGUI:
                 self.space_weather_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
                 self.space_weather_btn = None
+
+            # MIDI controller button
+            self.midi_btn = ttk.Button(button_frame, text="MIDI",
+                                       command=self.open_midi_window)
+            self.midi_btn.pack(side=tk.LEFT, padx=(0, 5))
 
             # Scroll mode selector removed from here - now in waterfall window title section
             self.scroll_mode_var = tk.StringVar(value="pan")
@@ -2434,6 +2446,94 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open space weather: {e}")
             self.log_status(f"ERROR: Failed to open space weather - {e}")
 
+    def open_midi_window(self):
+        """Open MIDI controller configuration window."""
+        # Check if controller exists but window is hidden
+        if self.midi_controller and self.midi_controller.window:
+            # Window exists but is hidden - show it
+            self.midi_controller.window.deiconify()
+            self.midi_controller.window.lift()
+            self.midi_window = self.midi_controller.window
+            self.log_status("MIDI controller window reopened")
+            return
+
+        # Check if window is already open
+        if self.midi_window and self.midi_window.winfo_exists():
+            self.midi_window.lift()  # Bring to front
+            return
+
+        try:
+            from midi_controller import create_midi_window
+
+            # Create MIDI window
+            self.midi_controller = create_midi_window(self)
+            self.midi_window = self.midi_controller.window
+
+            self.log_status("MIDI controller window opened")
+
+        except ImportError as e:
+            messagebox.showerror("Error", "MIDI support not available. Install python-rtmidi:\npip install python-rtmidi")
+            self.log_status(f"ERROR: MIDI not available - {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open MIDI window: {e}")
+            self.log_status(f"ERROR: Failed to open MIDI window - {e}")
+
+    def auto_init_midi(self):
+        """Auto-initialize MIDI controller on startup if config exists."""
+        try:
+            import os
+            config_file = os.path.expanduser("~/.ubersdr_midi_mappings.json")
+
+            # Only auto-init if config file exists
+            if os.path.exists(config_file):
+                from midi_controller import MIDIController
+
+                # Create controller without window
+                self.midi_controller = MIDIController(self)
+
+                # Log what was loaded
+                if self.midi_controller.mappings:
+                    self.log_status(f"MIDI: Loaded {len(self.midi_controller.mappings)} mapping(s)")
+
+                # Try to auto-connect to saved device (even if no mappings yet)
+                if self.midi_controller.last_device_name or self.midi_controller.mappings:
+                    try:
+                        import rtmidi
+                        midi_in = rtmidi.MidiIn()
+                        ports = midi_in.get_ports()
+
+                        if ports:
+                            # Try to find saved device first
+                            port_index = 0
+                            if self.midi_controller.last_device_name:
+                                try:
+                                    port_index = ports.index(self.midi_controller.last_device_name)
+                                    self.log_status(f"MIDI: Found saved device: {self.midi_controller.last_device_name}")
+                                except ValueError:
+                                    # Saved device not found, use first available
+                                    self.log_status(f"MIDI: Saved device '{self.midi_controller.last_device_name}' not found, using: {ports[0]}")
+                            else:
+                                self.log_status(f"MIDI: No saved device, using: {ports[0]}")
+
+                            # Connect to device
+                            self.midi_controller.midi_in = midi_in
+                            midi_in.open_port(port_index)
+                            midi_in.set_callback(self.midi_controller.on_midi_message)
+                            self.midi_controller.running = True
+                            self.log_status(f"MIDI: Auto-connected to {ports[port_index]}")
+                        else:
+                            del midi_in
+                            self.log_status("MIDI: No devices available")
+                    except Exception as e:
+                        self.log_status(f"MIDI: Auto-connect failed - {e}")
+
+        except ImportError:
+            # MIDI not available, skip silently
+            pass
+        except Exception as e:
+            # Other errors, log but don't show error dialog
+            print(f"MIDI auto-init error: {e}")
+
     def adjust_bandwidth_for_mode(self, mode: str):
         """Set bandwidth defaults based on mode (matching web application behavior)."""
         # Default bandwidth values for each mode (from static/app.js setMode function lines 2556-2606)
@@ -3535,6 +3635,12 @@ class RadioGUI:
         # Close space weather window if open
         if self.space_weather_window and self.space_weather_window.winfo_exists():
             self.space_weather_window.destroy()
+
+        # Disconnect MIDI controller if active
+        if self.midi_controller:
+            self.midi_controller.disconnect()
+            self.midi_controller = None
+        self.midi_window = None
 
         # Clean up shared DX cluster WebSocket manager
         if self.dxcluster_ws:

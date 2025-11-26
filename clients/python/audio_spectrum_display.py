@@ -22,19 +22,27 @@ class AudioSpectrumDisplay:
     to show the spectrum of what you're actually hearing.
     """
     
-    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 400, toggle_filter_callback: Optional[Callable] = None):
+    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 400, toggle_filter_callback: Optional[Callable] = None, mute_var=None, nr2_var=None, toggle_mute_callback: Optional[Callable] = None, toggle_nr2_callback: Optional[Callable] = None):
         """Initialize audio spectrum display widget.
-        
+
         Args:
             parent: Parent tkinter widget (can be Toplevel window)
             width: Canvas width in pixels
             height: Canvas height in pixels
             toggle_filter_callback: Optional callback to toggle audio filter in main GUI
+            mute_var: BooleanVar for mute checkbox state
+            nr2_var: BooleanVar for NR2 checkbox state
+            toggle_mute_callback: Optional callback to toggle mute in main GUI
+            toggle_nr2_callback: Optional callback to toggle NR2 in main GUI
         """
         self.parent = parent
         self.width = width
         self.height = height
         self.toggle_filter_callback = toggle_filter_callback
+        self.mute_var = mute_var
+        self.nr2_var = nr2_var
+        self.toggle_mute_callback = toggle_mute_callback
+        self.toggle_nr2_callback = toggle_nr2_callback
         
         # Create canvas for display
         self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=1)
@@ -382,13 +390,34 @@ class AudioSpectrumDisplay:
         self.tooltip_bg_id = None
         self.cursor_line_id = None
         
-        # Draw title
+        # Draw Mute and NR2 checkbox labels on canvas (left side)
+        if self.mute_var is not None:
+            mute_text = "☑ Mute" if self.mute_var.get() else "☐ Mute"
+            self.canvas.create_text(
+                35, 15,
+                text=mute_text,
+                fill='white', font=('sans-serif', 10),
+                anchor=tk.W,
+                tags='mute_checkbox'
+            )
+
+        if self.nr2_var is not None:
+            nr2_text = "☑ NR2" if self.nr2_var.get() else "☐ NR2"
+            self.canvas.create_text(
+                35, 35,
+                text=nr2_text,
+                fill='white', font=('sans-serif', 10),
+                anchor=tk.W,
+                tags='nr2_checkbox'
+            )
+
+        # Draw title (centered)
         self.canvas.create_text(
             self.width // 2, 15,
             text="Audio Spectrum (Demodulated Output)",
             fill='white', font=('sans-serif', 12, 'bold')
         )
-        
+
         # Draw info text (bandwidth)
         bw_text = f"Audio BW: {self.bandwidth_low} to {self.bandwidth_high} Hz"
         self.canvas.create_text(
@@ -713,8 +742,22 @@ class AudioSpectrumDisplay:
         self._update_tooltip_at_position(event.x, event.y)
     
     def on_click(self, event):
-        """Handle mouse click to toggle audio filter."""
-        # Only toggle if click is within the graph area
+        """Handle mouse click to toggle audio filter or checkboxes."""
+        # Check if click is on Mute checkbox (left side, top)
+        if self.mute_var is not None and 35 <= event.x <= 105 and 5 <= event.y <= 25:
+            # Toggle mute by calling the callback which updates main GUI
+            if self.toggle_mute_callback:
+                self.toggle_mute_callback()
+            return
+
+        # Check if click is on NR2 checkbox (left side, below Mute)
+        if self.nr2_var is not None and 35 <= event.x <= 105 and 25 <= event.y <= 45:
+            # Toggle NR2 by calling the callback which updates main GUI
+            if self.toggle_nr2_callback:
+                self.toggle_nr2_callback()
+            return
+
+        # Only toggle audio filter if click is within the graph area
         x = event.x - self.margin_left
         if 0 <= x <= self.graph_width:
             if self.toggle_filter_callback:
@@ -902,30 +945,88 @@ class AudioSpectrumDisplay:
 
 def create_audio_spectrum_window(parent_gui):
     """Create a standalone audio spectrum window.
-    
+
     Args:
         parent_gui: Parent RadioGUI instance
-        
+
     Returns:
         Tuple of (window, audio_spectrum_display)
     """
+    import tkinter.ttk as ttk
+
     # Create toplevel window
     window = Toplevel(parent_gui.root)
     window.title("Audio Spectrum Display")
     window.geometry("800x500")
-    
-    # Create audio spectrum display with toggle callback
+
+    # Mute and NR2 variables
+    mute_var = tk.BooleanVar(value=not (parent_gui.channel_left_var.get() or parent_gui.channel_right_var.get()))
+    nr2_var = tk.BooleanVar(value=parent_gui.nr2_enabled_var.get())
+
+    def toggle_mute():
+        """Toggle mute in the main GUI."""
+        # Toggle the current state
+        current_muted = not (parent_gui.channel_left_var.get() or parent_gui.channel_right_var.get())
+        new_muted = not current_muted
+
+        if new_muted:
+            # Mute: disable both channels
+            parent_gui.channel_left_var.set(False)
+            parent_gui.channel_right_var.set(False)
+        else:
+            # Unmute: enable both channels
+            parent_gui.channel_left_var.set(True)
+            parent_gui.channel_right_var.set(True)
+        parent_gui.update_channels()
+
+        # Update local var to match
+        mute_var.set(new_muted)
+
+    def toggle_nr2():
+        """Toggle NR2 in the main GUI."""
+        # Toggle the current state
+        new_state = not parent_gui.nr2_enabled_var.get()
+        parent_gui.nr2_enabled_var.set(new_state)
+        parent_gui.toggle_nr2()
+
+        # Update local var to match
+        nr2_var.set(new_state)
+
+    # Create audio spectrum display with toggle callbacks
     def toggle_audio_filter():
         """Toggle the audio filter in the main GUI."""
         parent_gui.audio_filter_enabled_var.set(not parent_gui.audio_filter_enabled_var.get())
         parent_gui.toggle_audio_filter()
-    
-    audio_spectrum = AudioSpectrumDisplay(window, width=800, height=500, toggle_filter_callback=toggle_audio_filter)
-    
+
+    def sync_mute_from_main():
+        """Sync mute checkbox from main GUI channel states."""
+        is_muted = not (parent_gui.channel_left_var.get() or parent_gui.channel_right_var.get())
+        mute_var.set(is_muted)
+
+    def sync_nr2_from_main():
+        """Sync NR2 checkbox from main GUI."""
+        nr2_var.set(parent_gui.nr2_enabled_var.get())
+
+    audio_spectrum = AudioSpectrumDisplay(window, width=800, height=500,
+                                         toggle_filter_callback=toggle_audio_filter,
+                                         mute_var=mute_var,
+                                         nr2_var=nr2_var,
+                                         toggle_mute_callback=toggle_mute,
+                                         toggle_nr2_callback=toggle_nr2)
+
+    # Periodic sync to keep checkboxes in sync with main GUI (every 500ms)
+    def periodic_sync():
+        if window.winfo_exists():
+            sync_mute_from_main()
+            sync_nr2_from_main()
+            window.after(500, periodic_sync)
+
+    window.after(500, periodic_sync)
+
     # Set sample rate from client
     if parent_gui.client:
         audio_spectrum.set_sample_rate(parent_gui.client.sample_rate)
-    
+
     # Update bandwidth
     try:
         audio_spectrum.update_bandwidth(
@@ -934,14 +1035,14 @@ def create_audio_spectrum_window(parent_gui):
         )
     except:
         pass
-    
+
     # Handle window close
     def on_close():
         audio_spectrum.disconnect()
         window.destroy()
         parent_gui.audio_spectrum_window = None
         parent_gui.audio_spectrum_display = None
-    
+
     window.protocol("WM_DELETE_WINDOW", on_close)
-    
+
     return window, audio_spectrum

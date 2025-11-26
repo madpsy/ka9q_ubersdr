@@ -414,7 +414,7 @@ class AudioSpectrumDisplay:
         # Draw title (centered)
         self.canvas.create_text(
             self.width // 2, 15,
-            text="Audio Spectrum (Demodulated Output)",
+            text="Audio Spectrum",
             fill='white', font=('sans-serif', 12, 'bold')
         )
 

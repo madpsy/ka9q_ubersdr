@@ -52,7 +52,7 @@ func LoadCWSkimmerConfig(filename string) (*CWSkimmerConfig, error) {
 		config.Port = 7300 // Default CW Skimmer port
 	}
 	if config.ReconnectDelay == 0 {
-		config.ReconnectDelay = 30 // 30 seconds default
+		config.ReconnectDelay = 10 // 10 seconds default
 	}
 	if config.KeepAliveDelay == 0 {
 		config.KeepAliveDelay = 300 // 5 minutes default

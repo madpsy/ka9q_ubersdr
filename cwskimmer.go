@@ -382,14 +382,18 @@ func (c *CWSkimmerClient) writeLine(line string) error {
 func (c *CWSkimmerClient) processLine(line string) {
 	// Check for ping response
 	if strings.Contains(line, "Unknown command") && strings.Contains(line, "PING") {
-		c.mu.RLock()
+		c.mu.Lock()
 		pingTime := c.lastPingTime
-		c.mu.RUnlock()
+		c.lastActivityTime = time.Now()
+		c.mu.Unlock()
 
 		if !pingTime.IsZero() {
 			responseTime := time.Since(pingTime)
 			log.Printf("CW Skimmer: Ping response received in %v", responseTime)
 		}
+
+		// Reset inactivity timer since we got a response
+		c.resetInactivityTimer()
 		return
 	}
 

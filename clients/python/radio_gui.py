@@ -735,17 +735,8 @@ class RadioGUI:
             else:
                 self.space_weather_btn = None
 
-            # Scroll mode selector (zoom vs pan) - always at the end
-            ttk.Label(button_frame, text="Scroll:").pack(side=tk.LEFT, padx=(15, 5))
-
+            # Scroll mode selector removed from here - now in waterfall window title section
             self.scroll_mode_var = tk.StringVar(value="zoom")
-            zoom_radio = ttk.Radiobutton(button_frame, text="Zoom", variable=self.scroll_mode_var,
-                                        value="zoom", command=self.on_scroll_mode_changed)
-            zoom_radio.pack(side=tk.LEFT, padx=(0, 5))
-
-            pan_radio = ttk.Radiobutton(button_frame, text="Pan", variable=self.scroll_mode_var,
-                                       value="pan", command=self.on_scroll_mode_changed)
-            pan_radio.pack(side=tk.LEFT)
 
             controls_frame.columnconfigure(0, weight=1)
 

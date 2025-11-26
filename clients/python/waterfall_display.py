@@ -579,6 +579,30 @@ def create_waterfall_window(parent_gui):
                                        font=('monospace', 8))
     signal_meter_mode_label.place(x=5, y=35, anchor=tk.W)
     
+    # Scroll mode selector (between signal meter and title) - stacked vertically
+    # Create frame for radio buttons to stack them vertically
+    scroll_frame = tk.Frame(info_frame, bg='#000000')
+    scroll_frame.place(x=120, y=25, anchor=tk.W)
+
+    from tkinter import ttk
+    # Create custom style for radio buttons with black background
+    style = ttk.Style()
+    style.configure('Black.TRadiobutton', background='#000000', foreground='white')
+    # Keep black background on hover/active states
+    style.map('Black.TRadiobutton',
+              background=[('active', '#000000'), ('!active', '#000000')],
+              foreground=[('active', 'white'), ('!active', 'white')])
+
+    zoom_radio = ttk.Radiobutton(scroll_frame, text="Zoom Scroll", variable=parent_gui.scroll_mode_var,
+                                value="zoom", command=parent_gui.on_scroll_mode_changed,
+                                style='Black.TRadiobutton')
+    zoom_radio.pack(side=tk.TOP, anchor=tk.W)
+
+    pan_radio = ttk.Radiobutton(scroll_frame, text="Pan Scroll", variable=parent_gui.scroll_mode_var,
+                               value="pan", command=parent_gui.on_scroll_mode_changed,
+                               style='Black.TRadiobutton')
+    pan_radio.pack(side=tk.TOP, anchor=tk.W)
+
     # Title label (centered)
     title_label = tk.Label(info_frame, text="RF Spectrum & Waterfall",
                           bg='#000000', fg='white',

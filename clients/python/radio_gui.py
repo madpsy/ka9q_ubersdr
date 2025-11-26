@@ -509,6 +509,10 @@ class RadioGUI:
         self.bw_high_label = ttk.Label(bw_frame, text=f"{self.config.get('bandwidth_high', 2700)} Hz", width=10)
         self.bw_high_label.grid(row=2, column=5, sticky=tk.W)
 
+        # Set initial bandwidth slider bounds based on initial mode (must be done after sliders are created)
+        initial_mode = self.config.get('mode', 'USB').lower()
+        self.update_bandwidth_slider_bounds(initial_mode)
+
         # Preset bandwidth buttons (will be updated based on mode)
         self.preset_frame = ttk.Frame(bw_frame)
         self.preset_frame.grid(row=3, column=0, columnspan=5, sticky=tk.W, pady=(5, 0))
@@ -2316,6 +2320,9 @@ class RadioGUI:
             self.bw_low_label.config(text=f"{low} Hz")
             self.bw_high_label.config(text=f"{high} Hz")
 
+            # Update slider bounds for the mode
+            self.update_bandwidth_slider_bounds(mode)
+
             # Update spectrum display bandwidth visualization
             if self.spectrum:
                 self.spectrum.update_bandwidth(low, high)
@@ -2342,6 +2349,55 @@ class RadioGUI:
         else:
             # Unknown mode - keep current bandwidth
             self.log_status(f"Unknown mode {mode.upper()} - keeping current bandwidth")
+
+    def update_bandwidth_slider_bounds(self, mode: str):
+        """Update bandwidth slider bounds based on mode.
+
+        Args:
+            mode: Current mode (e.g., 'usb', 'lsb', 'am', etc.)
+        """
+        # Mode-specific slider bounds (low_min, low_max, high_min, high_max)
+        mode_bounds = {
+            'am': (-10000, -200, 200, 10000),
+            'sam': (-10000, -200, 200, 10000),
+            'usb': (0, 200, 400, 4000),
+            'lsb': (-400, -4000, 0, -200),
+            'fm': (-10000, -200, 200, 10000),
+            'nfm': (-5000, -200, 200, 5000),
+            'cwu': (-100, -500, 100, 500),
+            'cwl': (-100, -500, 100, 500),
+        }
+
+        # Check if this is an IQ mode
+        is_iq_mode = mode in ['iq', 'iq48', 'iq96', 'iq192', 'iq384']
+
+        if is_iq_mode:
+            # Disable sliders for IQ modes
+            self.bw_low_scale.config(state='disabled')
+            self.bw_high_scale.config(state='disabled')
+            # Only log if status_text exists (after full initialization)
+            if hasattr(self, 'status_text'):
+                self.log_status(f"Bandwidth sliders disabled for {mode.upper()} mode")
+        else:
+            # Enable sliders for non-IQ modes
+            self.bw_low_scale.config(state='normal')
+            self.bw_high_scale.config(state='normal')
+
+            # Get bounds for current mode
+            if mode in mode_bounds:
+                low_min, low_max, high_min, high_max = mode_bounds[mode]
+
+                # Update slider ranges
+                self.bw_low_scale.config(from_=low_min, to=low_max)
+                self.bw_high_scale.config(from_=high_min, to=high_max)
+
+                # Only log if status_text exists (after full initialization)
+                if hasattr(self, 'status_text'):
+                    self.log_status(f"Bandwidth bounds for {mode.upper()}: Low [{low_min} to {low_max}], High [{high_min} to {high_max}]")
+            else:
+                # Unknown mode - use default wide range
+                self.bw_low_scale.config(from_=-10000, to=10000)
+                self.bw_high_scale.config(from_=-10000, to=10000)
 
     def update_preset_buttons(self):
         """Update bandwidth preset buttons based on current mode."""

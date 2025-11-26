@@ -20,6 +20,222 @@ except ImportError:
     print("Warning: astral not available for sunrise/sunset calculations. Install with: pip install astral")
 
 
+class MinimalSpaceWeatherDisplay:
+    """Minimal compact display window for space weather forecast."""
+
+    # Band order
+    BAND_ORDER = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m']
+
+    # Condition colors (matching bandconditions.html)
+    CONDITION_COLORS = {
+        'Poor': '#ef4444',
+        'Fair': '#ff9800',
+        'Good': '#fbbf24',
+        'Excellent': '#22c55e'
+    }
+
+    def __init__(self, parent, server_url: str, use_tls: bool = False, gps_coords: Optional[Dict] = None, location_name: Optional[str] = None):
+        """Initialize minimal space weather display.
+
+        Args:
+            parent: Parent window
+            server_url: Server URL (host:port format)
+            use_tls: Whether to use TLS/SSL
+            gps_coords: GPS coordinates dict with 'lat' and 'lon' keys
+            location_name: Location name string
+        """
+        self.parent = parent
+        self.server_url = server_url
+        self.use_tls = use_tls
+        self.gps_coords = gps_coords
+        self.location_name = location_name
+
+        # Build base URL
+        if '://' in server_url:
+            self.base_url = server_url
+        else:
+            protocol = 'https' if use_tls else 'http'
+            self.base_url = f"{protocol}://{server_url}"
+
+        # Data storage
+        self.weather_data: Optional[Dict] = None
+
+        # Widget references for updates
+        self.metric_labels = {}
+        self.condition_badges = {}
+
+        # Refresh control
+        self.refresh_job = None
+        self.running = True
+
+        # Create window
+        self.window = tk.Toplevel(parent)
+        self.window.title("Space Weather - Minimal")
+        self.window.geometry("600x210")
+
+        # Create UI
+        self.create_widgets()
+
+        # Handle window close
+        self.window.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        # Start data refresh
+        self.refresh_data()
+
+    def create_widgets(self):
+        """Create all UI widgets."""
+        # Main container
+        main_frame = ttk.Frame(self.window, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.window.columnconfigure(0, weight=1)
+        self.window.rowconfigure(0, weight=1)
+
+        # Key metrics in compact horizontal text form
+        metrics_frame = ttk.LabelFrame(main_frame, text="Key Metrics", padding="10")
+        metrics_frame.pack(fill=tk.X, pady=(0, 10))
+
+        metrics_text = ttk.Frame(metrics_frame)
+        metrics_text.pack(fill=tk.X)
+
+        # Create horizontal text labels for metrics (bold font)
+        self.metrics_display = ttk.Label(metrics_text, text="Loading...", font=('TkDefaultFont', 10, 'bold'))
+        self.metrics_display.pack(anchor=tk.W)
+
+        # Conditions frame (will show day OR night, not both)
+        self.conditions_frame = ttk.LabelFrame(main_frame, padding="10")
+        self.conditions_frame.pack(fill=tk.X, pady=(0, 10))
+
+        conditions_container = ttk.Frame(self.conditions_frame)
+        conditions_container.pack(expand=True)
+
+        condition_badges = ttk.Frame(conditions_container)
+        condition_badges.pack()
+
+        for band in self.BAND_ORDER:
+            badge = tk.Label(condition_badges, text=band, bg='#9ca3af', fg='white',
+                           font=('TkDefaultFont', 9, 'bold'), padx=8, pady=4,
+                           relief=tk.RAISED, borderwidth=1)
+            badge.pack(side=tk.LEFT, padx=3, pady=2)
+            self.condition_badges[band] = badge
+
+        # Full view button
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X)
+
+        full_btn = ttk.Button(button_frame, text="Full View", command=self.open_full_window)
+        full_btn.pack(side=tk.RIGHT)
+
+        self.status_label = ttk.Label(button_frame, text="Loading...", foreground='blue')
+        self.status_label.pack(side=tk.LEFT)
+
+    def update_display(self, data: Dict):
+        """Update display with space weather data."""
+        self.weather_data = data
+
+        # Determine if it's day or night
+        is_daytime = True  # Default to day
+        if self.gps_coords and ASTRAL_AVAILABLE:
+            try:
+                location = LocationInfo(
+                    name=self.location_name or "Receiver",
+                    region="",
+                    timezone="UTC",
+                    latitude=self.gps_coords['lat'],
+                    longitude=self.gps_coords['lon']
+                )
+                s = sun(location.observer, date=datetime.utcnow())
+                sunrise = s['sunrise']
+                sunset = s['sunset']
+                now = datetime.now(sunrise.tzinfo)
+
+                is_daytime = sunrise <= now < sunset
+            except Exception as e:
+                print(f"Error calculating sunrise/sunset: {e}")
+
+        # Update frame title based on day/night
+        day_night_icon = '☀️' if is_daytime else '🌙'
+        day_night_text = 'Day' if is_daytime else 'Night'
+        location_text = f" ({self.location_name})" if self.location_name else ""
+        self.conditions_frame.configure(text=f"{day_night_icon} {day_night_text} Conditions{location_text}")
+
+        # Update key metrics as horizontal text
+        solar_flux = data.get('solar_flux', 0)
+        k_index = data.get('k_index', 0)
+        k_status = data.get('k_index_status', '')
+        a_index = data.get('a_index', 0)
+        bz = data.get('solar_wind_bz', 0)
+        bz_dir = 'Southward' if bz < 0 else 'Northward'
+        quality = data.get('propagation_quality', 'Unknown')
+
+        metrics_text = (f"SFI: {solar_flux:.0f}  •  "
+                       f"K: {k_index} ({k_status})  •  "
+                       f"A: {a_index}  •  "
+                       f"Bz: {bz:.1f} nT ({bz_dir})  •  "
+                       f"Propagation: {quality}")
+
+        self.metrics_display.config(text=metrics_text)
+
+        # Update band conditions (day OR night, not both)
+        conditions_key = 'band_conditions_day' if is_daytime else 'band_conditions_night'
+        if conditions_key in data:
+            for band in self.BAND_ORDER:
+                if band in data[conditions_key]:
+                    condition = data[conditions_key][band]
+                    color = self.CONDITION_COLORS.get(condition, '#9ca3af')
+                    self.condition_badges[band].config(bg=color)
+
+        self.status_label.config(text="✓ Loaded", foreground='green')
+
+    def refresh_data(self):
+        """Refresh space weather data from server."""
+        if not self.running:
+            return
+
+        self.status_label.config(text="Loading...", foreground='blue')
+
+        # Fetch data in background thread
+        thread = threading.Thread(target=self._fetch_data_thread, daemon=True)
+        thread.start()
+
+        # Schedule next refresh in 5 minutes (300 seconds)
+        self.refresh_job = self.window.after(300000, self.refresh_data)
+
+    def _fetch_data_thread(self):
+        """Fetch data from server (runs in background thread)."""
+        try:
+            url = f"{self.base_url}/api/spaceweather"
+            response = requests.get(url, timeout=10)
+
+            if response.status_code == 204:
+                self.window.after(0, lambda: self.status_label.config(text="No data", foreground='orange'))
+                return
+
+            response.raise_for_status()
+            data = response.json()
+
+            # Update display on main thread
+            self.window.after(0, lambda: self.update_display(data))
+
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Error: {e}"
+            self.window.after(0, lambda: self.status_label.config(text=error_msg, foreground='red'))
+        except Exception as e:
+            error_msg = f"Error: {e}"
+            self.window.after(0, lambda: self.status_label.config(text=error_msg, foreground='red'))
+
+    def open_full_window(self):
+        """Open full space weather window and close this one."""
+        SpaceWeatherDisplay(self.parent, self.server_url, self.use_tls, self.gps_coords, self.location_name)
+        self.on_close()
+
+    def on_close(self):
+        """Handle window close event."""
+        self.running = False
+        if self.refresh_job:
+            self.window.after_cancel(self.refresh_job)
+        self.window.destroy()
+
+
 class SpaceWeatherDisplay:
     """Display window for space weather forecast."""
     
@@ -128,9 +344,17 @@ class SpaceWeatherDisplay:
         if self.gps_coords and ASTRAL_AVAILABLE:
             self.dn_frame = ttk.LabelFrame(self.content_frame, padding="10")
             self.dn_frame.pack(fill=tk.X, pady=(0, 10))
-            
-            self.sunrise_sunset_label = ttk.Label(self.dn_frame, font=('TkDefaultFont', 10))
-            self.sunrise_sunset_label.pack(anchor=tk.W)
+            # Container for sunrise/sunset and minimal button
+            top_row = ttk.Frame(self.dn_frame)
+            top_row.pack(fill=tk.X)
+
+            self.sunrise_sunset_label = ttk.Label(top_row, font=('TkDefaultFont', 10))
+            self.sunrise_sunset_label.pack(side=tk.LEFT, anchor=tk.W)
+
+            # Minimal button on the right
+            minimal_btn = ttk.Button(top_row, text="Minimal", command=self.open_minimal_window)
+            minimal_btn.pack(side=tk.RIGHT, padx=(10, 0))
+
             
             self.clock_label = ttk.Label(self.dn_frame, text="", font=('TkDefaultFont', 10, 'bold'))
             self.clock_label.pack(anchor=tk.W, pady=(5, 0))
@@ -425,6 +649,11 @@ class SpaceWeatherDisplay:
         else:
             self.countdown_label.config(text="(refreshing...)")
     
+    def open_minimal_window(self):
+        """Open minimal space weather window and close this one."""
+        MinimalSpaceWeatherDisplay(self.parent, self.server_url, self.use_tls, self.gps_coords, self.location_name)
+        self.on_close()
+
     def on_close(self):
         """Handle window close event."""
         self.running = False

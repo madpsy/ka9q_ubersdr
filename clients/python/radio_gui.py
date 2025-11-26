@@ -2454,6 +2454,13 @@ class RadioGUI:
             self.midi_controller.window.deiconify()
             self.midi_controller.window.lift()
             self.midi_window = self.midi_controller.window
+
+            # Update status label when reopening
+            if self.midi_controller.midi_in and self.midi_controller.running:
+                self.midi_controller.status_label.config(text="Connected", foreground='green')
+            else:
+                self.midi_controller.status_label.config(text="Not connected", foreground='red')
+
             self.log_status("MIDI controller window reopened")
             return
 
@@ -2463,13 +2470,18 @@ class RadioGUI:
             return
 
         try:
-            from midi_controller import create_midi_window
-
-            # Create MIDI window
-            self.midi_controller = create_midi_window(self)
-            self.midi_window = self.midi_controller.window
-
-            self.log_status("MIDI controller window opened")
+            # Check if controller already exists (from auto-init)
+            if self.midi_controller:
+                # Controller exists, just create window for it
+                self.midi_controller.create_window(self.root)
+                self.midi_window = self.midi_controller.window
+                self.log_status("MIDI controller window opened")
+            else:
+                # No controller yet, create new one with window
+                from midi_controller import create_midi_window
+                self.midi_controller = create_midi_window(self)
+                self.midi_window = self.midi_controller.window
+                self.log_status("MIDI controller window opened")
 
         except ImportError as e:
             messagebox.showerror("Error", "MIDI support not available. Install python-rtmidi:\npip install python-rtmidi")

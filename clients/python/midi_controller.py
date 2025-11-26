@@ -164,6 +164,24 @@ class MIDIController:
         # Refresh devices on startup
         self.refresh_devices()
 
+        # Set device dropdown to saved device and update status if already connected
+        if self.last_device_name:
+            try:
+                ports = self.device_combo['values']
+                if self.last_device_name in ports:
+                    self.device_var.set(self.last_device_name)
+            except:
+                pass
+
+        # Update status label based on current connection state
+        # (status_label was created earlier in device_frame)
+        if self.midi_in and self.running:
+            self.status_label.config(text="Connected", foreground='green')
+            print(f"DEBUG: MIDI window opened - showing Connected (midi_in={self.midi_in is not None}, running={self.running})")
+        else:
+            self.status_label.config(text="Not connected", foreground='red')
+            print(f"DEBUG: MIDI window opened - showing Not connected (midi_in={self.midi_in is not None}, running={self.running})")
+
         # Update mappings display
         self.update_mappings_display()
 

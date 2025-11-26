@@ -380,12 +380,10 @@ func (c *CWSkimmerClient) processLine(line string) {
 		c.mu.Lock()
 		pingTime := c.lastPingTime
 		c.lastActivityTime = time.Now()
-		// Stop the inactivity timer - we got a response, connection is alive
-		// Timer will be restarted when next ping is sent
-		if c.inactivityTimer != nil {
-			c.inactivityTimer.Stop()
-			c.inactivityTimer = nil
-		}
+		// Don't stop the inactivity timer here - let it expire naturally
+		// The checkInactivity() function will see the updated lastActivityTime
+		// and won't trigger a disconnect. This prevents race conditions where
+		// the timer callback is already queued when we try to stop it.
 		c.mu.Unlock()
 
 		if !pingTime.IsZero() {

@@ -22,11 +22,57 @@ class CWMetricsDashboard {
             '10m': 'rgba(148, 0, 211, 0.8)',
             '6m': 'rgba(255, 20, 147, 0.8)'
         };
+        this.colorCache = new Map(); // Cache for generated colors
         this.init();
         this.loadVersion();
         this.loadSkimmerNames();
         this.loadSummariesAndCharts();
         this.startSummaryAutoRefresh();
+    }
+
+    /**
+     * Generate a consistent color for a band using a hash function
+     * This ensures the same band always gets the same color across refreshes
+     */
+    hashStringToColor(str) {
+        // Check cache first
+        if (this.colorCache.has(str)) {
+            return this.colorCache.get(str);
+        }
+
+        // Simple hash function
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+
+        // Generate RGB values from hash
+        // Use different bit ranges to get varied colors
+        const r = (hash & 0xFF0000) >> 16;
+        const g = (hash & 0x00FF00) >> 8;
+        const b = hash & 0x0000FF;
+
+        // Ensure colors are vibrant enough (avoid too dark colors)
+        const minBrightness = 80;
+        const adjustedR = Math.max(r, minBrightness);
+        const adjustedG = Math.max(g, minBrightness);
+        const adjustedB = Math.max(b, minBrightness);
+
+        const color = `rgba(${adjustedR}, ${adjustedG}, ${adjustedB}, 0.8)`;
+
+        // Cache the result
+        this.colorCache.set(str, color);
+
+        return color;
+    }
+
+    /**
+     * Get color for a band - uses predefined colors if available,
+     * otherwise generates a consistent color based on band name hash
+     */
+    getBandColor(band) {
+        return this.BAND_COLORS[band] || this.hashStringToColor(band);
     }
 
     async loadSkimmerNames() {
@@ -229,13 +275,16 @@ class CWMetricsDashboard {
                 Object.keys(dayData).forEach(band => allBands.add(band));
             });
 
-            const datasets = Array.from(allBands).map(band => ({
-                label: band,
-                data: dates.map(date => dailyData[date][band] || 0),
-                backgroundColor: this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)',
-                borderColor: (this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)').replace('0.8', '1'),
-                borderWidth: 1
-            }));
+            const datasets = Array.from(allBands).map(band => {
+                const color = this.getBandColor(band);
+                return {
+                    label: band,
+                    data: dates.map(date => dailyData[date][band] || 0),
+                    backgroundColor: color,
+                    borderColor: color.replace('0.8', '1'),
+                    borderWidth: 1
+                };
+            });
 
             if (this.weekChart) {
                 this.weekChart.data.labels = labels;
@@ -290,13 +339,16 @@ class CWMetricsDashboard {
                 Object.keys(dayData).forEach(band => allBands.add(band));
             });
 
-            const datasets = Array.from(allBands).map(band => ({
-                label: band,
-                data: dates.map(date => dailyData[date][band] || 0),
-                backgroundColor: this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)',
-                borderColor: (this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)').replace('0.8', '1'),
-                borderWidth: 1
-            }));
+            const datasets = Array.from(allBands).map(band => {
+                const color = this.getBandColor(band);
+                return {
+                    label: band,
+                    data: dates.map(date => dailyData[date][band] || 0),
+                    backgroundColor: color,
+                    borderColor: color.replace('0.8', '1'),
+                    borderWidth: 1
+                };
+            });
 
             if (this.monthChart) {
                 this.monthChart.data.labels = labels;
@@ -374,13 +426,16 @@ class CWMetricsDashboard {
                 });
             }
 
-            const datasets = Array.from(allBands).map(band => ({
-                label: band,
-                data: monthlyDataArrays[band],
-                backgroundColor: this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)',
-                borderColor: (this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)').replace('0.8', '1'),
-                borderWidth: 1
-            }));
+            const datasets = Array.from(allBands).map(band => {
+                const color = this.getBandColor(band);
+                return {
+                    label: band,
+                    data: monthlyDataArrays[band],
+                    backgroundColor: color,
+                    borderColor: color.replace('0.8', '1'),
+                    borderWidth: 1
+                };
+            });
 
             if (this.yearChart) {
                 this.yearChart.data.labels = monthLabels;
@@ -612,11 +667,12 @@ class CWMetricsDashboard {
         });
 
         seriesMap.forEach((points, band) => {
+            const color = this.getBandColor(band);
             datasets.push({
                 label: band,
                 data: points,
-                borderColor: this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)',
-                backgroundColor: (this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)') + '20',
+                borderColor: color,
+                backgroundColor: color + '20',
                 tension: 0.4,
                 fill: false,
                 pointRadius: 3,
@@ -708,11 +764,12 @@ class CWMetricsDashboard {
         });
 
         seriesMap.forEach((points, band) => {
+            const color = this.getBandColor(band);
             datasets.push({
                 label: band,
                 data: points,
-                borderColor: this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)',
-                backgroundColor: (this.BAND_COLORS[band] || 'rgba(128, 128, 128, 0.8)') + '20',
+                borderColor: color,
+                backgroundColor: color + '20',
                 tension: 0.4,
                 fill: false,
                 pointRadius: 3,

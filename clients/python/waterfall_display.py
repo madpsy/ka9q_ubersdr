@@ -812,6 +812,7 @@ def create_waterfall_window(parent_gui):
     spectrum.bands = parent_gui.bands  # Pass bands to spectrum display
     spectrum.set_frequency_callback(parent_gui.on_spectrum_frequency_click)
     spectrum.set_frequency_step_callback(parent_gui.on_spectrum_frequency_step)
+    spectrum.set_mode_callback(parent_gui.on_spectrum_mode_change)
     spectrum.set_step_size(parent_gui.get_step_size_hz())
     
     # Set scroll mode from parent GUI

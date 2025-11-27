@@ -90,6 +90,7 @@ class SpectrumDisplay:
         # Frequency change callback
         self.frequency_callback: Optional[Callable[[float], None]] = None
         self.frequency_step_callback: Optional[Callable[[int], None]] = None  # Callback for stepping frequency
+        self.mode_callback: Optional[Callable[[str], None]] = None  # Callback for mode changes
         
         # Drawing parameters - increased top margin for bookmark section
         self.bookmark_section_height = 20  # Height for bookmark markers
@@ -734,6 +735,10 @@ class SpectrumDisplay:
         if freq and self.frequency_callback:
             # Call the frequency callback with the bookmark frequency
             self.frequency_callback(float(freq))
+        
+        # Call the mode callback with the bookmark mode
+        if mode and self.mode_callback:
+            self.mode_callback(mode)
 
     def _draw_bandwidth_filter(self):
         """Draw bandwidth filter visualization with yellow lines and fill."""
@@ -863,7 +868,32 @@ class SpectrumDisplay:
         if self.total_bandwidth == 0:
             return
 
-        # Calculate clicked frequency
+        # Check if click is in bookmark section (above the spectrum graph)
+        bookmark_section_bottom = self.margin_top - 10  # Just above orange frequency label
+        if event.y < bookmark_section_bottom and self.bookmarks:
+            # Click is in bookmark area - check which bookmark was clicked
+            start_freq = self.center_freq - self.total_bandwidth / 2
+            end_freq = self.center_freq + self.total_bandwidth / 2
+
+            for bookmark in self.bookmarks:
+                freq = bookmark.get('frequency', 0)
+                # Skip bookmarks outside visible range
+                if freq < start_freq or freq > end_freq:
+                    continue
+
+                # Calculate bookmark x position
+                freq_offset = freq - start_freq
+                x = self.margin_left + (freq_offset / self.total_bandwidth) * self.graph_width
+
+                # Check if click is within bookmark bounds (±label_width/2)
+                name = bookmark.get('name', 'Unknown')
+                label_width = len(name) * 7 + 8
+                if abs(event.x - x) < label_width / 2:
+                    # Clicked on this bookmark - tune to it
+                    self._on_bookmark_click(bookmark)
+                    return
+
+        # Calculate clicked frequency (normal frequency tuning)
         x = event.x - self.margin_left
         if x < 0 or x > self.graph_width:
             return
@@ -1063,6 +1093,14 @@ class SpectrumDisplay:
             callback: Function to call with step direction (+1 for up, -1 for down)
         """
         self.frequency_step_callback = callback
+    
+    def set_mode_callback(self, callback: Callable[[str], None]):
+        """Set callback for mode changes from bookmark clicks.
+        
+        Args:
+            callback: Function to call with new mode (e.g., 'USB', 'LSB', 'CW')
+        """
+        self.mode_callback = callback
     
     def set_step_size(self, step_hz: int):
         """Set frequency step size for click-to-tune snapping.

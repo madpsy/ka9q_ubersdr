@@ -750,6 +750,7 @@ class RadioGUI:
             self.spectrum = SpectrumDisplay(spectrum_container, width=800, height=200, bookmarks=self.bookmarks)
             self.spectrum.set_frequency_callback(self.on_spectrum_frequency_click)
             self.spectrum.set_frequency_step_callback(self.on_spectrum_frequency_step)
+            self.spectrum.set_mode_callback(self.on_spectrum_mode_change)
 
             # Initialize spectrum with current bandwidth values
             try:
@@ -2472,6 +2473,31 @@ class RadioGUI:
                 self.apply_frequency()
         except ValueError:
             pass
+
+    def on_spectrum_mode_change(self, mode: str):
+        """Handle mode change from spectrum bookmark click.
+        
+        Args:
+            mode: Mode string from bookmark (e.g., 'USB', 'LSB', 'CW')
+        """
+        # Only change mode if not locked
+        if self.mode_lock_var.get():
+            return
+        
+        # Map mode names (bookmark might use different case)
+        mode_map = {
+            'USB': 'USB', 'LSB': 'LSB', 'AM': 'AM', 'SAM': 'SAM',
+            'CWU': 'CWU', 'CWL': 'CWL', 'FM': 'FM', 'NFM': 'NFM',
+            'IQ': 'IQ', 'IQ48': 'IQ48', 'IQ96': 'IQ96',
+            'IQ192': 'IQ192', 'IQ384': 'IQ384'
+        }
+        mapped_mode = mode_map.get(mode.upper(), 'USB')
+        self.mode_var.set(mapped_mode)
+        self.on_mode_changed()
+        
+        # Apply mode change if connected
+        if self.connected:
+            self.apply_mode()
 
     def on_scroll_mode_changed(self):
         """Handle scroll mode change (zoom vs pan)."""

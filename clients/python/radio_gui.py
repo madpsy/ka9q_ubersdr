@@ -198,6 +198,9 @@ class RadioGUI:
         self.band_state_poll_job = None
         self.last_band_state_update = 0
 
+        # Bookmarks
+        self.bookmarks: List[Dict] = []  # List of bookmark dictionaries
+
         # Recording state
         self.recording = False
         self.recording_start_time = None
@@ -250,6 +253,9 @@ class RadioGUI:
 
         # Auto-initialize MIDI controller if mappings exist (after UI is ready)
         self.root.after(100, self.auto_init_midi)
+
+        # Fetch bookmarks on startup (after UI is ready)
+        self.root.after(200, self.fetch_bookmarks)
 
         # Auto-connect if requested (after UI is ready)
         if self.config.get('auto_connect', False):
@@ -445,6 +451,21 @@ class RadioGUI:
             self.update_band_buttons(initial_freq_hz)
         except ValueError:
             pass  # Ignore if frequency is invalid
+
+        # Bookmarks dropdown (third row, below band buttons)
+        bookmark_frame = ttk.Frame(freq_frame)
+        bookmark_frame.grid(row=2, column=0, columnspan=8, sticky=tk.W, pady=(5, 0))
+
+        ttk.Label(bookmark_frame, text="Bookmarks:").pack(side=tk.LEFT, padx=(0, 5))
+
+        self.bookmark_var = tk.StringVar(value="")
+        self.bookmark_combo = ttk.Combobox(bookmark_frame, textvariable=self.bookmark_var,
+                                          state='readonly', width=30)
+        self.bookmark_combo.pack(side=tk.LEFT, padx=(0, 5))
+        self.bookmark_combo.bind('<<ComboboxSelected>>', lambda e: self.on_bookmark_selected())
+
+        # Initially disabled until bookmarks are loaded
+        self.bookmark_combo.config(state='disabled')
 
         freq_frame.columnconfigure(8, weight=1)
 
@@ -1316,8 +1337,107 @@ class RadioGUI:
             for band_name, button in self.band_buttons.items():
                 button.configure(style='Unknown.TButton')
 
-    def apply_frequency(self):
-        """Apply frequency change by sending tune message."""
+    def fetch_bookmarks(self):
+        """Fetch bookmarks from the server API."""
+        try:
+            # Get server URL
+            server = self.server_var.get()
+            use_tls = self.tls_var.get()
+
+            # Build API URL
+            if '://' in server:
+                # Full URL provided
+                base_url = server
+            else:
+                # Host:port format
+                protocol = 'https' if use_tls else 'http'
+                base_url = f"{protocol}://{server}"
+
+            api_url = f"{base_url}/api/bookmarks"
+
+            # Fetch bookmarks
+            response = requests.get(api_url, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+
+            if isinstance(data, list):
+                self.bookmarks = data
+                self.populate_bookmark_dropdown()
+                self.log_status(f"Loaded {len(self.bookmarks)} bookmark(s)")
+            else:
+                self.log_status("No bookmarks available")
+
+        except requests.exceptions.RequestException as e:
+            # Silently fail if bookmarks not available (server might not support it)
+            self.log_status(f"Bookmarks not available: {e}")
+            self.bookmarks = []
+        except Exception as e:
+            self.log_status(f"Error loading bookmarks: {e}")
+            self.bookmarks = []
+
+    def populate_bookmark_dropdown(self):
+        """Populate the bookmark dropdown with bookmark names."""
+        if not self.bookmarks:
+            self.bookmark_combo.config(state='disabled')
+            self.bookmark_combo['values'] = []
+            return
+
+        # Extract bookmark names
+        bookmark_names = [bookmark.get('name', 'Unnamed') for bookmark in self.bookmarks]
+
+        # Update dropdown
+        self.bookmark_combo['values'] = bookmark_names
+        self.bookmark_combo.config(state='readonly')
+
+    def on_bookmark_selected(self):
+        """Handle bookmark selection from dropdown."""
+        selected_name = self.bookmark_var.get()
+        if not selected_name:
+            return
+
+        # Find the selected bookmark
+        selected_bookmark = None
+        for bookmark in self.bookmarks:
+            if bookmark.get('name') == selected_name:
+                selected_bookmark = bookmark
+                break
+
+        if not selected_bookmark:
+            return
+
+        # Get frequency and mode from bookmark
+        frequency = selected_bookmark.get('frequency')
+        mode = selected_bookmark.get('mode', 'USB').upper()
+
+        if frequency:
+            # Set frequency
+            self.set_frequency_hz(int(frequency))
+
+            # Set mode if not locked
+            if not self.mode_lock_var.get():
+                # Map mode names (bookmark might use different case)
+                mode_map = {
+                    'USB': 'USB', 'LSB': 'LSB', 'AM': 'AM', 'SAM': 'SAM',
+                    'CWU': 'CWU', 'CWL': 'CWL', 'FM': 'FM', 'NFM': 'NFM',
+                    'IQ': 'IQ', 'IQ48': 'IQ48', 'IQ96': 'IQ96',
+                    'IQ192': 'IQ192', 'IQ384': 'IQ384'
+                }
+                mapped_mode = mode_map.get(mode, 'USB')
+                self.mode_var.set(mapped_mode)
+                self.on_mode_changed()
+
+            # Apply changes if connected (skip auto mode switching for bookmarks)
+            if self.connected:
+                self.apply_frequency(skip_auto_mode=True)
+
+            self.log_status(f"Tuned to bookmark: {selected_name} ({frequency/1e6:.6f} MHz, {mode})")
+
+    def apply_frequency(self, skip_auto_mode=False):
+        """Apply frequency change by sending tune message.
+
+        Args:
+            skip_auto_mode: If True, skip automatic mode switching based on frequency
+        """
         if not self.connected or not self.client:
             return
 
@@ -1341,7 +1461,8 @@ class RadioGUI:
 
             # Auto-select appropriate mode based on frequency (LSB < 10 MHz, USB >= 10 MHz)
             # Only auto-switch for SSB modes (USB/LSB) and if mode is not locked
-            if not self.mode_lock_var.get():
+            # Skip auto-switching when tuning from bookmarks (they have their own mode)
+            if not skip_auto_mode and not self.mode_lock_var.get():
                 current_mode = self.mode_var.get().upper()
                 if current_mode in ['USB', 'LSB']:
                     if freq_hz < 10000000 and current_mode != 'LSB':
@@ -3148,12 +3269,12 @@ class RadioGUI:
                             # Delay audio spectrum opening slightly
                             self.root.after(600, self.auto_open_audio_spectrum)
 
-                        # Auto-open CW spots window if enabled
+                        # Auto-open CW spots window if enabled (disabled by default)
                         # Add 2000ms delay (same as spectrum) before connecting DX cluster WebSocket
-                        if self.client and hasattr(self.client, 'server_description'):
-                            desc = self.client.server_description
-                            if CW_SPOTS_AVAILABLE and desc.get('cw_skimmer', False):
-                                self.root.after(2800, self.auto_open_cw_spots)
+                        # if self.client and hasattr(self.client, 'server_description'):
+                        #     desc = self.client.server_description
+                        #     if CW_SPOTS_AVAILABLE and desc.get('cw_skimmer', False):
+                        #         self.root.after(2800, self.auto_open_cw_spots)
 
                         # Start band state polling after connection is established
                         # Add delay to allow other connections to establish first

@@ -536,6 +536,16 @@ class SpectrumDisplay:
         band_y = 5
         band_height = 18  # Height of the colored band area
 
+        # Fill entire bookmark section with light grey to show gaps between bands
+        # Only drawn when bands exist (not when self.bands is empty)
+        self.canvas.create_rectangle(
+            self.margin_left, band_y,
+            self.margin_left + self.graph_width, band_y + band_height,
+            fill='#d3d3d3',  # Light grey
+            outline='',
+            stipple='gray50'  # Semi-transparent
+        )
+
         # Sort bands by width (widest first) so narrower bands are drawn on top
         sorted_bands = sorted(self.bands, key=lambda b: b['end'] - b['start'], reverse=True)
 

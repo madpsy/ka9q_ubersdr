@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"net"
@@ -36,7 +35,6 @@ type CWSkimmerSpot struct {
 type CWSkimmerClient struct {
 	config            *CWSkimmerConfig
 	conn              net.Conn
-	reader            *bufio.Reader
 	mu                sync.RWMutex
 	connected         bool
 	stopChan          chan struct{}
@@ -180,7 +178,6 @@ func (c *CWSkimmerClient) connect() error {
 
 	c.mu.Lock()
 	c.conn = conn
-	c.reader = bufio.NewReader(conn)
 	c.connected = true
 	c.lastActivityTime = time.Now()
 	c.mu.Unlock()
@@ -222,7 +219,6 @@ func (c *CWSkimmerClient) disconnect() {
 		c.conn.Close()
 		c.conn = nil
 	}
-	c.reader = nil
 	c.mu.Unlock()
 
 	log.Println("CW Skimmer: Disconnected")
@@ -332,25 +328,40 @@ func (c *CWSkimmerClient) handleConnection() {
 	}
 }
 
-// readLine reads a line from the connection
+// readLine reads a line from the connection with proper timeout handling
 func (c *CWSkimmerClient) readLine() (string, error) {
 	c.mu.RLock()
-	reader := c.reader
 	conn := c.conn
 	c.mu.RUnlock()
 
-	if reader == nil || conn == nil {
+	if conn == nil {
 		return "", fmt.Errorf("not connected")
 	}
 
-	// Read until \n (which handles both \n and \r\n)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
+	// Read one byte at a time until we hit \n
+	// This respects the socket read deadline set in handleConnection
+	var line []byte
+	buf := make([]byte, 1)
+
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			return "", err
+		}
+
+		if n > 0 {
+			if buf[0] == '\n' {
+				// Found newline, return the line
+				break
+			}
+			// Skip \r characters (handle \r\n line endings)
+			if buf[0] != '\r' {
+				line = append(line, buf[0])
+			}
+		}
 	}
 
-	// Trim both \r and \n and any spaces
-	return strings.TrimSpace(line), nil
+	return strings.TrimSpace(string(line)), nil
 }
 
 // writeLine writes a line to the connection

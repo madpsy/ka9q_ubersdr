@@ -1055,9 +1055,21 @@ class RadioGUI:
         return 1000  # Default
 
     def on_step_size_changed(self):
-        """Handle step size change - update spectrum display."""
+        """Handle step size change - update spectrum and waterfall displays."""
+        step_hz = self.get_step_size_hz()
+
         if self.spectrum:
-            self.spectrum.set_step_size(self.get_step_size_hz())
+            self.spectrum.set_step_size(step_hz)
+
+        # Update waterfall display if open
+        if self.waterfall_display:
+            self.waterfall_display.set_step_size(step_hz)
+
+        # Update waterfall window's spectrum and waterfall if open
+        if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
+            self.waterfall_spectrum.set_step_size(step_hz)
+        if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
+            self.waterfall_waterfall.set_step_size(step_hz)
 
     def step_frequency_up(self):
         """Step frequency up by the selected step size, rounding to step boundaries."""

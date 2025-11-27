@@ -864,7 +864,7 @@ class RadioClient:
             async with websockets.connect(
                 url,
                 ping_interval=None,
-                extra_headers={'User-Agent': 'UberSDR Client 1.0 (python)'}
+                additional_headers={'User-Agent': 'UberSDR Client 1.0 (python)'}
             ) as websocket:
                 # Store websocket reference for GUI access
                 self.ws = websocket

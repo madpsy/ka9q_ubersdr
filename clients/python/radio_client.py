@@ -212,6 +212,11 @@ class RadioClient:
                 sys.exit(1)
             self._init_audio_filter()
             print(f"Audio bandpass filter enabled ({audio_filter_low:.0f}-{audio_filter_high:.0f} Hz)", file=sys.stderr)
+        
+        # 10-band equalizer
+        self.eq_enabled = False
+        self.eq_band_gains = {}  # Dictionary of {frequency: gain_db}
+        self.eq_filters = {}     # Dictionary of {frequency: (taps, zi)}
     
     def _init_audio_filter(self):
         """Initialize audio bandpass filter using FIR design."""
@@ -262,6 +267,47 @@ class RadioClient:
 
         if self.audio_filter_enabled and SCIPY_AVAILABLE:
             self._init_audio_filter()
+
+    def update_eq(self, band_gains: dict):
+        """Update EQ band gains and reinitialize filters.
+
+        Args:
+            band_gains: Dictionary of {frequency: gain_db}
+        """
+        if not SCIPY_AVAILABLE:
+            return
+
+        self.eq_band_gains = band_gains.copy()
+        self.eq_filters = {}
+
+        # Create a peaking filter for each band
+        for freq, gain_db in band_gains.items():
+            if abs(gain_db) < 0.1:
+                # Skip bands with negligible gain
+                continue
+
+            try:
+                # Design a peaking EQ filter using IIR (biquad)
+                # Q factor of 1.0 gives reasonable bandwidth
+                Q = 1.0
+                
+                # Convert gain from dB to linear
+                gain_linear = 10 ** (gain_db / 20.0)
+                
+                # Design peaking filter
+                b, a = scipy_signal.iirpeak(freq, Q, fs=self.sample_rate)
+                
+                # Apply gain by scaling the numerator
+                b = b * gain_linear
+                
+                # Initialize filter state
+                zi = scipy_signal.lfilter_zi(b, a) * 0.0
+                
+                self.eq_filters[freq] = (b, a, zi)
+            except Exception as e:
+                print(f"Warning: Failed to create EQ filter for {freq} Hz: {e}", file=sys.stderr)
+
+        print(f"EQ updated: {len(self.eq_filters)} active bands", file=sys.stderr)
 
     def _log(self, message: str):
         """Log a message to stderr and optionally to status callback for GUI."""
@@ -451,6 +497,22 @@ class RadioClient:
                 # Disable filter on error to avoid repeated failures
                 print(f"Warning: Audio filter error: {e}", file=sys.stderr)
                 self.audio_filter_enabled = False
+
+        # Apply 10-band EQ if enabled (AFTER audio filter, BEFORE recording callback)
+        if self.eq_enabled and self.eq_filters and SCIPY_AVAILABLE:
+            try:
+                # Apply each EQ band filter in sequence
+                for freq, (b, a, zi) in list(self.eq_filters.items()):
+                    if zi is not None:
+                        audio_float, new_zi = scipy_signal.lfilter(b, a, audio_float, zi=zi)
+                        # Update filter state
+                        self.eq_filters[freq] = (b, a, new_zi)
+                    else:
+                        audio_float = scipy_signal.lfilter(b, a, audio_float)
+            except Exception as e:
+                # Disable EQ on error to avoid repeated failures
+                print(f"Warning: EQ error: {e}", file=sys.stderr)
+                self.eq_enabled = False
 
         # Send mono audio to recording callback AFTER filtering but BEFORE stereo conversion
         # This captures the filtered mono signal (if filter is enabled) before it's duplicated to stereo

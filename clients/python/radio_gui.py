@@ -71,6 +71,14 @@ except ImportError:
     SPACE_WEATHER_AVAILABLE = False
     print("Warning: Space weather display not available (missing dependencies)")
 
+# Import EQ display
+try:
+    from eq_display import create_eq_window
+    EQ_AVAILABLE = True
+except ImportError:
+    EQ_AVAILABLE = False
+    print("Warning: EQ display not available (missing dependencies)")
+
 # Import shared WebSocket manager
 try:
     from dxcluster_websocket import DXClusterWebSocket
@@ -240,6 +248,10 @@ class RadioGUI:
         # Space weather display (separate window)
         self.space_weather_window = None
         self.space_weather_display = None
+
+        # EQ display (separate window)
+        self.eq_window = None
+        self.eq_display = None
 
         # MIDI controller (separate window)
         self.midi_window = None
@@ -649,6 +661,14 @@ class RadioGUI:
         self.right_check = ttk.Checkbutton(audio_frame, text="Right", variable=self.channel_right_var,
                                       command=self.update_channels)
         self.right_check.grid(row=2, column=2, sticky=tk.W, pady=(5, 0))
+
+        # EQ button (same row as channels)
+        if EQ_AVAILABLE:
+            self.eq_btn = ttk.Button(audio_frame, text="EQ", width=8,
+                                     command=self.open_eq_window)
+            self.eq_btn.grid(row=2, column=3, sticky=tk.W, padx=(20, 0), pady=(5, 0))
+        else:
+            self.eq_btn = None
 
         # NR2 Noise Reduction (row 3) - use a frame to avoid column weight issues
         nr2_container = ttk.Frame(audio_frame)
@@ -2763,6 +2783,45 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open space weather: {e}")
             self.log_status(f"ERROR: Failed to open space weather - {e}")
 
+    def open_eq_window(self):
+        """Open the 10-band equalizer window."""
+        # Check if window exists and is visible
+        if self.eq_display and self.eq_display.window and self.eq_display.window.winfo_exists():
+            self.eq_display.show()  # Bring to front
+            return
+
+        try:
+            from eq_display import create_eq_window
+
+            # Create EQ window with callback
+            self.eq_display = create_eq_window(self.root, self.on_eq_changed)
+            self.eq_window = self.eq_display.window
+
+            self.log_status("EQ window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open EQ: {e}")
+            self.log_status(f"ERROR: Failed to open EQ - {e}")
+
+    def on_eq_changed(self, band_gains: dict):
+        """Handle EQ changes from the EQ window.
+
+        Args:
+            band_gains: Dictionary of {frequency: gain_db} or None if disabled
+        """
+        if not self.client:
+            return
+
+        if band_gains is None:
+            # EQ disabled
+            self.client.eq_enabled = False
+            self.log_status("EQ disabled")
+        else:
+            # EQ enabled with new gains
+            self.client.eq_enabled = True
+            self.client.update_eq(band_gains)
+            self.log_status(f"EQ enabled: {len(band_gains)} bands")
+
     def open_midi_window(self):
         """Open MIDI controller configuration window."""
         # Check if controller exists but window is hidden
@@ -3262,6 +3321,13 @@ class RadioGUI:
             self.space_weather_window = None
             self.space_weather_display = None
             self.log_status("Space weather window closed")
+
+        # Close EQ window
+        if self.eq_window and self.eq_window.winfo_exists():
+            self.eq_window.destroy()
+            self.eq_window = None
+            self.eq_display = None
+            self.log_status("EQ window closed")
 
         # Clean up shared DX cluster WebSocket manager
         # Note: Actual disconnection happens automatically when last callback is removed
@@ -3964,6 +4030,10 @@ class RadioGUI:
         # Close space weather window if open
         if self.space_weather_window and self.space_weather_window.winfo_exists():
             self.space_weather_window.destroy()
+
+        # Close EQ window if open
+        if self.eq_window and self.eq_window.winfo_exists():
+            self.eq_window.destroy()
 
         # Disconnect MIDI controller if active
         if self.midi_controller:

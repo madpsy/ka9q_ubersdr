@@ -40,12 +40,9 @@ type CWSkimmerClient struct {
 	mu                sync.RWMutex
 	connected         bool
 	stopChan          chan struct{}
-	reconnectTimer    *time.Timer
-	keepaliveTimer    *time.Timer
-	inactivityTimer   *time.Timer
-	lastActivityTime  time.Time
-	lastPingTime      time.Time
-	lastSpotTime      time.Time // Time when last actual CW spot was received
+	keepaliveDone     chan struct{} // Signal to stop keepalive goroutine
+	lastActivityTime  time.Time     // For monitoring only
+	lastSpotTime      time.Time     // Time when last actual CW spot was received
 	spotHandlers      []func(CWSkimmerSpot)
 	messageHandlers   []func(string)
 	spotsLogger       *CWSkimmerSpotsLogger
@@ -119,20 +116,10 @@ func (c *CWSkimmerClient) Stop() {
 	close(c.stopChan)
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.reconnectTimer != nil {
-		c.reconnectTimer.Stop()
-	}
-	if c.keepaliveTimer != nil {
-		c.keepaliveTimer.Stop()
-	}
-	if c.inactivityTimer != nil {
-		c.inactivityTimer.Stop()
-	}
 	if c.conn != nil {
 		c.conn.Close()
 	}
+	c.mu.Unlock()
 }
 
 // IsConnected returns whether the client is currently connected
@@ -219,18 +206,17 @@ func (c *CWSkimmerClient) connect() error {
 	}
 }
 
-// disconnect closes the connection
+// disconnect closes the connection and stops keepalive
 func (c *CWSkimmerClient) disconnect() {
 	c.mu.Lock()
 	c.connected = false
-	if c.keepaliveTimer != nil {
-		c.keepaliveTimer.Stop()
-		c.keepaliveTimer = nil
+
+	// Signal keepalive goroutine to stop
+	if c.keepaliveDone != nil {
+		close(c.keepaliveDone)
+		c.keepaliveDone = nil
 	}
-	if c.inactivityTimer != nil {
-		c.inactivityTimer.Stop()
-		c.inactivityTimer = nil
-	}
+
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
@@ -299,19 +285,14 @@ func (c *CWSkimmerClient) login() error {
 
 	log.Println("CW Skimmer: Login completed")
 
-	// Clear read deadline for normal operation
-	conn.SetReadDeadline(time.Time{})
-
 	// Update last activity time
 	c.mu.Lock()
 	c.lastActivityTime = time.Now()
+	c.keepaliveDone = make(chan struct{})
 	c.mu.Unlock()
 
-	// Start keepalive timer (will send first ping in 60 seconds)
-	c.startKeepalive()
-
-	// Don't start inactivity monitor yet - it will be started after first ping is sent
-	// This prevents false timeout during initial connection when no data is expected
+	// Start keepalive goroutine
+	go c.keepaliveLoop()
 
 	return nil
 }
@@ -319,9 +300,24 @@ func (c *CWSkimmerClient) login() error {
 // handleConnection reads and processes messages from the skimmer
 func (c *CWSkimmerClient) handleConnection() {
 	for {
+		// Set read deadline: 2x keepalive interval
+		c.mu.RLock()
+		conn := c.conn
+		keepaliveDelay := c.config.KeepAliveDelay
+		c.mu.RUnlock()
+
+		if conn != nil {
+			readTimeout := time.Duration(keepaliveDelay*2) * time.Second
+			conn.SetReadDeadline(time.Now().Add(readTimeout))
+		}
+
 		line, err := c.readLine()
 		if err != nil {
-			log.Printf("CW Skimmer: Read error: %v", err)
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				log.Printf("CW Skimmer: Read timeout (no data for %ds), reconnecting", keepaliveDelay*2)
+			} else {
+				log.Printf("CW Skimmer: Read error: %v", err)
+			}
 			c.disconnect()
 			return
 		}
@@ -331,8 +327,6 @@ func (c *CWSkimmerClient) handleConnection() {
 		c.lastActivityTime = time.Now()
 		c.mu.Unlock()
 
-		// Process the line - processLine() will handle timer management for ping responses
-		// For spot data, we don't need to reset the timer as spots indicate an active connection
 		c.processLine(line)
 	}
 }
@@ -375,21 +369,9 @@ func (c *CWSkimmerClient) writeLine(line string) error {
 
 // processLine processes a line from the skimmer
 func (c *CWSkimmerClient) processLine(line string) {
-	// Check for ping response
+	// Check for ping response (server responds with "Unknown command: "PING"")
 	if strings.Contains(line, "Unknown command") && strings.Contains(line, "PING") {
-		c.mu.Lock()
-		pingTime := c.lastPingTime
-		c.lastActivityTime = time.Now()
-		// Don't stop the inactivity timer here - let it expire naturally
-		// The checkInactivity() function will see the updated lastActivityTime
-		// and won't trigger a disconnect. This prevents race conditions where
-		// the timer callback is already queued when we try to stop it.
-		c.mu.Unlock()
-
-		if !pingTime.IsZero() {
-			responseTime := time.Since(pingTime)
-			log.Printf("CW Skimmer: Ping response received in %v", responseTime)
-		}
+		// Ping response received - connection is alive
 		return
 	}
 
@@ -572,95 +554,35 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 	}
 }
 
-// startKeepalive starts the keepalive timer (sends ping every 60 seconds)
-func (c *CWSkimmerClient) startKeepalive() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// keepaliveLoop sends periodic pings to keep the connection alive
+func (c *CWSkimmerClient) keepaliveLoop() {
+	c.mu.RLock()
+	keepaliveDelay := time.Duration(c.config.KeepAliveDelay) * time.Second
+	done := c.keepaliveDone
+	c.mu.RUnlock()
 
-	if c.keepaliveTimer != nil {
-		c.keepaliveTimer.Stop()
-	}
+	ticker := time.NewTicker(keepaliveDelay)
+	defer ticker.Stop()
 
-	// Send ping every 60 seconds instead of using config value
-	c.keepaliveTimer = time.AfterFunc(60*time.Second, func() {
-		c.sendKeepalive()
-	})
-}
+	for {
+		select {
+		case <-ticker.C:
+			if !c.IsConnected() {
+				return
+			}
 
-// sendKeepalive sends a ping command and expects "Unknown command" response
-func (c *CWSkimmerClient) sendKeepalive() {
-	if !c.IsConnected() {
-		return
-	}
+			log.Println("CW Skimmer: Sending ping")
 
-	// Record ping time
-	c.mu.Lock()
-	c.lastPingTime = time.Now()
-	c.mu.Unlock()
+			// Send "ping" command - server will respond with "Unknown command: "PING""
+			if err := c.writeLine("ping"); err != nil {
+				log.Printf("CW Skimmer: Keepalive write failed: %v", err)
+				return
+			}
 
-	log.Println("CW Skimmer: Sending ping")
-
-	// Send "ping" command - server will respond with "Unknown command: "PING""
-	if err := c.writeLine("ping"); err != nil {
-		log.Printf("CW Skimmer: Keepalive write failed: %v", err)
-		c.disconnect()
-		return
-	}
-
-	// Always reset/start the inactivity monitor when sending a ping
-	// This ensures we have exactly one active timer monitoring for the response
-	c.resetInactivityTimer()
-
-	// Schedule next keepalive
-	c.startKeepalive()
-}
-
-// startInactivityMonitor starts the inactivity monitoring timer
-// Expects response to ping within 2 seconds (ping sent every 60s)
-// DEPRECATED: Use resetInactivityTimer() instead for consistency
-func (c *CWSkimmerClient) startInactivityMonitor() {
-	c.resetInactivityTimer()
-}
-
-// resetInactivityTimer resets the inactivity timer
-// This function ensures we always have exactly one active timer by stopping any existing timer
-// before creating a new one. This prevents stale timers from firing.
-func (c *CWSkimmerClient) resetInactivityTimer() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Stop any existing timer - this is critical to prevent stale timers from firing
-	if c.inactivityTimer != nil {
-		c.inactivityTimer.Stop()
-		// Note: timer.Stop() doesn't guarantee the callback won't execute if already queued,
-		// but by immediately creating a new timer and updating the reference, we ensure
-		// that checkInactivity() will see the most recent lastActivityTime
-	}
-
-	// Create new 2 second inactivity timeout
-	c.inactivityTimer = time.AfterFunc(2*time.Second, func() {
-		c.checkInactivity()
-	})
-}
-
-// checkInactivity checks if the connection has been inactive and triggers reconnection
-func (c *CWSkimmerClient) checkInactivity() {
-	c.mu.Lock()
-	lastActivity := c.lastActivityTime
-	connected := c.connected
-	c.mu.Unlock()
-
-	if !connected {
-		return
-	}
-
-	// Check if we've been inactive for more than 2 seconds
-	inactiveDuration := time.Since(lastActivity)
-	if inactiveDuration >= 2*time.Second {
-		log.Printf("CW Skimmer: No activity for %v, reconnecting", inactiveDuration)
-		// Use disconnect() to properly clean up timers and close connection
-		// This will cause the read in handleConnection to fail and exit
-		c.disconnect()
+		case <-done:
+			log.Println("CW Skimmer: Keepalive loop stopped")
+			return
+		}
 	}
 }
 

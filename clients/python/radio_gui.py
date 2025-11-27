@@ -341,12 +341,39 @@ class RadioGUI:
         self.cancel_btn.grid(row=0, column=4)
         self.cancel_btn.grid_remove()  # Hide initially
 
-        # Receiver name label (second row, initially hidden)
+        # Receiver info label (second row, initially hidden) - shows name, version, and map link
         ttk.Label(conn_frame, text="Receiver:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
+        
+        # Create a frame to hold all receiver info on one line
+        receiver_info_frame = ttk.Frame(conn_frame)
+        receiver_info_frame.grid(row=1, column=1, columnspan=3, sticky=tk.W)
+        
+        # Receiver name (truncated to 50 chars)
         self.receiver_name_var = tk.StringVar(value="")
-        self.receiver_name_label = ttk.Label(conn_frame, textvariable=self.receiver_name_var, foreground='blue')
-        self.receiver_name_label.grid(row=1, column=1, columnspan=2, sticky=tk.W)
-        self.receiver_name_label.grid_remove()  # Hide initially until connected
+        self.receiver_name_label = ttk.Label(receiver_info_frame, textvariable=self.receiver_name_var, foreground='blue')
+        self.receiver_name_label.pack(side=tk.LEFT)
+        
+        # Delimiter
+        self.receiver_delimiter1 = ttk.Label(receiver_info_frame, text=" | ", foreground='gray')
+        self.receiver_delimiter1.pack(side=tk.LEFT)
+        
+        # Version
+        self.receiver_version_var = tk.StringVar(value="")
+        self.receiver_version_label = ttk.Label(receiver_info_frame, textvariable=self.receiver_version_var, foreground='blue')
+        self.receiver_version_label.pack(side=tk.LEFT)
+        
+        # Delimiter
+        self.receiver_delimiter2 = ttk.Label(receiver_info_frame, text=" | ", foreground='gray')
+        self.receiver_delimiter2.pack(side=tk.LEFT)
+        
+        # Map link (clickable)
+        self.receiver_map_link = ttk.Label(receiver_info_frame, text="Open Map", foreground='blue', cursor='hand2')
+        self.receiver_map_link.pack(side=tk.LEFT)
+        self.receiver_map_link.bind('<Button-1>', self.open_receiver_map)
+        
+        # Hide entire frame initially until connected
+        receiver_info_frame.grid_remove()
+        self.receiver_info_frame = receiver_info_frame
 
         # Session timer label (same row as receiver, right side)
         self.session_timer_var = tk.StringVar(value="")
@@ -3489,9 +3516,10 @@ class RadioGUI:
         self.apply_freq_btn.state(['disabled'])
         self.rec_btn.state(['disabled'])
 
-        # Hide receiver name and session timer
-        self.receiver_name_label.grid_remove()
+        # Hide receiver info and session timer
+        self.receiver_info_frame.grid_remove()
         self.receiver_name_var.set("")
+        self.receiver_version_var.set("")
         self.stop_session_timer()
 
         # Hide spots buttons
@@ -3579,13 +3607,51 @@ class RadioGUI:
                         if "✓" not in msg:  # Don't duplicate success message
                             self.log_status("✓ Successfully connected!")
 
-                        # Update receiver name and session timer
+                        # Update receiver info (name, version, map link) and session timer
                         if self.client and hasattr(self.client, 'server_description'):
                             desc = self.client.server_description
+                            
+                            # Get receiver name and truncate to 50 chars
                             receiver_name = desc.get('receiver', {}).get('name', '')
-                            if receiver_name:
-                                self.receiver_name_var.set(receiver_name)
-                                self.receiver_name_label.grid()  # Show receiver name
+                            if receiver_name and len(receiver_name) > 50:
+                                receiver_name = receiver_name[:47] + '...'
+                            
+                            # Get version from root of JSON
+                            version = desc.get('version', '')
+                            
+                            # Get public_url from receiver object in JSON
+                            public_url = desc.get('receiver', {}).get('public_url', '')
+                            
+                            # Get GPS coordinates
+                            gps = desc.get('receiver', {}).get('gps', {})
+                            has_gps = gps.get('lat') is not None and gps.get('lon') is not None
+                            
+                            # Update display if we have any info
+                            if receiver_name or version or has_gps:
+                                if receiver_name:
+                                    self.receiver_name_var.set(receiver_name)
+                                    
+                                    # Make receiver name clickable if public_url is not default
+                                    if public_url and public_url != 'https://example.com':
+                                        self.receiver_name_label.config(foreground='blue', cursor='hand2')
+                                        self.receiver_name_label.bind('<Button-1>', self.open_receiver_url)
+                                    else:
+                                        self.receiver_name_label.config(foreground='black', cursor='')
+                                        self.receiver_name_label.unbind('<Button-1>')
+                                
+                                if version:
+                                    self.receiver_version_var.set(f"v{version}")
+                                
+                                # Show/hide map link based on GPS availability
+                                if has_gps:
+                                    self.receiver_map_link.pack(side=tk.LEFT)
+                                    self.receiver_delimiter2.pack(side=tk.LEFT, before=self.receiver_map_link)
+                                else:
+                                    self.receiver_map_link.pack_forget()
+                                    self.receiver_delimiter2.pack_forget()
+                                
+                                # Show the receiver info frame
+                                self.receiver_info_frame.grid()
 
                         # Check bypassed status and show/hide second row of mode buttons
                         if self.client and hasattr(self.client, 'bypassed'):
@@ -4131,6 +4197,50 @@ class RadioGUI:
         # Hide the timer label
         self.session_timer_label.grid_remove()
         self.session_timer_var.set("")
+
+    def open_receiver_url(self, event=None):
+        """Open the receiver's public URL in default browser."""
+        if not self.client or not hasattr(self.client, 'server_description'):
+            return
+
+        desc = self.client.server_description
+        public_url = desc.get('receiver', {}).get('public_url', '')
+
+        if not public_url or public_url == 'https://example.com':
+            return
+
+        # Open URL in default browser
+        import webbrowser
+        try:
+            webbrowser.open(public_url)
+            self.log_status(f"Opened receiver URL: {public_url}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open URL: {e}")
+            self.log_status(f"ERROR: Failed to open URL - {e}")
+
+    def open_receiver_map(self, event=None):
+        """Open Google Maps with receiver GPS coordinates."""
+        if not self.client or not hasattr(self.client, 'server_description'):
+            return
+
+        desc = self.client.server_description
+        gps = desc.get('receiver', {}).get('gps', {})
+        lat = gps.get('lat')
+        lon = gps.get('lon')
+
+        if lat is None or lon is None:
+            messagebox.showinfo("No GPS Data", "GPS coordinates not available for this receiver")
+            return
+
+        # Open Google Maps in default browser
+        import webbrowser
+        maps_url = f"https://www.google.com/maps?q={lat},{lon}"
+        try:
+            webbrowser.open(maps_url)
+            self.log_status(f"Opened map at {lat}, {lon}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open map: {e}")
+            self.log_status(f"ERROR: Failed to open map - {e}")
 
     def on_closing(self):
         """Handle window close event."""

@@ -100,6 +100,8 @@ class AudioSpectrumDisplay:
         # Mouse interaction
         self.canvas.bind('<Motion>', self.on_motion)
         self.canvas.bind('<Button-1>', self.on_click)  # Left click to toggle filter
+        # Window resize handling
+        self.canvas.bind('<Configure>', self.on_resize)
         self.tooltip_id = None
         self.tooltip_bg_id = None  # Track background rectangle
         self.cursor_line_id = None
@@ -738,6 +740,55 @@ class AudioSpectrumDisplay:
                 self.canvas.delete(self.cursor_line_id)
                 self.cursor_line_id = None
             return
+    def on_resize(self, event):
+        """Handle canvas resize event.
+
+        Args:
+            event: Configure event with new width and height
+        """
+        old_width = self.graph_width
+        old_height = self.waterfall_height
+
+        # Update dimensions
+        self.width = event.width
+        self.height = event.height
+        self.spectrum_height = 150  # Keep spectrum height constant
+        self.waterfall_height = self.height - self.margin_top - self.margin_bottom - self.spectrum_height - 10
+        self.graph_width = self.width - self.margin_left - self.margin_right
+
+        # Resize waterfall array if dimensions changed
+        if old_width != self.graph_width or old_height != self.waterfall_height:
+            # Create new array with new dimensions
+            new_array = np.zeros((self.waterfall_height, self.graph_width, 3), dtype=np.uint8)
+
+            # If we have existing data, scale it to fit new dimensions
+            if self.waterfall_array.size > 0:
+                try:
+                    from scipy.ndimage import zoom
+                    scale_y = self.waterfall_height / old_height if old_height > 0 else 1
+                    scale_x = self.graph_width / old_width if old_width > 0 else 1
+                    new_array = zoom(self.waterfall_array, (scale_y, scale_x, 1), order=1).astype(np.uint8)
+                except ImportError:
+                    # If scipy is not available, use simple numpy resize
+                    # This is less smooth but works without scipy
+                    if old_height > 0 and old_width > 0:
+                        # Simple nearest-neighbor resize
+                        for y in range(self.waterfall_height):
+                            old_y = int(y * old_height / self.waterfall_height)
+                            for x in range(self.graph_width):
+                                old_x = int(x * old_width / self.graph_width)
+                                if old_y < old_height and old_x < old_width:
+                                    new_array[y, x] = self.waterfall_array[old_y, old_x]
+
+            self.waterfall_array = new_array
+
+            # Update history size
+            self.max_history = self.waterfall_height
+
+        # Redraw display with new dimensions
+        if self.spectrum_data is not None:
+            self._draw_display()
+
         
         self._update_tooltip_at_position(event.x, event.y)
     

@@ -99,6 +99,8 @@ class SpectrumDisplay:
         self.canvas.bind('<Button-4>', self.on_scroll_up)  # Linux scroll up
         self.canvas.bind('<Button-5>', self.on_scroll_down)  # Linux scroll down
         self.canvas.bind('<MouseWheel>', self.on_mousewheel)  # Windows/Mac
+        # Window resize handling
+        self.canvas.bind('<Configure>', self.on_resize)
         
         # Tooltip and cursor
         self.tooltip_id = None
@@ -616,6 +618,22 @@ class SpectrumDisplay:
             # event.delta is positive for scroll up, negative for scroll down
             direction = 1 if event.delta > 0 else -1
             self.frequency_step_callback(direction)
+
+    def on_resize(self, event):
+        """Handle canvas resize event.
+
+        Args:
+            event: Configure event with new width and height
+        """
+        # Update dimensions
+        self.width = event.width
+        self.height = event.height
+        self.graph_height = self.height - self.margin_top - self.margin_bottom
+        self.graph_width = self.width - self.margin_left - self.margin_right
+
+        # Redraw spectrum with new dimensions if we have data
+        if self.spectrum_data is not None:
+            self._draw_spectrum()
     
     def on_motion(self, event):
         """Handle mouse motion for tooltip.

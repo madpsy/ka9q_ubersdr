@@ -433,6 +433,9 @@ class RadioClient:
                 stderr=asyncio.subprocess.DEVNULL
             )
             print(f"PipeWire output started (sample rate: {self.sample_rate} Hz, channels: {output_channels})", file=sys.stderr)
+            # Only show "Loading GUI" message when GUI is active (status_callback is set)
+            if self.status_callback:
+                print("Loading GUI (may take a moment)...", file=sys.stderr)
         except FileNotFoundError:
             print("Error: pw-play not found. Please install pipewire-utils.", file=sys.stderr)
             sys.exit(1)

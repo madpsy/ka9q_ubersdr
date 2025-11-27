@@ -312,8 +312,23 @@ class CWMetricsDashboard {
             });
 
             if (this.weekChart) {
+                // Preserve visibility state before updating
+                const visibilityState = this.weekChart.data.datasets.map((dataset, index) => {
+                    const meta = this.weekChart.getDatasetMeta(index);
+                    return meta.hidden;
+                });
+
                 this.weekChart.data.labels = labels;
                 this.weekChart.data.datasets = datasets;
+
+                // Restore visibility state after updating
+                this.weekChart.data.datasets.forEach((dataset, index) => {
+                    if (index < visibilityState.length) {
+                        const meta = this.weekChart.getDatasetMeta(index);
+                        meta.hidden = visibilityState[index];
+                    }
+                });
+
                 this.weekChart.update('none');
             } else {
                 const ctx = document.getElementById('week-chart').getContext('2d');
@@ -377,8 +392,23 @@ class CWMetricsDashboard {
             });
 
             if (this.monthChart) {
+                // Preserve visibility state before updating
+                const visibilityState = this.monthChart.data.datasets.map((dataset, index) => {
+                    const meta = this.monthChart.getDatasetMeta(index);
+                    return meta.hidden;
+                });
+
                 this.monthChart.data.labels = labels;
                 this.monthChart.data.datasets = datasets;
+
+                // Restore visibility state after updating
+                this.monthChart.data.datasets.forEach((dataset, index) => {
+                    if (index < visibilityState.length) {
+                        const meta = this.monthChart.getDatasetMeta(index);
+                        meta.hidden = visibilityState[index];
+                    }
+                });
+
                 this.monthChart.update('none');
             } else {
                 const ctx = document.getElementById('month-chart').getContext('2d');
@@ -465,8 +495,23 @@ class CWMetricsDashboard {
             });
 
             if (this.yearChart) {
+                // Preserve visibility state before updating
+                const visibilityState = this.yearChart.data.datasets.map((dataset, index) => {
+                    const meta = this.yearChart.getDatasetMeta(index);
+                    return meta.hidden;
+                });
+
                 this.yearChart.data.labels = monthLabels;
                 this.yearChart.data.datasets = datasets;
+
+                // Restore visibility state after updating
+                this.yearChart.data.datasets.forEach((dataset, index) => {
+                    if (index < visibilityState.length) {
+                        const meta = this.yearChart.getDatasetMeta(index);
+                        meta.hidden = visibilityState[index];
+                    }
+                });
+
                 this.yearChart.update('none');
             } else {
                 const ctx = document.getElementById('year-chart').getContext('2d');
@@ -866,9 +911,32 @@ class CWMetricsDashboard {
             }
         });
     }
+
+    /**
+     * Toggle all datasets in a chart on or off
+     * @param {string} chartName - Name of the chart property (e.g., 'weekChart', 'monthChart')
+     * @param {boolean} visible - true to show all, false to hide all
+     */
+    toggleAllDatasets(chartName, visible) {
+        const chart = this[chartName];
+        if (!chart) {
+            console.error(`Chart ${chartName} not found`);
+            return;
+        }
+
+        chart.data.datasets.forEach((dataset, index) => {
+            const meta = chart.getDatasetMeta(index);
+            meta.hidden = !visible;
+        });
+
+        chart.update();
+    }
 }
+
+// Global dashboard instance for button access
+let dashboard = null;
 
 // Initialize when DOM is ready
 document.addEventListener("DOMContentLoaded", () => {
-    new CWMetricsDashboard();
+    dashboard = new CWMetricsDashboard();
 });

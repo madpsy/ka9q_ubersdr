@@ -717,11 +717,24 @@ def create_waterfall_window(parent_gui):
                                   cursor='hand2')
     signal_meter_label.place(x=5, y=15, anchor=tk.W)
     
-    # Signal meter mode indicator (left side, below signal meter)
-    signal_meter_mode_label = tk.Label(info_frame, text="(click to toggle)",
-                                       bg='#000000', fg='#666666',
-                                       font=('monospace', 8))
-    signal_meter_mode_label.place(x=5, y=35, anchor=tk.W)
+    # Zoom buttons (left side, below signal meter)
+    zoom_out_btn = tk.Button(info_frame, text="−",
+                             bg='#333333', fg='white',
+                             font=('monospace', 9, 'bold'),
+                             width=2,
+                             relief=tk.RAISED, bd=1,
+                             cursor='hand2',
+                             padx=0, pady=0)
+    zoom_out_btn.place(x=5, y=35, anchor=tk.W)
+
+    zoom_in_btn = tk.Button(info_frame, text="+",
+                            bg='#333333', fg='white',
+                            font=('monospace', 9, 'bold'),
+                            width=2,
+                            relief=tk.RAISED, bd=1,
+                            cursor='hand2',
+                            padx=0, pady=0)
+    zoom_in_btn.place(x=30, y=35, anchor=tk.W)
     
     # Scroll mode selector (between signal meter and title) - stacked vertically
     # Create frame for radio buttons to stack them vertically
@@ -805,7 +818,18 @@ def create_waterfall_window(parent_gui):
         print(f"Signal meter mode: {mode_text}")
     
     signal_meter_label.bind('<Button-1>', toggle_signal_meter_mode)
-    signal_meter_mode_label.bind('<Button-1>', toggle_signal_meter_mode)
+
+    # Wire up zoom button callbacks - call zoom methods directly
+    def zoom_in_click():
+        """Zoom in."""
+        spectrum.zoom_in()
+
+    def zoom_out_click():
+        """Zoom out."""
+        spectrum.zoom_out()
+
+    zoom_in_btn.config(command=zoom_in_click)
+    zoom_out_btn.config(command=zoom_out_click)
     
     # Create NEW spectrum display in this window with bookmarks
     spectrum = SpectrumDisplay(container, width=800, height=200, click_tune_var=click_tune_var, center_tune_var=center_tune_var, bookmarks=parent_gui.bookmarks)

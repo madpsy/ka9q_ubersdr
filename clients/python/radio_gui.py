@@ -201,6 +201,9 @@ class RadioGUI:
         # Bookmarks
         self.bookmarks: List[Dict] = []  # List of bookmark dictionaries
 
+        # Bands (fetched from server)
+        self.bands: List[Dict] = []  # List of band dictionaries from /api/bands
+
         # Recording state
         self.recording = False
         self.recording_start_time = None
@@ -256,6 +259,9 @@ class RadioGUI:
 
         # Fetch bookmarks on startup (after UI is ready)
         self.root.after(200, self.fetch_bookmarks)
+
+        # Fetch bands on startup (after UI is ready)
+        self.root.after(250, self.fetch_bands)
 
         # Auto-connect if requested (after UI is ready)
         if self.config.get('auto_connect', False):
@@ -460,12 +466,24 @@ class RadioGUI:
 
         self.bookmark_var = tk.StringVar(value="")
         self.bookmark_combo = ttk.Combobox(bookmark_frame, textvariable=self.bookmark_var,
-                                          state='readonly', width=30)
+                                          state='readonly', width=15)
         self.bookmark_combo.pack(side=tk.LEFT, padx=(0, 5))
         self.bookmark_combo.bind('<<ComboboxSelected>>', lambda e: self.on_bookmark_selected())
 
         # Initially disabled until bookmarks are loaded
         self.bookmark_combo.config(state='disabled')
+
+        # Band selector dropdown (to the right of bookmarks)
+        ttk.Label(bookmark_frame, text="Band:").pack(side=tk.LEFT, padx=(20, 5))
+
+        self.band_selector_var = tk.StringVar(value="")
+        self.band_selector_combo = ttk.Combobox(bookmark_frame, textvariable=self.band_selector_var,
+                                               state='readonly', width=25)
+        self.band_selector_combo.pack(side=tk.LEFT, padx=(0, 5))
+        self.band_selector_combo.bind('<<ComboboxSelected>>', lambda e: self.on_band_selected())
+
+        # Band selector will be populated after fetching bands from server
+        self.band_selector_combo['values'] = [""]  # Empty initially
 
         freq_frame.columnconfigure(8, weight=1)
 
@@ -1080,8 +1098,20 @@ class RadioGUI:
         current_band = None
 
         for band_name, button in self.band_buttons.items():
-            if band_name in self.BAND_RANGES:
+            # Find band data (check both fetched bands and BAND_RANGES for compatibility)
+            band_range = None
+
+            # First try fetched bands
+            for band in self.bands:
+                if band.get('label') == band_name:
+                    band_range = {'min': band['start'], 'max': band['end']}
+                    break
+
+            # Fall back to BAND_RANGES if not found in fetched bands
+            if not band_range and band_name in self.BAND_RANGES:
                 band_range = self.BAND_RANGES[band_name]
+
+            if band_range:
                 is_active = band_range['min'] <= freq_hz <= band_range['max']
 
                 if is_active:
@@ -1146,7 +1176,7 @@ class RadioGUI:
                     'from': from_time,
                     'to': to_time
                 },
-                'bands': list(self.BAND_RANGES.keys()),
+                'bands': [band.get('label') for band in self.bands] if self.bands else list(self.BAND_RANGES.keys()),
                 'fields': ['ft8_snr'],
                 'interval': 'minute'
             }
@@ -1189,8 +1219,11 @@ class RadioGUI:
         Args:
             data: Noise floor latest data from API (format: {band_name: {ft8_snr: value, ...}})
         """
+        # Get band names from fetched bands or fall back to BAND_RANGES
+        band_names = [band.get('label') for band in self.bands] if self.bands else list(self.BAND_RANGES.keys())
+
         # Process each band
-        for band_name in self.BAND_RANGES.keys():
+        for band_name in band_names:
             # Get band data from API response
             band_data = data.get(band_name, {})
 
@@ -1238,8 +1271,11 @@ class RadioGUI:
         """
         primary_data = data.get('primary', {})
 
+        # Get band names from fetched bands or fall back to BAND_RANGES
+        band_names = [band.get('label') for band in self.bands] if self.bands else list(self.BAND_RANGES.keys())
+
         # Process each band
-        for band_name in self.BAND_RANGES.keys():
+        for band_name in band_names:
             band_data = primary_data.get(band_name, [])
 
             if not band_data or len(band_data) == 0:
@@ -1324,8 +1360,11 @@ class RadioGUI:
             self.root.after_cancel(self.band_state_poll_job)
             self.band_state_poll_job = None
 
+        # Get band names from fetched bands or fall back to BAND_RANGES
+        band_names = [band.get('label') for band in self.bands] if self.bands else list(self.BAND_RANGES.keys())
+
         # Reset band states to UNKNOWN
-        for band_name in self.BAND_RANGES.keys():
+        for band_name in band_names:
             self.band_states[band_name] = 'UNKNOWN'
 
         # Update button colors
@@ -1381,6 +1420,70 @@ class RadioGUI:
         except Exception as e:
             self.log_status(f"Error loading bookmarks: {e}")
             self.bookmarks = []
+
+    def fetch_bands(self):
+        """Fetch bands from the server API."""
+        try:
+            # Get server URL
+            server = self.server_var.get()
+            use_tls = self.tls_var.get()
+
+            # Build API URL
+            if '://' in server:
+                # Full URL provided
+                base_url = server
+            else:
+                # Host:port format
+                protocol = 'https' if use_tls else 'http'
+                base_url = f"{protocol}://{server}"
+
+            api_url = f"{base_url}/api/bands"
+
+            # Fetch bands
+            response = requests.get(api_url, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+
+            if isinstance(data, list):
+                self.bands = data
+                self.populate_band_selector()
+                self.log_status(f"Loaded {len(self.bands)} band(s) from server")
+            else:
+                self.log_status("No bands available from server")
+                # Fall back to hardcoded bands
+                self.use_hardcoded_bands()
+
+        except requests.exceptions.RequestException as e:
+            # Silently fall back to hardcoded bands if server doesn't support it
+            self.log_status(f"Bands API not available, using defaults: {e}")
+            self.use_hardcoded_bands()
+        except Exception as e:
+            self.log_status(f"Error loading bands: {e}")
+            self.use_hardcoded_bands()
+
+    def use_hardcoded_bands(self):
+        """Use hardcoded BAND_RANGES as fallback."""
+        # Convert BAND_RANGES to bands format
+        self.bands = []
+        for label, range_dict in self.BAND_RANGES.items():
+            self.bands.append({
+                'label': label,
+                'start': range_dict['min'],
+                'end': range_dict['max']
+            })
+        self.populate_band_selector()
+
+    def populate_band_selector(self):
+        """Populate the band selector dropdown with band labels."""
+        if not self.bands:
+            self.band_selector_combo['values'] = [""]
+            return
+
+        # Extract band labels
+        band_labels = [""] + [band.get('label', 'Unknown') for band in self.bands]
+
+        # Update dropdown
+        self.band_selector_combo['values'] = band_labels
 
     def populate_bookmark_dropdown(self):
         """Populate the bookmark dropdown with bookmark names."""
@@ -1438,6 +1541,48 @@ class RadioGUI:
                 self.apply_frequency(skip_auto_mode=True)
 
             self.log_status(f"Tuned to bookmark: {selected_name} ({frequency/1e6:.6f} MHz, {mode})")
+
+    def on_band_selected(self):
+        """Handle band selection from dropdown."""
+        selected_band = self.band_selector_var.get()
+        if not selected_band:
+            return
+
+        # Find the selected band in fetched bands
+        band_data = None
+        for band in self.bands:
+            if band.get('label') == selected_band:
+                band_data = band
+                break
+
+        if not band_data:
+            return
+
+        # Calculate center frequency
+        center_freq = (band_data['start'] + band_data['end']) // 2
+
+        # Set frequency
+        self.set_frequency_hz(center_freq)
+
+        # Determine mode based on frequency (LSB < 10 MHz, USB >= 10 MHz) only if not locked
+        if not self.mode_lock_var.get():
+            if center_freq < 10000000:  # Below 10 MHz
+                mode = 'LSB'
+            else:  # 10 MHz and above
+                mode = 'USB'
+
+            self.mode_var.set(mode)
+            # Trigger mode change handler to update bandwidth and presets
+            self.on_mode_changed()
+
+        # Apply changes if connected
+        if self.connected:
+            self.apply_frequency()
+
+        self.log_status(f"Tuned to {selected_band} band: {center_freq/1e6:.6f} MHz")
+
+        # Reset dropdown to empty after selection
+        self.band_selector_var.set("")
 
     def apply_frequency(self, skip_auto_mode=False):
         """Apply frequency change by sending tune message.

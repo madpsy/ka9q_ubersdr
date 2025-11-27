@@ -709,7 +709,7 @@ class RadioGUI:
             # Don't pack spectrum_container - it stays hidden
 
             # Create spectrum display in hidden container
-            self.spectrum = SpectrumDisplay(spectrum_container, width=800, height=200)
+            self.spectrum = SpectrumDisplay(spectrum_container, width=800, height=200, bookmarks=self.bookmarks)
             self.spectrum.set_frequency_callback(self.on_spectrum_frequency_click)
             self.spectrum.set_frequency_step_callback(self.on_spectrum_frequency_step)
 
@@ -1363,6 +1363,13 @@ class RadioGUI:
             if isinstance(data, list):
                 self.bookmarks = data
                 self.populate_bookmark_dropdown()
+                # Update spectrum and waterfall displays with bookmarks
+                if self.spectrum:
+                    self.spectrum.bookmarks = self.bookmarks
+                if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
+                    self.waterfall_spectrum.bookmarks = self.bookmarks
+                if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
+                    self.waterfall_waterfall.bookmarks = self.bookmarks
                 self.log_status(f"Loaded {len(self.bookmarks)} bookmark(s)")
             else:
                 self.log_status("No bookmarks available")

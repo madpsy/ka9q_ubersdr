@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 class SpectrumDisplay:
     """Spectrum display widget showing RF spectrum as a line chart."""
     
-    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 200, click_tune_var=None):
+    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 200, click_tune_var=None, bookmarks: list = None):
         """Initialize spectrum display widget.
         
         Args:
@@ -28,11 +28,13 @@ class SpectrumDisplay:
             width: Canvas width in pixels
             height: Canvas height in pixels
             click_tune_var: BooleanVar to control click-to-tune behavior
+            bookmarks: List of bookmark dictionaries with 'name', 'frequency', 'mode' keys
         """
         self.parent = parent
         self.width = width
         self.height = height
         self.click_tune_var = click_tune_var
+        self.bookmarks = bookmarks or []
         
         # Create canvas for spectrum display
         self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=1)
@@ -80,8 +82,9 @@ class SpectrumDisplay:
         self.frequency_callback: Optional[Callable[[float], None]] = None
         self.frequency_step_callback: Optional[Callable[[int], None]] = None  # Callback for stepping frequency
         
-        # Drawing parameters
-        self.margin_top = 30
+        # Drawing parameters - increased top margin for bookmark section
+        self.bookmark_section_height = 20  # Height for bookmark markers
+        self.margin_top = 30 + self.bookmark_section_height  # Add space for bookmarks
         self.margin_bottom = 30
         self.margin_left = 50
         self.margin_right = 20
@@ -426,6 +429,9 @@ class SpectrumDisplay:
             # Draw line
             self.canvas.create_line(points, fill='#00ff00', width=1)
         
+        # Draw bookmark markers (above spectrum)
+        self._draw_bookmarks()
+        
         # Draw bandwidth filter visualization
         self._draw_bandwidth_filter()
         
@@ -513,7 +519,74 @@ class SpectrumDisplay:
         self.canvas.create_text(x, self.margin_top - 10,
                                text=f"{freq_mhz:.6f} MHz",
                                fill='orange', font=('monospace', 10, 'bold'))
+    
+    def _draw_bookmarks(self):
+        """Draw bookmark markers in the bookmark section above spectrum."""
+        if not self.bookmarks or self.total_bandwidth == 0:
+            return
+        
+        start_freq = self.center_freq - self.total_bandwidth / 2
+        end_freq = self.center_freq + self.total_bandwidth / 2
+        
+        # Y position for bookmarks (in the bookmark section above spectrum, above the orange frequency readout)
+        # Orange frequency is at margin_top - 10
+        # To position bookmarks HIGHER (closer to top of canvas), we subtract MORE from margin_top
+        bookmark_y = 5  # Position 5px from absolute top of canvas
+        
+        for bookmark in self.bookmarks:
+            freq = bookmark.get('frequency', 0)
+            name = bookmark.get('name', 'Unknown')
+            
+            # Only draw if bookmark is within visible range
+            if freq < start_freq or freq > end_freq:
+                continue
+            
+            # Calculate x position
+            freq_offset = freq - start_freq
+            x = self.margin_left + (freq_offset / self.total_bandwidth) * self.graph_width
+            
+            # Draw bookmark label (gold background)
+            label_width = len(name) * 7 + 8
+            label_height = 12
+            
+            # Gold background
+            self.canvas.create_rectangle(
+                x - label_width / 2, bookmark_y,
+                x + label_width / 2, bookmark_y + label_height,
+                fill='#FFD700', outline='white', width=1
+            )
+            
+            # Black text on gold background
+            self.canvas.create_text(
+                x, bookmark_y + 6,
+                text=name, fill='black',
+                font=('monospace', 9, 'bold')
+            )
+            
+            # Draw downward arrow below label
+            arrow_y = bookmark_y + label_height
+            arrow_length = 6
+            
+            # Arrow triangle (gold with white border)
+            arrow_points = [
+                x, arrow_y + arrow_length,  # Tip
+                x - 4, arrow_y,              # Left
+                x + 4, arrow_y               # Right
+            ]
+            self.canvas.create_polygon(
+                arrow_points,
+                fill='#FFD700', outline='white', width=1
+            )
    
+    def _on_bookmark_click(self, bookmark):
+        """Handle bookmark marker click - tune to bookmark frequency and mode."""
+        freq = bookmark.get('frequency', 0)
+        mode = bookmark.get('mode', 'USB').upper()
+
+        if freq and self.frequency_callback:
+            # Call the frequency callback with the bookmark frequency
+            self.frequency_callback(float(freq))
+
     def _draw_bandwidth_filter(self):
         """Draw bandwidth filter visualization with yellow lines and fill."""
         if self.total_bandwidth == 0 or self.tuned_freq == 0:

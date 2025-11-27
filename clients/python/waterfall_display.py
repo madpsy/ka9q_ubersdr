@@ -26,7 +26,7 @@ class WaterfallDisplay:
     its own WebSocket connection.
     """
     
-    def __init__(self, parent: tk.Widget, spectrum_display, width: int = 800, height: int = 400, spectrum_height: int = 200, click_tune_var=None):
+    def __init__(self, parent: tk.Widget, spectrum_display, width: int = 800, height: int = 400, spectrum_height: int = 200, click_tune_var=None, bookmarks: list = None):
         """Initialize waterfall display widget.
         
         Args:
@@ -36,6 +36,7 @@ class WaterfallDisplay:
             height: Canvas height in pixels (for waterfall only)
             spectrum_height: Height of spectrum display on top (unused, kept for compatibility)
             click_tune_var: BooleanVar to control click-to-tune behavior
+            bookmarks: List of bookmark dictionaries with 'name', 'frequency', 'mode' keys
         """
         self.parent = parent
         self.width = width
@@ -43,6 +44,7 @@ class WaterfallDisplay:
         self.spectrum_height = spectrum_height
         self.spectrum_display = spectrum_display
         self.click_tune_var = click_tune_var
+        self.bookmarks = bookmarks or []
         
         # Share cursor tracking with spectrum display
         self.shared_cursor_x = -1
@@ -710,8 +712,8 @@ def create_waterfall_window(parent_gui):
     signal_meter_label.bind('<Button-1>', toggle_signal_meter_mode)
     signal_meter_mode_label.bind('<Button-1>', toggle_signal_meter_mode)
     
-    # Create NEW spectrum display in this window
-    spectrum = SpectrumDisplay(container, width=800, height=200, click_tune_var=click_tune_var)
+    # Create NEW spectrum display in this window with bookmarks
+    spectrum = SpectrumDisplay(container, width=800, height=200, click_tune_var=click_tune_var, bookmarks=parent_gui.bookmarks)
     spectrum.set_frequency_callback(parent_gui.on_spectrum_frequency_click)
     spectrum.set_frequency_step_callback(parent_gui.on_spectrum_frequency_step)
     spectrum.set_step_size(parent_gui.get_step_size_hz())
@@ -753,8 +755,8 @@ def create_waterfall_window(parent_gui):
     # Delay connection slightly to allow window to fully initialize
     window.after(200, connect_spectrum_delayed)
     
-    # Create waterfall display below spectrum (shares spectrum's data)
-    waterfall = WaterfallDisplay(container, spectrum, width=800, height=400, spectrum_height=200, click_tune_var=click_tune_var)
+    # Create waterfall display below spectrum (shares spectrum's data) with bookmarks
+    waterfall = WaterfallDisplay(container, spectrum, width=800, height=400, spectrum_height=200, click_tune_var=click_tune_var, bookmarks=parent_gui.bookmarks)
     
     # Set scroll mode on waterfall too
     if hasattr(parent_gui, 'scroll_mode_var'):

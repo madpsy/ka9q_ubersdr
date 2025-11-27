@@ -1106,6 +1106,31 @@ Examples:
     if args.bandwidth:
         bandwidth_low, bandwidth_high = args.bandwidth
     
+    # Set bandwidth defaults based on mode if not explicitly provided
+    # This ensures correct defaults for both CLI and GUI modes
+    if bandwidth_low is None or bandwidth_high is None:
+        mode = args.mode if args.mode else 'usb'
+        mode_defaults = {
+            'usb': (50, 2700),
+            'lsb': (-2700, -50),
+            'am': (-5000, 5000),
+            'sam': (-5000, 5000),
+            'cwu': (-200, 200),
+            'cwl': (-200, 200),
+            'fm': (-8000, 8000),
+            'nfm': (-5000, 5000),
+            'iq': (-5000, 5000),
+            'iq48': (-5000, 5000),
+            'iq96': (-5000, 5000),
+            'iq192': (-5000, 5000),
+            'iq384': (-5000, 5000)
+        }
+        default_low, default_high = mode_defaults.get(mode, (50, 2700))
+        if bandwidth_low is None:
+            bandwidth_low = default_low
+        if bandwidth_high is None:
+            bandwidth_high = default_high
+
     # Launch GUI if requested
     if args.gui:
         try:
@@ -1122,7 +1147,7 @@ Examples:
                 if '--host' in sys.argv or '-H' in sys.argv or '--port' in sys.argv or '-p' in sys.argv:
                     auto_connect = True
 
-            # Pass configuration to GUI
+            # Pass configuration to GUI (bandwidth defaults already set above)
             config = {
                 'url': args.url,
                 'host': args.host,
@@ -1130,8 +1155,8 @@ Examples:
                 'ssl': args.ssl,
                 'frequency': args.frequency if args.frequency else 14074000,
                 'mode': args.mode if args.mode else 'usb',
-                'bandwidth_low': bandwidth_low if bandwidth_low is not None else 50,
-                'bandwidth_high': bandwidth_high if bandwidth_high is not None else 2700,
+                'bandwidth_low': bandwidth_low,
+                'bandwidth_high': bandwidth_high,
                 'auto_connect': auto_connect
             }
             gui_main(config)

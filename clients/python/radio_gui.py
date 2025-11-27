@@ -4129,14 +4129,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Build config from arguments
+    # Note: bandwidth defaults should already be set correctly by radio_client.py
+    # based on the mode, so we don't override them here
     config = {
         'url': args.url,
         'host': args.host or 'localhost',
         'port': args.port or 8080,
         'frequency': int(args.frequency * 1e6) if args.frequency else 14074000,
         'mode': args.mode or 'usb',
-        'bandwidth_low': 50,
-        'bandwidth_high': 2700,
+        'bandwidth_low': 50,  # Default for USB, will be overridden by radio_client.py
+        'bandwidth_high': 2700,  # Default for USB, will be overridden by radio_client.py
         'ssl': args.ssl,
         'auto_connect': args.auto_connect
     }

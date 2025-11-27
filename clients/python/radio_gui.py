@@ -3712,12 +3712,14 @@ class RadioGUI:
 
                             # Auto-open waterfall window first (main display window)
                             if WATERFALL_AVAILABLE:
-                                # Open waterfall immediately and unmute audio after it opens
+                                # Open waterfall after spectrum connects (2500ms delay to avoid rate limiting)
+                                # Main spectrum connects at 2000ms, waterfall's spectrum connects 200ms after window opens
+                                # So 2500ms + 200ms = 2700ms total, giving 700ms between connections
                                 def open_waterfall_and_unmute():
                                     self.auto_open_waterfall()
                                     # Unmute audio after waterfall window opens (500ms delay)
                                     self.root.after(500, self.unmute_audio)
-                                self.root.after(100, open_waterfall_and_unmute)
+                                self.root.after(2500, open_waterfall_and_unmute)
 
                             # Auto-open audio spectrum window on successful connection
                             if AUDIO_SPECTRUM_AVAILABLE:

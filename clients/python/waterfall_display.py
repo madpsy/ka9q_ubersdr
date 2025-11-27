@@ -831,9 +831,35 @@ def create_waterfall_window(parent_gui):
     zoom_in_btn.config(command=zoom_in_click)
     zoom_out_btn.config(command=zoom_out_click)
     
-    # Create NEW spectrum display in this window with bookmarks
-    spectrum = SpectrumDisplay(container, width=800, height=200, click_tune_var=click_tune_var, center_tune_var=center_tune_var, bookmarks=parent_gui.bookmarks)
-    spectrum.bands = parent_gui.bands  # Pass bands to spectrum display
+    # Use the main GUI's spectrum display directly (shares WebSocket connection and data)
+    # No new WebSocket connection is created - waterfall reads from main spectrum
+    spectrum = parent_gui.spectrum
+    
+    # Unbind main spectrum's motion handler - waterfall will handle cursor for both
+    # (This is safe because the main spectrum is hidden in the main GUI)
+    spectrum.canvas.unbind('<Motion>')
+    
+    # Reparent the spectrum canvas to this window's container
+    spectrum.canvas.pack_forget()  # Remove from main GUI
+    spectrum.canvas = Canvas(container, width=800, height=200, bg='#000000', highlightthickness=0)
+    spectrum.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=False)
+    spectrum.width = 800
+    spectrum.height = 200
+    
+    # Rebind all spectrum canvas events
+    spectrum.canvas.bind('<ButtonPress-1>', spectrum.on_mouse_down)
+    spectrum.canvas.bind('<ButtonRelease-1>', spectrum.on_mouse_up)
+    spectrum.canvas.bind('<B1-Motion>', spectrum.on_drag)
+    spectrum.canvas.bind('<Button-4>', spectrum.on_scroll_up)
+    spectrum.canvas.bind('<Button-5>', spectrum.on_scroll_down)
+    spectrum.canvas.bind('<MouseWheel>', spectrum.on_mousewheel)
+    spectrum.canvas.bind('<Configure>', spectrum.on_resize)
+    
+    # Update spectrum with current settings
+    spectrum.click_tune_var = click_tune_var
+    spectrum.center_tune_var = center_tune_var
+    spectrum.bookmarks = parent_gui.bookmarks
+    spectrum.bands = parent_gui.bands
     spectrum.set_frequency_callback(parent_gui.on_spectrum_frequency_click)
     spectrum.set_frequency_step_callback(parent_gui.on_spectrum_frequency_step)
     spectrum.set_mode_callback(parent_gui.on_spectrum_mode_change)
@@ -843,13 +869,10 @@ def create_waterfall_window(parent_gui):
     if hasattr(parent_gui, 'scroll_mode_var'):
         spectrum.set_scroll_mode(parent_gui.scroll_mode_var.get())
     
-    # Unbind spectrum's motion handler - waterfall will handle cursor for both
-    spectrum.canvas.unbind('<Motion>')
-    
-    # Initialize with current settings BEFORE connecting
+    # Initialize with current settings
     try:
         freq_hz = parent_gui.get_frequency_hz()
-        spectrum.tuned_freq = freq_hz  # Set tuned frequency
+        spectrum.tuned_freq = freq_hz
         spectrum.update_center_frequency(freq_hz)
         spectrum.update_bandwidth(
             int(parent_gui.bw_low_var.get()),
@@ -857,24 +880,6 @@ def create_waterfall_window(parent_gui):
         )
     except ValueError:
         pass
-    
-    # Connect spectrum to server after window is ready (delayed)
-    def connect_spectrum_delayed():
-        if parent_gui.connected and parent_gui.client:
-            try:
-                server = parent_gui.server_var.get()
-                frequency = parent_gui.get_frequency_hz()
-                use_tls = parent_gui.tls_var.get()
-                # Connect with the tuned frequency
-                spectrum.connect(server, frequency, parent_gui.client.user_session_id, use_tls=use_tls)
-                print(f"Spectrum connected in waterfall window to {server} at {frequency/1e6:.6f} MHz")
-            except Exception as e:
-                print(f"Failed to connect spectrum in waterfall window: {e}")
-                import traceback
-                traceback.print_exc()
-    
-    # Delay connection slightly to allow window to fully initialize
-    window.after(200, connect_spectrum_delayed)
     
     # Create waterfall display below spectrum (shares spectrum's data) with bookmarks
     waterfall = WaterfallDisplay(container, spectrum, width=800, height=400, spectrum_height=200, click_tune_var=click_tune_var, bookmarks=parent_gui.bookmarks)

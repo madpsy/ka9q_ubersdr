@@ -45,9 +45,15 @@ class WaterfallDisplay:
         self.spectrum_display = spectrum_display
         self.click_tune_var = click_tune_var
         self.bookmarks = bookmarks or []
-        
+
         # Share cursor tracking with spectrum display
         self.shared_cursor_x = -1
+
+        # Drag state for click-and-drag panning
+        self.dragging = False
+        self.drag_start_x = 0
+        self.drag_start_freq = 0
+        self.drag_threshold = 5  # Pixels - movement less than this is considered a click
         
         # Create canvas for waterfall display (no container needed - parent handles layout)
         self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=0)
@@ -97,8 +103,10 @@ class WaterfallDisplay:
         self.waterfall_photo = None
         self.waterfall_canvas_image = None
         
-        # Mouse interaction
-        self.canvas.bind('<Button-1>', self.on_click)
+        # Mouse interaction - support click-and-drag panning
+        self.canvas.bind('<ButtonPress-1>', self.on_mouse_down)
+        self.canvas.bind('<ButtonRelease-1>', self.on_mouse_up)
+        self.canvas.bind('<B1-Motion>', self.on_drag)
         self.canvas.bind('<Motion>', self.on_motion)
         # Mouse wheel for frequency stepping
         self.canvas.bind('<Button-4>', self.on_scroll_up)  # Linux scroll up
@@ -333,28 +341,107 @@ class WaterfallDisplay:
             fill='yellow', width=2
         )
     
+    def on_mouse_down(self, event):
+        """Handle mouse button press - start drag operation.
+
+        Args:
+            event: Mouse event
+        """
+        if not self.spectrum_display:
+            return
+
+        self.dragging = True
+        self.drag_start_x = event.x
+        self.drag_start_freq = self.spectrum_display.center_freq
+
+    def on_mouse_up(self, event):
+        """Handle mouse button release - end drag or process click.
+
+        Args:
+            event: Mouse event
+        """
+        if self.dragging:
+            # Check if this was a drag or a click
+            drag_distance = abs(event.x - self.drag_start_x)
+            if drag_distance < self.drag_threshold:
+                # Small movement - treat as click
+                self.on_click(event)
+
+        self.dragging = False
+
+    def on_drag(self, event):
+        """Handle drag motion - pan spectrum (delegates to spectrum display).
+
+        Args:
+            event: Mouse event
+        """
+        if not self.dragging or not self.spectrum_display or self.spectrum_display.total_bandwidth == 0:
+            return
+
+        # Calculate frequency change based on pixel movement
+        dx = event.x - self.drag_start_x
+        freq_per_pixel = self.spectrum_display.total_bandwidth / self.waterfall_width
+        freq_change = -dx * freq_per_pixel  # Negative for natural drag direction
+
+        new_center = self.drag_start_freq + freq_change
+
+        # Constrain to valid range (keep view within 100 kHz - 30 MHz)
+        half_bw = self.spectrum_display.total_bandwidth / 2
+        min_center = 100000 + half_bw
+        max_center = 30000000 - half_bw
+        new_center = max(min_center, min(max_center, new_center))
+
+        # Check if tuned frequency will be off-screen after pan
+        if self.tuned_freq != 0:
+            start_freq = new_center - half_bw
+            end_freq = new_center + half_bw
+
+            # If tuned frequency is outside the new view, retune to keep it visible
+            if self.tuned_freq < start_freq or self.tuned_freq > end_freq:
+                # Retune to the edge that's closest to current tuned frequency
+                if self.tuned_freq < start_freq:
+                    # Tuned freq is off the left edge - retune to left edge
+                    new_tuned_freq = start_freq + (half_bw * 0.1)  # 10% from edge
+                else:
+                    # Tuned freq is off the right edge - retune to right edge
+                    new_tuned_freq = end_freq - (half_bw * 0.1)  # 10% from edge
+
+                # Snap to step boundary
+                new_tuned_freq = round(new_tuned_freq / self.step_size_hz) * self.step_size_hz
+
+                # Call frequency callback to update tuned frequency
+                if self.frequency_callback:
+                    self.frequency_callback(new_tuned_freq)
+
+        # Send pan command via spectrum display
+        if self.spectrum_display.connected and self.spectrum_display.event_loop and self.spectrum_display.event_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self.spectrum_display._send_pan_command(new_center),
+                self.spectrum_display.event_loop
+            )
+
     def on_click(self, event):
         """Handle mouse click on waterfall."""
         # Check if click-to-tune is enabled
         if self.click_tune_var and not self.click_tune_var.get():
             return
-        
+
         if not self.spectrum_display or self.spectrum_display.total_bandwidth == 0:
             return
-        
+
         # Calculate clicked frequency
         x = event.x - self.margin_left
         if x < 0 or x > self.waterfall_width:
             return
-        
+
         center_freq = self.spectrum_display.center_freq
         total_bandwidth = self.spectrum_display.total_bandwidth
         freq_offset = (x / self.waterfall_width - 0.5) * total_bandwidth
         clicked_freq = center_freq + freq_offset
-        
+
         # Snap to nearest step boundary
         new_freq = round(clicked_freq / self.step_size_hz) * self.step_size_hz
-        
+
         # Call frequency callback
         if self.frequency_callback:
             self.frequency_callback(new_freq)
@@ -672,19 +759,27 @@ def create_waterfall_window(parent_gui):
                        font=('monospace', 9))
     bw_label.place(relx=0.5, y=35, anchor=tk.CENTER)
     
-    # Click Tune checkbox (between title and peak freq, vertically centered)
+    # Click Tune checkbox (between title and peak freq, top)
     click_tune_var = tk.BooleanVar(value=True)
-    
+
+    # Center Tune checkbox (below Click Tune)
+    center_tune_var = tk.BooleanVar(value=True)
+
     # Create custom style for checkbox with black background
     style.configure('Black.TCheckbutton', background='#000000', foreground='white')
     style.map('Black.TCheckbutton',
               background=[('active', '#000000'), ('!active', '#000000')],
               foreground=[('active', 'white'), ('!active', 'white')])
-    
+
     click_tune_check = ttk.Checkbutton(info_frame, text="Click Tune",
                                        variable=click_tune_var,
                                        style='Black.TCheckbutton')
-    click_tune_check.place(relx=0.72, y=25, anchor=tk.CENTER)
+    click_tune_check.place(relx=0.70, y=15, anchor=tk.W)
+
+    center_tune_check = ttk.Checkbutton(info_frame, text="Center Tune",
+                                        variable=center_tune_var,
+                                        style='Black.TCheckbutton')
+    center_tune_check.place(relx=0.70, y=35, anchor=tk.W)
     
     # Peak frequency info (right side, top line)
     peak_freq_label = tk.Label(info_frame, text="",
@@ -713,7 +808,7 @@ def create_waterfall_window(parent_gui):
     signal_meter_mode_label.bind('<Button-1>', toggle_signal_meter_mode)
     
     # Create NEW spectrum display in this window with bookmarks
-    spectrum = SpectrumDisplay(container, width=800, height=200, click_tune_var=click_tune_var, bookmarks=parent_gui.bookmarks)
+    spectrum = SpectrumDisplay(container, width=800, height=200, click_tune_var=click_tune_var, center_tune_var=center_tune_var, bookmarks=parent_gui.bookmarks)
     spectrum.bands = parent_gui.bands  # Pass bands to spectrum display
     spectrum.set_frequency_callback(parent_gui.on_spectrum_frequency_click)
     spectrum.set_frequency_step_callback(parent_gui.on_spectrum_frequency_step)

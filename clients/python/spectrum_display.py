@@ -20,22 +20,30 @@ from urllib.parse import urlencode
 class SpectrumDisplay:
     """Spectrum display widget showing RF spectrum as a line chart."""
     
-    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 200, click_tune_var=None, bookmarks: list = None):
+    def __init__(self, parent: tk.Widget, width: int = 800, height: int = 200, click_tune_var=None, center_tune_var=None, bookmarks: list = None):
         """Initialize spectrum display widget.
-        
+
         Args:
             parent: Parent tkinter widget
             width: Canvas width in pixels
             height: Canvas height in pixels
             click_tune_var: BooleanVar to control click-to-tune behavior
+            center_tune_var: BooleanVar to control whether tuning centers the spectrum (default True)
             bookmarks: List of bookmark dictionaries with 'name', 'frequency', 'mode' keys
         """
         self.parent = parent
         self.width = width
         self.height = height
         self.click_tune_var = click_tune_var
+        self.center_tune_var = center_tune_var
         self.bookmarks = bookmarks or []
         self.bands = []  # List of band dictionaries with 'label', 'start', 'end', 'color'
+
+        # Drag state for click-and-drag panning
+        self.dragging = False
+        self.drag_start_x = 0
+        self.drag_start_freq = 0
+        self.drag_threshold = 5  # Pixels - movement less than this is considered a click
         
         # Create canvas for spectrum display
         self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=1)
@@ -96,8 +104,10 @@ class SpectrumDisplay:
         self.min_db = -100
         self.max_db = 0
         
-        # Mouse interaction
-        self.canvas.bind('<Button-1>', self.on_click)
+        # Mouse interaction - support click-and-drag panning
+        self.canvas.bind('<ButtonPress-1>', self.on_mouse_down)
+        self.canvas.bind('<ButtonRelease-1>', self.on_mouse_up)
+        self.canvas.bind('<B1-Motion>', self.on_drag)
         self.canvas.bind('<Motion>', self.on_motion)
         # Mouse wheel for zoom/pan (Linux/Windows)
         self.canvas.bind('<Button-4>', self.on_scroll_up)  # Linux scroll up
@@ -322,33 +332,63 @@ class SpectrumDisplay:
         await self.ws.send(json.dumps(command))
     
     def update_center_frequency(self, frequency: float):
-        """Update tuned frequency and pan spectrum if zoomed in.
-        
+        """Update tuned frequency and pan spectrum based on center_tune setting.
+
         Args:
             frequency: New tuned frequency in Hz
         """
         # Constrain frequency to valid range (100 kHz - 30 MHz)
         frequency = max(100000, min(30000000, frequency))
-        
+
         # Update tuned frequency (this is what we're listening to)
         self.tuned_freq = frequency
-        
-        # If zoomed in (not at full bandwidth), pan to follow the tuned frequency
-        # This keeps the tuned frequency visible when zoomed in
+
+        # Check if center tune is enabled (default to True if not set)
+        center_tune_enabled = True
+        if self.center_tune_var is not None:
+            center_tune_enabled = self.center_tune_var.get()
+
         if self.connected and self.event_loop and self.event_loop.is_running():
-            if self.initial_bin_bandwidth > 0 and self.bin_bandwidth < self.initial_bin_bandwidth:
-                # We're zoomed in - pan to follow tuned frequency
-                # Constrain to keep view within 100 kHz - 30 MHz
-                if self.total_bandwidth > 0:
-                    half_bandwidth = self.total_bandwidth / 2
+            if self.total_bandwidth > 0:
+                half_bandwidth = self.total_bandwidth / 2
+
+                if center_tune_enabled:
+                    # Center tune enabled - always center on tuned frequency
+                    pan_center = frequency
+
+                    # Constrain to keep view within 100 kHz - 30 MHz
                     min_center = 100000 + half_bandwidth
                     max_center = 30000000 - half_bandwidth
-                    pan_center = max(min_center, min(max_center, frequency))
-                    
+                    pan_center = max(min_center, min(max_center, pan_center))
+
                     asyncio.run_coroutine_threadsafe(
                         self._send_pan_command(pan_center),
                         self.event_loop
                     )
+                else:
+                    # Center tune disabled - only pan if tuned frequency would be off-screen
+                    start_freq = self.center_freq - half_bandwidth
+                    end_freq = self.center_freq + half_bandwidth
+
+                    # Only pan if tuned frequency is outside visible range
+                    if frequency < start_freq or frequency > end_freq:
+                        # Pan to bring tuned frequency into view (10% from edge)
+                        if frequency < start_freq:
+                            # Tuned freq is off the left - pan to show it at 10% from left edge
+                            pan_center = frequency + (half_bandwidth * 0.9)
+                        else:
+                            # Tuned freq is off the right - pan to show it at 10% from right edge
+                            pan_center = frequency - (half_bandwidth * 0.9)
+
+                        # Constrain to keep view within 100 kHz - 30 MHz
+                        min_center = 100000 + half_bandwidth
+                        max_center = 30000000 - half_bandwidth
+                        pan_center = max(min_center, min(max_center, pan_center))
+
+                        asyncio.run_coroutine_threadsafe(
+                            self._send_pan_command(pan_center),
+                            self.event_loop
+                        )
     
     def update_bandwidth(self, low: int, high: int):
         """Update filter bandwidth for visualization.
@@ -734,9 +774,85 @@ class SpectrumDisplay:
             fill='yellow', width=2
         )
     
+    def on_mouse_down(self, event):
+        """Handle mouse button press - start drag operation.
+
+        Args:
+            event: Mouse event
+        """
+        self.dragging = True
+        self.drag_start_x = event.x
+        self.drag_start_freq = self.center_freq
+
+    def on_mouse_up(self, event):
+        """Handle mouse button release - end drag or process click.
+
+        Args:
+            event: Mouse event
+        """
+        if self.dragging:
+            # Check if this was a drag or a click
+            drag_distance = abs(event.x - self.drag_start_x)
+            if drag_distance < self.drag_threshold:
+                # Small movement - treat as click
+                self.on_click(event)
+
+        self.dragging = False
+
+    def on_drag(self, event):
+        """Handle drag motion - pan spectrum.
+
+        Args:
+            event: Mouse event
+        """
+        if not self.dragging or self.total_bandwidth == 0:
+            return
+
+        # Calculate frequency change based on pixel movement
+        dx = event.x - self.drag_start_x
+        freq_per_pixel = self.total_bandwidth / self.graph_width
+        freq_change = -dx * freq_per_pixel  # Negative for natural drag direction
+
+        new_center = self.drag_start_freq + freq_change
+
+        # Constrain to valid range (keep view within 100 kHz - 30 MHz)
+        half_bw = self.total_bandwidth / 2
+        min_center = 100000 + half_bw
+        max_center = 30000000 - half_bw
+        new_center = max(min_center, min(max_center, new_center))
+
+        # Check if tuned frequency will be off-screen after pan
+        if self.tuned_freq != 0:
+            start_freq = new_center - half_bw
+            end_freq = new_center + half_bw
+
+            # If tuned frequency is outside the new view, retune to keep it visible
+            if self.tuned_freq < start_freq or self.tuned_freq > end_freq:
+                # Retune to the edge that's closest to current tuned frequency
+                if self.tuned_freq < start_freq:
+                    # Tuned freq is off the left edge - retune to left edge
+                    new_tuned_freq = start_freq + (half_bw * 0.1)  # 10% from edge
+                else:
+                    # Tuned freq is off the right edge - retune to right edge
+                    new_tuned_freq = end_freq - (half_bw * 0.1)  # 10% from edge
+
+                # Snap to step boundary
+                new_tuned_freq = round(new_tuned_freq / self.step_size_hz) * self.step_size_hz
+
+                # Call frequency callback to update tuned frequency
+                if self.frequency_callback:
+                    self.frequency_callback(new_tuned_freq)
+
+        # Send pan command
+        if self.connected and self.event_loop and self.event_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self._send_pan_command(new_center),
+                self.event_loop
+            )
+
     def on_click(self, event):
         """Handle mouse click on spectrum.
-        
+
         Args:
             event: Mouse event
         """
@@ -746,18 +862,18 @@ class SpectrumDisplay:
 
         if self.total_bandwidth == 0:
             return
-        
+
         # Calculate clicked frequency
         x = event.x - self.margin_left
         if x < 0 or x > self.graph_width:
             return
-        
+
         freq_offset = (x / self.graph_width - 0.5) * self.total_bandwidth
         clicked_freq = self.center_freq + freq_offset
-        
+
         # Snap to nearest step boundary
         new_freq = round(clicked_freq / self.step_size_hz) * self.step_size_hz
-        
+
         # Call frequency callback
         if self.frequency_callback:
             self.frequency_callback(new_freq)

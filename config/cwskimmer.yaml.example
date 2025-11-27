@@ -15,7 +15,7 @@ cwskimmer:
   
   # Connection settings
   reconnect_delay: 5  # Seconds between reconnection attempts
-  keepalive_delay: 300 # Seconds between keep-alive messages (5 minutes)
+  keepalive_delay: 60 # Seconds between keep-alive messages (5 minutes)
   
   # CSV Logging
   # Logs all CW spots to CSV files organized by date/band

@@ -1202,12 +1202,13 @@ class RadioGUI:
             from_time = (now - timedelta(minutes=10)).isoformat() + 'Z'
             
             # Build request body (matching bands_state.js format)
+            # Always use hardcoded BAND_RANGES for band button updates
             request_body = {
                 'primary': {
                     'from': from_time,
                     'to': to_time
                 },
-                'bands': [band.get('label') for band in self.bands] if self.bands else list(self.BAND_RANGES.keys()),
+                'bands': list(self.BAND_RANGES.keys()),
                 'fields': ['ft8_snr'],
                 'interval': 'minute'
             }
@@ -1250,8 +1251,8 @@ class RadioGUI:
         Args:
             data: Noise floor latest data from API (format: {band_name: {ft8_snr: value, ...}})
         """
-        # Get band names from fetched bands or fall back to BAND_RANGES
-        band_names = [band.get('label') for band in self.bands] if self.bands else list(self.BAND_RANGES.keys())
+        # Always use hardcoded BAND_RANGES for band button updates
+        band_names = list(self.BAND_RANGES.keys())
 
         # Process each band
         for band_name in band_names:
@@ -1302,8 +1303,8 @@ class RadioGUI:
         """
         primary_data = data.get('primary', {})
 
-        # Get band names from fetched bands or fall back to BAND_RANGES
-        band_names = [band.get('label') for band in self.bands] if self.bands else list(self.BAND_RANGES.keys())
+        # Always use hardcoded BAND_RANGES for band button updates
+        band_names = list(self.BAND_RANGES.keys())
 
         # Process each band
         for band_name in band_names:
@@ -1391,8 +1392,8 @@ class RadioGUI:
             self.root.after_cancel(self.band_state_poll_job)
             self.band_state_poll_job = None
 
-        # Get band names from fetched bands or fall back to BAND_RANGES
-        band_names = [band.get('label') for band in self.bands] if self.bands else list(self.BAND_RANGES.keys())
+        # Always use hardcoded BAND_RANGES for band button updates
+        band_names = list(self.BAND_RANGES.keys())
 
         # Reset band states to UNKNOWN
         for band_name in band_names:

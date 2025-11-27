@@ -1121,6 +1121,12 @@ class RadioGUI:
         # Update band button highlighting
         self.update_band_buttons(freq_hz)
 
+        # Update band dropdown selection
+        self.update_band_selector(freq_hz)
+
+        # Update bookmark dropdown selection
+        self.update_bookmark_selector(freq_hz)
+
     def update_band_buttons(self, freq_hz: int):
         """Update band button highlighting based on current frequency.
 
@@ -1544,6 +1550,13 @@ class RadioGUI:
         # Update dropdown
         self.band_selector_combo['values'] = band_labels
 
+        # Update initial selection based on current frequency
+        try:
+            freq_hz = self.get_frequency_hz()
+            self.update_band_selector(freq_hz)
+        except ValueError:
+            pass  # Ignore if frequency is invalid
+
     def populate_bookmark_dropdown(self):
         """Populate the bookmark dropdown with bookmark names."""
         if not self.bookmarks:
@@ -1557,6 +1570,13 @@ class RadioGUI:
         # Update dropdown
         self.bookmark_combo['values'] = bookmark_names
         self.bookmark_combo.config(state='readonly')
+
+        # Update initial selection based on current frequency and mode
+        try:
+            freq_hz = self.get_frequency_hz()
+            self.update_bookmark_selector(freq_hz)
+        except ValueError:
+            pass  # Ignore if frequency is invalid
 
     def on_bookmark_selected(self):
         """Handle bookmark selection from dropdown."""
@@ -1642,6 +1662,68 @@ class RadioGUI:
 
         # Reset dropdown to empty after selection
         self.band_selector_var.set("")
+
+    def update_band_selector(self, freq_hz: int):
+        """Update band selector dropdown to show the current band without triggering action.
+
+        Args:
+            freq_hz: Current frequency in Hz
+        """
+        if not self.bands:
+            return
+
+        # Find matching band
+        for band in self.bands:
+            if band['start'] <= freq_hz <= band['end']:
+                # Set dropdown value without triggering the callback
+                current_value = self.band_selector_var.get()
+                band_label = band.get('label', 'Unknown')
+
+                # Only update if different to avoid unnecessary updates
+                if current_value != band_label:
+                    self.band_selector_var.set(band_label)
+                return
+
+        # No matching band - clear selection
+        if self.band_selector_var.get() != "":
+            self.band_selector_var.set("")
+
+    def update_bookmark_selector(self, freq_hz: int):
+        """Update bookmark selector dropdown to show matching bookmark without triggering action.
+
+        Args:
+            freq_hz: Current frequency in Hz
+        """
+        if not self.bookmarks:
+            return
+
+        # Get current mode
+        try:
+            current_mode = self.mode_var.get().upper()
+        except:
+            current_mode = None
+
+        # Find matching bookmark (must match both frequency and mode)
+        for bookmark in self.bookmarks:
+            bookmark_freq = bookmark.get('frequency')
+            bookmark_mode = bookmark.get('mode', 'USB').upper()
+
+            # Check if frequency matches (within 1 kHz tolerance)
+            if bookmark_freq and abs(freq_hz - bookmark_freq) < 1000:
+                # Check if mode matches
+                if current_mode and bookmark_mode == current_mode:
+                    # Set dropdown value without triggering the callback
+                    current_value = self.bookmark_var.get()
+                    bookmark_name = bookmark.get('name', 'Unnamed')
+
+                    # Only update if different to avoid unnecessary updates
+                    if current_value != bookmark_name:
+                        self.bookmark_var.set(bookmark_name)
+                    return
+
+        # No matching bookmark - clear selection
+        if self.bookmark_var.get() != "":
+            self.bookmark_var.set("")
 
     def apply_frequency(self, skip_auto_mode=False):
         """Apply frequency change by sending tune message.
@@ -1764,9 +1846,16 @@ class RadioGUI:
         """Handle mode change - updates bandwidth and presets immediately."""
         mode_display = self.mode_var.get()
         mode = self._parse_mode_name(mode_display)
-        
+
         # Update mode button styles
         self.update_mode_buttons()
+
+        # Update bookmark selector when mode changes (bookmarks match freq + mode)
+        try:
+            freq_hz = self.get_frequency_hz()
+            self.update_bookmark_selector(freq_hz)
+        except ValueError:
+            pass  # Ignore if frequency is invalid
 
         # Disable audio filter only if mode actually changed (silently, without validation)
         # because bandwidth ranges change and filter settings may become invalid

@@ -8,18 +8,102 @@ class DecodeMetricsDashboard {
         this.weekChart = null;
         this.monthChart = null;
         this.yearChart = null;
+        this.weekBandChart = null;
+        this.monthBandChart = null;
+        this.yearBandChart = null;
         this.summaryAutoRefreshInterval = null; // Auto-refresh for summary data
         this.MODE_COLORS = {
             'FT8': 'rgba(54, 162, 235, 0.8)',
             'FT4': 'rgba(255, 159, 64, 0.8)',
             'WSPR': 'rgba(75, 192, 192, 0.8)'
         };
+        this.BAND_COLORS = {
+            '160m': 'rgba(139, 0, 0, 0.8)',
+            '80m': 'rgba(255, 69, 0, 0.8)',
+            '60m': 'rgba(255, 140, 0, 0.8)',
+            '40m': 'rgba(255, 215, 0, 0.8)',
+            '30m': 'rgba(154, 205, 50, 0.8)',
+            '20m': 'rgba(0, 128, 0, 0.8)',
+            '17m': 'rgba(0, 191, 255, 0.8)',
+            '15m': 'rgba(30, 144, 255, 0.8)',
+            '12m': 'rgba(138, 43, 226, 0.8)',
+            '10m': 'rgba(148, 0, 211, 0.8)',
+            '6m': 'rgba(255, 20, 147, 0.8)'
+        };
+        this.colorCache = new Map(); // Cache for generated colors
+        this.BAND_ORDER = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
         this.init();
         this.loadVersion();
         this.loadDecoderNames(); // Load decoder band names
         this.loadSummariesAndCharts(); // Load summary statistics and charts
         this.startSummaryAutoRefresh(); // Start auto-refresh for summaries
         // Don't auto-load detailed metrics - user must click "Load Metrics" button
+    }
+
+    /**
+     * Generate a consistent color for a band using a hash function
+     * This ensures the same band always gets the same color across refreshes
+     */
+    hashStringToColor(str) {
+        // Check cache first
+        if (this.colorCache.has(str)) {
+            return this.colorCache.get(str);
+        }
+
+        // Simple hash function
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+
+        // Generate RGB values from hash
+        const r = (hash & 0xFF0000) >> 16;
+        const g = (hash & 0x00FF00) >> 8;
+        const b = hash & 0x0000FF;
+
+        // Ensure colors are vibrant enough (avoid too dark colors)
+        const minBrightness = 80;
+        const adjustedR = Math.max(r, minBrightness);
+        const adjustedG = Math.max(g, minBrightness);
+        const adjustedB = Math.max(b, minBrightness);
+
+        const color = `rgba(${adjustedR}, ${adjustedG}, ${adjustedB}, 0.8)`;
+
+        // Cache the result
+        this.colorCache.set(str, color);
+
+        return color;
+    }
+
+    /**
+     * Get color for a band - uses predefined colors if available,
+     * otherwise generates a consistent color based on band name hash
+     */
+    getBandColor(band) {
+        return this.BAND_COLORS[band] || this.hashStringToColor(band);
+    }
+
+    /**
+     * Sort bands in the standard order (160m -> 10m -> 6m -> others)
+     * Ensures consistent ordering across all charts
+     */
+    sortBands(bands) {
+        return [...bands].sort((a, b) => {
+            const indexA = this.BAND_ORDER.indexOf(a);
+            const indexB = this.BAND_ORDER.indexOf(b);
+
+            // If both bands are in the order list, sort by their position
+            if (indexA !== -1 && indexB !== -1) {
+                return indexA - indexB;
+            }
+            // If only A is in the list, it comes first
+            if (indexA !== -1) return -1;
+            // If only B is in the list, it comes first
+            if (indexB !== -1) return 1;
+            // If neither is in the list, sort alphabetically
+            return a.localeCompare(b);
+        });
     }
 
     async loadDecoderNames() {
@@ -148,26 +232,29 @@ class DecodeMetricsDashboard {
                 document.getElementById('today-summary').innerHTML = '<div style="opacity: 0.6;">No data available</div>';
             }
 
-            // Process week chart
+            // Process week charts
             if (weekResponse.ok) {
                 const weekData = await weekResponse.json();
                 this.updateWeekChart(weekData);
+                this.updateWeekBandChart(weekData);
             }
 
-            // Process month summary and chart
+            // Process month summary and charts
             if (monthResponse.ok) {
                 const monthData = await monthResponse.json();
                 this.displaySummary('month-summary', monthData, 'month');
                 this.updateMonthChart(monthData);
+                this.updateMonthBandChart(monthData);
             } else {
                 document.getElementById('month-summary').innerHTML = '<div style="opacity: 0.6;">No data available</div>';
             }
 
-            // Process year summary and chart
+            // Process year summary and charts
             if (yearResponse.ok) {
                 const yearData = await yearResponse.json();
                 this.displaySummary('year-summary', yearData, 'year');
                 this.updateYearChart(yearData);
+                this.updateYearBandChart(yearData);
             } else {
                 document.getElementById('year-summary').innerHTML = '<div style="opacity: 0.6;">No data available</div>';
             }
@@ -532,6 +619,228 @@ class DecodeMetricsDashboard {
             }
         } catch (error) {
             console.error('Error loading year chart:', error);
+        }
+    }
+
+    updateWeekBandChart(data) {
+        try {
+            if (!data.summaries || data.summaries.length === 0) return;
+
+            // Aggregate by band across all modes for each day
+            const dailyData = {};
+            data.summaries.forEach(summary => {
+                if (summary.daily_breakdown) {
+                    summary.daily_breakdown.forEach(day => {
+                        const date = day.date;
+                        if (!dailyData[date]) dailyData[date] = {};
+                        if (!dailyData[date][summary.band]) dailyData[date][summary.band] = 0;
+                        dailyData[date][summary.band] += day.spots;
+                    });
+                }
+            });
+
+            const dates = Object.keys(dailyData).sort();
+            const labels = dates.map(d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+
+            const allBands = new Set();
+            Object.values(dailyData).forEach(dayData => {
+                Object.keys(dayData).forEach(band => allBands.add(band));
+            });
+
+            const sortedBands = this.sortBands(Array.from(allBands));
+            const datasets = sortedBands.map(band => {
+                const color = this.getBandColor(band);
+                return {
+                    label: band,
+                    data: dates.map(date => dailyData[date][band] || 0),
+                    backgroundColor: color,
+                    borderColor: color.replace('0.8', '1'),
+                    borderWidth: 1
+                };
+            });
+
+            if (this.weekBandChart) {
+                this.weekBandChart.data.labels = labels;
+                this.weekBandChart.data.datasets = datasets;
+                this.weekBandChart.update('none');
+            } else {
+                const ctx = document.getElementById('week-band-chart').getContext('2d');
+                this.weekBandChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        animation: { duration: 0 },
+                        scales: {
+                            x: { stacked: true, ticks: { color: '#fff' }, grid: { color: 'rgba(255, 255, 255, 0.1)' } },
+                            y: { stacked: true, beginAtZero: true, ticks: { color: '#fff', callback: v => v.toLocaleString() }, grid: { color: 'rgba(255, 255, 255, 0.1)' } }
+                        },
+                        plugins: {
+                            legend: { position: 'top', labels: { color: '#fff' } },
+                            tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}` } }
+                        }
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Error loading week band chart:', error);
+        }
+    }
+
+    updateMonthBandChart(data) {
+        try {
+            if (!data.summaries || data.summaries.length === 0) return;
+
+            // Aggregate by band across all modes for each day
+            const dailyData = {};
+            data.summaries.forEach(summary => {
+                if (summary.daily_breakdown) {
+                    summary.daily_breakdown.forEach(day => {
+                        const date = day.date;
+                        if (!dailyData[date]) dailyData[date] = {};
+                        if (!dailyData[date][summary.band]) dailyData[date][summary.band] = 0;
+                        dailyData[date][summary.band] += day.spots;
+                    });
+                }
+            });
+
+            const dates = Object.keys(dailyData).sort();
+            const labels = dates.map(d => new Date(d).getDate());
+
+            const allBands = new Set();
+            Object.values(dailyData).forEach(dayData => {
+                Object.keys(dayData).forEach(band => allBands.add(band));
+            });
+
+            const sortedBands = this.sortBands(Array.from(allBands));
+            const datasets = sortedBands.map(band => {
+                const color = this.getBandColor(band);
+                return {
+                    label: band,
+                    data: dates.map(date => dailyData[date][band] || 0),
+                    backgroundColor: color,
+                    borderColor: color.replace('0.8', '1'),
+                    borderWidth: 1
+                };
+            });
+
+            if (this.monthBandChart) {
+                this.monthBandChart.data.labels = labels;
+                this.monthBandChart.data.datasets = datasets;
+                this.monthBandChart.update('none');
+            } else {
+                const ctx = document.getElementById('month-band-chart').getContext('2d');
+                this.monthBandChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        animation: { duration: 0 },
+                        scales: {
+                            x: { stacked: true, title: { display: true, text: 'Day of Month', color: '#fff' }, ticks: { color: '#fff' }, grid: { color: 'rgba(255, 255, 255, 0.1)' } },
+                            y: { stacked: true, beginAtZero: true, ticks: { color: '#fff', callback: v => v.toLocaleString() }, grid: { color: 'rgba(255, 255, 255, 0.1)' } }
+                        },
+                        plugins: {
+                            legend: { position: 'top', labels: { color: '#fff' } },
+                            tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}` } }
+                        }
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Error loading month band chart:', error);
+        }
+    }
+
+    updateYearBandChart(data) {
+        try {
+            if (!data.summaries || data.summaries.length === 0) return;
+
+            const today = new Date();
+            const year = today.getFullYear();
+            const monthlyData = {};
+
+            // Aggregate by band across all modes for each month
+            data.summaries.forEach(summary => {
+                if (summary.monthly_breakdown && summary.monthly_breakdown.length > 0) {
+                    summary.monthly_breakdown.forEach(month => {
+                        const monthKey = month.month;
+                        if (!monthlyData[monthKey]) monthlyData[monthKey] = {};
+                        if (!monthlyData[monthKey][summary.band]) monthlyData[monthKey][summary.band] = 0;
+                        monthlyData[monthKey][summary.band] += month.spots;
+                    });
+                }
+            });
+
+            // For summaries without monthly_breakdown, add to current month
+            data.summaries.forEach(summary => {
+                if (!summary.monthly_breakdown || summary.monthly_breakdown.length === 0) {
+                    const currentMonth = `${year}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+                    if (!monthlyData[currentMonth]) monthlyData[currentMonth] = {};
+                    if (!monthlyData[currentMonth][summary.band]) monthlyData[currentMonth][summary.band] = 0;
+                    monthlyData[currentMonth][summary.band] += summary.total_spots;
+                }
+            });
+
+            const monthLabels = [];
+            const allBands = new Set();
+
+            Object.values(monthlyData).forEach(monthData => {
+                Object.keys(monthData).forEach(band => allBands.add(band));
+            });
+
+            const sortedBands = this.sortBands(Array.from(allBands));
+            const monthlyDataArrays = {};
+            sortedBands.forEach(band => { monthlyDataArrays[band] = []; });
+
+            for (let month = 1; month <= 12; month++) {
+                const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+                monthLabels.push(new Date(year, month - 1).toLocaleDateString('en-US', { month: 'short' }));
+                const monthData = monthlyData[monthKey] || {};
+                sortedBands.forEach(band => {
+                    monthlyDataArrays[band].push(monthData[band] || 0);
+                });
+            }
+
+            const datasets = sortedBands.map(band => {
+                const color = this.getBandColor(band);
+                return {
+                    label: band,
+                    data: monthlyDataArrays[band],
+                    backgroundColor: color,
+                    borderColor: color.replace('0.8', '1'),
+                    borderWidth: 1
+                };
+            });
+
+            if (this.yearBandChart) {
+                this.yearBandChart.data.labels = monthLabels;
+                this.yearBandChart.data.datasets = datasets;
+                this.yearBandChart.update('none');
+            } else {
+                const ctx = document.getElementById('year-band-chart').getContext('2d');
+                this.yearBandChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels: monthLabels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        animation: { duration: 0 },
+                        scales: {
+                            x: { stacked: true, ticks: { color: '#fff' }, grid: { color: 'rgba(255, 255, 255, 0.1)' } },
+                            y: { stacked: true, beginAtZero: true, ticks: { color: '#fff', callback: v => v.toLocaleString() }, grid: { color: 'rgba(255, 255, 255, 0.1)' } }
+                        },
+                        plugins: {
+                            legend: { position: 'top', labels: { color: '#fff' } },
+                            tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}` } }
+                        }
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Error loading year band chart:', error);
         }
     }
 

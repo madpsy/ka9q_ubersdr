@@ -1446,7 +1446,9 @@ class RadioGUI:
 
             if isinstance(data, list):
                 self.bands = data
+                self.assign_band_colors()
                 self.populate_band_selector()
+                self.update_spectrum_bands()
                 self.log_status(f"Loaded {len(self.bands)} band(s) from server")
             else:
                 self.log_status("No bands available from server")
@@ -1461,6 +1463,36 @@ class RadioGUI:
             self.log_status(f"Error loading bands: {e}")
             self.use_hardcoded_bands()
 
+    def assign_band_colors(self):
+        """Assign pastel colors to bands (matching web UI color palette)."""
+        # Color palette for bands (rainbow gradient with transparency)
+        band_colors = [
+            '#ffcccc',  # Light red
+            '#ffd9cc',  # Light orange-red
+            '#ffe6cc',  # Light orange
+            '#ffffcc',  # Light yellow
+            '#e6ffcc',  # Light yellow-green
+            '#ccffcc',  # Light green
+            '#ccffe6',  # Light cyan-green
+            '#cce6ff',  # Light cyan
+            '#ccccff',  # Light blue
+            '#d9ccff'   # Light purple
+        ]
+
+        # Assign colors to bands
+        for i, band in enumerate(self.bands):
+            band['color'] = band_colors[i % len(band_colors)]
+
+    def update_spectrum_bands(self):
+        """Update spectrum displays with band data."""
+        # Update main spectrum display if it exists
+        if self.spectrum:
+            self.spectrum.bands = self.bands
+
+        # Update waterfall window's spectrum if it exists
+        if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
+            self.waterfall_spectrum.bands = self.bands
+
     def use_hardcoded_bands(self):
         """Use hardcoded BAND_RANGES as fallback."""
         # Convert BAND_RANGES to bands format
@@ -1471,7 +1503,9 @@ class RadioGUI:
                 'start': range_dict['min'],
                 'end': range_dict['max']
             })
+        self.assign_band_colors()
         self.populate_band_selector()
+        self.update_spectrum_bands()
 
     def populate_band_selector(self):
         """Populate the band selector dropdown with band labels."""

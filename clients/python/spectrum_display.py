@@ -35,6 +35,7 @@ class SpectrumDisplay:
         self.height = height
         self.click_tune_var = click_tune_var
         self.bookmarks = bookmarks or []
+        self.bands = []  # List of band dictionaries with 'label', 'start', 'end', 'color'
         
         # Create canvas for spectrum display
         self.canvas = Canvas(parent, width=width, height=height, bg='#000000', highlightthickness=1)
@@ -429,7 +430,10 @@ class SpectrumDisplay:
             # Draw line
             self.canvas.create_line(points, fill='#00ff00', width=1)
         
-        # Draw bookmark markers (above spectrum)
+        # Draw band backgrounds (behind bookmarks)
+        self._draw_band_backgrounds()
+        
+        # Draw bookmark markers (above spectrum and band backgrounds)
         self._draw_bookmarks()
         
         # Draw bandwidth filter visualization
@@ -519,7 +523,101 @@ class SpectrumDisplay:
         self.canvas.create_text(x, self.margin_top - 10,
                                text=f"{freq_mhz:.6f} MHz",
                                fill='orange', font=('monospace', 10, 'bold'))
-    
+
+    def _draw_band_backgrounds(self):
+        """Draw colored band backgrounds in the bookmark section."""
+        if not self.bands or self.total_bandwidth == 0:
+            return
+
+        start_freq = self.center_freq - self.total_bandwidth / 2
+        end_freq = self.center_freq + self.total_bandwidth / 2
+
+        # Y position for band backgrounds (same as bookmark section)
+        band_y = 5
+        band_height = 18  # Height of the colored band area
+
+        # Sort bands by width (widest first) so narrower bands are drawn on top
+        sorted_bands = sorted(self.bands, key=lambda b: b['end'] - b['start'], reverse=True)
+
+        for band in sorted_bands:
+            # Check if band overlaps with visible spectrum
+            if band['end'] >= start_freq and band['start'] <= end_freq:
+                # Calculate pixel positions
+                band_start_x = max(self.margin_left,
+                                  self.margin_left + ((band['start'] - start_freq) / self.total_bandwidth) * self.graph_width)
+                band_end_x = min(self.margin_left + self.graph_width,
+                                self.margin_left + ((band['end'] - start_freq) / self.total_bandwidth) * self.graph_width)
+                band_width = band_end_x - band_start_x
+
+                if band_width > 0:
+                    # Draw semi-transparent colored rectangle
+                    color = band.get('color', '#cccccc')
+                    self.canvas.create_rectangle(
+                        band_start_x, band_y,
+                        band_end_x, band_y + band_height,
+                        fill=color, outline='', stipple='gray50'
+                    )
+
+                    # Draw band label if there's enough space
+                    label_text = band.get('label', '')
+                    if label_text and band_width > 30:
+                        # Prepare label styling
+                        label_y = band_y + 2
+
+                        # Calculate label width
+                        # Approximate: 7 pixels per character
+                        text_width = len(label_text) * 7
+                        padding = 2
+                        label_width = text_width + padding * 2
+
+                        # Determine label positions based on band width
+                        min_width_for_label = 30
+                        min_width_for_multiple = 180
+
+                        if band_width < min_width_for_label:
+                            # Too narrow for any labels
+                            continue
+                        elif band_width < min_width_for_multiple:
+                            # Single label in center
+                            if label_width <= band_width:
+                                label_x = band_start_x + band_width / 2
+                                # Draw label background
+                                self.canvas.create_rectangle(
+                                    label_x - label_width / 2, label_y,
+                                    label_x + label_width / 2, label_y + 10,
+                                    fill='white', outline=''
+                                )
+                                # Draw label text
+                                self.canvas.create_text(
+                                    label_x, label_y + 5,
+                                    text=label_text, fill='black',
+                                    font=('monospace', 9, 'bold')
+                                )
+                        else:
+                            # Multiple labels at regular intervals
+                            intelligent_spacing = max(180, label_width + 20)
+                            num_labels = max(2, int(band_width / intelligent_spacing) + 1)
+                            actual_spacing = band_width / (num_labels - 1)
+
+                            for i in range(num_labels):
+                                label_x = band_start_x + (i * actual_spacing)
+                                # Clamp to band boundaries
+                                label_x = max(band_start_x + label_width / 2,
+                                            min(band_end_x - label_width / 2, label_x))
+
+                                # Draw label background
+                                self.canvas.create_rectangle(
+                                    label_x - label_width / 2, label_y,
+                                    label_x + label_width / 2, label_y + 10,
+                                    fill='white', outline=''
+                                )
+                                # Draw label text
+                                self.canvas.create_text(
+                                    label_x, label_y + 5,
+                                    text=label_text, fill='black',
+                                    font=('monospace', 9, 'bold')
+                                )
+
     def _draw_bookmarks(self):
         """Draw bookmark markers in the bookmark section above spectrum."""
         if not self.bookmarks or self.total_bandwidth == 0:

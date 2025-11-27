@@ -714,6 +714,7 @@ def create_waterfall_window(parent_gui):
     
     # Create NEW spectrum display in this window with bookmarks
     spectrum = SpectrumDisplay(container, width=800, height=200, click_tune_var=click_tune_var, bookmarks=parent_gui.bookmarks)
+    spectrum.bands = parent_gui.bands  # Pass bands to spectrum display
     spectrum.set_frequency_callback(parent_gui.on_spectrum_frequency_click)
     spectrum.set_frequency_step_callback(parent_gui.on_spectrum_frequency_step)
     spectrum.set_step_size(parent_gui.get_step_size_hz())

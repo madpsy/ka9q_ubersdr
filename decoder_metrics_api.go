@@ -339,91 +339,74 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 			cycleSeconds = 120
 		}
 
-		// Try to get data from file snapshots first for historical data
+		// Calculate summary metrics from time series data for consistency
 		key := fmt.Sprintf("%s:%s", combo.Mode, combo.Band)
-		usedFileData := false
 
-		if fileSnapshots != nil {
-			if snapshots, exists := fileSnapshots[key]; exists && len(snapshots) > 0 {
-				// Strategy: Find a snapshot that's at least 1 hour old (to have accumulated data)
-				// but prefer more recent ones (within the time range) over very old ones
-				// This avoids both: brand new snapshots (low counts) and very stale data
+		// Always generate time series first to ensure we have the data
+		if !includeTimeSeries {
+			// Generate time series temporarily just for summary calculation
+			tempTimeSeries := generateTimeSeriesWithFiles(md.prometheusMetrics.digitalMetrics, []struct{ Mode, Band string }{combo}, interval, startTime, endTime, fileSnapshots)
 
-				var bestSnapshot *MetricsSnapshot
-				oneHourAgo := endTime.Add(-1 * time.Hour)
+			// Count total decodes from time series
+			totalDecodes := int64(0)
+			maxUniqueCallsigns := 0
 
-				// First pass: try to find snapshots that are at least 1 hour old
-				for i := range snapshots {
-					s := &snapshots[i]
-					if s.Timestamp.Before(oneHourAgo) && s.DecodeCounts.Last24Hours > 0 {
-						if bestSnapshot == nil || s.Timestamp.After(bestSnapshot.Timestamp) {
-							bestSnapshot = s
-						}
+			for _, point := range tempTimeSeries {
+				if data, exists := point.Data[key]; exists {
+					totalDecodes += int64(data.DecodeCount)
+					if data.UniqueCallsigns > maxUniqueCallsigns {
+						maxUniqueCallsigns = data.UniqueCallsigns
 					}
 				}
+			}
 
-				// If no snapshot older than 1 hour, use the one with highest count
-				if bestSnapshot == nil {
-					maxDecodes := int64(0)
-					for i := range snapshots {
-						s := &snapshots[i]
-						if s.DecodeCounts.Last24Hours > maxDecodes {
-							maxDecodes = s.DecodeCounts.Last24Hours
-							bestSnapshot = s
-						}
-					}
+			// Use time series totals for the requested time range
+			if totalDecodes > 0 {
+				metrics.DecodeCounts.Last24Hours = totalDecodes
+				metrics.UniqueCallsigns.Last24Hours = maxUniqueCallsigns
+
+				// Estimate shorter windows proportionally
+				if hours >= 1 {
+					metrics.DecodeCounts.Last1Hour = totalDecodes * 1 / int64(hours)
+					metrics.UniqueCallsigns.Last1Hour = maxUniqueCallsigns * 1 / hours
+				}
+				if hours >= 3 {
+					metrics.DecodeCounts.Last3Hours = totalDecodes * 3 / int64(hours)
+					metrics.UniqueCallsigns.Last3Hours = maxUniqueCallsigns * 3 / hours
+				}
+				if hours >= 6 {
+					metrics.DecodeCounts.Last6Hours = totalDecodes * 6 / int64(hours)
+					metrics.UniqueCallsigns.Last6Hours = maxUniqueCallsigns * 6 / hours
+				}
+				if hours >= 12 {
+					metrics.DecodeCounts.Last12Hours = totalDecodes * 12 / int64(hours)
+					metrics.UniqueCallsigns.Last12Hours = maxUniqueCallsigns * 12 / hours
 				}
 
-				if bestSnapshot != nil && bestSnapshot.DecodeCounts.Last24Hours > 0 {
-					metrics.DecodeCounts.Last1Hour = bestSnapshot.DecodeCounts.Last1Hour
-					metrics.DecodeCounts.Last3Hours = bestSnapshot.DecodeCounts.Last3Hours
-					metrics.DecodeCounts.Last6Hours = bestSnapshot.DecodeCounts.Last6Hours
-					metrics.DecodeCounts.Last12Hours = bestSnapshot.DecodeCounts.Last12Hours
-					metrics.DecodeCounts.Last24Hours = bestSnapshot.DecodeCounts.Last24Hours
+				log.Printf("Using time series data for %s - Total: %d decodes, %d unique callsigns over %d hours",
+					key, totalDecodes, maxUniqueCallsigns, hours)
+			} else {
+				// Fallback to in-memory if no time series data
+				metrics.DecodeCounts.Last1Hour = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 1)
+				metrics.DecodeCounts.Last3Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 3)
+				metrics.DecodeCounts.Last6Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 6)
+				metrics.DecodeCounts.Last12Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 12)
+				metrics.DecodeCounts.Last24Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 24)
 
-					metrics.UniqueCallsigns.Last1Hour = bestSnapshot.UniqueCallsigns.Last1Hour
-					metrics.UniqueCallsigns.Last3Hours = bestSnapshot.UniqueCallsigns.Last3Hours
-					metrics.UniqueCallsigns.Last6Hours = bestSnapshot.UniqueCallsigns.Last6Hours
-					metrics.UniqueCallsigns.Last12Hours = bestSnapshot.UniqueCallsigns.Last12Hours
-					metrics.UniqueCallsigns.Last24Hours = bestSnapshot.UniqueCallsigns.Last24Hours
-
-					metrics.DecodesPerCycle.Last1Min = bestSnapshot.DecodesPerCycle.Last1Min
-					metrics.DecodesPerCycle.Last5Min = bestSnapshot.DecodesPerCycle.Last5Min
-					metrics.DecodesPerCycle.Last15Min = bestSnapshot.DecodesPerCycle.Last15Min
-					metrics.DecodesPerCycle.Last30Min = bestSnapshot.DecodesPerCycle.Last30Min
-					metrics.DecodesPerCycle.Last60Min = bestSnapshot.DecodesPerCycle.Last60Min
-
-					usedFileData = true
-					log.Printf("Using file snapshot from %v for %s - Last24h: %d decodes, %d callsigns (from %d snapshots, endTime: %v)",
-						bestSnapshot.Timestamp.Format("2006-01-02 15:04:05"), key,
-						metrics.DecodeCounts.Last24Hours, metrics.UniqueCallsigns.Last24Hours, len(snapshots), endTime.Format("15:04:05"))
-				}
+				metrics.UniqueCallsigns.Last1Hour = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 1)
+				metrics.UniqueCallsigns.Last3Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 3)
+				metrics.UniqueCallsigns.Last6Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 6)
+				metrics.UniqueCallsigns.Last12Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 12)
+				metrics.UniqueCallsigns.Last24Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 24)
 			}
 		}
 
-		// Only use in-memory data if no file data was available
-		if !usedFileData {
-			// Decode counts
-			metrics.DecodeCounts.Last1Hour = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 1)
-			metrics.DecodeCounts.Last3Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 3)
-			metrics.DecodeCounts.Last6Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 6)
-			metrics.DecodeCounts.Last12Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 12)
-			metrics.DecodeCounts.Last24Hours = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 24)
-
-			// Decodes per cycle
-			metrics.DecodesPerCycle.Last1Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 1)
-			metrics.DecodesPerCycle.Last5Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 5)
-			metrics.DecodesPerCycle.Last15Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 15)
-			metrics.DecodesPerCycle.Last30Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 30)
-			metrics.DecodesPerCycle.Last60Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 60)
-
-			// Unique callsigns
-			metrics.UniqueCallsigns.Last1Hour = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 1)
-			metrics.UniqueCallsigns.Last3Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 3)
-			metrics.UniqueCallsigns.Last6Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 6)
-			metrics.UniqueCallsigns.Last12Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 12)
-			metrics.UniqueCallsigns.Last24Hours = md.prometheusMetrics.digitalMetrics.GetUniqueCallsigns(combo.Mode, combo.Band, 24)
-		}
+		// Decodes per cycle - use in-memory data (recent activity only)
+		metrics.DecodesPerCycle.Last1Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 1)
+		metrics.DecodesPerCycle.Last5Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 5)
+		metrics.DecodesPerCycle.Last15Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 15)
+		metrics.DecodesPerCycle.Last30Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 30)
+		metrics.DecodesPerCycle.Last60Min = md.prometheusMetrics.digitalMetrics.GetAverageDecodesPerCycle(combo.Mode, combo.Band, cycleSeconds, 60)
 
 		// Execution time
 		avg1m, min1m, max1m := md.prometheusMetrics.digitalMetrics.GetExecutionTimeStats(combo.Mode, combo.Band, 1)
@@ -461,6 +444,60 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 	if includeTimeSeries {
 		response.TimeSeries = generateTimeSeriesWithFiles(md.prometheusMetrics.digitalMetrics, filteredCombinations, interval, startTime, endTime, fileSnapshots)
 		response.ExecutionTimeSeries = generateExecutionTimeSeriesWithFiles(md.prometheusMetrics.digitalMetrics, filteredCombinations, interval, startTime, endTime, fileSnapshots)
+
+		// Now update summary metrics from the generated time series
+		for i := range response.Metrics {
+			metrics := &response.Metrics[i]
+			key := fmt.Sprintf("%s:%s", metrics.Mode, metrics.Band)
+
+			// Count total decodes and unique callsigns from time series
+			totalDecodes := int64(0)
+			maxUniqueCallsigns := 0
+
+			for _, point := range response.TimeSeries {
+				if data, exists := point.Data[key]; exists {
+					totalDecodes += int64(data.DecodeCount)
+					if data.UniqueCallsigns > maxUniqueCallsigns {
+						maxUniqueCallsigns = data.UniqueCallsigns
+					}
+				}
+			}
+
+			// Update metrics with time series totals
+			if totalDecodes > 0 {
+				metrics.DecodeCounts.Last24Hours = totalDecodes
+				metrics.UniqueCallsigns.Last24Hours = maxUniqueCallsigns
+
+				// Estimate shorter windows proportionally
+				if hours >= 1 {
+					metrics.DecodeCounts.Last1Hour = totalDecodes * 1 / int64(hours)
+					metrics.UniqueCallsigns.Last1Hour = maxUniqueCallsigns * 1 / hours
+				}
+				if hours >= 3 {
+					metrics.DecodeCounts.Last3Hours = totalDecodes * 3 / int64(hours)
+					metrics.UniqueCallsigns.Last3Hours = maxUniqueCallsigns * 3 / hours
+				}
+				if hours >= 6 {
+					metrics.DecodeCounts.Last6Hours = totalDecodes * 6 / int64(hours)
+					metrics.UniqueCallsigns.Last6Hours = maxUniqueCallsigns * 6 / hours
+				}
+				if hours >= 12 {
+					metrics.DecodeCounts.Last12Hours = totalDecodes * 12 / int64(hours)
+					metrics.UniqueCallsigns.Last12Hours = maxUniqueCallsigns * 12 / hours
+				}
+
+				// Recalculate activity metrics based on actual time range
+				metrics.Activity.DecodesPerHour = float64(totalDecodes) / float64(hours)
+				metrics.Activity.CallsignsPerHour = float64(maxUniqueCallsigns) / float64(hours)
+				metrics.Activity.ActivityScore = (metrics.Activity.DecodesPerHour / 100.0) * 100.0
+				if metrics.Activity.ActivityScore > 100 {
+					metrics.Activity.ActivityScore = 100
+				}
+
+				log.Printf("Updated summary for %s from time series - Total: %d decodes, %d unique callsigns over %d hours",
+					key, totalDecodes, maxUniqueCallsigns, hours)
+			}
+		}
 	}
 
 	// Generate top callsigns if requested

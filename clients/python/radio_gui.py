@@ -1115,9 +1115,6 @@ class RadioGUI:
         Args:
             freq_hz: Current frequency in Hz
         """
-        print(f"DEBUG: update_band_buttons called with freq_hz={freq_hz}", file=sys.stderr)
-        print(f"DEBUG: self.band_buttons has {len(self.band_buttons)} buttons", file=sys.stderr)
-
         current_band = None
 
         for band_name, button in self.band_buttons.items():
@@ -1127,11 +1124,9 @@ class RadioGUI:
 
             if band_range:
                 is_active = band_range['min'] <= freq_hz <= band_range['max']
-                print(f"DEBUG: {band_name} is_active={is_active} (range: {band_range['min']}-{band_range['max']})", file=sys.stderr)
 
                 if is_active:
                     current_band = band_name
-                    print(f"DEBUG: Setting current_band={current_band}", file=sys.stderr)
 
                 # Get band status (SNR-based color)
                 status = self.band_states.get(band_name, 'UNKNOWN')
@@ -1140,14 +1135,11 @@ class RadioGUI:
                 if is_active:
                     # Active band: use status color with border
                     style_name = f'{status.capitalize()}.Active.TButton'
-                    print(f"DEBUG: Applying active style '{style_name}' to {band_name}", file=sys.stderr)
                     button.configure(style=style_name)
                 else:
                     # Inactive band: use status color without border
                     style_name = f'{status.capitalize()}.TButton'
                     button.configure(style=style_name)
-            else:
-                print(f"DEBUG: No band_range found for {band_name} in BAND_RANGES!", file=sys.stderr)
 
         # Update band filter in digital spots window if open - only if band actually changed
         if self.digital_spots_display and current_band:

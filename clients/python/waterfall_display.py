@@ -762,8 +762,8 @@ def create_waterfall_window(parent_gui):
     # Click Tune checkbox (between title and peak freq, top)
     click_tune_var = tk.BooleanVar(value=True)
 
-    # Center Tune checkbox (below Click Tune)
-    center_tune_var = tk.BooleanVar(value=True)
+    # Center Tune checkbox (below Click Tune) - disabled by default
+    center_tune_var = tk.BooleanVar(value=False)
 
     # Create custom style for checkbox with black background
     style.configure('Black.TCheckbutton', background='#000000', foreground='white')
@@ -774,12 +774,12 @@ def create_waterfall_window(parent_gui):
     click_tune_check = ttk.Checkbutton(info_frame, text="Click Tune",
                                        variable=click_tune_var,
                                        style='Black.TCheckbutton')
-    click_tune_check.place(relx=0.70, y=15, anchor=tk.W)
+    click_tune_check.place(relx=0.66, y=15, anchor=tk.W)
 
     center_tune_check = ttk.Checkbutton(info_frame, text="Center Tune",
                                         variable=center_tune_var,
                                         style='Black.TCheckbutton')
-    center_tune_check.place(relx=0.70, y=35, anchor=tk.W)
+    center_tune_check.place(relx=0.66, y=35, anchor=tk.W)
     
     # Peak frequency info (right side, top line)
     peak_freq_label = tk.Label(info_frame, text="",

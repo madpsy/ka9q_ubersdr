@@ -23,6 +23,8 @@ class CWMetricsDashboard {
             '6m': 'rgba(255, 20, 147, 0.8)'
         };
         this.colorCache = new Map(); // Cache for generated colors
+        // Define band order for consistent plotting
+        this.BAND_ORDER = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
         this.init();
         this.loadVersion();
         this.loadSkimmerNames();
@@ -73,6 +75,28 @@ class CWMetricsDashboard {
      */
     getBandColor(band) {
         return this.BAND_COLORS[band] || this.hashStringToColor(band);
+    }
+
+    /**
+     * Sort bands in the standard order (160m -> 10m -> 6m -> others)
+     * Ensures consistent ordering across all charts
+     */
+    sortBands(bands) {
+        return [...bands].sort((a, b) => {
+            const indexA = this.BAND_ORDER.indexOf(a);
+            const indexB = this.BAND_ORDER.indexOf(b);
+
+            // If both bands are in the order list, sort by their position
+            if (indexA !== -1 && indexB !== -1) {
+                return indexA - indexB;
+            }
+            // If only A is in the list, it comes first
+            if (indexA !== -1) return -1;
+            // If only B is in the list, it comes first
+            if (indexB !== -1) return 1;
+            // If neither is in the list, sort alphabetically
+            return a.localeCompare(b);
+        });
     }
 
     async loadSkimmerNames() {
@@ -275,7 +299,8 @@ class CWMetricsDashboard {
                 Object.keys(dayData).forEach(band => allBands.add(band));
             });
 
-            const datasets = Array.from(allBands).map(band => {
+            const sortedBands = this.sortBands(Array.from(allBands));
+            const datasets = sortedBands.map(band => {
                 const color = this.getBandColor(band);
                 return {
                     label: band,
@@ -339,7 +364,8 @@ class CWMetricsDashboard {
                 Object.keys(dayData).forEach(band => allBands.add(band));
             });
 
-            const datasets = Array.from(allBands).map(band => {
+            const sortedBands = this.sortBands(Array.from(allBands));
+            const datasets = sortedBands.map(band => {
                 const color = this.getBandColor(band);
                 return {
                     label: band,
@@ -409,24 +435,25 @@ class CWMetricsDashboard {
 
             const monthLabels = [];
             const allBands = new Set();
-            
+
             Object.values(monthlyData).forEach(monthData => {
                 Object.keys(monthData).forEach(band => allBands.add(band));
             });
 
+            const sortedBands = this.sortBands(Array.from(allBands));
             const monthlyDataArrays = {};
-            allBands.forEach(band => { monthlyDataArrays[band] = []; });
+            sortedBands.forEach(band => { monthlyDataArrays[band] = []; });
 
             for (let month = 1; month <= 12; month++) {
                 const monthKey = `${year}-${String(month).padStart(2, '0')}`;
                 monthLabels.push(new Date(year, month - 1).toLocaleDateString('en-US', { month: 'short' }));
                 const monthData = monthlyData[monthKey] || {};
-                allBands.forEach(band => {
+                sortedBands.forEach(band => {
                     monthlyDataArrays[band].push(monthData[band] || 0);
                 });
             }
 
-            const datasets = Array.from(allBands).map(band => {
+            const datasets = sortedBands.map(band => {
                 const color = this.getBandColor(band);
                 return {
                     label: band,
@@ -666,7 +693,9 @@ class CWMetricsDashboard {
             });
         });
 
-        seriesMap.forEach((points, band) => {
+        const sortedBands = this.sortBands(Array.from(seriesMap.keys()));
+        sortedBands.forEach(band => {
+            const points = seriesMap.get(band);
             const color = this.getBandColor(band);
             datasets.push({
                 label: band,
@@ -763,7 +792,9 @@ class CWMetricsDashboard {
             });
         });
 
-        seriesMap.forEach((points, band) => {
+        const sortedBands = this.sortBands(Array.from(seriesMap.keys()));
+        sortedBands.forEach(band => {
+            const points = seriesMap.get(band);
             const color = this.getBandColor(band);
             datasets.push({
                 label: band,

@@ -1115,27 +1115,23 @@ class RadioGUI:
         Args:
             freq_hz: Current frequency in Hz
         """
+        print(f"DEBUG: update_band_buttons called with freq_hz={freq_hz}", file=sys.stderr)
+        print(f"DEBUG: self.band_buttons has {len(self.band_buttons)} buttons", file=sys.stderr)
+
         current_band = None
 
         for band_name, button in self.band_buttons.items():
-            # Find band data (check both fetched bands and BAND_RANGES for compatibility)
-            band_range = None
-
-            # First try fetched bands
-            for band in self.bands:
-                if band.get('label') == band_name:
-                    band_range = {'min': band['start'], 'max': band['end']}
-                    break
-
-            # Fall back to BAND_RANGES if not found in fetched bands
-            if not band_range and band_name in self.BAND_RANGES:
-                band_range = self.BAND_RANGES[band_name]
+            # Use hardcoded BAND_RANGES for button highlighting
+            # (server bands are for other purposes like the dropdown)
+            band_range = self.BAND_RANGES.get(band_name)
 
             if band_range:
                 is_active = band_range['min'] <= freq_hz <= band_range['max']
+                print(f"DEBUG: {band_name} is_active={is_active} (range: {band_range['min']}-{band_range['max']})", file=sys.stderr)
 
                 if is_active:
                     current_band = band_name
+                    print(f"DEBUG: Setting current_band={current_band}", file=sys.stderr)
 
                 # Get band status (SNR-based color)
                 status = self.band_states.get(band_name, 'UNKNOWN')
@@ -1143,10 +1139,15 @@ class RadioGUI:
                 # Apply style based on status and active state
                 if is_active:
                     # Active band: use status color with border
-                    button.configure(style=f'{status.capitalize()}.Active.TButton')
+                    style_name = f'{status.capitalize()}.Active.TButton'
+                    print(f"DEBUG: Applying active style '{style_name}' to {band_name}", file=sys.stderr)
+                    button.configure(style=style_name)
                 else:
                     # Inactive band: use status color without border
-                    button.configure(style=f'{status.capitalize()}.TButton')
+                    style_name = f'{status.capitalize()}.TButton'
+                    button.configure(style=style_name)
+            else:
+                print(f"DEBUG: No band_range found for {band_name} in BAND_RANGES!", file=sys.stderr)
 
         # Update band filter in digital spots window if open - only if band actually changed
         if self.digital_spots_display and current_band:
@@ -1659,6 +1660,9 @@ class RadioGUI:
                 return
 
             self.client.frequency = freq_hz
+
+            # Update band button highlighting
+            self.update_band_buttons(freq_hz)
 
             # Reset NR2 learning when frequency changes (noise profile will be different)
             if self.client.nr2_enabled and self.client.nr2_processor:

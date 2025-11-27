@@ -216,7 +216,8 @@ class RadioClient:
         # 10-band equalizer
         self.eq_enabled = False
         self.eq_band_gains = {}  # Dictionary of {frequency: gain_db}
-        self.eq_filters = {}     # Dictionary of {frequency: (taps, zi)}
+        self.eq_sos = None       # Combined second-order sections for all EQ bands
+        self.eq_zi = None        # Filter state for EQ
     
     def _init_audio_filter(self):
         """Initialize audio bandpass filter using FIR design."""
@@ -278,36 +279,61 @@ class RadioClient:
             return
 
         self.eq_band_gains = band_gains.copy()
-        self.eq_filters = {}
 
-        # Create a peaking filter for each band
-        for freq, gain_db in band_gains.items():
+        # Design second-order sections (SOS) for each EQ band
+        # SOS format is more numerically stable than transfer function
+        sos_list = []
+
+        # Nyquist frequency (half of sample rate)
+        nyquist = self.sample_rate / 2.0
+
+        for freq, gain_db in sorted(band_gains.items()):
             if abs(gain_db) < 0.1:
                 # Skip bands with negligible gain
                 continue
 
+            # Skip frequencies too close to Nyquist (need some margin for filter design)
+            # Use 80% of Nyquist as safe limit
+            if freq >= nyquist * 0.8:
+                continue
+
             try:
-                # Design a peaking EQ filter using IIR (biquad)
-                # Q factor of 1.0 gives reasonable bandwidth
-                Q = 1.0
-                
-                # Convert gain from dB to linear
-                gain_linear = 10 ** (gain_db / 20.0)
-                
-                # Design peaking filter
-                b, a = scipy_signal.iirpeak(freq, Q, fs=self.sample_rate)
-                
-                # Apply gain by scaling the numerator
-                b = b * gain_linear
-                
-                # Initialize filter state
-                zi = scipy_signal.lfilter_zi(b, a) * 0.0
-                
-                self.eq_filters[freq] = (b, a, zi)
+                # Design a proper peaking EQ filter using Audio EQ Cookbook formulas
+                # Reference: https://www.w3.org/TR/audio-eq-cookbook/
+                Q = 1.0  # Q factor (bandwidth) - 1.0 gives about 1.3 octave bandwidth
+                A = 10 ** (gain_db / 40.0)  # Amplitude (not power), so divide by 40 not 20
+
+                # Calculate intermediate values
+                w0 = 2 * np.pi * freq / self.sample_rate
+                cos_w0 = np.cos(w0)
+                sin_w0 = np.sin(w0)
+                alpha = sin_w0 / (2 * Q)
+
+                # Peaking EQ biquad coefficients (from Audio EQ Cookbook)
+                b0 = 1 + alpha * A
+                b1 = -2 * cos_w0
+                b2 = 1 - alpha * A
+                a0 = 1 + alpha / A
+                a1 = -2 * cos_w0
+                a2 = 1 - alpha / A
+
+                # Normalize and create SOS section [b0, b1, b2, a0, a1, a2]
+                sos_section = np.array([[b0/a0, b1/a0, b2/a0, 1.0, a1/a0, a2/a0]])
+
+                sos_list.append(sos_section)
+
             except Exception as e:
                 print(f"Warning: Failed to create EQ filter for {freq} Hz: {e}", file=sys.stderr)
 
-        print(f"EQ updated: {len(self.eq_filters)} active bands", file=sys.stderr)
+        if sos_list:
+            # Concatenate all SOS sections into one filter
+            self.eq_sos = np.vstack(sos_list)
+            # Initialize filter state - must match the number of sections
+            # sosfilt_zi returns shape (n_sections, 2) for the filter state
+            self.eq_zi = scipy_signal.sosfilt_zi(self.eq_sos)
+        else:
+            self.eq_sos = None
+            self.eq_zi = None
 
     def _log(self, message: str):
         """Log a message to stderr and optionally to status callback for GUI."""
@@ -499,16 +525,17 @@ class RadioClient:
                 self.audio_filter_enabled = False
 
         # Apply 10-band EQ if enabled (AFTER audio filter, BEFORE recording callback)
-        if self.eq_enabled and self.eq_filters and SCIPY_AVAILABLE:
+        # Using second-order sections (SOS) for numerical stability
+        if self.eq_enabled and self.eq_sos is not None and SCIPY_AVAILABLE:
             try:
-                # Apply each EQ band filter in sequence
-                for freq, (b, a, zi) in list(self.eq_filters.items()):
-                    if zi is not None:
-                        audio_float, new_zi = scipy_signal.lfilter(b, a, audio_float, zi=zi)
-                        # Update filter state
-                        self.eq_filters[freq] = (b, a, new_zi)
-                    else:
-                        audio_float = scipy_signal.lfilter(b, a, audio_float)
+                # Apply EQ using sosfilt (second-order sections filter)
+                # This is the standard, numerically stable way to apply cascaded biquads
+                if self.eq_zi is not None:
+                    audio_float, self.eq_zi = scipy_signal.sosfilt(
+                        self.eq_sos, audio_float, zi=self.eq_zi
+                    )
+                else:
+                    audio_float = scipy_signal.sosfilt(self.eq_sos, audio_float)
             except Exception as e:
                 # Disable EQ on error to avoid repeated failures
                 print(f"Warning: EQ error: {e}", file=sys.stderr)
@@ -619,6 +646,11 @@ class RadioClient:
                 if self.audio_filter_enabled and SCIPY_AVAILABLE:
                     self._init_audio_filter()
                     print(f"Audio filter reinitialized for {self.sample_rate} Hz", file=sys.stderr)
+
+                # Reinitialize EQ with new sample rate
+                if self.eq_enabled and self.eq_band_gains and SCIPY_AVAILABLE:
+                    self.update_eq(self.eq_band_gains)
+                    print(f"EQ reinitialized for {self.sample_rate} Hz", file=sys.stderr)
 
             if channels_changed:
                 self.channels = channels
@@ -1083,8 +1115,6 @@ Examples:
                 auto_connect = True
             else:
                 # Check if host or port were explicitly provided (not using defaults)
-                # We detect this by checking if they differ from the defaults
-                import sys
                 # Parse command line to see if --host or --port were actually specified
                 if '--host' in sys.argv or '-H' in sys.argv or '--port' in sys.argv or '-p' in sys.argv:
                     auto_connect = True

@@ -1791,6 +1791,13 @@ class RadioGUI:
             self.left_check.config(state='disabled')
             self.right_check.config(state='disabled')
 
+            # Disable EQ
+            if self.eq_display and self.eq_display.is_enabled():
+                self.eq_display.enabled_var.set(False)
+                self.eq_display.on_enable_changed()
+            if self.eq_btn:
+                self.eq_btn.config(state='disabled')
+
             # Disable NR2
             if self.nr2_enabled_var.get():
                 self.nr2_enabled_var.set(False)
@@ -1838,6 +1845,10 @@ class RadioGUI:
             # Re-enable channel checkboxes
             self.left_check.config(state='normal')
             self.right_check.config(state='normal')
+
+            # Re-enable EQ button
+            if self.eq_btn:
+                self.eq_btn.config(state='normal')
 
             # Re-enable NR2 checkbox
             self.nr2_check.config(state='normal')
@@ -3507,30 +3518,33 @@ class RadioGUI:
                                 elif self.cw_spots_btn:
                                     self.cw_spots_btn.pack_forget()
 
-                        # Auto-open waterfall window first (main display window)
-                        if WATERFALL_AVAILABLE:
-                            # Open waterfall immediately and unmute audio after it opens
-                            def open_waterfall_and_unmute():
-                                self.auto_open_waterfall()
-                                # Unmute audio after waterfall window opens (500ms delay)
-                                self.root.after(500, self.unmute_audio)
-                            self.root.after(100, open_waterfall_and_unmute)
+                            # Print loading message before opening GUI windows
+                            print("Loading GUI (may take a moment)...", file=sys.stderr)
 
-                        # Auto-open audio spectrum window on successful connection
-                        if AUDIO_SPECTRUM_AVAILABLE:
-                            # Delay audio spectrum opening slightly
-                            self.root.after(600, self.auto_open_audio_spectrum)
+                            # Auto-open waterfall window first (main display window)
+                            if WATERFALL_AVAILABLE:
+                                # Open waterfall immediately and unmute audio after it opens
+                                def open_waterfall_and_unmute():
+                                    self.auto_open_waterfall()
+                                    # Unmute audio after waterfall window opens (500ms delay)
+                                    self.root.after(500, self.unmute_audio)
+                                self.root.after(100, open_waterfall_and_unmute)
 
-                        # Auto-open CW spots window if enabled (disabled by default)
-                        # Add 2000ms delay (same as spectrum) before connecting DX cluster WebSocket
-                        # if self.client and hasattr(self.client, 'server_description'):
-                        #     desc = self.client.server_description
-                        #     if CW_SPOTS_AVAILABLE and desc.get('cw_skimmer', False):
-                        #         self.root.after(2800, self.auto_open_cw_spots)
+                            # Auto-open audio spectrum window on successful connection
+                            if AUDIO_SPECTRUM_AVAILABLE:
+                                # Delay audio spectrum opening slightly
+                                self.root.after(600, self.auto_open_audio_spectrum)
 
-                        # Start band state polling after connection is established
-                        # Add delay to allow other connections to establish first
-                        self.root.after(3000, self.start_band_state_polling)
+                            # Auto-open CW spots window if enabled (disabled by default)
+                            # Add 2000ms delay (same as spectrum) before connecting DX cluster WebSocket
+                            # if self.client and hasattr(self.client, 'server_description'):
+                            #     desc = self.client.server_description
+                            #     if CW_SPOTS_AVAILABLE and desc.get('cw_skimmer', False):
+                            #         self.root.after(2800, self.auto_open_cw_spots)
+
+                            # Start band state polling after connection is established
+                            # Add delay to allow other connections to establish first
+                            self.root.after(3000, self.start_band_state_polling)
 
                 elif msg_type == "error":
                     self.log_status(f"ERROR: {msg}")

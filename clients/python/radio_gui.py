@@ -1945,7 +1945,6 @@ class RadioGUI:
             # Convert percentage (0-100) to gain (0.0-2.0)
             # 100% = 1.0 gain, 200% = 2.0 gain
             self.client.volume = volume / 100.0
-            self.log_status(f"Volume: {volume}%")
 
     def update_channels(self):
         """Update audio channel routing (Left/Right)."""
@@ -2409,7 +2408,7 @@ class RadioGUI:
         if self.client and hasattr(self.client, '_desired_volume'):
             desired_volume = self.client._desired_volume
             self.client.volume = desired_volume
-            self.log_status(f"Audio enabled (volume: {int(desired_volume * 100)}%)")
+            self.log_status("Audio enabled")
 
     def auto_open_waterfall(self):
         """Automatically open waterfall window on connection (no error dialogs)."""

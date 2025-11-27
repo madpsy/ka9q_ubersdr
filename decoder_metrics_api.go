@@ -349,42 +349,41 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 
 			// Count total decodes from time series
 			totalDecodes := int64(0)
-			maxUniqueCallsigns := 0
+			totalUniqueCallsigns := 0
 
 			for _, point := range tempTimeSeries {
 				if data, exists := point.Data[key]; exists {
 					totalDecodes += int64(data.DecodeCount)
-					if data.UniqueCallsigns > maxUniqueCallsigns {
-						maxUniqueCallsigns = data.UniqueCallsigns
-					}
+					// Sum unique callsigns across all buckets (this is an upper bound estimate)
+					totalUniqueCallsigns += data.UniqueCallsigns
 				}
 			}
 
 			// Use time series totals for the requested time range
 			if totalDecodes > 0 {
 				metrics.DecodeCounts.Last24Hours = totalDecodes
-				metrics.UniqueCallsigns.Last24Hours = maxUniqueCallsigns
+				metrics.UniqueCallsigns.Last24Hours = totalUniqueCallsigns
 
 				// Estimate shorter windows proportionally
 				if hours >= 1 {
 					metrics.DecodeCounts.Last1Hour = totalDecodes * 1 / int64(hours)
-					metrics.UniqueCallsigns.Last1Hour = maxUniqueCallsigns * 1 / hours
+					metrics.UniqueCallsigns.Last1Hour = totalUniqueCallsigns * 1 / hours
 				}
 				if hours >= 3 {
 					metrics.DecodeCounts.Last3Hours = totalDecodes * 3 / int64(hours)
-					metrics.UniqueCallsigns.Last3Hours = maxUniqueCallsigns * 3 / hours
+					metrics.UniqueCallsigns.Last3Hours = totalUniqueCallsigns * 3 / hours
 				}
 				if hours >= 6 {
 					metrics.DecodeCounts.Last6Hours = totalDecodes * 6 / int64(hours)
-					metrics.UniqueCallsigns.Last6Hours = maxUniqueCallsigns * 6 / hours
+					metrics.UniqueCallsigns.Last6Hours = totalUniqueCallsigns * 6 / hours
 				}
 				if hours >= 12 {
 					metrics.DecodeCounts.Last12Hours = totalDecodes * 12 / int64(hours)
-					metrics.UniqueCallsigns.Last12Hours = maxUniqueCallsigns * 12 / hours
+					metrics.UniqueCallsigns.Last12Hours = totalUniqueCallsigns * 12 / hours
 				}
 
-				log.Printf("Using time series data for %s - Total: %d decodes, %d unique callsigns over %d hours",
-					key, totalDecodes, maxUniqueCallsigns, hours)
+				log.Printf("Using time series data for %s - Total: %d decodes, ~%d unique callsigns over %d hours",
+					key, totalDecodes, totalUniqueCallsigns, hours)
 			} else {
 				// Fallback to in-memory if no time series data
 				metrics.DecodeCounts.Last1Hour = md.prometheusMetrics.digitalMetrics.GetTotalDecodes(combo.Mode, combo.Band, 1)
@@ -452,50 +451,49 @@ func handleDecodeMetrics(w http.ResponseWriter, r *http.Request, md *MultiDecode
 
 			// Count total decodes and unique callsigns from time series
 			totalDecodes := int64(0)
-			maxUniqueCallsigns := 0
+			totalUniqueCallsigns := 0
 
 			for _, point := range response.TimeSeries {
 				if data, exists := point.Data[key]; exists {
 					totalDecodes += int64(data.DecodeCount)
-					if data.UniqueCallsigns > maxUniqueCallsigns {
-						maxUniqueCallsigns = data.UniqueCallsigns
-					}
+					// Sum unique callsigns across all buckets (upper bound estimate)
+					totalUniqueCallsigns += data.UniqueCallsigns
 				}
 			}
 
 			// Update metrics with time series totals
 			if totalDecodes > 0 {
 				metrics.DecodeCounts.Last24Hours = totalDecodes
-				metrics.UniqueCallsigns.Last24Hours = maxUniqueCallsigns
+				metrics.UniqueCallsigns.Last24Hours = totalUniqueCallsigns
 
 				// Estimate shorter windows proportionally
 				if hours >= 1 {
 					metrics.DecodeCounts.Last1Hour = totalDecodes * 1 / int64(hours)
-					metrics.UniqueCallsigns.Last1Hour = maxUniqueCallsigns * 1 / hours
+					metrics.UniqueCallsigns.Last1Hour = totalUniqueCallsigns * 1 / hours
 				}
 				if hours >= 3 {
 					metrics.DecodeCounts.Last3Hours = totalDecodes * 3 / int64(hours)
-					metrics.UniqueCallsigns.Last3Hours = maxUniqueCallsigns * 3 / hours
+					metrics.UniqueCallsigns.Last3Hours = totalUniqueCallsigns * 3 / hours
 				}
 				if hours >= 6 {
 					metrics.DecodeCounts.Last6Hours = totalDecodes * 6 / int64(hours)
-					metrics.UniqueCallsigns.Last6Hours = maxUniqueCallsigns * 6 / hours
+					metrics.UniqueCallsigns.Last6Hours = totalUniqueCallsigns * 6 / hours
 				}
 				if hours >= 12 {
 					metrics.DecodeCounts.Last12Hours = totalDecodes * 12 / int64(hours)
-					metrics.UniqueCallsigns.Last12Hours = maxUniqueCallsigns * 12 / hours
+					metrics.UniqueCallsigns.Last12Hours = totalUniqueCallsigns * 12 / hours
 				}
 
 				// Recalculate activity metrics based on actual time range
 				metrics.Activity.DecodesPerHour = float64(totalDecodes) / float64(hours)
-				metrics.Activity.CallsignsPerHour = float64(maxUniqueCallsigns) / float64(hours)
+				metrics.Activity.CallsignsPerHour = float64(totalUniqueCallsigns) / float64(hours)
 				metrics.Activity.ActivityScore = (metrics.Activity.DecodesPerHour / 100.0) * 100.0
 				if metrics.Activity.ActivityScore > 100 {
 					metrics.Activity.ActivityScore = 100
 				}
 
-				log.Printf("Updated summary for %s from time series - Total: %d decodes, %d unique callsigns over %d hours",
-					key, totalDecodes, maxUniqueCallsigns, hours)
+				log.Printf("Updated summary for %s from time series - Total: %d decodes, ~%d unique callsigns over %d hours",
+					key, totalDecodes, totalUniqueCallsigns, hours)
 			}
 		}
 	}

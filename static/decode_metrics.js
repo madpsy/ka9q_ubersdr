@@ -357,8 +357,23 @@ class DecodeMetricsDashboard {
 
             // Update existing chart if it exists, otherwise create new one
             if (this.weekChart) {
+                // Preserve visibility state of datasets
+                const visibilityState = {};
+                this.weekChart.data.datasets.forEach((dataset, index) => {
+                    visibilityState[dataset.label] = this.weekChart.isDatasetVisible(index);
+                });
+
                 this.weekChart.data.labels = labels;
                 this.weekChart.data.datasets = datasets;
+
+                // Restore visibility state
+                datasets.forEach((dataset, index) => {
+                    if (visibilityState[dataset.label] !== undefined) {
+                        const meta = this.weekChart.getDatasetMeta(index);
+                        meta.hidden = !visibilityState[dataset.label];
+                    }
+                });
+
                 this.weekChart.update('none'); // 'none' animation mode for smooth update
             } else {
                 const ctx = document.getElementById('week-chart').getContext('2d');
@@ -447,8 +462,23 @@ class DecodeMetricsDashboard {
 
             // Update existing chart if it exists, otherwise create new one
             if (this.monthChart) {
+                // Preserve visibility state of datasets
+                const visibilityState = {};
+                this.monthChart.data.datasets.forEach((dataset, index) => {
+                    visibilityState[dataset.label] = this.monthChart.isDatasetVisible(index);
+                });
+
                 this.monthChart.data.labels = labels;
                 this.monthChart.data.datasets = datasets;
+
+                // Restore visibility state
+                datasets.forEach((dataset, index) => {
+                    if (visibilityState[dataset.label] !== undefined) {
+                        const meta = this.monthChart.getDatasetMeta(index);
+                        meta.hidden = !visibilityState[dataset.label];
+                    }
+                });
+
                 this.monthChart.update('none'); // 'none' animation mode for smooth update
             } else {
                 const ctx = document.getElementById('month-chart').getContext('2d');
@@ -569,8 +599,23 @@ class DecodeMetricsDashboard {
 
             // Update existing chart if it exists, otherwise create new one
             if (this.yearChart) {
+                // Preserve visibility state of datasets
+                const visibilityState = {};
+                this.yearChart.data.datasets.forEach((dataset, index) => {
+                    visibilityState[dataset.label] = this.yearChart.isDatasetVisible(index);
+                });
+
                 this.yearChart.data.labels = monthLabels;
                 this.yearChart.data.datasets = datasets;
+
+                // Restore visibility state
+                datasets.forEach((dataset, index) => {
+                    if (visibilityState[dataset.label] !== undefined) {
+                        const meta = this.yearChart.getDatasetMeta(index);
+                        meta.hidden = !visibilityState[dataset.label];
+                    }
+                });
+
                 this.yearChart.update('none'); // 'none' animation mode for smooth update
             } else {
                 const ctx = document.getElementById('year-chart').getContext('2d');
@@ -660,8 +705,23 @@ class DecodeMetricsDashboard {
             });
 
             if (this.weekBandChart) {
+                // Preserve visibility state of datasets
+                const visibilityState = {};
+                this.weekBandChart.data.datasets.forEach((dataset, index) => {
+                    visibilityState[dataset.label] = this.weekBandChart.isDatasetVisible(index);
+                });
+
                 this.weekBandChart.data.labels = labels;
                 this.weekBandChart.data.datasets = datasets;
+
+                // Restore visibility state
+                datasets.forEach((dataset, index) => {
+                    if (visibilityState[dataset.label] !== undefined) {
+                        const meta = this.weekBandChart.getDatasetMeta(index);
+                        meta.hidden = !visibilityState[dataset.label];
+                    }
+                });
+
                 this.weekBandChart.update('none');
             } else {
                 const ctx = document.getElementById('week-band-chart').getContext('2d');
@@ -726,8 +786,23 @@ class DecodeMetricsDashboard {
             });
 
             if (this.monthBandChart) {
+                // Preserve visibility state of datasets
+                const visibilityState = {};
+                this.monthBandChart.data.datasets.forEach((dataset, index) => {
+                    visibilityState[dataset.label] = this.monthBandChart.isDatasetVisible(index);
+                });
+
                 this.monthBandChart.data.labels = labels;
                 this.monthBandChart.data.datasets = datasets;
+
+                // Restore visibility state
+                datasets.forEach((dataset, index) => {
+                    if (visibilityState[dataset.label] !== undefined) {
+                        const meta = this.monthBandChart.getDatasetMeta(index);
+                        meta.hidden = !visibilityState[dataset.label];
+                    }
+                });
+
                 this.monthBandChart.update('none');
             } else {
                 const ctx = document.getElementById('month-band-chart').getContext('2d');
@@ -767,6 +842,26 @@ class DecodeMetricsDashboard {
                 if (summary.monthly_breakdown && summary.monthly_breakdown.length > 0) {
                     summary.monthly_breakdown.forEach(month => {
                         const monthKey = month.month;
+    /**
+     * Toggle all datasets in a chart on or off
+     * @param {string} chartName - Name of the chart property (e.g., 'weekChart', 'monthBandChart')
+     * @param {boolean} visible - true to show all, false to hide all
+     */
+    toggleAllDatasets(chartName, visible) {
+        const chart = this[chartName];
+        if (!chart) {
+            console.error(`Chart ${chartName} not found`);
+            return;
+        }
+
+        chart.data.datasets.forEach((dataset, index) => {
+            const meta = chart.getDatasetMeta(index);
+            meta.hidden = !visible;
+        });
+
+        chart.update();
+    }
+
                         if (!monthlyData[monthKey]) monthlyData[monthKey] = {};
                         if (!monthlyData[monthKey][summary.band]) monthlyData[monthKey][summary.band] = 0;
                         monthlyData[monthKey][summary.band] += month.spots;
@@ -816,8 +911,23 @@ class DecodeMetricsDashboard {
             });
 
             if (this.yearBandChart) {
+                // Preserve visibility state of datasets
+                const visibilityState = {};
+                this.yearBandChart.data.datasets.forEach((dataset, index) => {
+                    visibilityState[dataset.label] = this.yearBandChart.isDatasetVisible(index);
+                });
+
                 this.yearBandChart.data.labels = monthLabels;
                 this.yearBandChart.data.datasets = datasets;
+
+                // Restore visibility state
+                datasets.forEach((dataset, index) => {
+                    if (visibilityState[dataset.label] !== undefined) {
+                        const meta = this.yearBandChart.getDatasetMeta(index);
+                        meta.hidden = !visibilityState[dataset.label];
+                    }
+                });
+
                 this.yearBandChart.update('none');
             } else {
                 const ctx = document.getElementById('year-band-chart').getContext('2d');
@@ -1413,5 +1523,7 @@ class DecodeMetricsDashboard {
 
 // Initialize when DOM is ready
 document.addEventListener("DOMContentLoaded", () => {
-    new DecodeMetricsDashboard();
+    dashboard = new DecodeMetricsDashboard();
 });
+// Global dashboard instance for button access
+let dashboard = null;

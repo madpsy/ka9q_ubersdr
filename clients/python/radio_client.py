@@ -1241,7 +1241,7 @@ Examples:
                 'host': args.host,
                 'port': args.port,
                 'ssl': args.ssl,
-                'frequency': args.frequency if args.frequency else 14074000,
+                'frequency': args.frequency if args.frequency else 14100000,
                 'mode': args.mode if args.mode else 'usb',
                 'bandwidth_low': bandwidth_low,
                 'bandwidth_high': bandwidth_high,

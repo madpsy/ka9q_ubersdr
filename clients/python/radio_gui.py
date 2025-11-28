@@ -436,7 +436,7 @@ class RadioGUI:
         ttk.Label(freq_frame, text="Frequency:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
 
         # Convert initial frequency from Hz to MHz for display
-        initial_freq_hz = self.config.get('frequency', 14074000)
+        initial_freq_hz = self.config.get('frequency', 14100000)
         initial_freq_mhz = initial_freq_hz / 1e6
 
         self.freq_var = tk.StringVar(value=f"{initial_freq_mhz:.6f}")
@@ -482,7 +482,7 @@ class RadioGUI:
             ("60m", 5357000),    # 60m band (5 MHz) - LSB
             ("40m", 7074000),    # 40m band - LSB
             ("30m", 10136000),   # 30m band (WARC) - USB (above 10 MHz)
-            ("20m", 14074000),   # 20m band - USB
+            ("20m", 14100000),   # 20m band - USB
             ("17m", 18100000),   # 17m band (WARC) - USB
             ("15m", 21074000),   # 15m band - USB
             ("12m", 24915000),   # 12m band (WARC) - USB
@@ -4348,7 +4348,7 @@ def main(config=None):
             'url': None,
             'host': 'localhost',
             'port': 8080,
-            'frequency': 14074000,
+            'frequency': 14100000,
             'mode': 'usb',
             'bandwidth_low': 50,      # USB defaults (positive bandwidth)
             'bandwidth_high': 2700,
@@ -4398,7 +4398,7 @@ if __name__ == '__main__':
         'url': args.url,
         'host': args.host or 'localhost',
         'port': args.port or 8080,
-        'frequency': int(args.frequency * 1e6) if args.frequency else 14074000,
+        'frequency': int(args.frequency * 1e6) if args.frequency else 14100000,
         'mode': args.mode or 'usb',
         'bandwidth_low': 50,  # Default for USB, will be overridden by radio_client.py
         'bandwidth_high': 2700,  # Default for USB, will be overridden by radio_client.py

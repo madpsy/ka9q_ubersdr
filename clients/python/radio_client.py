@@ -42,6 +42,13 @@ except ImportError:
     SCIPY_AVAILABLE = False
     print("Warning: scipy not available, audio bandpass filter disabled", file=sys.stderr)
 
+# Import PyAudio for cross-platform audio output (optional)
+try:
+    import pyaudio
+    PYAUDIO_AVAILABLE = True
+except ImportError:
+    PYAUDIO_AVAILABLE = False
+
 
 def get_pipewire_sinks() -> List[Tuple[str, str]]:
     """Get list of available PipeWire audio sinks.
@@ -165,6 +172,10 @@ class RadioClient:
 
         self.wav_writer = None
         self.pipewire_process = None
+        
+        # PyAudio output
+        self.pyaudio_instance = None
+        self.pyaudio_stream = None
 
         # Auto-reconnect settings
         self.auto_reconnect = auto_reconnect
@@ -440,6 +451,32 @@ class RadioClient:
             print("Error: pw-play not found. Please install pipewire-utils.", file=sys.stderr)
             sys.exit(1)
     
+    async def setup_pyaudio(self):
+        """Start PyAudio playback stream."""
+        if not PYAUDIO_AVAILABLE:
+            print("Error: PyAudio not available. Install with: pip install pyaudio", file=sys.stderr)
+            sys.exit(1)
+        
+        try:
+            # Always output as stereo to support left/right channel control
+            output_channels = 2
+            
+            self.pyaudio_instance = pyaudio.PyAudio()
+            self.pyaudio_stream = self.pyaudio_instance.open(
+                format=pyaudio.paInt16,
+                channels=output_channels,
+                rate=self.sample_rate,
+                output=True,
+                frames_per_buffer=1024
+            )
+            print(f"PyAudio output started (sample rate: {self.sample_rate} Hz, channels: {output_channels})", file=sys.stderr)
+            # Only show "Loading GUI" message when GUI is active (status_callback is set)
+            if self.status_callback:
+                print("Loading GUI (may take a moment)...", file=sys.stderr)
+        except Exception as e:
+            print(f"Error: Failed to initialize PyAudio: {e}", file=sys.stderr)
+            sys.exit(1)
+    
     def decode_audio(self, base64_data: str) -> bytes:
         """Decode base64 audio data to PCM bytes."""
         # Decode base64
@@ -606,6 +643,16 @@ class RadioClient:
                     print("PipeWire connection lost", file=sys.stderr)
                     self.running = False
         
+        elif self.output_mode == 'pyaudio':
+            # Write to PyAudio stream (skip if in IQ mode)
+            is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+            if not is_iq_mode and self.pyaudio_stream:
+                try:
+                    self.pyaudio_stream.write(pcm_data)
+                except Exception as e:
+                    print(f"PyAudio error: {e}", file=sys.stderr)
+                    self.running = False
+        
         elif self.output_mode == 'wav':
             # Write to WAV file
             if self.wav_writer:
@@ -670,6 +717,14 @@ class RadioClient:
                     self.pipewire_process.kill()
                     await self.pipewire_process.wait()
                 await self.setup_pipewire()
+            
+            # Restart PyAudio if sample rate or channels changed
+            if (sample_rate_changed or channels_changed) and self.output_mode == 'pyaudio' and self.pyaudio_stream:
+                print("Restarting PyAudio with new audio configuration...", file=sys.stderr)
+                self.pyaudio_stream.stop_stream()
+                self.pyaudio_stream.close()
+                self.pyaudio_stream = None
+                await self.setup_pyaudio()
 
             if audio_data:
                 pcm_data = self.decode_audio(audio_data)
@@ -879,6 +934,8 @@ class RadioClient:
                 # Setup output based on mode
                 if self.output_mode == 'pipewire':
                     await self.setup_pipewire()
+                elif self.output_mode == 'pyaudio':
+                    await self.setup_pyaudio()
                 elif self.output_mode == 'wav':
                     self.setup_wav_writer()
                 
@@ -999,6 +1056,24 @@ class RadioClient:
             except asyncio.TimeoutError:
                 self.pipewire_process.kill()
                 await self.pipewire_process.wait()
+        
+        # Close PyAudio stream
+        if self.pyaudio_stream:
+            try:
+                self.pyaudio_stream.stop_stream()
+                self.pyaudio_stream.close()
+                print("PyAudio stream closed", file=sys.stderr)
+            except Exception as e:
+                print(f"Error closing PyAudio stream: {e}", file=sys.stderr)
+            self.pyaudio_stream = None
+        
+        if self.pyaudio_instance:
+            try:
+                self.pyaudio_instance.terminate()
+                print("PyAudio terminated", file=sys.stderr)
+            except Exception as e:
+                print(f"Error terminating PyAudio: {e}", file=sys.stderr)
+            self.pyaudio_instance = None
 
 
 def parse_bandwidth(value: str) -> tuple[int, int]:
@@ -1050,9 +1125,9 @@ Examples:
                         help='Demodulation mode (iq48/iq96/iq192/iq384 require bypassed IP)')
     parser.add_argument('-b', '--bandwidth', type=parse_bandwidth,
                         help='Bandwidth in format low:high (e.g., -5000:5000)')
-    parser.add_argument('-o', '--output', choices=['pipewire', 'stdout', 'wav'],
+    parser.add_argument('-o', '--output', choices=['pipewire', 'pyaudio', 'stdout', 'wav'],
                         default='pipewire',
-                        help='Output mode (default: pipewire)')
+                        help='Output mode (default: pipewire, pyaudio works on all platforms)')
     parser.add_argument('-w', '--wav-file', metavar='FILE',
                         help='WAV file path (required when output=wav)')
     parser.add_argument('-t', '--time', type=float, metavar='SECONDS',
@@ -1157,7 +1232,8 @@ Examples:
                 'mode': args.mode if args.mode else 'usb',
                 'bandwidth_low': bandwidth_low,
                 'bandwidth_high': bandwidth_high,
-                'auto_connect': auto_connect
+                'auto_connect': auto_connect,
+                'output_mode': args.output
             }
             gui_main(config)
             return

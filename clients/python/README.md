@@ -12,7 +12,8 @@ A command-line and GUI Python client for connecting to the ka9q_ubersdr WebSocke
 - Configurable frequency and bandwidth with live updates
 - **NR2 Spectral Subtraction Noise Reduction**: FFT-based noise reduction with adaptive learning
 - Multiple output options:
-  - **PipeWire**: Real-time audio playback via PipeWire
+  - **PyAudio**: Cross-platform real-time audio playback (Windows, macOS, Linux)
+  - **PipeWire**: Real-time audio playback via PipeWire (Linux only)
   - **stdout**: Raw PCM output to stdout (for piping to other tools)
   - **WAV file**: Record to PCM WAV file with optional time limit
   - **FIFO (named pipe)**: Additional output to named pipe for multi-consumer streaming
@@ -25,7 +26,8 @@ A command-line and GUI Python client for connecting to the ka9q_ubersdr WebSocke
 - `numpy` library
 - `scipy` library (optional, required for NR2 noise reduction)
 - `tkinter` library (usually included with Python, required for GUI mode)
-- For PipeWire output: `pipewire-utils` package (provides `pw-play`)
+- `pyaudio` library (optional, for cross-platform audio output)
+- For PipeWire output: `pipewire-utils` package (provides `pw-play`, Linux only)
 
 ## Installation
 
@@ -34,7 +36,12 @@ A command-line and GUI Python client for connecting to the ka9q_ubersdr WebSocke
 pip install -r requirements.txt
 ```
 
-2. For PipeWire output, install pipewire-utils:
+2. For cross-platform audio output (recommended for Windows/macOS):
+```bash
+pip install pyaudio
+```
+
+3. For PipeWire output (Linux only), install pipewire-utils:
 ```bash
 # Debian/Ubuntu
 sudo apt install pipewire-utils
@@ -46,7 +53,7 @@ sudo dnf install pipewire-utils
 sudo pacman -S pipewire
 ```
 
-3. Make the script executable:
+4. Make the script executable:
 ```bash
 chmod +x radio_client.py
 ```
@@ -78,7 +85,12 @@ The GUI provides:
 
 ### Command-Line Mode
 
-Listen to 14.074 MHz USB via PipeWire:
+Listen to 14.074 MHz USB via PyAudio (cross-platform):
+```bash
+./radio_client.py -f 14074000 -m usb -o pyaudio
+```
+
+Listen to 14.074 MHz USB via PipeWire (Linux only):
 ```bash
 ./radio_client.py -f 14074000 -m usb
 ```
@@ -130,8 +142,8 @@ optional arguments:
                         Required for CLI mode, optional for GUI mode
   -b BANDWIDTH, --bandwidth BANDWIDTH
                         Bandwidth in format low:high (e.g., -5000:5000)
-  -o {pipewire,stdout,wav}, --output {pipewire,stdout,wav}
-                        Output mode (default: pipewire)
+  -o {pipewire,pyaudio,stdout,wav}, --output {pipewire,pyaudio,stdout,wav}
+                        Output mode (default: pipewire, pyaudio works on all platforms)
                         Note: GUI mode always uses pipewire
   -w FILE, --wav-file FILE
                         WAV file path (required when output=wav)
@@ -185,7 +197,15 @@ If not specified, the server will use mode-specific defaults.
 
 ### Output Modes
 
-#### PipeWire (default)
+#### PyAudio (cross-platform)
+Real-time audio playback through PyAudio (works on Windows, macOS, and Linux):
+```bash
+./radio_client.py -f 14074000 -m usb -o pyaudio
+```
+
+PyAudio is the recommended output mode for Windows and macOS users, as it provides native audio support without requiring additional system packages.
+
+#### PipeWire (Linux only, default)
 Real-time audio playback through PipeWire:
 ```bash
 ./radio_client.py -f 14074000 -m usb
@@ -468,8 +488,27 @@ Record with noise reduction:
 
 ## Troubleshooting
 
+### "PyAudio not available"
+Install PyAudio:
+```bash
+pip install pyaudio
+```
+
+On some systems, you may need to install PortAudio development files first:
+```bash
+# Debian/Ubuntu
+sudo apt install portaudio19-dev python3-pyaudio
+
+# macOS (with Homebrew)
+brew install portaudio
+pip install pyaudio
+
+# Windows
+pip install pyaudio
+```
+
 ### "pw-play not found"
-Install pipewire-utils package for your distribution.
+Install pipewire-utils package for your distribution (Linux only).
 
 ### Connection refused
 - Verify the server is running

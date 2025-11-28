@@ -3346,6 +3346,9 @@ class RadioGUI:
             if not fifo_path:
                 fifo_path = None
 
+            # Get output mode from config (defaults to pipewire if not specified)
+            output_mode = self.config.get('output_mode', 'pipewire')
+
             # Create client (disable auto_reconnect for GUI - we'll handle retries)
             # Start with audio muted (volume=0) - will be enabled after window opens
             self.client = RadioClient(
@@ -3356,7 +3359,7 @@ class RadioGUI:
                 mode=mode,
                 bandwidth_low=bandwidth_low,
                 bandwidth_high=bandwidth_high,
-                output_mode='pipewire',
+                output_mode=output_mode,
                 auto_reconnect=False,  # GUI handles connection attempts
                 status_callback=lambda msg_type, msg: self.status_queue.put((msg_type, msg)),
                 volume=0,  # Start muted, will unmute after window opens
@@ -3367,6 +3370,9 @@ class RadioGUI:
                 ssl=self.tls_var.get(),  # Use TLS if checkbox is checked
                 fifo_path=fifo_path  # Pass FIFO path to client
             )
+            
+            # Log the output mode being used
+            self.log_status(f"Audio output mode: {output_mode}")
 
             # Store the desired volume to restore after window opens
             self.client._desired_volume = volume
@@ -3712,14 +3718,20 @@ class RadioGUI:
 
                             # Auto-open waterfall window first (main display window)
                             if WATERFALL_AVAILABLE:
-                                # Open waterfall after spectrum connects (2500ms delay to avoid rate limiting)
-                                # Main spectrum connects at 2000ms, waterfall's spectrum connects 200ms after window opens
-                                # So 2500ms + 200ms = 2700ms total, giving 700ms between connections
+                                # Open waterfall after GUI is fully ready (5000ms delay)
+                                # This ensures all Tkinter widgets are properly initialized
                                 def open_waterfall_and_unmute():
-                                    self.auto_open_waterfall()
-                                    # Unmute audio after waterfall window opens (500ms delay)
-                                    self.root.after(500, self.unmute_audio)
-                                self.root.after(2500, open_waterfall_and_unmute)
+                                    try:
+                                        # Force GUI update before opening waterfall
+                                        self.root.update_idletasks()
+                                        self.auto_open_waterfall()
+                                        # Unmute audio after waterfall window opens (500ms delay)
+                                        self.root.after(500, self.unmute_audio)
+                                    except Exception as e:
+                                        # If waterfall fails to open, still unmute audio
+                                        self.log_status(f"Waterfall auto-open failed: {e}")
+                                        self.unmute_audio()
+                                self.root.after(5000, open_waterfall_and_unmute)
 
                             # Auto-open audio spectrum window on successful connection
                             if AUDIO_SPECTRUM_AVAILABLE:

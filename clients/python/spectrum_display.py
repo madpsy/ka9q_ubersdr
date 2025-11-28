@@ -412,11 +412,24 @@ class SpectrumDisplay:
             pass
         
         # Check for new data frequently (every 10ms) to be responsive
-        self.parent.after(10, self.update_display)
+        # Protect against destroyed parent widget
+        try:
+            if self.parent.winfo_exists():
+                self.parent.after(10, self.update_display)
+        except (tk.TclError, AttributeError):
+            # Parent widget was destroyed, stop the update loop
+            pass
     
     def _draw_spectrum(self):
         """Draw spectrum on canvas."""
         if self.spectrum_data is None or len(self.spectrum_data) == 0:
+            return
+        
+        # Check if canvas still exists before attempting to draw
+        try:
+            if not self.canvas.winfo_exists():
+                return
+        except (tk.TclError, AttributeError):
             return
         
         # Clear canvas (except tooltip and cursor which we'll redraw)

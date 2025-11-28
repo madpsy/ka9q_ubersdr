@@ -8,3 +8,4 @@ matplotlib>=3.7.0
 astral>=3.2
 python-rtmidi>=1.5.0
 pyaudio>=0.2.14
+pyinstaller>=6.17.0

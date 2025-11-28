@@ -58,18 +58,67 @@ sudo pacman -S pipewire
 chmod +x radio_client.py
 ```
 
+## Building Standalone Executable
+
+You can build a standalone executable using PyInstaller, which bundles Python and all dependencies into a single file.
+
+### Requirements
+
+- PyInstaller: `pip install pyinstaller`
+- An icon file: `ubersdr.ico` (should be in the same directory)
+
+### Build Steps
+
+1. Create and activate a virtual environment:
+```bash
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Install PyInstaller:
+```bash
+pip install pyinstaller
+```
+
+4. Build the executable:
+```bash
+pyinstaller --onefile radio_client.py --icon=ubersdr.ico
+```
+
+5. The built executable will be in the `dist/` directory:
+```bash
+# Linux/macOS
+./dist/radio_client
+
+# Windows
+dist\radio_client.exe
+```
+
+### Build Notes
+
+- The `--onefile` flag creates a single executable file
+- The `--icon` flag sets the application icon (optional, omit if you don't have an icon file)
+- The build process may take a few minutes
+- The resulting executable is platform-specific (build on the target OS)
+- The executable size will be larger (~50-100MB) as it includes Python and all dependencies
+
 ## Usage
 
-### GUI Mode (Recommended for Interactive Use)
+### GUI Mode (Default)
 
-Launch the graphical interface:
+Launch the graphical interface (default behavior):
 ```bash
-./radio_client.py --gui
+./radio_client.py
 ```
 
 Or with initial settings:
 ```bash
-./radio_client.py --gui -f 14074000 -m usb
+./radio_client.py -f 14074000 -m usb
 ```
 
 The GUI provides:
@@ -85,40 +134,42 @@ The GUI provides:
 
 ### Command-Line Mode
 
+To use CLI mode instead of GUI, add the `--no-gui` flag:
+
 Listen to 14.074 MHz USB via PyAudio (cross-platform):
 ```bash
-./radio_client.py -f 14074000 -m usb -o pyaudio
+./radio_client.py --no-gui -f 14074000 -m usb -o pyaudio
 ```
 
 Listen to 14.074 MHz USB via PipeWire (Linux only):
 ```bash
-./radio_client.py -f 14074000 -m usb
+./radio_client.py --no-gui -f 14074000 -m usb
 ```
 
 Connect using full WebSocket URL:
 ```bash
-./radio_client.py -u ws://radio.example.com:8073/ws -f 14074000 -m usb
+./radio_client.py --no-gui -u ws://radio.example.com:8073/ws -f 14074000 -m usb
 ```
 
 Record 1000 kHz AM to WAV file for 60 seconds:
 ```bash
-./radio_client.py -f 1000000 -m am -o wav -w recording.wav -t 60
+./radio_client.py --no-gui -f 1000000 -m am -o wav -w recording.wav -t 60
 ```
 
 Output raw PCM to stdout (pipe to another program):
 ```bash
-./radio_client.py -f 7100000 -m lsb -o stdout | aplay -f S16_LE -r 12000 -c 1
+./radio_client.py --no-gui -f 7100000 -m lsb -o stdout | aplay -f S16_LE -r 12000 -c 1
 ```
 
 Enable NR2 noise reduction:
 ```bash
-./radio_client.py -f 14074000 -m usb --nr2
+./radio_client.py --no-gui -f 14074000 -m usb --nr2
 ```
 
 ### Command-Line Options
 
 ```
-usage: radio_client.py [-h] [--gui] [-u URL] [-H HOST] [-p PORT] [-f FREQUENCY]
+usage: radio_client.py [-h] [--no-gui] [-u URL] [-H HOST] [-p PORT] [-f FREQUENCY]
                        [-m MODE] [-b BANDWIDTH] [-o {pipewire,stdout,wav}]
                        [-w FILE] [-t SECONDS] [-s] [--nr2]
                        [--nr2-strength PERCENT] [--nr2-floor PERCENT]
@@ -130,7 +181,7 @@ CLI Radio Client for ka9q_ubersdr
 
 optional arguments:
   -h, --help            show this help message and exit
-  --gui                 Launch graphical user interface (Linux only, requires Tkinter)
+  --no-gui              Disable GUI and use command-line interface (requires --frequency and --mode)
   -u URL, --url URL     Full WebSocket URL (e.g., ws://host:port/ws or wss://host/ws)
   -H HOST, --host HOST  Server hostname (default: localhost, ignored if --url is provided)
   -p PORT, --port PORT  Server port (default: 8080, ignored if --url is provided)
@@ -347,7 +398,7 @@ See `rigctl -l` for a list of supported radio models.
 
 1. Launch the GUI:
    ```bash
-   ./radio_client.py --gui
+   ./radio_client.py
    ```
 
 2. In the Connection section, enter:
@@ -364,12 +415,12 @@ When sync is enabled, changing the SDR frequency or mode will automatically upda
 
 Auto-connect to rigctld and enable sync:
 ```bash
-./radio_client.py --gui --rigctl-host localhost --rigctl-port 4532 --rigctl-sync
+./radio_client.py --rigctl-host localhost --rigctl-port 4532 --rigctl-sync
 ```
 
 Connect to remote rigctld:
 ```bash
-./radio_client.py --gui --rigctl-host 192.168.1.100 --rigctl-port 4532
+./radio_client.py --rigctl-host 192.168.1.100 --rigctl-port 4532
 ```
 
 ### Rigctl Features

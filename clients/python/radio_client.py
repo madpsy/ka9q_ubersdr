@@ -1106,25 +1106,25 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Listen to 14.074 MHz USB via PipeWire
-  %(prog)s -f 14074000 -m usb
+  # Launch GUI interface (default)
+  %(prog)s
 
-  # Launch GUI interface
-  %(prog)s --gui -f 14074000 -m usb
+  # Listen to 14.074 MHz USB via PipeWire (CLI mode)
+  %(prog)s --no-gui -f 14074000 -m usb
 
-  # Connect using full URL
-  %(prog)s -u ws://radio.example.com:8073/ws -f 14074000 -m usb
+  # Connect using full URL (CLI mode)
+  %(prog)s --no-gui -u ws://radio.example.com:8073/ws -f 14074000 -m usb
 
-  # Record 1000 kHz AM to WAV file for 60 seconds
-  %(prog)s -f 1000000 -m am -o wav -w recording.wav -t 60
+  # Record 1000 kHz AM to WAV file for 60 seconds (CLI mode)
+  %(prog)s --no-gui -f 1000000 -m am -o wav -w recording.wav -t 60
 
-  # Output raw PCM to stdout with custom bandwidth
-  %(prog)s -f 7100000 -m lsb -b -2700:-50 -o stdout > audio.pcm
+  # Output raw PCM to stdout with custom bandwidth (CLI mode)
+  %(prog)s --no-gui -f 7100000 -m lsb -b -2700:-50 -o stdout > audio.pcm
         """
     )
     
-    parser.add_argument('--gui', action='store_true',
-                        help='Launch graphical user interface (Linux only, requires Tkinter)')
+    parser.add_argument('--no-gui', action='store_true',
+                        help='Disable GUI and use command-line interface (requires --frequency and --mode)')
     parser.add_argument('-u', '--url',
                         help='Full WebSocket URL (e.g., ws://host:port/ws or wss://host/ws)')
     parser.add_argument('-H', '--host', default='localhost',
@@ -1219,8 +1219,8 @@ Examples:
         if bandwidth_high is None:
             bandwidth_high = default_high
 
-    # Launch GUI if requested
-    if args.gui:
+    # Launch GUI by default (unless --no-gui is specified)
+    if not args.no_gui:
         try:
             from radio_gui import main as gui_main
             # Determine if we should auto-connect
@@ -1257,9 +1257,9 @@ Examples:
 
     # Validate arguments for CLI mode
     if not args.frequency:
-        parser.error("--frequency is required (unless using --gui)")
+        parser.error("--frequency is required in CLI mode (use --no-gui)")
     if not args.mode:
-        parser.error("--mode is required (unless using --gui)")
+        parser.error("--mode is required in CLI mode (use --no-gui)")
 
     if args.output == 'wav' and not args.wav_file:
         parser.error("--wav-file is required when output mode is 'wav'")

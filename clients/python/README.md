@@ -86,8 +86,15 @@ pip install pyinstaller
 ```
 
 4. Build the executable:
+
+**For Windows:**
 ```bash
 pyinstaller --onefile radio_client.py --icon=ubersdr.ico
+```
+
+**For Linux/macOS:**
+```bash
+pyinstaller --onefile radio_client.py --icon=ubersdr.ico --hidden-import=PIL._tkinter_finder
 ```
 
 5. The built executable will be in the `dist/` directory:
@@ -103,6 +110,7 @@ dist\radio_client.exe
 
 - The `--onefile` flag creates a single executable file
 - The `--icon` flag sets the application icon (optional, omit if you don't have an icon file)
+- The `--hidden-import=PIL._tkinter_finder` flag is required on Linux/macOS to properly bundle PIL's Tkinter integration
 - The build process may take a few minutes
 - The resulting executable is platform-specific (build on the target OS)
 - The executable size will be larger (~50-100MB) as it includes Python and all dependencies

@@ -134,7 +134,7 @@ def find_next_fifo_path() -> str:
 
 # Import rigctl client
 try:
-    from rigctl import RigctlClient
+    from rigctl import ThreadedRigctlClient
     RIGCTL_AVAILABLE = True
 except ImportError:
     RIGCTL_AVAILABLE = False
@@ -287,11 +287,8 @@ class RadioGUI:
         # Auto-initialize MIDI controller if mappings exist (after UI is ready)
         self.root.after(100, self.auto_init_midi)
 
-        # Fetch bookmarks on startup (after UI is ready)
-        self.root.after(200, self.fetch_bookmarks)
-
-        # Fetch bands on startup (after UI is ready)
-        self.root.after(250, self.fetch_bands)
+        # Don't fetch bookmarks/bands on startup - they will be fetched after connection
+        # (removed lines 290-294)
 
         # Auto-connect if requested (after UI is ready)
         if self.config.get('auto_connect', False):
@@ -683,8 +680,14 @@ class RadioGUI:
 
         # Arrange in single row
         for i, (label, freq_hz) in enumerate(quick_freqs):
-            btn = ttk.Button(quick_frame, text=label, width=5,
-                           command=lambda f=freq_hz: self.set_frequency_and_mode(f))
+            # Use tk.Button on Windows for color support, ttk.Button on Linux for native theme
+            if platform.system() == 'Windows':
+                btn = tk.Button(quick_frame, text=label, width=5,
+                              command=lambda f=freq_hz: self.set_frequency_and_mode(f),
+                              relief=tk.RAISED, borderwidth=2)
+            else:
+                btn = ttk.Button(quick_frame, text=label, width=5,
+                               command=lambda f=freq_hz: self.set_frequency_and_mode(f))
             btn.grid(row=0, column=i, padx=1, pady=1)
             # Store button reference for highlighting
             self.band_buttons[label] = btn
@@ -760,15 +763,27 @@ class RadioGUI:
 
         # Create first row mode buttons
         for i, (mode_value, mode_display) in enumerate(modes_row1):
-            btn = ttk.Button(mode_buttons_frame, text=mode_display, width=10,
-                           command=lambda m=mode_value: self.select_mode(m))
+            # Use tk.Button on Windows for color support, ttk.Button on Linux for native theme
+            if platform.system() == 'Windows':
+                btn = tk.Button(mode_buttons_frame, text=mode_display, width=10,
+                              command=lambda m=mode_value: self.select_mode(m),
+                              relief=tk.RAISED, borderwidth=2)
+            else:
+                btn = ttk.Button(mode_buttons_frame, text=mode_display, width=10,
+                               command=lambda m=mode_value: self.select_mode(m))
             btn.grid(row=0, column=i, padx=1, pady=1)
             self.mode_buttons[mode_value] = btn
 
         # Create second row mode buttons (initially hidden)
         for i, (mode_value, mode_display) in enumerate(modes_row2):
-            btn = ttk.Button(mode_buttons_frame, text=mode_display, width=10,
-                           command=lambda m=mode_value: self.select_mode(m))
+            # Use tk.Button on Windows for color support, ttk.Button on Linux for native theme
+            if platform.system() == 'Windows':
+                btn = tk.Button(mode_buttons_frame, text=mode_display, width=10,
+                              command=lambda m=mode_value: self.select_mode(m),
+                              relief=tk.RAISED, borderwidth=2)
+            else:
+                btn = ttk.Button(mode_buttons_frame, text=mode_display, width=10,
+                               command=lambda m=mode_value: self.select_mode(m))
             btn.grid(row=1, column=i, padx=1, pady=1)
             btn.grid_remove()  # Hide initially
             self.mode_buttons[mode_value] = btn
@@ -1380,16 +1395,27 @@ class RadioGUI:
 
                 # Get band status (SNR-based color)
                 status = self.band_states.get(band_name, 'UNKNOWN')
+                color = self.BAND_COLORS[status]
 
-                # Apply style based on status and active state
-                if is_active:
-                    # Active band: use status color with border
-                    style_name = f'{status.capitalize()}.Active.TButton'
-                    button.configure(style=style_name)
+                # Apply style based on button type (tk.Button on Windows, ttk.Button on Linux)
+                if platform.system() == 'Windows':
+                    # tk.Button: use bg, fg, relief, borderwidth
+                    if is_active:
+                        button.configure(bg=color, fg='white', relief=tk.SOLID, borderwidth=3)
+                    else:
+                        button.configure(bg=color, fg='white', relief=tk.RAISED, borderwidth=2)
                 else:
-                    # Inactive band: use status color without border
-                    style_name = f'{status.capitalize()}.TButton'
-                    button.configure(style=style_name)
+                    # ttk.Button: use style
+                    if is_active:
+                        style_name = f'{status.capitalize()}.Active.TButton'
+                        button.configure(style=style_name)
+                    else:
+                        style_name = f'{status.capitalize()}.TButton'
+                        button.configure(style=style_name)
+
+                # Force widget update on Windows
+                if platform.system() == 'Windows':
+                    button.update_idletasks()
 
         # Update band filter in digital spots window if open - only if band actually changed
         if self.digital_spots_display and current_band:
@@ -1673,6 +1699,7 @@ class RadioGUI:
 
             if isinstance(data, list):
                 self.bookmarks = data
+                print(f"[BOOKMARKS] Fetched {len(self.bookmarks)} bookmarks from API")
                 self.populate_bookmark_dropdown()
                 # Update spectrum and waterfall displays with bookmarks
                 if self.spectrum:
@@ -1683,13 +1710,16 @@ class RadioGUI:
                     self.waterfall_waterfall.bookmarks = self.bookmarks
                 self.log_status(f"Loaded {len(self.bookmarks)} bookmark(s)")
             else:
+                print(f"[BOOKMARKS] API returned non-list data: {type(data)}")
                 self.log_status("No bookmarks available")
 
         except requests.exceptions.RequestException as e:
             # Silently fail if bookmarks not available (server might not support it)
+            print(f"[BOOKMARKS] Request error: {e}")
             self.log_status(f"Bookmarks not available: {e}")
             self.bookmarks = []
         except Exception as e:
+            print(f"[BOOKMARKS] Unexpected error: {e}")
             self.log_status(f"Error loading bookmarks: {e}")
             self.bookmarks = []
 
@@ -1720,20 +1750,24 @@ class RadioGUI:
 
             if isinstance(data, list):
                 self.bands = data
+                print(f"[BANDS] Fetched {len(self.bands)} bands from API")
                 self.assign_band_colors()
                 self.populate_band_selector()
                 self.update_spectrum_bands()
                 self.log_status(f"Loaded {len(self.bands)} band(s) from server")
             else:
+                print(f"[BANDS] API returned non-list data: {type(data)}")
                 self.log_status("No bands available from server")
                 # Fall back to hardcoded bands
                 self.use_hardcoded_bands()
 
         except requests.exceptions.RequestException as e:
             # Silently fall back to hardcoded bands if server doesn't support it
+            print(f"[BANDS] Request error: {e}")
             self.log_status(f"Bands API not available, using defaults: {e}")
             self.use_hardcoded_bands()
         except Exception as e:
+            print(f"[BANDS] Unexpected error: {e}")
             self.log_status(f"Error loading bands: {e}")
             self.use_hardcoded_bands()
 
@@ -1784,14 +1818,17 @@ class RadioGUI:
     def populate_band_selector(self):
         """Populate the band selector dropdown with band labels."""
         if not self.bands:
+            print(f"[BANDS] populate_band_selector: No bands to populate")
             self.band_selector_combo['values'] = [""]
             return
 
         # Extract band labels
         band_labels = [""] + [band.get('label', 'Unknown') for band in self.bands]
+        print(f"[BANDS] populate_band_selector: Populating {len(band_labels)-1} bands into dropdown")
 
         # Update dropdown
         self.band_selector_combo['values'] = band_labels
+        print(f"[BANDS] populate_band_selector: Dropdown values set")
 
         # Update initial selection based on current frequency
         try:
@@ -1803,16 +1840,19 @@ class RadioGUI:
     def populate_bookmark_dropdown(self):
         """Populate the bookmark dropdown with bookmark names."""
         if not self.bookmarks:
+            print(f"[BOOKMARKS] populate_bookmark_dropdown: No bookmarks to populate")
             self.bookmark_combo.config(state='disabled')
             self.bookmark_combo['values'] = []
             return
 
         # Extract bookmark names
         bookmark_names = [bookmark.get('name', 'Unnamed') for bookmark in self.bookmarks]
+        print(f"[BOOKMARKS] populate_bookmark_dropdown: Populating {len(bookmark_names)} bookmarks into dropdown")
 
         # Update dropdown
         self.bookmark_combo['values'] = bookmark_names
         self.bookmark_combo.config(state='readonly')
+        print(f"[BOOKMARKS] populate_bookmark_dropdown: Dropdown values set, state=readonly")
 
         # Update initial selection based on current frequency and mode
         try:
@@ -2080,12 +2120,25 @@ class RadioGUI:
         current_mode = self.mode_var.get().upper()
         
         for mode_value, button in self.mode_buttons.items():
-            if mode_value.upper() == current_mode:
-                button.configure(style='ModeActive.TButton')
+            is_active = mode_value.upper() == current_mode
+            
+            # Apply style based on button type (tk.Button on Windows, ttk.Button on Linux)
+            if platform.system() == 'Windows':
+                # tk.Button: use bg, fg
+                if is_active:
+                    button.configure(bg='#16a34a', fg='white')  # Darker green for active
+                else:
+                    button.configure(bg='#22c55e', fg='white')  # Normal green
             else:
-                button.configure(style='Mode.TButton')
+                # ttk.Button: use style
+                if is_active:
+                    button.configure(style='ModeActive.TButton')
+                else:
+                    button.configure(style='Mode.TButton')
+
             # Force widget update on Windows
-            button.update_idletasks()
+            if platform.system() == 'Windows':
+                button.update_idletasks()
 
     def on_mode_changed(self, skip_apply=False):
         """Handle mode change - updates bandwidth and presets immediately."""
@@ -3994,6 +4047,10 @@ class RadioGUI:
                             #     if CW_SPOTS_AVAILABLE and desc.get('cw_skimmer', False):
                             #         self.root.after(2800, self.auto_open_cw_spots)
 
+                            # Fetch bookmarks and bands after connection is established
+                            self.root.after(500, self.fetch_bookmarks)
+                            self.root.after(600, self.fetch_bands)
+
                             # Start band state polling after connection is established
                             # Add delay to allow other connections to establish first
                             self.root.after(3000, self.start_band_state_polling)
@@ -4169,8 +4226,17 @@ class RadioGUI:
                 messagebox.showerror("Error", "Invalid port number")
                 return
 
-            # Create and connect rigctl client
-            self.rigctl = RigctlClient(host, port)
+            # Create and connect threaded rigctl client
+            self.rigctl = ThreadedRigctlClient(host, port)
+            
+            # Set up callbacks for value changes
+            self.rigctl.set_callbacks(
+                frequency_callback=self.on_rigctl_frequency_changed,
+                mode_callback=self.on_rigctl_mode_changed,
+                ptt_callback=self.on_rigctl_ptt_changed,
+                error_callback=lambda err: self.log_status(f"Rigctl error: {err}")
+            )
+            
             self.rigctl.connect()
 
             self.rigctl_connected = True
@@ -4178,16 +4244,8 @@ class RadioGUI:
             self.log_status(f"✓ Connected to rigctld at {host}:{port}")
 
             # Initialize PTT state
-            try:
-                self.rigctl_last_ptt = self.rigctl.get_ptt()
-                # Set initial checkbox style based on PTT state
-                if self.rigctl_last_ptt:
-                    self.rigctl_mute_tx_check.configure(style='MuteTX.Red.TCheckbutton')
-                else:
-                    self.rigctl_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
-            except:
-                self.rigctl_last_ptt = False
-                self.rigctl_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
+            self.rigctl_last_ptt = False
+            self.rigctl_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
 
             # Start syncing immediately with selected direction
             self.start_rigctl_sync()
@@ -4202,6 +4260,121 @@ class RadioGUI:
             self.log_status(f"ERROR: Failed to connect to rigctld - {e}")
             if self.rigctl:
                 self.rigctl.disconnect()
+
+    def on_rigctl_frequency_changed(self, freq_hz: int):
+        """Callback when rigctl frequency changes (called from worker thread).
+
+        Args:
+            freq_hz: New frequency in Hz
+        """
+        # Check if frequency actually changed
+        if self.rigctl_last_freq is not None and freq_hz != self.rigctl_last_freq:
+            # Only sync if direction is Rig→SDR and sync is enabled
+            if self.rigctl_sync_enabled and self.rigctl_sync_direction_var.get() == "Rig→SDR":
+                # Schedule GUI update in main thread
+                self.root.after(0, lambda: self._apply_rigctl_frequency(freq_hz))
+
+        self.rigctl_last_freq = freq_hz
+
+    def on_rigctl_mode_changed(self, mode: str):
+        """Callback when rigctl mode changes (called from worker thread).
+
+        Args:
+            mode: New mode string
+        """
+        # Check if mode actually changed
+        if self.rigctl_last_mode is not None and mode != self.rigctl_last_mode:
+            # Only sync if direction is Rig→SDR and sync is enabled
+            if self.rigctl_sync_enabled and self.rigctl_sync_direction_var.get() == "Rig→SDR":
+                # Schedule GUI update in main thread
+                self.root.after(0, lambda: self._apply_rigctl_mode(mode))
+
+        self.rigctl_last_mode = mode
+
+    def on_rigctl_ptt_changed(self, ptt_state: bool):
+        """Callback when rigctl PTT changes (called from worker thread).
+
+        Args:
+            ptt_state: New PTT state
+        """
+        # Check if PTT state actually changed
+        if ptt_state != self.rigctl_last_ptt:
+            # Schedule GUI update in main thread
+            self.root.after(0, lambda: self._apply_rigctl_ptt(ptt_state))
+
+        self.rigctl_last_ptt = ptt_state
+
+    def _apply_rigctl_frequency(self, freq_hz: int):
+        """Apply frequency change from rig (runs in main thread).
+
+        Args:
+            freq_hz: New frequency in Hz
+        """
+        self.set_frequency_hz(freq_hz)
+        if self.connected:
+            self.apply_frequency()
+        self.log_status(f"Synced from rig: {freq_hz/1e6:.6f} MHz")
+
+    def _apply_rigctl_mode(self, rig_mode: str):
+        """Apply mode change from rig (runs in main thread).
+
+        Args:
+            rig_mode: New mode string from rig
+        """
+        # Map rigctl mode to SDR mode
+        mode_map = {
+            'USB': 'USB',
+            'LSB': 'LSB',
+            'AM': 'AM',
+            'CW': 'CWU',  # Default to CWU
+            'CWR': 'CWL',
+            'FM': 'FM'
+        }
+        sdr_mode = mode_map.get(rig_mode, 'USB')
+
+        # Only update if mode lock is not enabled
+        if not self.mode_lock_var.get():
+            self.mode_var.set(sdr_mode)
+            self.on_mode_changed(skip_apply=True)
+            if self.connected:
+                self.apply_mode()
+            self.log_status(f"Synced mode from rig: {rig_mode}")
+
+    def _apply_rigctl_ptt(self, ptt_state: bool):
+        """Apply PTT state change (runs in main thread).
+
+        Args:
+            ptt_state: New PTT state
+        """
+        if ptt_state:
+            # PTT activated
+            # Update checkbox background to red (always, for visual feedback)
+            self.rigctl_mute_tx_check.configure(style='MuteTX.Red.TCheckbutton')
+            # Mute audio only if checkbox is enabled
+            if self.rigctl_mute_tx_var.get() and self.client:
+                # Save current channel states (both GUI vars and client state)
+                self.rigctl_saved_channels = (
+                    self.channel_left_var.get(),
+                    self.channel_right_var.get()
+                )
+                # Mute audio instantly by disabling both channels
+                self.channel_left_var.set(False)
+                self.channel_right_var.set(False)
+                self.client.channel_left = False
+                self.client.channel_right = False
+        else:
+            # PTT deactivated
+            # Update checkbox background to green (always, for visual feedback)
+            self.rigctl_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
+            # Restore audio only if checkbox is enabled and we saved channel states
+            if self.rigctl_mute_tx_var.get() and self.client and self.rigctl_saved_channels is not None:
+                # Restore saved channel states (both GUI vars and client state)
+                left_state, right_state = self.rigctl_saved_channels
+                self.channel_left_var.set(left_state)
+                self.channel_right_var.set(right_state)
+                self.client.channel_left = left_state
+                self.client.channel_right = right_state
+                self.rigctl_saved_channels = None
                 self.rigctl = None
 
     def disconnect_rigctl(self):
@@ -4235,13 +4408,9 @@ class RadioGUI:
                 self.sync_frequency_to_rigctl()
             else:  # Rig→SDR
                 self.log_status("Rigctl sync direction changed - SDR will follow radio frequency")
-                # Initialize last known values
-                try:
-                    self.rigctl_last_freq = self.rigctl.get_frequency()
-                    self.rigctl_last_mode = self.rigctl.get_mode()
-                except:
-                    self.rigctl_last_freq = None
-                    self.rigctl_last_mode = None
+                # Initialize last known values from cache (non-blocking)
+                self.rigctl_last_freq = self.rigctl.get_frequency()
+                self.rigctl_last_mode = self.rigctl.get_mode()
                 # Start polling immediately
                 self.poll_rigctl_frequency()
 
@@ -4262,13 +4431,9 @@ class RadioGUI:
                 self.poll_rigctl_frequency()
         else:  # Rig→SDR
             self.log_status("Rigctl sync enabled - SDR will follow radio frequency")
-            # Initialize last known values
-            try:
-                self.rigctl_last_freq = self.rigctl.get_frequency()
-                self.rigctl_last_mode = self.rigctl.get_mode()
-            except:
-                self.rigctl_last_freq = None
-                self.rigctl_last_mode = None
+            # Initialize last known values from cache (non-blocking)
+            self.rigctl_last_freq = self.rigctl.get_frequency()
+            self.rigctl_last_mode = self.rigctl.get_mode()
             # Start polling immediately
             self.poll_rigctl_frequency()
 
@@ -4296,7 +4461,7 @@ class RadioGUI:
             # Get current SDR frequency
             freq_hz = self.get_frequency_hz()
 
-            # Set rigctl frequency
+            # Queue frequency change (non-blocking)
             self.rigctl.set_frequency(freq_hz)
 
             # Get current mode and sync it too
@@ -4316,6 +4481,7 @@ class RadioGUI:
             }
 
             rigctl_mode = mode_map.get(mode, 'USB')
+            # Queue mode change (non-blocking)
             self.rigctl.set_mode(rigctl_mode)
 
         except Exception as e:
@@ -4349,6 +4515,7 @@ class RadioGUI:
             }
 
             rigctl_mode = mode_map.get(mode, 'USB')
+            # Queue mode change (non-blocking)
             self.rigctl.set_mode(rigctl_mode)
 
         except Exception as e:
@@ -4361,88 +4528,9 @@ class RadioGUI:
             self.rigctl_poll_job = None
             return
 
-        # Always poll when rigctl is connected (for PTT visual feedback)
-        # Sync only happens if enabled, muting only happens if checkbox is enabled
-
-        try:
-            # Get current rig frequency and mode (only if sync enabled)
-            if self.rigctl_sync_enabled and self.rigctl_sync_direction_var.get() == "Rig→SDR":
-                rig_freq = self.rigctl.get_frequency()
-                rig_mode = self.rigctl.get_mode()
-
-                # Check if frequency changed
-                if self.rigctl_last_freq is not None and rig_freq != self.rigctl_last_freq:
-                    # Update SDR frequency
-                    self.set_frequency_hz(rig_freq)
-                    if self.connected:
-                        self.apply_frequency()
-                    self.log_status(f"Synced from rig: {rig_freq/1e6:.6f} MHz")
-
-                # Check if mode changed
-                if self.rigctl_last_mode is not None and rig_mode != self.rigctl_last_mode:
-                    # Map rigctl mode to SDR mode
-                    mode_map = {
-                        'USB': 'USB',
-                        'LSB': 'LSB',
-                        'AM': 'AM',
-                        'CW': 'CWU',  # Default to CWU
-                        'CWR': 'CWL',
-                        'FM': 'FM'
-                    }
-                    sdr_mode = mode_map.get(rig_mode, 'USB')
-
-                    # Only update if mode lock is not enabled
-                    if not self.mode_lock_var.get():
-                        self.mode_var.set(sdr_mode)
-                        self.on_mode_changed(skip_apply=True)
-                        if self.connected:
-                            self.apply_mode()
-                        self.log_status(f"Synced mode from rig: {rig_mode}")
-
-                # Update last known values
-                self.rigctl_last_freq = rig_freq
-                self.rigctl_last_mode = rig_mode
-
-            # Always check PTT status for visual feedback
-            ptt_state = self.rigctl.get_ptt()
-
-            # Check if PTT state changed
-            if ptt_state != self.rigctl_last_ptt:
-                if ptt_state:
-                    # PTT activated
-                    # Update checkbox background to red (always, for visual feedback)
-                    self.rigctl_mute_tx_check.configure(style='MuteTX.Red.TCheckbutton')
-                    # Mute audio only if checkbox is enabled
-                    if self.rigctl_mute_tx_var.get() and self.client:
-                        # Save current channel states (both GUI vars and client state)
-                        self.rigctl_saved_channels = (
-                            self.channel_left_var.get(),
-                            self.channel_right_var.get()
-                        )
-                        # Mute audio instantly by disabling both channels
-                        self.channel_left_var.set(False)
-                        self.channel_right_var.set(False)
-                        self.client.channel_left = False
-                        self.client.channel_right = False
-                else:
-                    # PTT deactivated
-                    # Update checkbox background to green (always, for visual feedback)
-                    self.rigctl_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
-                    # Restore audio only if checkbox is enabled and we saved channel states
-                    if self.rigctl_mute_tx_var.get() and self.client and self.rigctl_saved_channels is not None:
-                        # Restore saved channel states (both GUI vars and client state)
-                        left_state, right_state = self.rigctl_saved_channels
-                        self.channel_left_var.set(left_state)
-                        self.channel_right_var.set(right_state)
-                        self.client.channel_left = left_state
-                        self.client.channel_right = right_state
-                        self.rigctl_saved_channels = None
-
-                self.rigctl_last_ptt = ptt_state
-
-        except Exception as e:
-            # Log error but don't disable polling - might be temporary
-            pass
+        # Queue a poll command (non-blocking)
+        # The worker thread will execute it and trigger callbacks
+        self.rigctl.poll()
 
         # Schedule next poll (20ms = 50 Hz for fast TX detection)
         self.rigctl_poll_job = self.root.after(20, self.poll_rigctl_frequency)

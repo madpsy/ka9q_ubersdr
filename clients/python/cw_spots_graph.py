@@ -270,7 +270,17 @@ class CWSpotsGraphWindow:
         if filtered_spots:
             try:
                 latest_spot = max(filtered_spots, key=lambda s: s.get('time', ''))
-                self.last_spot_time = datetime.fromisoformat(latest_spot['time'].replace('Z', '+00:00')).replace(tzinfo=None)
+                # Truncate nanosecond precision to microseconds for Windows compatibility
+                time_str = latest_spot['time'].replace('Z', '+00:00')
+                if '.' in time_str and '+' in time_str:
+                    parts = time_str.split('+')
+                    time_part = parts[0]
+                    tz_part = '+' + parts[1]
+                    if '.' in time_part:
+                        base, frac = time_part.rsplit('.', 1)
+                        frac = frac[:6]  # Keep only 6 digits (microseconds)
+                        time_str = f"{base}.{frac}{tz_part}"
+                self.last_spot_time = datetime.fromisoformat(time_str).replace(tzinfo=None)
             except Exception:
                 pass
 
@@ -297,7 +307,17 @@ class CWSpotsGraphWindow:
 
         for spot in filtered_spots:
             try:
-                spot_time = datetime.fromisoformat(spot['time'].replace('Z', '+00:00'))
+                # Truncate nanosecond precision to microseconds for Windows compatibility
+                time_str = spot['time'].replace('Z', '+00:00')
+                if '.' in time_str and '+' in time_str:
+                    parts = time_str.split('+')
+                    time_part = parts[0]
+                    tz_part = '+' + parts[1]
+                    if '.' in time_part:
+                        base, frac = time_part.rsplit('.', 1)
+                        frac = frac[:6]  # Keep only 6 digits (microseconds)
+                        time_str = f"{base}.{frac}{tz_part}"
+                spot_time = datetime.fromisoformat(time_str)
                 spot_time = spot_time.replace(tzinfo=None)
                 times.append(spot_time)
                 frequencies.append(spot['frequency'] / 1e6)  # Convert to MHz
@@ -393,7 +413,17 @@ class CWSpotsGraphWindow:
             try:
                 # Age filter
                 if max_age_ms is not None:
-                    spot_time = datetime.fromisoformat(spot['time'].replace('Z', '+00:00'))
+                    # Truncate nanosecond precision to microseconds for Windows compatibility
+                    time_str = spot['time'].replace('Z', '+00:00')
+                    if '.' in time_str and '+' in time_str:
+                        parts = time_str.split('+')
+                        time_part = parts[0]
+                        tz_part = '+' + parts[1]
+                        if '.' in time_part:
+                            base, frac = time_part.rsplit('.', 1)
+                            frac = frac[:6]  # Keep only 6 digits (microseconds)
+                            time_str = f"{base}.{frac}{tz_part}"
+                    spot_time = datetime.fromisoformat(time_str)
                     spot_time = spot_time.replace(tzinfo=None)
                     age_ms = (now - spot_time).total_seconds() * 1000
                     if age_ms > max_age_ms:

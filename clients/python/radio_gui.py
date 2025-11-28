@@ -205,6 +205,8 @@ class RadioGUI:
         self.rigctl_poll_job = None  # For Rig→SDR polling
         self.rigctl_last_freq = None  # Track last known rig frequency
         self.rigctl_last_mode = None  # Track last known rig mode
+        self.rigctl_last_ptt = False  # Track last known PTT state
+        self.rigctl_saved_channels = None  # Store channel states before muting
 
         # Band buttons dictionary for highlighting
         self.band_buttons = {}
@@ -289,8 +291,15 @@ class RadioGUI:
 
     def create_widgets(self):
         """Create all GUI widgets."""
-        # Configure custom styles for band buttons
+        # Configure custom styles for band buttons and Mute TX checkbox
         style = ttk.Style()
+
+        # Mute TX checkbox styles (green when not TX, red when TX)
+        style.configure('MuteTX.Green.TCheckbutton', background='#22c55e', foreground='white')
+        style.configure('MuteTX.Red.TCheckbutton', background='#ef4444', foreground='white')
+        # Keep background color on hover (don't turn grey)
+        style.map('MuteTX.Green.TCheckbutton', background=[('active', '#22c55e'), ('!active', '#22c55e')])
+        style.map('MuteTX.Red.TCheckbutton', background=[('active', '#ef4444'), ('!active', '#ef4444')])
 
         # Status-based styles (background colors based on SNR, white bold text)
         style.configure('Poor.TButton', background=self.BAND_COLORS['POOR'], foreground='white', font=('TkDefaultFont', 9, 'bold'))
@@ -425,7 +434,13 @@ class RadioGUI:
                                                        variable=self.rigctl_sync_direction_var,
                                                        value="Rig→SDR",
                                                        command=self.on_rigctl_sync_direction_changed)
-        self.rigctl_rig_to_sdr_radio.pack(side=tk.LEFT)
+        self.rigctl_rig_to_sdr_radio.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Mute TX checkbox (enabled by default)
+        self.rigctl_mute_tx_var = tk.BooleanVar(value=True)
+        self.rigctl_mute_tx_check = ttk.Checkbutton(rigctl_controls, text="Mute TX",
+                                                     variable=self.rigctl_mute_tx_var)
+        self.rigctl_mute_tx_check.pack(side=tk.LEFT)
 
         conn_frame.columnconfigure(1, weight=1)
 
@@ -3951,8 +3966,25 @@ class RadioGUI:
             self.rigctl_connect_btn.config(text="Disconnect Rig")
             self.log_status(f"✓ Connected to rigctld at {host}:{port}")
 
+            # Initialize PTT state
+            try:
+                self.rigctl_last_ptt = self.rigctl.get_ptt()
+                # Set initial checkbox style based on PTT state
+                if self.rigctl_last_ptt:
+                    self.rigctl_mute_tx_check.configure(style='MuteTX.Red.TCheckbutton')
+                else:
+                    self.rigctl_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
+            except:
+                self.rigctl_last_ptt = False
+                self.rigctl_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
+
             # Start syncing immediately with selected direction
             self.start_rigctl_sync()
+
+            # Always start polling for PTT status (for visual feedback)
+            # even if sync is not enabled
+            if not self.rigctl_poll_job:
+                self.poll_rigctl_frequency()
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to connect to rigctld: {e}")
@@ -4014,6 +4046,9 @@ class RadioGUI:
             self.log_status("Rigctl sync enabled - radio will follow SDR frequency")
             # Immediately sync current SDR frequency to rig
             self.sync_frequency_to_rigctl()
+            # Always start polling for PTT (for visual feedback)
+            if not self.rigctl_poll_job:
+                self.poll_rigctl_frequency()
         else:  # Rig→SDR
             self.log_status("Rigctl sync enabled - SDR will follow radio frequency")
             # Initialize last known values
@@ -4110,60 +4145,96 @@ class RadioGUI:
             # Don't disable sync on error - might be temporary
 
     def poll_rigctl_frequency(self):
-        """Poll rigctl for frequency/mode changes (for Rig→SDR sync)."""
-        if not self.rigctl_sync_enabled or not self.rigctl_connected or not self.rigctl:
+        """Poll rigctl for frequency/mode/PTT changes (for Rig→SDR sync and Mute TX)."""
+        if not self.rigctl_connected or not self.rigctl:
             self.rigctl_poll_job = None
             return
 
-        # Only poll if direction is Rig→SDR
-        if self.rigctl_sync_direction_var.get() != "Rig→SDR":
-            self.rigctl_poll_job = None
-            return
+        # Always poll when rigctl is connected (for PTT visual feedback)
+        # Sync only happens if enabled, muting only happens if checkbox is enabled
 
         try:
-            # Get current rig frequency and mode
-            rig_freq = self.rigctl.get_frequency()
-            rig_mode = self.rigctl.get_mode()
+            # Get current rig frequency and mode (only if sync enabled)
+            if self.rigctl_sync_enabled and self.rigctl_sync_direction_var.get() == "Rig→SDR":
+                rig_freq = self.rigctl.get_frequency()
+                rig_mode = self.rigctl.get_mode()
 
-            # Check if frequency changed
-            if self.rigctl_last_freq is not None and rig_freq != self.rigctl_last_freq:
-                # Update SDR frequency
-                self.set_frequency_hz(rig_freq)
-                if self.connected:
-                    self.apply_frequency()
-                self.log_status(f"Synced from rig: {rig_freq/1e6:.6f} MHz")
-
-            # Check if mode changed
-            if self.rigctl_last_mode is not None and rig_mode != self.rigctl_last_mode:
-                # Map rigctl mode to SDR mode
-                mode_map = {
-                    'USB': 'USB',
-                    'LSB': 'LSB',
-                    'AM': 'AM',
-                    'CW': 'CWU',  # Default to CWU
-                    'CWR': 'CWL',
-                    'FM': 'FM'
-                }
-                sdr_mode = mode_map.get(rig_mode, 'USB')
-
-                # Only update if mode lock is not enabled
-                if not self.mode_lock_var.get():
-                    self.mode_var.set(sdr_mode)
-                    self.on_mode_changed(skip_apply=True)
+                # Check if frequency changed
+                if self.rigctl_last_freq is not None and rig_freq != self.rigctl_last_freq:
+                    # Update SDR frequency
+                    self.set_frequency_hz(rig_freq)
                     if self.connected:
-                        self.apply_mode()
-                    self.log_status(f"Synced mode from rig: {rig_mode}")
+                        self.apply_frequency()
+                    self.log_status(f"Synced from rig: {rig_freq/1e6:.6f} MHz")
 
-            # Update last known values
-            self.rigctl_last_freq = rig_freq
-            self.rigctl_last_mode = rig_mode
+                # Check if mode changed
+                if self.rigctl_last_mode is not None and rig_mode != self.rigctl_last_mode:
+                    # Map rigctl mode to SDR mode
+                    mode_map = {
+                        'USB': 'USB',
+                        'LSB': 'LSB',
+                        'AM': 'AM',
+                        'CW': 'CWU',  # Default to CWU
+                        'CWR': 'CWL',
+                        'FM': 'FM'
+                    }
+                    sdr_mode = mode_map.get(rig_mode, 'USB')
+
+                    # Only update if mode lock is not enabled
+                    if not self.mode_lock_var.get():
+                        self.mode_var.set(sdr_mode)
+                        self.on_mode_changed(skip_apply=True)
+                        if self.connected:
+                            self.apply_mode()
+                        self.log_status(f"Synced mode from rig: {rig_mode}")
+
+                # Update last known values
+                self.rigctl_last_freq = rig_freq
+                self.rigctl_last_mode = rig_mode
+
+            # Always check PTT status for visual feedback
+            ptt_state = self.rigctl.get_ptt()
+
+            # Check if PTT state changed
+            if ptt_state != self.rigctl_last_ptt:
+                if ptt_state:
+                    # PTT activated
+                    # Update checkbox background to red (always, for visual feedback)
+                    self.rigctl_mute_tx_check.configure(style='MuteTX.Red.TCheckbutton')
+                    # Mute audio only if checkbox is enabled
+                    if self.rigctl_mute_tx_var.get() and self.client:
+                        # Save current channel states (both GUI vars and client state)
+                        self.rigctl_saved_channels = (
+                            self.channel_left_var.get(),
+                            self.channel_right_var.get()
+                        )
+                        # Mute audio instantly by disabling both channels
+                        self.channel_left_var.set(False)
+                        self.channel_right_var.set(False)
+                        self.client.channel_left = False
+                        self.client.channel_right = False
+                else:
+                    # PTT deactivated
+                    # Update checkbox background to green (always, for visual feedback)
+                    self.rigctl_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
+                    # Restore audio only if checkbox is enabled and we saved channel states
+                    if self.rigctl_mute_tx_var.get() and self.client and self.rigctl_saved_channels is not None:
+                        # Restore saved channel states (both GUI vars and client state)
+                        left_state, right_state = self.rigctl_saved_channels
+                        self.channel_left_var.set(left_state)
+                        self.channel_right_var.set(right_state)
+                        self.client.channel_left = left_state
+                        self.client.channel_right = right_state
+                        self.rigctl_saved_channels = None
+
+                self.rigctl_last_ptt = ptt_state
 
         except Exception as e:
-            # Log error but don't disable sync - might be temporary
+            # Log error but don't disable polling - might be temporary
             pass
 
-        # Schedule next poll (100ms)
-        self.rigctl_poll_job = self.root.after(100, self.poll_rigctl_frequency)
+        # Schedule next poll (20ms = 50 Hz for fast TX detection)
+        self.rigctl_poll_job = self.root.after(20, self.poll_rigctl_frequency)
 
     def format_time(self, seconds: int) -> str:
         """Format seconds as MM:SS."""

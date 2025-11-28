@@ -414,8 +414,7 @@ class SpectrumDisplay:
         # Check for new data frequently (every 10ms) to be responsive
         # Protect against destroyed parent widget
         try:
-            if self.parent.winfo_exists():
-                self.parent.after(10, self.update_display)
+            self.parent.after(10, self.update_display)
         except (tk.TclError, AttributeError):
             # Parent widget was destroyed, stop the update loop
             pass

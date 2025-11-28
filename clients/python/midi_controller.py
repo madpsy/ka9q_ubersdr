@@ -10,6 +10,7 @@ from typing import Optional, Callable, Dict, Any
 import threading
 import json
 import os
+import platform
 
 try:
     import rtmidi
@@ -49,8 +50,15 @@ class MIDIController:
         self.mappings_modified = False
         self.saved_mappings_hash = None
 
-        # Load saved mappings and device
-        self.config_file = os.path.expanduser("~/.ubersdr_midi_mappings.json")
+        # Load saved mappings and device (use platform-appropriate config directory)
+        if platform.system() == 'Windows':
+            # Use AppData on Windows
+            config_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'ubersdr')
+            os.makedirs(config_dir, exist_ok=True)
+            self.config_file = os.path.join(config_dir, 'midi_mappings.json')
+        else:
+            # Use home directory on Unix-like systems
+            self.config_file = os.path.expanduser("~/.ubersdr_midi_mappings.json")
         self.load_mappings()
         self._update_saved_hash()
 

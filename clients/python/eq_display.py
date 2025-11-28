@@ -9,6 +9,7 @@ from tkinter import ttk
 from typing import Optional, Callable, List, Tuple
 import json
 import os
+import platform
 
 
 class EQDisplay:
@@ -35,8 +36,15 @@ class EQDisplay:
         self.sliders: List[Tuple[int, ttk.Scale, tk.Label]] = []
         self.enabled_var: Optional[tk.BooleanVar] = None
         
-        # Config file path
-        self.config_file = os.path.expanduser("~/.ubersdr_eq_settings.json")
+        # Config file path (use platform-appropriate config directory)
+        if platform.system() == 'Windows':
+            # Use AppData on Windows
+            config_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'ubersdr')
+            os.makedirs(config_dir, exist_ok=True)
+            self.config_file = os.path.join(config_dir, 'eq_settings.json')
+        else:
+            # Use home directory on Unix-like systems
+            self.config_file = os.path.expanduser("~/.ubersdr_eq_settings.json")
         
         # Load saved settings
         self.load_settings()

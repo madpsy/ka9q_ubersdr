@@ -2,3 +2,4 @@ ka9q_ubersdr
 clients/go/radio_client
 clients/go/go.sum
 clients/python/__pycache__
+clients/python/venv

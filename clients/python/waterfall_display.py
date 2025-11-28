@@ -155,7 +155,11 @@ class WaterfallDisplay:
                 self._draw_waterfall()
         
         # Check for new data frequently
-        self.parent.after(10, self.update_display)
+        try:
+            self.parent.after(10, self.update_display)
+        except (tk.TclError, AttributeError):
+            # Parent widget was destroyed, stop the update loop
+            pass
     
     def _db_to_rgb(self, db: float) -> tuple:
         """Convert dB value to RGB color tuple.
@@ -205,6 +209,13 @@ class WaterfallDisplay:
     def _draw_waterfall(self):
         """Draw waterfall on canvas using PIL Image for efficiency."""
         if len(self.history) == 0 or self.spectrum_display is None:
+            return
+        
+        # Check if canvas still exists before attempting to draw
+        try:
+            if not self.canvas.winfo_exists():
+                return
+        except (tk.TclError, AttributeError):
             return
         
         # Use auto-ranging based on last 2 seconds of data for better contrast
@@ -448,21 +459,21 @@ class WaterfallDisplay:
     
     def on_scroll_up(self, event):
         """Handle mouse scroll up (Linux)."""
-        if self.scroll_mode == 'zoom' and self.spectrum_display:
+        if self.scroll_mode == 'pan' and self.spectrum_display:
             self.spectrum_display.zoom_in()
         elif self.frequency_step_callback:
             self.frequency_step_callback(1)
     
     def on_scroll_down(self, event):
         """Handle mouse scroll down (Linux)."""
-        if self.scroll_mode == 'zoom' and self.spectrum_display:
+        if self.scroll_mode == 'pan' and self.spectrum_display:
             self.spectrum_display.zoom_out()
         elif self.frequency_step_callback:
             self.frequency_step_callback(-1)
     
     def on_mousewheel(self, event):
         """Handle mouse wheel (Windows/Mac)."""
-        if self.scroll_mode == 'zoom' and self.spectrum_display:
+        if self.scroll_mode == 'pan' and self.spectrum_display:
             if event.delta > 0:
                 self.spectrum_display.zoom_in()
             else:
@@ -837,10 +848,24 @@ def create_waterfall_window(parent_gui):
     
     # Unbind main spectrum's motion handler - waterfall will handle cursor for both
     # (This is safe because the main spectrum is hidden in the main GUI)
-    spectrum.canvas.unbind('<Motion>')
+    try:
+        spectrum.canvas.unbind('<Motion>')
+    except (tk.TclError, AttributeError):
+        pass  # Canvas might not exist or already unbound
     
     # Reparent the spectrum canvas to this window's container
-    spectrum.canvas.pack_forget()  # Remove from main GUI
+    try:
+        spectrum.canvas.pack_forget()  # Remove from main GUI
+    except (tk.TclError, AttributeError):
+        pass  # Canvas might already be removed or destroyed
+    
+    # Destroy old canvas if it exists
+    try:
+        if spectrum.canvas and spectrum.canvas.winfo_exists():
+            spectrum.canvas.destroy()
+    except (tk.TclError, AttributeError):
+        pass  # Canvas already destroyed
+    
     spectrum.canvas = Canvas(container, width=800, height=200, bg='#000000', highlightthickness=0)
     spectrum.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=False)
     spectrum.width = 800
@@ -868,6 +893,11 @@ def create_waterfall_window(parent_gui):
     # Set scroll mode from parent GUI
     if hasattr(parent_gui, 'scroll_mode_var'):
         spectrum.set_scroll_mode(parent_gui.scroll_mode_var.get())
+    
+    # CRITICAL: Restart the spectrum update loop
+    # The loop may have stopped when the window was previously closed
+    # We need to restart it for the new window
+    spectrum.update_display()
     
     # Initialize with current settings
     try:

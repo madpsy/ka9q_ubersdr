@@ -54,8 +54,14 @@ def get_pipewire_sinks() -> List[Tuple[str, str]]:
     """Get list of available PipeWire audio sinks.
     
     Returns:
-        List of tuples (node_name, description) for audio sinks
+        List of tuples (node_name, description) for audio sinks. Empty list on Windows or if PipeWire not available.
     """
+    import platform
+
+    # PipeWire not available on Windows
+    if platform.system() == 'Windows':
+        return []
+
     try:
         result = subprocess.run(
             ['pw-cli', 'list-objects', 'Node'],
@@ -354,6 +360,9 @@ class RadioClient:
     
     def build_websocket_url(self) -> str:
         """Build the WebSocket URL with query parameters."""
+        # Check if this is an IQ mode (bandwidth should not be sent for IQ modes)
+        is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+
         # If full URL provided, parse and merge parameters
         if self.url:
             parsed = urlparse(self.url)
@@ -372,10 +381,12 @@ class RadioClient:
             params['mode'] = self.mode
             params['user_session_id'] = self.user_session_id
             
-            if self.bandwidth_low is not None:
-                params['bandwidthLow'] = str(self.bandwidth_low)
-            if self.bandwidth_high is not None:
-                params['bandwidthHigh'] = str(self.bandwidth_high)
+            # Only include bandwidth for non-IQ modes
+            if not is_iq_mode:
+                if self.bandwidth_low is not None:
+                    params['bandwidthLow'] = str(self.bandwidth_low)
+                if self.bandwidth_high is not None:
+                    params['bandwidthHigh'] = str(self.bandwidth_high)
             
             return f"{base_url}?{urlencode(params)}"
         else:
@@ -386,10 +397,12 @@ class RadioClient:
             url += f"&mode={self.mode}"
             url += f"&user_session_id={self.user_session_id}"
             
-            if self.bandwidth_low is not None:
-                url += f"&bandwidthLow={self.bandwidth_low}"
-            if self.bandwidth_high is not None:
-                url += f"&bandwidthHigh={self.bandwidth_high}"
+            # Only include bandwidth for non-IQ modes
+            if not is_iq_mode:
+                if self.bandwidth_low is not None:
+                    url += f"&bandwidthLow={self.bandwidth_low}"
+                if self.bandwidth_high is not None:
+                    url += f"&bandwidthHigh={self.bandwidth_high}"
                 
             return url
     
@@ -1126,8 +1139,8 @@ Examples:
     parser.add_argument('-b', '--bandwidth', type=parse_bandwidth,
                         help='Bandwidth in format low:high (e.g., -5000:5000)')
     parser.add_argument('-o', '--output', choices=['pipewire', 'pyaudio', 'stdout', 'wav'],
-                        default='pipewire',
-                        help='Output mode (default: pipewire, pyaudio works on all platforms)')
+                        default='pyaudio',
+                        help='Output mode (default: pyaudio, works on all platforms)')
     parser.add_argument('-w', '--wav-file', metavar='FILE',
                         help='WAV file path (required when output=wav)')
     parser.add_argument('-t', '--time', type=float, metavar='SECONDS',
@@ -1302,7 +1315,9 @@ Examples:
         client.running = False
     
     signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # SIGTERM not available on Windows
+    if hasattr(signal, 'SIGTERM'):
+        signal.signal(signal.SIGTERM, signal_handler)
     
     # Run client
     try:

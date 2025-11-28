@@ -103,8 +103,16 @@ except ImportError:
 
 
 def find_next_fifo_path() -> str:
-    """Find the next available FIFO path (/tmp/ubersdr.fifo, ubersdr1.fifo, etc.)."""
+    """Find the next available FIFO path (/tmp/ubersdr.fifo, ubersdr1.fifo, etc.).
+    
+    Returns empty string on Windows (FIFO not supported).
+    """
     import os
+    import platform
+
+    # FIFO not supported on Windows
+    if platform.system() == 'Windows':
+        return ""
 
     # Try /tmp/ubersdr.fifo first
     base_path = "/tmp/ubersdr"
@@ -652,18 +660,22 @@ class RadioGUI:
         ttk.Label(audio_frame, text="Volume:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
         self.volume_var = tk.IntVar(value=70)
         self.volume_scale = ttk.Scale(audio_frame, from_=0, to=100, orient=tk.HORIZONTAL,
-                                variable=self.volume_var, command=self.update_volume)
+                                variable=self.volume_var, command=self.update_volume,
+                                length=200)
         self.volume_scale.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
 
         self.volume_label = ttk.Label(audio_frame, text="70%", width=5)
-        self.volume_label.grid(row=1, column=2, sticky=tk.W, padx=(0, 20))
+        self.volume_label.grid(row=1, column=2, sticky=tk.W, padx=(0, 10))
 
-        # Audio level meter
-        ttk.Label(audio_frame, text="Level:").grid(row=1, column=3, sticky=tk.W, padx=(0, 5))
-
+        # Audio level meter - put label and meter in a container frame to eliminate gap
+        level_container = ttk.Frame(audio_frame)
+        level_container.grid(row=1, column=3, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 5))
+        
+        ttk.Label(level_container, text="Level:").pack(side=tk.LEFT, padx=(0, 5))
+        
         # Create a frame for the level meter bar
-        meter_frame = ttk.Frame(audio_frame, relief=tk.SUNKEN, borderwidth=1)
-        meter_frame.grid(row=1, column=4, sticky=(tk.W, tk.E), padx=(0, 10))
+        meter_frame = ttk.Frame(level_container, relief=tk.SUNKEN, borderwidth=1)
+        meter_frame.pack(side=tk.LEFT, padx=(0, 5))
 
         # Canvas for audio level meter
         self.level_canvas = tk.Canvas(meter_frame, width=150, height=20, bg='#2c3e50', highlightthickness=0)
@@ -672,8 +684,8 @@ class RadioGUI:
         # Audio level bar (will be updated dynamically)
         self.level_bar = self.level_canvas.create_rectangle(0, 0, 0, 20, fill='#28a745', outline='')
 
-        self.level_label = ttk.Label(audio_frame, text="-∞ dB", width=8)
-        self.level_label.grid(row=1, column=5, sticky=tk.W)
+        self.level_label = ttk.Label(level_container, text="-∞ dB", width=8)
+        self.level_label.pack(side=tk.LEFT)
 
         # Channel selection (Left/Right)
         ttk.Label(audio_frame, text="Channels:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
@@ -3265,13 +3277,19 @@ class RadioGUI:
 
         try:
             import json
+            # Check if this is an IQ mode (bandwidth should not be sent for IQ modes)
+            is_iq_mode = self.client.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+
             tune_msg = {
                 'type': 'tune',
                 'frequency': self.client.frequency,
-                'mode': self.client.mode,
-                'bandwidthLow': self.client.bandwidth_low,
-                'bandwidthHigh': self.client.bandwidth_high
+                'mode': self.client.mode
             }
+
+            # Only include bandwidth for non-IQ modes
+            if not is_iq_mode:
+                tune_msg['bandwidthLow'] = self.client.bandwidth_low
+                tune_msg['bandwidthHigh'] = self.client.bandwidth_high
 
             # Send the tune message via WebSocket using the async event loop
             if self.event_loop and self.event_loop.is_running():
@@ -3733,10 +3751,15 @@ class RadioGUI:
                                         self.unmute_audio()
                                 self.root.after(5000, open_waterfall_and_unmute)
 
-                            # Auto-open audio spectrum window on successful connection
+                            # Auto-open audio spectrum window on successful connection (but not for IQ modes)
                             if AUDIO_SPECTRUM_AVAILABLE:
-                                # Delay audio spectrum opening slightly
-                                self.root.after(600, self.auto_open_audio_spectrum)
+                                # Check if current mode is IQ before opening
+                                mode_display = self.mode_var.get()
+                                mode = self._parse_mode_name(mode_display)
+                                is_iq_mode = mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+                                if not is_iq_mode:
+                                    # Delay audio spectrum opening slightly
+                                    self.root.after(600, self.auto_open_audio_spectrum)
 
                             # Auto-open CW spots window if enabled (disabled by default)
                             # Add 2000ms delay (same as spectrum) before connecting DX cluster WebSocket

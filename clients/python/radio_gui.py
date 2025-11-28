@@ -8,12 +8,15 @@ import asyncio
 import sys
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 from typing import Optional, List, Tuple, Dict
 import queue
 import socket
 import requests
 import time
+import json
+import os
+import platform
 
 # Import spectrum display
 try:
@@ -180,6 +183,11 @@ class RadioGUI:
 
         # Configuration
         self.config = initial_config
+        
+        # Server configurations storage
+        self.servers = []  # List of saved server configurations
+        self.config_file = self._get_config_file_path()
+        self.load_servers()
 
         # Client state
         self.client: Optional[RadioClient] = None
@@ -288,6 +296,141 @@ class RadioGUI:
         # Auto-connect if requested (after UI is ready)
         if self.config.get('auto_connect', False):
             self.root.after(100, self.connect)  # Delay slightly to ensure UI is fully initialized
+    
+    def _get_config_file_path(self) -> str:
+        """Get platform-appropriate config file path for server configurations."""
+        if platform.system() == 'Windows':
+            # Use AppData on Windows
+            config_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'ubersdr')
+            os.makedirs(config_dir, exist_ok=True)
+            return os.path.join(config_dir, 'servers.json')
+        else:
+            # Use home directory on Unix-like systems
+            return os.path.expanduser("~/.ubersdr_servers.json")
+    
+    def load_servers(self):
+        """Load saved server configurations from file."""
+        if not os.path.exists(self.config_file):
+            return
+        
+        try:
+            with open(self.config_file, 'r') as f:
+                data = json.load(f)
+                self.servers = data.get('servers', [])
+                # Only log if status_text exists (after UI is created)
+                if hasattr(self, 'status_text'):
+                    self.log_status(f"Loaded {len(self.servers)} saved server(s)")
+        except Exception as e:
+            print(f"Failed to load server configurations: {e}")
+            self.servers = []
+    
+    def save_servers(self):
+        """Save server configurations to file."""
+        try:
+            data = {'servers': self.servers}
+            with open(self.config_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            self.log_status(f"Saved {len(self.servers)} server configuration(s)")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save server configurations: {e}")
+            self.log_status(f"ERROR: Failed to save servers - {e}")
+    
+    def add_current_server(self):
+        """Add current server configuration to saved servers."""
+        # Get current server details from separate fields
+        hostname = self.server_var.get().strip()
+        if not hostname:
+            messagebox.showerror("Error", "Please enter a server hostname")
+            return
+        
+        # Get port from port field
+        port_str = self.port_var.get().strip()
+        if not port_str:
+            messagebox.showerror("Error", "Please enter a port number")
+            return
+        
+        try:
+            port = int(port_str)
+        except ValueError:
+            messagebox.showerror("Error", "Invalid port number")
+            return
+        
+        tls_enabled = self.tls_var.get()
+        
+        # Ask for a name for this server
+        name = tk.simpledialog.askstring("Save Server",
+                                         "Enter a name for this server:",
+                                         initialvalue=hostname)
+        if not name:
+            return  # User cancelled
+        
+        # Check if server with this name already exists
+        for i, server in enumerate(self.servers):
+            if server['name'] == name:
+                if messagebox.askyesno("Overwrite?",
+                                      f"A server named '{name}' already exists. Overwrite it?"):
+                    self.servers[i] = {
+                        'name': name,
+                        'hostname': hostname,
+                        'port': port,
+                        'tls': tls_enabled
+                    }
+                    self.save_servers()
+                    self.populate_server_dropdown()
+                    messagebox.showinfo("Success", f"Server '{name}' updated")
+                return
+        
+        # Add new server
+        self.servers.append({
+            'name': name,
+            'hostname': hostname,
+            'port': port,
+            'tls': tls_enabled
+        })
+        self.save_servers()
+        self.populate_server_dropdown()
+        messagebox.showinfo("Success", f"Server '{name}' saved")
+    
+    def load_selected_server(self):
+        """Load the selected server from dropdown."""
+        selected = self.server_dropdown_var.get()
+        if not selected or selected == "Select saved server...":
+            return
+        
+        # Find the server
+        for server in self.servers:
+            if server['name'] == selected:
+                # Update UI - populate hostname and port separately
+                self.server_var.set(server['hostname'])
+                self.port_var.set(str(server['port']))
+                self.tls_var.set(server['tls'])
+                self.log_status(f"Loaded server: {server['name']}")
+                break
+    
+    def delete_selected_server(self):
+        """Delete the selected server from saved servers."""
+        selected = self.server_dropdown_var.get()
+        if not selected or selected == "Select saved server...":
+            messagebox.showinfo("Info", "Please select a server to delete")
+            return
+        
+        if not messagebox.askyesno("Confirm Delete",
+                                   f"Are you sure you want to delete server '{selected}'?"):
+            return
+        
+        # Remove the server
+        self.servers = [s for s in self.servers if s['name'] != selected]
+        self.save_servers()
+        self.populate_server_dropdown()
+        self.server_dropdown_var.set("Select saved server...")
+        messagebox.showinfo("Success", f"Server '{selected}' deleted")
+    
+    def populate_server_dropdown(self):
+        """Populate the server dropdown with saved servers."""
+        server_names = ["Select saved server..."] + [s['name'] for s in self.servers]
+        self.server_dropdown['values'] = server_names
+        if not self.server_dropdown_var.get() or self.server_dropdown_var.get() not in server_names:
+            self.server_dropdown_var.set("Select saved server...")
 
     def create_widgets(self):
         """Create all GUI widgets."""
@@ -340,30 +483,64 @@ class RadioGUI:
         conn_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
 
         ttk.Label(conn_frame, text="Server:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        self.server_var = tk.StringVar(value=self.config.get('url') or f"{self.config.get('host', 'localhost')}:{self.config.get('port', 8080)}")
-        server_entry = ttk.Entry(conn_frame, textvariable=self.server_var, width=40)
-        server_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        
+        # Initialize server field - handle both URL and host:port formats
+        initial_server = self.config.get('url')
+        if not initial_server:
+            # Use just the hostname, not host:port
+            initial_server = self.config.get('host', 'localhost')
+        
+        self.server_var = tk.StringVar(value=initial_server)
+        server_entry = ttk.Entry(conn_frame, textvariable=self.server_var, width=30)
+        server_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
         server_entry.bind('<Return>', lambda e: self.toggle_connection())
+
+        # Port field (separate from hostname)
+        ttk.Label(conn_frame, text="Port:").grid(row=0, column=2, sticky=tk.W, padx=(5, 5))
+        self.port_var = tk.StringVar(value=str(self.config.get('port', 8080)))
+        port_entry = ttk.Entry(conn_frame, textvariable=self.port_var, width=6)
+        port_entry.grid(row=0, column=3, sticky=tk.W, padx=(0, 5))
+        port_entry.bind('<Return>', lambda e: self.toggle_connection())
 
         # TLS checkbox - default from config or False
         self.tls_var = tk.BooleanVar(value=self.config.get('ssl', False))
         tls_check = ttk.Checkbutton(conn_frame, text="TLS", variable=self.tls_var)
-        tls_check.grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        tls_check.grid(row=0, column=4, sticky=tk.W, padx=(0, 5))
 
         self.connect_btn = ttk.Button(conn_frame, text="Connect", command=self.toggle_connection)
-        self.connect_btn.grid(row=0, column=3, padx=(0, 5))
+        self.connect_btn.grid(row=0, column=5, padx=(0, 5))
 
         # Cancel button (hidden by default)
         self.cancel_btn = ttk.Button(conn_frame, text="Cancel", command=self.cancel_connection_attempt)
-        self.cancel_btn.grid(row=0, column=4)
+        self.cancel_btn.grid(row=0, column=6)
         self.cancel_btn.grid_remove()  # Hide initially
+        
+        # Server dropdown and management buttons (second row)
+        ttk.Label(conn_frame, text="Saved:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+        
+        self.server_dropdown_var = tk.StringVar(value="Select saved server...")
+        self.server_dropdown = ttk.Combobox(conn_frame, textvariable=self.server_dropdown_var,
+                                           state='readonly', width=28)
+        self.server_dropdown.grid(row=1, column=1, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 5), pady=(5, 0))
+        self.server_dropdown.bind('<<ComboboxSelected>>', lambda e: self.load_selected_server())
+        
+        # Populate dropdown with saved servers
+        self.populate_server_dropdown()
+        
+        # Save button
+        save_btn = ttk.Button(conn_frame, text="Save", width=6, command=self.add_current_server)
+        save_btn.grid(row=1, column=3, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+        
+        # Delete button
+        delete_btn = ttk.Button(conn_frame, text="Delete", width=6, command=self.delete_selected_server)
+        delete_btn.grid(row=1, column=4, sticky=tk.W, padx=(0, 5), pady=(5, 0))
 
-        # Receiver info label (second row, initially hidden) - shows name, version, and map link
-        ttk.Label(conn_frame, text="Receiver:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
+        # Receiver info label (third row, initially hidden) - shows name, version, and map link
+        ttk.Label(conn_frame, text="Receiver:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5))
         
         # Create a frame to hold all receiver info on one line
         receiver_info_frame = ttk.Frame(conn_frame)
-        receiver_info_frame.grid(row=1, column=1, columnspan=3, sticky=tk.W)
+        receiver_info_frame.grid(row=2, column=1, columnspan=5, sticky=tk.W)
         
         # Receiver name (truncated to 50 chars)
         self.receiver_name_var = tk.StringVar(value="")
@@ -395,15 +572,15 @@ class RadioGUI:
         # Session timer label (same row as receiver, right side)
         self.session_timer_var = tk.StringVar(value="")
         self.session_timer_label = ttk.Label(conn_frame, textvariable=self.session_timer_var, foreground='blue', font=('TkDefaultFont', 9, 'bold'))
-        self.session_timer_label.grid(row=1, column=3, columnspan=2, sticky=tk.E)
+        self.session_timer_label.grid(row=2, column=5, columnspan=2, sticky=tk.E)
         self.session_timer_label.grid_remove()  # Hide initially until connected
 
-        # Rigctl connection (third row, optional)
-        ttk.Label(conn_frame, text="Rigctl:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5))
+        # Rigctl connection (fourth row, optional)
+        ttk.Label(conn_frame, text="Rigctl:").grid(row=3, column=0, sticky=tk.W, padx=(0, 5))
 
         # Create a frame to hold rigctl controls so they stay together
         rigctl_controls = ttk.Frame(conn_frame)
-        rigctl_controls.grid(row=2, column=1, columnspan=4, sticky=tk.W)
+        rigctl_controls.grid(row=3, column=1, columnspan=6, sticky=tk.W)
 
         self.rigctl_host_var = tk.StringVar(value=self.config.get('rigctl_host', 'localhost'))
         rigctl_host_entry = ttk.Entry(rigctl_controls, textvariable=self.rigctl_host_var, width=15)
@@ -1236,7 +1413,9 @@ class RadioGUI:
             from datetime import datetime, timedelta
             
             # Get server URL
-            server = self.server_var.get()
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server = f"{hostname}:{port}" if ':' not in hostname else hostname
             use_tls = self.tls_var.get()
 
             # Build API URL
@@ -1467,7 +1646,9 @@ class RadioGUI:
         """Fetch bookmarks from the server API."""
         try:
             # Get server URL
-            server = self.server_var.get()
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server = f"{hostname}:{port}" if ':' not in hostname else hostname
             use_tls = self.tls_var.get()
 
             # Build API URL
@@ -1512,7 +1693,9 @@ class RadioGUI:
         """Fetch bands from the server API."""
         try:
             # Get server URL
-            server = self.server_var.get()
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server = f"{hostname}:{port}" if ':' not in hostname else hostname
             use_tls = self.tls_var.get()
 
             # Build API URL
@@ -2472,7 +2655,9 @@ class RadioGUI:
                 # Connect if radio is connected
                 if self.connected and self.client:
                     try:
-                        server = self.server_var.get()
+                        hostname = self.server_var.get().strip()
+                        port = self.port_var.get().strip()
+                        server = f"{hostname}:{port}" if ':' not in hostname else hostname
                         frequency = self.get_frequency_hz()
                         # Pass the audio channel's user_session_id to spectrum
                         self.spectrum.connect(server, frequency, self.client.user_session_id)
@@ -2767,7 +2952,9 @@ class RadioGUI:
         """Ensure shared DX cluster WebSocket manager exists (connection is automatic)."""
         if not self.dxcluster_ws and DXCLUSTER_WS_AVAILABLE:
             # Create shared WebSocket manager
-            server = self.server_var.get()
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server = f"{hostname}:{port}" if ':' not in hostname else hostname
             use_tls = self.tls_var.get()
 
             # Parse server URL
@@ -2916,7 +3103,9 @@ class RadioGUI:
             from band_conditions_display import create_band_conditions_window
 
             # Get server URL and TLS setting
-            server = self.server_var.get()
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server = f"{hostname}:{port}" if ':' not in hostname else hostname
             use_tls = self.tls_var.get()
 
             # Create band conditions window
@@ -2944,7 +3133,9 @@ class RadioGUI:
             from space_weather_display import create_space_weather_window
 
             # Get server URL and TLS setting
-            server = self.server_var.get()
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server = f"{hostname}:{port}" if ':' not in hostname else hostname
             use_tls = self.tls_var.get()
 
             # Get GPS coordinates and location from client
@@ -3341,20 +3532,26 @@ class RadioGUI:
             # Import RadioClient here to avoid circular import issues
             from radio_client import RadioClient
 
-            # Parse server input
-            server = self.server_var.get()
-            if '://' in server:
-                url = server
+            # Parse server input - now using separate hostname and port fields
+            hostname = self.server_var.get().strip()
+            if not hostname:
+                messagebox.showerror("Error", "Please enter a server hostname")
+                return
+            
+            try:
+                port = int(self.port_var.get().strip())
+            except ValueError:
+                messagebox.showerror("Error", "Invalid port number")
+                return
+            
+            # Check if full URL was provided in hostname field
+            if '://' in hostname:
+                url = hostname
                 host = None
                 port = None
             else:
                 url = None
-                if ':' in server:
-                    host, port_str = server.split(':', 1)
-                    port = int(port_str)
-                else:
-                    host = server
-                    port = 8080
+                host = hostname
 
             # Get frequency and mode
             frequency = self.get_frequency_hz()
@@ -3436,6 +3633,10 @@ class RadioGUI:
             if self.spectrum and SPECTRUM_AVAILABLE:
                 def connect_spectrum_delayed():
                     try:
+                        # Build server string from hostname and port
+                        hostname = self.server_var.get().strip()
+                        port = self.port_var.get().strip()
+                        server = f"{hostname}:{port}" if ':' not in hostname else hostname
                         # Pass the audio channel's user_session_id and TLS setting to spectrum
                         use_tls = self.tls_var.get()
                         self.spectrum.connect(server, frequency, self.client.user_session_id, use_tls=use_tls)
@@ -3449,7 +3650,11 @@ class RadioGUI:
                 # and avoid rate limiting (HTTP 429)
                 self.root.after(2000, connect_spectrum_delayed)
 
-            self.log_status(f"Connecting to {server}...")
+            # Construct server string for logging
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server_display = f"{hostname}:{port}" if ':' not in hostname else hostname
+            self.log_status(f"Connecting to {server_display}...")
 
         except ValueError as e:
             messagebox.showerror("Error", f"Invalid input: {e}")

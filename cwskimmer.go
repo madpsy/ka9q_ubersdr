@@ -333,19 +333,27 @@ func (c *CWSkimmerClient) readLine(timeout time.Duration) (string, error) {
 
 	// Set deadline once for the entire line read
 	deadline := time.Now().Add(timeout)
-	conn.SetReadDeadline(deadline)
+	if err := conn.SetReadDeadline(deadline); err != nil {
+		return "", fmt.Errorf("failed to set read deadline: %w", err)
+	}
 
 	// Read one byte at a time until we hit \n
 	var line []byte
 	buf := make([]byte, 1)
+	bytesRead := 0
 
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
+			// Log how many bytes we read before the error
+			if bytesRead > 0 {
+				log.Printf("CW Skimmer: Read error after %d bytes (partial: %q): %v", bytesRead, string(line), err)
+			}
 			return "", err
 		}
 
 		if n > 0 {
+			bytesRead++
 			if buf[0] == '\n' {
 				// Found newline, return the line
 				break

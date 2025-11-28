@@ -1592,6 +1592,8 @@ class RadioGUI:
             for band_name, button in self.band_buttons.items():
                 status = self.band_states.get(band_name, 'UNKNOWN')
                 button.configure(style=f'{status.capitalize()}.TButton')
+                # Force widget update on Windows
+                button.update_idletasks()
 
     def start_band_state_polling(self):
         """Start periodic polling of band states (every 60 seconds)."""
@@ -1641,6 +1643,8 @@ class RadioGUI:
             # If frequency is invalid, just update all buttons
             for band_name, button in self.band_buttons.items():
                 button.configure(style='Unknown.TButton')
+                # Force widget update on Windows
+                button.update_idletasks()
 
     def fetch_bookmarks(self):
         """Fetch bookmarks from the server API."""
@@ -2080,6 +2084,8 @@ class RadioGUI:
                 button.configure(style='ModeActive.TButton')
             else:
                 button.configure(style='Mode.TButton')
+            # Force widget update on Windows
+            button.update_idletasks()
 
     def on_mode_changed(self, skip_apply=False):
         """Handle mode change - updates bandwidth and presets immediately."""

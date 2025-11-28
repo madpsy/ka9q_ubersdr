@@ -183,6 +183,8 @@ class MinimalSpaceWeatherDisplay:
                     condition = data[conditions_key][band]
                     color = self.CONDITION_COLORS.get(condition, '#9ca3af')
                     self.condition_badges[band].config(bg=color)
+                    # Force widget update on Windows
+                    self.condition_badges[band].update_idletasks()
 
         self.status_label.config(text="✓ Loaded", foreground='green')
 
@@ -500,7 +502,25 @@ class SpaceWeatherDisplay:
         
         # Update last update time
         if 'last_update' in data:
-            last_update = datetime.fromisoformat(data['last_update'].replace('Z', '+00:00'))
+            # Handle nanosecond precision timestamps (Windows doesn't support them)
+            timestamp_str = data['last_update'].replace('Z', '+00:00')
+            # Truncate nanoseconds to microseconds (6 digits after decimal)
+            if '.' in timestamp_str:
+                parts = timestamp_str.split('.')
+                if len(parts) == 2:
+                    # Keep only first 6 digits of fractional seconds
+                    fractional = parts[1][:6]
+                    # Find where timezone starts (+ or -)
+                    tz_start = -1
+                    for i, c in enumerate(parts[1]):
+                        if c in ['+', '-']:
+                            tz_start = i
+                            break
+                    if tz_start > 0:
+                        timezone = parts[1][tz_start:]
+                        timestamp_str = f"{parts[0]}.{fractional}{timezone}"
+
+            last_update = datetime.fromisoformat(timestamp_str)
             now = datetime.utcnow()
             minutes_ago = int((now - last_update.replace(tzinfo=None)).total_seconds() / 60)
             
@@ -517,15 +537,19 @@ class SpaceWeatherDisplay:
         
         # Update key metrics
         self.metric_labels['solar_flux'].config(text=f"{data.get('solar_flux', 0):.0f} SFU")
+        self.metric_labels['solar_flux'].update_idletasks()
         
         k_status = data.get('k_index_status', '')
         self.metric_labels['k_index'].config(text=f"{data.get('k_index', 0)} ({k_status})")
+        self.metric_labels['k_index'].update_idletasks()
         
         self.metric_labels['a_index'].config(text=f"{data.get('a_index', 0)}")
+        self.metric_labels['a_index'].update_idletasks()
         
         bz = data.get('solar_wind_bz', 0)
         bz_dir = 'Southward' if bz < 0 else 'Northward'
         self.metric_labels['solar_wind'].config(text=f"{bz:.1f} nT\n({bz_dir})")
+        self.metric_labels['solar_wind'].update_idletasks()
         
         quality = data.get('propagation_quality', 'Unknown')
         quality_colors = {
@@ -536,6 +560,7 @@ class SpaceWeatherDisplay:
         }
         quality_color = quality_colors.get(quality, '#9ca3af')
         self.metric_labels['propagation'].config(text=quality, foreground=quality_color)
+        self.metric_labels['propagation'].update_idletasks()
         
         # Update band conditions
         if 'band_conditions_day' in data:
@@ -544,6 +569,8 @@ class SpaceWeatherDisplay:
                     condition = data['band_conditions_day'][band]
                     color = self.CONDITION_COLORS.get(condition, '#9ca3af')
                     self.day_badges[band].config(bg=color)
+                    # Force widget update on Windows
+                    self.day_badges[band].update_idletasks()
         
         if 'band_conditions_night' in data:
             for band in self.BAND_ORDER:
@@ -551,6 +578,8 @@ class SpaceWeatherDisplay:
                     condition = data['band_conditions_night'][band]
                     color = self.CONDITION_COLORS.get(condition, '#9ca3af')
                     self.night_badges[band].config(bg=color)
+                    # Force widget update on Windows
+                    self.night_badges[band].update_idletasks()
         
         self.status_label.config(text="✓ Data loaded successfully", foreground='green')
     

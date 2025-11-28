@@ -304,7 +304,25 @@ class CWSpotsDisplay:
             # Age filter
             if self.age_filter is not None:
                 try:
-                    spot_time = datetime.fromisoformat(spot['time'].replace('Z', '+00:00'))
+                    # Handle nanosecond precision timestamps (Windows doesn't support them)
+                    timestamp_str = spot['time'].replace('Z', '+00:00')
+                    # Truncate nanoseconds to microseconds (6 digits after decimal)
+                    if '.' in timestamp_str:
+                        parts = timestamp_str.split('.')
+                        if len(parts) == 2:
+                            # Keep only first 6 digits of fractional seconds
+                            fractional = parts[1][:6]
+                            # Find where timezone starts (+ or -)
+                            tz_start = -1
+                            for i, c in enumerate(parts[1]):
+                                if c in ['+', '-']:
+                                    tz_start = i
+                                    break
+                            if tz_start > 0:
+                                timezone = parts[1][tz_start:]
+                                timestamp_str = f"{parts[0]}.{fractional}{timezone}"
+
+                    spot_time = datetime.fromisoformat(timestamp_str)
                     # Remove timezone info to compare with naive datetime
                     spot_time = spot_time.replace(tzinfo=None)
                     age_minutes = (now - spot_time).total_seconds() / 60
@@ -343,7 +361,25 @@ class CWSpotsDisplay:
             # Get the most recent spot time from filtered spots
             try:
                 latest_spot = max(filtered_spots, key=lambda s: s.get('time', ''))
-                self.last_spot_time = datetime.fromisoformat(latest_spot['time'].replace('Z', '+00:00')).replace(tzinfo=None)
+                # Handle nanosecond precision timestamps (Windows doesn't support them)
+                timestamp_str = latest_spot['time'].replace('Z', '+00:00')
+                # Truncate nanoseconds to microseconds (6 digits after decimal)
+                if '.' in timestamp_str:
+                    parts = timestamp_str.split('.')
+                    if len(parts) == 2:
+                        # Keep only first 6 digits of fractional seconds
+                        fractional = parts[1][:6]
+                        # Find where timezone starts (+ or -)
+                        tz_start = -1
+                        for i, c in enumerate(parts[1]):
+                            if c in ['+', '-']:
+                                tz_start = i
+                                break
+                        if tz_start > 0:
+                            timezone = parts[1][tz_start:]
+                            timestamp_str = f"{parts[0]}.{fractional}{timezone}"
+
+                self.last_spot_time = datetime.fromisoformat(timestamp_str).replace(tzinfo=None)
             except Exception:
                 pass
 
@@ -475,8 +511,28 @@ class CWSpotsDisplay:
         """Add a single spot to the treeview."""
         # Format time
         try:
-            spot_time = datetime.fromisoformat(spot['time'].replace('Z', '+00:00'))
-            time_str = spot_time.strftime("%H:%M:%S")
+            # Handle nanosecond precision timestamps (Windows doesn't support them)
+            timestamp_str = spot['time'].replace('Z', '+00:00')
+            # Truncate nanoseconds to microseconds (6 digits after decimal)
+            if '.' in timestamp_str:
+                parts = timestamp_str.split('.')
+                if len(parts) == 2:
+                    # Keep only first 6 digits of fractional seconds
+                    fractional = parts[1][:6]
+                    # Find where timezone starts (+ or -)
+                    tz_start = -1
+                    for i, c in enumerate(parts[1]):
+                        if c in ['+', '-']:
+                            tz_start = i
+                            break
+                    if tz_start > 0:
+                        timezone = parts[1][tz_start:]
+                        timestamp_str = f"{parts[0]}.{fractional}{timezone}"
+
+            spot_time = datetime.fromisoformat(timestamp_str)
+            # Convert to UTC and remove timezone info for consistent formatting on Windows
+            spot_time_utc = spot_time.replace(tzinfo=None)
+            time_str = spot_time_utc.strftime("%H:%M:%S")
 
             # Calculate age
             now = datetime.utcnow()

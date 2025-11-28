@@ -296,19 +296,12 @@ func (c *CWSkimmerClient) login() error {
 
 // handleConnection reads and processes messages from the skimmer
 func (c *CWSkimmerClient) handleConnection() {
+	c.mu.RLock()
+	keepaliveDelay := c.config.KeepAliveDelay
+	c.mu.RUnlock()
+
 	for {
-		// Set read deadline: 2x keepalive interval
-		c.mu.RLock()
-		conn := c.conn
-		keepaliveDelay := c.config.KeepAliveDelay
-		c.mu.RUnlock()
-
-		if conn != nil {
-			readTimeout := time.Duration(keepaliveDelay*2) * time.Second
-			conn.SetReadDeadline(time.Now().Add(readTimeout))
-		}
-
-		line, err := c.readLine()
+		line, err := c.readLine(time.Duration(keepaliveDelay*2) * time.Second)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				log.Printf("CW Skimmer: Read timeout (no data for %ds), reconnecting", keepaliveDelay*2)
@@ -329,7 +322,7 @@ func (c *CWSkimmerClient) handleConnection() {
 }
 
 // readLine reads a line from the connection with proper timeout handling
-func (c *CWSkimmerClient) readLine() (string, error) {
+func (c *CWSkimmerClient) readLine(timeout time.Duration) (string, error) {
 	c.mu.RLock()
 	conn := c.conn
 	c.mu.RUnlock()
@@ -338,8 +331,11 @@ func (c *CWSkimmerClient) readLine() (string, error) {
 		return "", fmt.Errorf("not connected")
 	}
 
+	// Set deadline once for the entire line read
+	deadline := time.Now().Add(timeout)
+	conn.SetReadDeadline(deadline)
+
 	// Read one byte at a time until we hit \n
-	// This respects the socket read deadline set in handleConnection
 	var line []byte
 	buf := make([]byte, 1)
 

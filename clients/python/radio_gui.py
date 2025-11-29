@@ -82,6 +82,14 @@ except ImportError:
     SPACE_WEATHER_AVAILABLE = False
     print("Warning: Space weather display not available (missing dependencies)")
 
+# Import public instances display
+try:
+    from public_instances_display import create_public_instances_window
+    PUBLIC_INSTANCES_AVAILABLE = True
+except ImportError:
+    PUBLIC_INSTANCES_AVAILABLE = False
+    print("Warning: Public instances display not available (missing dependencies)")
+
 # Import EQ display
 try:
     from eq_display import create_eq_window
@@ -325,6 +333,9 @@ class RadioGUI:
         # Auto-connect if requested (after UI is ready)
         if self.config.get('auto_connect', False):
             self.root.after(100, self.connect)  # Delay slightly to ensure UI is fully initialized
+        # If using default localhost and not auto-connecting, show public instances window
+        elif self.config.get('host') == 'localhost' and not self.config.get('url') and not self.config.get('auto_connect'):
+            self.root.after(200, self.open_public_instances_window)  # Delay to ensure UI is ready
     
     def _get_config_file_path(self) -> str:
         """Get platform-appropriate config file path for server configurations."""
@@ -453,6 +464,25 @@ class RadioGUI:
         self.populate_server_dropdown()
         self.server_dropdown_var.set("Select saved server...")
         messagebox.showinfo("Success", f"Server '{selected}' deleted")
+    def open_public_instances_window(self):
+        """Open a window showing public UberSDR instances."""
+        if not PUBLIC_INSTANCES_AVAILABLE:
+            messagebox.showerror("Error", "Public instances display not available")
+            return
+
+        def on_connect(host, port, tls, name):
+            """Callback when user selects an instance to connect to."""
+            # Populate connection fields
+            self.server_var.set(host)
+            self.port_var.set(str(port))
+            self.tls_var.set(tls)
+
+            # Connect automatically
+            self.log_status(f"Connecting to public instance: {name}")
+            self.connect()
+
+        create_public_instances_window(self.root, on_connect)
+
     
     def populate_server_dropdown(self):
         """Populate the server dropdown with saved servers."""
@@ -563,6 +593,10 @@ class RadioGUI:
         # Delete button
         delete_btn = ttk.Button(conn_frame, text="Delete", width=6, command=self.delete_selected_server)
         delete_btn.grid(row=1, column=4, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+
+        # Public button
+        public_btn = ttk.Button(conn_frame, text="Public", width=6, command=self.open_public_instances_window)
+        public_btn.grid(row=1, column=5, sticky=tk.W, padx=(0, 5), pady=(5, 0))
 
         # Receiver info label (third row, initially hidden) - shows name, version, and map link
         ttk.Label(conn_frame, text="Receiver:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5))

@@ -407,6 +407,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
 		       altitude, public_url, version, host, port, tls, first_seen, last_seen
 		FROM instances
+		WHERE datetime(last_seen) >= datetime('now', '-30 minutes')
 		ORDER BY last_seen DESC
 	`)
 	if err != nil {

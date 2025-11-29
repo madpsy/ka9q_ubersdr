@@ -140,6 +140,15 @@ except ImportError:
     RIGCTL_AVAILABLE = False
     print("Warning: rigctl module not available")
 
+# Import OmniRig client (Windows only)
+OMNIRIG_AVAILABLE = False
+if platform.system() == 'Windows':
+    try:
+        from omnirig_control import ThreadedOmniRigClient
+        OMNIRIG_AVAILABLE = True
+    except ImportError:
+        print("Warning: OmniRig module not available (install pywin32)")
+
 
 class RadioGUI:
     """Tkinter-based GUI for the radio client."""
@@ -206,15 +215,26 @@ class RadioGUI:
         self.bandwidth_update_job = None  # Debounce timer for bandwidth updates
         self.last_mode = None  # Track last mode to detect actual mode changes
 
-        # Rigctl client
-        self.rigctl: Optional[RigctlClient] = None
+        # Radio control (rigctl or OmniRig)
+        self.radio_control_type = 'none'  # 'none', 'rigctl', or 'omnirig'
+        self.radio_control = None  # Will be ThreadedRigctlClient or ThreadedOmniRigClient
+        self.radio_control_connected = False
+        self.radio_control_sync_enabled = False
+        self.radio_control_poll_job = None  # For Rig→SDR polling
+        self.radio_control_last_freq = None  # Track last known rig frequency
+        self.radio_control_last_mode = None  # Track last known rig mode
+        self.radio_control_last_ptt = False  # Track last known PTT state
+        self.radio_control_saved_channels = None  # Store channel states before muting
+        
+        # Legacy aliases for backward compatibility
+        self.rigctl = None
         self.rigctl_connected = False
         self.rigctl_sync_enabled = False
-        self.rigctl_poll_job = None  # For Rig→SDR polling
-        self.rigctl_last_freq = None  # Track last known rig frequency
-        self.rigctl_last_mode = None  # Track last known rig mode
-        self.rigctl_last_ptt = False  # Track last known PTT state
-        self.rigctl_saved_channels = None  # Store channel states before muting
+        self.rigctl_poll_job = None
+        self.rigctl_last_freq = None
+        self.rigctl_last_mode = None
+        self.rigctl_last_ptt = False
+        self.rigctl_saved_channels = None
 
         # Band buttons dictionary for highlighting
         self.band_buttons = {}
@@ -572,49 +592,97 @@ class RadioGUI:
         self.session_timer_label.grid(row=2, column=5, columnspan=2, sticky=tk.E)
         self.session_timer_label.grid_remove()  # Hide initially until connected
 
-        # Rigctl connection (fourth row, optional)
-        ttk.Label(conn_frame, text="Rigctl:").grid(row=3, column=0, sticky=tk.W, padx=(0, 5))
+        # Radio control connection (fourth row, optional)
+        ttk.Label(conn_frame, text="Radio:").grid(row=3, column=0, sticky=tk.W, padx=(0, 5))
 
-        # Create a frame to hold rigctl controls so they stay together
-        rigctl_controls = ttk.Frame(conn_frame)
-        rigctl_controls.grid(row=3, column=1, columnspan=6, sticky=tk.W)
+        # Create a frame to hold radio control controls so they stay together
+        radio_controls = ttk.Frame(conn_frame)
+        radio_controls.grid(row=3, column=1, columnspan=6, sticky=tk.W)
 
-        self.rigctl_host_var = tk.StringVar(value=self.config.get('rigctl_host', 'localhost'))
-        rigctl_host_entry = ttk.Entry(rigctl_controls, textvariable=self.rigctl_host_var, width=15)
-        rigctl_host_entry.pack(side=tk.LEFT, padx=(0, 5))
-        rigctl_host_entry.bind('<Return>', lambda e: self.toggle_rigctl_connection())
+        # Radio control type selector (rigctl or OmniRig)
+        available_types = ['None']
+        if RIGCTL_AVAILABLE:
+            available_types.append('rigctl')
+        if OMNIRIG_AVAILABLE:
+            available_types.append('OmniRig')
+        
+        # Set default based on platform
+        default_type = 'None'
+        if platform.system() == 'Windows' and OMNIRIG_AVAILABLE:
+            default_type = 'OmniRig'
+        elif RIGCTL_AVAILABLE:
+            default_type = 'rigctl'
+        
+        self.radio_control_type_var = tk.StringVar(value=default_type)
+        radio_type_combo = ttk.Combobox(radio_controls, textvariable=self.radio_control_type_var,
+                                       values=available_types, state='readonly', width=8)
+        radio_type_combo.pack(side=tk.LEFT, padx=(0, 5))
+        radio_type_combo.bind('<<ComboboxSelected>>', lambda e: self.on_radio_control_type_changed())
+        
+        # Store reference for later use
+        self.radio_type_combo = radio_type_combo
 
-        ttk.Label(rigctl_controls, text="Port:").pack(side=tk.LEFT, padx=(0, 5))
-        self.rigctl_port_var = tk.StringVar(value=str(self.config.get('rigctl_port', 4532)))
-        rigctl_port_entry = ttk.Entry(rigctl_controls, textvariable=self.rigctl_port_var, width=6)
-        rigctl_port_entry.pack(side=tk.LEFT, padx=(0, 5))
-        rigctl_port_entry.bind('<Return>', lambda e: self.toggle_rigctl_connection())
+        # Host/Port fields (for rigctl)
+        self.radio_host_label = ttk.Label(radio_controls, text="Host:")
+        self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
+        
+        self.radio_host_var = tk.StringVar(value=self.config.get('rigctl_host', 'localhost'))
+        self.radio_host_entry = ttk.Entry(radio_controls, textvariable=self.radio_host_var, width=15)
+        self.radio_host_entry.pack(side=tk.LEFT, padx=(0, 5))
+        self.radio_host_entry.bind('<Return>', lambda e: self.toggle_radio_control_connection())
 
-        self.rigctl_connect_btn = ttk.Button(rigctl_controls, text="Connect Rig", command=self.toggle_rigctl_connection)
-        self.rigctl_connect_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.radio_port_label = ttk.Label(radio_controls, text="Port:")
+        self.radio_port_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.radio_port_var = tk.StringVar(value=str(self.config.get('rigctl_port', 4532)))
+        self.radio_port_entry = ttk.Entry(radio_controls, textvariable=self.radio_port_var, width=6)
+        self.radio_port_entry.pack(side=tk.LEFT, padx=(0, 5))
+        self.radio_port_entry.bind('<Return>', lambda e: self.toggle_radio_control_connection())
+
+        # Rig number selector (for OmniRig)
+        self.omnirig_rig_label = ttk.Label(radio_controls, text="Rig:")
+        self.omnirig_rig_var = tk.StringVar(value='1')
+        self.omnirig_rig_combo = ttk.Combobox(radio_controls, textvariable=self.omnirig_rig_var,
+                                             values=['1', '2'], state='readonly', width=5)
+        
+        # Hide OmniRig controls initially
+        # (will be shown when OmniRig is selected)
+
+        self.radio_connect_btn = ttk.Button(radio_controls, text="Connect", command=self.toggle_radio_control_connection)
+        self.radio_connect_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Legacy aliases for backward compatibility
+        self.rigctl_host_var = self.radio_host_var
+        self.rigctl_port_var = self.radio_port_var
+        self.rigctl_connect_btn = self.radio_connect_btn
 
         # Sync direction radio buttons (SDR->Rig or Rig->SDR) - always visible
-        ttk.Label(rigctl_controls, text="Sync:").pack(side=tk.LEFT, padx=(10, 5))
-        
-        self.rigctl_sync_direction_var = tk.StringVar(value="SDR→Rig")
+        self.radio_sync_direction_var = tk.StringVar(value="SDR→Rig")
 
-        self.rigctl_sdr_to_rig_radio = ttk.Radiobutton(rigctl_controls, text="SDR→Rig",
-                                                       variable=self.rigctl_sync_direction_var,
+        self.radio_sdr_to_rig_radio = ttk.Radiobutton(radio_controls, text="SDR→Rig",
+                                                       variable=self.radio_sync_direction_var,
                                                        value="SDR→Rig",
-                                                       command=self.on_rigctl_sync_direction_changed)
-        self.rigctl_sdr_to_rig_radio.pack(side=tk.LEFT, padx=(0, 5))
+                                                       command=self.on_radio_sync_direction_changed)
+        self.radio_sdr_to_rig_radio.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.rigctl_rig_to_sdr_radio = ttk.Radiobutton(rigctl_controls, text="Rig→SDR",
-                                                       variable=self.rigctl_sync_direction_var,
+        self.radio_rig_to_sdr_radio = ttk.Radiobutton(radio_controls, text="Rig→SDR",
+                                                       variable=self.radio_sync_direction_var,
                                                        value="Rig→SDR",
-                                                       command=self.on_rigctl_sync_direction_changed)
-        self.rigctl_rig_to_sdr_radio.pack(side=tk.LEFT, padx=(0, 10))
+                                                       command=self.on_radio_sync_direction_changed)
+        self.radio_rig_to_sdr_radio.pack(side=tk.LEFT, padx=(0, 10))
 
         # Mute TX checkbox (enabled by default)
-        self.rigctl_mute_tx_var = tk.BooleanVar(value=True)
-        self.rigctl_mute_tx_check = ttk.Checkbutton(rigctl_controls, text="Mute TX",
-                                                     variable=self.rigctl_mute_tx_var)
-        self.rigctl_mute_tx_check.pack(side=tk.LEFT)
+        self.radio_mute_tx_var = tk.BooleanVar(value=True)
+        self.radio_mute_tx_check = ttk.Checkbutton(radio_controls, text="Mute TX",
+                                                     variable=self.radio_mute_tx_var)
+        self.radio_mute_tx_check.pack(side=tk.LEFT)
+        
+        # Legacy aliases for backward compatibility
+        self.rigctl_sync_direction_var = self.radio_sync_direction_var
+        self.rigctl_sdr_to_rig_radio = self.radio_sdr_to_rig_radio
+        self.rigctl_rig_to_sdr_radio = self.radio_rig_to_sdr_radio
+        self.rigctl_mute_tx_var = self.radio_mute_tx_var
+        self.rigctl_mute_tx_check = self.radio_mute_tx_check
 
         conn_frame.columnconfigure(1, weight=1)
 
@@ -1088,6 +1156,9 @@ class RadioGUI:
 
         # Start audio level meter updates
         self.update_audio_level()
+        
+        # Update radio control UI based on default selection
+        self.on_radio_control_type_changed()
 
     def log_status(self, message: str):
         """Add a status message to the log."""
@@ -2073,9 +2144,9 @@ class RadioGUI:
             # self.log_status(f"Tuning to {freq_hz/1e6:.6f} MHz...")  # Removed: too verbose during rapid frequency changes
             self.send_tune_message()
 
-            # Sync to rigctl if enabled
-            if self.rigctl_sync_enabled:
-                self.sync_frequency_to_rigctl()
+            # Sync to radio control if enabled
+            if self.radio_control_sync_enabled:
+                self.sync_frequency_to_radio_control()
         except ValueError as e:
             messagebox.showerror("Error", f"Invalid frequency: {e}")
 
@@ -2233,6 +2304,8 @@ class RadioGUI:
         else:
             # Non-IQ mode: re-enable audio controls
             self.volume_scale.config(state='normal')
+            
+            # Re-enable audio controls for non-IQ modes
             if self.volume_var.get() == 0:
                 self.volume_var.set(70)
             self.volume_label.config(text=f"{self.volume_var.get()}%")
@@ -2269,6 +2342,433 @@ class RadioGUI:
         # If connected, also apply the change to the client (unless skip_apply is True)
         if self.connected and self.client and not skip_apply:
             self.apply_mode()
+
+        # Sync mode to radio control if enabled and direction is SDR→Rig
+        if self.radio_control_sync_enabled and self.radio_sync_direction_var.get() == "SDR→Rig":
+            self.sync_mode_to_radio_control()
+    def on_radio_control_type_changed(self):
+        """Handle radio control type change - show/hide appropriate controls."""
+        control_type = self.radio_control_type_var.get()
+        
+        if control_type == 'rigctl':
+            # Show rigctl controls
+            self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
+            self.radio_host_entry.pack(side=tk.LEFT, padx=(0, 5))
+            self.radio_port_label.pack(side=tk.LEFT, padx=(0, 5))
+            self.radio_port_entry.pack(side=tk.LEFT, padx=(0, 5))
+            # Hide OmniRig controls
+            self.omnirig_rig_label.pack_forget()
+            self.omnirig_rig_combo.pack_forget()
+        elif control_type == 'OmniRig':
+            # Hide rigctl controls
+            self.radio_host_label.pack_forget()
+            self.radio_host_entry.pack_forget()
+            self.radio_port_label.pack_forget()
+            self.radio_port_entry.pack_forget()
+            # Show OmniRig controls
+            self.omnirig_rig_label.pack(side=tk.LEFT, padx=(5, 5))
+            self.omnirig_rig_combo.pack(side=tk.LEFT, padx=(0, 5))
+        else:  # None
+            # Hide all controls
+            self.radio_host_label.pack_forget()
+            self.radio_host_entry.pack_forget()
+            self.radio_port_label.pack_forget()
+            self.radio_port_entry.pack_forget()
+            self.omnirig_rig_label.pack_forget()
+            self.omnirig_rig_combo.pack_forget()
+    
+    def toggle_radio_control_connection(self):
+        """Connect or disconnect from radio control (rigctl or OmniRig)."""
+        if not self.radio_control_connected:
+            self.connect_radio_control()
+        else:
+            self.disconnect_radio_control()
+    
+    def connect_radio_control(self):
+        """Connect to radio control (rigctl or OmniRig)."""
+        control_type = self.radio_control_type_var.get()
+        
+        if control_type == 'None':
+            messagebox.showinfo("Info", "Please select a radio control type")
+            return
+        
+        try:
+            if control_type == 'rigctl':
+                # Connect to rigctl
+                host = self.radio_host_var.get().strip()
+                port_str = self.radio_port_var.get().strip()
+                
+                if not host or not port_str:
+                    messagebox.showerror("Error", "Please enter rigctl host and port")
+                    return
+                
+                try:
+                    port = int(port_str)
+                except ValueError:
+                    messagebox.showerror("Error", "Invalid port number")
+                    return
+                
+                # Create and connect threaded rigctl client
+                self.radio_control = ThreadedRigctlClient(host, port)
+                self.radio_control_type = 'rigctl'
+                
+                # Set up callbacks
+                self.radio_control.set_callbacks(
+                    frequency_callback=self.on_radio_control_frequency_changed,
+                    mode_callback=self.on_radio_control_mode_changed,
+                    ptt_callback=self.on_radio_control_ptt_changed,
+                    error_callback=lambda err: self.log_status(f"Radio control error: {err}")
+                )
+                
+                self.radio_control.connect()
+                self.log_status(f"✓ Connected to rigctld at {host}:{port}")
+                
+            elif control_type == 'OmniRig':
+                # Connect to OmniRig
+                rig_num = int(self.omnirig_rig_var.get())
+                
+                # Create and connect OmniRig client
+                self.radio_control = ThreadedOmniRigClient(rig_num)
+                self.radio_control_type = 'omnirig'
+                
+                # Set up callbacks
+                self.radio_control.set_callbacks(
+                    frequency_callback=self.on_radio_control_frequency_changed,
+                    mode_callback=self.on_radio_control_mode_changed,
+                    ptt_callback=self.on_radio_control_ptt_changed,
+                    error_callback=lambda err: self.log_status(f"Radio control error: {err}")
+                )
+                
+                self.radio_control.connect()
+                self.log_status(f"✓ Connected to OmniRig Rig{rig_num}")
+            
+            # Update state
+            self.radio_control_connected = True
+            self.radio_connect_btn.config(text="Disconnect")
+            
+            # Update legacy aliases
+            self.rigctl = self.radio_control
+            self.rigctl_connected = self.radio_control_connected
+            
+            # Initialize PTT state
+            self.radio_control_last_ptt = False
+            self.radio_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
+            
+            # Start syncing immediately with selected direction
+            self.start_radio_control_sync()
+            
+            # Always start polling for PTT status (for visual feedback)
+            if not self.radio_control_poll_job:
+                self.poll_radio_control_frequency()
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to connect to radio control: {e}")
+            self.log_status(f"ERROR: Failed to connect to radio control - {e}")
+            if self.radio_control:
+                self.radio_control.disconnect()
+    
+    def disconnect_radio_control(self):
+        """Disconnect from radio control."""
+        if self.radio_control:
+            self.radio_control.disconnect()
+            self.radio_control = None
+        
+        self.radio_control_connected = False
+        self.radio_control_sync_enabled = False
+        self.radio_control_type = 'none'
+        
+        # Update legacy aliases
+        self.rigctl = None
+        self.rigctl_connected = False
+        self.rigctl_sync_enabled = False
+        
+        # Stop polling if active
+        if self.radio_control_poll_job:
+            self.root.after_cancel(self.radio_control_poll_job)
+            self.radio_control_poll_job = None
+        
+        self.radio_connect_btn.config(text="Connect")
+        self.log_status("Disconnected from radio control")
+    
+    def on_radio_control_frequency_changed(self, freq_hz: int):
+        """Callback when radio control frequency changes (called from worker thread)."""
+        # Check if frequency actually changed
+        if self.radio_control_last_freq is not None and freq_hz != self.radio_control_last_freq:
+            # Only sync if direction is Rig→SDR and sync is enabled
+            if self.radio_control_sync_enabled and self.radio_sync_direction_var.get() == "Rig→SDR":
+                # Schedule GUI update in main thread
+                self.root.after(0, lambda: self._apply_radio_control_frequency(freq_hz))
+        
+        self.radio_control_last_freq = freq_hz
+        # Update legacy alias
+        self.rigctl_last_freq = freq_hz
+    
+    def on_radio_control_mode_changed(self, mode: str):
+        """Callback when radio control mode changes (called from worker thread)."""
+        # Check if mode actually changed
+        if self.radio_control_last_mode is not None and mode != self.radio_control_last_mode:
+            # Only sync if direction is Rig→SDR and sync is enabled
+            if self.radio_control_sync_enabled and self.radio_sync_direction_var.get() == "Rig→SDR":
+                # Schedule GUI update in main thread
+                self.root.after(0, lambda: self._apply_radio_control_mode(mode))
+        
+        self.radio_control_last_mode = mode
+        # Update legacy alias
+        self.rigctl_last_mode = mode
+    
+    def on_radio_control_ptt_changed(self, ptt_state: bool):
+        """Callback when radio control PTT changes (called from worker thread)."""
+        # Check if PTT state actually changed
+        if ptt_state != self.radio_control_last_ptt:
+            # Schedule GUI update in main thread
+            self.root.after(0, lambda: self._apply_radio_control_ptt(ptt_state))
+        
+        self.radio_control_last_ptt = ptt_state
+        # Update legacy alias
+        self.rigctl_last_ptt = ptt_state
+    
+    def _apply_radio_control_frequency(self, freq_hz: int):
+        """Apply frequency change from radio (runs in main thread)."""
+        self.set_frequency_hz(freq_hz)
+        if self.connected:
+            self.apply_frequency()
+        self.log_status(f"Synced from radio: {freq_hz/1e6:.6f} MHz")
+    
+    def _apply_radio_control_mode(self, rig_mode: str):
+        """Apply mode change from radio (runs in main thread)."""
+        # Map radio mode to SDR mode
+        mode_map = {
+            'USB': 'USB',
+            'LSB': 'LSB',
+            'AM': 'AM',
+            'CW': 'CWU',  # Default to CWU
+            'CWR': 'CWL',
+            'FM': 'FM'
+        }
+        sdr_mode = mode_map.get(rig_mode, 'USB')
+        
+        # Only update if mode lock is not enabled
+        if not self.mode_lock_var.get():
+            self.mode_var.set(sdr_mode)
+            self.on_mode_changed(skip_apply=True)
+            if self.connected:
+                self.apply_mode()
+            self.log_status(f"Synced mode from radio: {rig_mode}")
+    
+    def _apply_radio_control_ptt(self, ptt_state: bool):
+        """Apply PTT state change (runs in main thread)."""
+        if ptt_state:
+            # PTT activated
+            self.radio_mute_tx_check.configure(style='MuteTX.Red.TCheckbutton')
+            # Mute audio only if checkbox is enabled
+            if self.radio_mute_tx_var.get() and self.client:
+                # Save current channel states
+                self.radio_control_saved_channels = (
+                    self.channel_left_var.get(),
+                    self.channel_right_var.get()
+                )
+                # Mute audio instantly
+                self.channel_left_var.set(False)
+                self.channel_right_var.set(False)
+                self.client.channel_left = False
+                self.client.channel_right = False
+        else:
+            # PTT deactivated
+            self.radio_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
+            # Restore audio only if checkbox is enabled and we saved channel states
+            if self.radio_mute_tx_var.get() and self.client and self.radio_control_saved_channels is not None:
+                # Restore saved channel states
+                left_state, right_state = self.radio_control_saved_channels
+                self.channel_left_var.set(left_state)
+                self.channel_right_var.set(right_state)
+                self.client.channel_left = left_state
+                self.client.channel_right = right_state
+                self.radio_control_saved_channels = None
+    
+    def on_radio_sync_direction_changed(self):
+        """Handle sync direction change - restart sync if active."""
+        if self.radio_control_sync_enabled:
+            # Stop current sync mode
+            self.stop_radio_control_sync()
+            # Re-enable sync flag
+            self.radio_control_sync_enabled = True
+            # Start sync with new direction
+            direction = self.radio_sync_direction_var.get()
+            if direction == "SDR→Rig":
+                self.log_status("Radio sync direction changed - radio will follow SDR frequency")
+                self.sync_frequency_to_radio_control()
+            else:  # Rig→SDR
+                self.log_status("Radio sync direction changed - SDR will follow radio frequency")
+                # Initialize last known values from cache
+                self.radio_control_last_freq = self.radio_control.get_frequency()
+                self.radio_control_last_mode = self.radio_control.get_mode()
+                # Start polling immediately
+                self.poll_radio_control_frequency()
+    
+    def start_radio_control_sync(self):
+        """Start syncing frequency with radio control."""
+        if not self.radio_control_connected or not self.radio_control:
+            return
+        
+        self.radio_control_sync_enabled = True
+        # Update legacy alias
+        self.rigctl_sync_enabled = True
+        
+        direction = self.radio_sync_direction_var.get()
+        
+        if direction == "SDR→Rig":
+            self.log_status("Radio sync enabled - radio will follow SDR frequency")
+            # Immediately sync current SDR frequency to radio
+            self.sync_frequency_to_radio_control()
+            # Always start polling for PTT
+            if not self.radio_control_poll_job:
+                self.poll_radio_control_frequency()
+        else:  # Rig→SDR
+            self.log_status("Radio sync enabled - SDR will follow radio frequency")
+            # Initialize last known values from cache
+            self.radio_control_last_freq = self.radio_control.get_frequency()
+            self.radio_control_last_mode = self.radio_control.get_mode()
+            # Start polling immediately
+            self.poll_radio_control_frequency()
+    
+    def stop_radio_control_sync(self):
+        """Stop syncing frequency with radio control."""
+        self.radio_control_sync_enabled = False
+        # Update legacy alias
+        self.rigctl_sync_enabled = False
+        
+        # Stop polling if active
+        if self.radio_control_poll_job:
+            self.root.after_cancel(self.radio_control_poll_job)
+            self.radio_control_poll_job = None
+        
+        self.log_status("Radio sync disabled")
+    
+    def sync_frequency_to_radio_control(self):
+        """Sync current SDR frequency to radio control."""
+        if not self.radio_control_sync_enabled or not self.radio_control_connected or not self.radio_control:
+            return
+        
+        # Only sync if direction is SDR→Rig
+        if self.radio_sync_direction_var.get() != "SDR→Rig":
+            return
+        
+        try:
+            # Get current SDR frequency
+            freq_hz = self.get_frequency_hz()
+            
+            # Queue frequency change (non-blocking)
+            self.radio_control.set_frequency(freq_hz)
+            
+            # Get current mode and sync it too
+            mode_display = self.mode_var.get()
+            mode = self._parse_mode_name(mode_display)
+            
+            # Map SDR modes to radio control modes
+            mode_map = {
+                'usb': 'USB',
+                'lsb': 'LSB',
+                'am': 'AM',
+                'sam': 'AM',
+                'cwu': 'CW',
+                'cwl': 'CW',
+                'fm': 'FM',
+                'nfm': 'FM'
+            }
+            
+            radio_mode = mode_map.get(mode, 'USB')
+            # Queue mode change (non-blocking)
+            self.radio_control.set_mode(radio_mode)
+            
+        except Exception as e:
+            self.log_status(f"Radio sync error: {e}")
+    
+    def sync_mode_to_radio_control(self):
+        """Sync current SDR mode to radio control."""
+        if not self.radio_control_sync_enabled or not self.radio_control_connected or not self.radio_control:
+            return
+        
+        # Only sync if direction is SDR→Rig
+        if self.radio_sync_direction_var.get() != "SDR→Rig":
+            return
+        
+        try:
+            # Get current mode
+            mode_display = self.mode_var.get()
+            mode = self._parse_mode_name(mode_display)
+            
+            # Map SDR modes to radio control modes
+            mode_map = {
+                'usb': 'USB',
+                'lsb': 'LSB',
+                'am': 'AM',
+                'sam': 'AM',
+                'cwu': 'CW',
+                'cwl': 'CW',
+                'fm': 'FM',
+                'nfm': 'FM'
+            }
+            
+            radio_mode = mode_map.get(mode, 'USB')
+            # Queue mode change (non-blocking)
+            self.radio_control.set_mode(radio_mode)
+            
+        except Exception as e:
+            self.log_status(f"Radio mode sync error: {e}")
+    
+    def poll_radio_control_frequency(self):
+        """Poll radio control for frequency/mode/PTT changes."""
+        if not self.radio_control_connected or not self.radio_control:
+            self.radio_control_poll_job = None
+            # Update legacy alias
+            self.rigctl_poll_job = None
+            return
+        
+        # Queue a poll command (non-blocking)
+        self.radio_control.poll()
+        
+        # Schedule next poll (20ms = 50 Hz for fast TX detection)
+        self.radio_control_poll_job = self.root.after(20, self.poll_radio_control_frequency)
+        # Update legacy alias
+        self.rigctl_poll_job = self.radio_control_poll_job
+
+    # Legacy method names for backward compatibility
+    def toggle_rigctl_connection(self):
+        """Connect or disconnect from rigctld (legacy wrapper)."""
+        self.toggle_radio_control_connection()
+
+    def connect_rigctl(self):
+        """Connect to rigctld server (legacy wrapper)."""
+        self.connect_radio_control()
+
+    def disconnect_rigctl(self):
+        """Disconnect from rigctld server (legacy wrapper)."""
+        self.disconnect_radio_control()
+
+    def on_rigctl_sync_direction_changed(self):
+        """Handle sync direction change (legacy wrapper)."""
+        self.on_radio_sync_direction_changed()
+
+    def start_rigctl_sync(self):
+        """Start syncing frequency with rigctld (legacy wrapper)."""
+        self.start_radio_control_sync()
+
+    def stop_rigctl_sync(self):
+        """Stop syncing frequency with rigctld (legacy wrapper)."""
+        self.stop_radio_control_sync()
+
+    def sync_frequency_to_rigctl(self):
+        """Sync current SDR frequency to rigctld (legacy wrapper)."""
+        self.sync_frequency_to_radio_control()
+
+    def sync_mode_to_rigctl(self):
+        """Sync current SDR mode to rigctld (legacy wrapper)."""
+        self.sync_mode_to_radio_control()
+
+    def poll_rigctl_frequency(self):
+        """Poll rigctl for frequency/mode/PTT changes (legacy wrapper)."""
+        self.poll_radio_control_frequency()
+
 
     def apply_mode(self):
         """Apply mode change by sending tune message (called when connected)."""
@@ -4234,338 +4734,6 @@ class RadioGUI:
         # Also send to audio spectrum display if open
         if self.audio_spectrum_display:
             self.audio_spectrum_display.add_audio_data(audio_float)
-
-    def toggle_rigctl_connection(self):
-        """Connect or disconnect from rigctld."""
-        if not self.rigctl_connected:
-            self.connect_rigctl()
-        else:
-            self.disconnect_rigctl()
-
-    def connect_rigctl(self):
-        """Connect to rigctld server."""
-        try:
-            host = self.rigctl_host_var.get().strip()
-            port_str = self.rigctl_port_var.get().strip()
-
-            if not host or not port_str:
-                messagebox.showerror("Error", "Please enter rigctl host and port")
-                return
-
-            try:
-                port = int(port_str)
-            except ValueError:
-                messagebox.showerror("Error", "Invalid port number")
-                return
-
-            # Create and connect threaded rigctl client
-            self.rigctl = ThreadedRigctlClient(host, port)
-            
-            # Set up callbacks for value changes
-            self.rigctl.set_callbacks(
-                frequency_callback=self.on_rigctl_frequency_changed,
-                mode_callback=self.on_rigctl_mode_changed,
-                ptt_callback=self.on_rigctl_ptt_changed,
-                error_callback=lambda err: self.log_status(f"Rigctl error: {err}")
-            )
-            
-            self.rigctl.connect()
-
-            self.rigctl_connected = True
-            self.rigctl_connect_btn.config(text="Disconnect Rig")
-            self.log_status(f"✓ Connected to rigctld at {host}:{port}")
-
-            # Initialize PTT state
-            self.rigctl_last_ptt = False
-            self.rigctl_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
-
-            # Start syncing immediately with selected direction
-            self.start_rigctl_sync()
-
-            # Always start polling for PTT status (for visual feedback)
-            # even if sync is not enabled
-            if not self.rigctl_poll_job:
-                self.poll_rigctl_frequency()
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to connect to rigctld: {e}")
-            self.log_status(f"ERROR: Failed to connect to rigctld - {e}")
-            if self.rigctl:
-                self.rigctl.disconnect()
-
-    def on_rigctl_frequency_changed(self, freq_hz: int):
-        """Callback when rigctl frequency changes (called from worker thread).
-
-        Args:
-            freq_hz: New frequency in Hz
-        """
-        # Check if frequency actually changed
-        if self.rigctl_last_freq is not None and freq_hz != self.rigctl_last_freq:
-            # Only sync if direction is Rig→SDR and sync is enabled
-            if self.rigctl_sync_enabled and self.rigctl_sync_direction_var.get() == "Rig→SDR":
-                # Schedule GUI update in main thread
-                self.root.after(0, lambda: self._apply_rigctl_frequency(freq_hz))
-
-        self.rigctl_last_freq = freq_hz
-
-    def on_rigctl_mode_changed(self, mode: str):
-        """Callback when rigctl mode changes (called from worker thread).
-
-        Args:
-            mode: New mode string
-        """
-        # Check if mode actually changed
-        if self.rigctl_last_mode is not None and mode != self.rigctl_last_mode:
-            # Only sync if direction is Rig→SDR and sync is enabled
-            if self.rigctl_sync_enabled and self.rigctl_sync_direction_var.get() == "Rig→SDR":
-                # Schedule GUI update in main thread
-                self.root.after(0, lambda: self._apply_rigctl_mode(mode))
-
-        self.rigctl_last_mode = mode
-
-    def on_rigctl_ptt_changed(self, ptt_state: bool):
-        """Callback when rigctl PTT changes (called from worker thread).
-
-        Args:
-            ptt_state: New PTT state
-        """
-        # Check if PTT state actually changed
-        if ptt_state != self.rigctl_last_ptt:
-            # Schedule GUI update in main thread
-            self.root.after(0, lambda: self._apply_rigctl_ptt(ptt_state))
-
-        self.rigctl_last_ptt = ptt_state
-
-    def _apply_rigctl_frequency(self, freq_hz: int):
-        """Apply frequency change from rig (runs in main thread).
-
-        Args:
-            freq_hz: New frequency in Hz
-        """
-        self.set_frequency_hz(freq_hz)
-        if self.connected:
-            self.apply_frequency()
-        self.log_status(f"Synced from rig: {freq_hz/1e6:.6f} MHz")
-
-    def _apply_rigctl_mode(self, rig_mode: str):
-        """Apply mode change from rig (runs in main thread).
-
-        Args:
-            rig_mode: New mode string from rig
-        """
-        # Map rigctl mode to SDR mode
-        mode_map = {
-            'USB': 'USB',
-            'LSB': 'LSB',
-            'AM': 'AM',
-            'CW': 'CWU',  # Default to CWU
-            'CWR': 'CWL',
-            'FM': 'FM'
-        }
-        sdr_mode = mode_map.get(rig_mode, 'USB')
-
-        # Only update if mode lock is not enabled
-        if not self.mode_lock_var.get():
-            self.mode_var.set(sdr_mode)
-            self.on_mode_changed(skip_apply=True)
-            if self.connected:
-                self.apply_mode()
-            self.log_status(f"Synced mode from rig: {rig_mode}")
-
-    def _apply_rigctl_ptt(self, ptt_state: bool):
-        """Apply PTT state change (runs in main thread).
-
-        Args:
-            ptt_state: New PTT state
-        """
-        if ptt_state:
-            # PTT activated
-            # Update checkbox background to red (always, for visual feedback)
-            self.rigctl_mute_tx_check.configure(style='MuteTX.Red.TCheckbutton')
-            # Mute audio only if checkbox is enabled
-            if self.rigctl_mute_tx_var.get() and self.client:
-                # Save current channel states (both GUI vars and client state)
-                self.rigctl_saved_channels = (
-                    self.channel_left_var.get(),
-                    self.channel_right_var.get()
-                )
-                # Mute audio instantly by disabling both channels
-                self.channel_left_var.set(False)
-                self.channel_right_var.set(False)
-                self.client.channel_left = False
-                self.client.channel_right = False
-        else:
-            # PTT deactivated
-            # Update checkbox background to green (always, for visual feedback)
-            self.rigctl_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
-            # Restore audio only if checkbox is enabled and we saved channel states
-            if self.rigctl_mute_tx_var.get() and self.client and self.rigctl_saved_channels is not None:
-                # Restore saved channel states (both GUI vars and client state)
-                left_state, right_state = self.rigctl_saved_channels
-                self.channel_left_var.set(left_state)
-                self.channel_right_var.set(right_state)
-                self.client.channel_left = left_state
-                self.client.channel_right = right_state
-                self.rigctl_saved_channels = None
-                self.rigctl = None
-
-    def disconnect_rigctl(self):
-        """Disconnect from rigctld server."""
-        if self.rigctl:
-            self.rigctl.disconnect()
-            self.rigctl = None
-
-        self.rigctl_connected = False
-        self.rigctl_sync_enabled = False
-
-        # Stop polling if active
-        if self.rigctl_poll_job:
-            self.root.after_cancel(self.rigctl_poll_job)
-            self.rigctl_poll_job = None
-
-        self.rigctl_connect_btn.config(text="Connect Rig")
-        self.log_status("Disconnected from rigctld")
-
-    def on_rigctl_sync_direction_changed(self):
-        """Handle sync direction change - restart sync if active."""
-        if self.rigctl_sync_enabled:
-            # Stop current sync mode
-            self.stop_rigctl_sync()
-            # Re-enable sync flag (stop_rigctl_sync sets it to False)
-            self.rigctl_sync_enabled = True
-            # Start sync with new direction
-            direction = self.rigctl_sync_direction_var.get()
-            if direction == "SDR→Rig":
-                self.log_status("Rigctl sync direction changed - radio will follow SDR frequency")
-                self.sync_frequency_to_rigctl()
-            else:  # Rig→SDR
-                self.log_status("Rigctl sync direction changed - SDR will follow radio frequency")
-                # Initialize last known values from cache (non-blocking)
-                self.rigctl_last_freq = self.rigctl.get_frequency()
-                self.rigctl_last_mode = self.rigctl.get_mode()
-                # Start polling immediately
-                self.poll_rigctl_frequency()
-
-    def start_rigctl_sync(self):
-        """Start syncing frequency with rigctld."""
-        if not self.rigctl_connected or not self.rigctl:
-            return
-
-        self.rigctl_sync_enabled = True
-        direction = self.rigctl_sync_direction_var.get()
-
-        if direction == "SDR→Rig":
-            self.log_status("Rigctl sync enabled - radio will follow SDR frequency")
-            # Immediately sync current SDR frequency to rig
-            self.sync_frequency_to_rigctl()
-            # Always start polling for PTT (for visual feedback)
-            if not self.rigctl_poll_job:
-                self.poll_rigctl_frequency()
-        else:  # Rig→SDR
-            self.log_status("Rigctl sync enabled - SDR will follow radio frequency")
-            # Initialize last known values from cache (non-blocking)
-            self.rigctl_last_freq = self.rigctl.get_frequency()
-            self.rigctl_last_mode = self.rigctl.get_mode()
-            # Start polling immediately
-            self.poll_rigctl_frequency()
-
-    def stop_rigctl_sync(self):
-        """Stop syncing frequency with rigctld."""
-        self.rigctl_sync_enabled = False
-
-        # Stop polling if active
-        if self.rigctl_poll_job:
-            self.root.after_cancel(self.rigctl_poll_job)
-            self.rigctl_poll_job = None
-
-        self.log_status("Rigctl sync disabled")
-
-    def sync_frequency_to_rigctl(self):
-        """Sync current SDR frequency to rigctld (called after frequency changes)."""
-        if not self.rigctl_sync_enabled or not self.rigctl_connected or not self.rigctl:
-            return
-
-        # Only sync if direction is SDR→Rig
-        if self.rigctl_sync_direction_var.get() != "SDR→Rig":
-            return
-
-        try:
-            # Get current SDR frequency
-            freq_hz = self.get_frequency_hz()
-
-            # Queue frequency change (non-blocking)
-            self.rigctl.set_frequency(freq_hz)
-
-            # Get current mode and sync it too
-            mode_display = self.mode_var.get()
-            mode = self._parse_mode_name(mode_display)
-
-            # Map SDR modes to rigctl modes
-            mode_map = {
-                'usb': 'USB',
-                'lsb': 'LSB',
-                'am': 'AM',
-                'sam': 'AM',
-                'cwu': 'CW',
-                'cwl': 'CW',
-                'fm': 'FM',
-                'nfm': 'FM'
-            }
-
-            rigctl_mode = mode_map.get(mode, 'USB')
-            # Queue mode change (non-blocking)
-            self.rigctl.set_mode(rigctl_mode)
-
-        except Exception as e:
-            self.log_status(f"Rigctl sync error: {e}")
-            # Don't disable sync on error - might be temporary
-
-    def sync_mode_to_rigctl(self):
-        """Sync current SDR mode to rigctld (called after mode changes)."""
-        if not self.rigctl_sync_enabled or not self.rigctl_connected or not self.rigctl:
-            return
-
-        # Only sync if direction is SDR→Rig
-        if self.rigctl_sync_direction_var.get() != "SDR→Rig":
-            return
-
-        try:
-            # Get current mode
-            mode_display = self.mode_var.get()
-            mode = self._parse_mode_name(mode_display)
-
-            # Map SDR modes to rigctl modes
-            mode_map = {
-                'usb': 'USB',
-                'lsb': 'LSB',
-                'am': 'AM',
-                'sam': 'AM',
-                'cwu': 'CW',
-                'cwl': 'CW',
-                'fm': 'FM',
-                'nfm': 'FM'
-            }
-
-            rigctl_mode = mode_map.get(mode, 'USB')
-            # Queue mode change (non-blocking)
-            self.rigctl.set_mode(rigctl_mode)
-
-        except Exception as e:
-            self.log_status(f"Rigctl mode sync error: {e}")
-            # Don't disable sync on error - might be temporary
-
-    def poll_rigctl_frequency(self):
-        """Poll rigctl for frequency/mode/PTT changes (for Rig→SDR sync and Mute TX)."""
-        if not self.rigctl_connected or not self.rigctl:
-            self.rigctl_poll_job = None
-            return
-
-        # Queue a poll command (non-blocking)
-        # The worker thread will execute it and trigger callbacks
-        self.rigctl.poll()
-
-        # Schedule next poll (20ms = 50 Hz for fast TX detection)
-        self.rigctl_poll_job = self.root.after(20, self.poll_rigctl_frequency)
 
     def format_time(self, seconds: int) -> str:
         """Format seconds as MM:SS."""

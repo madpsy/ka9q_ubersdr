@@ -9,3 +9,6 @@ astral>=3.2
 python-rtmidi>=1.5.0
 pyaudio>=0.2.14
 pyinstaller>=6.17.0
+
+# Windows-only: OmniRig support
+pywin32>=306; platform_system=="Windows"

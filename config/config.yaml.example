@@ -566,3 +566,10 @@ instance_reporting:
   # Do not modify this value manually - it will be auto-generated
   # Example: "550e8400-e29b-41d4-a716-446655440000"
   instance_uuid: ""
+
+  # Instance connection information (optional)
+  # These fields are reported to the central server if set
+  # Leave empty if you don't want to report connection details
+  host: ""
+  instance_port: 0
+  tls: false

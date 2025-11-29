@@ -32,6 +32,9 @@ type Instance struct {
 	Altitude      int       `json:"altitude"`
 	PublicURL     string    `json:"public_url"`
 	Version       string    `json:"version"`
+	Host          string    `json:"host,omitempty"`
+	Port          int       `json:"port,omitempty"`
+	TLS           bool      `json:"tls,omitempty"`
 	FirstSeen     time.Time `json:"first_seen"`
 	LastSeen      time.Time `json:"last_seen"`
 	LastReportAge int64     `json:"last_report_age_seconds"` // Computed field
@@ -49,6 +52,9 @@ type InstanceUpdate struct {
 	PublicURL string  `json:"public_url"`
 	Version   string  `json:"version"`
 	Timestamp int64   `json:"timestamp"`
+	Host      string  `json:"host"`
+	Port      int     `json:"port"`
+	TLS       bool    `json:"tls"`
 }
 
 // Config represents the collector configuration
@@ -166,6 +172,9 @@ func initDatabase(path string) (*sql.DB, error) {
 		altitude INTEGER NOT NULL,
 		public_url TEXT NOT NULL,
 		version TEXT NOT NULL,
+		host TEXT,
+		port INTEGER,
+		tls BOOLEAN,
 		first_seen DATETIME NOT NULL,
 		last_seen DATETIME NOT NULL
 	);
@@ -332,10 +341,12 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			INSERT INTO instances (
 				secret_uuid, public_uuid, callsign, name, location,
 				latitude, longitude, altitude, public_url, version,
+				host, port, tls,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version,
+			update.Host, update.Port, update.TLS,
 			now, now,
 		)
 
@@ -356,11 +367,15 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			UPDATE instances SET
 				callsign = ?, name = ?, location = ?,
 				latitude = ?, longitude = ?, altitude = ?,
-				public_url = ?, version = ?, last_seen = ?
+				public_url = ?, version = ?,
+				host = ?, port = ?, tls = ?,
+				last_seen = ?
 			WHERE secret_uuid = ?`,
 			update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude,
-			update.PublicURL, update.Version, now,
+			update.PublicURL, update.Version,
+			update.Host, update.Port, update.TLS,
+			now,
 			secretUUID,
 		)
 
@@ -390,7 +405,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 
 	rows, err := c.db.Query(`
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
-		       altitude, public_url, version, first_seen, last_seen
+		       altitude, public_url, version, host, port, tls, first_seen, last_seen
 		FROM instances
 		ORDER BY last_seen DESC
 	`)
@@ -409,7 +424,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		err := rows.Scan(
 			&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 			&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
-			&inst.Version, &inst.FirstSeen, &inst.LastSeen,
+			&inst.Version, &inst.Host, &inst.Port, &inst.TLS, &inst.FirstSeen, &inst.LastSeen,
 		)
 		if err != nil {
 			log.Printf("Failed to scan instance: %v", err)
@@ -453,13 +468,13 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	var inst Instance
 	err := c.db.QueryRow(`
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
-		       altitude, public_url, version, first_seen, last_seen
+		       altitude, public_url, version, host, port, tls, first_seen, last_seen
 		FROM instances
 		WHERE public_uuid = ?
 	`, publicUUID).Scan(
 		&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 		&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
-		&inst.Version, &inst.FirstSeen, &inst.LastSeen,
+		&inst.Version, &inst.Host, &inst.Port, &inst.TLS, &inst.FirstSeen, &inst.LastSeen,
 	)
 
 	if err == sql.ErrNoRows {

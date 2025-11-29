@@ -159,6 +159,9 @@ type InstanceReportingConfig struct {
 	Port              int    `yaml:"port"`                // Central server port
 	ReportIntervalSec int    `yaml:"report_interval_sec"` // Seconds between reports
 	InstanceUUID      string `yaml:"instance_uuid"`       // Unique instance identifier (auto-generated)
+	Host              string `yaml:"host"`                // Instance host (optional, for reporting)
+	InstancePort      int    `yaml:"instance_port"`       // Instance port (optional, for reporting)
+	TLS               bool   `yaml:"tls"`                 // Instance uses TLS (optional, for reporting)
 }
 
 // NoiseFloorConfig contains noise floor monitoring settings

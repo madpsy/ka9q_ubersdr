@@ -34,6 +34,9 @@ type InstanceReport struct {
 	PublicURL string  `json:"public_url"`
 	Version   string  `json:"version"`
 	Timestamp int64   `json:"timestamp"`
+	Host      string  `json:"host,omitempty"` // Optional: tells clients how to connect to this instance
+	Port      int     `json:"port,omitempty"` // Optional: port for client connections
+	TLS       bool    `json:"tls,omitempty"`  // Optional: whether TLS is required for connections
 }
 
 // NewInstanceReporter creates a new instance reporter
@@ -191,6 +194,9 @@ func (ir *InstanceReporter) sendReport() error {
 		PublicURL: ir.config.Admin.PublicURL,
 		Version:   Version,
 		Timestamp: time.Now().Unix(),
+		Host:      ir.config.InstanceReporting.Host,
+		Port:      ir.config.InstanceReporting.InstancePort,
+		TLS:       ir.config.InstanceReporting.TLS,
 	}
 
 	jsonData, err := json.Marshal(report)

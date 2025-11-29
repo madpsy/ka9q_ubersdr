@@ -194,9 +194,9 @@ func (ir *InstanceReporter) sendReport() error {
 		PublicURL: ir.config.Admin.PublicURL,
 		Version:   Version,
 		Timestamp: time.Now().Unix(),
-		Host:      ir.config.InstanceReporting.Host,
-		Port:      ir.config.InstanceReporting.InstancePort,
-		TLS:       ir.config.InstanceReporting.TLS,
+		Host:      ir.config.InstanceReporting.Instance.Host,
+		Port:      ir.config.InstanceReporting.Instance.Port,
+		TLS:       ir.config.InstanceReporting.Instance.TLS,
 	}
 
 	jsonData, err := json.Marshal(report)

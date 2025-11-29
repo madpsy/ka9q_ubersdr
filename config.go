@@ -153,15 +153,20 @@ type SpaceWeatherConfig struct {
 
 // InstanceReportingConfig contains settings for reporting to central instance registry
 type InstanceReportingConfig struct {
-	Enabled           bool   `yaml:"enabled"`             // Enable/disable instance reporting
-	UseHTTPS          bool   `yaml:"use_https"`           // Use HTTPS (true) or HTTP (false) for connections
-	Hostname          string `yaml:"hostname"`            // Central server hostname
-	Port              int    `yaml:"port"`                // Central server port
-	ReportIntervalSec int    `yaml:"report_interval_sec"` // Seconds between reports
-	InstanceUUID      string `yaml:"instance_uuid"`       // Unique instance identifier (auto-generated)
-	Host              string `yaml:"host"`                // Instance host (optional, for reporting)
-	InstancePort      int    `yaml:"instance_port"`       // Instance port (optional, for reporting)
-	TLS               bool   `yaml:"tls"`                 // Instance uses TLS (optional, for reporting)
+	Enabled           bool                   `yaml:"enabled"`             // Enable/disable instance reporting
+	UseHTTPS          bool                   `yaml:"use_https"`           // Use HTTPS (true) or HTTP (false) for connections
+	Hostname          string                 `yaml:"hostname"`            // Central server hostname
+	Port              int                    `yaml:"port"`                // Central server port
+	ReportIntervalSec int                    `yaml:"report_interval_sec"` // Seconds between reports
+	InstanceUUID      string                 `yaml:"instance_uuid"`       // Unique instance identifier (auto-generated)
+	Instance          InstanceConnectionInfo `yaml:"instance"`            // Instance connection information
+}
+
+// InstanceConnectionInfo contains connection details for this instance
+type InstanceConnectionInfo struct {
+	Host string `yaml:"host"` // Instance host (tells clients how to connect)
+	Port int    `yaml:"port"` // Instance port (tells clients how to connect)
+	TLS  bool   `yaml:"tls"`  // Instance uses TLS (tells clients how to connect)
 }
 
 // NoiseFloorConfig contains noise floor monitoring settings

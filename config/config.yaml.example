@@ -568,8 +568,9 @@ instance_reporting:
   instance_uuid: ""
 
   # Instance connection information (optional)
-  # These fields are reported to the central server if set
+  # These fields tell clients how to connect to this UberSDR instance
   # Leave empty if you don't want to report connection details
-  host: ""
-  instance_port: 0
-  tls: false
+  instance:
+    host: ""
+    port: 0
+    tls: false

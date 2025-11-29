@@ -1,0 +1,46 @@
+services:
+  # UberSDR Instance Collector
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ubersdr-collector:latest
+    container_name: ubersdr-collector
+    restart: unless-stopped
+
+    # Expose collector port
+    ports:
+      - 8443:8443
+
+    # Environment variables
+    environment:
+      - TZ=${TZ:-UTC}
+
+    # Volumes for persistent configuration and database
+    volumes:
+      # Configuration file (will be created from example on first run)
+      - collector-config:/app/config.json
+      # Database directory (SQLite database will be stored here)
+      - collector-data:/app/data
+
+    # Healthcheck
+    healthcheck:
+      test: [CMD, wget, --no-verbose, --tries=1, --spider, http://localhost:8443/health]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+    # Resource limits (optional)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1'
+    #       memory: 512M
+    #     reservations:
+    #       cpus: '0.25'
+    #       memory: 128M
+
+volumes:
+  collector-config:
+  collector-data:

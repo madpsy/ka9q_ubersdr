@@ -193,7 +193,7 @@ func (ir *InstanceReporter) sendReport() error {
 		return fmt.Errorf("failed to marshal report: %w", err)
 	}
 
-	url := fmt.Sprintf("https://%s:%d/api/%s",
+	url := fmt.Sprintf("https://%s:%d/api/instance/%s",
 		ir.config.InstanceReporting.Hostname,
 		ir.config.InstanceReporting.Port,
 		ir.config.InstanceReporting.InstanceUUID)

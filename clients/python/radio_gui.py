@@ -66,6 +66,14 @@ except ImportError:
     BAND_CONDITIONS_AVAILABLE = False
     print("Warning: Band conditions display not available (missing dependencies)")
 
+# Import noise floor display
+try:
+    from noise_floor_display import create_noise_floor_window
+    NOISE_FLOOR_AVAILABLE = True
+except ImportError:
+    NOISE_FLOOR_AVAILABLE = False
+    print("Warning: Noise floor display not available (missing dependencies)")
+
 # Import space weather display
 try:
     from space_weather_display import create_space_weather_window
@@ -282,6 +290,10 @@ class RadioGUI:
         # Band conditions display (separate window)
         self.band_conditions_window = None
         self.band_conditions_display = None
+
+        # Noise floor display (separate window)
+        self.noise_floor_window = None
+        self.noise_floor_display = None
 
         # Space weather display (separate window)
         self.space_weather_window = None
@@ -1114,6 +1126,14 @@ class RadioGUI:
             else:
                 self.band_conditions_btn = None
 
+            # Noise floor button (always available)
+            if NOISE_FLOOR_AVAILABLE:
+                self.noise_floor_btn = ttk.Button(button_frame, text="Noise",
+                                                 command=self.open_noise_floor_window)
+                self.noise_floor_btn.pack(side=tk.LEFT, padx=(0, 5))
+            else:
+                self.noise_floor_btn = None
+
             # Space weather button (always available)
             if SPACE_WEATHER_AVAILABLE:
                 self.space_weather_btn = ttk.Button(button_frame, text="Weather",
@@ -1488,15 +1508,15 @@ class RadioGUI:
                 if platform.system() == 'Windows':
                     button.update_idletasks()
 
-        # Update band filter in digital spots window if open - only if band actually changed
+        # Update band filter in digital spots window if open - only if band actually changed and auto_band is enabled
         if self.digital_spots_display and current_band:
-            if self.digital_spots_display.band_filter.get() != current_band:
+            if self.digital_spots_display.auto_band_var.get() and self.digital_spots_display.band_filter.get() != current_band:
                 self.digital_spots_display.band_filter.set(current_band)
                 self.digital_spots_display.apply_filters()
 
-        # Update band filter in CW spots window if open - only if band actually changed
+        # Update band filter in CW spots window if open - only if band actually changed and auto_band is enabled
         if self.cw_spots_display and current_band:
-            if self.cw_spots_display.band_var.get() != current_band:
+            if self.cw_spots_display.auto_band_var.get() and self.cw_spots_display.band_var.get() != current_band:
                 self.cw_spots_display.band_var.set(current_band)
                 self.cw_spots_display.apply_filters()
 
@@ -3705,6 +3725,36 @@ class RadioGUI:
             messagebox.showerror("Error", f"Failed to open band conditions: {e}")
             self.log_status(f"ERROR: Failed to open band conditions - {e}")
 
+    def open_noise_floor_window(self):
+        """Open a separate noise floor display window."""
+        # Don't open multiple windows
+        if self.noise_floor_window and self.noise_floor_window.winfo_exists():
+            self.noise_floor_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        try:
+            from noise_floor_display import create_noise_floor_window
+
+            # Get server URL and TLS setting
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server = f"{hostname}:{port}" if ':' not in hostname else hostname
+            use_tls = self.tls_var.get()
+
+            # Create noise floor window
+            self.noise_floor_display = create_noise_floor_window(self.root, server, use_tls)
+            self.noise_floor_window = self.noise_floor_display.window
+
+            self.log_status("Noise floor window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open noise floor: {e}")
+            self.log_status(f"ERROR: Failed to open noise floor - {e}")
+
     def open_space_weather_window(self):
         """Open a separate space weather display window."""
         # Don't open multiple windows
@@ -4311,6 +4361,13 @@ class RadioGUI:
             self.band_conditions_display = None
             self.log_status("Band conditions window closed")
 
+        # Close noise floor window
+        if self.noise_floor_window and self.noise_floor_window.winfo_exists():
+            self.noise_floor_window.destroy()
+            self.noise_floor_window = None
+            self.noise_floor_display = None
+            self.log_status("Noise floor window closed")
+
         # Close space weather window
         if self.space_weather_window and self.space_weather_window.winfo_exists():
             self.space_weather_window.destroy()
@@ -4880,6 +4937,10 @@ class RadioGUI:
         # Close band conditions window if open
         if self.band_conditions_window and self.band_conditions_window.winfo_exists():
             self.band_conditions_window.destroy()
+
+        # Close noise floor window if open
+        if self.noise_floor_window and self.noise_floor_window.winfo_exists():
+            self.noise_floor_window.destroy()
 
         # Close space weather window if open
         if self.space_weather_window and self.space_weather_window.winfo_exists():

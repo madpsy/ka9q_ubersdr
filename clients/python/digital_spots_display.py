@@ -49,6 +49,7 @@ class DigitalSpotsDisplay:
         self.snr_filter = tk.StringVar(value="none")
         self.callsign_filter = tk.StringVar(value="")
         self.country_filter = tk.StringVar(value="all")
+        self.auto_band = True  # Auto-update band filter when frequency changes
         
         # Sorting state
         self.sort_column = "time"
@@ -162,6 +163,11 @@ class DigitalSpotsDisplay:
         # Clear button
         ttk.Button(filter_frame, text="Clear All",
                   command=self.clear_spots).grid(row=0, column=14, sticky=tk.W)
+
+        # Auto Band checkbox
+        self.auto_band_var = tk.BooleanVar(value=True)
+        auto_band_check = ttk.Checkbutton(filter_frame, text="Auto Band", variable=self.auto_band_var)
+        auto_band_check.grid(row=0, column=15, sticky=tk.W, padx=(5, 0))
         
         # Spots table with scrollbar
         table_frame = ttk.Frame(main_frame)

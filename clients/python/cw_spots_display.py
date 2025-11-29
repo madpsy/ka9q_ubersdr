@@ -48,6 +48,7 @@ class CWSpotsDisplay:
         self.wpm_filter = None
         self.callsign_filter = ""
         self.country_filter = "all"
+        self.auto_band = True  # Auto-update band filter when frequency changes
 
         # Sorting state
         self.sort_column = "time"
@@ -157,6 +158,11 @@ class CWSpotsDisplay:
         # Clear button
         clear_btn = ttk.Button(filter_frame, text="Clear Spots", command=self.clear_spots)
         clear_btn.grid(row=1, column=8, padx=5, pady=5)
+
+        # Auto Band checkbox
+        self.auto_band_var = tk.BooleanVar(value=True)
+        auto_band_check = ttk.Checkbutton(filter_frame, text="Auto Band", variable=self.auto_band_var)
+        auto_band_check.grid(row=1, column=9, padx=5, pady=5)
 
         # Table frame
         table_frame = ttk.Frame(self.window)

@@ -16,10 +16,11 @@ import (
 
 // InstanceReporter handles reporting instance information to central server
 type InstanceReporter struct {
-	config     *Config
-	configPath string
-	httpClient *http.Client
-	stopChan   chan struct{}
+	config          *Config
+	cwskimmerConfig *CWSkimmerConfig
+	configPath      string
+	httpClient      *http.Client
+	stopChan        chan struct{}
 }
 
 // InstanceReport represents the data sent to the central server
@@ -44,10 +45,11 @@ type InstanceReport struct {
 }
 
 // NewInstanceReporter creates a new instance reporter
-func NewInstanceReporter(config *Config, configPath string) *InstanceReporter {
+func NewInstanceReporter(config *Config, cwskimmerConfig *CWSkimmerConfig, configPath string) *InstanceReporter {
 	return &InstanceReporter{
-		config:     config,
-		configPath: configPath,
+		config:          config,
+		cwskimmerConfig: cwskimmerConfig,
+		configPath:      configPath,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
@@ -187,49 +189,14 @@ func (ir *InstanceReporter) reportLoop() {
 // sendReport sends the current instance information to the central server
 // Retries up to 3 times with 10 second delays between attempts
 func (ir *InstanceReporter) sendReport() error {
-	// Get capability information from local /api/description endpoint
-	// Extract port from server listen address
-	listenAddr := ir.config.Server.Listen
-	port := "8080" // default
-	if len(listenAddr) > 0 {
-		// Parse listen address (e.g., ":8080" or "0.0.0.0:8080")
-		if idx := len(listenAddr) - 1; listenAddr[idx] >= '0' && listenAddr[idx] <= '9' {
-			// Find the colon before the port
-			for i := len(listenAddr) - 1; i >= 0; i-- {
-				if listenAddr[i] == ':' {
-					port = listenAddr[i+1:]
-					break
-				}
-			}
-		}
+	// Get capability information directly from config (no HTTP call needed)
+	cwSkimmerEnabled := false
+	if ir.cwskimmerConfig != nil {
+		cwSkimmerEnabled = ir.cwskimmerConfig.Enabled
 	}
 
-	descURL := fmt.Sprintf("http://localhost:%s/api/description", port)
-	descResp, err := http.Get(descURL)
-
-	// Default capability values
-	capabilities := struct {
-		MaxClients     int  `json:"max_clients"`
-		NoiseFloor     bool `json:"noise_floor"`
-		DigitalDecodes bool `json:"digital_decodes"`
-		CWSkimmer      bool `json:"cw_skimmer"`
-	}{
-		MaxClients:     ir.config.Server.MaxSessions,
-		NoiseFloor:     ir.config.NoiseFloor.Enabled,
-		DigitalDecodes: ir.config.Decoder.Enabled,
-		CWSkimmer:      false, // Will be updated from API if available
-	}
-
-	if err == nil && descResp != nil {
-		defer descResp.Body.Close()
-		if descResp.StatusCode == http.StatusOK {
-			if err := json.NewDecoder(descResp.Body).Decode(&capabilities); err != nil {
-				log.Printf("Warning: Failed to decode description response: %v", err)
-			}
-		}
-	} else if err != nil {
-		log.Printf("Warning: Failed to get description for instance report: %v", err)
-	}
+	log.Printf("Reporting capabilities: CW=%v, Digital=%v, Noise=%v, MaxClients=%d",
+		cwSkimmerEnabled, ir.config.Decoder.Enabled, ir.config.NoiseFloor.Enabled, ir.config.Server.MaxSessions)
 
 	report := InstanceReport{
 		UUID:           ir.config.InstanceReporting.InstanceUUID,
@@ -245,10 +212,10 @@ func (ir *InstanceReporter) sendReport() error {
 		Host:           ir.config.InstanceReporting.Instance.Host,
 		Port:           ir.config.InstanceReporting.Instance.Port,
 		TLS:            ir.config.InstanceReporting.Instance.TLS,
-		CWSkimmer:      capabilities.CWSkimmer,
-		DigitalDecodes: capabilities.DigitalDecodes,
-		NoiseFloor:     capabilities.NoiseFloor,
-		MaxClients:     capabilities.MaxClients,
+		CWSkimmer:      cwSkimmerEnabled,
+		DigitalDecodes: ir.config.Decoder.Enabled,
+		NoiseFloor:     ir.config.NoiseFloor.Enabled,
+		MaxClients:     ir.config.Server.MaxSessions,
 	}
 
 	jsonData, err := json.Marshal(report)

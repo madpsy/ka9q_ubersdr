@@ -154,12 +154,6 @@ def create_public_instances_window(parent, on_connect_callback):
     # Configure tags for link-like appearance
     tree.tag_configure('link', foreground='blue')
 
-    connect_btn = ttk.Button(button_frame, text="Connect", command=connect_to_instance)
-    connect_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-    close_btn = ttk.Button(button_frame, text="Close", command=window.destroy)
-    close_btn.pack(side=tk.LEFT)
-
     # Fetch instances in background
     def fetch_instances():
         try:
@@ -228,7 +222,23 @@ def create_public_instances_window(parent, on_connect_callback):
                 status_label.config(text=f"Unexpected error: {e}", foreground='red')
             window.after(0, show_error)
 
-    # Start fetch in background thread
+    def refresh_instances():
+        """Refresh the instances list."""
+        status_label.config(text="Refreshing instances...", foreground='blue')
+        fetch_thread = threading.Thread(target=fetch_instances, daemon=True)
+        fetch_thread.start()
+
+    # Create buttons
+    connect_btn = ttk.Button(button_frame, text="Connect", command=connect_to_instance)
+    connect_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+    close_btn = ttk.Button(button_frame, text="Close", command=window.destroy)
+    close_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+    refresh_btn = ttk.Button(button_frame, text="Refresh", command=refresh_instances)
+    refresh_btn.pack(side=tk.LEFT)
+
+    # Start initial fetch in background thread
     fetch_thread = threading.Thread(target=fetch_instances, daemon=True)
     fetch_thread.start()
 

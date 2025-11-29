@@ -596,7 +596,7 @@ func main() {
 
 	// Initialize instance reporter
 	if config.InstanceReporting.Enabled {
-		instanceReporter := NewInstanceReporter(config, configPath)
+		instanceReporter := NewInstanceReporter(config, cwskimmerConfig, configPath)
 		if err := instanceReporter.Start(); err != nil {
 			log.Printf("Warning: Failed to start instance reporter: %v", err)
 		} else {
@@ -1272,8 +1272,12 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	// Get count of non-bypassed users (available clients)
-	availableClients := sessions.GetNonBypassedUserCount()
+	// Calculate available client slots (max - current non-bypassed users)
+	currentNonBypassedUsers := sessions.GetNonBypassedUserCount()
+	availableClients := config.Server.MaxSessions - currentNonBypassedUsers
+	if availableClients < 0 {
+		availableClients = 0
+	}
 
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{

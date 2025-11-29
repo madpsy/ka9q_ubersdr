@@ -44,6 +44,16 @@ CREATE TABLE instances (
 
 Update or register an instance. Requires the secret UUID in the URL path.
 
+**Field Validation Rules:**
+- `callsign`: Required, max 20 characters
+- `name`: Required, max 100 characters
+- `location`: Required, max 200 characters
+- `version`: Required, max 50 characters
+- `latitude`: Required, must be between -90 and 90
+- `longitude`: Required, must be between -180 and 180
+- `altitude`: Required, must be between -500 and 10000 meters
+- `public_url`: Optional, must be valid HTTP/HTTPS URL, max 500 characters
+
 **Request Body:**
 ```json
 {

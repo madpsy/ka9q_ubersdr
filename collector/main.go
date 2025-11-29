@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -179,6 +181,69 @@ func initDatabase(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// validateInstanceUpdate validates the fields of an instance update
+func validateInstanceUpdate(update *InstanceUpdate) error {
+	// Validate required string fields are not empty
+	if strings.TrimSpace(update.Callsign) == "" {
+		return fmt.Errorf("callsign is required")
+	}
+	if strings.TrimSpace(update.Name) == "" {
+		return fmt.Errorf("name is required")
+	}
+	if strings.TrimSpace(update.Location) == "" {
+		return fmt.Errorf("location is required")
+	}
+	if strings.TrimSpace(update.Version) == "" {
+		return fmt.Errorf("version is required")
+	}
+
+	// Validate string length limits
+	if len(update.Callsign) > 20 {
+		return fmt.Errorf("callsign too long (max 20 characters)")
+	}
+	if len(update.Name) > 100 {
+		return fmt.Errorf("name too long (max 100 characters)")
+	}
+	if len(update.Location) > 200 {
+		return fmt.Errorf("location too long (max 200 characters)")
+	}
+	if len(update.Version) > 50 {
+		return fmt.Errorf("version too long (max 50 characters)")
+	}
+
+	// Validate coordinate ranges
+	if update.Latitude < -90 || update.Latitude > 90 {
+		return fmt.Errorf("latitude must be between -90 and 90 (got %.6f)", update.Latitude)
+	}
+	if update.Longitude < -180 || update.Longitude > 180 {
+		return fmt.Errorf("longitude must be between -180 and 180 (got %.6f)", update.Longitude)
+	}
+
+	// Validate altitude range (reasonable values)
+	if update.Altitude < -500 || update.Altitude > 10000 {
+		return fmt.Errorf("altitude must be between -500 and 10000 meters (got %d)", update.Altitude)
+	}
+
+	// Validate public URL if provided
+	if update.PublicURL != "" {
+		parsedURL, err := url.Parse(update.PublicURL)
+		if err != nil {
+			return fmt.Errorf("invalid public_url format: %v", err)
+		}
+		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+			return fmt.Errorf("public_url must use http or https scheme")
+		}
+		if parsedURL.Host == "" {
+			return fmt.Errorf("public_url must have a valid host")
+		}
+		if len(update.PublicURL) > 500 {
+			return fmt.Errorf("public_url too long (max 500 characters)")
+		}
+	}
+
+	return nil
+}
+
 // handleInstanceUpdate handles POST requests from instances
 func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -210,6 +275,12 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 	// Verify UUID in body matches URL
 	if update.UUID != secretUUID {
 		http.Error(w, "UUID mismatch", http.StatusBadRequest)
+		return
+	}
+
+	// Validate field values
+	if err := validateInstanceUpdate(&update); err != nil {
+		http.Error(w, fmt.Sprintf("Validation error: %v", err), http.StatusBadRequest)
 		return
 	}
 

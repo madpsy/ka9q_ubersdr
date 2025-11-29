@@ -193,7 +193,13 @@ func (ir *InstanceReporter) sendReport() error {
 		return fmt.Errorf("failed to marshal report: %w", err)
 	}
 
-	url := fmt.Sprintf("https://%s:%d/api/instance/%s",
+	// Build URL with http or https based on config
+	protocol := "https"
+	if !ir.config.InstanceReporting.UseHTTPS {
+		protocol = "http"
+	}
+	url := fmt.Sprintf("%s://%s:%d/api/instance/%s",
+		protocol,
 		ir.config.InstanceReporting.Hostname,
 		ir.config.InstanceReporting.Port,
 		ir.config.InstanceReporting.InstanceUUID)
@@ -214,7 +220,7 @@ func (ir *InstanceReporter) sendReport() error {
 
 		resp, err := ir.httpClient.Do(req)
 		if err != nil {
-			lastErr = fmt.Errorf("failed to send request (attempt %d/%d): %w", attempt, maxRetries, err)
+			lastErr = fmt.Errorf("failed to send request to %s (attempt %d/%d): %w", url, attempt, maxRetries, err)
 			log.Printf("%v", lastErr)
 			if attempt < maxRetries {
 				time.Sleep(retryDelay)
@@ -225,7 +231,7 @@ func (ir *InstanceReporter) sendReport() error {
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-			lastErr = fmt.Errorf("server returned status %d (attempt %d/%d)", resp.StatusCode, attempt, maxRetries)
+			lastErr = fmt.Errorf("server returned status %d for %s (attempt %d/%d)", resp.StatusCode, url, attempt, maxRetries)
 			log.Printf("%v", lastErr)
 			if attempt < maxRetries {
 				time.Sleep(retryDelay)
@@ -234,7 +240,7 @@ func (ir *InstanceReporter) sendReport() error {
 			return lastErr
 		}
 
-		log.Printf("Successfully reported instance to central server (status: %d, attempt: %d)", resp.StatusCode, attempt)
+		log.Printf("Successfully reported instance to %s (status: %d, attempt: %d)", url, resp.StatusCode, attempt)
 		return nil
 	}
 

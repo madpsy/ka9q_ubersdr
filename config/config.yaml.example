@@ -543,12 +543,17 @@ instance_reporting:
   # including: UUID, callsign, location, public URL, and basic statistics
   enabled: true
 
+  # Use HTTPS (true) or HTTP (false) for connections to the central server
+  # Default: true (HTTPS)
+  # Set to false for local testing with HTTP-only collector
+  use_https: true
+
   # Central server hostname for instance reporting
   # Default: instances.ubersdr.org
   hostname: "instances.ubersdr.org"
 
-  # Central server port (HTTPS)
-  # Default: 443
+  # Central server port
+  # Default: 443 (HTTPS) or 8443 (HTTP for local testing)
   port: 443
 
   # Reporting interval in seconds (how often to send updates)

@@ -4599,6 +4599,15 @@ class RadioGUI:
                                 elif self.cw_spots_btn:
                                     self.cw_spots_btn.pack_forget()
 
+                                # Pack noise floor button if enabled
+                                if self.noise_floor_btn and desc.get('noise_floor', False):
+                                    if scroll_label:
+                                        self.noise_floor_btn.pack(side=tk.LEFT, padx=(0, 5), before=scroll_label)
+                                    else:
+                                        self.noise_floor_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                elif self.noise_floor_btn:
+                                    self.noise_floor_btn.pack_forget()
+
                             # Print loading message before opening GUI windows
                             print("Loading GUI (may take a moment)...", file=sys.stderr)
 

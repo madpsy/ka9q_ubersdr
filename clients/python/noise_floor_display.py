@@ -73,7 +73,7 @@ class NoiseFloorDisplay:
         # Create window
         self.window = tk.Toplevel(parent)
         self.window.title("Noise Floor - Current Conditions")
-        self.window.geometry("1180x800")
+        self.window.geometry("1475x800")
 
         # Create UI
         self.create_widgets()
@@ -123,6 +123,21 @@ class NoiseFloorDisplay:
 
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Bind mouse wheel scrolling
+        def _on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        def _on_mousewheel_linux(event):
+            if event.num == 4:
+                self.canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self.canvas.yview_scroll(1, "units")
+
+        # Bind for different platforms
+        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)  # Windows/Mac
+        self.canvas.bind_all("<Button-4>", _on_mousewheel_linux)  # Linux scroll up
+        self.canvas.bind_all("<Button-5>", _on_mousewheel_linux)  # Linux scroll down
 
         self.canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -708,6 +723,12 @@ class NoiseFloorDisplay:
         self.running = False
         if self.refresh_job:
             self.window.after_cancel(self.refresh_job)
+
+        # Unbind mouse wheel events
+        self.canvas.unbind_all("<MouseWheel>")
+        self.canvas.unbind_all("<Button-4>")
+        self.canvas.unbind_all("<Button-5>")
+
         self.window.destroy()
 
 

@@ -9,10 +9,19 @@ echo "Building UberSDR Instance Collector..."
 VERSION=$(grep 'const Version' main.go | cut -d'"' -f2)
 echo "Version: $VERSION"
 
+# Download dependencies
+echo "Downloading dependencies..."
+go mod download
+
+# Tidy go.mod and go.sum
+echo "Tidying dependencies..."
+go mod tidy
+
 # Build for current platform
 echo "Building for current platform..."
 go build -ldflags "-s -w" -o collector
 
+echo ""
 echo "Build complete: ./collector"
 echo ""
 echo "To build for other platforms:"

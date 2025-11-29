@@ -426,6 +426,9 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		       first_seen, last_seen
 		FROM instances
 		WHERE datetime(last_seen) >= datetime('now', '-30 minutes')
+		  AND host IS NOT NULL
+		  AND host != ''
+		  AND port > 0
 		ORDER BY last_seen DESC
 	`)
 	if err != nil {

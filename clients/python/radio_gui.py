@@ -307,6 +307,9 @@ class RadioGUI:
         self.space_weather_window = None
         self.space_weather_display = None
 
+        # Public instances display (separate window)
+        self.public_instances_window = None
+
         # EQ display (separate window)
         self.eq_window = None
         self.eq_display = None
@@ -466,6 +469,11 @@ class RadioGUI:
         messagebox.showinfo("Success", f"Server '{selected}' deleted")
     def open_public_instances_window(self):
         """Open a window showing public UberSDR instances."""
+        # Don't open multiple windows
+        if hasattr(self, 'public_instances_window') and self.public_instances_window and self.public_instances_window.winfo_exists():
+            self.public_instances_window.lift()  # Bring to front
+            return
+
         if not PUBLIC_INSTANCES_AVAILABLE:
             messagebox.showerror("Error", "Public instances display not available")
             return
@@ -486,7 +494,7 @@ class RadioGUI:
             self.log_status(f"Connecting to public instance: {name}")
             self.connect()
 
-        create_public_instances_window(self.root, on_connect)
+        self.public_instances_window = create_public_instances_window(self.root, on_connect)
 
     
     def populate_server_dropdown(self):
@@ -4464,6 +4472,12 @@ class RadioGUI:
             self.space_weather_display = None
             self.log_status("Space weather window closed")
 
+        # Close public instances window
+        if self.public_instances_window and self.public_instances_window.winfo_exists():
+            self.public_instances_window.destroy()
+            self.public_instances_window = None
+            self.log_status("Public instances window closed")
+
         # Close EQ window
         if self.eq_window and self.eq_window.winfo_exists():
             self.eq_window.destroy()
@@ -5043,6 +5057,10 @@ class RadioGUI:
         # Close space weather window if open
         if self.space_weather_window and self.space_weather_window.winfo_exists():
             self.space_weather_window.destroy()
+
+        # Close public instances window if open
+        if self.public_instances_window and self.public_instances_window.winfo_exists():
+            self.public_instances_window.destroy()
 
         # Close EQ window if open
         if self.eq_window and self.eq_window.winfo_exists():

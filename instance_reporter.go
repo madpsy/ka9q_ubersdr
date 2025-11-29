@@ -200,14 +200,27 @@ func (ir *InstanceReporter) sendReport() error {
 
 	// Build URL with http or https based on config
 	protocol := "https"
+	defaultPort := 443
 	if !ir.config.InstanceReporting.UseHTTPS {
 		protocol = "http"
+		defaultPort = 80
 	}
-	url := fmt.Sprintf("%s://%s:%d/api/instance/%s",
-		protocol,
-		ir.config.InstanceReporting.Hostname,
-		ir.config.InstanceReporting.Port,
-		ir.config.InstanceReporting.InstanceUUID)
+
+	// Don't include port in URL if it's the default port for the protocol
+	// This ensures the Host header doesn't include the port, which can cause routing issues
+	var url string
+	if ir.config.InstanceReporting.Port == defaultPort {
+		url = fmt.Sprintf("%s://%s/api/instance/%s",
+			protocol,
+			ir.config.InstanceReporting.Hostname,
+			ir.config.InstanceReporting.InstanceUUID)
+	} else {
+		url = fmt.Sprintf("%s://%s:%d/api/instance/%s",
+			protocol,
+			ir.config.InstanceReporting.Hostname,
+			ir.config.InstanceReporting.Port,
+			ir.config.InstanceReporting.InstanceUUID)
+	}
 
 	// Retry up to 3 times with 10 second delays
 	maxRetries := 3

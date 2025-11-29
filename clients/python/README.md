@@ -24,9 +24,11 @@ A command-line and GUI Python client for connecting to the ka9q_ubersdr WebSocke
 - `websockets` library
 - `aiohttp` library
 - `numpy` library
-- `scipy` library (optional, required for NR2 noise reduction)
+- `scipy` library (optional, required for NR2 noise reduction and audio filtering)
 - `tkinter` library (usually included with Python, required for GUI mode)
 - `pyaudio` library (optional, for cross-platform audio output)
+- `sounddevice` library (optional, recommended for cross-platform audio output with better quality)
+- `samplerate` library (optional, required for high-quality audio resampling with sounddevice)
 - For PipeWire output: `pipewire-utils` package (provides `pw-play`, Linux only)
 
 ## Installation
@@ -38,6 +40,10 @@ pip install -r requirements.txt
 
 2. For cross-platform audio output (recommended for Windows/macOS):
 ```bash
+# Option 1: sounddevice (recommended - better quality, click-free resampling)
+pip install sounddevice samplerate
+
+# Option 2: pyaudio (alternative)
 pip install pyaudio
 ```
 
@@ -256,13 +262,24 @@ If not specified, the server will use mode-specific defaults.
 
 ### Output Modes
 
-#### PyAudio (cross-platform)
+#### sounddevice (cross-platform, recommended)
+Real-time audio playback through sounddevice with high-quality resampling (works on Windows, macOS, and Linux):
+```bash
+./radio_client.py -f 14074000 -m usb -o sounddevice
+```
+
+sounddevice is the recommended output mode for all platforms, as it provides:
+- High-quality, click-free audio resampling using libsamplerate
+- Better hardware compatibility across different sample rates
+- Lower latency than PyAudio on most systems
+
+#### PyAudio (cross-platform, alternative)
 Real-time audio playback through PyAudio (works on Windows, macOS, and Linux):
 ```bash
 ./radio_client.py -f 14074000 -m usb -o pyaudio
 ```
 
-PyAudio is the recommended output mode for Windows and macOS users, as it provides native audio support without requiring additional system packages.
+PyAudio is an alternative output mode that works on all platforms without requiring additional resampling libraries.
 
 #### PipeWire (Linux only, default)
 Real-time audio playback through PipeWire:
@@ -547,6 +564,26 @@ Record with noise reduction:
 
 ## Troubleshooting
 
+### "sounddevice not available" or "samplerate not available"
+Install sounddevice and samplerate for best audio quality:
+```bash
+pip install sounddevice samplerate
+```
+
+On some systems, you may need to install libsamplerate development files first:
+```bash
+# Debian/Ubuntu
+sudo apt install libsamplerate0-dev
+pip install samplerate
+
+# macOS (with Homebrew)
+brew install libsamplerate
+pip install samplerate
+
+# Windows
+pip install samplerate
+```
+
 ### "PyAudio not available"
 Install PyAudio:
 ```bash
@@ -579,7 +616,10 @@ Install pipewire-utils package for your distribution (Linux only).
 - Verify audio device: `pw-cli list-objects | grep node.name`
 - Try stdout mode to verify data is being received
 
-### Audio glitches or dropouts
+### Audio glitches, clicks, or crackles
+- Ensure you have `samplerate` library installed: `pip install samplerate`
+- The `samplerate` library provides stateful, click-free audio resampling
+- If using PyAudio mode, try switching to sounddevice mode: `-o sounddevice`
 - Check network connection quality
 - Monitor server load
 - Try increasing system audio buffer size

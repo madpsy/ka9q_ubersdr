@@ -8,6 +8,8 @@ matplotlib>=3.7.0
 astral>=3.2
 python-rtmidi>=1.5.0
 pyaudio>=0.2.14
+sounddevice>=0.4.6
+samplerate>=0.1.0
 pyinstaller>=6.17.0
 
 # Windows-only: OmniRig support

@@ -965,22 +965,36 @@ class RadioGUI:
         self.device_var = tk.StringVar(value="(default)")
         self.device_combo = ttk.Combobox(audio_frame, textvariable=self.device_var,
                                         state='readonly', width=30)
-        self.device_combo.grid(row=0, column=1, columnspan=3, sticky=(tk.W, tk.E), padx=(0, 5))
+        self.device_combo.grid(row=0, column=1, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 5))
+
+        # Create a frame to hold refresh button and "All" checkbox together
+        refresh_frame = ttk.Frame(audio_frame)
+        refresh_frame.grid(row=0, column=3, sticky=tk.W)
 
         # Refresh devices button
-        self.refresh_devices_btn = ttk.Button(audio_frame, text="↻", width=3,
+        self.refresh_devices_btn = ttk.Button(refresh_frame, text="↻", width=3,
                                              command=self.refresh_devices)
-        self.refresh_devices_btn.grid(row=0, column=4, sticky=tk.W)
+        self.refresh_devices_btn.pack(side=tk.LEFT)
+
+        # "All" checkbox (Windows only - shows all APIs when enabled, WASAPI only when disabled)
+        if platform.system() == 'Windows':
+            self.show_all_devices_var = tk.BooleanVar(value=False)
+            self.show_all_devices_check = ttk.Checkbutton(refresh_frame, text="All",
+                                                          variable=self.show_all_devices_var,
+                                                          command=self.refresh_devices)
+            self.show_all_devices_check.pack(side=tk.LEFT, padx=(2, 0))
+        else:
+            self.show_all_devices_var = None
 
         # Load initial device list
         self.refresh_devices()
 
         # FIFO path (to the right of device selector)
-        ttk.Label(audio_frame, text="FIFO:").grid(row=0, column=5, sticky=tk.W, padx=(20, 5))
+        ttk.Label(audio_frame, text="FIFO:").grid(row=0, column=4, sticky=tk.W, padx=(20, 5))
 
         self.fifo_var = tk.StringVar(value=find_next_fifo_path())
         self.fifo_entry = ttk.Entry(audio_frame, textvariable=self.fifo_var, width=25)
-        self.fifo_entry.grid(row=0, column=6, sticky=(tk.W, tk.E), padx=(0, 5))
+        self.fifo_entry.grid(row=0, column=5, sticky=(tk.W, tk.E), padx=(0, 5))
 
         # Volume control
         ttk.Label(audio_frame, text="Volume:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
@@ -2915,12 +2929,26 @@ class RadioGUI:
             self.log_status("Audio output: Muted (no channels selected)")
 
     def refresh_devices(self):
-        """Refresh the list of available audio output devices (PyAudio or PipeWire)."""
+        """Refresh the list of available audio output devices (PyAudio, PipeWire, or sounddevice)."""
         try:
             # Get output mode from config
-            output_mode = self.config.get('output_mode', 'pyaudio')
+            output_mode = self.config.get('output_mode', 'sounddevice')
             
-            device_list = ["(default)"]
+            # Determine default device label with API info
+            default_label = "(default)"
+            if output_mode == 'sounddevice':
+                try:
+                    import sounddevice as sd
+                    default_device_idx = sd.default.device[1]  # Output device
+                    if default_device_idx is not None:
+                        default_info = sd.query_devices(default_device_idx)
+                        default_api = sd.query_hostapis(default_info['hostapi'])['name']
+                        default_label = f"(default) [{default_api}]"
+                except:
+                    pass  # Fall back to simple "(default)" on error
+
+            # Always include default as first option
+            device_list = [default_label]
             
             if output_mode == 'pyaudio':
                 # Use PyAudio device listing
@@ -2928,6 +2956,17 @@ class RadioGUI:
                 self.pyaudio_devices = get_pyaudio_devices()
                 
                 for device_index, device_name in self.pyaudio_devices:
+                    device_list.append(f"{device_name}")
+            elif output_mode == 'sounddevice':
+                # Use sounddevice device listing
+                from radio_client import get_sounddevice_devices
+                # On Windows, filter to WASAPI only unless "All" checkbox is enabled
+                wasapi_only = False
+                if platform.system() == 'Windows' and self.show_all_devices_var is not None:
+                    wasapi_only = not self.show_all_devices_var.get()
+                self.sounddevice_devices = get_sounddevice_devices(wasapi_only=wasapi_only)
+
+                for device_index, device_name in self.sounddevice_devices:
                     device_list.append(f"{device_name}")
             else:
                 # Use PipeWire device listing
@@ -2949,22 +2988,28 @@ class RadioGUI:
             self.device_var.set("(default)")
 
     def get_selected_device(self) -> Optional[int]:
-        """Get the selected PyAudio device index, or None for default.
+        """Get the selected device index, or None for default.
         
         Returns:
-            Device index for PyAudio, or None for default device
+            Device index for PyAudio/sounddevice, or node name for PipeWire, or None for default device
         """
         selection = self.device_var.get()
         if selection == "(default)":
             return None
 
         # Get output mode from config
-        output_mode = self.config.get('output_mode', 'pyaudio')
+        output_mode = self.config.get('output_mode', 'sounddevice')
         
         if output_mode == 'pyaudio':
             # Extract device index from PyAudio device list
             if hasattr(self, 'pyaudio_devices'):
                 for device_index, device_name in self.pyaudio_devices:
+                    if device_name == selection:
+                        return device_index
+        elif output_mode == 'sounddevice':
+            # Extract device index from sounddevice device list
+            if hasattr(self, 'sounddevice_devices'):
+                for device_index, device_name in self.sounddevice_devices:
                     if device_name == selection:
                         return device_index
         else:
@@ -4175,14 +4220,12 @@ class RadioGUI:
 
             # Send the tune message via WebSocket using the async event loop
             if self.event_loop and self.event_loop.is_running():
-                # Schedule the coroutine in the client's event loop
-                future = asyncio.run_coroutine_threadsafe(
+                # Schedule the coroutine in the client's event loop (fire-and-forget)
+                asyncio.run_coroutine_threadsafe(
                     self.client.ws.send(json.dumps(tune_msg)),
                     self.event_loop
                 )
-                # Wait for completion with timeout
-                future.result(timeout=2.0)
-
+                # Don't wait for completion - this prevents GUI freezing
                 # self.log_status(f"Sent tune: {self.client.frequency/1e6:.3f} MHz {self.client.mode.upper()} ({self.client.bandwidth_low} to {self.client.bandwidth_high} Hz)")  # Removed: too verbose during rapid frequency changes
             else:
                 self.log_status("ERROR: Event loop not running")
@@ -4252,34 +4295,41 @@ class RadioGUI:
             if not fifo_path:
                 fifo_path = None
 
-            # Get output mode from config (defaults to pyaudio if not specified)
-            output_mode = self.config.get('output_mode', 'pyaudio')
-            
-            # Get selected device (PyAudio device index or None for default)
+            # Get output mode from config (defaults to sounddevice if not specified)
+            output_mode = self.config.get('output_mode', 'sounddevice')
+
+            # Get selected device (device index or None for default)
             device_index = self.get_selected_device()
 
             # Create client (disable auto_reconnect for GUI - we'll handle retries)
             # Start with audio muted (volume=0) - will be enabled after window opens
-            self.client = RadioClient(
-                url=url,
-                host=host,
-                port=port,
-                frequency=frequency,
-                mode=mode,
-                bandwidth_low=bandwidth_low,
-                bandwidth_high=bandwidth_high,
-                output_mode=output_mode,
-                auto_reconnect=False,  # GUI handles connection attempts
-                status_callback=lambda msg_type, msg: self.status_queue.put((msg_type, msg)),
-                volume=0,  # Start muted, will unmute after window opens
-                channel_left=channel_left,
-                channel_right=channel_right,
-                audio_level_callback=lambda level_db: self.audio_level_queue.put(level_db),
-                recording_callback=self.add_recording_frame,
-                ssl=self.tls_var.get(),  # Use TLS if checkbox is checked
-                fifo_path=fifo_path,  # Pass FIFO path to client
-                pyaudio_device_index=device_index  # Pass selected device index
-            )
+            client_kwargs = {
+                'url': url,
+                'host': host,
+                'port': port,
+                'frequency': frequency,
+                'mode': mode,
+                'bandwidth_low': bandwidth_low,
+                'bandwidth_high': bandwidth_high,
+                'output_mode': output_mode,
+                'auto_reconnect': False,  # GUI handles connection attempts
+                'status_callback': lambda msg_type, msg: self.status_queue.put((msg_type, msg)),
+                'volume': 0,  # Start muted, will unmute after window opens
+                'channel_left': channel_left,
+                'channel_right': channel_right,
+                'audio_level_callback': lambda level_db: self.audio_level_queue.put(level_db),
+                'recording_callback': self.add_recording_frame,
+                'ssl': self.tls_var.get(),  # Use TLS if checkbox is checked
+                'fifo_path': fifo_path,  # Pass FIFO path to client
+            }
+
+            # Add device index parameter based on output mode
+            if output_mode == 'sounddevice':
+                client_kwargs['sounddevice_device_index'] = device_index
+            else:
+                client_kwargs['pyaudio_device_index'] = device_index
+
+            self.client = RadioClient(**client_kwargs)
             
             # Log the output mode being used
             self.log_status(f"Audio output mode: {output_mode}")

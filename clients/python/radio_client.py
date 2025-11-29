@@ -10,6 +10,7 @@ import atexit
 import base64
 import json
 import os
+import platform
 import signal
 import stat
 import struct
@@ -48,6 +49,22 @@ try:
     PYAUDIO_AVAILABLE = True
 except ImportError:
     PYAUDIO_AVAILABLE = False
+
+# Import sounddevice for better cross-platform audio (optional)
+try:
+    import sounddevice as sd
+    SOUNDDEVICE_AVAILABLE = True
+except ImportError:
+    SOUNDDEVICE_AVAILABLE = False
+
+# Import samplerate for high-quality streaming resampling (optional)
+try:
+    import samplerate
+    SAMPLERATE_AVAILABLE = True
+except ImportError:
+    SAMPLERATE_AVAILABLE = False
+    print("Warning: samplerate not available, audio resampling disabled", file=sys.stderr)
+    print("Install with: pip install samplerate", file=sys.stderr)
 
 
 def get_pipewire_sinks() -> List[Tuple[str, str]]:
@@ -181,6 +198,58 @@ def get_pyaudio_devices() -> List[Tuple[int, str]]:
         return []
 
 
+def get_sounddevice_devices(wasapi_only: bool = False) -> List[Tuple[int, str]]:
+    """Get list of available sounddevice output devices.
+
+    Args:
+        wasapi_only: On Windows, only show WASAPI devices (default: False shows all except DirectSound)
+
+    Returns:
+        List of tuples (device_index, device_name) for output devices, sorted alphabetically. Empty list if sounddevice not available.
+    """
+    if not SOUNDDEVICE_AVAILABLE:
+        return []
+
+    try:
+        devices = []
+        device_list = sd.query_devices()
+        default_device = sd.default.device[1]  # Output device
+
+        for i, info in enumerate(device_list):
+            # Only include output devices (max_output_channels > 0)
+            if info['max_output_channels'] > 0:
+                name = info['name']
+                host_api_name = sd.query_hostapis(info['hostapi'])['name']
+
+                # On Windows, filter devices based on wasapi_only flag
+                if platform.system() == 'Windows':
+                    # Always hide DirectSound devices (poor format support)
+                    if 'DirectSound' in host_api_name:
+                        continue
+
+                    # If wasapi_only is True, only show WASAPI devices
+                    if wasapi_only and 'WASAPI' not in host_api_name:
+                        continue
+
+                # Format: "Device Name [API]" or "Device Name [API] (default)"
+                display_name = f"{name} [{host_api_name}]"
+
+                # Mark default device
+                if i == default_device:
+                    display_name = f"{display_name} (default)"
+
+                devices.append((i, display_name))
+
+        # Sort devices alphabetically by name (case-insensitive)
+        devices.sort(key=lambda x: x[1].lower())
+
+        return devices
+
+    except Exception as e:
+        print(f"Warning: Could not list sounddevice devices: {e}", file=sys.stderr)
+        return []
+
+
 class RadioClient:
     """WebSocket radio client for receiving and outputting audio."""
     
@@ -195,7 +264,8 @@ class RadioClient:
                  volume: float = 1.0, channel_left: bool = True, channel_right: bool = True,
                  audio_level_callback=None, recording_callback=None, fifo_path: Optional[str] = None,
                  audio_filter_enabled: bool = False, audio_filter_low: float = 300.0,
-                 audio_filter_high: float = 2700.0, pyaudio_device_index: Optional[int] = None):
+                 audio_filter_high: float = 2700.0, pyaudio_device_index: Optional[int] = None,
+                 sounddevice_device_index: Optional[int] = None):
         self.url = url
         self.host = host
         self.port = port
@@ -242,6 +312,19 @@ class RadioClient:
         self.pyaudio_instance = None
         self.pyaudio_stream = None
         self.pyaudio_device_index = pyaudio_device_index  # Device index for PyAudio (None = default)
+
+        # sounddevice output
+        self.sounddevice_stream = None
+        self.sounddevice_device_index = sounddevice_device_index  # Device index for sounddevice (None = default)
+        self.sounddevice_output_rate = self.sample_rate  # Output sample rate (may differ from input)
+        self.sounddevice_wasapi_checked = False  # Cache flag to avoid repeated WASAPI lookups
+
+        # Resample to 48 kHz for better compatibility across all platforms
+        # Most audio hardware doesn't support 12 kHz natively
+        # Use samplerate library for stateful, click-free resampling
+        self.needs_resampling = (output_mode == 'sounddevice' and SAMPLERATE_AVAILABLE)
+        self.resampler_left = None  # Stateful resampler for left channel
+        self.resampler_right = None  # Stateful resampler for right channel
 
         # Auto-reconnect settings
         self.auto_reconnect = auto_reconnect
@@ -529,18 +612,29 @@ class RadioClient:
         if not PYAUDIO_AVAILABLE:
             print("Error: PyAudio not available. Install with: pip install pyaudio", file=sys.stderr)
             sys.exit(1)
-        
+
         try:
             # Always output as stereo to support left/right channel control
             output_channels = 2
 
             self.pyaudio_instance = pyaudio.PyAudio()
 
+            # On Windows, use 48 kHz to avoid high latency from resampling
+            # Windows audio APIs (MME/DirectSound) don't support 12 kHz natively
+            if self.pyaudio_needs_resampling:
+                self.pyaudio_output_rate = 48000
+                if not SCIPY_AVAILABLE:
+                    print("Error: Windows PyAudio requires scipy for resampling. Install with: pip install scipy", file=sys.stderr)
+                    sys.exit(1)
+                print(f"Windows detected: Resampling {self.sample_rate} Hz -> {self.pyaudio_output_rate} Hz for low latency", file=sys.stderr)
+            else:
+                self.pyaudio_output_rate = self.sample_rate
+
             # Build kwargs for stream opening
             stream_kwargs = {
                 'format': pyaudio.paInt16,
                 'channels': output_channels,
-                'rate': self.sample_rate,
+                'rate': self.pyaudio_output_rate,
                 'output': True,
                 'frames_per_buffer': 1024
             }
@@ -550,9 +644,9 @@ class RadioClient:
                 stream_kwargs['output_device_index'] = self.pyaudio_device_index
                 device_info = self.pyaudio_instance.get_device_info_by_index(self.pyaudio_device_index)
                 device_name = device_info.get('name', 'Unknown')
-                print(f"PyAudio output started on device [{self.pyaudio_device_index}] {device_name} (sample rate: {self.sample_rate} Hz, channels: {output_channels})", file=sys.stderr)
+                print(f"PyAudio output started on device [{self.pyaudio_device_index}] {device_name} (sample rate: {self.pyaudio_output_rate} Hz, channels: {output_channels})", file=sys.stderr)
             else:
-                print(f"PyAudio output started (sample rate: {self.sample_rate} Hz, channels: {output_channels})", file=sys.stderr)
+                print(f"PyAudio output started (sample rate: {self.pyaudio_output_rate} Hz, channels: {output_channels})", file=sys.stderr)
 
             self.pyaudio_stream = self.pyaudio_instance.open(**stream_kwargs)
 
@@ -562,7 +656,99 @@ class RadioClient:
         except Exception as e:
             print(f"Error: Failed to initialize PyAudio: {e}", file=sys.stderr)
             sys.exit(1)
-    
+
+    async def setup_sounddevice(self):
+        """Start sounddevice playback stream."""
+        if not SOUNDDEVICE_AVAILABLE:
+            print("Error: sounddevice not available. Install with: pip install sounddevice", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            # Always output as stereo to support left/right channel control
+            output_channels = 2
+
+            # Use 48 kHz for better hardware compatibility across all platforms
+            # Most audio hardware doesn't support 12 kHz natively
+            if self.needs_resampling:
+                self.sounddevice_output_rate = 48000
+                if not SAMPLERATE_AVAILABLE:
+                    print("Error: sounddevice requires samplerate for resampling. Install with: pip install samplerate", file=sys.stderr)
+                    sys.exit(1)
+
+                print(f"Resampling {self.sample_rate} Hz -> {self.sounddevice_output_rate} Hz using samplerate (stateful, click-free)", file=sys.stderr)
+            else:
+                self.sounddevice_output_rate = self.sample_rate
+
+            # Configure sounddevice stream
+            device_info = None
+            if self.sounddevice_device_index is not None:
+                device_info = sd.query_devices(self.sounddevice_device_index)
+                device_name = device_info['name']
+                host_api_name = sd.query_hostapis(device_info['hostapi'])['name']
+                print(f"sounddevice output started on device [{self.sounddevice_device_index}] {device_name} (sample rate: {self.sounddevice_output_rate} Hz, channels: {output_channels})", file=sys.stderr)
+                print(f"Using host API: {host_api_name}", file=sys.stderr)
+            else:
+                print(f"sounddevice output started (sample rate: {self.sounddevice_output_rate} Hz, channels: {output_channels})", file=sys.stderr)
+
+            # On Windows, prefer WASAPI over DirectSound for better format support
+            # WASAPI is the modern Windows audio API with lower latency and better compatibility
+            # Only do this lookup once and cache the result to avoid stalls on frequency changes
+            extra_settings = None
+            if platform.system() == 'Windows' and not self.sounddevice_wasapi_checked:
+                self.sounddevice_wasapi_checked = True
+                # Try to find WASAPI host API
+                try:
+                    wasapi_hostapi = None
+                    for i, api in enumerate(sd.query_hostapis()):
+                        if 'WASAPI' in api['name']:
+                            wasapi_hostapi = i
+                            break
+
+                    if wasapi_hostapi is not None:
+                        # If device was specified, find its WASAPI equivalent
+                        if self.sounddevice_device_index is not None:
+                            # Get the device name to search for WASAPI version
+                            orig_device = sd.query_devices(self.sounddevice_device_index)
+                            device_name = orig_device['name']
+
+                            # Find WASAPI device with same name
+                            for i, dev in enumerate(sd.query_devices()):
+                                if dev['hostapi'] == wasapi_hostapi and dev['name'] == device_name and dev['max_output_channels'] > 0:
+                                    self.sounddevice_device_index = i
+                                    print(f"Switched to WASAPI device: [{i}] {device_name}", file=sys.stderr)
+                                    break
+
+                        # Use WASAPI-specific settings for lower latency
+                        extra_settings = sd.WasapiSettings(exclusive=False)
+                        print("Using WASAPI (Windows Audio Session API) for better compatibility", file=sys.stderr)
+                except Exception as e:
+                    print(f"Note: Could not configure WASAPI, using default: {e}", file=sys.stderr)
+            elif platform.system() == 'Windows' and self.sounddevice_wasapi_checked:
+                # Already checked, just use WASAPI settings if available
+                try:
+                    extra_settings = sd.WasapiSettings(exclusive=False)
+                except:
+                    pass
+
+            # Open output stream
+            self.sounddevice_stream = sd.OutputStream(
+                samplerate=self.sounddevice_output_rate,
+                channels=output_channels,
+                dtype='int16',
+                device=self.sounddevice_device_index,
+                blocksize=1024,
+                latency='low',  # Request low latency
+                extra_settings=extra_settings
+            )
+            self.sounddevice_stream.start()
+
+            # Only show "Loading GUI" message when GUI is active (status_callback is set)
+            if self.status_callback:
+                print("Loading GUI (may take a moment)...", file=sys.stderr)
+        except Exception as e:
+            print(f"Error: Failed to initialize sounddevice: {e}", file=sys.stderr)
+            sys.exit(1)
+
     def decode_audio(self, base64_data: str) -> bytes:
         """Decode base64 audio data to PCM bytes."""
         # Decode base64
@@ -708,7 +894,28 @@ class RadioClient:
             audio_float[:, 0] = 0  # Mute left channel
         if not self.channel_right:
             audio_float[:, 1] = 0  # Mute right channel
-        
+
+        # Resample for sounddevice if needed (12 kHz -> 48 kHz)
+        # This avoids hardware rejection of unsupported sample rates
+        # Using samplerate library for stateful, click-free resampling
+        if self.output_mode == 'sounddevice' and self.needs_resampling:
+            if self.sounddevice_output_rate != self.sample_rate:
+                if SAMPLERATE_AVAILABLE:
+                    # Initialize resamplers on first use
+                    if self.resampler_left is None:
+                        # Use 'sinc_best' for highest quality, or 'sinc_medium' for lower CPU usage
+                        self.resampler_left = samplerate.Resampler('sinc_best', channels=1)
+                        self.resampler_right = samplerate.Resampler('sinc_best', channels=1)
+
+                    # Calculate resampling ratio
+                    ratio = self.sounddevice_output_rate / self.sample_rate
+
+                    # Resample each channel with stateful resamplers
+                    # This maintains filter state across chunks, eliminating clicks
+                    left_resampled = self.resampler_left.process(audio_float[:, 0], ratio)
+                    right_resampled = self.resampler_right.process(audio_float[:, 1], ratio)
+                    audio_float = np.column_stack((left_resampled, right_resampled))
+
         # Convert back to int16 and clip
         audio_array = np.clip(audio_float * 32768.0, -32768, 32767).astype(np.int16)
         pcm_data = audio_array.tobytes()
@@ -738,7 +945,19 @@ class RadioClient:
                 except Exception as e:
                     print(f"PyAudio error: {e}", file=sys.stderr)
                     self.running = False
-        
+
+        elif self.output_mode == 'sounddevice':
+            # Write to sounddevice stream (skip if in IQ mode)
+            is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+            if not is_iq_mode and self.sounddevice_stream:
+                try:
+                    # sounddevice expects numpy array, not bytes
+                    audio_array_for_sd = np.frombuffer(pcm_data, dtype=np.int16).reshape(-1, 2)
+                    self.sounddevice_stream.write(audio_array_for_sd)
+                except Exception as e:
+                    print(f"sounddevice error: {e}", file=sys.stderr)
+                    self.running = False
+
         elif self.output_mode == 'wav':
             # Write to WAV file
             if self.wav_writer:
@@ -811,6 +1030,22 @@ class RadioClient:
                 self.pyaudio_stream.close()
                 self.pyaudio_stream = None
                 await self.setup_pyaudio()
+
+            # Restart sounddevice if sample rate or channels changed
+            if (sample_rate_changed or channels_changed) and self.output_mode == 'sounddevice' and self.sounddevice_stream:
+                restart_start = time.time()
+                print("Restarting sounddevice with new audio configuration...", file=sys.stderr)
+                self.sounddevice_stream.stop()
+                self.sounddevice_stream.close()
+                self.sounddevice_stream = None
+                # Reset resamplers if sample rate changed
+                if sample_rate_changed and self.needs_resampling:
+                    # Reset resampler instances to reinitialize with new sample rate
+                    self.resampler_left = None
+                    self.resampler_right = None
+                await self.setup_sounddevice()
+                restart_time = (time.time() - restart_start) * 1000
+                print(f"Sounddevice restart took {restart_time:.1f}ms", file=sys.stderr)
 
             if audio_data:
                 pcm_data = self.decode_audio(audio_data)
@@ -1022,6 +1257,8 @@ class RadioClient:
                     await self.setup_pipewire()
                 elif self.output_mode == 'pyaudio':
                     await self.setup_pyaudio()
+                elif self.output_mode == 'sounddevice':
+                    await self.setup_sounddevice()
                 elif self.output_mode == 'wav':
                     self.setup_wav_writer()
                 
@@ -1161,6 +1398,22 @@ class RadioClient:
                 print(f"Error terminating PyAudio: {e}", file=sys.stderr)
             self.pyaudio_instance = None
 
+        # Close sounddevice stream
+        if self.sounddevice_stream:
+            try:
+                self.sounddevice_stream.stop()
+                self.sounddevice_stream.close()
+                print("sounddevice stream closed", file=sys.stderr)
+            except Exception as e:
+                print(f"Error closing sounddevice stream: {e}", file=sys.stderr)
+            self.sounddevice_stream = None
+
+        # Clean up resamplers
+        if self.resampler_left is not None:
+            self.resampler_left = None
+        if self.resampler_right is not None:
+            self.resampler_right = None
+
 
 def parse_bandwidth(value: str) -> tuple[int, int]:
     """Parse bandwidth argument in format 'low:high'."""
@@ -1211,9 +1464,9 @@ Examples:
                         help='Demodulation mode (iq48/iq96/iq192/iq384 require bypassed IP)')
     parser.add_argument('-b', '--bandwidth', type=parse_bandwidth,
                         help='Bandwidth in format low:high (e.g., -5000:5000)')
-    parser.add_argument('-o', '--output', choices=['pipewire', 'pyaudio', 'stdout', 'wav'],
-                        default='pyaudio',
-                        help='Output mode (default: pyaudio, works on all platforms)')
+    parser.add_argument('-o', '--output', choices=['pipewire', 'pyaudio', 'sounddevice', 'stdout', 'wav'],
+                        default='sounddevice',
+                        help='Output mode (default: sounddevice)')
     parser.add_argument('-w', '--wav-file', metavar='FILE',
                         help='WAV file path (required when output=wav)')
     parser.add_argument('-t', '--time', type=float, metavar='SECONDS',
@@ -1261,6 +1514,16 @@ Examples:
                 print()
             else:
                 print("  No devices found or PyAudio not available")
+        elif output_mode == 'sounddevice':
+            print("Available sounddevice audio output devices:")
+            print()
+            devices = get_sounddevice_devices()
+            if devices:
+                for device_index, device_name in devices:
+                    print(f"  [{device_index}] {device_name}")
+                print()
+            else:
+                print("  No devices found or sounddevice not available")
         else:
             print("Available PipeWire audio output devices:")
             print()
@@ -1392,7 +1655,8 @@ Examples:
         fifo_path=args.fifo_path,
         audio_filter_enabled=args.audio_filter,
         audio_filter_low=args.audio_filter_low,
-        audio_filter_high=args.audio_filter_high
+        audio_filter_high=args.audio_filter_high,
+        sounddevice_device_index=None  # TODO: Add command-line argument for device selection
     )
     
     # Setup signal handler for graceful shutdown

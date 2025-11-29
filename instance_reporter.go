@@ -48,6 +48,11 @@ func NewInstanceReporter(config *Config, configPath string) *InstanceReporter {
 					MinVersion: tls.VersionTLS12,
 				},
 			},
+			// Don't follow redirects - we want to see the actual response
+			// This prevents POST being changed to GET on redirects
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 		stopChan: make(chan struct{}),
 	}
@@ -229,6 +234,18 @@ func (ir *InstanceReporter) sendReport() error {
 			return lastErr
 		}
 		defer resp.Body.Close()
+
+		// Check for redirect responses
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			location := resp.Header.Get("Location")
+			lastErr = fmt.Errorf("server returned redirect %d to %s for %s (attempt %d/%d)", resp.StatusCode, location, url, attempt, maxRetries)
+			log.Printf("%v", lastErr)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return lastErr
+		}
 
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 			lastErr = fmt.Errorf("server returned status %d for %s (attempt %d/%d)", resp.StatusCode, url, attempt, maxRetries)

@@ -54,7 +54,7 @@ def get_pipewire_sinks() -> List[Tuple[str, str]]:
     """Get list of available PipeWire audio sinks.
     
     Returns:
-        List of tuples (node_name, description) for audio sinks. Empty list on Windows or if PipeWire not available.
+        List of tuples (node_name, description) for audio sinks, sorted alphabetically. Empty list on Windows or if PipeWire not available.
     """
     import platform
 
@@ -115,10 +115,69 @@ def get_pipewire_sinks() -> List[Tuple[str, str]]:
             description = current_nick if current_nick else current_node_name
             sinks.append((current_node_name, description))
         
+        # Sort sinks alphabetically by description (case-insensitive)
+        sinks.sort(key=lambda x: x[1].lower())
+
         return sinks
-    
+
     except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
         print(f"Warning: Could not list PipeWire sinks: {e}", file=sys.stderr)
+        return []
+
+
+def get_pyaudio_devices() -> List[Tuple[int, str]]:
+    """Get list of available PyAudio output devices.
+
+    Returns:
+        List of tuples (device_index, device_name) for output devices, sorted alphabetically. Empty list if PyAudio not available.
+    """
+    if not PYAUDIO_AVAILABLE:
+        return []
+
+    try:
+        p = pyaudio.PyAudio()
+        devices = []
+
+        # Get default output device info
+        try:
+            default_info = p.get_default_output_device_info()
+            default_index = default_info['index']
+        except:
+            default_index = None
+
+        # Enumerate all devices
+        for i in range(p.get_device_count()):
+            try:
+                info = p.get_device_info_by_index(i)
+                # Only include output devices (maxOutputChannels > 0)
+                if info['maxOutputChannels'] > 0:
+                    name = info['name']
+
+                    # Get host API info to differentiate between subsystems
+                    host_api_index = info.get('hostApi', 0)
+                    host_api_info = p.get_host_api_info_by_index(host_api_index)
+                    host_api_name = host_api_info.get('name', 'Unknown')
+
+                    # Format: "Device Name [API]" or "Device Name [API] (default)"
+                    display_name = f"{name} [{host_api_name}]"
+
+                    # Mark default device
+                    if i == default_index:
+                        display_name = f"{display_name} (default)"
+
+                    devices.append((i, display_name))
+            except Exception:
+                continue
+
+        p.terminate()
+
+        # Sort devices alphabetically by name (case-insensitive)
+        devices.sort(key=lambda x: x[1].lower())
+
+        return devices
+
+    except Exception as e:
+        print(f"Warning: Could not list PyAudio devices: {e}", file=sys.stderr)
         return []
 
 
@@ -136,7 +195,7 @@ class RadioClient:
                  volume: float = 1.0, channel_left: bool = True, channel_right: bool = True,
                  audio_level_callback=None, recording_callback=None, fifo_path: Optional[str] = None,
                  audio_filter_enabled: bool = False, audio_filter_low: float = 300.0,
-                 audio_filter_high: float = 2700.0):
+                 audio_filter_high: float = 2700.0, pyaudio_device_index: Optional[int] = None):
         self.url = url
         self.host = host
         self.port = port
@@ -182,6 +241,7 @@ class RadioClient:
         # PyAudio output
         self.pyaudio_instance = None
         self.pyaudio_stream = None
+        self.pyaudio_device_index = pyaudio_device_index  # Device index for PyAudio (None = default)
 
         # Auto-reconnect settings
         self.auto_reconnect = auto_reconnect
@@ -473,16 +533,29 @@ class RadioClient:
         try:
             # Always output as stereo to support left/right channel control
             output_channels = 2
-            
+
             self.pyaudio_instance = pyaudio.PyAudio()
-            self.pyaudio_stream = self.pyaudio_instance.open(
-                format=pyaudio.paInt16,
-                channels=output_channels,
-                rate=self.sample_rate,
-                output=True,
-                frames_per_buffer=1024
-            )
-            print(f"PyAudio output started (sample rate: {self.sample_rate} Hz, channels: {output_channels})", file=sys.stderr)
+
+            # Build kwargs for stream opening
+            stream_kwargs = {
+                'format': pyaudio.paInt16,
+                'channels': output_channels,
+                'rate': self.sample_rate,
+                'output': True,
+                'frames_per_buffer': 1024
+            }
+
+            # Add device index if specified
+            if self.pyaudio_device_index is not None:
+                stream_kwargs['output_device_index'] = self.pyaudio_device_index
+                device_info = self.pyaudio_instance.get_device_info_by_index(self.pyaudio_device_index)
+                device_name = device_info.get('name', 'Unknown')
+                print(f"PyAudio output started on device [{self.pyaudio_device_index}] {device_name} (sample rate: {self.sample_rate} Hz, channels: {output_channels})", file=sys.stderr)
+            else:
+                print(f"PyAudio output started (sample rate: {self.sample_rate} Hz, channels: {output_channels})", file=sys.stderr)
+
+            self.pyaudio_stream = self.pyaudio_instance.open(**stream_kwargs)
+
             # Only show "Loading GUI" message when GUI is active (status_callback is set)
             if self.status_callback:
                 print("Loading GUI (may take a moment)...", file=sys.stderr)
@@ -1161,7 +1234,7 @@ Examples:
     parser.add_argument('--pipewire-target', type=str, default=None,
                         help='PipeWire target device (node name). Use --list-devices to see available devices.')
     parser.add_argument('--list-devices', action='store_true',
-                        help='List available PipeWire audio output devices and exit')
+                        help='List available audio output devices and exit (PyAudio or PipeWire depending on --output)')
     parser.add_argument('--fifo-path', type=str, metavar='PATH',
                         help='Also write audio to named pipe (FIFO) at this path (non-blocking, works with any output mode)')
 
@@ -1176,16 +1249,29 @@ Examples:
     
     # List devices mode
     if args.list_devices:
-        print("Available PipeWire audio output devices:")
-        print()
-        sinks = get_pipewire_sinks()
-        if sinks:
-            for node_name, description in sinks:
-                print(f"  {node_name}")
-                print(f"    Description: {description}")
+        output_mode = args.output
+
+        if output_mode == 'pyaudio':
+            print("Available PyAudio audio output devices:")
+            print()
+            devices = get_pyaudio_devices()
+            if devices:
+                for device_index, device_name in devices:
+                    print(f"  [{device_index}] {device_name}")
                 print()
+            else:
+                print("  No devices found or PyAudio not available")
         else:
-            print("  No devices found or pw-cli not available")
+            print("Available PipeWire audio output devices:")
+            print()
+            sinks = get_pipewire_sinks()
+            if sinks:
+                for node_name, description in sinks:
+                    print(f"  {node_name}")
+                    print(f"    Description: {description}")
+                    print()
+            else:
+                print("  No devices found or pw-cli not available")
         sys.exit(0)
     
     # Parse bandwidth early for GUI

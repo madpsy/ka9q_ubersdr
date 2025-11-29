@@ -2356,15 +2356,27 @@ class RadioGUI:
             self.log_status("Audio output: Muted (no channels selected)")
 
     def refresh_devices(self):
-        """Refresh the list of available PipeWire output devices."""
+        """Refresh the list of available audio output devices (PyAudio or PipeWire)."""
         try:
-            from radio_client import get_pipewire_sinks
-            self.pipewire_devices = get_pipewire_sinks()
-
-            # Build device list for combobox
+            # Get output mode from config
+            output_mode = self.config.get('output_mode', 'pyaudio')
+            
             device_list = ["(default)"]
-            for node_name, description in self.pipewire_devices:
-                device_list.append(f"{description} ({node_name})")
+            
+            if output_mode == 'pyaudio':
+                # Use PyAudio device listing
+                from radio_client import get_pyaudio_devices
+                self.pyaudio_devices = get_pyaudio_devices()
+                
+                for device_index, device_name in self.pyaudio_devices:
+                    device_list.append(f"{device_name}")
+            else:
+                # Use PipeWire device listing
+                from radio_client import get_pipewire_sinks
+                self.pipewire_devices = get_pipewire_sinks()
+                
+                for node_name, description in self.pipewire_devices:
+                    device_list.append(f"{description} ({node_name})")
 
             self.device_combo['values'] = device_list
 
@@ -2377,16 +2389,32 @@ class RadioGUI:
             self.device_combo['values'] = ["(default)"]
             self.device_var.set("(default)")
 
-    def get_selected_device(self) -> Optional[str]:
-        """Get the selected PipeWire device node name, or None for default."""
+    def get_selected_device(self) -> Optional[int]:
+        """Get the selected PyAudio device index, or None for default.
+        
+        Returns:
+            Device index for PyAudio, or None for default device
+        """
         selection = self.device_var.get()
         if selection == "(default)":
             return None
 
-        # Extract node name from "Description (node_name)" format
-        for node_name, description in self.pipewire_devices:
-            if f"{description} ({node_name})" == selection:
-                return node_name
+        # Get output mode from config
+        output_mode = self.config.get('output_mode', 'pyaudio')
+        
+        if output_mode == 'pyaudio':
+            # Extract device index from PyAudio device list
+            if hasattr(self, 'pyaudio_devices'):
+                for device_index, device_name in self.pyaudio_devices:
+                    if device_name == selection:
+                        return device_index
+        else:
+            # For PipeWire, return node name (not used currently, but kept for compatibility)
+            if hasattr(self, 'pipewire_devices'):
+                for node_name, description in self.pipewire_devices:
+                    if f"{description} ({node_name})" == selection:
+                        # Return as string for PipeWire (would need different handling)
+                        return node_name
 
         return None
 
@@ -3635,8 +3663,11 @@ class RadioGUI:
             if not fifo_path:
                 fifo_path = None
 
-            # Get output mode from config (defaults to pipewire if not specified)
-            output_mode = self.config.get('output_mode', 'pipewire')
+            # Get output mode from config (defaults to pyaudio if not specified)
+            output_mode = self.config.get('output_mode', 'pyaudio')
+            
+            # Get selected device (PyAudio device index or None for default)
+            device_index = self.get_selected_device()
 
             # Create client (disable auto_reconnect for GUI - we'll handle retries)
             # Start with audio muted (volume=0) - will be enabled after window opens
@@ -3657,7 +3688,8 @@ class RadioGUI:
                 audio_level_callback=lambda level_db: self.audio_level_queue.put(level_db),
                 recording_callback=self.add_recording_frame,
                 ssl=self.tls_var.get(),  # Use TLS if checkbox is checked
-                fifo_path=fifo_path  # Pass FIFO path to client
+                fifo_path=fifo_path,  # Pass FIFO path to client
+                pyaudio_device_index=device_index  # Pass selected device index
             )
             
             # Log the output mode being used

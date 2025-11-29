@@ -289,20 +289,25 @@ class NoiseFloorDisplay:
         # Hide loading message
         self.loading_label.pack_forget()
 
-        # Clear existing cards and canvases
-        for band_data in self.band_cards.values():
-            if isinstance(band_data, dict) and 'card' in band_data:
-                band_data['card'].destroy()
-            elif hasattr(band_data, 'destroy'):
-                band_data.destroy()
-        self.band_cards.clear()
-        self.trend_canvases.clear()
-        self.spectrum_canvases.clear()
+        # Get current bands
+        current_bands = [band for band in self.BAND_ORDER if band in self.latest_data]
+        existing_bands = list(self.band_cards.keys())
 
-        # Create cards for bands with data in 5 columns
-        card_index = 0
-        for band in self.BAND_ORDER:
-            if band in self.latest_data:
+        # Check if we need to recreate (band list changed)
+        if set(current_bands) != set(existing_bands):
+            # Band list changed, need to recreate
+            for band_data in self.band_cards.values():
+                if isinstance(band_data, dict) and 'card' in band_data:
+                    band_data['card'].destroy()
+                elif hasattr(band_data, 'destroy'):
+                    band_data.destroy()
+            self.band_cards.clear()
+            self.trend_canvases.clear()
+            self.spectrum_canvases.clear()
+
+            # Create cards for bands with data in 5 columns
+            card_index = 0
+            for band in current_bands:
                 row = card_index // 5
                 col = card_index % 5
                 card, graph_frame = self.create_band_card(band, self.latest_data[band], row, col)
@@ -313,8 +318,16 @@ class NoiseFloorDisplay:
                 }
                 card_index += 1
 
-        # Update graphs if enabled
-        self.update_all_graphs()
+            # Update graphs if enabled
+            self.update_all_graphs()
+        else:
+            # Just update the existing card data without recreating
+            for band in current_bands:
+                if band in self.band_cards:
+                    self.update_band_card_data(band, self.latest_data[band])
+
+            # Update graphs with new data
+            self.update_all_graphs()
 
     def refresh_data(self):
         """Refresh noise floor data from server."""
@@ -368,6 +381,63 @@ class NoiseFloorDisplay:
     def update_display_error(self, error_msg: str):
         """Update display with error message."""
         self.status_label.config(text=f"Error: {error_msg}", foreground='red')
+
+    def update_band_card_data(self, band: str, data: Dict):
+        """Update data in an existing band card without recreating it.
+
+        Args:
+            band: Band name
+            data: Updated band data
+        """
+        band_info = self.band_cards.get(band)
+        if not band_info or not isinstance(band_info, dict):
+            return
+
+        card = band_info['card']
+
+        # Find and update the timestamp in the header
+        for widget in card.winfo_children():
+            if isinstance(widget, tk.Frame) and widget.cget('bg') == '#2563eb':
+                # This is the header frame
+                for label in widget.winfo_children():
+                    if isinstance(label, tk.Label) and 'Updated:' in label.cget('text'):
+                        timestamp = data.get('timestamp', '')
+                        if timestamp:
+                            try:
+                                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                                time_str = dt.strftime('%H:%M:%S UTC')
+                                label.config(text=f"Updated: {time_str}")
+                            except:
+                                pass
+                        break
+                break
+
+        # Find and update metrics in the metrics frame
+        for widget in card.winfo_children():
+            if isinstance(widget, ttk.Frame):
+                # Look for metric frames
+                for metric_frame in widget.winfo_children():
+                    if isinstance(metric_frame, ttk.Frame):
+                        labels = [w for w in metric_frame.winfo_children() if isinstance(w, ttk.Label)]
+                        if len(labels) >= 2:
+                            label_text = labels[0].cget('text')
+                            value_label = labels[-1]
+
+                            # Update based on label
+                            if 'Noise Floor (P5)' in label_text:
+                                value_label.config(text=f"{data.get('p5_db', 0):.1f} dB")
+                            elif 'Signal Peak (Max)' in label_text:
+                                value_label.config(text=f"{data.get('max_db', 0):.1f} dB")
+                            elif 'P95' in label_text:
+                                value_label.config(text=f"{data.get('p95_db', 0):.1f} dB")
+                            elif 'Median' in label_text:
+                                value_label.config(text=f"{data.get('median_db', 0):.1f} dB")
+                            elif 'Dynamic Range' in label_text:
+                                value_label.config(text=f"{data.get('dynamic_range', 0):.1f} dB")
+                            elif 'Band Occupancy' in label_text:
+                                value_label.config(text=f"{data.get('occupancy_pct', 0):.1f}%")
+                            elif 'FT8 SNR' in label_text and data.get('ft8_snr'):
+                                value_label.config(text=f"{data.get('ft8_snr', 0):.1f} dB")
 
     def update_display(self, data: Dict):
         """Update display with fetched data."""

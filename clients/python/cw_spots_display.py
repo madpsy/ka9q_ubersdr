@@ -41,6 +41,10 @@ class CWSpotsDisplay:
         # Queue for thread-safe updates
         self.update_queue = queue.Queue()
 
+        # Batched update control
+        self._update_pending = False
+        self._batch_timer = None
+
         # Filters
         self.age_filter = 10  # minutes
         self.band_filter = "all"
@@ -256,6 +260,17 @@ class CWSpotsDisplay:
         if len(self.spots) > self.max_spots:
             self.spots = self.spots[:self.max_spots]
 
+        # Schedule batched update instead of immediate update
+        # This prevents UI stalls when many spots arrive quickly
+        if not self._update_pending:
+            self._update_pending = True
+            # Batch updates every 500ms during high activity
+            self._batch_timer = self.window.after(500, self._do_batched_update)
+
+    def _do_batched_update(self):
+        """Execute batched display update."""
+        self._update_pending = False
+        self._batch_timer = None
         # Apply filters and update display
         self.apply_filters()
 
@@ -617,6 +632,11 @@ class CWSpotsDisplay:
 
     def _on_closing(self):
         """Handle window close event."""
+        # Cancel any pending batch update
+        if self._batch_timer is not None:
+            self.window.after_cancel(self._batch_timer)
+            self._batch_timer = None
+
         # Close graph window if open
         if self.graph_window and self.graph_window.window.winfo_exists():
             self.graph_window.window.destroy()

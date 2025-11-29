@@ -174,9 +174,42 @@ Or use command-line flags:
 
 ## Building
 
+### Using the Build Script
+
+```bash
+cd collector
+./build.sh
+```
+
+The build script will:
+- Extract version from source code
+- Build optimized binary with stripped symbols (`-ldflags "-s -w"`)
+- Display cross-compilation examples for other platforms
+
+### Manual Build
+
 ```bash
 cd collector
 go build
+```
+
+### Cross-Compilation Examples
+
+```bash
+# Linux AMD64
+GOOS=linux GOARCH=amd64 go build -o collector-linux-amd64
+
+# Linux ARM64 (Raspberry Pi, etc.)
+GOOS=linux GOARCH=arm64 go build -o collector-linux-arm64
+
+# macOS Intel
+GOOS=darwin GOARCH=amd64 go build -o collector-darwin-amd64
+
+# macOS Apple Silicon
+GOOS=darwin GOARCH=arm64 go build -o collector-darwin-arm64
+
+# Windows
+GOOS=windows GOARCH=amd64 go build -o collector-windows-amd64.exe
 ```
 
 ## Running

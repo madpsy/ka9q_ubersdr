@@ -979,6 +979,27 @@ func (sm *SessionManager) GetUniqueUserCount() int {
 	return len(sm.userSessionUUIDs)
 }
 
+// GetNonBypassedUserCount returns the current number of unique non-bypassed users
+// This counts users whose IPs are not in the timeout bypass list
+func (sm *SessionManager) GetNonBypassedUserCount() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	// Track which UUIDs have at least one non-bypassed session
+	nonBypassedUUIDs := make(map[string]bool)
+
+	for _, session := range sm.sessions {
+		if session.UserSessionID != "" {
+			// Check if this session's IP is bypassed
+			if !sm.config.Server.IsIPTimeoutBypassed(session.ClientIP) {
+				nonBypassedUUIDs[session.UserSessionID] = true
+			}
+		}
+	}
+
+	return len(nonBypassedUUIDs)
+}
+
 // CanAcceptNewUUID checks if a new UUID can be accepted without exceeding max_sessions
 // Returns true if the UUID already exists OR if there's room for a new UUID
 func (sm *SessionManager) CanAcceptNewUUID(userSessionID string) bool {

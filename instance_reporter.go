@@ -24,19 +24,23 @@ type InstanceReporter struct {
 
 // InstanceReport represents the data sent to the central server
 type InstanceReport struct {
-	UUID      string  `json:"uuid"`
-	Callsign  string  `json:"callsign"`
-	Name      string  `json:"name"`
-	Location  string  `json:"location"`
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
-	Altitude  int     `json:"altitude"`
-	PublicURL string  `json:"public_url"`
-	Version   string  `json:"version"`
-	Timestamp int64   `json:"timestamp"`
-	Host      string  `json:"host,omitempty"` // Optional: tells clients how to connect to this instance
-	Port      int     `json:"port,omitempty"` // Optional: port for client connections
-	TLS       bool    `json:"tls,omitempty"`  // Optional: whether TLS is required for connections
+	UUID           string  `json:"uuid"`
+	Callsign       string  `json:"callsign"`
+	Name           string  `json:"name"`
+	Location       string  `json:"location"`
+	Latitude       float64 `json:"latitude"`
+	Longitude      float64 `json:"longitude"`
+	Altitude       int     `json:"altitude"`
+	PublicURL      string  `json:"public_url"`
+	Version        string  `json:"version"`
+	Timestamp      int64   `json:"timestamp"`
+	Host           string  `json:"host,omitempty"`  // Optional: tells clients how to connect to this instance
+	Port           int     `json:"port,omitempty"`  // Optional: port for client connections
+	TLS            bool    `json:"tls,omitempty"`   // Optional: whether TLS is required for connections
+	CWSkimmer      bool    `json:"cw_skimmer"`      // Whether CW Skimmer is enabled
+	DigitalDecodes bool    `json:"digital_decodes"` // Whether digital decoding is enabled
+	NoiseFloor     bool    `json:"noise_floor"`     // Whether noise floor monitoring is enabled
+	MaxClients     int     `json:"max_clients"`     // Maximum number of clients allowed
 }
 
 // NewInstanceReporter creates a new instance reporter
@@ -183,20 +187,68 @@ func (ir *InstanceReporter) reportLoop() {
 // sendReport sends the current instance information to the central server
 // Retries up to 3 times with 10 second delays between attempts
 func (ir *InstanceReporter) sendReport() error {
+	// Get capability information from local /api/description endpoint
+	// Extract port from server listen address
+	listenAddr := ir.config.Server.Listen
+	port := "8080" // default
+	if len(listenAddr) > 0 {
+		// Parse listen address (e.g., ":8080" or "0.0.0.0:8080")
+		if idx := len(listenAddr) - 1; listenAddr[idx] >= '0' && listenAddr[idx] <= '9' {
+			// Find the colon before the port
+			for i := len(listenAddr) - 1; i >= 0; i-- {
+				if listenAddr[i] == ':' {
+					port = listenAddr[i+1:]
+					break
+				}
+			}
+		}
+	}
+
+	descURL := fmt.Sprintf("http://localhost:%s/api/description", port)
+	descResp, err := http.Get(descURL)
+
+	// Default capability values
+	capabilities := struct {
+		MaxClients     int  `json:"max_clients"`
+		NoiseFloor     bool `json:"noise_floor"`
+		DigitalDecodes bool `json:"digital_decodes"`
+		CWSkimmer      bool `json:"cw_skimmer"`
+	}{
+		MaxClients:     ir.config.Server.MaxSessions,
+		NoiseFloor:     ir.config.NoiseFloor.Enabled,
+		DigitalDecodes: ir.config.Decoder.Enabled,
+		CWSkimmer:      false, // Will be updated from API if available
+	}
+
+	if err == nil && descResp != nil {
+		defer descResp.Body.Close()
+		if descResp.StatusCode == http.StatusOK {
+			if err := json.NewDecoder(descResp.Body).Decode(&capabilities); err != nil {
+				log.Printf("Warning: Failed to decode description response: %v", err)
+			}
+		}
+	} else if err != nil {
+		log.Printf("Warning: Failed to get description for instance report: %v", err)
+	}
+
 	report := InstanceReport{
-		UUID:      ir.config.InstanceReporting.InstanceUUID,
-		Callsign:  ir.config.Admin.Callsign,
-		Name:      ir.config.Admin.Name,
-		Location:  ir.config.Admin.Location,
-		Latitude:  ir.config.Admin.GPS.Lat,
-		Longitude: ir.config.Admin.GPS.Lon,
-		Altitude:  ir.config.Admin.ASL,
-		PublicURL: ir.config.Admin.PublicURL,
-		Version:   Version,
-		Timestamp: time.Now().Unix(),
-		Host:      ir.config.InstanceReporting.Instance.Host,
-		Port:      ir.config.InstanceReporting.Instance.Port,
-		TLS:       ir.config.InstanceReporting.Instance.TLS,
+		UUID:           ir.config.InstanceReporting.InstanceUUID,
+		Callsign:       ir.config.Admin.Callsign,
+		Name:           ir.config.Admin.Name,
+		Location:       ir.config.Admin.Location,
+		Latitude:       ir.config.Admin.GPS.Lat,
+		Longitude:      ir.config.Admin.GPS.Lon,
+		Altitude:       ir.config.Admin.ASL,
+		PublicURL:      ir.config.Admin.PublicURL,
+		Version:        Version,
+		Timestamp:      time.Now().Unix(),
+		Host:           ir.config.InstanceReporting.Instance.Host,
+		Port:           ir.config.InstanceReporting.Instance.Port,
+		TLS:            ir.config.InstanceReporting.Instance.TLS,
+		CWSkimmer:      capabilities.CWSkimmer,
+		DigitalDecodes: capabilities.DigitalDecodes,
+		NoiseFloor:     capabilities.NoiseFloor,
+		MaxClients:     capabilities.MaxClients,
 	}
 
 	jsonData, err := json.Marshal(report)

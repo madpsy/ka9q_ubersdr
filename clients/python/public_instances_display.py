@@ -35,21 +35,27 @@ def create_public_instances_window(parent, on_connect_callback):
     status_label.pack(pady=(0, 10))
 
     # Create Treeview for instances list
-    columns = ('name', 'callsign', 'location', 'version', 'url', 'map')
+    columns = ('name', 'callsign', 'location', 'cw', 'digi', 'noise', 'version', 'url', 'map')
     tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=15)
 
     # Define headings
     tree.heading('name', text='Name')
     tree.heading('callsign', text='Callsign')
     tree.heading('location', text='Location')
+    tree.heading('cw', text='CW')
+    tree.heading('digi', text='Digi')
+    tree.heading('noise', text='Noise')
     tree.heading('version', text='Version')
     tree.heading('url', text='Public URL')
     tree.heading('map', text='Map')
 
     # Define column widths
-    tree.column('name', width=200)
+    tree.column('name', width=180)
     tree.column('callsign', width=80)
-    tree.column('location', width=200)
+    tree.column('location', width=180)
+    tree.column('cw', width=40)
+    tree.column('digi', width=40)
+    tree.column('noise', width=50)
     tree.column('version', width=80)
     tree.column('url', width=100)
     tree.column('map', width=80)
@@ -117,14 +123,14 @@ def create_public_instances_window(parent, on_connect_callback):
             if not instance:
                 return
 
-            # Column #5 is Public URL
-            if column == '#5':
+            # Column #8 is Public URL
+            if column == '#8':
                 url = instance.get('public_url', '')
                 if url:
                     webbrowser.open(url)
 
-            # Column #6 is Map
-            elif column == '#6':
+            # Column #9 is Map
+            elif column == '#9':
                 lat = instance.get('latitude')
                 lon = instance.get('longitude')
                 if lat and lon:
@@ -183,6 +189,11 @@ def create_public_instances_window(parent, on_connect_callback):
                     location = instance.get('location', '')
                     version = instance.get('version', '')
 
+                    # Capability checkboxes
+                    cw_text = '✓' if instance.get('cw_skimmer', False) else '✗'
+                    digi_text = '✓' if instance.get('digital_decodes', False) else '✗'
+                    noise_text = '✓' if instance.get('noise_floor', False) else '✗'
+
                     # Public URL
                     public_url = instance.get('public_url', '')
                     url_text = '🔗 Open' if public_url else ''
@@ -193,7 +204,7 @@ def create_public_instances_window(parent, on_connect_callback):
                     map_text = '🗺️ Map' if (lat and lon) else ''
 
                     # Insert into tree
-                    item_id = tree.insert('', tk.END, values=(name, callsign, location, version, url_text, map_text), tags=('link',))
+                    item_id = tree.insert('', tk.END, values=(name, callsign, location, cw_text, digi_text, noise_text, version, url_text, map_text), tags=('link',))
 
                     # Store full instance data with connection info
                     # The API returns host, port, tls at the top level

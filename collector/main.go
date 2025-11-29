@@ -22,39 +22,47 @@ const Version = "0.1.0"
 
 // Instance represents an UberSDR instance
 type Instance struct {
-	SecretUUID    string    `json:"-"`  // Secret UUID (not exposed in API)
-	PublicUUID    string    `json:"id"` // Public UUID for API access
-	Callsign      string    `json:"callsign"`
-	Name          string    `json:"name"`
-	Location      string    `json:"location"`
-	Latitude      float64   `json:"latitude"`
-	Longitude     float64   `json:"longitude"`
-	Altitude      int       `json:"altitude"`
-	PublicURL     string    `json:"public_url"`
-	Version       string    `json:"version"`
-	Host          string    `json:"host,omitempty"`
-	Port          int       `json:"port,omitempty"`
-	TLS           bool      `json:"tls,omitempty"`
-	FirstSeen     time.Time `json:"first_seen"`
-	LastSeen      time.Time `json:"last_seen"`
-	LastReportAge int64     `json:"last_report_age_seconds"` // Computed field
+	SecretUUID     string    `json:"-"`  // Secret UUID (not exposed in API)
+	PublicUUID     string    `json:"id"` // Public UUID for API access
+	Callsign       string    `json:"callsign"`
+	Name           string    `json:"name"`
+	Location       string    `json:"location"`
+	Latitude       float64   `json:"latitude"`
+	Longitude      float64   `json:"longitude"`
+	Altitude       int       `json:"altitude"`
+	PublicURL      string    `json:"public_url"`
+	Version        string    `json:"version"`
+	Host           string    `json:"host,omitempty"`
+	Port           int       `json:"port,omitempty"`
+	TLS            bool      `json:"tls,omitempty"`
+	CWSkimmer      bool      `json:"cw_skimmer"`
+	DigitalDecodes bool      `json:"digital_decodes"`
+	NoiseFloor     bool      `json:"noise_floor"`
+	MaxClients     int       `json:"max_clients"`
+	FirstSeen      time.Time `json:"first_seen"`
+	LastSeen       time.Time `json:"last_seen"`
+	LastReportAge  int64     `json:"last_report_age_seconds"` // Computed field
 }
 
 // InstanceUpdate represents the data received from an instance
 type InstanceUpdate struct {
-	UUID      string  `json:"uuid"`
-	Callsign  string  `json:"callsign"`
-	Name      string  `json:"name"`
-	Location  string  `json:"location"`
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
-	Altitude  int     `json:"altitude"`
-	PublicURL string  `json:"public_url"`
-	Version   string  `json:"version"`
-	Timestamp int64   `json:"timestamp"`
-	Host      string  `json:"host"`
-	Port      int     `json:"port"`
-	TLS       bool    `json:"tls"`
+	UUID           string  `json:"uuid"`
+	Callsign       string  `json:"callsign"`
+	Name           string  `json:"name"`
+	Location       string  `json:"location"`
+	Latitude       float64 `json:"latitude"`
+	Longitude      float64 `json:"longitude"`
+	Altitude       int     `json:"altitude"`
+	PublicURL      string  `json:"public_url"`
+	Version        string  `json:"version"`
+	Timestamp      int64   `json:"timestamp"`
+	Host           string  `json:"host"`
+	Port           int     `json:"port"`
+	TLS            bool    `json:"tls"`
+	CWSkimmer      bool    `json:"cw_skimmer"`
+	DigitalDecodes bool    `json:"digital_decodes"`
+	NoiseFloor     bool    `json:"noise_floor"`
+	MaxClients     int     `json:"max_clients"`
 }
 
 // Config represents the collector configuration
@@ -175,6 +183,10 @@ func initDatabase(path string) (*sql.DB, error) {
 		host TEXT,
 		port INTEGER,
 		tls BOOLEAN,
+		cw_skimmer BOOLEAN DEFAULT 0,
+		digital_decodes BOOLEAN DEFAULT 0,
+		noise_floor BOOLEAN DEFAULT 0,
+		max_clients INTEGER DEFAULT 0,
 		first_seen DATETIME NOT NULL,
 		last_seen DATETIME NOT NULL
 	);
@@ -342,11 +354,13 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				secret_uuid, public_uuid, callsign, name, location,
 				latitude, longitude, altitude, public_url, version,
 				host, port, tls,
+				cw_skimmer, digital_decodes, noise_floor, max_clients,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version,
 			update.Host, update.Port, update.TLS,
+			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients,
 			now, now,
 		)
 
@@ -369,12 +383,14 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				latitude = ?, longitude = ?, altitude = ?,
 				public_url = ?, version = ?,
 				host = ?, port = ?, tls = ?,
+				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?,
 				last_seen = ?
 			WHERE secret_uuid = ?`,
 			update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude,
 			update.PublicURL, update.Version,
 			update.Host, update.Port, update.TLS,
+			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients,
 			now,
 			secretUUID,
 		)
@@ -405,7 +421,9 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 
 	rows, err := c.db.Query(`
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
-		       altitude, public_url, version, host, port, tls, first_seen, last_seen
+		       altitude, public_url, version, host, port, tls,
+		       cw_skimmer, digital_decodes, noise_floor, max_clients,
+		       first_seen, last_seen
 		FROM instances
 		WHERE datetime(last_seen) >= datetime('now', '-30 minutes')
 		ORDER BY last_seen DESC
@@ -425,7 +443,9 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		err := rows.Scan(
 			&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 			&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
-			&inst.Version, &inst.Host, &inst.Port, &inst.TLS, &inst.FirstSeen, &inst.LastSeen,
+			&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
+			&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients,
+			&inst.FirstSeen, &inst.LastSeen,
 		)
 		if err != nil {
 			log.Printf("Failed to scan instance: %v", err)
@@ -469,13 +489,17 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	var inst Instance
 	err := c.db.QueryRow(`
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
-		       altitude, public_url, version, host, port, tls, first_seen, last_seen
+		       altitude, public_url, version, host, port, tls,
+		       cw_skimmer, digital_decodes, noise_floor, max_clients,
+		       first_seen, last_seen
 		FROM instances
 		WHERE public_uuid = ?
 	`, publicUUID).Scan(
 		&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 		&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
-		&inst.Version, &inst.Host, &inst.Port, &inst.TLS, &inst.FirstSeen, &inst.LastSeen,
+		&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
+		&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients,
+		&inst.FirstSeen, &inst.LastSeen,
 	)
 
 	if err == sql.ErrNoRows {

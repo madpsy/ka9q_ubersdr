@@ -734,7 +734,7 @@ func main() {
 		handleExtensions(w, r, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig)
+		handleDescription(w, r, config, cwskimmerConfig, sessions)
 	})
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(w, r, config)
@@ -1268,9 +1268,12 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+
+	// Get count of non-bypassed users (available clients)
+	availableClients := sessions.GetNonBypassedUserCount()
 
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
@@ -1287,12 +1290,13 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 			"asl":      config.Admin.ASL,
 			"location": config.Admin.Location,
 		},
-		"max_clients":     config.Server.MaxSessions,
-		"version":         Version,
-		"space_weather":   config.SpaceWeather.Enabled,
-		"noise_floor":     config.NoiseFloor.Enabled,
-		"digital_decodes": config.Decoder.Enabled,
-		"cw_skimmer":      cwskimmerConfig.Enabled,
+		"max_clients":       config.Server.MaxSessions,
+		"available_clients": availableClients,
+		"version":           Version,
+		"space_weather":     config.SpaceWeather.Enabled,
+		"noise_floor":       config.NoiseFloor.Enabled,
+		"digital_decodes":   config.Decoder.Enabled,
+		"cw_skimmer":        cwskimmerConfig.Enabled,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

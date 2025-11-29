@@ -472,6 +472,11 @@ class RadioGUI:
 
         def on_connect(host, port, tls, name):
             """Callback when user selects an instance to connect to."""
+            # Disconnect from current server if connected
+            if self.connected:
+                self.log_status(f"Disconnecting from current server...")
+                self.disconnect()
+
             # Populate connection fields
             self.server_var.set(host)
             self.port_var.set(str(port))

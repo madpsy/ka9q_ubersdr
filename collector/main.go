@@ -109,12 +109,12 @@ func main() {
 		config: config,
 	}
 
-	// Setup HTTP routes
-	http.HandleFunc("/api/instance/", collector.handleInstanceUpdate)
-	http.HandleFunc("/api/instances", collector.handleListInstances)
-	http.HandleFunc("/api/instances/", collector.handleGetInstance)
-	http.HandleFunc("/api/lookup/", collector.handleLookupPublicUUID)
-	http.HandleFunc("/health", handleHealth)
+	// Setup HTTP routes with logging middleware
+	http.HandleFunc("/api/instance/", loggingMiddleware(collector.handleInstanceUpdate))
+	http.HandleFunc("/api/instances", loggingMiddleware(collector.handleListInstances))
+	http.HandleFunc("/api/instances/", loggingMiddleware(collector.handleGetInstance))
+	http.HandleFunc("/api/lookup/", loggingMiddleware(collector.handleLookupPublicUUID))
+	http.HandleFunc("/health", loggingMiddleware(handleHealth))
 
 	// Start HTTP server
 	server := &http.Server{
@@ -179,6 +179,40 @@ func initDatabase(path string) (*sql.DB, error) {
 
 	log.Println("Database initialized successfully")
 	return db, nil
+}
+
+// loggingMiddleware logs all HTTP requests
+func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// Create a response writer wrapper to capture status code
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		// Call the next handler
+		next(wrapped, r)
+
+		// Log the request
+		duration := time.Since(start)
+		log.Printf("%s %s %d %s %s",
+			r.Method,
+			r.URL.Path,
+			wrapped.statusCode,
+			duration,
+			r.RemoteAddr,
+		)
+	}
+}
+
+// responseWriter wraps http.ResponseWriter to capture status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
 }
 
 // validateInstanceUpdate validates the fields of an instance update

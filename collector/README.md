@@ -174,6 +174,17 @@ Or use command-line flags:
 
 ## Building
 
+### Requirements
+
+- Go 1.20 or later
+- GCC or compatible C compiler (required for SQLite CGO bindings)
+- SQLite3 development libraries
+
+On Ubuntu/Debian:
+```bash
+sudo apt-get install build-essential libsqlite3-dev
+```
+
 ### Using the Build Script
 
 ```bash
@@ -182,7 +193,9 @@ cd collector
 ```
 
 The build script will:
+- Download and tidy dependencies
 - Extract version from source code
+- Build with CGO enabled (required for SQLite)
 - Build optimized binary with stripped symbols (`-ldflags "-s -w"`)
 - Display cross-compilation examples for other platforms
 
@@ -190,8 +203,10 @@ The build script will:
 
 ```bash
 cd collector
-go build
+CGO_ENABLED=1 go build
 ```
+
+**Note:** `CGO_ENABLED=1` is required because the SQLite driver uses C bindings.
 
 ### Cross-Compilation Examples
 

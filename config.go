@@ -10,22 +10,23 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Admin            AdminConfig        `yaml:"admin"`
-	Radiod           RadiodConfig       `yaml:"radiod"`
-	Server           ServerConfig       `yaml:"server"`
-	Audio            AudioConfig        `yaml:"audio"`
-	Spectrum         SpectrumConfig     `yaml:"spectrum"`
-	NoiseFloor       NoiseFloorConfig   `yaml:"noisefloor"`
-	Decoder          DecoderConfig      `yaml:"decoder"`
-	Prometheus       PrometheusConfig   `yaml:"prometheus"`
-	MQTT             MQTTConfig         `yaml:"mqtt"`
-	Logging          LoggingConfig      `yaml:"logging"`
-	DXCluster        DXClusterConfig    `yaml:"dxcluster"`
-	SpaceWeather     SpaceWeatherConfig `yaml:"spaceweather"`
-	Bookmarks        []Bookmark         `yaml:"bookmarks"`
-	Bands            []Band             `yaml:"bands"`
-	Extensions       []string           `yaml:"extensions"`
-	DefaultExtension string             `yaml:"default_extension,omitempty"`
+	Admin             AdminConfig             `yaml:"admin"`
+	Radiod            RadiodConfig            `yaml:"radiod"`
+	Server            ServerConfig            `yaml:"server"`
+	Audio             AudioConfig             `yaml:"audio"`
+	Spectrum          SpectrumConfig          `yaml:"spectrum"`
+	NoiseFloor        NoiseFloorConfig        `yaml:"noisefloor"`
+	Decoder           DecoderConfig           `yaml:"decoder"`
+	Prometheus        PrometheusConfig        `yaml:"prometheus"`
+	MQTT              MQTTConfig              `yaml:"mqtt"`
+	Logging           LoggingConfig           `yaml:"logging"`
+	DXCluster         DXClusterConfig         `yaml:"dxcluster"`
+	SpaceWeather      SpaceWeatherConfig      `yaml:"spaceweather"`
+	InstanceReporting InstanceReportingConfig `yaml:"instance_reporting"`
+	Bookmarks         []Bookmark              `yaml:"bookmarks"`
+	Bands             []Band                  `yaml:"bands"`
+	Extensions        []string                `yaml:"extensions"`
+	DefaultExtension  string                  `yaml:"default_extension,omitempty"`
 }
 
 // AdminConfig contains admin authentication settings
@@ -148,6 +149,15 @@ type SpaceWeatherConfig struct {
 	PollIntervalSec int    `yaml:"poll_interval_sec"` // Seconds between API polls (recommended: 900 = 15 minutes)
 	DataDir         string `yaml:"data_dir"`          // Directory to store CSV files
 	LogToCSV        bool   `yaml:"log_to_csv"`        // Enable CSV logging
+}
+
+// InstanceReportingConfig contains settings for reporting to central instance registry
+type InstanceReportingConfig struct {
+	Enabled           bool   `yaml:"enabled"`             // Enable/disable instance reporting
+	Hostname          string `yaml:"hostname"`            // Central server hostname
+	Port              int    `yaml:"port"`                // Central server port
+	ReportIntervalSec int    `yaml:"report_interval_sec"` // Seconds between reports
+	InstanceUUID      string `yaml:"instance_uuid"`       // Unique instance identifier (auto-generated)
 }
 
 // NoiseFloorConfig contains noise floor monitoring settings
@@ -368,6 +378,17 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.MQTT.SpectrumPublishInterval == 0 {
 		config.MQTT.SpectrumPublishInterval = 10 // 10 seconds default (matches HTTP endpoint)
+	}
+
+	// Set instance reporting defaults if not specified
+	if config.InstanceReporting.Hostname == "" {
+		config.InstanceReporting.Hostname = "instances.ubersdr.org"
+	}
+	if config.InstanceReporting.Port == 0 {
+		config.InstanceReporting.Port = 443
+	}
+	if config.InstanceReporting.ReportIntervalSec == 0 {
+		config.InstanceReporting.ReportIntervalSec = 600 // 10 minutes default
 	}
 
 	// Set default amateur radio bands with per-band spectrum parameters if not specified

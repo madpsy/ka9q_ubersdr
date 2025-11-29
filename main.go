@@ -594,6 +594,16 @@ func main() {
 	}
 	defer spaceWeatherMonitor.Stop()
 
+	// Initialize instance reporter
+	if config.InstanceReporting.Enabled {
+		instanceReporter := NewInstanceReporter(config, configPath)
+		if err := instanceReporter.Start(); err != nil {
+			log.Printf("Warning: Failed to start instance reporter: %v", err)
+		} else {
+			defer instanceReporter.Stop()
+		}
+	}
+
 	// Start MQTT publisher if enabled (after space weather monitor is initialized)
 	if prometheusMetrics != nil && config.MQTT.Enabled {
 		// Get the context from Prometheus initialization

@@ -534,3 +534,30 @@ noisefloor:
       bin_count: 1000
       bin_bandwidth: 1700     # 1.7 kHz resolution (wide band)
       ft8_frequency: 28074000 # 28.074 MHz - FT8 calling frequency
+
+# Instance Reporting settings
+# Allows this UberSDR instance to report to a central registry
+instance_reporting:
+  # Enable or disable instance reporting (enabled by default)
+  # When enabled, this instance will periodically send information to the central server
+  # including: UUID, callsign, location, public URL, and basic statistics
+  enabled: true
+
+  # Central server hostname for instance reporting
+  # Default: instances.ubersdr.org
+  hostname: "instances.ubersdr.org"
+
+  # Central server port (HTTPS)
+  # Default: 443
+  port: 443
+
+  # Reporting interval in seconds (how often to send updates)
+  # Default: 600 (10 minutes)
+  # Minimum recommended: 300 (5 minutes)
+  report_interval_sec: 600
+
+  # Instance UUID (automatically generated on first run if enabled)
+  # This uniquely identifies your SDR instance in the registry
+  # Do not modify this value manually - it will be auto-generated
+  # Example: "550e8400-e29b-41d4-a716-446655440000"
+  instance_uuid: ""

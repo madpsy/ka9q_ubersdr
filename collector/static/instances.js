@@ -64,11 +64,12 @@ function createInstanceCard(instance, noiseFloorData) {
     
     // Parse noise floor data if available
     let bandBadges = '';
-    if (noiseFloorData && noiseFloorData.data && noiseFloorData.data.bands) {
-        const bands = noiseFloorData.data.bands;
+    if (noiseFloorData && noiseFloorData.data && noiseFloorData.data.data) {
+        // The structure is: noiseFloorData.data.data[band].ft8_snr
+        const bands = noiseFloorData.data.data;
         bandBadges = BANDS.map(band => {
             const bandData = bands[band];
-            const snr = bandData ? bandData.snr : null;
+            const snr = bandData ? bandData.ft8_snr : null;
             return createBandBadge(band, snr);
         }).join('');
     } else if (instance.noise_floor) {

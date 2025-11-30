@@ -459,21 +459,21 @@ class WaterfallDisplay:
     
     def on_scroll_up(self, event):
         """Handle mouse scroll up (Linux)."""
-        if self.scroll_mode == 'pan' and self.spectrum_display:
+        if self.scroll_mode == 'zoom' and self.spectrum_display:
             self.spectrum_display.zoom_in()
         elif self.frequency_step_callback:
             self.frequency_step_callback(1)
     
     def on_scroll_down(self, event):
         """Handle mouse scroll down (Linux)."""
-        if self.scroll_mode == 'pan' and self.spectrum_display:
+        if self.scroll_mode == 'zoom' and self.spectrum_display:
             self.spectrum_display.zoom_out()
         elif self.frequency_step_callback:
             self.frequency_step_callback(-1)
     
     def on_mousewheel(self, event):
         """Handle mouse wheel (Windows/Mac)."""
-        if self.scroll_mode == 'pan' and self.spectrum_display:
+        if self.scroll_mode == 'zoom' and self.spectrum_display:
             if event.delta > 0:
                 self.spectrum_display.zoom_in()
             else:

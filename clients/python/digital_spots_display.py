@@ -14,7 +14,7 @@ import queue
 class DigitalSpotsDisplay:
     """Display window for digital mode spots (FT8, FT4, WSPR)."""
     
-    def __init__(self, websocket_manager, on_close: Optional[Callable] = None, countries: Optional[List[Dict]] = None):
+    def __init__(self, websocket_manager, on_close: Optional[Callable] = None, countries: Optional[List[Dict]] = None, radio_gui=None):
         """
         Initialize the digital spots display.
         
@@ -22,10 +22,12 @@ class DigitalSpotsDisplay:
             websocket_manager: Shared DXClusterWebSocket instance
             on_close: Optional callback when window is closed
             countries: Optional list of countries from /api/cty/countries
+            radio_gui: Optional reference to RadioGUI for accessing server info
         """
         self.websocket_manager = websocket_manager
         self.on_close_callback = on_close
         self.countries = countries or []
+        self.radio_gui = radio_gui
         
         # Create window
         self.window = tk.Toplevel()
@@ -168,6 +170,10 @@ class DigitalSpotsDisplay:
         self.auto_band_var = tk.BooleanVar(value=True)
         auto_band_check = ttk.Checkbutton(filter_frame, text="Auto Band", variable=self.auto_band_var)
         auto_band_check.grid(row=0, column=15, sticky=tk.W, padx=(5, 0))
+
+        # Live Map button (pinned to far right)
+        live_map_btn = ttk.Button(filter_frame, text="Live Map", command=self.open_live_map)
+        live_map_btn.grid(row=0, column=16, sticky=tk.E, padx=(5, 0))
         
         # Spots table with scrollbar
         table_frame = ttk.Frame(main_frame)
@@ -581,8 +587,32 @@ class DigitalSpotsDisplay:
             self.country_filter.set(clicked_value)
             self.apply_filters()
 
+    def open_live_map(self):
+        """Open the Digital Spots live map in the default browser."""
+        import webbrowser
+        
+        # Get public_url from radio_gui if available
+        if self.radio_gui and hasattr(self.radio_gui, 'client') and self.radio_gui.client:
+            if hasattr(self.radio_gui.client, 'server_description'):
+                desc = self.radio_gui.client.server_description
+                public_url = desc.get('receiver', {}).get('public_url', '')
+                
+                if public_url and public_url != 'https://example.com':
+                    # Build the map URL
+                    map_url = f"{public_url}/digitalspots_map.html"
+                    try:
+                        webbrowser.open(map_url)
+                        print(f"Opened Digital Spots map: {map_url}")
+                    except Exception as e:
+                        print(f"Failed to open map: {e}")
+                    return
+        
+        # Fallback: show error message
+        from tkinter import messagebox
+        messagebox.showinfo("Map Not Available", "Public URL not available for this receiver")
 
-def create_digital_spots_window(websocket_manager, on_close=None, countries=None):
+
+def create_digital_spots_window(websocket_manager, on_close=None, countries=None, radio_gui=None):
     """Create and return a digital spots display window.
     
     Args:
@@ -590,7 +620,9 @@ def create_digital_spots_window(websocket_manager, on_close=None, countries=None
         on_close: Optional callback when window is closed
         countries: Optional list of countries from /api/cty/countries
         
+        radio_gui: Optional reference to RadioGUI for accessing server info
+        
     Returns:
         DigitalSpotsDisplay instance
     """
-    return DigitalSpotsDisplay(websocket_manager, on_close, countries)
+    return DigitalSpotsDisplay(websocket_manager, on_close, countries, radio_gui)

@@ -168,6 +168,10 @@ class CWSpotsDisplay:
         auto_band_check = ttk.Checkbutton(filter_frame, text="Auto Band", variable=self.auto_band_var)
         auto_band_check.grid(row=1, column=9, padx=5, pady=5)
 
+        # Live Map button (pinned to far right)
+        live_map_btn = ttk.Button(filter_frame, text="Live Map", command=self.open_live_map)
+        live_map_btn.grid(row=1, column=10, padx=5, pady=5, sticky=tk.E)
+
         # Table frame
         table_frame = ttk.Frame(self.window)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -734,6 +738,30 @@ class CWSpotsDisplay:
             # Set country filter
             self.country_var.set(clicked_value)
             self.apply_filters()
+
+    def open_live_map(self):
+        """Open the CW Skimmer live map in the default browser."""
+        import webbrowser
+        
+        # Get public_url from radio_gui if available
+        if self.radio_gui and hasattr(self.radio_gui, 'client') and self.radio_gui.client:
+            if hasattr(self.radio_gui.client, 'server_description'):
+                desc = self.radio_gui.client.server_description
+                public_url = desc.get('receiver', {}).get('public_url', '')
+                
+                if public_url and public_url != 'https://example.com':
+                    # Build the map URL
+                    map_url = f"{public_url}/cwskimmer_map.html"
+                    try:
+                        webbrowser.open(map_url)
+                        print(f"Opened CW Skimmer map: {map_url}")
+                    except Exception as e:
+                        print(f"Failed to open map: {e}")
+                    return
+        
+        # Fallback: show error message
+        from tkinter import messagebox
+        messagebox.showinfo("Map Not Available", "Public URL not available for this receiver")
 
 
 def create_cw_spots_window(websocket_manager, on_close=None, radio_gui=None, countries=None):

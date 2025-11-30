@@ -3599,7 +3599,8 @@ class RadioGUI:
             self.digital_spots_display = create_digital_spots_window(
                 ws_manager,
                 on_close=self._on_digital_spots_closed,
-                countries=countries
+                countries=countries,
+                radio_gui=self
             )
             self.digital_spots_window = self.digital_spots_display.window
 
@@ -3775,7 +3776,8 @@ class RadioGUI:
             self.digital_spots_display = create_digital_spots_window(
                 ws_manager,
                 on_close=self._on_digital_spots_closed,
-                countries=countries
+                countries=countries,
+                radio_gui=self
             )
             self.digital_spots_window = self.digital_spots_display.window
 

@@ -595,6 +595,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // verifyInstanceAccessibility makes a callback to the instance to verify it's publicly accessible
+// Retries up to 3 times with 10 second delays between attempts
 func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port int, useTLS bool) bool {
 	// Skip verification if host or port is invalid
 	if host == "" || port == 0 {
@@ -632,43 +633,71 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 		},
 	}
 
-	// Make the POST request
-	req, err := http.NewRequest("POST", callbackURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		log.Printf("Failed to create verification request: %v", err)
-		return false
+	// Retry up to 3 times with 10 second delays
+	maxRetries := 3
+	retryDelay := 10 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Make the POST request
+		req, err := http.NewRequest("POST", callbackURL, bytes.NewBuffer(jsonData))
+		if err != nil {
+			log.Printf("Failed to create verification request (attempt %d/%d): %v", attempt, maxRetries, err)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return false
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", fmt.Sprintf("UberSDR-Collector/%s", Version))
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("Failed to verify instance %s at %s (attempt %d/%d): %v", secretUUID, callbackURL, attempt, maxRetries, err)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return false
+		}
+		defer resp.Body.Close()
+
+		// Check response status
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("Instance verification returned status %d for %s (attempt %d/%d)", resp.StatusCode, secretUUID, attempt, maxRetries)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return false
+		}
+
+		// Parse response
+		var verifyResp InstanceVerificationResponse
+		if err := json.NewDecoder(resp.Body).Decode(&verifyResp); err != nil {
+			log.Printf("Failed to decode verification response (attempt %d/%d): %v", attempt, maxRetries, err)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return false
+		}
+
+		// Verify the response matches what we expect
+		if verifyResp.Host != host || verifyResp.Port != port || verifyResp.TLS != useTLS {
+			log.Printf("Instance verification mismatch for %s (attempt %d/%d): expected host=%s port=%d tls=%v, got host=%s port=%d tls=%v",
+				secretUUID, attempt, maxRetries, host, port, useTLS, verifyResp.Host, verifyResp.Port, verifyResp.TLS)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return false
+		}
+
+		log.Printf("Instance %s verified successfully at %s (attempt %d)", secretUUID, callbackURL, attempt)
+		return true
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", fmt.Sprintf("UberSDR-Collector/%s", Version))
-
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("Failed to verify instance %s at %s: %v", secretUUID, callbackURL, err)
-		return false
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Instance verification returned status %d for %s", resp.StatusCode, secretUUID)
-		return false
-	}
-
-	// Parse response
-	var verifyResp InstanceVerificationResponse
-	if err := json.NewDecoder(resp.Body).Decode(&verifyResp); err != nil {
-		log.Printf("Failed to decode verification response: %v", err)
-		return false
-	}
-
-	// Verify the response matches what we expect
-	if verifyResp.Host != host || verifyResp.Port != port || verifyResp.TLS != useTLS {
-		log.Printf("Instance verification mismatch for %s: expected host=%s port=%d tls=%v, got host=%s port=%d tls=%v",
-			secretUUID, host, port, useTLS, verifyResp.Host, verifyResp.Port, verifyResp.TLS)
-		return false
-	}
-
-	log.Printf("Instance %s verified successfully at %s", secretUUID, callbackURL)
-	return true
+	return false
 }

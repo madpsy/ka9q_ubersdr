@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UberSDR Instance Directory</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         * {
             margin: 0;
@@ -58,6 +60,30 @@
 
         .status-bar.success {
             background: rgba(76, 175, 80, 0.3);
+        }
+
+        .map-container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            margin-bottom: 30px;
+        }
+
+        .map-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #map {
+            height: 500px;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
         }
 
         .instances-grid {
@@ -305,6 +331,11 @@
         
         <div id="status" class="status-bar loading">
             Loading instances...
+        </div>
+
+        <div class="map-container">
+            <div class="map-title">🗺️ Receiver Locations</div>
+            <div id="map"></div>
         </div>
 
         <div id="instances-container" class="instances-grid">

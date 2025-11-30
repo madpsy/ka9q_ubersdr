@@ -3,6 +3,10 @@
 const BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
 const REFRESH_INTERVAL = 60000; // 60 seconds
 
+// Global map variable
+let map = null;
+let markers = [];
+
 // SNR thresholds for band condition classification
 function getConditionClass(snr) {
     if (snr === null || snr === undefined) return 'unknown';
@@ -172,6 +176,104 @@ async function fetchNoiseFloor(publicUUID) {
     }
 }
 
+function initMap() {
+    // Initialize the map centered on the world
+    map = L.map('map').setView([20, 0], 2);
+    
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19
+    }).addTo(map);
+}
+
+function updateMap(instances) {
+    if (!map) {
+        initMap();
+    }
+    
+    // Clear existing markers
+    markers.forEach(marker => map.removeLayer(marker));
+    markers = [];
+    
+    if (instances.length === 0) {
+        return;
+    }
+    
+    // Add markers for each instance
+    const bounds = [];
+    
+    instances.forEach(instance => {
+        const lat = instance.latitude;
+        const lon = instance.longitude;
+        
+        // Create marker with custom icon based on online status
+        const isOnline = instance.last_report_age_seconds < 1800;
+        const iconColor = isOnline ? 'green' : 'red';
+        
+        // Create custom icon HTML
+        const iconHtml = `
+            <div style="
+                background-color: ${iconColor};
+                width: 24px;
+                height: 24px;
+                border-radius: 50% 50% 50% 0;
+                transform: rotate(-45deg);
+                border: 2px solid white;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            "></div>
+        `;
+        
+        const customIcon = L.divIcon({
+            html: iconHtml,
+            className: 'custom-marker',
+            iconSize: [24, 24],
+            iconAnchor: [12, 24],
+            popupAnchor: [0, -24]
+        });
+        
+        const marker = L.marker([lat, lon], { icon: customIcon }).addTo(map);
+        
+        // Create popup content
+        const popupContent = `
+            <div style="font-family: sans-serif; min-width: 200px;">
+                <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">${instance.callsign}</h3>
+                <p style="margin: 0 0 4px 0; font-size: 0.9em;">${instance.name}</p>
+                <p style="margin: 0; font-size: 0.85em; color: #666;">${instance.location}</p>
+                <p style="margin: 8px 0 0 0; font-size: 0.85em;">
+                    <strong>Status:</strong> <span style="color: ${isOnline ? 'green' : 'red'};">${isOnline ? 'Online' : 'Offline'}</span>
+                </p>
+                <a href="${instance.public_url}" target="_blank" style="
+                    display: inline-block;
+                    margin-top: 8px;
+                    padding: 6px 12px;
+                    background: #3b82f6;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 4px;
+                    font-size: 0.85em;
+                ">Connect</a>
+            </div>
+        `;
+        
+        marker.bindPopup(popupContent);
+        
+        // Bind tooltip with callsign and name
+        marker.bindTooltip(`<strong>${instance.callsign}</strong><br>${instance.name}`, {
+            direction: 'top',
+            offset: [0, -20]
+        });
+        
+        markers.push(marker);
+        bounds.push([lat, lon]);
+    });
+    
+    // Fit map to show all markers
+    if (bounds.length > 0) {
+        map.fitBounds(bounds, { padding: [50, 50] });
+    }
+}
+
 async function loadAndDisplayInstances() {
     const statusEl = document.getElementById('status');
     const containerEl = document.getElementById('instances-container');
@@ -212,6 +314,9 @@ async function loadAndDisplayInstances() {
         ).join('');
         
         containerEl.innerHTML = cards;
+        
+        // Update the map with instance locations
+        updateMap(instances);
         
         statusEl.textContent = `${instances.length} instance${instances.length !== 1 ? 's' : ''} found • Last updated: ${new Date().toLocaleTimeString()}`;
         statusEl.className = 'status-bar success';

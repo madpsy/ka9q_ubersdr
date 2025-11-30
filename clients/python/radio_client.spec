@@ -6,14 +6,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=[
-        'PIL._tkinter_finder',
-        'omnirig_process',
-        'omnirig_process_client',
-        'win32com.client',
-        'win32com.client.gencache',
-        'pythoncom'
-    ],
+    hiddenimports=['PIL._tkinter_finder'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

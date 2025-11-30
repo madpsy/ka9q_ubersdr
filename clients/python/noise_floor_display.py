@@ -11,11 +11,39 @@ from datetime import datetime
 import threading
 import time
 from typing import Optional, Dict
+import re
 import matplotlib
 matplotlib.use('TkAgg')
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import numpy as np
+
+
+def parse_timestamp(timestamp_str: str) -> datetime:
+    """Parse timestamp string, handling nanosecond precision.
+    
+    Python's fromisoformat() doesn't handle nanoseconds well on Windows,
+    so we truncate to microseconds before parsing.
+    
+    Args:
+        timestamp_str: ISO format timestamp string
+        
+    Returns:
+        datetime object
+    """
+    # Remove 'Z' and replace with '+00:00' for UTC
+    timestamp_str = timestamp_str.replace('Z', '+00:00')
+    
+    # Handle nanosecond precision by truncating to microseconds
+    # Match pattern like: 2024-01-01T12:00:00.123456789+00:00
+    match = re.match(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d+)([\+\-]\d{2}:\d{2})', timestamp_str)
+    if match:
+        base, fractional, tz = match.groups()
+        # Truncate fractional seconds to 6 digits (microseconds)
+        fractional = fractional[:6].ljust(6, '0')
+        timestamp_str = f"{base}.{fractional}{tz}"
+    
+    return datetime.fromisoformat(timestamp_str)
 
 
 class NoiseFloorDisplay:
@@ -235,9 +263,9 @@ class NoiseFloorDisplay:
         timestamp = data.get('timestamp', '')
         if timestamp:
             try:
-                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                dt = parse_timestamp(timestamp)
                 time_str = dt.strftime('%H:%M:%S UTC')
-            except:
+            except Exception as e:
                 time_str = 'Unknown'
         else:
             time_str = 'Unknown'
@@ -419,10 +447,10 @@ class NoiseFloorDisplay:
                         timestamp = data.get('timestamp', '')
                         if timestamp:
                             try:
-                                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                                dt = parse_timestamp(timestamp)
                                 time_str = dt.strftime('%H:%M:%S UTC')
                                 label.config(text=f"Updated: {time_str}")
-                            except:
+                            except Exception as e:
                                 pass
                         break
                 break
@@ -549,10 +577,10 @@ class NoiseFloorDisplay:
             for entry in data:
                 if 'timestamp' in entry and 'p5_db' in entry:
                     try:
-                        dt = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
+                        dt = parse_timestamp(entry['timestamp'])
                         timestamps.append(dt)
                         p5_values.append(entry['p5_db'])
-                    except:
+                    except Exception as e:
                         continue
 
             if not timestamps or not p5_values:
@@ -577,8 +605,18 @@ class NoiseFloorDisplay:
             p5_values: List of P5 dB values
         """
         try:
-            # Get system background color
-            bg_color = self.window.cget('bg')
+            # Get system background color and convert to RGB for cross-platform compatibility
+            try:
+                bg_color = self.window.cget('bg')
+                # Convert system color name to RGB (handles Windows system colors like 'SystemButtonFace')
+                rgb = self.window.winfo_rgb(bg_color)
+                # Convert from 16-bit RGB (0-65535) to 8-bit (0-255) and format as hex
+                bg_color = '#{:02x}{:02x}{:02x}'.format(
+                    rgb[0] >> 8, rgb[1] >> 8, rgb[2] >> 8
+                )
+            except:
+                # Fallback to a neutral gray if conversion fails
+                bg_color = '#f0f0f0'
 
             # Create figure without axes or labels (smaller height for trend - 2/3 of original)
             fig = Figure(figsize=(3, 0.67), dpi=80, facecolor=bg_color)
@@ -665,8 +703,18 @@ class NoiseFloorDisplay:
             spectrum_data: Dictionary containing FFT data and frequency info
         """
         try:
-            # Get system background color
-            bg_color = self.window.cget('bg')
+            # Get system background color and convert to RGB for cross-platform compatibility
+            try:
+                bg_color = self.window.cget('bg')
+                # Convert system color name to RGB (handles Windows system colors like 'SystemButtonFace')
+                rgb = self.window.winfo_rgb(bg_color)
+                # Convert from 16-bit RGB (0-65535) to 8-bit (0-255) and format as hex
+                bg_color = '#{:02x}{:02x}{:02x}'.format(
+                    rgb[0] >> 8, rgb[1] >> 8, rgb[2] >> 8
+                )
+            except:
+                # Fallback to a neutral gray if conversion fails
+                bg_color = '#f0f0f0'
 
             # Extract data and frequency information
             fft_data = spectrum_data['data']

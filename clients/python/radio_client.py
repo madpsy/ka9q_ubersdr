@@ -1708,4 +1708,9 @@ Examples:
 
 
 if __name__ == '__main__':
+    # CRITICAL: freeze_support() must be the FIRST thing called in __main__
+    # It detects if this is a spawned child process in a frozen executable and exits
+    import multiprocessing
+    multiprocessing.freeze_support()
+    
     main()

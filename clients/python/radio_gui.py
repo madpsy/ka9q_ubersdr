@@ -160,10 +160,12 @@ except ImportError:
 OMNIRIG_AVAILABLE = False
 if platform.system() == 'Windows':
     try:
-        from omnirig_control import ThreadedOmniRigClient
-        OMNIRIG_AVAILABLE = True
-    except ImportError:
-        print("Warning: OmniRig module not available (install pywin32)")
+        from omnirig_process_client import OmniRigProcessClient as ThreadedOmniRigClient, OMNIRIG_AVAILABLE
+        if not OMNIRIG_AVAILABLE:
+            print("Warning: OmniRig module not available (install pywin32)")
+    except ImportError as e:
+        print(f"Warning: OmniRig module not available: {e}")
+        OMNIRIG_AVAILABLE = False
 
 
 class RadioGUI:
@@ -5241,6 +5243,11 @@ def main(config=None):
 
 
 if __name__ == '__main__':
+    # CRITICAL: freeze_support() must be the FIRST thing called in __main__
+    # It detects if this is a spawned child process in a frozen executable and exits
+    import multiprocessing
+    multiprocessing.freeze_support()
+    
     import argparse
 
     parser = argparse.ArgumentParser(description='ka9q_ubersdr Radio GUI Client')
@@ -5278,4 +5285,5 @@ if __name__ == '__main__':
         config['rigctl_port'] = args.rigctl_port or 4532
         config['rigctl_sync'] = args.rigctl_sync
 
+    # Call main() inside the guard to prevent execution during module import
     main(config)

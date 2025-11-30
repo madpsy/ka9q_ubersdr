@@ -161,8 +161,9 @@ class OmniRigController:
         global _controller_instance
         
         try:
-            # Initialize COM for this thread in apartment threaded mode
-            pythoncom.CoInitialize()
+            # Don't call CoInitialize() - we're in the Tkinter main thread
+            # which already handles Windows messages properly.
+            # Calling CoInitialize() here can interfere with other threads' GIL management.
             
             # Set global controller reference for event handlers
             _controller_instance = self
@@ -223,14 +224,12 @@ class OmniRigController:
             if self.rig.Status == self.ST_NOTCONFIGURED:
                 if self.error_callback:
                     self.error_callback("Rig not configured in OmniRig")
-                pythoncom.CoUninitialize()
                 return False
             
             # Check if rig is online
             if self.rig.Status != self.ST_ONLINE:
                 if self.error_callback:
                     self.error_callback(f"Rig not online (status: {self.rig.Status})")
-                pythoncom.CoUninitialize()
                 return False
             
             self.connected = True
@@ -246,10 +245,6 @@ class OmniRigController:
         except Exception as e:
             if self.error_callback:
                 self.error_callback(f"Failed to connect to OmniRig: {e}")
-            try:
-                pythoncom.CoUninitialize()
-            except:
-                pass
             return False
     
     def disconnect(self):
@@ -263,10 +258,7 @@ class OmniRigController:
         self.rig = None
         self.omnirig = None
         
-        try:
-            pythoncom.CoUninitialize()
-        except:
-            pass
+        # Don't call CoUninitialize() since we didn't call CoInitialize()
     
     def poll(self):
         """Poll for COM events and process queued commands.

@@ -34,26 +34,26 @@ type CWSkimmerSpot struct {
 
 // CWSkimmerClient manages connection to a CW Skimmer server
 type CWSkimmerClient struct {
-	config            *CWSkimmerConfig
-	conn              net.Conn
-	scanner           *bufio.Scanner
-	mu                sync.RWMutex
-	connected         bool
-	stopChan          chan struct{}
-	keepaliveDone     chan struct{} // Signal to stop keepalive goroutine
-	lastActivityTime     time.Time // For monitoring only
-	lastSpotTime         time.Time // Time when last actual CW spot was received
-	lastPingTime         time.Time // Time when last ping was sent
-	lastPingResponseTime time.Time // Time when last ping response was received
-	spotHandlers      []func(CWSkimmerSpot)
-	messageHandlers   []func(string)
-	spotsLogger       *CWSkimmerSpotsLogger
-	pskReporter       *PSKReporter
-	ctyDatabase       *CTYDatabase
-	receiverLat       float64
-	receiverLon       float64
-	prometheusMetrics *PrometheusMetrics
-	metrics           *CWSkimmerMetrics
+	config               *CWSkimmerConfig
+	conn                 net.Conn
+	scanner              *bufio.Scanner
+	mu                   sync.RWMutex
+	connected            bool
+	stopChan             chan struct{}
+	keepaliveDone        chan struct{} // Signal to stop keepalive goroutine
+	lastActivityTime     time.Time     // For monitoring only
+	lastSpotTime         time.Time     // Time when last actual CW spot was received
+	lastPingTime         time.Time     // Time when last ping was sent
+	lastPingResponseTime time.Time     // Time when last ping response was received
+	spotHandlers         []func(CWSkimmerSpot)
+	messageHandlers      []func(string)
+	spotsLogger          *CWSkimmerSpotsLogger
+	pskReporter          *PSKReporter
+	ctyDatabase          *CTYDatabase
+	receiverLat          float64
+	receiverLon          float64
+	prometheusMetrics    *PrometheusMetrics
+	metrics              *CWSkimmerMetrics
 }
 
 // NewCWSkimmerClient creates a new CW Skimmer client
@@ -211,16 +211,21 @@ func (c *CWSkimmerClient) connect() error {
 // disconnect closes the connection and stops keepalive
 func (c *CWSkimmerClient) disconnect() {
 	log.Println("CW Skimmer: disconnect() called")
-	
-	// First, get the connection reference and close it immediately
-	// This MUST happen before acquiring the lock to ensure any blocked
-	// readLine() call fails immediately with a closed connection error
+
+	// First, get the connection reference
 	c.mu.RLock()
 	conn := c.conn
 	c.mu.RUnlock()
 
-	// Close the connection first - this will cause any blocked reads to fail immediately
+	// Set an immediate read deadline to unblock any pending reads
+	// This MUST happen before closing to ensure scanner.Scan() returns immediately
 	if conn != nil {
+		log.Println("CW Skimmer: Setting immediate read deadline to unblock pending reads")
+		conn.SetReadDeadline(time.Now()) // Deadline in the past = immediate timeout
+
+		// Give the blocked read a moment to detect the deadline
+		time.Sleep(10 * time.Millisecond)
+
 		log.Println("CW Skimmer: Closing connection socket")
 		conn.Close()
 	}

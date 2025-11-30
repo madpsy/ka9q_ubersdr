@@ -17,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	timezoneLookup "github.com/evanoberholster/timezoneLookup/v2"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -35,8 +34,6 @@ type Instance struct {
 	Longitude      float64   `json:"longitude"`
 	Altitude       int       `json:"altitude"`
 	Maidenhead     string    `json:"maidenhead"` // 6-character Maidenhead locator
-	Timezone       string    `json:"timezone"`   // IANA timezone name (e.g., "Europe/London")
-	LocalTime      string    `json:"local_time"` // Current local time in RFC3339 format
 	PublicURL      string    `json:"public_url"`
 	Version        string    `json:"version"`
 	Host           string    `json:"host,omitempty"`
@@ -96,7 +93,6 @@ type Collector struct {
 	config                *Config
 	activeNoiseFloorFetch map[string]bool // Track active noise floor fetches by public_uuid
 	noiseFloorMutex       sync.Mutex      // Protect the activeNoiseFloorFetch map
-	tzCache               *timezoneLookup.Timezonecache // Timezone cache
 }
 
 func main() {
@@ -140,17 +136,10 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize timezone cache
-	// Note: The timezone.data file needs to be present or downloaded
-	// For now, we'll initialize an empty cache and timezone info won't be available
-	// until the data file is provided
-	var tzCache timezoneLookup.Timezonecache
-	
 	collector := &Collector{
 		db:                    db,
 		config:                config,
 		activeNoiseFloorFetch: make(map[string]bool),
-		tzCache:               &tzCache,
 	}
 
 	// Setup HTTP routes with logging middleware
@@ -577,19 +566,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 
 		// Calculate Maidenhead locator
 		inst.Maidenhead = latLonToMaidenhead(inst.Latitude, inst.Longitude)
-
-		// Get timezone and local time
-		if c.tzCache != nil {
-			result, err := c.tzCache.Search(inst.Latitude, inst.Longitude)
-			if err == nil && result.Timezone != "" {
-				inst.Timezone = result.Timezone
-				loc, err := time.LoadLocation(result.Timezone)
-				if err == nil {
-					inst.LocalTime = now.In(loc).Format(time.RFC3339)
-				}
-			}
-		}
-
+		
 		instances = append(instances, inst)
 	}
 
@@ -653,18 +630,6 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 
 	// Calculate Maidenhead locator
 	inst.Maidenhead = latLonToMaidenhead(inst.Latitude, inst.Longitude)
-
-	// Get timezone and local time
-	if c.tzCache != nil {
-		result, err := c.tzCache.Search(inst.Latitude, inst.Longitude)
-		if err == nil && result.Timezone != "" {
-			inst.Timezone = result.Timezone
-			loc, err := time.LoadLocation(result.Timezone)
-			if err == nil {
-				inst.LocalTime = now.In(loc).Format(time.RFC3339)
-			}
-		}
-	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

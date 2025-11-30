@@ -210,6 +210,19 @@ func (c *CWSkimmerClient) connect() error {
 
 // disconnect closes the connection and stops keepalive
 func (c *CWSkimmerClient) disconnect() {
+	// First, get the connection reference and close it immediately
+	// This MUST happen before acquiring the lock to ensure any blocked
+	// readLine() call fails immediately with a closed connection error
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+
+	// Close the connection first - this will cause any blocked reads to fail immediately
+	if conn != nil {
+		conn.Close()
+	}
+
+	// Now acquire the write lock and clean up state
 	c.mu.Lock()
 	c.connected = false
 
@@ -219,10 +232,8 @@ func (c *CWSkimmerClient) disconnect() {
 		c.keepaliveDone = nil
 	}
 
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
-	}
+	// Clear the connection reference (already closed above)
+	c.conn = nil
 	c.scanner = nil
 	c.mu.Unlock()
 

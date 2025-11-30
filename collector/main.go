@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -87,8 +88,10 @@ type Config struct {
 
 // Collector manages the instance collection service
 type Collector struct {
-	db     *sql.DB
-	config *Config
+	db                    *sql.DB
+	config                *Config
+	activeNoiseFloorFetch map[string]bool // Track active noise floor fetches by public_uuid
+	noiseFloorMutex       sync.Mutex      // Protect the activeNoiseFloorFetch map
 }
 
 func main() {
@@ -133,8 +136,9 @@ func main() {
 	defer db.Close()
 
 	collector := &Collector{
-		db:     db,
-		config: config,
+		db:                    db,
+		config:                config,
+		activeNoiseFloorFetch: make(map[string]bool),
 	}
 
 	// Setup HTTP routes with logging middleware
@@ -435,8 +439,17 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 	}
 
 	// If noise floor is enabled, fetch and store the latest data
+	// Only start a new fetch if one isn't already in progress
 	if update.NoiseFloor {
-		go c.fetchAndStoreNoiseFloor(publicUUID, update.Host, update.Port, update.TLS)
+		c.noiseFloorMutex.Lock()
+		if !c.activeNoiseFloorFetch[publicUUID] {
+			c.activeNoiseFloorFetch[publicUUID] = true
+			c.noiseFloorMutex.Unlock()
+			go c.fetchAndStoreNoiseFloor(publicUUID, update.Host, update.Port, update.TLS)
+		} else {
+			c.noiseFloorMutex.Unlock()
+			log.Printf("Noise floor fetch already in progress for %s, skipping", publicUUID)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -727,6 +740,13 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 // fetchAndStoreNoiseFloor fetches noise floor data from an instance and stores it
 // Retries up to 3 times with 30 second delays between attempts
 func (c *Collector) fetchAndStoreNoiseFloor(publicUUID, host string, port int, useTLS bool) {
+	// Ensure we clear the active fetch flag when done
+	defer func() {
+		c.noiseFloorMutex.Lock()
+		delete(c.activeNoiseFloorFetch, publicUUID)
+		c.noiseFloorMutex.Unlock()
+	}()
+
 	// Skip if host or port is invalid
 	if host == "" || port == 0 {
 		return

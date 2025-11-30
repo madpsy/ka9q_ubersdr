@@ -333,6 +333,9 @@ class RadioGUI:
         # Don't fetch bookmarks/bands on startup - they will be fetched after connection
         # (removed lines 290-294)
 
+        # Apply saved audio settings after UI is ready
+        self.root.after(50, self.apply_saved_audio_settings)
+
         # Auto-connect if requested (after UI is ready)
         if self.config.get('auto_connect', False):
             self.root.after(100, self.connect)  # Delay slightly to ensure UI is fully initialized
@@ -352,7 +355,7 @@ class RadioGUI:
             return os.path.expanduser("~/.ubersdr_servers.json")
     
     def load_servers(self):
-        """Load saved server configurations from file."""
+        """Load saved server configurations and audio settings from file."""
         if not os.path.exists(self.config_file):
             return
         
@@ -360,23 +363,77 @@ class RadioGUI:
             with open(self.config_file, 'r') as f:
                 data = json.load(f)
                 self.servers = data.get('servers', [])
+                
+                # Load audio settings if they exist
+                audio_settings = data.get('audio_settings', {})
+                if audio_settings:
+                    # Store for later use (after UI is created)
+                    self._saved_audio_settings = audio_settings
+                
                 # Only log if status_text exists (after UI is created)
                 if hasattr(self, 'status_text'):
                     self.log_status(f"Loaded {len(self.servers)} saved server(s)")
         except Exception as e:
             print(f"Failed to load server configurations: {e}")
             self.servers = []
+            self._saved_audio_settings = {}
     
     def save_servers(self):
-        """Save server configurations to file."""
+        """Save server configurations and audio settings to file."""
         try:
-            data = {'servers': self.servers}
+            # Get current audio settings
+            audio_settings = {
+                'device': self.device_var.get(),
+                'volume': self.volume_var.get(),
+                'channel_left': self.channel_left_var.get(),
+                'channel_right': self.channel_right_var.get()
+            }
+            
+            data = {
+                'servers': self.servers,
+                'audio_settings': audio_settings
+            }
+            
             with open(self.config_file, 'w') as f:
                 json.dump(data, f, indent=2)
-            self.log_status(f"Saved {len(self.servers)} server configuration(s)")
+            # Only log when explicitly saving servers (not during auto-save)
+            if hasattr(self, '_explicit_server_save') and self._explicit_server_save:
+                self.log_status(f"Saved {len(self.servers)} server configuration(s)")
+                self._explicit_server_save = False
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save server configurations: {e}")
-            self.log_status(f"ERROR: Failed to save servers - {e}")
+            messagebox.showerror("Error", f"Failed to save configurations: {e}")
+            self.log_status(f"ERROR: Failed to save configurations - {e}")
+    
+    def apply_saved_audio_settings(self):
+        """Apply saved audio settings to UI after it's created."""
+        if not hasattr(self, '_saved_audio_settings'):
+            return
+        
+        settings = self._saved_audio_settings
+        
+        # Apply device selection (silently)
+        if 'device' in settings:
+            device = settings['device']
+            # Check if device exists in current device list
+            if device in self.device_combo['values']:
+                self.device_var.set(device)
+        
+        # Apply volume (silently)
+        if 'volume' in settings:
+            volume = settings['volume']
+            self.volume_var.set(volume)
+            self.volume_label.config(text=f"{volume}%")
+        
+        # Apply channel selection (silently)
+        if 'channel_left' in settings:
+            self.channel_left_var.set(settings['channel_left'])
+        if 'channel_right' in settings:
+            self.channel_right_var.set(settings['channel_right'])
+    
+    def save_audio_settings(self):
+        """Save audio settings automatically (called when settings change)."""
+        # Use the existing save_servers method which now includes audio settings
+        self.save_servers()
     
     def add_current_server(self):
         """Add current server configuration to saved servers."""
@@ -418,6 +475,7 @@ class RadioGUI:
                         'port': port,
                         'tls': tls_enabled
                     }
+                    self._explicit_server_save = True
                     self.save_servers()
                     self.populate_server_dropdown()
                     messagebox.showinfo("Success", f"Server '{name}' updated")
@@ -430,6 +488,7 @@ class RadioGUI:
             'port': port,
             'tls': tls_enabled
         })
+        self._explicit_server_save = True
         self.save_servers()
         self.populate_server_dropdown()
         messagebox.showinfo("Success", f"Server '{name}' saved")
@@ -974,6 +1033,7 @@ class RadioGUI:
         self.device_combo = ttk.Combobox(audio_frame, textvariable=self.device_var,
                                         state='readonly', width=30)
         self.device_combo.grid(row=0, column=1, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 5))
+        self.device_combo.bind('<<ComboboxSelected>>', lambda e: self.on_device_changed())
 
         # Create a frame to hold refresh button and "All" checkbox together
         refresh_frame = ttk.Frame(audio_frame)
@@ -2913,6 +2973,9 @@ class RadioGUI:
             # Convert percentage (0-100) to gain (0.0-2.0)
             # 100% = 1.0 gain, 200% = 2.0 gain
             self.client.volume = volume / 100.0
+        
+        # Auto-save volume setting
+        self.save_audio_settings()
 
     def update_channels(self):
         """Update audio channel routing (Left/Right)."""
@@ -2935,6 +2998,14 @@ class RadioGUI:
             self.log_status(f"Audio output: {' + '.join(channels)}")
         else:
             self.log_status("Audio output: Muted (no channels selected)")
+        
+        # Auto-save channel settings
+        self.save_audio_settings()
+
+    def on_device_changed(self):
+        """Handle audio device selection change."""
+        # Auto-save device setting (silently)
+        self.save_audio_settings()
 
     def refresh_devices(self):
         """Refresh the list of available audio output devices (PyAudio, PipeWire, or sounddevice)."""
@@ -4758,6 +4829,10 @@ class RadioGUI:
 
                 elif msg_type == "error":
                     self.log_status(f"ERROR: {msg}")
+                elif msg_type == "wasapi_warning":
+                    # WASAPI warning - show popup and log to status
+                    self.log_status(f"WARNING: {msg}")
+                    messagebox.showwarning("Audio Device Warning", msg)
                 elif msg_type == "server_error":
                     # Server error - show alert box AND log to status
                     self.log_status(f"SERVER ERROR: {msg}")

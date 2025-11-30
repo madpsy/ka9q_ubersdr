@@ -736,7 +736,11 @@ class RadioClient:
                                     break
                             
                             if not wasapi_device_found:
-                                print(f"Note: Using non-WASAPI device (WASAPI equivalent not found)", file=sys.stderr)
+                                warning_msg = "Audio latency may be high with non-WASAPI device. Please select a WASAPI device from the output device dropdown for better performance."
+                                print(f"WARNING: {warning_msg}", file=sys.stderr)
+                                # Send warning to GUI if callback is available
+                                if self.status_callback:
+                                    self.status_callback("wasapi_warning", warning_msg)
                 except Exception as e:
                     print(f"Note: Could not configure WASAPI, using default: {e}", file=sys.stderr)
             elif platform.system() == 'Windows' and self.sounddevice_wasapi_checked:

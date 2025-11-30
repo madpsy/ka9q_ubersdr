@@ -9,6 +9,7 @@ import platform
 import threading
 import time
 from typing import Optional, Callable
+import ctypes
 
 # Check if we're on Windows and pywin32 is available
 OMNIRIG_AVAILABLE = False
@@ -22,60 +23,41 @@ if platform.system() == 'Windows':
         pass
 
 
-# Global reference to controller for event handlers
+# Global flag for event handlers (C-level integer, safe without GIL)
+# Using ctypes.c_int for true thread-safety without GIL
+_event_pending = ctypes.c_int(0)
 _controller_instance = None
 
 class OmniRigEvents:
-    """Event handler class for OmniRig COM events."""
+    """Event handler class for OmniRig COM events.
+    
+    CRITICAL: These methods are called by COM without the GIL held.
+    They must do MINIMAL work - just set a C-level flag. All actual processing
+    happens in poll() which runs with the GIL held.
+    """
     
     def OnVisibleChange(self):
         """Called when OmniRig dialog visibility changes."""
-        pass  # Not used in our implementation
+        pass  # Not used
     
     def OnRigTypeChange(self, RigNumber):
         """Called when rig type changes."""
-        # Queue event for processing in message pump thread
-        controller = _controller_instance
-        if controller and RigNumber == controller.rig_number:
-            try:
-                with controller._command_lock:
-                    controller._command_queue.append(('event_rigtype', RigNumber))
-            except:
-                pass
+        global _event_pending
+        _event_pending.value = 1  # C-level assignment, safe without GIL
     
     def OnStatusChange(self, RigNumber):
         """Called when rig status changes."""
-        # Queue event for processing in message pump thread
-        controller = _controller_instance
-        if controller and RigNumber == controller.rig_number:
-            try:
-                with controller._command_lock:
-                    controller._command_queue.append(('event_status', RigNumber))
-            except:
-                pass
+        global _event_pending
+        _event_pending.value = 1  # C-level assignment, safe without GIL
     
     def OnParamsChange(self, RigNumber, Params):
-        """Called when rig parameters change.
-        
-        Args:
-            RigNumber: Which rig changed (1 or 2)
-            Params: Bitmask of changed parameters
-        """
-        # Queue the event for processing in the message pump thread
-        # This avoids GIL issues with COM callbacks
-        controller = _controller_instance
-        if controller is None or RigNumber != controller.rig_number:
-            return
-        
-        try:
-            with controller._command_lock:
-                controller._command_queue.append(('event_params', (RigNumber, Params)))
-        except Exception as e:
-            pass  # Silently ignore if we can't queue
+        """Called when rig parameters change."""
+        global _event_pending
+        _event_pending.value = 1  # C-level assignment, safe without GIL
     
     def OnCustomReply(self, RigNumber, Command, Reply):
         """Called when custom command receives reply."""
-        pass  # Not used in our implementation
+        pass  # Not used
 
 
 class OmniRigController:
@@ -289,9 +271,11 @@ class OmniRigController:
     def poll(self):
         """Poll for COM events and process queued commands.
         
-        This must be called regularly (e.g., every 50-100ms) from the main thread
+        This must be called regularly (e.g., every 20ms) from the main thread
         to process COM events and execute queued commands.
         """
+        global _event_pending
+        
         if not self.connected:
             return
         
@@ -299,22 +283,58 @@ class OmniRigController:
             # Pump COM messages to process events
             pythoncom.PumpWaitingMessages()
             
+            # Check if any events occurred (C-level flag set by COM callbacks)
+            if _event_pending.value:
+                _event_pending.value = 0  # Clear flag
+                # Read current state and check for changes
+                self._check_for_changes()
+            
             # Process any queued commands
             self._process_command_queue()
         except Exception as e:
             if self.error_callback:
                 self.error_callback(f"Poll error: {e}")
     
+    def _check_for_changes(self):
+        """Check for parameter changes by polling current state.
+        
+        This runs with the GIL held, called from poll() after COM events fire.
+        """
+        try:
+            # Check frequency
+            freq = self._get_frequency_internal()
+            if freq is not None and freq != self._last_freq:
+                self._last_freq = freq
+                if self.frequency_callback:
+                    self.frequency_callback(freq)
+            
+            # Check mode
+            mode = self._get_mode_internal()
+            if mode is not None and mode != self._last_mode:
+                self._last_mode = mode
+                if self.mode_callback:
+                    self.mode_callback(mode)
+            
+            # Check PTT
+            ptt = self._get_ptt_internal()
+            if ptt is not None and ptt != self._last_ptt:
+                self._last_ptt = ptt
+                if self.ptt_callback:
+                    self.ptt_callback(ptt)
+        except Exception as e:
+            if self.error_callback:
+                self.error_callback(f"Change detection error: {e}")
+    
     def _process_command_queue(self):
-        """Process queued commands and events (runs in pump thread)."""
+        """Process queued commands (runs with GIL held)."""
         commands_to_process = []
         
-        # Get all pending commands/events
+        # Get all pending commands
         with self._command_lock:
             while self._command_queue:
                 commands_to_process.append(self._command_queue.pop(0))
         
-        # Process commands/events outside the lock
+        # Process commands outside the lock
         for item in commands_to_process:
             try:
                 cmd_type = item[0]
@@ -323,76 +343,9 @@ class OmniRigController:
                     self._set_frequency_internal(item[1])
                 elif cmd_type == 'mode':
                     self._set_mode_internal(item[1])
-                elif cmd_type == 'event_params':
-                    self._handle_params_change(item[1][0], item[1][1])
-                elif cmd_type == 'event_status':
-                    self._handle_status_change(item[1])
-                elif cmd_type == 'event_rigtype':
-                    self._handle_rigtype_change(item[1])
             except Exception as e:
                 if self.error_callback:
                     self.error_callback(f"Command error ({cmd_type}): {e}")
-    
-    def _handle_params_change(self, RigNumber, Params):
-        """Handle parameter change event (runs in pump thread with GIL)."""
-        try:
-            # Check which parameters changed using bitmask
-            if Params & self.PM_FREQ:
-                # Frequency changed
-                freq = self._get_frequency_internal()
-                if freq is not None and freq != self._last_freq:
-                    self._last_freq = freq
-                    if self.frequency_callback:
-                        self.frequency_callback(freq)
-            
-            # Check for mode changes (any mode bit)
-            mode_bits = (self.PM_CW_U | self.PM_CW_L |
-                        self.PM_SSB_U | self.PM_SSB_L |
-                        self.PM_DIG_U | self.PM_DIG_L |
-                        self.PM_AM | self.PM_FM)
-            
-            if Params & mode_bits:
-                # Mode changed
-                mode = self._get_mode_internal()
-                if mode is not None and mode != self._last_mode:
-                    self._last_mode = mode
-                    if self.mode_callback:
-                        self.mode_callback(mode)
-            
-            # Check for TX/RX changes
-            if Params & (self.PM_TX | self.PM_RX):
-                ptt = self._get_ptt_internal()
-                if ptt is not None and ptt != self._last_ptt:
-                    self._last_ptt = ptt
-                    if self.ptt_callback:
-                        self.ptt_callback(ptt)
-        except Exception as e:
-            if self.error_callback:
-                self.error_callback(f"ParamsChange error: {e}")
-    
-    def _handle_status_change(self, RigNumber):
-        """Handle status change event (runs in pump thread with GIL)."""
-        try:
-            status = self.rig.Status
-            if status != self.ST_ONLINE:
-                self.connected = False
-                if self.error_callback:
-                    self.error_callback(f"Rig status changed: {status}")
-            else:
-                self.connected = True
-        except Exception as e:
-            if self.error_callback:
-                self.error_callback(f"StatusChange error: {e}")
-    
-    def _handle_rigtype_change(self, RigNumber):
-        """Handle rig type change event (runs in pump thread with GIL)."""
-        try:
-            rig_type = self.rig.RigType
-            if self.error_callback:
-                self.error_callback(f"Rig type: {rig_type}")
-        except Exception as e:
-            if self.error_callback:
-                self.error_callback(f"RigTypeChange error: {e}")
     
     def _get_frequency_internal(self) -> Optional[int]:
         """Get frequency from rig (internal)."""

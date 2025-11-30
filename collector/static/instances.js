@@ -199,9 +199,16 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
                 </div>
             </div>
             
-            <a href="${instance.public_url}" target="_blank" class="instance-link">
-                🔗 Connect to SDR
-            </a>
+            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                <a href="${instance.public_url}" target="_blank" class="instance-link" style="margin-bottom: 0;">
+                    🔗 Connect to SDR
+                </a>
+                ${instance.digital_decodes ? `
+                <a href="${instance.public_url}/digitalspots_map.html" target="_blank" class="instance-link" style="margin-bottom: 0; background: #10b981;">
+                    🌍 Live Map
+                </a>
+                ` : ''}
+            </div>
             
             ${bandSection}
         </div>

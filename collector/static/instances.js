@@ -120,6 +120,12 @@ function createInstanceCard(instance, noiseFloorData) {
                     <span class="instance-info-label">⛰️ Altitude:</span>
                     <span class="instance-info-value">${instance.altitude}m</span>
                 </div>
+                ${instance.timezone && instance.local_time ? `
+                <div class="instance-info-row">
+                    <span class="instance-info-label">🕐 Local Time:</span>
+                    <span class="instance-info-value">${new Date(instance.local_time).toLocaleTimeString()} (${instance.timezone})</span>
+                </div>
+                ` : ''}
                 <div class="instance-info-row">
                     <span class="instance-info-label">🔧 Version:</span>
                     <span class="instance-info-value">${instance.version}</span>

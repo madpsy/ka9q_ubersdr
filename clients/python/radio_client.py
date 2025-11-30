@@ -322,7 +322,9 @@ class RadioClient:
         # Resample to 48 kHz for better compatibility across all platforms
         # Most audio hardware doesn't support 12 kHz natively
         # Use samplerate library for stateful, click-free resampling
-        self.needs_resampling = (output_mode == 'sounddevice' and SAMPLERATE_AVAILABLE)
+        # IMPORTANT: Never resample IQ modes - they need exact sample rates
+        is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+        self.needs_resampling = (output_mode == 'sounddevice' and SAMPLERATE_AVAILABLE and not is_iq_mode)
         self.resampler_left = None  # Stateful resampler for left channel
         self.resampler_right = None  # Stateful resampler for right channel
 
@@ -705,28 +707,51 @@ class RadioClient:
                             break
 
                     if wasapi_hostapi is not None:
-                        # If device was specified, find its WASAPI equivalent
-                        if self.sounddevice_device_index is not None:
-                            # Get the device name to search for WASAPI version
-                            orig_device = sd.query_devices(self.sounddevice_device_index)
-                            device_name = orig_device['name']
-
-                            # Find WASAPI device with same name
+                        # Determine which device to check
+                        device_to_check = self.sounddevice_device_index
+                        if device_to_check is None:
+                            # Use default output device
+                            device_to_check = sd.default.device[1]
+                        
+                        # Get device info
+                        device = sd.query_devices(device_to_check)
+                        device_name = device['name']
+                        current_hostapi = device['hostapi']
+                        
+                        # Only apply WASAPI settings if device is already WASAPI or we can find WASAPI equivalent
+                        if current_hostapi == wasapi_hostapi:
+                            # Device is already WASAPI, use WASAPI settings
+                            extra_settings = sd.WasapiSettings(exclusive=False)
+                            print("Using WASAPI (Windows Audio Session API) for better compatibility", file=sys.stderr)
+                        else:
+                            # Try to find WASAPI device with same name
+                            wasapi_device_found = False
                             for i, dev in enumerate(sd.query_devices()):
                                 if dev['hostapi'] == wasapi_hostapi and dev['name'] == device_name and dev['max_output_channels'] > 0:
                                     self.sounddevice_device_index = i
+                                    extra_settings = sd.WasapiSettings(exclusive=False)
                                     print(f"Switched to WASAPI device: [{i}] {device_name}", file=sys.stderr)
+                                    print("Using WASAPI (Windows Audio Session API) for better compatibility", file=sys.stderr)
+                                    wasapi_device_found = True
                                     break
-
-                        # Use WASAPI-specific settings for lower latency
-                        extra_settings = sd.WasapiSettings(exclusive=False)
-                        print("Using WASAPI (Windows Audio Session API) for better compatibility", file=sys.stderr)
+                            
+                            if not wasapi_device_found:
+                                print(f"Note: Using non-WASAPI device (WASAPI equivalent not found)", file=sys.stderr)
                 except Exception as e:
                     print(f"Note: Could not configure WASAPI, using default: {e}", file=sys.stderr)
             elif platform.system() == 'Windows' and self.sounddevice_wasapi_checked:
-                # Already checked, just use WASAPI settings if available
+                # Already checked, only use WASAPI settings if device is confirmed WASAPI
                 try:
-                    extra_settings = sd.WasapiSettings(exclusive=False)
+                    device_to_check = self.sounddevice_device_index
+                    if device_to_check is None:
+                        device_to_check = sd.default.device[1]
+                    
+                    device = sd.query_devices(device_to_check)
+                    host_api_name = sd.query_hostapis(device['hostapi'])['name']
+                    
+                    # Only apply WASAPI settings if device is actually WASAPI
+                    if 'WASAPI' in host_api_name:
+                        extra_settings = sd.WasapiSettings(exclusive=False)
                 except:
                     pass
 

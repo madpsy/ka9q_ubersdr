@@ -4083,7 +4083,12 @@ class RadioGUI:
         """Auto-initialize MIDI controller on startup if config exists."""
         try:
             import os
-            config_file = os.path.expanduser("~/.ubersdr_midi_mappings.json")
+            # Use platform-appropriate config path (same as MIDIController)
+            if platform.system() == 'Windows':
+                config_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'ubersdr')
+                config_file = os.path.join(config_dir, 'midi_mappings.json')
+            else:
+                config_file = os.path.expanduser("~/.ubersdr_midi_mappings.json")
 
             # Only auto-init if config file exists
             if os.path.exists(config_file):

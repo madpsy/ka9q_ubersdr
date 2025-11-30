@@ -2695,10 +2695,13 @@ class RadioGUI:
         self.rigctl_last_mode = mode
     
     def on_radio_control_ptt_changed(self, ptt_state: bool):
-        """Callback when radio control PTT changes (called from worker thread)."""
+        """Callback when radio control PTT changes (called from worker thread).
+        
+        PTT detection works in both sync directions for audio muting.
+        """
         # Check if PTT state actually changed
         if ptt_state != self.radio_control_last_ptt:
-            # Schedule GUI update in main thread
+            # Schedule GUI update in main thread (always, regardless of sync direction)
             self.root.after(0, lambda: self._apply_radio_control_ptt(ptt_state))
         
         self.radio_control_last_ptt = ptt_state
@@ -2766,22 +2769,17 @@ class RadioGUI:
     def on_radio_sync_direction_changed(self):
         """Handle sync direction change - restart sync if active."""
         if self.radio_control_sync_enabled:
-            # Stop current sync mode
-            self.stop_radio_control_sync()
-            # Re-enable sync flag
-            self.radio_control_sync_enabled = True
-            # Start sync with new direction
+            # Don't stop polling - just change direction
             direction = self.radio_sync_direction_var.get()
             if direction == "SDR→Rig":
                 self.log_status("Radio sync direction changed - radio will follow SDR frequency")
+                # Sync current SDR state to radio immediately
                 self.sync_frequency_to_radio_control()
             else:  # Rig→SDR
                 self.log_status("Radio sync direction changed - SDR will follow radio frequency")
                 # Initialize last known values from cache
                 self.radio_control_last_freq = self.radio_control.get_frequency()
                 self.radio_control_last_mode = self.radio_control.get_mode()
-                # Start polling immediately
-                self.poll_radio_control_frequency()
     
     def start_radio_control_sync(self):
         """Start syncing frequency with radio control."""
@@ -2798,16 +2796,14 @@ class RadioGUI:
             self.log_status("Radio sync enabled - radio will follow SDR frequency")
             # Immediately sync current SDR frequency to radio
             self.sync_frequency_to_radio_control()
-            # Always start polling for PTT
-            if not self.radio_control_poll_job:
-                self.poll_radio_control_frequency()
         else:  # Rig→SDR
             self.log_status("Radio sync enabled - SDR will follow radio frequency")
             # Initialize last known values from cache
             self.radio_control_last_freq = self.radio_control.get_frequency()
             self.radio_control_last_mode = self.radio_control.get_mode()
-            # Start polling immediately
-            self.poll_radio_control_frequency()
+        
+        # Note: Polling is already running from connect_radio_control()
+        # No need to start it here
     
     def stop_radio_control_sync(self):
         """Stop syncing frequency with radio control."""
@@ -2815,10 +2811,8 @@ class RadioGUI:
         # Update legacy alias
         self.rigctl_sync_enabled = False
         
-        # Stop polling if active
-        if self.radio_control_poll_job:
-            self.root.after_cancel(self.radio_control_poll_job)
-            self.radio_control_poll_job = None
+        # Don't stop polling - we still need it for PTT detection
+        # Polling continues but frequency/mode sync is disabled
         
         self.log_status("Radio sync disabled")
     

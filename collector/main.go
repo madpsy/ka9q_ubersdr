@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"flag"
@@ -63,6 +65,18 @@ type InstanceUpdate struct {
 	DigitalDecodes bool    `json:"digital_decodes"`
 	NoiseFloor     bool    `json:"noise_floor"`
 	MaxClients     int     `json:"max_clients"`
+}
+
+// InstanceVerificationRequest represents the request to verify an instance
+type InstanceVerificationRequest struct {
+	UUID string `json:"uuid"`
+}
+
+// InstanceVerificationResponse represents the response from instance verification
+type InstanceVerificationResponse struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	TLS  bool   `json:"tls"`
 }
 
 // Config represents the collector configuration
@@ -339,6 +353,13 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Verify instance is publicly accessible by making a callback
+	if !c.verifyInstanceAccessibility(secretUUID, update.Host, update.Port, update.TLS) {
+		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v)", secretUUID, update.Host, update.Port, update.TLS)
+		http.Error(w, "Instance verification failed - not publicly accessible", http.StatusBadRequest)
+		return
+	}
+
 	// Check if instance exists
 	var publicUUID string
 	err := c.db.QueryRow("SELECT public_uuid FROM instances WHERE secret_uuid = ?", secretUUID).Scan(&publicUUID)
@@ -571,4 +592,83 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"version": Version,
 	})
+}
+
+// verifyInstanceAccessibility makes a callback to the instance to verify it's publicly accessible
+func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port int, useTLS bool) bool {
+	// Skip verification if host or port is invalid
+	if host == "" || port == 0 {
+		log.Printf("Skipping verification for instance %s: invalid host/port", secretUUID)
+		return false
+	}
+
+	// Build the callback URL
+	protocol := "http"
+	if useTLS {
+		protocol = "https"
+	}
+
+	callbackURL := fmt.Sprintf("%s://%s:%d/api/instance", protocol, host, port)
+
+	// Create the verification request
+	reqBody := InstanceVerificationRequest{
+		UUID: secretUUID,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		log.Printf("Failed to marshal verification request: %v", err)
+		return false
+	}
+
+	// Create HTTP client with timeout and TLS config
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: false, // Verify TLS certificates
+				MinVersion:         tls.VersionTLS12,
+			},
+		},
+	}
+
+	// Make the POST request
+	req, err := http.NewRequest("POST", callbackURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("Failed to create verification request: %v", err)
+		return false
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", fmt.Sprintf("UberSDR-Collector/%s", Version))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Failed to verify instance %s at %s: %v", secretUUID, callbackURL, err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Instance verification returned status %d for %s", resp.StatusCode, secretUUID)
+		return false
+	}
+
+	// Parse response
+	var verifyResp InstanceVerificationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&verifyResp); err != nil {
+		log.Printf("Failed to decode verification response: %v", err)
+		return false
+	}
+
+	// Verify the response matches what we expect
+	if verifyResp.Host != host || verifyResp.Port != port || verifyResp.TLS != useTLS {
+		log.Printf("Instance verification mismatch for %s: expected host=%s port=%d tls=%v, got host=%s port=%d tls=%v",
+			secretUUID, host, port, useTLS, verifyResp.Host, verifyResp.Port, verifyResp.TLS)
+		return false
+	}
+
+	log.Printf("Instance %s verified successfully at %s", secretUUID, callbackURL)
+	return true
 }

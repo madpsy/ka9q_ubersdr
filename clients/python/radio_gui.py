@@ -4519,6 +4519,11 @@ class RadioGUI:
 
         # Close CW spots window
         if self.cw_spots_window and self.cw_spots_window.winfo_exists():
+            # Close graph window first if it exists
+            if self.cw_spots_display and self.cw_spots_display.graph_window:
+                if self.cw_spots_display.graph_window.window.winfo_exists():
+                    self.cw_spots_display.graph_window.window.destroy()
+                self.cw_spots_display.graph_window = None
             self.cw_spots_window.destroy()
             self.cw_spots_window = None
             self.cw_spots_display = None

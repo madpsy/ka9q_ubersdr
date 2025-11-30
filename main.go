@@ -594,16 +594,6 @@ func main() {
 	}
 	defer spaceWeatherMonitor.Stop()
 
-	// Initialize instance reporter
-	if config.InstanceReporting.Enabled {
-		instanceReporter := NewInstanceReporter(config, cwskimmerConfig, configPath)
-		if err := instanceReporter.Start(); err != nil {
-			log.Printf("Warning: Failed to start instance reporter: %v", err)
-		} else {
-			defer instanceReporter.Stop()
-		}
-	}
-
 	// Start MQTT publisher if enabled (after space weather monitor is initialized)
 	if prometheusMetrics != nil && config.MQTT.Enabled {
 		// Get the context from Prometheus initialization
@@ -924,6 +914,17 @@ func main() {
 	// Start server
 	log.Printf("Server listening on %s", config.Server.Listen)
 	log.Println("Open http://localhost:8080 in your browser")
+	
+	// Initialize instance reporter after HTTP server is listening
+	if config.InstanceReporting.Enabled {
+		instanceReporter := NewInstanceReporter(config, cwskimmerConfig, configPath)
+		if err := instanceReporter.Start(); err != nil {
+			log.Printf("Warning: Failed to start instance reporter: %v", err)
+		} else {
+			defer instanceReporter.Stop()
+		}
+	}
+	
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server error: %v", err)
 	}

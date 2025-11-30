@@ -334,13 +334,19 @@ func (c *CWSkimmerClient) handleConnection() {
 	ctx := c.ctx
 	c.mu.RUnlock()
 
+	// Use a ticker to periodically check context cancellation
+	// This ensures we can exit even if readLine is blocked
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
-		// Check context cancellation first
+		// Check context cancellation periodically
 		select {
 		case <-ctx.Done():
 			log.Println("CW Skimmer: Context cancelled, exiting message handler")
 			return
-		default:
+		case <-ticker.C:
+			// Periodic check - continue to read attempt
 		}
 
 		// Check if we're still connected

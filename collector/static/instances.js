@@ -8,6 +8,9 @@ let map = null;
 let markers = [];
 let terminator = null;
 
+// User location
+let userLocation = null;
+
 // SNR thresholds for band condition classification
 function getConditionClass(snr) {
     if (snr === null || snr === undefined) return 'unknown';
@@ -28,6 +31,49 @@ function getConditionLabel(snr) {
 function formatSNR(snr) {
     if (snr === null || snr === undefined) return 'N/A';
     return `${snr.toFixed(1)} dB`;
+}
+
+// Calculate distance between two coordinates using Haversine formula
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in kilometers
+}
+
+// Request user's geolocation
+async function requestUserLocation() {
+    return new Promise((resolve) => {
+        if (!navigator.geolocation) {
+            console.log('Geolocation is not supported by this browser');
+            resolve(null);
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                userLocation = {
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude
+                };
+                console.log('User location obtained:', userLocation);
+                resolve(userLocation);
+            },
+            (error) => {
+                console.log('Geolocation permission denied or error:', error.message);
+                resolve(null);
+            },
+            {
+                enableHighAccuracy: false,
+                timeout: 5000,
+                maximumAge: 300000 // Cache for 5 minutes
+            }
+        );
+    });
 }
 
 function formatTimestamp(timestamp) {
@@ -58,13 +104,24 @@ function createBandBadge(band, snr) {
     `;
 }
 
-function createInstanceCard(instance, noiseFloorData) {
+function createInstanceCard(instance, noiseFloorData, isClosest = false) {
     const isOnline = instance.last_report_age_seconds < 1800; // 30 minutes
     const features = [];
     
     if (instance.cw_skimmer) features.push('CW Skimmer');
     if (instance.digital_decodes) features.push('Digital');
     if (instance.noise_floor) features.push('Noise Floor');
+    
+    // Add distance info if user location is available
+    let distanceInfo = '';
+    if (userLocation && instance.distance !== undefined) {
+        distanceInfo = `
+            <div class="instance-info-row">
+                <span class="instance-info-label">📏 Distance:</span>
+                <span class="instance-info-value">${instance.distance.toFixed(0)} km</span>
+            </div>
+        `;
+    }
     
     // Parse noise floor data if available
     let bandBadges = '';
@@ -95,13 +152,16 @@ function createInstanceCard(instance, noiseFloorData) {
     ` : '';
     
     return `
-        <div class="instance-card">
+        <div class="instance-card ${isClosest ? 'closest-instance' : ''}">
             <div class="instance-header">
                 <div class="instance-title">
-                    <div class="instance-callsign">${instance.callsign}</div>
+                    <div class="instance-callsign">
+                        ${isClosest ? '⭐ ' : ''}${instance.callsign}
+                    </div>
                     <div class="instance-name">${instance.name}</div>
                 </div>
                 <div class="instance-status">
+                    ${isClosest ? '<span class="status-badge closest">⭐ Closest</span>' : ''}
                     <span class="status-badge ${isOnline ? 'online' : 'offline'}">
                         ${isOnline ? '● Online' : '○ Offline'}
                     </span>
@@ -131,6 +191,7 @@ function createInstanceCard(instance, noiseFloorData) {
                     <span class="instance-info-value">${features.map(f => `<span class="status-badge feature">${f}</span>`).join(' ')}</span>
                 </div>
                 ` : ''}
+                ${distanceInfo}
                 <div class="instance-info-row">
                     <span class="instance-info-label">🕐 Last Seen:</span>
                     <span class="instance-info-value">${formatTimestamp(instance.last_seen)}</span>
@@ -306,6 +367,21 @@ async function loadAndDisplayInstances() {
             return;
         }
         
+        // Calculate distances if user location is available
+        if (userLocation) {
+            instances.forEach(instance => {
+                instance.distance = calculateDistance(
+                    userLocation.latitude,
+                    userLocation.longitude,
+                    instance.latitude,
+                    instance.longitude
+                );
+            });
+            
+            // Sort instances by distance (closest first)
+            instances.sort((a, b) => a.distance - b.distance);
+        }
+        
         // Fetch noise floor data for instances that have it enabled
         const noiseFloorPromises = instances.map(async (instance) => {
             if (instance.noise_floor) {
@@ -323,9 +399,9 @@ async function loadAndDisplayInstances() {
             noiseFloorMap[result.id] = result.data;
         });
         
-        // Create instance cards
-        const cards = instances.map(instance => 
-            createInstanceCard(instance, noiseFloorMap[instance.id])
+        // Create instance cards - mark the first one as closest if user location is available
+        const cards = instances.map((instance, index) =>
+            createInstanceCard(instance, noiseFloorMap[instance.id], userLocation && index === 0)
         ).join('');
         
         containerEl.innerHTML = cards;
@@ -333,7 +409,12 @@ async function loadAndDisplayInstances() {
         // Update the map with instance locations
         updateMap(instances);
         
-        statusEl.textContent = `${instances.length} instance${instances.length !== 1 ? 's' : ''} found • Last updated: ${new Date().toLocaleTimeString()}`;
+        let statusText = `${instances.length} instance${instances.length !== 1 ? 's' : ''} found`;
+        if (userLocation) {
+            statusText += ` • Sorted by distance from your location`;
+        }
+        statusText += ` • Last updated: ${new Date().toLocaleTimeString()}`;
+        statusEl.textContent = statusText;
         statusEl.className = 'status-bar success';
         
     } catch (error) {
@@ -351,9 +432,12 @@ if (document.readyState === 'loading') {
     init();
 }
 
-function init() {
+async function init() {
+    // Request user location first (non-blocking)
+    await requestUserLocation();
+    
     // Initial load
-    loadAndDisplayInstances();
+    await loadAndDisplayInstances();
 
     // Refresh periodically
     setInterval(loadAndDisplayInstances, REFRESH_INTERVAL);

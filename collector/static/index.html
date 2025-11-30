@@ -108,6 +108,17 @@
             box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
         }
 
+        .instance-card.closest-instance {
+            background: rgba(251, 191, 36, 0.15);
+            border: 2px solid rgba(251, 191, 36, 0.5);
+            box-shadow: 0 8px 32px rgba(251, 191, 36, 0.3);
+        }
+
+        .instance-card.closest-instance:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(251, 191, 36, 0.4);
+        }
+
         .instance-header {
             display: flex;
             justify-content: space-between;
@@ -159,6 +170,21 @@
         .status-badge.feature {
             background: #3b82f6;
             color: white;
+        }
+
+        .status-badge.closest {
+            background: #fbbf24;
+            color: #1e3c72;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
         }
 
         .instance-info {

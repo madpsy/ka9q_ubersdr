@@ -41,9 +41,10 @@ type CWSkimmerClient struct {
 	connected         bool
 	stopChan          chan struct{}
 	keepaliveDone     chan struct{} // Signal to stop keepalive goroutine
-	lastActivityTime  time.Time     // For monitoring only
-	lastSpotTime      time.Time     // Time when last actual CW spot was received
-	lastPingTime      time.Time     // Time when last ping was sent
+	lastActivityTime     time.Time // For monitoring only
+	lastSpotTime         time.Time // Time when last actual CW spot was received
+	lastPingTime         time.Time // Time when last ping was sent
+	lastPingResponseTime time.Time // Time when last ping response was received
 	spotHandlers      []func(CWSkimmerSpot)
 	messageHandlers   []func(string)
 	spotsLogger       *CWSkimmerSpotsLogger
@@ -378,9 +379,10 @@ func (c *CWSkimmerClient) processLine(line string) {
 	// Check for ping response (server responds with "Unknown command: "PING"")
 	if strings.Contains(line, "Unknown command") && strings.Contains(line, "PING") {
 		// Ping response received - connection is alive
-		c.mu.RLock()
+		c.mu.Lock()
 		lastPing := c.lastPingTime
-		c.mu.RUnlock()
+		c.lastPingResponseTime = time.Now()
+		c.mu.Unlock()
 
 		if !lastPing.IsZero() {
 			elapsed := time.Since(lastPing)
@@ -582,6 +584,19 @@ func (c *CWSkimmerClient) keepaliveLoop() {
 		select {
 		case <-ticker.C:
 			if !c.IsConnected() {
+				return
+			}
+
+			// Check if previous ping got a response
+			c.mu.Lock()
+			lastPing := c.lastPingTime
+			lastResponse := c.lastPingResponseTime
+			c.mu.Unlock()
+
+			// If we sent a ping but never got response, force reconnect
+			if !lastPing.IsZero() && (lastResponse.IsZero() || lastResponse.Before(lastPing)) {
+				log.Printf("CW Skimmer: Previous ping sent at %v never received response, forcing reconnection", lastPing)
+				c.disconnect()
 				return
 			}
 

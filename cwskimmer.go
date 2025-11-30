@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"net"
@@ -35,6 +36,7 @@ type CWSkimmerSpot struct {
 type CWSkimmerClient struct {
 	config            *CWSkimmerConfig
 	conn              net.Conn
+	scanner           *bufio.Scanner
 	mu                sync.RWMutex
 	connected         bool
 	stopChan          chan struct{}
@@ -178,6 +180,7 @@ func (c *CWSkimmerClient) connect() error {
 
 	c.mu.Lock()
 	c.conn = conn
+	c.scanner = bufio.NewScanner(conn)
 	c.connected = true
 	c.lastActivityTime = time.Now()
 	c.mu.Unlock()
@@ -219,6 +222,7 @@ func (c *CWSkimmerClient) disconnect() {
 		c.conn.Close()
 		c.conn = nil
 	}
+	c.scanner = nil
 	c.mu.Unlock()
 
 	log.Println("CW Skimmer: Disconnected")
@@ -322,50 +326,49 @@ func (c *CWSkimmerClient) handleConnection() {
 }
 
 // readLine reads a line from the connection with proper timeout handling
+// Uses bufio.Scanner with goroutine+timeout for robust, non-blocking reads
 func (c *CWSkimmerClient) readLine(timeout time.Duration) (string, error) {
 	c.mu.RLock()
-	conn := c.conn
+	scanner := c.scanner
 	c.mu.RUnlock()
 
-	if conn == nil {
+	if scanner == nil {
 		return "", fmt.Errorf("not connected")
 	}
 
-	// Set deadline once for the entire line read
-	deadline := time.Now().Add(timeout)
-	if err := conn.SetReadDeadline(deadline); err != nil {
-		return "", fmt.Errorf("failed to set read deadline: %w", err)
-	}
+	// Create channels for result
+	lineChan := make(chan string, 1)
+	errChan := make(chan error, 1)
 
-	// Read one byte at a time until we hit \n
-	var line []byte
-	buf := make([]byte, 1)
-	bytesRead := 0
-
-	for {
-		n, err := conn.Read(buf)
-		if err != nil {
-			// Log how many bytes we read before the error
-			if bytesRead > 0 {
-				log.Printf("CW Skimmer: Read error after %d bytes (partial: %q): %v", bytesRead, string(line), err)
-			}
-			return "", err
-		}
-
-		if n > 0 {
-			bytesRead++
-			if buf[0] == '\n' {
-				// Found newline, return the line
-				break
-			}
-			// Skip \r characters (handle \r\n line endings)
-			if buf[0] != '\r' {
-				line = append(line, buf[0])
+	// Read line in goroutine
+	go func() {
+		if scanner.Scan() {
+			lineChan <- scanner.Text()
+		} else {
+			// Scanner.Err() returns nil on EOF, we want to report that
+			if err := scanner.Err(); err != nil {
+				errChan <- err
+			} else {
+				errChan <- fmt.Errorf("EOF")
 			}
 		}
-	}
+	}()
 
-	return strings.TrimSpace(string(line)), nil
+	// Wait for line or timeout
+	select {
+	case line := <-lineChan:
+		return strings.TrimSpace(line), nil
+	case err := <-errChan:
+		return "", err
+	case <-time.After(timeout):
+		// Timeout occurred - close connection to unblock the scanner goroutine
+		c.mu.Lock()
+		if c.conn != nil {
+			c.conn.Close()
+		}
+		c.mu.Unlock()
+		return "", fmt.Errorf("read timeout after %v", timeout)
+	}
 }
 
 // writeLine writes a line to the connection

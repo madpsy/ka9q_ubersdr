@@ -605,11 +605,19 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 
 	// Build the callback URL
 	protocol := "http"
+	defaultPort := 80
 	if useTLS {
 		protocol = "https"
+		defaultPort = 443
 	}
 
-	callbackURL := fmt.Sprintf("%s://%s:%d/api/instance", protocol, host, port)
+	// Omit port if it's the default for the protocol
+	var callbackURL string
+	if port == defaultPort {
+		callbackURL = fmt.Sprintf("%s://%s/api/instance", protocol, host)
+	} else {
+		callbackURL = fmt.Sprintf("%s://%s:%d/api/instance", protocol, host, port)
+	}
 
 	// Create the verification request
 	reqBody := InstanceVerificationRequest{

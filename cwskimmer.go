@@ -306,6 +306,12 @@ func (c *CWSkimmerClient) handleConnection() {
 	c.mu.RUnlock()
 
 	for {
+		// Check if we're still connected before trying to read
+		if !c.IsConnected() {
+			log.Println("CW Skimmer: Connection closed by keepalive watchdog")
+			return
+		}
+
 		line, err := c.readLine(time.Duration(keepaliveDelay*2) * time.Second)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {

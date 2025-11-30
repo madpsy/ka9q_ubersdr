@@ -330,45 +330,32 @@ func (c *CWSkimmerClient) handleConnection() {
 func (c *CWSkimmerClient) readLine(timeout time.Duration) (string, error) {
 	c.mu.RLock()
 	scanner := c.scanner
+	conn := c.conn
 	c.mu.RUnlock()
 
-	if scanner == nil {
+	if scanner == nil || conn == nil {
 		return "", fmt.Errorf("not connected")
 	}
 
-	// Create channels for result
-	lineChan := make(chan string, 1)
-	errChan := make(chan error, 1)
-
-	// Read line in goroutine
-	go func() {
-		if scanner.Scan() {
-			lineChan <- scanner.Text()
-		} else {
-			// Scanner.Err() returns nil on EOF, we want to report that
-			if err := scanner.Err(); err != nil {
-				errChan <- err
-			} else {
-				errChan <- fmt.Errorf("EOF")
-			}
-		}
-	}()
-
-	// Wait for line or timeout
-	select {
-	case line := <-lineChan:
-		return strings.TrimSpace(line), nil
-	case err := <-errChan:
-		return "", err
-	case <-time.After(timeout):
-		// Timeout occurred - close connection to unblock the scanner goroutine
-		c.mu.Lock()
-		if c.conn != nil {
-			c.conn.Close()
-		}
-		c.mu.Unlock()
-		return "", fmt.Errorf("read timeout after %v", timeout)
+	// Set read deadline on the underlying connection
+	// This ensures the scanner's Read() calls will timeout
+	deadline := time.Now().Add(timeout)
+	if err := conn.SetReadDeadline(deadline); err != nil {
+		return "", fmt.Errorf("failed to set read deadline: %w", err)
 	}
+
+	// Scan for next line - this will respect the read deadline
+	if scanner.Scan() {
+		return strings.TrimSpace(scanner.Text()), nil
+	}
+
+	// Check for error
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	// EOF with no error
+	return "", fmt.Errorf("EOF")
 }
 
 // writeLine writes a line to the connection

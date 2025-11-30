@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UberSDR - Software Defined Radio Platform</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo-container">
+                <img src="logo.png" alt="UberSDR Logo" class="logo">
+                <h1>UberSDR</h1>
+            </div>
+            <nav>
+                <a href="#features">Features</a>
+                <a href="#instances" class="cta-button">View Instances</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero">
+            <div class="container">
+                <h2>Software Defined Radio Platform</h2>
+                <p class="hero-description">
+                    A powerful, web-based SDR platform for radio enthusiasts, providing real-time access to the entire HF spectrum
+                    and digital mode decoding capabilities. Based on the affordable RX-888 MKII and generic PC hardware.
+                </p>
+                <div class="hero-buttons">
+                    <a href="https://instances.ubersdr.org" class="primary-button" target="_blank" rel="noopener noreferrer">
+                        <span class="button-icon">🗺️</span>
+                        View Available Instances
+                    </a>
+                    <a href="#features" class="secondary-button">Learn More</a>
+                </div>
+            </div>
+        </section>
+
+        <section id="features" class="features">
+            <div class="container">
+                <h2>Features</h2>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">📡</div>
+                        <h3>Real-Time Spectrum Analysis</h3>
+                        <p>Monitor HF bands in real-time with a spectrum display and waterfall. Historical data is stored for band conditions and geographic locations, enabling analysis of propagation patterns over time.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🌍</div>
+                        <h3>Global Network</h3>
+                        <p>Our goal is to build a network of receivers from around the world.<br><br>Diversity receive utilising multiple receivers is work in progress.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🔊</div>
+                        <h3>Multiple Decoders</h3>
+                        <p>Support for all-band skimming of various digital modes including FT4, FT8, WSPR, as well as an external CW Skimmer driver.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">📊</div>
+                        <h3>Band Conditions</h3>
+                        <p>Track propagation conditions and band activity with integrated monitoring tools.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🎯</div>
+                        <h3>DX Cluster Integration</h3>
+                        <p>DX Cluster integration for spot alerts directly in the spectrum display.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">⚡</div>
+                        <h3>Low Latency</h3>
+                        <p>Experience minimal delay with optimised WebSocket streaming and audio processing. Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank" rel="noopener noreferrer" class="inline-link">ka9q-radio</a>.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="instances" class="instances-section">
+            <div class="container">
+                <h2>Available Instances</h2>
+                <p class="section-description">
+                    Explore our growing network of UberSDR instances. Each instance provides access to the local 
+                    HF radio spectrum and unique propagation conditions.
+                </p>
+                <div class="map-container">
+                    <a href="https://instances.ubersdr.org" class="map-link" target="_blank" rel="noopener noreferrer">
+                        <div class="map-placeholder">
+                            <div class="map-icon">🗺️</div>
+                            <h3>View Interactive Map</h3>
+                            <p>Click to see all available UberSDR instances worldwide</p>
+                        </div>
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <section class="downloads">
+            <div class="container">
+                <h2>Desktop Client</h2>
+                <p class="section-description">
+                    Download the UberSDR desktop client for your operating system to access SDR instances
+                    with a native application experience.
+                </p>
+                <ul class="client-features">
+                    <li>Audio output device selection</li>
+                    <li>Rigctl and OmniRig support</li>
+                    <li>MIDI controller support</li>
+                    <li>High bandwidth IQ streams</li>
+                    <li>CW Spot Graph</li>
+                    <li>Noisefloor Monitoring</li>
+                </ul>
+                <div class="download-grid">
+                    <a href="../clients/radio_client.exe" class="download-card" download>
+                        <img src="windows.png" alt="Windows" class="platform-icon">
+                        <h3>Windows</h3>
+                        <p>Download for Windows</p>
+                        <div class="download-button">
+                            <span class="download-icon">⬇️</span>
+                            Download
+                        </div>
+                    </a>
+                    <a href="../clients/radio_client" class="download-card" download>
+                        <img src="linux.png" alt="Linux" class="platform-icon">
+                        <h3>Linux</h3>
+                        <p>Download for x86_64 Linux</p>
+                        <div class="download-button">
+                            <span class="download-icon">⬇️</span>
+                            Download
+                        </div>
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <section class="build-your-own">
+            <div class="container">
+                <h2>Build Your Own UberSDR Instance</h2>
+                <p class="section-description">
+                    Set up your own UberSDR instance with affordable hardware and our Docker-based software.
+                    Join the network and share your local radio spectrum with the community.
+                </p>
+                
+                <div class="hardware-requirements">
+                    <h3>What You Need</h3>
+                    <div class="requirements-grid">
+                        <div class="requirement-card">
+                            <div class="requirement-icon">📡</div>
+                            <h4>SDR Hardware</h4>
+                            <p><strong>RX-888 MkII</strong></p>
+                            <p>High-performance SDR receiver available from AliExpress. Offers excellent dynamic range and wide frequency coverage.</p>
+                        </div>
+                        <div class="requirement-card">
+                            <div class="requirement-icon">💻</div>
+                            <h4>Computer</h4>
+                            <p><strong>Low-Power PC Options:</strong></p>
+                            <ul>
+                                <li>N100/N150 based mini PC (new)</li>
+                                <li>HP EliteDesk or similar (used from eBay)</li>
+                                <li>Any x86_64 system with a recent CPU</li>
+                            </ul>
+                        </div>
+                        <div class="requirement-card">
+                            <div class="requirement-icon">🐳</div>
+                            <h4>Software</h4>
+                            <p><strong>Docker-Based Deployment</strong></p>
+                            <p>UberSDR runs in Docker containers for easy installation and management. Simply pull the image and configure your setup.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setup-benefits">
+                    <h3>Why Build Your Own?</h3>
+                    <div class="benefits-grid">
+                        <div class="benefit-item">
+                            <span class="benefit-icon">🌍</span>
+                            <p>Contribute to the global SDR network</p>
+                        </div>
+                        <div class="benefit-item">
+                            <span class="benefit-icon">🔧</span>
+                            <p>Full control over your SDR setup</p>
+                        </div>
+                        <div class="benefit-item">
+                            <span class="benefit-icon">💰</span>
+                            <p>Affordable hardware options</p>
+                        </div>
+                        <div class="benefit-item">
+                            <span class="benefit-icon">⚡</span>
+                            <p>Low power consumption</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setup-instructions">
+                    <h3>Installation Instructions</h3>
+                    <div class="instructions-content">
+                        <p>For now, please refer to the <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank" rel="noopener noreferrer" class="inline-link">GitHub repository</a> for setup information.</p>
+                        <p class="coming-soon">📝 More detailed instructions coming soon!</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="getting-started">
+            <div class="container">
+                <h2>Getting Started</h2>
+                <div class="steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <h3>Choose an Instance</h3>
+                        <p>Browse the available instances map and select one near you or in a location of interest.</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <h3>Connect</h3>
+                        <p>Click on an instance to access its web interface and start exploring the radio spectrum.</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <h3>Tune & Listen</h3>
+                        <p>Select your frequency, adjust settings, and enjoy real-time SDR reception.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>UberSDR</h4>
+                    <p>Open-source software defined radio platform for the amateur radio community.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="https://instances.ubersdr.org" target="_blank" rel="noopener noreferrer">Instance Map</a></li>
+                        <li><a href="#features">Features</a></li>
+                        <li><a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://github.com/madpsy/ka9q_ubersdr/issues" target="_blank" rel="noopener noreferrer">Report Issues</a></li>
+                        <li><a href="https://www.oarc.uk/" target="_blank" rel="noopener noreferrer">OARC</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 UberSDR. Open Source Project.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

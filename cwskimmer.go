@@ -210,6 +210,8 @@ func (c *CWSkimmerClient) connect() error {
 
 // disconnect closes the connection and stops keepalive
 func (c *CWSkimmerClient) disconnect() {
+	log.Println("CW Skimmer: disconnect() called")
+	
 	// First, get the connection reference and close it immediately
 	// This MUST happen before acquiring the lock to ensure any blocked
 	// readLine() call fails immediately with a closed connection error
@@ -219,6 +221,7 @@ func (c *CWSkimmerClient) disconnect() {
 
 	// Close the connection first - this will cause any blocked reads to fail immediately
 	if conn != nil {
+		log.Println("CW Skimmer: Closing connection socket")
 		conn.Close()
 	}
 
@@ -323,6 +326,7 @@ func (c *CWSkimmerClient) handleConnection() {
 			return
 		}
 
+		log.Println("CW Skimmer: handleConnection calling readLine()")
 		line, err := c.readLine(time.Duration(keepaliveDelay*2) * time.Second)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -333,6 +337,7 @@ func (c *CWSkimmerClient) handleConnection() {
 			c.disconnect()
 			return
 		}
+		log.Printf("CW Skimmer: readLine() returned: %q", line)
 
 		// Update last activity time on successful read
 		c.mu.Lock()

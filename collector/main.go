@@ -142,6 +142,7 @@ func main() {
 	http.HandleFunc("/api/instances", loggingMiddleware(collector.handleListInstances))
 	http.HandleFunc("/api/instances/", loggingMiddleware(collector.handleGetInstance))
 	http.HandleFunc("/api/lookup/", loggingMiddleware(collector.handleLookupPublicUUID))
+	http.HandleFunc("/api/noisefloor/", loggingMiddleware(collector.handleGetNoiseFloor))
 	http.HandleFunc("/health", loggingMiddleware(handleHealth))
 
 	// Start HTTP server
@@ -206,6 +207,14 @@ func initDatabase(path string) (*sql.DB, error) {
 	);
 	CREATE INDEX IF NOT EXISTS idx_public_uuid ON instances(public_uuid);
 	CREATE INDEX IF NOT EXISTS idx_last_seen ON instances(last_seen);
+	
+	CREATE TABLE IF NOT EXISTS noise_floor_data (
+		public_uuid TEXT PRIMARY KEY,
+		data TEXT NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (public_uuid) REFERENCES instances(public_uuid) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_noise_floor_updated ON noise_floor_data(updated_at);
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -423,6 +432,11 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		}
 
 		log.Printf("Instance updated: %s (public: %s, callsign: %s)", secretUUID, publicUUID, update.Callsign)
+	}
+
+	// If noise floor is enabled, fetch and store the latest data
+	if update.NoiseFloor {
+		go c.fetchAndStoreNoiseFloor(publicUUID, update.Host, update.Port, update.TLS)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -708,4 +722,137 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 	}
 
 	return false
+}
+
+// fetchAndStoreNoiseFloor fetches noise floor data from an instance and stores it
+func (c *Collector) fetchAndStoreNoiseFloor(publicUUID, host string, port int, useTLS bool) {
+	// Skip if host or port is invalid
+	if host == "" || port == 0 {
+		return
+	}
+
+	// Build the noise floor URL
+	protocol := "http"
+	defaultPort := 80
+	if useTLS {
+		protocol = "https"
+		defaultPort = 443
+	}
+
+	// Omit port if it's the default for the protocol
+	var noiseFloorURL string
+	if port == defaultPort {
+		noiseFloorURL = fmt.Sprintf("%s://%s/api/noisefloor/latest", protocol, host)
+	} else {
+		noiseFloorURL = fmt.Sprintf("%s://%s:%d/api/noisefloor/latest", protocol, host, port)
+	}
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: false,
+				MinVersion:         tls.VersionTLS12,
+			},
+		},
+	}
+
+	// Make the GET request
+	req, err := http.NewRequest("GET", noiseFloorURL, nil)
+	if err != nil {
+		log.Printf("Failed to create noise floor request for %s: %v", publicUUID, err)
+		return
+	}
+
+	req.Header.Set("User-Agent", fmt.Sprintf("UberSDR-Collector/%s", Version))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Failed to fetch noise floor data for %s from %s: %v", publicUUID, noiseFloorURL, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Noise floor request returned status %d for %s", resp.StatusCode, publicUUID)
+		return
+	}
+
+	// Read the response body as raw JSON
+	var jsonData json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&jsonData); err != nil {
+		log.Printf("Failed to decode noise floor data for %s: %v", publicUUID, err)
+		return
+	}
+
+	// Store in database
+	now := time.Now()
+	_, err = c.db.Exec(`
+			INSERT INTO noise_floor_data (public_uuid, data, updated_at)
+			VALUES (?, ?, ?)
+			ON CONFLICT(public_uuid) DO UPDATE SET
+				data = excluded.data,
+				updated_at = excluded.updated_at
+		`, publicUUID, string(jsonData), now)
+
+	if err != nil {
+		log.Printf("Failed to store noise floor data for %s: %v", publicUUID, err)
+		return
+	}
+
+	log.Printf("Stored noise floor data for %s", publicUUID)
+}
+
+// handleGetNoiseFloor handles GET requests for noise floor data by public UUID
+func (c *Collector) handleGetNoiseFloor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract public UUID from URL path
+	// URL format: /api/noisefloor/{public_uuid}
+	publicUUID := r.URL.Path[len("/api/noisefloor/"):]
+	if publicUUID == "" {
+		http.Error(w, "Missing instance UUID", http.StatusBadRequest)
+		return
+	}
+
+	// Validate UUID format
+	if _, err := uuid.Parse(publicUUID); err != nil {
+		http.Error(w, "Invalid UUID format", http.StatusBadRequest)
+		return
+	}
+
+	var data string
+	var updatedAt time.Time
+	err := c.db.QueryRow(`
+		SELECT data, updated_at
+		FROM noise_floor_data
+		WHERE public_uuid = ?
+	`, publicUUID).Scan(&data, &updatedAt)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Noise floor data not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		log.Printf("Failed to query noise floor data: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the raw JSON data with metadata
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Wrap the data with metadata
+	response := map[string]interface{}{
+		"public_uuid": publicUUID,
+		"updated_at":  updatedAt.Format(time.RFC3339),
+		"data":        json.RawMessage(data),
+	}
+
+	json.NewEncoder(w).Encode(response)
 }

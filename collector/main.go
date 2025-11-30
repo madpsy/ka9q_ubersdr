@@ -725,6 +725,7 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 }
 
 // fetchAndStoreNoiseFloor fetches noise floor data from an instance and stores it
+// Retries up to 3 times with 30 second delays between attempts
 func (c *Collector) fetchAndStoreNoiseFloor(publicUUID, host string, port int, useTLS bool) {
 	// Skip if host or port is invalid
 	if host == "" || port == 0 {
@@ -758,38 +759,59 @@ func (c *Collector) fetchAndStoreNoiseFloor(publicUUID, host string, port int, u
 		},
 	}
 
-	// Make the GET request
-	req, err := http.NewRequest("GET", noiseFloorURL, nil)
-	if err != nil {
-		log.Printf("Failed to create noise floor request for %s: %v", publicUUID, err)
-		return
-	}
+	// Retry up to 3 times with 30 second delays
+	maxRetries := 3
+	retryDelay := 30 * time.Second
 
-	req.Header.Set("User-Agent", fmt.Sprintf("UberSDR-Collector/%s", Version))
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Make the GET request
+		req, err := http.NewRequest("GET", noiseFloorURL, nil)
+		if err != nil {
+			log.Printf("Failed to create noise floor request for %s (attempt %d/%d): %v", publicUUID, attempt, maxRetries, err)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return
+		}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("Failed to fetch noise floor data for %s from %s: %v", publicUUID, noiseFloorURL, err)
-		return
-	}
-	defer resp.Body.Close()
+		req.Header.Set("User-Agent", fmt.Sprintf("UberSDR-Collector/%s", Version))
 
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Noise floor request returned status %d for %s", resp.StatusCode, publicUUID)
-		return
-	}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("Failed to fetch noise floor data for %s from %s (attempt %d/%d): %v", publicUUID, noiseFloorURL, attempt, maxRetries, err)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return
+		}
+		defer resp.Body.Close()
 
-	// Read the response body as raw JSON
-	var jsonData json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&jsonData); err != nil {
-		log.Printf("Failed to decode noise floor data for %s: %v", publicUUID, err)
-		return
-	}
+		// Check response status
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("Noise floor request returned status %d for %s (attempt %d/%d)", resp.StatusCode, publicUUID, attempt, maxRetries)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return
+		}
 
-	// Store in database
-	now := time.Now()
-	_, err = c.db.Exec(`
+		// Read the response body as raw JSON
+		var jsonData json.RawMessage
+		if err := json.NewDecoder(resp.Body).Decode(&jsonData); err != nil {
+			log.Printf("Failed to decode noise floor data for %s (attempt %d/%d): %v", publicUUID, attempt, maxRetries, err)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return
+		}
+
+		// Store in database
+		now := time.Now()
+		_, err = c.db.Exec(`
 			INSERT INTO noise_floor_data (public_uuid, data, updated_at)
 			VALUES (?, ?, ?)
 			ON CONFLICT(public_uuid) DO UPDATE SET
@@ -797,12 +819,18 @@ func (c *Collector) fetchAndStoreNoiseFloor(publicUUID, host string, port int, u
 				updated_at = excluded.updated_at
 		`, publicUUID, string(jsonData), now)
 
-	if err != nil {
-		log.Printf("Failed to store noise floor data for %s: %v", publicUUID, err)
+		if err != nil {
+			log.Printf("Failed to store noise floor data for %s (attempt %d/%d): %v", publicUUID, attempt, maxRetries, err)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return
+		}
+
+		log.Printf("Stored noise floor data for %s (attempt %d)", publicUUID, attempt)
 		return
 	}
-
-	log.Printf("Stored noise floor data for %s", publicUUID)
 }
 
 // handleGetNoiseFloor handles GET requests for noise floor data by public UUID

@@ -142,6 +142,9 @@ func main() {
 		activeNoiseFloorFetch: make(map[string]bool),
 	}
 
+	// Start background cleanup goroutine
+	go collector.cleanupStaleInstances()
+
 	// Setup HTTP routes with logging middleware
 	http.HandleFunc("/api/instance/", loggingMiddleware(collector.handleInstanceUpdate))
 	http.HandleFunc("/api/instances", loggingMiddleware(collector.handleListInstances))
@@ -916,6 +919,35 @@ func (c *Collector) fetchAndStoreNoiseFloor(publicUUID, host string, port int, u
 
 		log.Printf("Stored noise floor data for %s (attempt %d)", publicUUID, attempt)
 		return
+	}
+}
+
+// cleanupStaleInstances periodically removes instances that haven't been seen in 24 hours
+func (c *Collector) cleanupStaleInstances() {
+	ticker := time.NewTicker(1 * time.Hour) // Run cleanup every hour
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// Delete instances not seen in the last 24 hours
+		result, err := c.db.Exec(`
+			DELETE FROM instances
+			WHERE datetime(last_seen) < datetime('now', '-24 hours')
+		`)
+
+		if err != nil {
+			log.Printf("Failed to cleanup stale instances: %v", err)
+			continue
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			log.Printf("Failed to get rows affected during cleanup: %v", err)
+			continue
+		}
+
+		if rowsAffected > 0 {
+			log.Printf("Cleaned up %d stale instance(s) not seen in 24 hours", rowsAffected)
+		}
 	}
 }
 

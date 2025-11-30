@@ -47,9 +47,8 @@ function createBandBadge(band, snr) {
     const snrText = formatSNR(snr);
     
     return `
-        <div class="band-badge ${condition}" title="${band}: ${snrText}">
+        <div class="band-badge ${condition}" title="${band}: ${snrText} (${label})">
             <span>${band}</span>
-            <span class="band-badge-snr">${label}</span>
         </div>
     `;
 }

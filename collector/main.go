@@ -149,6 +149,10 @@ func main() {
 	http.HandleFunc("/api/noisefloor/", loggingMiddleware(collector.handleGetNoiseFloor))
 	http.HandleFunc("/health", loggingMiddleware(handleHealth))
 
+	// Serve static files
+	fs := http.FileServer(http.Dir("static"))
+	http.Handle("/", fs)
+
 	// Start HTTP server
 	server := &http.Server{
 		Addr:         config.Listen,

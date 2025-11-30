@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UberSDR Instance Directory</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .status-bar {
+            text-align: center;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .status-bar.loading {
+            background: rgba(33, 150, 243, 0.3);
+        }
+
+        .status-bar.error {
+            background: rgba(244, 67, 54, 0.3);
+        }
+
+        .status-bar.success {
+            background: rgba(76, 175, 80, 0.3);
+        }
+
+        .instances-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .instance-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .instance-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .instance-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .instance-title {
+            flex: 1;
+        }
+
+        .instance-callsign {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .instance-name {
+            font-size: 0.95em;
+            opacity: 0.9;
+        }
+
+        .instance-status {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .status-badge.online {
+            background: #22c55e;
+            color: white;
+        }
+
+        .status-badge.offline {
+            background: #ef4444;
+            color: white;
+        }
+
+        .status-badge.feature {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .instance-info {
+            margin-bottom: 15px;
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+
+        .instance-info-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 5px;
+        }
+
+        .instance-info-label {
+            opacity: 0.7;
+            min-width: 80px;
+        }
+
+        .instance-info-value {
+            font-weight: 500;
+        }
+
+        .instance-link {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #3b82f6;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            transition: background 0.2s;
+            margin-bottom: 15px;
+        }
+
+        .instance-link:hover {
+            background: #2563eb;
+        }
+
+        .band-status-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .band-status-title {
+            font-size: 0.9em;
+            font-weight: bold;
+            margin-bottom: 10px;
+            opacity: 0.9;
+        }
+
+        .band-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .band-badge {
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-weight: bold;
+            font-size: 0.8em;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s;
+        }
+
+        .band-badge:hover {
+            transform: translateY(-2px);
+        }
+
+        .band-badge.poor {
+            background: #ef4444;
+            color: white;
+        }
+
+        .band-badge.fair {
+            background: #ff9800;
+            color: white;
+        }
+
+        .band-badge.good {
+            background: #fbbf24;
+            color: white;
+        }
+
+        .band-badge.excellent {
+            background: #22c55e;
+            color: white;
+        }
+
+        .band-badge.unknown {
+            background: #9ca3af;
+            color: white;
+        }
+
+        .band-badge-snr {
+            font-size: 0.85em;
+            opacity: 0.9;
+        }
+
+        .legend {
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9em;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+        }
+
+        .site-footer {
+            text-align: center;
+            padding: 20px;
+            margin-top: 40px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .site-footer a {
+            color: #4CAF50;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .site-footer a:hover {
+            color: #45a049;
+            text-decoration: underline;
+        }
+
+        .no-instances {
+            text-align: center;
+            padding: 60px 20px;
+            font-size: 1.2em;
+            opacity: 0.8;
+        }
+
+        @media (max-width: 768px) {
+            .instances-grid {
+                grid-template-columns: 1fr;
+            }
+
+            h1 {
+                font-size: 1.8em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 UberSDR Instance Directory</h1>
+        <div class="subtitle">Public SDR Receivers with Real-Time Band Conditions</div>
+        
+        <div id="status" class="status-bar loading">
+            Loading instances...
+        </div>
+
+        <div id="instances-container" class="instances-grid">
+            <!-- Instance cards will be inserted here -->
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #ef4444;"></div>
+                <span>POOR (SNR &lt; 6 dB)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #ff9800;"></div>
+                <span>FAIR (6-20 dB)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #fbbf24;"></div>
+                <span>GOOD (20-30 dB)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #22c55e;"></div>
+                <span>EXCELLENT (SNR &gt; 30 dB)</span>
+            </div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <p>UberSDR Instance Collector • <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank">GitHub</a></p>
+    </footer>
+
+    <script src="instances.js"></script>
+</body>
+</html>

@@ -33,6 +33,7 @@ type Instance struct {
 	Latitude       float64   `json:"latitude"`
 	Longitude      float64   `json:"longitude"`
 	Altitude       int       `json:"altitude"`
+	Maidenhead     string    `json:"maidenhead"` // 6-character Maidenhead locator
 	PublicURL      string    `json:"public_url"`
 	Version        string    `json:"version"`
 	Host           string    `json:"host,omitempty"`
@@ -231,6 +232,39 @@ func initDatabase(path string) (*sql.DB, error) {
 
 	log.Println("Database initialized successfully")
 	return db, nil
+}
+
+// latLonToMaidenhead converts latitude and longitude to a 6-character Maidenhead locator
+func latLonToMaidenhead(lat, lon float64) string {
+	// Adjust longitude to 0-360 range
+	lon += 180.0
+	lat += 90.0
+
+	// Field (first pair) - 20 degrees longitude, 10 degrees latitude
+	field1 := int(lon / 20.0)
+	field2 := int(lat / 10.0)
+
+	// Square (second pair) - 2 degrees longitude, 1 degree latitude
+	lon -= float64(field1) * 20.0
+	lat -= float64(field2) * 10.0
+	square1 := int(lon / 2.0)
+	square2 := int(lat / 1.0)
+
+	// Subsquare (third pair) - 5 minutes (1/12 degree) longitude, 2.5 minutes (1/24 degree) latitude
+	lon -= float64(square1) * 2.0
+	lat -= float64(square2) * 1.0
+	subsquare1 := int(lon * 12.0)
+	subsquare2 := int(lat * 24.0)
+
+	// Build the 6-character locator
+	return fmt.Sprintf("%c%c%d%d%c%c",
+		'A'+field1,
+		'A'+field2,
+		square1,
+		square2,
+		'a'+subsquare1,
+		'a'+subsquare2,
+	)
 }
 
 // loggingMiddleware logs all HTTP requests
@@ -529,6 +563,10 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 
 		// Calculate age of last report
 		inst.LastReportAge = int64(now.Sub(inst.LastSeen).Seconds())
+
+		// Calculate Maidenhead locator
+		inst.Maidenhead = latLonToMaidenhead(inst.Latitude, inst.Longitude)
+
 		instances = append(instances, inst)
 	}
 
@@ -588,6 +626,9 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 
 	// Calculate age of last report
 	inst.LastReportAge = int64(time.Now().Sub(inst.LastSeen).Seconds())
+
+	// Calculate Maidenhead locator
+	inst.Maidenhead = latLonToMaidenhead(inst.Latitude, inst.Longitude)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

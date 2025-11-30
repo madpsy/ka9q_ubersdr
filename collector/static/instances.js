@@ -114,7 +114,7 @@ function createInstanceCard(instance, noiseFloorData) {
                 </div>
                 <div class="instance-info-row">
                     <span class="instance-info-label">🌍 Coordinates:</span>
-                    <span class="instance-info-value">${instance.latitude.toFixed(4)}°, ${instance.longitude.toFixed(4)}°</span>
+                    <span class="instance-info-value">${instance.latitude.toFixed(4)}°, ${instance.longitude.toFixed(4)}° ${instance.maidenhead ? `(${instance.maidenhead})` : ''}</span>
                 </div>
                 <div class="instance-info-row">
                     <span class="instance-info-label">⛰️ Altitude:</span>

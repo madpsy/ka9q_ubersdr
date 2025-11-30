@@ -198,6 +198,9 @@ func (ir *InstanceReporter) sendReport() error {
 	log.Printf("Reporting capabilities: CW=%v, Digital=%v, Noise=%v, MaxClients=%d",
 		cwSkimmerEnabled, ir.config.Decoder.Enabled, ir.config.NoiseFloor.Enabled, ir.config.Server.MaxSessions)
 
+	// Construct public_url from instance connection info
+	publicURL := ir.config.InstanceReporting.ConstructPublicURL()
+
 	report := InstanceReport{
 		UUID:           ir.config.InstanceReporting.InstanceUUID,
 		Callsign:       ir.config.Admin.Callsign,
@@ -206,7 +209,7 @@ func (ir *InstanceReporter) sendReport() error {
 		Latitude:       ir.config.Admin.GPS.Lat,
 		Longitude:      ir.config.Admin.GPS.Lon,
 		Altitude:       ir.config.Admin.ASL,
-		PublicURL:      ir.config.Admin.PublicURL,
+		PublicURL:      publicURL,
 		Version:        Version,
 		Timestamp:      time.Now().Unix(),
 		Host:           ir.config.InstanceReporting.Instance.Host,

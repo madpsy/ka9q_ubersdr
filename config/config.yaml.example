@@ -11,8 +11,6 @@ admin:
   name: 'My SDR operated by myself!'
   # Admin email address
   email: "me@example.com"
-  # Public URL for this instance 
-  public_url:  https://example.com
   # Callsign (optional)
   callsign: "N0CALL"
   # GPS coordinates

@@ -581,3 +581,29 @@ func (pc *PrometheusConfig) IsIPAllowed(ipStr string) bool {
 
 	return false
 }
+
+// ConstructPublicURL builds a public URL from instance connection info
+func (irc *InstanceReportingConfig) ConstructPublicURL() string {
+	host := irc.Instance.Host
+	port := irc.Instance.Port
+	tls := irc.Instance.TLS
+
+	// If host is empty or port is 0, return default placeholder
+	if host == "" || port == 0 {
+		return "https://example.com"
+	}
+
+	// Determine protocol and default port
+	protocol := "http"
+	defaultPort := 80
+	if tls {
+		protocol = "https"
+		defaultPort = 443
+	}
+
+	// Build URL - omit port if it's the default for the protocol
+	if port == defaultPort {
+		return fmt.Sprintf("%s://%s/", protocol, host)
+	}
+	return fmt.Sprintf("%s://%s:%d/", protocol, host, port)
+}

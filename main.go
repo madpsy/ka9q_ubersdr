@@ -1279,6 +1279,9 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		availableClients = 0
 	}
 
+	// Construct public_url from instance connection info
+	publicURL := config.InstanceReporting.ConstructPublicURL()
+
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
 		"description": config.Admin.Description,
@@ -1286,7 +1289,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 			"name":       config.Admin.Name,
 			"admin":      config.Admin.Email,
 			"callsign":   config.Admin.Callsign,
-			"public_url": config.Admin.PublicURL,
+			"public_url": publicURL,
 			"gps": map[string]interface{}{
 				"lat": config.Admin.GPS.Lat,
 				"lon": config.Admin.GPS.Lon,

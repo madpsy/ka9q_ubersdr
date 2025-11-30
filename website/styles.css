@@ -129,6 +129,18 @@ nav a:hover {
     line-height: 1.8;
 }
 
+.hero-description .inline-link {
+    color: white !important;
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.3s ease;
+}
+
+.hero-description .inline-link:hover {
+    color: var(--accent) !important;
+    text-decoration: underline;
+}
+
 .hero-buttons {
     display: flex;
     gap: 1.5rem;

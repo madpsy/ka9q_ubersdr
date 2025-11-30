@@ -7,6 +7,7 @@ const REFRESH_INTERVAL = 60000; // 60 seconds
 let map = null;
 let markers = [];
 let terminator = null;
+let userMarker = null;
 
 // User location
 let userLocation = null;
@@ -272,12 +273,73 @@ function updateMap(instances) {
     markers.forEach(marker => map.removeLayer(marker));
     markers = [];
     
+    // Add user location marker if available
+    if (userLocation) {
+        if (userMarker) {
+            map.removeLayer(userMarker);
+        }
+        
+        // Create a custom icon for user location (blue circle with pulse)
+        const userIconHtml = `
+            <div style="position: relative;">
+                <div style="
+                    background-color: #3b82f6;
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 50%;
+                    border: 3px solid white;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+                "></div>
+                <div style="
+                    position: absolute;
+                    top: -4px;
+                    left: -4px;
+                    background-color: rgba(59, 130, 246, 0.3);
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 50%;
+                    animation: pulse-ring 2s ease-out infinite;
+                "></div>
+            </div>
+        `;
+        
+        const userIcon = L.divIcon({
+            html: userIconHtml,
+            className: 'user-location-marker',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+            popupAnchor: [0, -12]
+        });
+        
+        userMarker = L.marker([userLocation.latitude, userLocation.longitude], { icon: userIcon }).addTo(map);
+        
+        userMarker.bindPopup(`
+            <div style="font-family: sans-serif; min-width: 150px;">
+                <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">📍 Your Location</h3>
+                <p style="margin: 0; font-size: 0.85em; color: #666;">
+                    ${userLocation.latitude.toFixed(4)}°, ${userLocation.longitude.toFixed(4)}°
+                </p>
+            </div>
+        `);
+        
+        userMarker.bindTooltip('📍 You are here', {
+            direction: 'top',
+            offset: [0, -12],
+            permanent: false
+        });
+    }
+    
     if (instances.length === 0) {
         return;
     }
     
     // Add markers for each instance
     const bounds = [];
+    
+    // Add user location to bounds if available
+    if (userLocation) {
+        bounds.push([userLocation.latitude, userLocation.longitude]);
+    }
     
     instances.forEach(instance => {
         const lat = instance.latitude;

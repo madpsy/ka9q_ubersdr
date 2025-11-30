@@ -340,6 +340,22 @@
             opacity: 0.8;
         }
 
+        /* User location marker animation */
+        @keyframes pulse-ring {
+            0% {
+                transform: scale(0.8);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(2.5);
+                opacity: 0;
+            }
+        }
+
+        .user-location-marker {
+            z-index: 1000 !important;
+        }
+
         @media (max-width: 768px) {
             .instances-grid {
                 grid-template-columns: 1fr;

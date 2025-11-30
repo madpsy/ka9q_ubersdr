@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/evanoberholster/timezoneLookup"
+	timezoneLookup "github.com/evanoberholster/timezoneLookup/v2"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 )

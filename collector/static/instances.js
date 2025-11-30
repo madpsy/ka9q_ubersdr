@@ -64,9 +64,10 @@ function createInstanceCard(instance, noiseFloorData) {
     
     // Parse noise floor data if available
     let bandBadges = '';
-    if (noiseFloorData && noiseFloorData.data && noiseFloorData.data.data) {
-        // The structure is: noiseFloorData.data.data[band].ft8_snr
-        const bands = noiseFloorData.data.data;
+    if (noiseFloorData && noiseFloorData.data) {
+        // The structure from the API is: { data: { "160m": {...}, "80m": {...}, ... }, public_uuid: "...", updated_at: "..." }
+        // Each band object has ft8_snr field
+        const bands = noiseFloorData.data;
         bandBadges = BANDS.map(band => {
             const bandData = bands[band];
             const snr = bandData ? bandData.ft8_snr : null;

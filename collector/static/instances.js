@@ -6,6 +6,7 @@ const REFRESH_INTERVAL = 60000; // 60 seconds
 // Global map variable
 let map = null;
 let markers = [];
+let terminator = null;
 
 // SNR thresholds for band condition classification
 function getConditionClass(snr) {
@@ -185,6 +186,20 @@ function initMap() {
         attribution: '© OpenStreetMap contributors',
         maxZoom: 19
     }).addTo(map);
+    
+    // Add day/night terminator (grey line)
+    terminator = L.terminator({
+        fillOpacity: 0.3,
+        color: '#000',
+        weight: 2
+    }).addTo(map);
+    
+    // Update terminator every minute
+    setInterval(function() {
+        if (terminator && map) {
+            terminator.setTime();
+        }
+    }, 60000);
 }
 
 function updateMap(instances) {

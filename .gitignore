@@ -5,3 +5,4 @@ clients/python/__pycache__
 clients/python/venv
 clients/python/build
 clients/python/dist
+collector/instances.db

@@ -763,6 +763,13 @@ class RadioGUI:
         self.omnirig_rig_combo = ttk.Combobox(radio_controls, textvariable=self.omnirig_rig_var,
                                              values=['1', '2'], state='readonly', width=5)
         
+        # VFO selector (for OmniRig)
+        self.omnirig_vfo_label = ttk.Label(radio_controls, text="VFO:")
+        self.omnirig_vfo_var = tk.StringVar(value='A')
+        self.omnirig_vfo_combo = ttk.Combobox(radio_controls, textvariable=self.omnirig_vfo_var,
+                                             values=['A', 'B'], state='readonly', width=5)
+        self.omnirig_vfo_combo.bind('<<ComboboxSelected>>', lambda e: self.on_omnirig_vfo_changed())
+        
         # Hide OmniRig controls initially
         # (will be shown when OmniRig is selected)
 
@@ -2500,6 +2507,8 @@ class RadioGUI:
             # Hide OmniRig controls
             self.omnirig_rig_label.pack_forget()
             self.omnirig_rig_combo.pack_forget()
+            self.omnirig_vfo_label.pack_forget()
+            self.omnirig_vfo_combo.pack_forget()
         elif control_type == 'OmniRig':
             # Hide rigctl controls
             self.radio_host_label.pack_forget()
@@ -2509,6 +2518,8 @@ class RadioGUI:
             # Show OmniRig controls
             self.omnirig_rig_label.pack(side=tk.LEFT, padx=(5, 5))
             self.omnirig_rig_combo.pack(side=tk.LEFT, padx=(0, 5))
+            self.omnirig_vfo_label.pack(side=tk.LEFT, padx=(5, 5))
+            self.omnirig_vfo_combo.pack(side=tk.LEFT, padx=(0, 5))
         else:  # None
             # Hide all controls
             self.radio_host_label.pack_forget()
@@ -2517,6 +2528,16 @@ class RadioGUI:
             self.radio_port_entry.pack_forget()
             self.omnirig_rig_label.pack_forget()
             self.omnirig_rig_combo.pack_forget()
+            self.omnirig_vfo_label.pack_forget()
+            self.omnirig_vfo_combo.pack_forget()
+    
+    def on_omnirig_vfo_changed(self):
+        """Handle VFO selection change for OmniRig."""
+        if self.radio_control_connected and self.radio_control_type == 'omnirig':
+            vfo = self.omnirig_vfo_var.get()
+            if self.radio_control and hasattr(self.radio_control, 'set_vfo'):
+                self.radio_control.set_vfo(vfo)
+                self.log_status(f"Switched to VFO-{vfo}")
     
     def toggle_radio_control_connection(self):
         """Connect or disconnect from radio control (rigctl or OmniRig)."""
@@ -2528,6 +2549,8 @@ class RadioGUI:
     def connect_radio_control(self):
         """Connect to radio control (rigctl or OmniRig)."""
         control_type = self.radio_control_type_var.get()
+        
+        self.log_status(f"DEBUG: connect_radio_control called, type={control_type}")
         
         if control_type == 'None':
             messagebox.showinfo("Info", "Please select a radio control type")
@@ -2567,21 +2590,33 @@ class RadioGUI:
             elif control_type == 'OmniRig':
                 # Connect to OmniRig
                 rig_num = int(self.omnirig_rig_var.get())
+                vfo = self.omnirig_vfo_var.get()
                 
-                # Create and connect OmniRig client
-                self.radio_control = ThreadedOmniRigClient(rig_num)
+                self.log_status(f"DEBUG: Creating OmniRig client Rig{rig_num} VFO-{vfo}")
+                
+                # Create and connect OmniRig client with VFO selection
+                self.radio_control = ThreadedOmniRigClient(rig_num, vfo)
                 self.radio_control_type = 'omnirig'
+                
+                self.log_status(f"DEBUG: Setting up callbacks")
                 
                 # Set up callbacks
                 self.radio_control.set_callbacks(
                     frequency_callback=self.on_radio_control_frequency_changed,
                     mode_callback=self.on_radio_control_mode_changed,
                     ptt_callback=self.on_radio_control_ptt_changed,
-                    error_callback=lambda err: self.log_status(f"Radio control error: {err}")
+                    error_callback=lambda err: self.log_status(f"OmniRig: {err}")
                 )
                 
-                self.radio_control.connect()
-                self.log_status(f"✓ Connected to OmniRig Rig{rig_num}")
+                self.log_status(f"DEBUG: Calling connect()")
+                success = self.radio_control.connect()
+                self.log_status(f"DEBUG: connect() returned {success}")
+                
+                if not success:
+                    self.log_status("ERROR: OmniRig connection failed")
+                    return
+                
+                self.log_status(f"✓ Connected to OmniRig Rig{rig_num} VFO-{vfo}")
             
             # Update state
             self.radio_control_connected = True
@@ -2595,12 +2630,14 @@ class RadioGUI:
             self.radio_control_last_ptt = False
             self.radio_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
             
-            # Start syncing immediately with selected direction
-            self.start_radio_control_sync()
-            
-            # Always start polling for PTT status (for visual feedback)
+            # CRITICAL: Start polling FIRST (required for OmniRig to process events)
             if not self.radio_control_poll_job:
+                self.log_status("DEBUG: Starting radio control polling...")
                 self.poll_radio_control_frequency()
+            
+            # Then enable sync with selected direction
+            self.log_status("DEBUG: Enabling radio control sync...")
+            self.start_radio_control_sync()
                 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to connect to radio control: {e}")
@@ -2865,10 +2902,11 @@ class RadioGUI:
             self.rigctl_poll_job = None
             return
         
-        # Queue a poll command (non-blocking)
+        # For OmniRig, poll() processes COM events and command queue
+        # For rigctl, poll() just queues a poll command
         self.radio_control.poll()
         
-        # Schedule next poll (20ms = 50 Hz for fast TX detection)
+        # Schedule next poll (20ms = 50 Hz for fast TX detection and COM event processing)
         self.radio_control_poll_job = self.root.after(20, self.poll_radio_control_frequency)
         # Update legacy alias
         self.rigctl_poll_job = self.radio_control_poll_job

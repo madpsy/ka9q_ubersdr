@@ -2,6 +2,7 @@
 """
 OmniRig v1 COM interface for radio control (Windows only).
 Provides bidirectional frequency and mode synchronization with physical radios.
+Uses event-driven architecture matching the official OmniRig Pascal client.
 """
 
 import platform
@@ -14,10 +15,67 @@ OMNIRIG_AVAILABLE = False
 if platform.system() == 'Windows':
     try:
         import win32com.client
+        import win32com.client.gencache
         import pythoncom
         OMNIRIG_AVAILABLE = True
     except ImportError:
         pass
+
+
+# Global reference to controller for event handlers
+_controller_instance = None
+
+class OmniRigEvents:
+    """Event handler class for OmniRig COM events."""
+    
+    def OnVisibleChange(self):
+        """Called when OmniRig dialog visibility changes."""
+        pass  # Not used in our implementation
+    
+    def OnRigTypeChange(self, RigNumber):
+        """Called when rig type changes."""
+        # Queue event for processing in message pump thread
+        controller = _controller_instance
+        if controller and RigNumber == controller.rig_number:
+            try:
+                with controller._command_lock:
+                    controller._command_queue.append(('event_rigtype', RigNumber))
+            except:
+                pass
+    
+    def OnStatusChange(self, RigNumber):
+        """Called when rig status changes."""
+        # Queue event for processing in message pump thread
+        controller = _controller_instance
+        if controller and RigNumber == controller.rig_number:
+            try:
+                with controller._command_lock:
+                    controller._command_queue.append(('event_status', RigNumber))
+            except:
+                pass
+    
+    def OnParamsChange(self, RigNumber, Params):
+        """Called when rig parameters change.
+        
+        Args:
+            RigNumber: Which rig changed (1 or 2)
+            Params: Bitmask of changed parameters
+        """
+        # Queue the event for processing in the message pump thread
+        # This avoids GIL issues with COM callbacks
+        controller = _controller_instance
+        if controller is None or RigNumber != controller.rig_number:
+            return
+        
+        try:
+            with controller._command_lock:
+                controller._command_queue.append(('event_params', (RigNumber, Params)))
+        except Exception as e:
+            pass  # Silently ignore if we can't queue
+    
+    def OnCustomReply(self, RigNumber, Command, Reply):
+        """Called when custom command receives reply."""
+        pass  # Not used in our implementation
 
 
 class OmniRigController:
@@ -30,7 +88,30 @@ class OmniRigController:
     ST_NOTRESPONDING = 3
     ST_ONLINE = 4
     
-    # OmniRig mode constants (will be set from COM object)
+    # OmniRig parameter constants (will be set from COM object)
+    PM_UNKNOWN = None
+    PM_FREQ = None
+    PM_FREQA = None
+    PM_FREQB = None
+    PM_PITCH = None
+    PM_RITOFFSET = None
+    PM_RIT0 = None
+    PM_VFOAA = None
+    PM_VFOAB = None
+    PM_VFOBA = None
+    PM_VFOBB = None
+    PM_VFOA = None
+    PM_VFOB = None
+    PM_VFOEQUAL = None
+    PM_VFOSWAP = None
+    PM_SPLITON = None
+    PM_SPLITOFF = None
+    PM_RITON = None
+    PM_RITOFF = None
+    PM_XITON = None
+    PM_XITOFF = None
+    PM_RX = None
+    PM_TX = None
     PM_CW_U = None
     PM_CW_L = None
     PM_SSB_U = None
@@ -40,16 +121,18 @@ class OmniRigController:
     PM_AM = None
     PM_FM = None
     
-    def __init__(self, rig_number: int = 1):
+    def __init__(self, rig_number: int = 1, vfo: str = 'A'):
         """Initialize OmniRig controller.
         
         Args:
             rig_number: Rig number (1 or 2) in OmniRig
+            vfo: VFO to use ('A' or 'B')
         """
         if not OMNIRIG_AVAILABLE:
             raise ImportError("OmniRig requires pywin32 on Windows. Install with: pip install pywin32")
         
         self.rig_number = rig_number
+        self.vfo = vfo.upper()  # 'A' or 'B'
         self.omnirig = None
         self.rig = None
         self.connected = False
@@ -60,10 +143,6 @@ class OmniRigController:
         self.mode_callback: Optional[Callable[[str], None]] = None
         self.ptt_callback: Optional[Callable[[bool], None]] = None
         self.error_callback: Optional[Callable[[str], None]] = None
-        
-        # Polling thread
-        self.poll_thread: Optional[threading.Thread] = None
-        self.poll_interval = 0.02  # 20ms polling interval (50 Hz, matching rigctl)
         
         # Cache for change detection
         self._last_freq: Optional[int] = None
@@ -97,22 +176,60 @@ class OmniRigController:
         Returns:
             True if connection successful, False otherwise
         """
+        global _controller_instance
+        
         try:
-            # Initialize COM for this thread
+            # Initialize COM for this thread in apartment threaded mode
             pythoncom.CoInitialize()
             
-            # Create OmniRig COM object
-            self.omnirig = win32com.client.Dispatch("OmniRig.OmniRigX")
+            # Set global controller reference for event handlers
+            _controller_instance = self
             
-            # Store mode constants from COM object
-            self.PM_CW_U = self.omnirig.PM_CW_U
-            self.PM_CW_L = self.omnirig.PM_CW_L
-            self.PM_SSB_U = self.omnirig.PM_SSB_U
-            self.PM_SSB_L = self.omnirig.PM_SSB_L
-            self.PM_DIG_U = self.omnirig.PM_DIG_U
-            self.PM_DIG_L = self.omnirig.PM_DIG_L
-            self.PM_AM = self.omnirig.PM_AM
-            self.PM_FM = self.omnirig.PM_FM
+            # Create OmniRig COM object with event support
+            # Events will fire in this thread when we pump messages
+            self.omnirig = win32com.client.DispatchWithEvents("OmniRig.OmniRigX", OmniRigEvents)
+            
+            # Import the generated constants module
+            # The constants are module-level, not on the object
+            try:
+                omnirig_module = win32com.client.gencache.EnsureModule('{4FE359C5-A58F-459D-BE95-CA559FB4F270}', 0, 1, 0)
+                
+                # Store parameter constants from module
+                self.PM_UNKNOWN = omnirig_module.constants.PM_UNKNOWN
+                self.PM_FREQ = omnirig_module.constants.PM_FREQ
+                self.PM_FREQA = omnirig_module.constants.PM_FREQA
+                self.PM_FREQB = omnirig_module.constants.PM_FREQB
+                self.PM_PITCH = omnirig_module.constants.PM_PITCH
+                self.PM_RITOFFSET = omnirig_module.constants.PM_RITOFFSET
+                self.PM_RIT0 = omnirig_module.constants.PM_RIT0
+                self.PM_VFOAA = omnirig_module.constants.PM_VFOAA
+                self.PM_VFOAB = omnirig_module.constants.PM_VFOAB
+                self.PM_VFOBA = omnirig_module.constants.PM_VFOBA
+                self.PM_VFOBB = omnirig_module.constants.PM_VFOBB
+                self.PM_VFOA = omnirig_module.constants.PM_VFOA
+                self.PM_VFOB = omnirig_module.constants.PM_VFOB
+                self.PM_VFOEQUAL = omnirig_module.constants.PM_VFOEQUAL
+                self.PM_VFOSWAP = omnirig_module.constants.PM_VFOSWAP
+                self.PM_SPLITON = omnirig_module.constants.PM_SPLITON
+                self.PM_SPLITOFF = omnirig_module.constants.PM_SPLITOFF
+                self.PM_RITON = omnirig_module.constants.PM_RITON
+                self.PM_RITOFF = omnirig_module.constants.PM_RITOFF
+                self.PM_XITON = omnirig_module.constants.PM_XITON
+                self.PM_XITOFF = omnirig_module.constants.PM_XITOFF
+                self.PM_RX = omnirig_module.constants.PM_RX
+                self.PM_TX = omnirig_module.constants.PM_TX
+                self.PM_CW_U = omnirig_module.constants.PM_CW_U
+                self.PM_CW_L = omnirig_module.constants.PM_CW_L
+                self.PM_SSB_U = omnirig_module.constants.PM_SSB_U
+                self.PM_SSB_L = omnirig_module.constants.PM_SSB_L
+                self.PM_DIG_U = omnirig_module.constants.PM_DIG_U
+                self.PM_DIG_L = omnirig_module.constants.PM_DIG_L
+                self.PM_AM = omnirig_module.constants.PM_AM
+                self.PM_FM = omnirig_module.constants.PM_FM
+            except Exception as e:
+                if self.error_callback:
+                    self.error_callback(f"Failed to load OmniRig constants: {e}")
+                raise
             
             # Get the specified rig
             if self.rig_number == 1:
@@ -120,44 +237,46 @@ class OmniRigController:
             else:
                 self.rig = self.omnirig.Rig2
             
-            # Check if rig is online
+            # Check if rig is configured
             if self.rig.Status == self.ST_NOTCONFIGURED:
                 if self.error_callback:
                     self.error_callback("Rig not configured in OmniRig")
+                pythoncom.CoUninitialize()
                 return False
             
+            # Check if rig is online
             if self.rig.Status != self.ST_ONLINE:
                 if self.error_callback:
                     self.error_callback(f"Rig not online (status: {self.rig.Status})")
+                pythoncom.CoUninitialize()
                 return False
             
             self.connected = True
             self.running = True
             
-            # Initialize cache
+            # Initialize cache with current values
             self._last_freq = self._get_frequency_internal()
             self._last_mode = self._get_mode_internal()
             self._last_ptt = self._get_ptt_internal()
-            
-            # Start polling thread
-            self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
-            self.poll_thread.start()
             
             return True
             
         except Exception as e:
             if self.error_callback:
                 self.error_callback(f"Failed to connect to OmniRig: {e}")
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
             return False
     
     def disconnect(self):
         """Disconnect from OmniRig."""
+        global _controller_instance
+        
         self.running = False
         self.connected = False
-        
-        # Wait for poll thread to finish
-        if self.poll_thread and self.poll_thread.is_alive():
-            self.poll_thread.join(timeout=1.0)
+        _controller_instance = None
         
         self.rig = None
         self.omnirig = None
@@ -167,97 +286,183 @@ class OmniRigController:
         except:
             pass
     
-    def _poll_loop(self):
-        """Polling loop that runs in separate thread."""
-        # Initialize COM for this thread
-        pythoncom.CoInitialize()
+    def poll(self):
+        """Poll for COM events and process queued commands.
+        
+        This must be called regularly (e.g., every 50-100ms) from the main thread
+        to process COM events and execute queued commands.
+        """
+        if not self.connected:
+            return
         
         try:
-            while self.running and self.connected:
-                try:
-                    # Process any queued commands
-                    self._process_command_queue()
-                    
-                    # Check for changes
-                    current_freq = self._get_frequency_internal()
-                    current_mode = self._get_mode_internal()
-                    current_ptt = self._get_ptt_internal()
-                    
-                    # Detect frequency changes
-                    if current_freq is not None and current_freq != self._last_freq:
-                        self._last_freq = current_freq
-                        if self.frequency_callback:
-                            self.frequency_callback(current_freq)
-                    
-                    # Detect mode changes
-                    if current_mode is not None and current_mode != self._last_mode:
-                        self._last_mode = current_mode
-                        if self.mode_callback:
-                            self.mode_callback(current_mode)
-                    
-                    # Detect PTT changes
-                    if current_ptt is not None and current_ptt != self._last_ptt:
-                        self._last_ptt = current_ptt
-                        if self.ptt_callback:
-                            self.ptt_callback(current_ptt)
-                    
-                    # Sleep before next poll
-                    time.sleep(self.poll_interval)
-                    
-                except Exception as e:
-                    if self.error_callback:
-                        self.error_callback(f"Poll error: {e}")
-                    time.sleep(1.0)  # Back off on error
-        finally:
-            pythoncom.CoUninitialize()
+            # Pump COM messages to process events
+            pythoncom.PumpWaitingMessages()
+            
+            # Process any queued commands
+            self._process_command_queue()
+        except Exception as e:
+            if self.error_callback:
+                self.error_callback(f"Poll error: {e}")
     
     def _process_command_queue(self):
-        """Process queued commands (runs in poll thread)."""
+        """Process queued commands and events (runs in pump thread)."""
+        commands_to_process = []
+        
+        # Get all pending commands/events
         with self._command_lock:
             while self._command_queue:
-                cmd_type, cmd_value = self._command_queue.pop(0)
+                commands_to_process.append(self._command_queue.pop(0))
+        
+        # Process commands/events outside the lock
+        for item in commands_to_process:
+            try:
+                cmd_type = item[0]
                 
-                try:
-                    if cmd_type == 'freq':
-                        self._set_frequency_internal(cmd_value)
-                    elif cmd_type == 'mode':
-                        self._set_mode_internal(cmd_value)
-                except Exception as e:
-                    if self.error_callback:
-                        self.error_callback(f"Command error: {e}")
+                if cmd_type == 'freq':
+                    self._set_frequency_internal(item[1])
+                elif cmd_type == 'mode':
+                    self._set_mode_internal(item[1])
+                elif cmd_type == 'event_params':
+                    self._handle_params_change(item[1][0], item[1][1])
+                elif cmd_type == 'event_status':
+                    self._handle_status_change(item[1])
+                elif cmd_type == 'event_rigtype':
+                    self._handle_rigtype_change(item[1])
+            except Exception as e:
+                if self.error_callback:
+                    self.error_callback(f"Command error ({cmd_type}): {e}")
+    
+    def _handle_params_change(self, RigNumber, Params):
+        """Handle parameter change event (runs in pump thread with GIL)."""
+        try:
+            # Check which parameters changed using bitmask
+            if Params & self.PM_FREQ:
+                # Frequency changed
+                freq = self._get_frequency_internal()
+                if freq is not None and freq != self._last_freq:
+                    self._last_freq = freq
+                    if self.frequency_callback:
+                        self.frequency_callback(freq)
+            
+            # Check for mode changes (any mode bit)
+            mode_bits = (self.PM_CW_U | self.PM_CW_L |
+                        self.PM_SSB_U | self.PM_SSB_L |
+                        self.PM_DIG_U | self.PM_DIG_L |
+                        self.PM_AM | self.PM_FM)
+            
+            if Params & mode_bits:
+                # Mode changed
+                mode = self._get_mode_internal()
+                if mode is not None and mode != self._last_mode:
+                    self._last_mode = mode
+                    if self.mode_callback:
+                        self.mode_callback(mode)
+            
+            # Check for TX/RX changes
+            if Params & (self.PM_TX | self.PM_RX):
+                ptt = self._get_ptt_internal()
+                if ptt is not None and ptt != self._last_ptt:
+                    self._last_ptt = ptt
+                    if self.ptt_callback:
+                        self.ptt_callback(ptt)
+        except Exception as e:
+            if self.error_callback:
+                self.error_callback(f"ParamsChange error: {e}")
+    
+    def _handle_status_change(self, RigNumber):
+        """Handle status change event (runs in pump thread with GIL)."""
+        try:
+            status = self.rig.Status
+            if status != self.ST_ONLINE:
+                self.connected = False
+                if self.error_callback:
+                    self.error_callback(f"Rig status changed: {status}")
+            else:
+                self.connected = True
+        except Exception as e:
+            if self.error_callback:
+                self.error_callback(f"StatusChange error: {e}")
+    
+    def _handle_rigtype_change(self, RigNumber):
+        """Handle rig type change event (runs in pump thread with GIL)."""
+        try:
+            rig_type = self.rig.RigType
+            if self.error_callback:
+                self.error_callback(f"Rig type: {rig_type}")
+        except Exception as e:
+            if self.error_callback:
+                self.error_callback(f"RigTypeChange error: {e}")
     
     def _get_frequency_internal(self) -> Optional[int]:
-        """Get frequency from rig (internal, runs in poll thread)."""
+        """Get frequency from rig (internal)."""
         try:
             if self.rig and self.connected:
-                return int(self.rig.Freq)
-        except Exception:
-            pass
+                readable = self.rig.ReadableParams
+                
+                # Use VFO-specific frequency if available, otherwise fall back to Freq
+                if self.vfo == 'A' and (readable & self.PM_FREQA):
+                    return int(self.rig.FreqA)
+                elif self.vfo == 'B' and (readable & self.PM_FREQB):
+                    return int(self.rig.FreqB)
+                elif readable & self.PM_FREQ:
+                    return int(self.rig.Freq)
+        except Exception as e:
+            if self.error_callback:
+                self.error_callback(f"Error reading frequency: {e}")
         return None
     
     def _get_mode_internal(self) -> Optional[str]:
-        """Get mode from rig (internal, runs in poll thread)."""
+        """Get mode from rig (internal)."""
         try:
             if self.rig and self.connected:
                 mode_value = self.rig.Mode
                 return self._omnirig_mode_to_string(mode_value)
-        except Exception:
-            pass
+        except Exception as e:
+            if self.error_callback:
+                self.error_callback(f"Error reading mode: {e}")
         return None
     
     def _set_frequency_internal(self, freq_hz: int):
-        """Set frequency on rig (internal, runs in poll thread)."""
-        if self.rig and self.connected:
-            self.rig.Freq = int(freq_hz)
-            self._last_freq = freq_hz  # Update cache immediately
+        """Set frequency on rig (internal)."""
+        try:
+            if self.rig and self.connected:
+                writeable = self.rig.WriteableParams
+                
+                # Use VFO-specific frequency if available, otherwise fall back to Freq
+                if self.vfo == 'A' and (writeable & self.PM_FREQA):
+                    self.rig.FreqA = int(freq_hz)
+                    self._last_freq = freq_hz
+                elif self.vfo == 'B' and (writeable & self.PM_FREQB):
+                    self.rig.FreqB = int(freq_hz)
+                    self._last_freq = freq_hz
+                elif writeable & self.PM_FREQ:
+                    self.rig.Freq = int(freq_hz)
+                    self._last_freq = freq_hz
+                else:
+                    if self.error_callback:
+                        self.error_callback(f"Frequency is not writeable on VFO {self.vfo}")
+        except Exception as e:
+            if self.error_callback:
+                self.error_callback(f"Error setting frequency: {e}")
     
     def _set_mode_internal(self, mode: str):
-        """Set mode on rig (internal, runs in poll thread)."""
-        if self.rig and self.connected:
-            omnirig_mode = self._string_to_omnirig_mode(mode)
-            if omnirig_mode is not None:
-                self.rig.Mode = omnirig_mode
-                self._last_mode = mode  # Update cache immediately
+        """Set mode on rig (internal)."""
+        try:
+            if self.rig and self.connected:
+                omnirig_mode = self._string_to_omnirig_mode(mode)
+                if omnirig_mode is not None:
+                    # Check if mode is writeable
+                    writeable = self.rig.WriteableParams
+                    if writeable & omnirig_mode:
+                        self.rig.Mode = omnirig_mode
+                        self._last_mode = mode  # Update cache immediately
+                    else:
+                        if self.error_callback:
+                            self.error_callback(f"Mode {mode} is not writeable on this rig")
+        except Exception as e:
+            if self.error_callback:
+                self.error_callback(f"Error setting mode: {e}")
     
     def get_frequency(self) -> Optional[int]:
         """Get cached frequency (thread-safe, non-blocking).
@@ -266,6 +471,26 @@ class OmniRigController:
             Frequency in Hz, or None if not available
         """
         return self._last_freq
+    
+    def set_vfo(self, vfo: str):
+        """Change the active VFO.
+        
+        Args:
+            vfo: VFO to use ('A' or 'B')
+        """
+        self.vfo = vfo.upper()
+        # Re-read frequency from new VFO
+        self._last_freq = self._get_frequency_internal()
+        if self.error_callback:
+            self.error_callback(f"Switched to VFO {self.vfo}")
+    
+    def get_vfo(self) -> str:
+        """Get current VFO.
+        
+        Returns:
+            Current VFO ('A' or 'B')
+        """
+        return self.vfo
     
     def get_mode(self) -> Optional[str]:
         """Get cached mode (thread-safe, non-blocking).
@@ -284,13 +509,15 @@ class OmniRigController:
         return self._last_ptt
     
     def _get_ptt_internal(self) -> Optional[bool]:
-        """Get PTT state from rig (internal, runs in poll thread)."""
+        """Get PTT state from rig (internal)."""
         try:
             if self.rig and self.connected:
-                # OmniRig Tx property: 0=RX, non-zero=TX
-                return bool(self.rig.Tx)
-        except Exception:
-            pass
+                # OmniRig Tx property: PM_RX or PM_TX
+                tx_state = self.rig.Tx
+                return tx_state == self.PM_TX
+        except Exception as e:
+            if self.error_callback:
+                self.error_callback(f"Error reading PTT: {e}")
         return None
     
     def set_frequency(self, freq_hz: int):
@@ -301,6 +528,8 @@ class OmniRigController:
         """
         with self._command_lock:
             self._command_queue.append(('freq', freq_hz))
+        if self.error_callback:
+            self.error_callback(f"DEBUG: Queued freq command: {freq_hz} Hz")
     
     def set_mode(self, mode: str):
         """Queue mode change (thread-safe, non-blocking).
@@ -310,11 +539,6 @@ class OmniRigController:
         """
         with self._command_lock:
             self._command_queue.append(('mode', mode))
-    
-    def poll(self):
-        """Trigger a poll cycle (for compatibility with rigctl interface)."""
-        # Polling happens automatically in background thread
-        pass
     
     def _omnirig_mode_to_string(self, mode_value) -> str:
         """Convert OmniRig mode constant to string.

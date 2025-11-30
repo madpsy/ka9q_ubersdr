@@ -55,7 +55,7 @@ function createBandBadge(band, snr) {
 }
 
 function createInstanceCard(instance, noiseFloorData) {
-    const isOnline = instance.last_report_age_seconds < 300; // 5 minutes
+    const isOnline = instance.last_report_age_seconds < 1800; // 30 minutes
     const features = [];
     
     if (instance.cw_skimmer) features.push('CW Skimmer');
@@ -142,7 +142,8 @@ function createInstanceCard(instance, noiseFloorData) {
 
 async function fetchInstances() {
     try {
-        const response = await fetch('/api/instances');
+        // Use ?all=true to show all instances, not just those seen in last 30 minutes
+        const response = await fetch('/api/instances?all=true');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -222,8 +223,17 @@ async function loadAndDisplayInstances() {
     }
 }
 
-// Initial load
-loadAndDisplayInstances();
+// Wait for DOM to be ready before executing
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
 
-// Refresh periodically
-setInterval(loadAndDisplayInstances, REFRESH_INTERVAL);
+function init() {
+    // Initial load
+    loadAndDisplayInstances();
+
+    // Refresh periodically
+    setInterval(loadAndDisplayInstances, REFRESH_INTERVAL);
+}

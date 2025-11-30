@@ -471,18 +471,38 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	rows, err := c.db.Query(`
-		SELECT public_uuid, callsign, name, location, latitude, longitude,
-		       altitude, public_url, version, host, port, tls,
-		       cw_skimmer, digital_decodes, noise_floor, max_clients,
-		       first_seen, last_seen
-		FROM instances
-		WHERE datetime(last_seen) >= datetime('now', '-30 minutes')
-		  AND host IS NOT NULL
-		  AND host != ''
-		  AND port > 0
-		ORDER BY last_seen DESC
-	`)
+	// Check for 'all' query parameter to show all instances regardless of last_seen
+	showAll := r.URL.Query().Get("all") == "true"
+
+	var query string
+	if showAll {
+		query = `
+			SELECT public_uuid, callsign, name, location, latitude, longitude,
+			       altitude, public_url, version, host, port, tls,
+			       cw_skimmer, digital_decodes, noise_floor, max_clients,
+			       first_seen, last_seen
+			FROM instances
+			WHERE host IS NOT NULL
+			  AND host != ''
+			  AND port > 0
+			ORDER BY last_seen DESC
+		`
+	} else {
+		query = `
+			SELECT public_uuid, callsign, name, location, latitude, longitude,
+			       altitude, public_url, version, host, port, tls,
+			       cw_skimmer, digital_decodes, noise_floor, max_clients,
+			       first_seen, last_seen
+			FROM instances
+			WHERE datetime(last_seen) >= datetime('now', '-30 minutes')
+			  AND host IS NOT NULL
+			  AND host != ''
+			  AND port > 0
+			ORDER BY last_seen DESC
+		`
+	}
+
+	rows, err := c.db.Query(query)
 	if err != nil {
 		log.Printf("Failed to query instances: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)

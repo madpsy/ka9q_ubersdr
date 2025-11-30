@@ -736,6 +736,9 @@ func main() {
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
 		handleDescription(w, r, config, cwskimmerConfig, sessions)
 	})
+	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
+		handleInstanceStatus(w, r, config)
+	})
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		handleStatus(w, r, config)
 	})
@@ -1309,6 +1312,63 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding description: %v", err)
 	}
+}
+
+// InstanceStatusRequest represents the request body for instance status check
+type InstanceStatusRequest struct {
+	UUID string `json:"uuid"`
+}
+
+// InstanceStatusResponse represents the response for instance status check
+type InstanceStatusResponse struct {
+	Host string `json:"host,omitempty"`
+	Port int    `json:"port,omitempty"`
+	TLS  bool   `json:"tls,omitempty"`
+}
+
+// handleInstanceStatus checks if instance reporting is enabled and returns connection info
+func handleInstanceStatus(w http.ResponseWriter, r *http.Request, config *Config) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Only accept POST requests
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Method not allowed, use POST",
+		})
+		return
+	}
+
+	// Parse request body
+	var req InstanceStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
+	// Check if instance reporting is enabled and UUID matches
+	if !config.InstanceReporting.Enabled ||
+		config.InstanceReporting.InstanceUUID == "" ||
+		config.InstanceReporting.InstanceUUID != req.UUID {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Instance not found",
+		})
+		return
+	}
+
+	// Return instance connection info
+	response := InstanceStatusResponse{
+		Host: config.InstanceReporting.Instance.Host,
+		Port: config.InstanceReporting.Instance.Port,
+		TLS:  config.InstanceReporting.Instance.TLS,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 // handleStatus serves the status.json endpoint with receiver and SDR information

@@ -34,6 +34,7 @@ type Session struct {
 	UserSessionID  string // Client-generated UUID to link audio and spectrum sessions
 	UserAgent      string // User-Agent string from the client
 	BypassPassword string // Password used for bypass authentication (if any)
+	AuthMethod     string // Authentication method: "password", "ip_bypass", or "" for normal
 
 	// WebSocket connection (for closing when kicked)
 	WSConn interface{} // *wsConn, stored as interface{} to avoid import cycle
@@ -1106,11 +1107,23 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 	for _, session := range sm.sessions {
 		session.mu.RLock()
 
-		// Check if this session's IP is bypassed
-		isBypassed := sm.config.Server.IsIPTimeoutBypassed(session.ClientIP)
-
 		// Check if this is an internal session (no client IP = internal system session)
 		isInternal := session.ClientIP == ""
+
+		// Determine authentication method
+		authMethod := ""
+		isBypassed := false
+		if session.BypassPassword != "" {
+			// Session has a password stored, check if it's valid
+			if sm.config.Server.IsIPTimeoutBypassed(session.ClientIP, session.BypassPassword) {
+				authMethod = "password"
+				isBypassed = true
+			}
+		} else if sm.config.Server.IsIPTimeoutBypassed(session.ClientIP) {
+			// No password, but IP is in bypass list
+			authMethod = "ip_bypass"
+			isBypassed = true
+		}
 
 		info := map[string]interface{}{
 			"id":              session.ID,
@@ -1126,6 +1139,7 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			"last_active":     session.LastActive.Format(time.RFC3339),
 			"is_bypassed":     isBypassed,
 			"is_internal":     isInternal,
+			"auth_method":     authMethod,
 		}
 
 		// Add type-specific info

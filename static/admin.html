@@ -2305,10 +2305,16 @@
                 }
 
                 // Combine IP display: show client IP, with source IP in parentheses if different
-                // Add bypass indicator if applicable
+                // Add bypass indicator if applicable - check auth_method to distinguish between password and IP bypass
                 let ipDisplay = clientIP;
                 if (sessions.isBypassed) {
-                    ipDisplay += ` <span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; margin-left: 5px;">BYPASSED</span>`;
+                    // Check the auth_method from the first session to determine badge type
+                    const authMethod = audioSession?.auth_method || spectrumSession?.auth_method || '';
+                    if (authMethod === 'password') {
+                        ipDisplay += ` <span style="background: #2196f3; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; margin-left: 5px;">PASSWORD</span>`;
+                    } else {
+                        ipDisplay += ` <span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; margin-left: 5px;">BYPASSED</span>`;
+                    }
                 }
                 if (sourceIP !== clientIP && sourceIP !== 'N/A') {
                     ipDisplay += ` <span style="color: #666; font-size: 11px;">(via ${sourceIP})</span>`;

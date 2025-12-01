@@ -15,6 +15,7 @@
 
 #include <websocketpp/config/asio_client.hpp>
 #include <websocketpp/client.hpp>
+#include <websocketpp/config/asio_no_tls_client.hpp>
 
 #include <thread>
 #include <mutex>
@@ -102,8 +103,10 @@ std::string generateUUID() {
     return ss.str();
 }
 
-typedef websocketpp::client<websocketpp::config::asio_client> client;
-typedef websocketpp::config::asio_client::message_type::ptr message_ptr;
+// Use TLS-enabled client configuration
+typedef websocketpp::client<websocketpp::config::asio_tls_client> client;
+typedef websocketpp::config::asio_tls_client::message_type::ptr message_ptr;
+typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
 
 /***********************************************************************
  * Device implementation
@@ -761,6 +764,26 @@ void SoapyUberSDR::connectWebSocket()
     _wsClient.clear_access_channels(websocketpp::log::alevel::all);
     _wsClient.clear_error_channels(websocketpp::log::elevel::all);
     _wsClient.init_asio();
+    
+    // Set up TLS/SSL context for secure WebSocket connections
+    _wsClient.set_tls_init_handler([](websocketpp::connection_hdl) {
+        context_ptr ctx = websocketpp::lib::make_shared<websocketpp::lib::asio::ssl::context>(
+            websocketpp::lib::asio::ssl::context::sslv23);
+        
+        try {
+            ctx->set_options(websocketpp::lib::asio::ssl::context::default_workarounds |
+                           websocketpp::lib::asio::ssl::context::no_sslv2 |
+                           websocketpp::lib::asio::ssl::context::no_sslv3 |
+                           websocketpp::lib::asio::ssl::context::single_dh_use);
+            
+            // Set verify mode to none to accept self-signed certificates
+            // In production, you might want to verify certificates properly
+            ctx->set_verify_mode(websocketpp::lib::asio::ssl::verify_none);
+        } catch (std::exception &e) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: TLS init error: %s", e.what());
+        }
+        return ctx;
+    });
     
     // Set User-Agent header
     _wsClient.set_user_agent("UberSDR_Soapy/1.0");

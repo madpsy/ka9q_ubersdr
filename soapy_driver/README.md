@@ -253,7 +253,7 @@ sudo cp -r websocketpp/websocketpp /usr/local/include/
 - RX only (no transmit support)
 - No gain control (server-side only)
 - Requires network connectivity
-- Wide IQ modes require server authorization
+- Wide IQ modes require server authorisation
 
 ## Development
 
@@ -281,11 +281,6 @@ BSL-1.0 (Boost Software License 1.0)
 ## Contributing
 
 Contributions welcome! Please submit pull requests to the main ka9q_ubersdr repository.
-
-## Support
-
-- GitHub Issues: https://github.com/ka9q/ka9q-radio/issues
-- KA9Q Radio Wiki: https://github.com/ka9q/ka9q-radio/wiki
 
 ## Connection Flow
 
@@ -324,7 +319,6 @@ The password is sent securely in:
 ## See Also
 
 - [KA9Q UberSDR](https://github.com/madpsy/ka9q_ubersdr)
-- [KA9Q Radio](https://github.com/ka9q/ka9q-radio)
 - [SoapySDR](https://github.com/pothosware/SoapySDR)
 - [GQRX](https://gqrx.dk/)
 - [CubicSDR](https://cubicsdr.com/)

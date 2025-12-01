@@ -1089,11 +1089,12 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
                 std::string protocol = tls ? "wss" : "ws";
                 std::string serverURL = protocol + "://" + host + ":" + port + "/ws";
                 
-                // Create label with station info
-                std::string stationInfo = name;
+                // Create label with station info - prepend callsign if available
+                std::string stationInfo;
                 if (!callsign.empty()) {
-                    stationInfo += " (" + callsign + ")";
+                    stationInfo = "(" + callsign + ") ";
                 }
+                stationInfo += name;
                 if (!location.empty()) {
                     stationInfo += " - " + location;
                 }

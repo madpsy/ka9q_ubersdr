@@ -940,12 +940,13 @@ type ConnectionCheckRequest struct {
 
 // ConnectionCheckResponse represents the response for connection check
 type ConnectionCheckResponse struct {
-	ClientIP       string `json:"client_ip"`
-	Allowed        bool   `json:"allowed"`
-	Reason         string `json:"reason,omitempty"`
-	SessionTimeout int    `json:"session_timeout"`  // Session inactivity timeout in seconds (0 = no timeout)
-	MaxSessionTime int    `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
-	Bypassed       bool   `json:"bypassed"`         // Whether the IP is in the timeout bypass list
+	ClientIP       string   `json:"client_ip"`
+	Allowed        bool     `json:"allowed"`
+	Reason         string   `json:"reason,omitempty"`
+	SessionTimeout int      `json:"session_timeout"`  // Session inactivity timeout in seconds (0 = no timeout)
+	MaxSessionTime int      `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
+	Bypassed       bool     `json:"bypassed"`         // Whether the IP is in the timeout bypass list
+	AllowedIQModes []string `json:"allowed_iq_modes"` // List of IQ modes the user can access
 }
 
 // handleConnectionCheck checks if a connection will be allowed before WebSocket upgrade
@@ -1005,12 +1006,30 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		maxSessionTime = 0
 	}
 
+	// Build list of allowed IQ modes for this user
+	// Bypassed users get all modes, non-bypassed users get public modes only
+	allowedIQModes := []string{}
+	wideIQModes := []string{"iq48", "iq96", "iq192", "iq384"}
+
+	if isBypassed {
+		// Bypassed users can access all wide IQ modes
+		allowedIQModes = wideIQModes
+	} else {
+		// Non-bypassed users can only access public IQ modes
+		for _, mode := range wideIQModes {
+			if sessions.config.Server.PublicIQModes[mode] {
+				allowedIQModes = append(allowedIQModes, mode)
+			}
+		}
+	}
+
 	response := ConnectionCheckResponse{
 		ClientIP:       clientIP,
 		Allowed:        true,
 		SessionTimeout: sessionTimeout,
 		MaxSessionTime: maxSessionTime,
 		Bypassed:       isBypassed,
+		AllowedIQModes: allowedIQModes,
 	}
 
 	// Check if IP is banned
@@ -1287,6 +1306,15 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	// Construct public_url from instance connection info
 	publicURL := config.InstanceReporting.ConstructPublicURL()
 
+	// Build list of public IQ modes (modes that don't require authentication)
+	publicIQModes := []string{}
+	wideIQModes := []string{"iq48", "iq96", "iq192", "iq384"}
+	for _, mode := range wideIQModes {
+		if config.Server.PublicIQModes[mode] {
+			publicIQModes = append(publicIQModes, mode)
+		}
+	}
+
 	// Build the response with description plus status information (without sdrs)
 	response := map[string]interface{}{
 		"description": config.Admin.Description,
@@ -1309,6 +1337,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"noise_floor":       config.NoiseFloor.Enabled,
 		"digital_decodes":   config.Decoder.Enabled,
 		"cw_skimmer":        cwskimmerConfig.Enabled,
+		"public_iq_modes":   publicIQModes,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

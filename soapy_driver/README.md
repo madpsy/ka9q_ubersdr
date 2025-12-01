@@ -98,6 +98,11 @@ SoapySDRUtil --make="driver=ubersdr,server=ws://localhost:8080/ws,mode=iq96,pass
 5. Select sample rate: 192000
 6. Click OK and start
 
+**Example device string from discovery:**
+```
+callsign=M9PSY,driver=ubersdr,location='Dalgety Bay, Scotland, UK',mode=iq96,serial=wss://ubersdr.madpsy.uk:443/ws:iq96,server=wss://ubersdr.madpsy.uk:443/ws,soapy=5,password=xxxxxxxxxxxxxxxxx
+```
+
 ### CubicSDR
 
 1. Start CubicSDR

@@ -24,7 +24,7 @@ def create_public_instances_window(parent, on_connect_callback):
     # Create new window
     window = tk.Toplevel(parent)
     window.title("Public UberSDR Instances")
-    window.geometry("980x500")
+    window.geometry("1040x500")
 
     # Main frame with padding
     main_frame = ttk.Frame(window, padding="10")
@@ -35,13 +35,14 @@ def create_public_instances_window(parent, on_connect_callback):
     status_label.pack(pady=(0, 10))
 
     # Create Treeview for instances list
-    columns = ('name', 'callsign', 'location', 'session', 'cw', 'digi', 'noise', 'iq', 'version', 'url', 'map')
+    columns = ('name', 'callsign', 'location', 'users', 'session', 'cw', 'digi', 'noise', 'iq', 'version', 'url', 'map')
     tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=15)
 
     # Define headings
     tree.heading('name', text='Name')
     tree.heading('callsign', text='Callsign')
     tree.heading('location', text='Location')
+    tree.heading('users', text='Users')
     tree.heading('session', text='Session')
     tree.heading('cw', text='CW')
     tree.heading('digi', text='Digi')
@@ -55,6 +56,7 @@ def create_public_instances_window(parent, on_connect_callback):
     tree.column('name', width=180)
     tree.column('callsign', width=80)
     tree.column('location', width=180)
+    tree.column('users', width=60)
     tree.column('session', width=60)
     tree.column('cw', width=40)
     tree.column('digi', width=40)
@@ -127,14 +129,14 @@ def create_public_instances_window(parent, on_connect_callback):
             if not instance:
                 return
 
-            # Column #10 is Public URL
-            if column == '#10':
+            # Column #11 is Public URL
+            if column == '#11':
                 url = instance.get('public_url', '')
                 if url:
                     webbrowser.open(url)
 
-            # Column #11 is Map
-            elif column == '#11':
+            # Column #12 is Map
+            elif column == '#12':
                 lat = instance.get('latitude')
                 lon = instance.get('longitude')
                 if lat and lon:
@@ -187,6 +189,11 @@ def create_public_instances_window(parent, on_connect_callback):
                     location = instance.get('location', '')
                     version = instance.get('version', '')
 
+                    # Users available
+                    available_clients = instance.get('available_clients', 0)
+                    max_clients = instance.get('max_clients', 0)
+                    users_text = f"{available_clients}/{max_clients}"
+
                     # Max session time in minutes
                     max_session_time = instance.get('max_session_time', 0)
                     session_text = f"{max_session_time // 60}m" if max_session_time > 0 else ''
@@ -221,7 +228,7 @@ def create_public_instances_window(parent, on_connect_callback):
                     map_text = '🗺️ Map' if (lat and lon) else ''
 
                     # Insert into tree
-                    item_id = tree.insert('', tk.END, values=(name, callsign, location, session_text, cw_text, digi_text, noise_text, iq_text, version, url_text, map_text), tags=('link',))
+                    item_id = tree.insert('', tk.END, values=(name, callsign, location, users_text, session_text, cw_text, digi_text, noise_text, iq_text, version, url_text, map_text), tags=('link',))
 
                     # Store full instance data with connection info
                     # The API returns host, port, tls at the top level

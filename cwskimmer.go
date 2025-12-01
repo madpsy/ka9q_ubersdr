@@ -334,21 +334,7 @@ func (c *CWSkimmerClient) handleConnection() {
 	ctx := c.ctx
 	c.mu.RUnlock()
 
-	// Use a ticker to periodically check context cancellation
-	// This ensures we can exit even if readLine is blocked
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
 	for {
-		// Check context cancellation periodically
-		select {
-		case <-ctx.Done():
-			log.Println("CW Skimmer: Context cancelled, exiting message handler")
-			return
-		case <-ticker.C:
-			// Periodic check - continue to read attempt
-		}
-
 		// Check if we're still connected
 		if !c.IsConnected() {
 			log.Println("CW Skimmer: Connection closed by keepalive watchdog")
@@ -382,26 +368,44 @@ func (c *CWSkimmerClient) handleConnection() {
 }
 
 // readLineWithContext reads a line with context cancellation support
+// It checks the context periodically (every second) to allow quick cancellation
 func (c *CWSkimmerClient) readLineWithContext(ctx context.Context, timeout time.Duration) (string, error) {
-	type result struct {
-		line string
-		err  error
-	}
+	deadline := time.Now().Add(timeout)
 
-	resultChan := make(chan result, 1)
+	for {
+		// Check context cancellation first
+		select {
+		case <-ctx.Done():
+			log.Println("CW Skimmer: readLineWithContext detected context cancellation")
+			return "", ctx.Err()
+		default:
+		}
 
-	// Start the read in a goroutine
-	go func() {
-		line, err := c.readLine(timeout)
-		resultChan <- result{line, err}
-	}()
+		// Calculate remaining time
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return "", fmt.Errorf("timeout waiting for data")
+		}
 
-	// Wait for either the read to complete or context cancellation
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case res := <-resultChan:
-		return res.line, res.err
+		// Try a short read (1 second max) so we can check context frequently
+		readTimeout := 1 * time.Second
+		if remaining < readTimeout {
+			readTimeout = remaining
+		}
+
+		line, err := c.readLine(readTimeout)
+		if err == nil {
+			// Successfully read a line
+			return line, nil
+		}
+
+		// If it's a timeout, loop and try again (will check context on next iteration)
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			continue
+		}
+
+		// Other errors are fatal
+		return "", err
 	}
 }
 

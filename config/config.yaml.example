@@ -607,8 +607,8 @@ instance_reporting:
 
   # Reporting interval in seconds (how often to send updates)
   # Default: 600 (10 minutes)
-  # Minimum recommended: 300 (5 minutes)
-  report_interval_sec: 600
+  # Minimum recommended: 120 (2 minutes)
+  report_interval_sec: 120
 
   # Instance UUID (automatically generated on first run if enabled)
   # This uniquely identifies your SDR instance in the registry

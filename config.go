@@ -409,6 +409,8 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.InstanceReporting.ReportIntervalSec == 0 {
 		config.InstanceReporting.ReportIntervalSec = 600 // 10 minutes default
+	} else if config.InstanceReporting.ReportIntervalSec < 60 {
+		config.InstanceReporting.ReportIntervalSec = 60 // Minimum 60 seconds
 	}
 	// UseHTTPS defaults to true (YAML unmarshaling will set it to false if explicitly set)
 	// We set it to true here to ensure it's true by default

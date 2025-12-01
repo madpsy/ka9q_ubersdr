@@ -193,7 +193,7 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
                 </div>
                 ` : ''}
                 <div class="instance-info-row">
-                    <span class="instance-info-label">📶 IQ Bandwidths:</span>
+                    <span class="instance-info-label">📻 Bandwidths:</span>
                     <span class="instance-info-value">
                         ${instance.public_iq_modes && instance.public_iq_modes.length > 0
                             ? instance.public_iq_modes.map(mode => {

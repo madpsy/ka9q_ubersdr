@@ -949,8 +949,37 @@ static std::vector<std::map<std::string, std::string>> fetchPublicInstances()
         instance["callsign"] = extractValue("callsign");
         instance["location"] = extractValue("location");
         
-        // Only add if we have host and port
-        if (!instance["host"].empty() && !instance["port"].empty()) {
+        // Extract public_iq_modes array
+        size_t modesPos = instanceObj.find("\"public_iq_modes\"");
+        if (modesPos != std::string::npos) {
+            size_t arrayStart = instanceObj.find("[", modesPos);
+            size_t arrayEnd = instanceObj.find("]", arrayStart);
+            
+            if (arrayStart != std::string::npos && arrayEnd != std::string::npos) {
+                std::string modesArray = instanceObj.substr(arrayStart + 1, arrayEnd - arrayStart - 1);
+                
+                // Parse each mode in the array and concatenate with commas
+                std::string publicModes;
+                size_t modePos = 0;
+                while (modePos < modesArray.length()) {
+                    size_t quoteStart = modesArray.find("\"", modePos);
+                    if (quoteStart == std::string::npos) break;
+                    
+                    size_t quoteEnd = modesArray.find("\"", quoteStart + 1);
+                    if (quoteEnd == std::string::npos) break;
+                    
+                    std::string mode = modesArray.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+                    if (!publicModes.empty()) publicModes += ",";
+                    publicModes += mode;
+                    modePos = quoteEnd + 1;
+                }
+                
+                instance["public_iq_modes"] = publicModes;
+            }
+        }
+        
+        // Only add if we have host, port, and at least one public IQ mode
+        if (!instance["host"].empty() && !instance["port"].empty() && !instance["public_iq_modes"].empty()) {
             instances.push_back(instance);
         }
         
@@ -1029,6 +1058,27 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
                 std::string callsign = instance.count("callsign") ? instance.at("callsign") : "";
                 std::string location = instance.count("location") ? instance.at("location") : "";
                 
+                // Parse public_iq_modes
+                std::vector<std::string> publicModes;
+                if (instance.count("public_iq_modes")) {
+                    std::string modesStr = instance.at("public_iq_modes");
+                    size_t pos = 0;
+                    while (pos < modesStr.length()) {
+                        size_t commaPos = modesStr.find(",", pos);
+                        if (commaPos == std::string::npos) {
+                            publicModes.push_back(modesStr.substr(pos));
+                            break;
+                        }
+                        publicModes.push_back(modesStr.substr(pos, commaPos - pos));
+                        pos = commaPos + 1;
+                    }
+                }
+                
+                // Skip instance if no public modes
+                if (publicModes.empty()) {
+                    continue;
+                }
+                
                 // Build WebSocket URL
                 std::string protocol = tls ? "wss" : "ws";
                 std::string serverURL = protocol + "://" + host + ":" + port + "/ws";
@@ -1042,7 +1092,8 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
                     stationInfo += " - " + location;
                 }
                 
-                for (const auto& mode : modes) {
+                // Only create devices for public IQ modes
+                for (const auto& mode : publicModes) {
                     SoapySDR::Kwargs dev;
                     dev["driver"] = "ubersdr";
                     dev["server"] = serverURL;

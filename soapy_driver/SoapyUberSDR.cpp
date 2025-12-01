@@ -1019,11 +1019,14 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
         std::string serverURL = args.at("server");
         
         for (const auto& mode : modes) {
+            // Convert mode to bandwidth display (e.g., "iq48" -> "48 kHz")
+            std::string bandwidth = mode.substr(2) + " kHz"; // Remove "iq" prefix and add " kHz"
+            
             SoapySDR::Kwargs dev;
             dev["driver"] = "ubersdr";
             dev["server"] = serverURL;
             dev["mode"] = mode;
-            dev["label"] = "KA9Q UberSDR " + mode;
+            dev["label"] = "KA9Q UberSDR " + bandwidth;
             dev["serial"] = serverURL + ":" + mode;
             results.push_back(dev);
         }
@@ -1038,11 +1041,14 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
             // Fallback to localhost
             std::string serverURL = "ws://localhost:8080/ws";
             for (const auto& mode : modes) {
+                // Convert mode to bandwidth display (e.g., "iq48" -> "48 kHz")
+                std::string bandwidth = mode.substr(2) + " kHz"; // Remove "iq" prefix and add " kHz"
+                
                 SoapySDR::Kwargs dev;
                 dev["driver"] = "ubersdr";
                 dev["server"] = serverURL;
                 dev["mode"] = mode;
-                dev["label"] = "KA9Q UberSDR (localhost) " + mode;
+                dev["label"] = "KA9Q UberSDR (localhost) " + bandwidth;
                 dev["serial"] = serverURL + ":" + mode;
                 results.push_back(dev);
             }
@@ -1094,11 +1100,14 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
                 
                 // Only create devices for public IQ modes
                 for (const auto& mode : publicModes) {
+                    // Convert mode to bandwidth display (e.g., "iq48" -> "48 kHz")
+                    std::string bandwidth = mode.substr(2) + " kHz"; // Remove "iq" prefix and add " kHz"
+                    
                     SoapySDR::Kwargs dev;
                     dev["driver"] = "ubersdr";
                     dev["server"] = serverURL;
                     dev["mode"] = mode;
-                    dev["label"] = stationInfo + " " + mode;
+                    dev["label"] = stationInfo + " " + bandwidth;
                     dev["serial"] = serverURL + ":" + mode;
                     if (!callsign.empty()) {
                         dev["callsign"] = callsign;

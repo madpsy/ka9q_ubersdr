@@ -190,10 +190,12 @@ public:
 private:
     // Configuration
     std::string _serverURL;
+    std::string _password;
     std::string _userSessionID;
     std::string _currentMode;
     uint64_t _currentFrequency;
     double _sampleRate;
+    bool _bypassed;
     
     // WebSocket client
     client _wsClient;
@@ -224,15 +226,22 @@ SoapyUberSDR::SoapyUberSDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("SoapyUberSDR: 'server' argument required");
     
     _serverURL = args.at("server");
+    _password = args.count("password") ? args.at("password") : "";
     _currentMode = args.count("mode") ? args.at("mode") : "iq96";
     _currentFrequency = 14074000;
     _sampleRate = modeToSampleRate(_currentMode);
     _streaming = false;
     _connected = false;
+    _bypassed = false;
     _userSessionID = generateUUID();
     
-    SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Created device for %s mode=%s", 
-                   _serverURL.c_str(), _currentMode.c_str());
+    if (!_password.empty()) {
+        SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Created device for %s mode=%s (with password)",
+                       _serverURL.c_str(), _currentMode.c_str());
+    } else {
+        SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Created device for %s mode=%s",
+                       _serverURL.c_str(), _currentMode.c_str());
+    }
 }
 
 // Destructor
@@ -623,7 +632,11 @@ bool SoapyUberSDR::checkConnectionAllowed()
     
     // Build JSON request body
     std::stringstream jsonBody;
-    jsonBody << "{\"user_session_id\":\"" << _userSessionID << "\"}";
+    jsonBody << "{\"user_session_id\":\"" << _userSessionID << "\"";
+    if (!_password.empty()) {
+        jsonBody << ",\"password\":\"" << _password << "\"";
+    }
+    jsonBody << "}";
     std::string postData = jsonBody.str();
     
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Checking connection permission at %s", checkURL.c_str());
@@ -659,16 +672,36 @@ bool SoapyUberSDR::checkConnectionAllowed()
     
     // Parse JSON response
     SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyUberSDR: Connection check response: %s", response.c_str());
-    
-    // Simple JSON parsing for "allowed" field
+
+    // Simple JSON parsing for "allowed" and "bypassed" fields
+    // For wide IQ modes, BOTH "allowed" and "bypassed" must be true
     size_t allowedPos = response.find("\"allowed\"");
     if (allowedPos != std::string::npos) {
         size_t truePos = response.find("true", allowedPos);
         size_t falsePos = response.find("false", allowedPos);
-        
+
         if (truePos != std::string::npos && (falsePos == std::string::npos || truePos < falsePos)) {
-            SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: Connection allowed by server");
-            return true;
+            // Connection is allowed, now check for "bypassed" field
+            size_t bypassedPos = response.find("\"bypassed\"");
+            if (bypassedPos != std::string::npos) {
+                size_t bypassedTruePos = response.find("true", bypassedPos);
+                size_t bypassedFalsePos = response.find("false", bypassedPos);
+
+                if (bypassedTruePos != std::string::npos && (bypassedFalsePos == std::string::npos || bypassedTruePos < bypassedFalsePos)) {
+                    _bypassed = true;
+                    SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: Connection allowed and bypassed - wide IQ modes available");
+                    return true;
+                } else {
+                    _bypassed = false;
+                    SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Connection allowed but not bypassed - wide IQ modes require bypass password");
+                    return false;
+                }
+            } else {
+                // No bypassed field in response - assume not bypassed
+                _bypassed = false;
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Connection allowed but not bypassed - wide IQ modes require bypass password");
+                return false;
+            }
         } else if (falsePos != std::string::npos) {
             // Extract reason if present
             size_t reasonPos = response.find("\"reason\"");
@@ -706,6 +739,20 @@ void SoapyUberSDR::connectWebSocket()
     ss << "frequency=" << _currentFrequency;
     ss << "&mode=" << _currentMode;
     ss << "&user_session_id=" << _userSessionID;
+    if (!_password.empty()) {
+        // URL encode password (simple implementation for common characters)
+        std::string encodedPassword;
+        for (char c : _password) {
+            if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+                encodedPassword += c;
+            } else {
+                char hex[4];
+                snprintf(hex, sizeof(hex), "%%%02X", (unsigned char)c);
+                encodedPassword += hex;
+            }
+        }
+        ss << "&password=" << encodedPassword;
+    }
     
     std::string wsURL = ss.str();
     

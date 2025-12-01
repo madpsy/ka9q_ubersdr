@@ -35,7 +35,7 @@ target_include_directories(uberSDRSupport PRIVATE
 )
 
 target_link_libraries(uberSDRSupport
-    ${SOAPY_SDR_LIBRARIES}
+    SoapySDR
     ${Boost_LIBRARIES}
     ${OPENSSL_LIBRARIES}
     ${CURL_LIBRARIES}

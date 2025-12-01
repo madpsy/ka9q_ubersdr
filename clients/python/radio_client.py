@@ -533,12 +533,12 @@ class RadioClient:
                     params['bandwidthLow'] = str(self.bandwidth_low)
                 if self.bandwidth_high is not None:
                     params['bandwidthHigh'] = str(self.bandwidth_high)
-           
-           # Add password if provided
-           if self.password:
-               params['password'] = self.password
-           
-           return f"{base_url}?{urlencode(params)}"
+            
+            # Add password if provided
+            if self.password:
+                params['password'] = self.password
+            
+            return f"{base_url}?{urlencode(params)}"
         else:
             # Build URL from host/port/ssl
             protocol = 'wss' if self.ssl else 'ws'
@@ -553,13 +553,13 @@ class RadioClient:
                     url += f"&bandwidthLow={self.bandwidth_low}"
                 if self.bandwidth_high is not None:
                     url += f"&bandwidthHigh={self.bandwidth_high}"
-           
-           # Add password if provided
-           if self.password:
-               from urllib.parse import quote
-               url += f"&password={quote(self.password)}"
-               
-           return url
+            
+            # Add password if provided
+            if self.password:
+                from urllib.parse import quote
+                url += f"&password={quote(self.password)}"
+                
+            return url
     
     def setup_wav_writer(self):
         """Initialize WAV file writer."""
@@ -1035,6 +1035,11 @@ class RadioClient:
             if sample_rate_changed:
                 self.sample_rate = sample_rate
                 print(f"Sample rate updated: {self.sample_rate} Hz", file=sys.stderr)
+
+                # Recalculate needs_resampling based on current mode
+                # IQ modes should never be resampled as they have fixed bandwidths
+                is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+                self.needs_resampling = (self.output_mode == 'sounddevice' and SAMPLERATE_AVAILABLE and not is_iq_mode)
 
                 # Reinitialize audio filter with new sample rate
                 if self.audio_filter_enabled and SCIPY_AVAILABLE:
@@ -1635,6 +1640,7 @@ Examples:
                 'host': args.host,
                 'port': args.port,
                 'ssl': args.ssl,
+                'password': args.password,
                 'frequency': args.frequency if args.frequency else 14100000,
                 'mode': args.mode if args.mode else 'usb',
                 'bandwidth_low': bandwidth_low,

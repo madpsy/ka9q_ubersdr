@@ -130,7 +130,7 @@ class SpectrumDisplay:
         # Start update loop
         self.update_display()
     
-    def connect(self, server_url: str, frequency: float, user_session_id: str = None, use_tls: bool = False):
+    def connect(self, server_url: str, frequency: float, user_session_id: str = None, use_tls: bool = False, password: str = None):
         """Connect to spectrum WebSocket.
         
         Args:
@@ -138,6 +138,7 @@ class SpectrumDisplay:
             frequency: Initial tuned frequency in Hz (where we're listening)
             user_session_id: User session ID (same as audio channel UUID)
             use_tls: Whether to use WSS (WebSocket Secure) instead of WS
+            password: Optional password for bypass authentication
         """
         # Parse server URL
         if '://' in server_url:
@@ -157,10 +158,16 @@ class SpectrumDisplay:
             protocol = 'wss' if use_tls else 'ws'
             ws_url = f'{protocol}://{server_url}/ws/user-spectrum'
         
-        # Add user_session_id query parameter if provided
+        # Build query parameters
+        params = {}
         if user_session_id:
-            params = urlencode({'user_session_id': user_session_id})
-            ws_url = f'{ws_url}?{params}'
+            params['user_session_id'] = user_session_id
+        if password:
+            params['password'] = password
+        
+        # Add query parameters if any
+        if params:
+            ws_url = f'{ws_url}?{urlencode(params)}'
         
         self.ws_url = ws_url
         # Store the tuned frequency (where we're listening)

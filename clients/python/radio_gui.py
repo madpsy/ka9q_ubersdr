@@ -3463,8 +3463,9 @@ class RadioGUI:
                         port = self.port_var.get().strip()
                         server = f"{hostname}:{port}" if ':' not in hostname else hostname
                         frequency = self.get_frequency_hz()
-                        # Pass the audio channel's user_session_id to spectrum
-                        self.spectrum.connect(server, frequency, self.client.user_session_id)
+                        # Pass the audio channel's user_session_id and password to spectrum
+                        password = self.config.get('password')
+                        self.spectrum.connect(server, frequency, self.client.user_session_id, password=password)
                         self.log_status("Spectrum display connected")
                     except Exception as e:
                         self.log_status(f"Spectrum display error: {e}")
@@ -4441,6 +4442,7 @@ class RadioGUI:
                 'recording_callback': self.add_recording_frame,
                 'ssl': self.tls_var.get(),  # Use TLS if checkbox is checked
                 'fifo_path': fifo_path,  # Pass FIFO path to client
+                'password': self.config.get('password'),  # Pass password from config
             }
 
             # Add device index parameter based on output mode
@@ -4487,9 +4489,10 @@ class RadioGUI:
                         hostname = self.server_var.get().strip()
                         port = self.port_var.get().strip()
                         server = f"{hostname}:{port}" if ':' not in hostname else hostname
-                        # Pass the audio channel's user_session_id and TLS setting to spectrum
+                        # Pass the audio channel's user_session_id, TLS setting, and password to spectrum
                         use_tls = self.tls_var.get()
-                        self.spectrum.connect(server, frequency, self.client.user_session_id, use_tls=use_tls)
+                        password = self.config.get('password')
+                        self.spectrum.connect(server, frequency, self.client.user_session_id, use_tls=use_tls, password=password)
                         # Set tuned frequency for bandwidth filter visualization
                         self.spectrum.tuned_freq = frequency
                         self.log_status("Spectrum display connected")

@@ -84,6 +84,9 @@ Test device creation:
 
 ```bash
 SoapySDRUtil --make="driver=ubersdr,server=ws://localhost:8080/ws,mode=iq96"
+
+# Test with password authentication
+SoapySDRUtil --make="driver=ubersdr,server=ws://localhost:8080/ws,mode=iq96,password=your-secret-password"
 ```
 
 ### GQRX
@@ -91,8 +94,9 @@ SoapySDRUtil --make="driver=ubersdr,server=ws://localhost:8080/ws,mode=iq96"
 1. Start GQRX
 2. Configure I/O devices
 3. Device string: `ubersdr,server=ws://your-server:8080/ws,mode=iq192`
-4. Select sample rate: 192000
-5. Click OK and start
+4. For password-protected servers: `ubersdr,server=ws://your-server:8080/ws,mode=iq192,password=your-secret-password`
+5. Select sample rate: 192000
+6. Click OK and start
 
 ### CubicSDR
 
@@ -114,7 +118,8 @@ from gnuradio import gr, blocks
 sdr = SoapySDR.Device(dict(
     driver="ubersdr",
     server="ws://localhost:8080/ws",
-    mode="iq384"  # 384 kHz bandwidth
+    mode="iq384",  # 384 kHz bandwidth
+    password="your-secret-password"  # Optional: for bypass authentication
 ))
 
 # Configure
@@ -147,6 +152,7 @@ rx_sdr -d driver=ubersdr,server=ws://localhost:8080/ws,mode=iq192 \
 | `driver` | Yes | Must be "ubersdr" | `driver=ubersdr` |
 | `server` | Yes | WebSocket URL | `server=ws://localhost:8080/ws` |
 | `mode` | No | Wide IQ mode (default: iq96) | `mode=iq192` |
+| `password` | No | Bypass password for wide IQ modes | `password=your-secret-password` |
 
 ## Wide IQ Modes
 
@@ -157,7 +163,7 @@ rx_sdr -d driver=ubersdr,server=ws://localhost:8080/ws,mode=iq192 \
 | iq192 | 192 kHz | 192 kHz | Wide spectrum analysis |
 | iq384 | 384 kHz | 384 kHz | Full band coverage |
 
-**Note**: Wide IQ modes require a bypassed IP on the UberSDR server. Check with your server administrator.
+**Note**: Wide IQ modes require either a bypassed IP or a valid password on the UberSDR server. Check with your server administrator for access credentials.
 
 ## Frequency Tuning
 
@@ -184,7 +190,8 @@ SoapySDRUtil --info
 - Verify server URL is correct (ws:// or wss://)
 - Check firewall allows WebSocket connections
 - Ensure server is running and accessible
-- Verify your IP is authorized for wide IQ modes
+- Verify your IP is authorized for wide IQ modes, or provide a valid password
+- If using password authentication, ensure the password is correct
 
 ### No Audio/Samples
 
@@ -277,11 +284,37 @@ Contributions welcome! Please submit pull requests to the main ka9q_ubersdr repo
 
 ## Connection Flow
 
-1. **HTTP Connection Check**: Before connecting, the driver sends a POST request to `/connection` with the UUID
+1. **HTTP Connection Check**: Before connecting, the driver sends a POST request to `/connection` with the UUID and optional password
 2. **Server Authorization**: Server responds with `{"allowed":true}` or `{"allowed":false,"reason":"..."}`
-3. **WebSocket Connection**: If allowed, driver connects via WebSocket with UUID in query parameters
+3. **WebSocket Connection**: If allowed, driver connects via WebSocket with UUID and optional password in query parameters
 4. **Audio Streaming**: Server sends base64-encoded I/Q audio data
 5. **Frequency Control**: Driver sends JSON tune commands for frequency changes
+
+## Password Authentication
+
+The driver supports password-based bypass authentication for accessing wide IQ modes without requiring IP whitelisting:
+
+```bash
+# Using password with SoapySDRUtil
+SoapySDRUtil --find="driver=ubersdr,server=ws://localhost:8080/ws,password=your-secret-password"
+
+# Using password with GQRX
+# Device string: ubersdr,server=ws://your-server:8080/ws,mode=iq192,password=your-secret-password
+
+# Using password with GNU Radio
+sdr = SoapySDR.Device(dict(
+    driver="ubersdr",
+    server="ws://localhost:8080/ws",
+    mode="iq384",
+    password="your-secret-password"
+))
+```
+
+The password is sent securely in:
+- The `/connection` HTTP POST request body
+- The WebSocket connection URL query parameters
+
+**Security Note**: Use WSS (WebSocket Secure) when transmitting passwords over untrusted networks.
 
 ## See Also
 

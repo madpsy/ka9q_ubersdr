@@ -1332,6 +1332,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		},
 		"max_clients":       config.Server.MaxSessions,
 		"available_clients": availableClients,
+		"max_session_time":  config.Server.MaxSessionTime,
 		"version":           Version,
 		"space_weather":     config.SpaceWeather.Enabled,
 		"noise_floor":       config.NoiseFloor.Enabled,

@@ -909,12 +909,19 @@ func (sm *SessionManager) cleanupInactiveSessions() {
 		userSessionID := session.UserSessionID
 		clientIP := session.ClientIP
 		isSpectrum := session.IsSpectrum
+		mode := session.Mode
 		session.mu.RUnlock()
 
 		if userSessionID != "" {
 			// Check if this session's IP is bypassed
 			if sm.config.Server.IsIPTimeoutBypassed(clientIP) {
 				bypassedUUIDs[userSessionID] = true
+			}
+
+			// Skip IQ mode sessions - they are only subject to max_session_time, not inactivity timeout
+			isIQMode := mode == "iq" || mode == "iq48" || mode == "iq96" || mode == "iq192" || mode == "iq384"
+			if isIQMode {
+				continue
 			}
 
 			if inactive > sm.timeout {

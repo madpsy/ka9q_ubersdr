@@ -155,11 +155,8 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
     return `
         <div class="instance-card ${isClosest ? 'closest-instance' : ''}">
             <div class="instance-header">
-                <div class="instance-title">
-                    <div class="instance-callsign">
-                        ${instance.callsign}
-                    </div>
-                    <div class="instance-name">${instance.name}</div>
+                <div class="instance-callsign">
+                    ${instance.callsign}
                 </div>
                 <div class="instance-status">
                     ${isClosest ? '<span class="status-badge closest">Closest</span>' : ''}
@@ -171,6 +168,7 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
                     </span>
                 </div>
             </div>
+            <div class="instance-name">${instance.name}</div>
             
             <div class="instance-info">
                 <div class="instance-info-row">

@@ -130,6 +130,7 @@
 
         .instance-title {
             flex: 1;
+            min-width: 0;
         }
 
         .instance-callsign {
@@ -141,12 +142,16 @@
         .instance-name {
             font-size: 0.95em;
             opacity: 0.9;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .instance-status {
             display: flex;
             gap: 8px;
             flex-wrap: wrap;
+            flex-shrink: 0;
         }
 
         .status-badge {

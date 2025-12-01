@@ -914,7 +914,7 @@ func main() {
 	// Start server
 	log.Printf("Server listening on %s", config.Server.Listen)
 	log.Println("Open http://localhost:8080 in your browser")
-	
+
 	// Initialize instance reporter after HTTP server is listening
 	if config.InstanceReporting.Enabled {
 		instanceReporter := NewInstanceReporter(config, cwskimmerConfig, configPath)
@@ -924,7 +924,7 @@ func main() {
 			defer instanceReporter.Stop()
 		}
 	}
-	
+
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server error: %v", err)
 	}
@@ -935,6 +935,7 @@ func main() {
 // ConnectionCheckRequest represents the request body for connection check
 type ConnectionCheckRequest struct {
 	UserSessionID string `json:"user_session_id"`
+	Password      string `json:"password,omitempty"` // Optional password for bypass authentication
 }
 
 // ConnectionCheckResponse represents the response for connection check
@@ -994,8 +995,8 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		}
 	}
 
-	// Check if this IP is in the timeout bypass list
-	isBypassed := sessions.config.Server.IsIPTimeoutBypassed(clientIP)
+	// Check if this IP is in the timeout bypass list or if valid password provided
+	isBypassed := sessions.config.Server.IsIPTimeoutBypassed(clientIP, req.Password)
 	sessionTimeout := sessions.config.Server.SessionTimeout
 	maxSessionTime := sessions.config.Server.MaxSessionTime
 	if isBypassed {
@@ -1040,8 +1041,8 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	}
 
 	// Check if max sessions limit would be exceeded
-	// Skip this check if the IP is in the bypass list
-	if !sessions.config.Server.IsIPTimeoutBypassed(clientIP) {
+	// Skip this check if the IP is in the bypass list or valid password provided
+	if !sessions.config.Server.IsIPTimeoutBypassed(clientIP, req.Password) {
 		if !sessions.CanAcceptNewUUID(req.UserSessionID) {
 			uniqueCount := sessions.GetUniqueUserCount()
 			maxSessions := sessions.config.Server.MaxSessions
@@ -1054,8 +1055,8 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	}
 
 	// Check if max unique users per IP limit would be exceeded
-	// Skip this check if the IP is in the bypass list
-	if !sessions.config.Server.IsIPTimeoutBypassed(clientIP) {
+	// Skip this check if the IP is in the bypass list or valid password provided
+	if !sessions.config.Server.IsIPTimeoutBypassed(clientIP, req.Password) {
 		if !sessions.CanAcceptNewIP(clientIP, req.UserSessionID) {
 			maxSessionsIP := sessions.config.Server.MaxSessionsIP
 			response.Allowed = false

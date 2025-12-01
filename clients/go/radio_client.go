@@ -36,6 +36,7 @@ type RadioClient struct {
 	wavFile       string
 	duration      *float64
 	ssl           bool
+	password      string
 	userSessionID string
 	running       bool
 	startTime     *time.Time
@@ -77,6 +78,7 @@ type WebSocketMessage struct {
 // ConnectionCheckRequest for /connection endpoint
 type ConnectionCheckRequest struct {
 	UserSessionID string `json:"user_session_id"`
+	Password      string `json:"password,omitempty"`
 }
 
 // ConnectionCheckResponse from /connection endpoint
@@ -92,7 +94,7 @@ type ConnectionCheckResponse struct {
 // NewRadioClient creates a new radio client instance
 func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 	bandwidthLow, bandwidthHigh *int, outputMode, wavFile string,
-	duration *float64, ssl, nr2Enabled bool, nr2Strength, nr2Floor, nr2AdaptRate float64,
+	duration *float64, ssl bool, password string, nr2Enabled bool, nr2Strength, nr2Floor, nr2AdaptRate float64,
 	autoReconnect bool) *RadioClient {
 
 	// Determine default channels based on mode
@@ -115,6 +117,7 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		wavFile:       wavFile,
 		duration:      duration,
 		ssl:           ssl,
+		password:      password,
 		userSessionID: uuid.New().String(),
 		running:       true,
 		sampleRate:    12000,           // Default, will be updated from server
@@ -169,6 +172,9 @@ func (c *RadioClient) BuildWebSocketURL() string {
 		if c.bandwidthHigh != nil {
 			params.Set("bandwidthHigh", fmt.Sprintf("%d", *c.bandwidthHigh))
 		}
+		if c.password != "" {
+			params.Set("password", c.password)
+		}
 
 		return fmt.Sprintf("%s?%s", baseURL, params.Encode())
 	}
@@ -187,6 +193,9 @@ func (c *RadioClient) BuildWebSocketURL() string {
 	}
 	if c.bandwidthHigh != nil {
 		wsURL += fmt.Sprintf("&bandwidthHigh=%d", *c.bandwidthHigh)
+	}
+	if c.password != "" {
+		wsURL += fmt.Sprintf("&password=%s", url.QueryEscape(c.password))
 	}
 
 	return wsURL
@@ -486,6 +495,7 @@ func (c *RadioClient) CheckConnectionAllowed() (bool, error) {
 	// Prepare request body
 	reqBody := ConnectionCheckRequest{
 		UserSessionID: c.userSessionID,
+		Password:      c.password,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -753,6 +763,7 @@ func main() {
 	nr2FloorFlag := flag.Float64("nr2-floor", 10.0, "NR2 spectral floor to prevent musical noise, 0-10% (default: 10)")
 	nr2AdaptRateFlag := flag.Float64("nr2-adapt-rate", 1.0, "NR2 noise profile adaptation rate, 0.1-5.0% (default: 1)")
 	autoReconnectFlag := flag.Bool("auto-reconnect", false, "Automatically reconnect on connection loss with exponential backoff (max 60s)")
+	passwordFlag := flag.String("password", "", "Bypass password for accessing wide IQ modes and bypassing session limits")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "CLI Radio Client for ka9q_ubersdr\n\n")
@@ -865,7 +876,7 @@ func main() {
 	client := NewRadioClient(
 		*urlFlag, *hostFlag, *portFlag, *frequencyFlag, *modeFlag,
 		bandwidthLow, bandwidthHigh, *outputFlag, *wavFileFlag,
-		duration, *sslFlag, *nr2Flag, *nr2StrengthFlag, *nr2FloorFlag, *nr2AdaptRateFlag,
+		duration, *sslFlag, *passwordFlag, *nr2Flag, *nr2StrengthFlag, *nr2FloorFlag, *nr2AdaptRateFlag,
 		*autoReconnectFlag,
 	)
 

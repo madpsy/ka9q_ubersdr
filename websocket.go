@@ -307,8 +307,12 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Check connection rate limit (unless IP is bypassed)
-	if !wsh.config.Server.IsIPTimeoutBypassed(clientIP) && !wsh.connRateLimiter.AllowConnection(clientIP) {
+	// Get password from query string (optional)
+	query := r.URL.Query()
+	password := query.Get("password")
+
+	// Check connection rate limit (unless IP is bypassed via IP list or password)
+	if !wsh.config.Server.IsIPTimeoutBypassed(clientIP, password) && !wsh.connRateLimiter.AllowConnection(clientIP) {
 		log.Printf("Connection rate limit exceeded for IP: %s (client IP: %s)", sourceIP, clientIP)
 		http.Error(w, "Too Many Requests - Connection rate limit exceeded", http.StatusTooManyRequests)
 		return
@@ -344,8 +348,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	// Start stats logger if not already running
 	startStatsLogger()
 
-	// Get initial parameters from query string
-	query := r.URL.Query()
+	// Get initial parameters from query string (query already extracted above for password)
 	frequency := uint64(14074000) // Default to 20m FT8
 	if freq := query.Get("frequency"); freq != "" {
 		var f uint64
@@ -380,10 +383,10 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		// Check if wide IQ mode requires bypass
-		if wideIQModes[m] && !wsh.config.Server.IsIPTimeoutBypassed(clientIP) {
-			log.Printf("Rejected WebSocket connection: wide IQ mode '%s' requires bypassed IP from %s (client IP: %s)", m, sourceIP, clientIP)
-			wsh.sendError(conn, fmt.Sprintf("Mode '%s' is only available for authorized IPs", m))
+		// Check if wide IQ mode requires bypass (via IP list or password)
+		if wideIQModes[m] && !wsh.config.Server.IsIPTimeoutBypassed(clientIP, password) {
+			log.Printf("Rejected WebSocket connection: wide IQ mode '%s' requires bypass from %s (client IP: %s)", m, sourceIP, clientIP)
+			wsh.sendError(conn, fmt.Sprintf("Mode '%s' is only available for authorized IPs or with valid password", m))
 			return
 		}
 
@@ -418,8 +421,8 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	}
 
 	var bandwidthLow, bandwidthHigh *int
-	const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs exempt)
-	isBypassed := wsh.config.Server.IsIPTimeoutBypassed(clientIP)
+	const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs/passwords exempt)
+	isBypassed := wsh.config.Server.IsIPTimeoutBypassed(clientIP, password)
 
 	// Only process bandwidth parameters for non-wide IQ modes
 	if !wideIQModes[mode] {
@@ -476,6 +479,9 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		time.Sleep(100 * time.Millisecond)
 		return
 	}
+
+	// Store bypass password in session for later bypass checks
+	session.BypassPassword = password
 
 	// Store WebSocket connection reference in session for kick functionality
 	session.WSConn = conn
@@ -637,9 +643,10 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					continue // Don't close connection, just reject this tune request
 				}
 
-				// Check if wide IQ mode requires bypass
-				if wideIQModes[msg.Mode] && !wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP) {
-					wsh.sendError(conn, fmt.Sprintf("Mode '%s' is only available for authorized IPs", msg.Mode))
+				// Check if wide IQ mode requires bypass (via IP list or password)
+				// Note: password is stored in session during creation
+				if wideIQModes[msg.Mode] && !wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP, currentSession.BypassPassword) {
+					wsh.sendError(conn, fmt.Sprintf("Mode '%s' is only available for authorized IPs or with valid password", msg.Mode))
 					continue // Don't close connection, just reject this tune request
 				}
 
@@ -660,8 +667,8 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				}
 
 				// At least one bandwidth value was sent
-				const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs exempt)
-				isBypassed := wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP)
+				const maxBandwidth = 8000 // Maximum bandwidth limit in Hz (bypassed IPs/passwords exempt)
+				isBypassed := wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP, currentSession.BypassPassword)
 				if msg.BandwidthLow != nil {
 					// Validate bandwidth range: -8000 to +8000 Hz (unless IP is bypassed)
 					if !isBypassed && (*msg.BandwidthLow < -maxBandwidth || *msg.BandwidthLow > maxBandwidth) {

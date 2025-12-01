@@ -257,7 +257,7 @@ class RadioClient:
                  port: Optional[int] = None, frequency: int = 0, mode: str = '',
                  bandwidth_low: Optional[int] = None, bandwidth_high: Optional[int] = None,
                  output_mode: str = 'pipewire', wav_file: Optional[str] = None,
-                 duration: Optional[float] = None, ssl: bool = False,
+                 duration: Optional[float] = None, ssl: bool = False, password: Optional[str] = None,
                  nr2_enabled: bool = False, nr2_strength: float = 40.0,
                  nr2_floor: float = 10.0, nr2_adapt_rate: float = 1.0,
                  auto_reconnect: bool = False, status_callback=None,
@@ -277,6 +277,7 @@ class RadioClient:
         self.wav_file = wav_file
         self.duration = duration
         self.ssl = ssl
+        self.password = password
         
         self.user_session_id = str(uuid.uuid4())
         self.running = True
@@ -532,8 +533,12 @@ class RadioClient:
                     params['bandwidthLow'] = str(self.bandwidth_low)
                 if self.bandwidth_high is not None:
                     params['bandwidthHigh'] = str(self.bandwidth_high)
-            
-            return f"{base_url}?{urlencode(params)}"
+           
+           # Add password if provided
+           if self.password:
+               params['password'] = self.password
+           
+           return f"{base_url}?{urlencode(params)}"
         else:
             # Build URL from host/port/ssl
             protocol = 'wss' if self.ssl else 'ws'
@@ -548,8 +553,13 @@ class RadioClient:
                     url += f"&bandwidthLow={self.bandwidth_low}"
                 if self.bandwidth_high is not None:
                     url += f"&bandwidthHigh={self.bandwidth_high}"
-                
-            return url
+           
+           # Add password if provided
+           if self.password:
+               from urllib.parse import quote
+               url += f"&password={quote(self.password)}"
+               
+           return url
     
     def setup_wav_writer(self):
         """Initialize WAV file writer."""
@@ -1201,6 +1211,10 @@ class RadioClient:
             "user_session_id": self.user_session_id
         }
         
+        # Add password if provided
+        if self.password:
+            request_body["password"] = self.password
+        
         self._log("Checking connection permission...")
         
         try:
@@ -1512,6 +1526,8 @@ Examples:
                         help='NR2 noise profile adaptation rate, 0.1-5.0%% (default: 1)')
     parser.add_argument('--auto-reconnect', action='store_true',
                         help='Automatically reconnect on connection loss with exponential backoff (max 60s)')
+    parser.add_argument('--password', type=str, default=None,
+                        help='Bypass password for accessing wide IQ modes and bypassing session limits')
     
     parser.add_argument('--pipewire-target', type=str, default=None,
                         help='PipeWire target device (node name). Use --list-devices to see available devices.')
@@ -1676,6 +1692,7 @@ Examples:
         wav_file=args.wav_file,
         duration=args.time,
         ssl=args.ssl,
+        password=args.password,
         nr2_enabled=args.nr2,
         nr2_strength=args.nr2_strength,
         nr2_floor=args.nr2_floor,

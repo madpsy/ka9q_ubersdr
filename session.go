@@ -29,10 +29,11 @@ type Session struct {
 	mu            sync.RWMutex
 
 	// Connection info
-	SourceIP      string // Direct connection IP (RemoteAddr)
-	ClientIP      string // True client IP (from X-Forwarded-For if present)
-	UserSessionID string // Client-generated UUID to link audio and spectrum sessions
-	UserAgent     string // User-Agent string from the client
+	SourceIP       string // Direct connection IP (RemoteAddr)
+	ClientIP       string // True client IP (from X-Forwarded-For if present)
+	UserSessionID  string // Client-generated UUID to link audio and spectrum sessions
+	UserAgent      string // User-Agent string from the client
+	BypassPassword string // Password used for bypass authentication (if any)
 
 	// WebSocket connection (for closing when kicked)
 	WSConn interface{} // *wsConn, stored as interface{} to avoid import cycle

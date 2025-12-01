@@ -83,6 +83,7 @@ type ServerConfig struct {
 	CmdRateLimit      int          `yaml:"cmd_rate_limit"`     // Commands per second per UUID per channel (0 = unlimited)
 	ConnRateLimit     int          `yaml:"conn_rate_limit"`    // WebSocket connections per second per IP (0 = unlimited)
 	TimeoutBypassIPs  []string     `yaml:"timeout_bypass_ips"` // List of IPs/CIDRs that bypass idle and max session time limits
+	BypassPassword    string       `yaml:"bypass_password"`    // Password that grants bypass privileges (empty = disabled)
 	EnableCORS        bool         `yaml:"enable_cors"`
 	LogFile           string       `yaml:"logfile"` // HTTP request log file path
 	timeoutBypassNets []*net.IPNet // Parsed CIDR networks (internal use)
@@ -515,7 +516,16 @@ func (sc *ServerConfig) parseTimeoutBypassIPs() error {
 }
 
 // IsIPTimeoutBypassed checks if an IP address is in the timeout bypass list
-func (sc *ServerConfig) IsIPTimeoutBypassed(ipStr string) bool {
+// or if the provided password matches the bypass password
+func (sc *ServerConfig) IsIPTimeoutBypassed(ipStr string, password ...string) bool {
+	// Check password-based bypass first (if password provided and configured)
+	if len(password) > 0 && password[0] != "" && sc.BypassPassword != "" {
+		if password[0] == sc.BypassPassword {
+			return true
+		}
+	}
+
+	// Check IP-based bypass
 	if len(sc.timeoutBypassNets) == 0 {
 		return false
 	}

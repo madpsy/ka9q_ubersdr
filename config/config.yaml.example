@@ -77,6 +77,7 @@ server:
   #   - max_session_time (maximum session duration)
   #   - max_sessions (maximum unique users globally)
   #   - max_sessions_ip (maximum unique users per IP)
+  #   - Wide IQ mode restrictions (iq48, iq96, iq192, iq384)
   # Supports both IPv4 and IPv6 addresses with CIDR notation
   # Examples:
   #   - "127.0.0.1"           # Single IPv4 address
@@ -91,6 +92,23 @@ server:
   #   - "::1"
   #   - "192.168.1.0/24"
   #   - "10.0.0.0/8"
+  # Password-based bypass authentication (optional)
+  # When set, clients can provide this password to gain the same bypass privileges
+  # as IPs in the timeout_bypass_ips list. This allows remote users to access
+  # wide IQ modes and bypass session limits without being on the IP whitelist.
+  #
+  # Usage:
+  #   - WebSocket: Add ?password=yourpassword to the WebSocket URL
+  #   - /connection endpoint: Include "password": "yourpassword" in the JSON body
+  #
+  # Security notes:
+  #   - Use a strong, unique password
+  #   - Password is transmitted in plain text, so use HTTPS/WSS in production
+  #   - Leave empty (or comment out) to disable password-based bypass
+  #   - This grants the same privileges as being in timeout_bypass_ips
+  #
+  # Example: bypass_password: "my-secret-bypass-password-123"
+  bypass_password: ""
   # Enable CORS
   enable_cors: false
   # HTTP request log file (Apache combined log format)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/textproto"
 	"strings"
 	"sync"
 	"time"
@@ -37,7 +38,7 @@ type CWSkimmerSpot struct {
 type CWSkimmerClient struct {
 	config               *CWSkimmerConfig
 	conn                 net.Conn
-	scanner              *bufio.Scanner
+	reader               *textproto.Reader
 	mu                   sync.RWMutex
 	connected            bool
 	stopChan             chan struct{}
@@ -187,7 +188,7 @@ func (c *CWSkimmerClient) connect() error {
 
 	c.mu.Lock()
 	c.conn = conn
-	c.scanner = bufio.NewScanner(conn)
+	c.reader = textproto.NewReader(bufio.NewReader(conn))
 	c.connected = true
 	c.lastActivityTime = time.Now()
 	c.ctx = ctx
@@ -249,7 +250,7 @@ func (c *CWSkimmerClient) disconnect() {
 
 	// Clear references
 	c.conn = nil
-	c.scanner = nil
+	c.reader = nil
 	c.ctx = nil
 	c.cancel = nil
 	c.mu.Unlock()
@@ -368,70 +369,69 @@ func (c *CWSkimmerClient) handleConnection() {
 }
 
 // readLineWithContext reads a line with context cancellation support
+// Uses a polling approach to check context every 500ms while waiting for data
 func (c *CWSkimmerClient) readLineWithContext(ctx context.Context, timeout time.Duration) (string, error) {
-	type result struct {
-		line string
-		err  error
-	}
-
-	resultChan := make(chan result, 1)
-
-	// Start the read in a goroutine with the full timeout
-	go func() {
-		line, err := c.readLine(timeout)
-		resultChan <- result{line, err}
-	}()
-
-	// Create a ticker to periodically check context while waiting for read
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
+	deadline := time.Now().Add(timeout)
 
 	for {
+		// Check context first
 		select {
 		case <-ctx.Done():
-			log.Println("CW Skimmer: readLineWithContext detected context cancellation")
-			// Note: the goroutine will complete eventually and write to resultChan,
-			// but we won't be listening anymore. This is OK - the channel is buffered.
 			return "", ctx.Err()
-		case res := <-resultChan:
-			// Read completed (success or error)
-			return res.line, res.err
-		case <-ticker.C:
-			// Periodic check - just continue waiting
+		default:
+		}
+
+		// Calculate remaining time
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return "", fmt.Errorf("timeout waiting for data")
+		}
+
+		// Try a short read (500ms) so we can check context frequently
+		readTimeout := 500 * time.Millisecond
+		if remaining < readTimeout {
+			readTimeout = remaining
+		}
+
+		line, err := c.readLine(readTimeout)
+		if err == nil {
+			// Successfully read a line
+			return line, nil
+		}
+
+		// If it's a timeout, loop and try again (will check context on next iteration)
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			continue
 		}
+
+		// Other errors are fatal
+		return "", err
 	}
 }
 
-// readLine reads a line from the connection with proper timeout handling
+// readLine reads a line from the connection with timeout
 func (c *CWSkimmerClient) readLine(timeout time.Duration) (string, error) {
 	c.mu.RLock()
-	scanner := c.scanner
+	reader := c.reader
 	conn := c.conn
 	c.mu.RUnlock()
 
-	if scanner == nil || conn == nil {
+	if reader == nil || conn == nil {
 		return "", fmt.Errorf("not connected")
 	}
 
-	// Set read deadline on the underlying connection
-	deadline := time.Now().Add(timeout)
-	if err := conn.SetReadDeadline(deadline); err != nil {
+	// Set read deadline
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return "", fmt.Errorf("failed to set read deadline: %w", err)
 	}
 
-	// Scan for next line
-	if scanner.Scan() {
-		return strings.TrimSpace(scanner.Text()), nil
-	}
-
-	// Check for error
-	if err := scanner.Err(); err != nil {
+	// Read line using textproto.Reader
+	line, err := reader.ReadLine()
+	if err != nil {
 		return "", err
 	}
 
-	// EOF with no error
-	return "", fmt.Errorf("EOF")
+	return strings.TrimSpace(line), nil
 }
 
 // writeLine writes a line to the connection

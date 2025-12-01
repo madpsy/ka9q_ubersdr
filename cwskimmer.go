@@ -369,43 +369,31 @@ func (c *CWSkimmerClient) handleConnection() {
 }
 
 // readLineWithContext reads a line with context cancellation support
-// Uses a polling approach to check context every 500ms while waiting for data
+// Runs the blocking read in a goroutine so we can cancel via context
 func (c *CWSkimmerClient) readLineWithContext(ctx context.Context, timeout time.Duration) (string, error) {
-	deadline := time.Now().Add(timeout)
+	// Create a channel to receive the read result
+	type readResult struct {
+		line string
+		err  error
+	}
+	resultChan := make(chan readResult, 1)
 
-	for {
-		// Check context first
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		default:
-		}
+	// Start the read in a goroutine
+	go func() {
+		line, err := c.readLine(timeout)
+		resultChan <- readResult{line: line, err: err}
+	}()
 
-		// Calculate remaining time
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return "", fmt.Errorf("timeout waiting for data")
-		}
-
-		// Try a short read (500ms) so we can check context frequently
-		readTimeout := 500 * time.Millisecond
-		if remaining < readTimeout {
-			readTimeout = remaining
-		}
-
-		line, err := c.readLine(readTimeout)
-		if err == nil {
-			// Successfully read a line
-			return line, nil
-		}
-
-		// If it's a timeout, loop and try again (will check context on next iteration)
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			continue
-		}
-
-		// Other errors are fatal
-		return "", err
+	// Wait for either the read to complete or context cancellation
+	select {
+	case <-ctx.Done():
+		// Context cancelled - return immediately
+		// Note: The goroutine will eventually complete and write to resultChan,
+		// but since resultChan is buffered, it won't block
+		return "", ctx.Err()
+	case result := <-resultChan:
+		// Read completed (successfully or with error)
+		return result.line, result.err
 	}
 }
 

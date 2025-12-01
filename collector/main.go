@@ -43,6 +43,7 @@ type Instance struct {
 	DigitalDecodes bool      `json:"digital_decodes"`
 	NoiseFloor     bool      `json:"noise_floor"`
 	MaxClients     int       `json:"max_clients"`
+	MaxSessionTime int       `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
 	PublicIQModes  []string  `json:"public_iq_modes"` // List of IQ modes accessible without authentication
 	FirstSeen      time.Time `json:"first_seen"`
 	LastSeen       time.Time `json:"last_seen"`
@@ -68,6 +69,7 @@ type InstanceUpdate struct {
 	DigitalDecodes bool     `json:"digital_decodes"`
 	NoiseFloor     bool     `json:"noise_floor"`
 	MaxClients     int      `json:"max_clients"`
+	MaxSessionTime int      `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
 	PublicIQModes  []string `json:"public_iq_modes"` // List of IQ modes accessible without authentication
 }
 
@@ -216,6 +218,7 @@ func initDatabase(path string) (*sql.DB, error) {
 		digital_decodes BOOLEAN DEFAULT 0,
 		noise_floor BOOLEAN DEFAULT 0,
 		max_clients INTEGER DEFAULT 0,
+		max_session_time INTEGER DEFAULT 0,
 		public_iq_modes TEXT DEFAULT '[]',
 		first_seen DATETIME NOT NULL,
 		last_seen DATETIME NOT NULL
@@ -440,14 +443,14 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				secret_uuid, public_uuid, callsign, name, location,
 				latitude, longitude, altitude, public_url, version,
 				host, port, tls,
-				cw_skimmer, digital_decodes, noise_floor, max_clients,
+				cw_skimmer, digital_decodes, noise_floor, max_clients, max_session_time,
 				public_iq_modes,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version,
 			update.Host, update.Port, update.TLS,
-			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients,
+			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.MaxSessionTime,
 			string(publicIQModesJSON),
 			now, now,
 		)
@@ -479,7 +482,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				latitude = ?, longitude = ?, altitude = ?,
 				public_url = ?, version = ?,
 				host = ?, port = ?, tls = ?,
-				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?,
+				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?, max_session_time = ?,
 				public_iq_modes = ?,
 				last_seen = ?
 			WHERE secret_uuid = ?`,
@@ -487,7 +490,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			update.Latitude, update.Longitude, update.Altitude,
 			update.PublicURL, update.Version,
 			update.Host, update.Port, update.TLS,
-			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients,
+			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.MaxSessionTime,
 			string(publicIQModesJSON),
 			now,
 			secretUUID,
@@ -539,7 +542,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		query = `
 			SELECT public_uuid, callsign, name, location, latitude, longitude,
 			       altitude, public_url, version, host, port, tls,
-			       cw_skimmer, digital_decodes, noise_floor, max_clients,
+			       cw_skimmer, digital_decodes, noise_floor, max_clients, max_session_time,
 			       public_iq_modes,
 			       first_seen, last_seen
 			FROM instances
@@ -552,7 +555,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		query = `
 			SELECT public_uuid, callsign, name, location, latitude, longitude,
 			       altitude, public_url, version, host, port, tls,
-			       cw_skimmer, digital_decodes, noise_floor, max_clients,
+			       cw_skimmer, digital_decodes, noise_floor, max_clients, max_session_time,
 			       public_iq_modes,
 			       first_seen, last_seen
 			FROM instances
@@ -582,7 +585,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 			&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 			&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
 			&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
-			&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients,
+			&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.MaxSessionTime,
 			&publicIQModesJSON,
 			&inst.FirstSeen, &inst.LastSeen,
 		)
@@ -640,7 +643,7 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	err := c.db.QueryRow(`
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
 		       altitude, public_url, version, host, port, tls,
-		       cw_skimmer, digital_decodes, noise_floor, max_clients,
+		       cw_skimmer, digital_decodes, noise_floor, max_clients, max_session_time,
 		       public_iq_modes,
 		       first_seen, last_seen
 		FROM instances
@@ -649,7 +652,7 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 		&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
 		&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
-		&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients,
+		&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.MaxSessionTime,
 		&publicIQModesJSON,
 		&inst.FirstSeen, &inst.LastSeen,
 	)

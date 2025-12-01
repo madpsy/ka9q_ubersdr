@@ -204,6 +204,15 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
                         }
                     </span>
                 </div>
+                <div class="instance-info-row">
+                    <span class="instance-info-label">🕐 Session Limit:</span>
+                    <span class="instance-info-value">
+                        ${instance.max_session_time === 0
+                            ? 'Unlimited'
+                            : `${Math.floor(instance.max_session_time / 60)} minutes`
+                        }
+                    </span>
+                </div>
                 ${distanceInfo}
                 <div class="instance-info-row">
                     <span class="instance-info-label">🕐 Last Seen:</span>

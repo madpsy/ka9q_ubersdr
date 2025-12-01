@@ -42,6 +42,7 @@ type InstanceReport struct {
 	DigitalDecodes bool     `json:"digital_decodes"` // Whether digital decoding is enabled
 	NoiseFloor     bool     `json:"noise_floor"`     // Whether noise floor monitoring is enabled
 	MaxClients     int      `json:"max_clients"`     // Maximum number of clients allowed
+	MaxSessionTime int      `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
 	PublicIQModes  []string `json:"public_iq_modes"` // List of IQ modes accessible without authentication
 }
 
@@ -228,6 +229,7 @@ func (ir *InstanceReporter) sendReport() error {
 		DigitalDecodes: ir.config.Decoder.Enabled,
 		NoiseFloor:     ir.config.NoiseFloor.Enabled,
 		MaxClients:     ir.config.Server.MaxSessions,
+		MaxSessionTime: ir.config.Server.MaxSessionTime,
 		PublicIQModes:  publicIQModes,
 	}
 

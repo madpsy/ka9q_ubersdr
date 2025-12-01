@@ -74,19 +74,20 @@ type RadiodConfig struct {
 
 // ServerConfig contains web server settings
 type ServerConfig struct {
-	Listen            string       `yaml:"listen"`
-	MaxSessions       int          `yaml:"max_sessions"`
-	MaxSessionsIP     int          `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
-	SessionTimeout    int          `yaml:"session_timeout"`
-	MaxSessionTime    int          `yaml:"max_session_time"`   // Maximum time a session can exist in seconds (0 = unlimited)
-	MaxIdleTime       int          `yaml:"max_idle_time"`      // Maximum time a user can be idle in seconds (0 = unlimited)
-	CmdRateLimit      int          `yaml:"cmd_rate_limit"`     // Commands per second per UUID per channel (0 = unlimited)
-	ConnRateLimit     int          `yaml:"conn_rate_limit"`    // WebSocket connections per second per IP (0 = unlimited)
-	TimeoutBypassIPs  []string     `yaml:"timeout_bypass_ips"` // List of IPs/CIDRs that bypass idle and max session time limits
-	BypassPassword    string       `yaml:"bypass_password"`    // Password that grants bypass privileges (empty = disabled)
-	EnableCORS        bool         `yaml:"enable_cors"`
-	LogFile           string       `yaml:"logfile"` // HTTP request log file path
-	timeoutBypassNets []*net.IPNet // Parsed CIDR networks (internal use)
+	Listen            string          `yaml:"listen"`
+	MaxSessions       int             `yaml:"max_sessions"`
+	MaxSessionsIP     int             `yaml:"max_sessions_ip"` // Maximum sessions per IP address (0 = unlimited)
+	SessionTimeout    int             `yaml:"session_timeout"`
+	MaxSessionTime    int             `yaml:"max_session_time"`   // Maximum time a session can exist in seconds (0 = unlimited)
+	MaxIdleTime       int             `yaml:"max_idle_time"`      // Maximum time a user can be idle in seconds (0 = unlimited)
+	CmdRateLimit      int             `yaml:"cmd_rate_limit"`     // Commands per second per UUID per channel (0 = unlimited)
+	ConnRateLimit     int             `yaml:"conn_rate_limit"`    // WebSocket connections per second per IP (0 = unlimited)
+	TimeoutBypassIPs  []string        `yaml:"timeout_bypass_ips"` // List of IPs/CIDRs that bypass idle and max session time limits
+	BypassPassword    string          `yaml:"bypass_password"`    // Password that grants bypass privileges (empty = disabled)
+	PublicIQModes     map[string]bool `yaml:"public_iq_modes"`    // IQ modes accessible without bypass authentication
+	EnableCORS        bool            `yaml:"enable_cors"`
+	LogFile           string          `yaml:"logfile"` // HTTP request log file path
+	timeoutBypassNets []*net.IPNet    // Parsed CIDR networks (internal use)
 }
 
 // AudioConfig contains audio processing settings
@@ -266,6 +267,15 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Server.ConnRateLimit == 0 {
 		config.Server.ConnRateLimit = 2 // Default 2 connections/sec per IP
+	}
+	// Set default public IQ modes if not specified (all restricted by default)
+	if config.Server.PublicIQModes == nil {
+		config.Server.PublicIQModes = map[string]bool{
+			"iq48":  false,
+			"iq96":  false,
+			"iq192": false,
+			"iq384": false,
+		}
 	}
 	// Note: LogFile path is relative to working directory, not config directory
 	// If you want it in the config directory, set it explicitly in config.yaml

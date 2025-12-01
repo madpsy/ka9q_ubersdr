@@ -109,6 +109,39 @@ server:
   #
   # Example: bypass_password: "my-secret-bypass-password-123"
   bypass_password: ""
+
+  # Public IQ modes configuration
+  # Controls which wide IQ modes can be accessed without bypass authentication
+  # By default, all wide IQ modes (iq48-iq384) require bypass (IP or password)
+  # Set any mode to 'true' to make it publicly accessible without authentication
+  #
+  # Available wide IQ modes:
+  #   - iq48: 48 kHz bandwidth (48 kHz sample rate)
+  #   - iq96: 96 kHz bandwidth (96 kHz sample rate)
+  #   - iq192: 192 kHz bandwidth (192 kHz sample rate)
+  #   - iq384: 384 kHz bandwidth (384 kHz sample rate)
+  #
+  # Note: Standard 'iq' mode (10 kHz) is always publicly accessible
+  #
+  # Use cases:
+  #   - Allow public access to lower bandwidth modes while restricting higher ones
+  #   - Enable iq48 publicly for general users, keep iq96+ for authenticated users
+  #   - Control server bandwidth usage by limiting public access
+  #
+  # Example: Allow iq48 publicly but keep others restricted
+  # public_iq_modes:
+  #   iq48: true
+  #   iq96: false
+  #   iq192: false
+  #   iq384: false
+  #
+  # Default: All false except 48 KHz (require bypass authentication)
+  public_iq_modes:
+    iq48: true
+    iq96: false
+    iq192: false
+    iq384: false
+
   # Enable CORS
   enable_cors: false
   # HTTP request log file (Apache combined log format)

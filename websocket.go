@@ -384,7 +384,9 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 
 		// Check if wide IQ mode requires bypass (via IP list or password)
-		if wideIQModes[m] && !wsh.config.Server.IsIPTimeoutBypassed(clientIP, password) {
+		// Unless the mode is configured as public
+		isPublic := wsh.config.Server.PublicIQModes[m]
+		if wideIQModes[m] && !isPublic && !wsh.config.Server.IsIPTimeoutBypassed(clientIP, password) {
 			log.Printf("Rejected WebSocket connection: wide IQ mode '%s' requires bypass from %s (client IP: %s)", m, sourceIP, clientIP)
 			wsh.sendError(conn, fmt.Sprintf("Mode '%s' is only available for authorized IPs or with valid password", m))
 			return
@@ -644,8 +646,10 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				}
 
 				// Check if wide IQ mode requires bypass (via IP list or password)
+				// Unless the mode is configured as public
 				// Note: password is stored in session during creation
-				if wideIQModes[msg.Mode] && !wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP, currentSession.BypassPassword) {
+				isPublicMode := wsh.config.Server.PublicIQModes[msg.Mode]
+				if wideIQModes[msg.Mode] && !isPublicMode && !wsh.config.Server.IsIPTimeoutBypassed(currentSession.ClientIP, currentSession.BypassPassword) {
 					wsh.sendError(conn, fmt.Sprintf("Mode '%s' is only available for authorized IPs or with valid password", msg.Mode))
 					continue // Don't close connection, just reject this tune request
 				}

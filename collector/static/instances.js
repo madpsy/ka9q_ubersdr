@@ -113,6 +113,16 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
     if (instance.digital_decodes) features.push('Digital');
     if (instance.noise_floor) features.push('Noise Floor');
     
+    // Add public IQ modes as badges
+    const publicIQModesBadges = [];
+    if (instance.public_iq_modes && instance.public_iq_modes.length > 0) {
+        instance.public_iq_modes.forEach(mode => {
+            // Extract bandwidth from mode name (e.g., "iq48" -> "48")
+            const bandwidth = mode.replace('iq', '');
+            publicIQModesBadges.push(`<span class="status-badge feature">${bandwidth} kHz</span>`);
+        });
+    }
+    
     // Add distance info if user location is available
     let distanceInfo = '';
     if (userLocation && instance.distance !== undefined) {
@@ -186,10 +196,13 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
                     <span class="instance-info-label">🔧 Version:</span>
                     <span class="instance-info-value">${instance.version}</span>
                 </div>
-                ${features.length > 0 ? `
+                ${features.length > 0 || publicIQModesBadges.length > 0 ? `
                 <div class="instance-info-row">
                     <span class="instance-info-label">✨ Features:</span>
-                    <span class="instance-info-value">${features.map(f => `<span class="status-badge feature">${f}</span>`).join(' ')}</span>
+                    <span class="instance-info-value">
+                        ${features.map(f => `<span class="status-badge feature">${f}</span>`).join(' ')}
+                        ${publicIQModesBadges.join(' ')}
+                    </span>
                 </div>
                 ` : ''}
                 ${distanceInfo}

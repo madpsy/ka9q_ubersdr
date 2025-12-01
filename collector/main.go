@@ -43,6 +43,7 @@ type Instance struct {
 	DigitalDecodes bool      `json:"digital_decodes"`
 	NoiseFloor     bool      `json:"noise_floor"`
 	MaxClients     int       `json:"max_clients"`
+	PublicIQModes  []string  `json:"public_iq_modes"` // List of IQ modes accessible without authentication
 	FirstSeen      time.Time `json:"first_seen"`
 	LastSeen       time.Time `json:"last_seen"`
 	LastReportAge  int64     `json:"last_report_age_seconds"` // Computed field
@@ -50,23 +51,24 @@ type Instance struct {
 
 // InstanceUpdate represents the data received from an instance
 type InstanceUpdate struct {
-	UUID           string  `json:"uuid"`
-	Callsign       string  `json:"callsign"`
-	Name           string  `json:"name"`
-	Location       string  `json:"location"`
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
-	Altitude       int     `json:"altitude"`
-	PublicURL      string  `json:"public_url"`
-	Version        string  `json:"version"`
-	Timestamp      int64   `json:"timestamp"`
-	Host           string  `json:"host"`
-	Port           int     `json:"port"`
-	TLS            bool    `json:"tls"`
-	CWSkimmer      bool    `json:"cw_skimmer"`
-	DigitalDecodes bool    `json:"digital_decodes"`
-	NoiseFloor     bool    `json:"noise_floor"`
-	MaxClients     int     `json:"max_clients"`
+	UUID           string   `json:"uuid"`
+	Callsign       string   `json:"callsign"`
+	Name           string   `json:"name"`
+	Location       string   `json:"location"`
+	Latitude       float64  `json:"latitude"`
+	Longitude      float64  `json:"longitude"`
+	Altitude       int      `json:"altitude"`
+	PublicURL      string   `json:"public_url"`
+	Version        string   `json:"version"`
+	Timestamp      int64    `json:"timestamp"`
+	Host           string   `json:"host"`
+	Port           int      `json:"port"`
+	TLS            bool     `json:"tls"`
+	CWSkimmer      bool     `json:"cw_skimmer"`
+	DigitalDecodes bool     `json:"digital_decodes"`
+	NoiseFloor     bool     `json:"noise_floor"`
+	MaxClients     int      `json:"max_clients"`
+	PublicIQModes  []string `json:"public_iq_modes"` // List of IQ modes accessible without authentication
 }
 
 // InstanceVerificationRequest represents the request to verify an instance
@@ -214,6 +216,7 @@ func initDatabase(path string) (*sql.DB, error) {
 		digital_decodes BOOLEAN DEFAULT 0,
 		noise_floor BOOLEAN DEFAULT 0,
 		max_clients INTEGER DEFAULT 0,
+		public_iq_modes TEXT DEFAULT '[]',
 		first_seen DATETIME NOT NULL,
 		last_seen DATETIME NOT NULL
 	);
@@ -424,18 +427,28 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		// New instance - generate public UUID
 		publicUUID = uuid.New().String()
 
+		// Marshal public_iq_modes to JSON
+		publicIQModesJSON, err := json.Marshal(update.PublicIQModes)
+		if err != nil {
+			log.Printf("Failed to marshal public_iq_modes: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
 		_, err = c.db.Exec(`
 			INSERT INTO instances (
 				secret_uuid, public_uuid, callsign, name, location,
 				latitude, longitude, altitude, public_url, version,
 				host, port, tls,
 				cw_skimmer, digital_decodes, noise_floor, max_clients,
+				public_iq_modes,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients,
+			string(publicIQModesJSON),
 			now, now,
 		)
 
@@ -452,6 +465,14 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	} else {
 		// Existing instance - update
+		// Marshal public_iq_modes to JSON
+		publicIQModesJSON, err := json.Marshal(update.PublicIQModes)
+		if err != nil {
+			log.Printf("Failed to marshal public_iq_modes: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
 		_, err = c.db.Exec(`
 			UPDATE instances SET
 				callsign = ?, name = ?, location = ?,
@@ -459,6 +480,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				public_url = ?, version = ?,
 				host = ?, port = ?, tls = ?,
 				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?,
+				public_iq_modes = ?,
 				last_seen = ?
 			WHERE secret_uuid = ?`,
 			update.Callsign, update.Name, update.Location,
@@ -466,6 +488,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			update.PublicURL, update.Version,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients,
+			string(publicIQModesJSON),
 			now,
 			secretUUID,
 		)
@@ -517,6 +540,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 			SELECT public_uuid, callsign, name, location, latitude, longitude,
 			       altitude, public_url, version, host, port, tls,
 			       cw_skimmer, digital_decodes, noise_floor, max_clients,
+			       public_iq_modes,
 			       first_seen, last_seen
 			FROM instances
 			WHERE host IS NOT NULL
@@ -529,6 +553,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 			SELECT public_uuid, callsign, name, location, latitude, longitude,
 			       altitude, public_url, version, host, port, tls,
 			       cw_skimmer, digital_decodes, noise_floor, max_clients,
+			       public_iq_modes,
 			       first_seen, last_seen
 			FROM instances
 			WHERE datetime(last_seen) >= datetime('now', '-30 minutes')
@@ -552,11 +577,13 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 
 	for rows.Next() {
 		var inst Instance
+		var publicIQModesJSON string
 		err := rows.Scan(
 			&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 			&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
 			&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
 			&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients,
+			&publicIQModesJSON,
 			&inst.FirstSeen, &inst.LastSeen,
 		)
 		if err != nil {
@@ -564,12 +591,18 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 
+		// Unmarshal public_iq_modes from JSON
+		if err := json.Unmarshal([]byte(publicIQModesJSON), &inst.PublicIQModes); err != nil {
+			log.Printf("Failed to unmarshal public_iq_modes for %s: %v", inst.PublicUUID, err)
+			inst.PublicIQModes = []string{} // Default to empty array on error
+		}
+
 		// Calculate age of last report
 		inst.LastReportAge = int64(now.Sub(inst.LastSeen).Seconds())
 
 		// Calculate Maidenhead locator
 		inst.Maidenhead = latLonToMaidenhead(inst.Latitude, inst.Longitude)
-		
+
 		instances = append(instances, inst)
 	}
 
@@ -603,10 +636,12 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var inst Instance
+	var publicIQModesJSON string
 	err := c.db.QueryRow(`
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
 		       altitude, public_url, version, host, port, tls,
 		       cw_skimmer, digital_decodes, noise_floor, max_clients,
+		       public_iq_modes,
 		       first_seen, last_seen
 		FROM instances
 		WHERE public_uuid = ?
@@ -615,6 +650,7 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
 		&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
 		&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients,
+		&publicIQModesJSON,
 		&inst.FirstSeen, &inst.LastSeen,
 	)
 
@@ -625,6 +661,12 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to query instance: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
+	}
+
+	// Unmarshal public_iq_modes from JSON
+	if err := json.Unmarshal([]byte(publicIQModesJSON), &inst.PublicIQModes); err != nil {
+		log.Printf("Failed to unmarshal public_iq_modes for %s: %v", inst.PublicUUID, err)
+		inst.PublicIQModes = []string{} // Default to empty array on error
 	}
 
 	// Calculate age of last report

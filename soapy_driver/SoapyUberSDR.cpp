@@ -198,7 +198,7 @@ private:
     std::string _currentMode;
     uint64_t _currentFrequency;
     double _sampleRate;
-    bool _bypassed;
+    std::vector<std::string> _allowedIQModes;
     
     // WebSocket client
     client _wsClient;
@@ -235,7 +235,6 @@ SoapyUberSDR::SoapyUberSDR(const SoapySDR::Kwargs &args)
     _sampleRate = modeToSampleRate(_currentMode);
     _streaming = false;
     _connected = false;
-    _bypassed = false;
     _userSessionID = generateUUID();
     
     if (!_password.empty()) {
@@ -676,33 +675,56 @@ bool SoapyUberSDR::checkConnectionAllowed()
     // Parse JSON response
     SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyUberSDR: Connection check response: %s", response.c_str());
 
-    // Simple JSON parsing for "allowed" and "bypassed" fields
-    // For wide IQ modes, BOTH "allowed" and "bypassed" must be true
+    // Parse "allowed" field
     size_t allowedPos = response.find("\"allowed\"");
     if (allowedPos != std::string::npos) {
         size_t truePos = response.find("true", allowedPos);
         size_t falsePos = response.find("false", allowedPos);
 
         if (truePos != std::string::npos && (falsePos == std::string::npos || truePos < falsePos)) {
-            // Connection is allowed, now check for "bypassed" field
-            size_t bypassedPos = response.find("\"bypassed\"");
-            if (bypassedPos != std::string::npos) {
-                size_t bypassedTruePos = response.find("true", bypassedPos);
-                size_t bypassedFalsePos = response.find("false", bypassedPos);
-
-                if (bypassedTruePos != std::string::npos && (bypassedFalsePos == std::string::npos || bypassedTruePos < bypassedFalsePos)) {
-                    _bypassed = true;
-                    SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: Connection allowed and bypassed - wide IQ modes available");
-                    return true;
-                } else {
-                    _bypassed = false;
-                    SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Connection allowed but not bypassed - wide IQ modes require bypass password");
-                    return false;
+            // Connection is allowed, now parse allowed_iq_modes array
+            _allowedIQModes.clear();
+            
+            size_t modesPos = response.find("\"allowed_iq_modes\"");
+            if (modesPos != std::string::npos) {
+                size_t arrayStart = response.find("[", modesPos);
+                size_t arrayEnd = response.find("]", arrayStart);
+                
+                if (arrayStart != std::string::npos && arrayEnd != std::string::npos) {
+                    std::string modesArray = response.substr(arrayStart + 1, arrayEnd - arrayStart - 1);
+                    
+                    // Parse each mode in the array
+                    size_t pos = 0;
+                    while (pos < modesArray.length()) {
+                        size_t quoteStart = modesArray.find("\"", pos);
+                        if (quoteStart == std::string::npos) break;
+                        
+                        size_t quoteEnd = modesArray.find("\"", quoteStart + 1);
+                        if (quoteEnd == std::string::npos) break;
+                        
+                        std::string mode = modesArray.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+                        _allowedIQModes.push_back(mode);
+                        pos = quoteEnd + 1;
+                    }
                 }
+            }
+            
+            // Check if current mode is allowed
+            bool modeAllowed = std::find(_allowedIQModes.begin(), _allowedIQModes.end(), _currentMode) != _allowedIQModes.end();
+            
+            if (modeAllowed) {
+                SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Connection allowed - mode '%s' is available", _currentMode.c_str());
+                return true;
             } else {
-                // No bypassed field in response - assume not bypassed
-                _bypassed = false;
-                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Connection allowed but not bypassed - wide IQ modes require bypass password");
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Connection allowed but mode '%s' is not in allowed list", _currentMode.c_str());
+                if (!_allowedIQModes.empty()) {
+                    std::string allowedList;
+                    for (size_t i = 0; i < _allowedIQModes.size(); i++) {
+                        if (i > 0) allowedList += ", ";
+                        allowedList += _allowedIQModes[i];
+                    }
+                    SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Allowed modes: %s", allowedList.c_str());
+                }
                 return false;
             }
         } else if (falsePos != std::string::npos) {

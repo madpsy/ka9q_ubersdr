@@ -25,23 +25,24 @@ type InstanceReporter struct {
 
 // InstanceReport represents the data sent to the central server
 type InstanceReport struct {
-	UUID           string  `json:"uuid"`
-	Callsign       string  `json:"callsign"`
-	Name           string  `json:"name"`
-	Location       string  `json:"location"`
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
-	Altitude       int     `json:"altitude"`
-	PublicURL      string  `json:"public_url"`
-	Version        string  `json:"version"`
-	Timestamp      int64   `json:"timestamp"`
-	Host           string  `json:"host,omitempty"`  // Optional: tells clients how to connect to this instance
-	Port           int     `json:"port,omitempty"`  // Optional: port for client connections
-	TLS            bool    `json:"tls,omitempty"`   // Optional: whether TLS is required for connections
-	CWSkimmer      bool    `json:"cw_skimmer"`      // Whether CW Skimmer is enabled
-	DigitalDecodes bool    `json:"digital_decodes"` // Whether digital decoding is enabled
-	NoiseFloor     bool    `json:"noise_floor"`     // Whether noise floor monitoring is enabled
-	MaxClients     int     `json:"max_clients"`     // Maximum number of clients allowed
+	UUID           string   `json:"uuid"`
+	Callsign       string   `json:"callsign"`
+	Name           string   `json:"name"`
+	Location       string   `json:"location"`
+	Latitude       float64  `json:"latitude"`
+	Longitude      float64  `json:"longitude"`
+	Altitude       int      `json:"altitude"`
+	PublicURL      string   `json:"public_url"`
+	Version        string   `json:"version"`
+	Timestamp      int64    `json:"timestamp"`
+	Host           string   `json:"host,omitempty"`  // Optional: tells clients how to connect to this instance
+	Port           int      `json:"port,omitempty"`  // Optional: port for client connections
+	TLS            bool     `json:"tls,omitempty"`   // Optional: whether TLS is required for connections
+	CWSkimmer      bool     `json:"cw_skimmer"`      // Whether CW Skimmer is enabled
+	DigitalDecodes bool     `json:"digital_decodes"` // Whether digital decoding is enabled
+	NoiseFloor     bool     `json:"noise_floor"`     // Whether noise floor monitoring is enabled
+	MaxClients     int      `json:"max_clients"`     // Maximum number of clients allowed
+	PublicIQModes  []string `json:"public_iq_modes"` // List of IQ modes accessible without authentication
 }
 
 // NewInstanceReporter creates a new instance reporter
@@ -198,6 +199,14 @@ func (ir *InstanceReporter) sendReport() error {
 	log.Printf("Reporting capabilities: CW=%v, Digital=%v, Noise=%v, MaxClients=%d",
 		cwSkimmerEnabled, ir.config.Decoder.Enabled, ir.config.NoiseFloor.Enabled, ir.config.Server.MaxSessions)
 
+	// Build list of public IQ modes
+	publicIQModes := []string{}
+	for mode, isPublic := range ir.config.Server.PublicIQModes {
+		if isPublic {
+			publicIQModes = append(publicIQModes, mode)
+		}
+	}
+
 	// Construct public_url from instance connection info
 	publicURL := ir.config.InstanceReporting.ConstructPublicURL()
 
@@ -219,6 +228,7 @@ func (ir *InstanceReporter) sendReport() error {
 		DigitalDecodes: ir.config.Decoder.Enabled,
 		NoiseFloor:     ir.config.NoiseFloor.Enabled,
 		MaxClients:     ir.config.Server.MaxSessions,
+		PublicIQModes:  publicIQModes,
 	}
 
 	jsonData, err := json.Marshal(report)

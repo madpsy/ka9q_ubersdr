@@ -917,7 +917,7 @@ func main() {
 
 	// Initialize instance reporter after HTTP server is listening
 	if config.InstanceReporting.Enabled {
-		instanceReporter := NewInstanceReporter(config, cwskimmerConfig, configPath)
+		instanceReporter := NewInstanceReporter(config, cwskimmerConfig, sessions, configPath)
 		if err := instanceReporter.Start(); err != nil {
 			log.Printf("Warning: Failed to start instance reporter: %v", err)
 		} else {

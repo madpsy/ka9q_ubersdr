@@ -25,52 +25,54 @@ const Version = "0.1.0"
 
 // Instance represents an UberSDR instance
 type Instance struct {
-	SecretUUID     string    `json:"-"`  // Secret UUID (not exposed in API)
-	PublicUUID     string    `json:"id"` // Public UUID for API access
-	Callsign       string    `json:"callsign"`
-	Name           string    `json:"name"`
-	Location       string    `json:"location"`
-	Latitude       float64   `json:"latitude"`
-	Longitude      float64   `json:"longitude"`
-	Altitude       int       `json:"altitude"`
-	Maidenhead     string    `json:"maidenhead"` // 6-character Maidenhead locator
-	PublicURL      string    `json:"public_url"`
-	Version        string    `json:"version"`
-	Host           string    `json:"host,omitempty"`
-	Port           int       `json:"port,omitempty"`
-	TLS            bool      `json:"tls,omitempty"`
-	CWSkimmer      bool      `json:"cw_skimmer"`
-	DigitalDecodes bool      `json:"digital_decodes"`
-	NoiseFloor     bool      `json:"noise_floor"`
-	MaxClients     int       `json:"max_clients"`
-	MaxSessionTime int       `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes  []string  `json:"public_iq_modes"` // List of IQ modes accessible without authentication
-	FirstSeen      time.Time `json:"first_seen"`
-	LastSeen       time.Time `json:"last_seen"`
-	LastReportAge  int64     `json:"last_report_age_seconds"` // Computed field
+	SecretUUID       string    `json:"-"`  // Secret UUID (not exposed in API)
+	PublicUUID       string    `json:"id"` // Public UUID for API access
+	Callsign         string    `json:"callsign"`
+	Name             string    `json:"name"`
+	Location         string    `json:"location"`
+	Latitude         float64   `json:"latitude"`
+	Longitude        float64   `json:"longitude"`
+	Altitude         int       `json:"altitude"`
+	Maidenhead       string    `json:"maidenhead"` // 6-character Maidenhead locator
+	PublicURL        string    `json:"public_url"`
+	Version          string    `json:"version"`
+	Host             string    `json:"host,omitempty"`
+	Port             int       `json:"port,omitempty"`
+	TLS              bool      `json:"tls,omitempty"`
+	CWSkimmer        bool      `json:"cw_skimmer"`
+	DigitalDecodes   bool      `json:"digital_decodes"`
+	NoiseFloor       bool      `json:"noise_floor"`
+	MaxClients       int       `json:"max_clients"`
+	AvailableClients int       `json:"available_clients"` // Current number of available client slots
+	MaxSessionTime   int       `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes    []string  `json:"public_iq_modes"` // List of IQ modes accessible without authentication
+	FirstSeen        time.Time `json:"first_seen"`
+	LastSeen         time.Time `json:"last_seen"`
+	LastReportAge    int64     `json:"last_report_age_seconds"` // Computed field
 }
 
 // InstanceUpdate represents the data received from an instance
 type InstanceUpdate struct {
-	UUID           string   `json:"uuid"`
-	Callsign       string   `json:"callsign"`
-	Name           string   `json:"name"`
-	Location       string   `json:"location"`
-	Latitude       float64  `json:"latitude"`
-	Longitude      float64  `json:"longitude"`
-	Altitude       int      `json:"altitude"`
-	PublicURL      string   `json:"public_url"`
-	Version        string   `json:"version"`
-	Timestamp      int64    `json:"timestamp"`
-	Host           string   `json:"host"`
-	Port           int      `json:"port"`
-	TLS            bool     `json:"tls"`
-	CWSkimmer      bool     `json:"cw_skimmer"`
-	DigitalDecodes bool     `json:"digital_decodes"`
-	NoiseFloor     bool     `json:"noise_floor"`
-	MaxClients     int      `json:"max_clients"`
-	MaxSessionTime int      `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes  []string `json:"public_iq_modes"` // List of IQ modes accessible without authentication
+	UUID             string   `json:"uuid"`
+	Callsign         string   `json:"callsign"`
+	Name             string   `json:"name"`
+	Location         string   `json:"location"`
+	Latitude         float64  `json:"latitude"`
+	Longitude        float64  `json:"longitude"`
+	Altitude         int      `json:"altitude"`
+	PublicURL        string   `json:"public_url"`
+	Version          string   `json:"version"`
+	Timestamp        int64    `json:"timestamp"`
+	Host             string   `json:"host"`
+	Port             int      `json:"port"`
+	TLS              bool     `json:"tls"`
+	CWSkimmer        bool     `json:"cw_skimmer"`
+	DigitalDecodes   bool     `json:"digital_decodes"`
+	NoiseFloor       bool     `json:"noise_floor"`
+	MaxClients       int      `json:"max_clients"`
+	AvailableClients int      `json:"available_clients"` // Current number of available client slots
+	MaxSessionTime   int      `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes    []string `json:"public_iq_modes"` // List of IQ modes accessible without authentication
 }
 
 // InstanceVerificationRequest represents the request to verify an instance
@@ -218,6 +220,7 @@ func initDatabase(path string) (*sql.DB, error) {
 		digital_decodes BOOLEAN DEFAULT 0,
 		noise_floor BOOLEAN DEFAULT 0,
 		max_clients INTEGER DEFAULT 0,
+		available_clients INTEGER DEFAULT 0,
 		max_session_time INTEGER DEFAULT 0,
 		public_iq_modes TEXT DEFAULT '[]',
 		first_seen DATETIME NOT NULL,
@@ -443,14 +446,14 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				secret_uuid, public_uuid, callsign, name, location,
 				latitude, longitude, altitude, public_url, version,
 				host, port, tls,
-				cw_skimmer, digital_decodes, noise_floor, max_clients, max_session_time,
+				cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
 				public_iq_modes,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version,
 			update.Host, update.Port, update.TLS,
-			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.MaxSessionTime,
+			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
 			string(publicIQModesJSON),
 			now, now,
 		)
@@ -482,7 +485,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				latitude = ?, longitude = ?, altitude = ?,
 				public_url = ?, version = ?,
 				host = ?, port = ?, tls = ?,
-				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?, max_session_time = ?,
+				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?, available_clients = ?, max_session_time = ?,
 				public_iq_modes = ?,
 				last_seen = ?
 			WHERE secret_uuid = ?`,
@@ -490,7 +493,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			update.Latitude, update.Longitude, update.Altitude,
 			update.PublicURL, update.Version,
 			update.Host, update.Port, update.TLS,
-			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.MaxSessionTime,
+			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
 			string(publicIQModesJSON),
 			now,
 			secretUUID,
@@ -542,7 +545,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		query = `
 			SELECT public_uuid, callsign, name, location, latitude, longitude,
 			       altitude, public_url, version, host, port, tls,
-			       cw_skimmer, digital_decodes, noise_floor, max_clients, max_session_time,
+			       cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
 			       public_iq_modes,
 			       first_seen, last_seen
 			FROM instances
@@ -555,7 +558,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		query = `
 			SELECT public_uuid, callsign, name, location, latitude, longitude,
 			       altitude, public_url, version, host, port, tls,
-			       cw_skimmer, digital_decodes, noise_floor, max_clients, max_session_time,
+			       cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
 			       public_iq_modes,
 			       first_seen, last_seen
 			FROM instances
@@ -585,7 +588,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 			&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 			&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
 			&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
-			&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.MaxSessionTime,
+			&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.AvailableClients, &inst.MaxSessionTime,
 			&publicIQModesJSON,
 			&inst.FirstSeen, &inst.LastSeen,
 		)
@@ -643,7 +646,7 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	err := c.db.QueryRow(`
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
 		       altitude, public_url, version, host, port, tls,
-		       cw_skimmer, digital_decodes, noise_floor, max_clients, max_session_time,
+		       cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
 		       public_iq_modes,
 		       first_seen, last_seen
 		FROM instances
@@ -652,7 +655,7 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 		&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
 		&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
-		&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.MaxSessionTime,
+		&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.AvailableClients, &inst.MaxSessionTime,
 		&publicIQModesJSON,
 		&inst.FirstSeen, &inst.LastSeen,
 	)

@@ -18,6 +18,7 @@ import (
 type InstanceReporter struct {
 	config          *Config
 	cwskimmerConfig *CWSkimmerConfig
+	sessions        *SessionManager
 	configPath      string
 	httpClient      *http.Client
 	stopChan        chan struct{}
@@ -25,32 +26,34 @@ type InstanceReporter struct {
 
 // InstanceReport represents the data sent to the central server
 type InstanceReport struct {
-	UUID           string   `json:"uuid"`
-	Callsign       string   `json:"callsign"`
-	Name           string   `json:"name"`
-	Location       string   `json:"location"`
-	Latitude       float64  `json:"latitude"`
-	Longitude      float64  `json:"longitude"`
-	Altitude       int      `json:"altitude"`
-	PublicURL      string   `json:"public_url"`
-	Version        string   `json:"version"`
-	Timestamp      int64    `json:"timestamp"`
-	Host           string   `json:"host,omitempty"`  // Optional: tells clients how to connect to this instance
-	Port           int      `json:"port,omitempty"`  // Optional: port for client connections
-	TLS            bool     `json:"tls,omitempty"`   // Optional: whether TLS is required for connections
-	CWSkimmer      bool     `json:"cw_skimmer"`      // Whether CW Skimmer is enabled
-	DigitalDecodes bool     `json:"digital_decodes"` // Whether digital decoding is enabled
-	NoiseFloor     bool     `json:"noise_floor"`     // Whether noise floor monitoring is enabled
-	MaxClients     int      `json:"max_clients"`     // Maximum number of clients allowed
-	MaxSessionTime int      `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes  []string `json:"public_iq_modes"` // List of IQ modes accessible without authentication
+	UUID             string   `json:"uuid"`
+	Callsign         string   `json:"callsign"`
+	Name             string   `json:"name"`
+	Location         string   `json:"location"`
+	Latitude         float64  `json:"latitude"`
+	Longitude        float64  `json:"longitude"`
+	Altitude         int      `json:"altitude"`
+	PublicURL        string   `json:"public_url"`
+	Version          string   `json:"version"`
+	Timestamp        int64    `json:"timestamp"`
+	Host             string   `json:"host,omitempty"`  // Optional: tells clients how to connect to this instance
+	Port             int      `json:"port,omitempty"`  // Optional: port for client connections
+	TLS              bool     `json:"tls,omitempty"`   // Optional: whether TLS is required for connections
+	CWSkimmer        bool     `json:"cw_skimmer"`      // Whether CW Skimmer is enabled
+	DigitalDecodes   bool     `json:"digital_decodes"` // Whether digital decoding is enabled
+	NoiseFloor       bool     `json:"noise_floor"`     // Whether noise floor monitoring is enabled
+	MaxClients       int      `json:"max_clients"`     // Maximum number of clients allowed
+	AvailableClients int      `json:"available_clients"` // Current number of available client slots
+	MaxSessionTime   int      `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes    []string `json:"public_iq_modes"` // List of IQ modes accessible without authentication
 }
 
 // NewInstanceReporter creates a new instance reporter
-func NewInstanceReporter(config *Config, cwskimmerConfig *CWSkimmerConfig, configPath string) *InstanceReporter {
+func NewInstanceReporter(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, configPath string) *InstanceReporter {
 	return &InstanceReporter{
 		config:          config,
 		cwskimmerConfig: cwskimmerConfig,
+		sessions:        sessions,
 		configPath:      configPath,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
@@ -197,8 +200,15 @@ func (ir *InstanceReporter) sendReport() error {
 		cwSkimmerEnabled = ir.cwskimmerConfig.Enabled
 	}
 
-	log.Printf("Reporting capabilities: CW=%v, Digital=%v, Noise=%v, MaxClients=%d",
-		cwSkimmerEnabled, ir.config.Decoder.Enabled, ir.config.NoiseFloor.Enabled, ir.config.Server.MaxSessions)
+	// Calculate available client slots (max - current non-bypassed users)
+	currentNonBypassedUsers := ir.sessions.GetNonBypassedUserCount()
+	availableClients := ir.config.Server.MaxSessions - currentNonBypassedUsers
+	if availableClients < 0 {
+		availableClients = 0
+	}
+
+	log.Printf("Reporting capabilities: CW=%v, Digital=%v, Noise=%v, MaxClients=%d, AvailableClients=%d",
+		cwSkimmerEnabled, ir.config.Decoder.Enabled, ir.config.NoiseFloor.Enabled, ir.config.Server.MaxSessions, availableClients)
 
 	// Build list of public IQ modes
 	publicIQModes := []string{}
@@ -212,25 +222,26 @@ func (ir *InstanceReporter) sendReport() error {
 	publicURL := ir.config.InstanceReporting.ConstructPublicURL()
 
 	report := InstanceReport{
-		UUID:           ir.config.InstanceReporting.InstanceUUID,
-		Callsign:       ir.config.Admin.Callsign,
-		Name:           ir.config.Admin.Name,
-		Location:       ir.config.Admin.Location,
-		Latitude:       ir.config.Admin.GPS.Lat,
-		Longitude:      ir.config.Admin.GPS.Lon,
-		Altitude:       ir.config.Admin.ASL,
-		PublicURL:      publicURL,
-		Version:        Version,
-		Timestamp:      time.Now().Unix(),
-		Host:           ir.config.InstanceReporting.Instance.Host,
-		Port:           ir.config.InstanceReporting.Instance.Port,
-		TLS:            ir.config.InstanceReporting.Instance.TLS,
-		CWSkimmer:      cwSkimmerEnabled,
-		DigitalDecodes: ir.config.Decoder.Enabled,
-		NoiseFloor:     ir.config.NoiseFloor.Enabled,
-		MaxClients:     ir.config.Server.MaxSessions,
-		MaxSessionTime: ir.config.Server.MaxSessionTime,
-		PublicIQModes:  publicIQModes,
+		UUID:             ir.config.InstanceReporting.InstanceUUID,
+		Callsign:         ir.config.Admin.Callsign,
+		Name:             ir.config.Admin.Name,
+		Location:         ir.config.Admin.Location,
+		Latitude:         ir.config.Admin.GPS.Lat,
+		Longitude:        ir.config.Admin.GPS.Lon,
+		Altitude:         ir.config.Admin.ASL,
+		PublicURL:        publicURL,
+		Version:          Version,
+		Timestamp:        time.Now().Unix(),
+		Host:             ir.config.InstanceReporting.Instance.Host,
+		Port:             ir.config.InstanceReporting.Instance.Port,
+		TLS:              ir.config.InstanceReporting.Instance.TLS,
+		CWSkimmer:        cwSkimmerEnabled,
+		DigitalDecodes:   ir.config.Decoder.Enabled,
+		NoiseFloor:       ir.config.NoiseFloor.Enabled,
+		MaxClients:       ir.config.Server.MaxSessions,
+		AvailableClients: availableClients,
+		MaxSessionTime:   ir.config.Server.MaxSessionTime,
+		PublicIQModes:    publicIQModes,
 	}
 
 	jsonData, err := json.Marshal(report)

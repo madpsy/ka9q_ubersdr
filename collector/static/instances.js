@@ -163,6 +163,9 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
                 </div>
                 <div class="instance-status">
                     ${isClosest ? '<span class="status-badge closest">⭐ Closest</span>' : ''}
+                    <span class="status-badge ${instance.available_clients > 0 ? 'online' : 'offline'}">
+                        👥 ${instance.available_clients}/${instance.max_clients}
+                    </span>
                     <span class="status-badge ${isOnline ? 'online' : 'offline'}">
                         ${isOnline ? '● Online' : '○ Offline'}
                     </span>

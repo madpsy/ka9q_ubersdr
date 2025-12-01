@@ -35,13 +35,14 @@ def create_public_instances_window(parent, on_connect_callback):
     status_label.pack(pady=(0, 10))
 
     # Create Treeview for instances list
-    columns = ('name', 'callsign', 'location', 'cw', 'digi', 'noise', 'iq', 'version', 'url', 'map')
+    columns = ('name', 'callsign', 'location', 'session', 'cw', 'digi', 'noise', 'iq', 'version', 'url', 'map')
     tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=15)
 
     # Define headings
     tree.heading('name', text='Name')
     tree.heading('callsign', text='Callsign')
     tree.heading('location', text='Location')
+    tree.heading('session', text='Session')
     tree.heading('cw', text='CW')
     tree.heading('digi', text='Digi')
     tree.heading('noise', text='Noise')
@@ -54,6 +55,7 @@ def create_public_instances_window(parent, on_connect_callback):
     tree.column('name', width=180)
     tree.column('callsign', width=80)
     tree.column('location', width=180)
+    tree.column('session', width=60)
     tree.column('cw', width=40)
     tree.column('digi', width=40)
     tree.column('noise', width=50)
@@ -125,14 +127,14 @@ def create_public_instances_window(parent, on_connect_callback):
             if not instance:
                 return
 
-            # Column #9 is Public URL
-            if column == '#9':
+            # Column #10 is Public URL
+            if column == '#10':
                 url = instance.get('public_url', '')
                 if url:
                     webbrowser.open(url)
 
-            # Column #10 is Map
-            elif column == '#10':
+            # Column #11 is Map
+            elif column == '#11':
                 lat = instance.get('latitude')
                 lon = instance.get('longitude')
                 if lat and lon:
@@ -185,6 +187,10 @@ def create_public_instances_window(parent, on_connect_callback):
                     location = instance.get('location', '')
                     version = instance.get('version', '')
 
+                    # Max session time in minutes
+                    max_session_time = instance.get('max_session_time', 0)
+                    session_text = f"{max_session_time // 60}m" if max_session_time > 0 else ''
+
                     # Capability checkboxes
                     cw_text = '✓' if instance.get('cw_skimmer', False) else '✗'
                     digi_text = '✓' if instance.get('digital_decodes', False) else '✗'
@@ -215,7 +221,7 @@ def create_public_instances_window(parent, on_connect_callback):
                     map_text = '🗺️ Map' if (lat and lon) else ''
 
                     # Insert into tree
-                    item_id = tree.insert('', tk.END, values=(name, callsign, location, cw_text, digi_text, noise_text, iq_text, version, url_text, map_text), tags=('link',))
+                    item_id = tree.insert('', tk.END, values=(name, callsign, location, session_text, cw_text, digi_text, noise_text, iq_text, version, url_text, map_text), tags=('link',))
 
                     # Store full instance data with connection info
                     # The API returns host, port, tls at the top level

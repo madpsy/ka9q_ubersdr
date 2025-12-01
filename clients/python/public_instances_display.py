@@ -24,7 +24,7 @@ def create_public_instances_window(parent, on_connect_callback):
     # Create new window
     window = tk.Toplevel(parent)
     window.title("Public UberSDR Instances")
-    window.geometry("900x500")
+    window.geometry("980x500")
 
     # Main frame with padding
     main_frame = ttk.Frame(window, padding="10")
@@ -35,7 +35,7 @@ def create_public_instances_window(parent, on_connect_callback):
     status_label.pack(pady=(0, 10))
 
     # Create Treeview for instances list
-    columns = ('name', 'callsign', 'location', 'cw', 'digi', 'noise', 'version', 'url', 'map')
+    columns = ('name', 'callsign', 'location', 'cw', 'digi', 'noise', 'iq', 'version', 'url', 'map')
     tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=15)
 
     # Define headings
@@ -45,6 +45,7 @@ def create_public_instances_window(parent, on_connect_callback):
     tree.heading('cw', text='CW')
     tree.heading('digi', text='Digi')
     tree.heading('noise', text='Noise')
+    tree.heading('iq', text='IQ (kHz)')
     tree.heading('version', text='Version')
     tree.heading('url', text='Public URL')
     tree.heading('map', text='Map')
@@ -56,6 +57,7 @@ def create_public_instances_window(parent, on_connect_callback):
     tree.column('cw', width=40)
     tree.column('digi', width=40)
     tree.column('noise', width=50)
+    tree.column('iq', width=80)
     tree.column('version', width=80)
     tree.column('url', width=100)
     tree.column('map', width=80)
@@ -123,14 +125,14 @@ def create_public_instances_window(parent, on_connect_callback):
             if not instance:
                 return
 
-            # Column #8 is Public URL
-            if column == '#8':
+            # Column #9 is Public URL
+            if column == '#9':
                 url = instance.get('public_url', '')
                 if url:
                     webbrowser.open(url)
 
-            # Column #9 is Map
-            elif column == '#9':
+            # Column #10 is Map
+            elif column == '#10':
                 lat = instance.get('latitude')
                 lon = instance.get('longitude')
                 if lat and lon:
@@ -188,6 +190,21 @@ def create_public_instances_window(parent, on_connect_callback):
                     digi_text = '✓' if instance.get('digital_decodes', False) else '✗'
                     noise_text = '✓' if instance.get('noise_floor', False) else '✗'
 
+                    # IQ modes - extract numbers from mode names (e.g., "iq48" -> "48")
+                    public_iq_modes = instance.get('public_iq_modes', [])
+                    if public_iq_modes:
+                        # Extract numbers from mode names and sort them
+                        iq_numbers = []
+                        for mode in public_iq_modes:
+                            # Extract digits from mode name (e.g., "iq48" -> "48")
+                            digits = ''.join(filter(str.isdigit, mode))
+                            if digits:
+                                iq_numbers.append(int(digits))
+                        iq_numbers.sort()
+                        iq_text = ', '.join(str(n) for n in iq_numbers) if iq_numbers else 'None'
+                    else:
+                        iq_text = 'None'
+
                     # Public URL
                     public_url = instance.get('public_url', '')
                     url_text = '🔗 Open' if public_url else ''
@@ -198,7 +215,7 @@ def create_public_instances_window(parent, on_connect_callback):
                     map_text = '🗺️ Map' if (lat and lon) else ''
 
                     # Insert into tree
-                    item_id = tree.insert('', tk.END, values=(name, callsign, location, cw_text, digi_text, noise_text, version, url_text, map_text), tags=('link',))
+                    item_id = tree.insert('', tk.END, values=(name, callsign, location, cw_text, digi_text, noise_text, iq_text, version, url_text, map_text), tags=('link',))
 
                     # Store full instance data with connection info
                     # The API returns host, port, tls at the top level

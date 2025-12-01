@@ -4768,18 +4768,24 @@ class RadioGUI:
                                 # Show the receiver info frame
                                 self.receiver_info_frame.grid()
 
-                        # Check bypassed status and show/hide second row of mode buttons
-                        if self.client and hasattr(self.client, 'bypassed'):
-                            self.bypassed = self.client.bypassed
-                            if self.bypassed:
-                                # Show second row of IQ bandwidth buttons
-                                for btn in self.mode_buttons_row2:
-                                    btn.grid()
-                                self.log_status("High bandwidth IQ modes enabled (bypassed connection)")
-                            else:
-                                # Hide second row of IQ bandwidth buttons
-                                for btn in self.mode_buttons_row2:
-                                    btn.grid_remove()
+                        # Check allowed IQ modes and show/hide second row of mode buttons
+                        if self.client and hasattr(self.client, 'allowed_iq_modes'):
+                            allowed_iq_modes = self.client.allowed_iq_modes
+                            
+                            # Show/hide each IQ mode button based on allowed list
+                            for mode_value, btn in self.mode_buttons.items():
+                                if mode_value in ['IQ48', 'IQ96', 'IQ192', 'IQ384']:
+                                    # Check if this mode is in the allowed list (case-insensitive)
+                                    mode_lower = mode_value.lower()
+                                    if mode_lower in allowed_iq_modes:
+                                        btn.grid()
+                                    else:
+                                        btn.grid_remove()
+                            
+                            # Log which modes are available
+                            if allowed_iq_modes:
+                                modes_str = ', '.join([m.upper() for m in allowed_iq_modes])
+                                self.log_status(f"High bandwidth IQ modes enabled: {modes_str}")
 
                         # Start session timer (always show, displays "Unlimited" if max_session_time=0)
                         if self.client and hasattr(self.client, 'max_session_time'):

@@ -286,7 +286,8 @@ class RadioClient:
         self.ws = None  # WebSocket connection reference for sending messages
         self.server_description = {}  # Server description from /api/description
         self.countries = []  # Country list from /api/cty/countries
-        self.bypassed = False  # Connection bypassed status from /connection endpoint
+        self.bypassed = False  # Connection bypassed status from /connection endpoint (deprecated)
+        self.allowed_iq_modes = []  # List of allowed IQ modes from /connection endpoint
         self.max_session_time = 0  # Maximum session time in seconds (0 = unlimited)
         self.connection_start_time = None  # Time when connection was established
 
@@ -1240,15 +1241,17 @@ class RadioClient:
                         self._log(f"Connection rejected: {reason}")
                         return False
                     
-                    # Store bypassed status and session time
+                    # Store bypassed status (deprecated), allowed IQ modes, and session time
                     self.bypassed = data.get('bypassed', False)
+                    self.allowed_iq_modes = data.get('allowed_iq_modes', [])
                     self.max_session_time = data.get('max_session_time', 0)
                     self.connection_start_time = time.time()
 
                     client_ip = data.get('client_ip', 'unknown')
                     bypassed_msg = " (bypassed)" if self.bypassed else ""
+                    iq_modes_msg = f", allowed IQ modes: {', '.join(self.allowed_iq_modes)}" if self.allowed_iq_modes else ""
                     session_msg = f", max session: {self.max_session_time}s" if self.max_session_time > 0 else ""
-                    self._log(f"Connection allowed (client IP: {client_ip}){bypassed_msg}{session_msg}")
+                    self._log(f"Connection allowed (client IP: {client_ip}){bypassed_msg}{iq_modes_msg}{session_msg}")
                     return True
                     
         except Exception as e:

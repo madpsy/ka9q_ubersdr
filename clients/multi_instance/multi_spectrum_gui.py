@@ -9,7 +9,21 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-# Add parent directory to path to import from clients/python
+# Import local modules FIRST (before modifying sys.path)
+from spectrum_instance import SpectrumInstance
+from instance_manager import InstanceManager
+from config_manager import ConfigManager
+from instance_dialogs import AddInstanceDialog, EditInstanceDialog
+
+# Import local public_instances_display (before adding parent to path)
+try:
+    from public_instances_display import create_public_instances_window
+    PUBLIC_INSTANCES_AVAILABLE = True
+except ImportError:
+    PUBLIC_INSTANCES_AVAILABLE = False
+    print("Warning: Public instances display not available")
+
+# NOW add parent directory to path to import spectrum_display from clients/python
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
 
 try:
@@ -19,19 +33,6 @@ except ImportError:
     SPECTRUM_AVAILABLE = False
     print("ERROR: Spectrum display not available (missing dependencies)")
     sys.exit(1)
-
-try:
-    from public_instances_display import create_public_instances_window
-    PUBLIC_INSTANCES_AVAILABLE = True
-except ImportError:
-    PUBLIC_INSTANCES_AVAILABLE = False
-    print("Warning: Public instances display not available")
-
-# Import local modules
-from spectrum_instance import SpectrumInstance
-from instance_manager import InstanceManager
-from config_manager import ConfigManager
-from instance_dialogs import AddInstanceDialog, EditInstanceDialog
 
 
 class MultiSpectrumGUI:
@@ -264,6 +265,8 @@ class MultiSpectrumGUI:
         def on_ok(instance: SpectrumInstance):
             self.instance_manager.add_instance(instance)
             self.create_instance_ui(instance)
+            self._add_instance_to_signal_levels(instance)
+            self._update_comparison_dropdowns()
             self.save_config()
         
         AddInstanceDialog(self.root, len(self.instance_manager.instances), on_ok)
@@ -283,7 +286,8 @@ class MultiSpectrumGUI:
             """Callback when user selects a public instance."""
             instance = SpectrumInstance(len(self.instance_manager.instances))
             instance.name = name
-            instance.callsign = callsign if callsign else ""
+            # Handle None, empty string, or the string 'None'
+            instance.callsign = callsign if (callsign and callsign != 'None') else ""
             instance.host = host
             instance.port = port
             instance.tls = tls
@@ -291,6 +295,8 @@ class MultiSpectrumGUI:
             
             self.instance_manager.add_instance(instance)
             self.create_instance_ui(instance)
+            self._add_instance_to_signal_levels(instance)
+            self._update_comparison_dropdowns()
             self.save_config()
         
         create_public_instances_window(self.root, on_select)
@@ -310,7 +316,7 @@ class MultiSpectrumGUI:
         
         # Instance info
         protocol = "https" if instance.tls else "http"
-        info_text = f"{instance.name} - {protocol}://{instance.host}:{instance.port}"
+        info_text = f"{instance.get_display_name()} - {protocol}://{instance.host}:{instance.port}"
         info_label = ttk.Label(row_frame, text=info_text, width=60)
         info_label.pack(side=tk.LEFT, padx=5)
         
@@ -322,9 +328,13 @@ class MultiSpectrumGUI:
         status_label.pack(side=tk.LEFT, padx=5)
         
         # Connect/Disconnect button
-        connect_btn = ttk.Button(row_frame, text="Connect", width=10,
+        button_text = "Disconnect" if instance.connected else "Connect"
+        connect_btn = ttk.Button(row_frame, text=button_text, width=10,
                                 command=lambda: self.toggle_connection(instance))
         connect_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Store button reference for updating text
+        instance.connect_btn = connect_btn
         
         # Edit button
         ttk.Button(row_frame, text="Edit", width=8,
@@ -362,11 +372,18 @@ class MultiSpectrumGUI:
     
     def connect_instance(self, instance: SpectrumInstance):
         """Connect a single instance."""
+        # Update button text
+        if hasattr(instance, 'connect_btn'):
+            instance.connect_btn.config(text="Disconnect")
+        
         # Create spectrum display if not exists
         if instance.spectrum is None:
             spectrum_frame = ttk.LabelFrame(self.spectrum_container,
-                                           text=instance.name, padding="5")
+                                           text=instance.get_display_name(), padding="5")
             spectrum_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+            
+            # Store reference to the frame for later cleanup
+            instance.spectrum_frame = spectrum_frame
             
             # Create click-to-tune variable (always enabled for multi-instance)
             click_tune_var = tk.BooleanVar(value=True)
@@ -409,6 +426,11 @@ class MultiSpectrumGUI:
             instance.status_var.set("Connected")
             # Initialize bandwidth filter on newly connected spectrum
             self.root.after(500, self._update_all_bandwidths)
+            # Sync zoom level with existing instances if sync is enabled
+            if self.sync_enabled.get():
+                self.root.after(1000, lambda: self._sync_new_instance_zoom(instance))
+            # Recalculate target throttle rate after connection (give it time to get server rate)
+            self.root.after(1000, self._update_target_rate)
         else:
             instance.status_var.set("Error")
     
@@ -416,6 +438,11 @@ class MultiSpectrumGUI:
         """Disconnect a single instance."""
         if self.instance_manager.disconnect_instance(instance):
             instance.status_var.set("Enabled" if instance.enabled else "Disabled")
+            # Update button text
+            if hasattr(instance, 'connect_btn'):
+                instance.connect_btn.config(text="Connect")
+            # Recalculate target throttle rate after disconnection
+            self._update_target_rate()
     
     def connect_all_enabled(self):
         """Connect all enabled instances."""
@@ -475,11 +502,19 @@ class MultiSpectrumGUI:
             self.instance_frames[instance.instance_id].destroy()
             del self.instance_frames[instance.instance_id]
         
-        # Remove spectrum display
+        # Remove spectrum display and its frame
         if instance.spectrum:
-            instance.spectrum.master.destroy()
+            # Destroy the spectrum frame (which contains the spectrum display)
+            if hasattr(instance, 'spectrum_frame') and instance.spectrum_frame:
+                instance.spectrum_frame.destroy()
             if instance.instance_id in self.spectrum_displays:
                 del self.spectrum_displays[instance.instance_id]
+            instance.spectrum = None
+            instance.spectrum_frame = None
+        
+        # Remove from signal levels window
+        self._remove_instance_from_signal_levels(instance)
+        self._update_comparison_dropdowns()
         
         self.save_config()
     
@@ -746,6 +781,35 @@ class MultiSpectrumGUI:
                     )
         
         self._syncing = False
+    
+    def _sync_new_instance_zoom(self, new_instance: SpectrumInstance):
+        """Synchronize a newly connected instance to match existing instances' zoom level."""
+        import asyncio
+        
+        # Find a connected instance to copy zoom from
+        source_spectrum = None
+        for instance in self.instance_manager.active_instances:
+            if instance != new_instance and instance.spectrum and instance.spectrum.connected:
+                source_spectrum = instance.spectrum
+                break
+        
+        if not source_spectrum or not new_instance.spectrum or not new_instance.spectrum.connected:
+            return
+        
+        # Get zoom state from source
+        if source_spectrum.bin_count == 0:
+            return
+        
+        frequency = source_spectrum.center_freq
+        bandwidth = source_spectrum.total_bandwidth
+        
+        # Apply to new instance
+        if new_instance.spectrum.event_loop:
+            asyncio.run_coroutine_threadsafe(
+                new_instance.spectrum._send_zoom_command(frequency, bandwidth),
+                new_instance.spectrum.event_loop
+            )
+            print(f"Synced new instance to existing zoom: {frequency/1e6:.6f} MHz, {bandwidth/1e3:.1f} kHz")
     
     def _update_target_rate(self):
         """Update target throttle rate based on server-reported rates from all connected instances."""
@@ -1065,6 +1129,7 @@ class MultiSpectrumGUI:
 
             # Store all labels for this instance
             self.signal_level_labels[instance.instance_id] = {
+                'frame': frame,
                 'hover_level': hover_level_label,
                 'bw_peak': bw_peak_label,
                 'bw_floor': bw_floor_label,
@@ -1074,6 +1139,9 @@ class MultiSpectrumGUI:
                 'diff_snr': diff_snr_label
             }
 
+        # Store the scrollable frame for dynamic updates
+        self.signal_levels_scrollable_frame = scrollable_frame
+        
         # Handle window close
         self.signal_levels_window.protocol("WM_DELETE_WINDOW", self._on_signal_levels_close)
 
@@ -1082,6 +1150,108 @@ class MultiSpectrumGUI:
         self.signal_levels_window.destroy()
         self.signal_levels_window = None
         self.signal_level_labels = {}
+        self.signal_levels_scrollable_frame = None
+    
+    def _add_instance_to_signal_levels(self, instance: SpectrumInstance):
+        """Add an instance to the signal levels window if it's open."""
+        if not self.signal_levels_window or not tk.Toplevel.winfo_exists(self.signal_levels_window):
+            return
+        
+        if instance.instance_id in self.signal_level_labels:
+            return  # Already exists
+        
+        # Create frame for this instance
+        frame = ttk.LabelFrame(self.signal_levels_scrollable_frame, text=instance.get_display_name(), padding="5")
+        frame.pack(fill=tk.X, pady=5)
+        
+        # Create a grid for two columns of metrics
+        metrics_frame = ttk.Frame(frame)
+        metrics_frame.pack(fill=tk.X)
+        
+        # Column headers
+        ttk.Label(metrics_frame, text="At Hover Freq", font=('TkDefaultFont', 9, 'bold'),
+                 anchor=tk.CENTER).grid(row=0, column=0, columnspan=2, pady=(0, 5))
+        ttk.Label(metrics_frame, text="In Bandwidth", font=('TkDefaultFont', 9, 'bold'),
+                 anchor=tk.CENTER).grid(row=0, column=2, columnspan=2, pady=(0, 5))
+        ttk.Label(metrics_frame, text="Difference (A-B)", font=('TkDefaultFont', 9, 'bold'),
+                 anchor=tk.CENTER).grid(row=0, column=4, columnspan=2, pady=(0, 5))
+        
+        # Left column - Hover frequency (just level)
+        ttk.Label(metrics_frame, text="Level:", width=10, anchor=tk.W).grid(row=1, column=0, sticky=tk.W, padx=2)
+        hover_level_label = ttk.Label(metrics_frame, text="--- dB", width=10, anchor=tk.E,
+                                     font=('TkDefaultFont', 9, 'bold'))
+        hover_level_label.grid(row=1, column=1, sticky=tk.E, padx=2)
+        
+        # Middle column - Bandwidth metrics
+        ttk.Label(metrics_frame, text="Peak:", width=10, anchor=tk.W).grid(row=1, column=2, sticky=tk.W, padx=(10, 2))
+        bw_peak_label = ttk.Label(metrics_frame, text="--- dB", width=10, anchor=tk.E,
+                                 font=('TkDefaultFont', 9))
+        bw_peak_label.grid(row=1, column=3, sticky=tk.E, padx=2)
+        
+        ttk.Label(metrics_frame, text="Floor:", width=10, anchor=tk.W).grid(row=2, column=2, sticky=tk.W, padx=(10, 2))
+        bw_floor_label = ttk.Label(metrics_frame, text="--- dB", width=10, anchor=tk.E,
+                                  font=('TkDefaultFont', 9))
+        bw_floor_label.grid(row=2, column=3, sticky=tk.E, padx=2)
+        
+        ttk.Label(metrics_frame, text="SNR:", width=10, anchor=tk.W).grid(row=3, column=2, sticky=tk.W, padx=(10, 2))
+        bw_snr_label = ttk.Label(metrics_frame, text="--- dB", width=10, anchor=tk.E,
+                                font=('TkDefaultFont', 9, 'bold'))
+        bw_snr_label.grid(row=3, column=3, sticky=tk.E, padx=2)
+        
+        # Right column - Comparison differences
+        ttk.Label(metrics_frame, text="Peak:", width=10, anchor=tk.W).grid(row=1, column=4, sticky=tk.W, padx=(10, 2))
+        diff_peak_label = ttk.Label(metrics_frame, text="---", width=10, anchor=tk.E,
+                                   font=('TkDefaultFont', 9))
+        diff_peak_label.grid(row=1, column=5, sticky=tk.E, padx=2)
+        
+        ttk.Label(metrics_frame, text="Floor:", width=10, anchor=tk.W).grid(row=2, column=4, sticky=tk.W, padx=(10, 2))
+        diff_floor_label = ttk.Label(metrics_frame, text="---", width=10, anchor=tk.E,
+                                    font=('TkDefaultFont', 9))
+        diff_floor_label.grid(row=2, column=5, sticky=tk.E, padx=2)
+        
+        ttk.Label(metrics_frame, text="SNR:", width=10, anchor=tk.W).grid(row=3, column=4, sticky=tk.W, padx=(10, 2))
+        diff_snr_label = ttk.Label(metrics_frame, text="---", width=10, anchor=tk.E,
+                                  font=('TkDefaultFont', 9, 'bold'))
+        diff_snr_label.grid(row=3, column=5, sticky=tk.E, padx=2)
+        
+        # Store all labels for this instance
+        self.signal_level_labels[instance.instance_id] = {
+            'frame': frame,
+            'hover_level': hover_level_label,
+            'bw_peak': bw_peak_label,
+            'bw_floor': bw_floor_label,
+            'bw_snr': bw_snr_label,
+            'diff_peak': diff_peak_label,
+            'diff_floor': diff_floor_label,
+            'diff_snr': diff_snr_label
+        }
+    
+    def _remove_instance_from_signal_levels(self, instance: SpectrumInstance):
+        """Remove an instance from the signal levels window if it's open."""
+        if not self.signal_levels_window or not tk.Toplevel.winfo_exists(self.signal_levels_window):
+            return
+        
+        if instance.instance_id in self.signal_level_labels:
+            # Destroy the frame
+            self.signal_level_labels[instance.instance_id]['frame'].destroy()
+            # Remove from dictionary
+            del self.signal_level_labels[instance.instance_id]
+    
+    def _update_comparison_dropdowns(self):
+        """Update the comparison dropdown values if signal levels window is open."""
+        if not self.signal_levels_window or not tk.Toplevel.winfo_exists(self.signal_levels_window):
+            return
+        
+        # Get updated instance names
+        instance_names = ["None"] + [inst.get_display_name() for inst in self.instance_manager.instances]
+        
+        # Find the comparison comboboxes and update their values
+        # We need to search through the window's children to find them
+        for child in self.signal_levels_window.winfo_children():
+            if isinstance(child, ttk.Frame):
+                for subchild in child.winfo_children():
+                    if isinstance(subchild, ttk.Combobox):
+                        subchild['values'] = instance_names
 
     def _setup_cursor_sync(self, spectrum, instance_id: int):
         """Set up cursor synchronization for a spectrum display."""

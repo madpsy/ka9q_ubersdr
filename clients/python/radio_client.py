@@ -290,6 +290,8 @@ class RadioClient:
         self.allowed_iq_modes = []  # List of allowed IQ modes from /connection endpoint
         self.max_session_time = 0  # Maximum session time in seconds (0 = unlimited)
         self.connection_start_time = None  # Time when connection was established
+        self.connection_rejected = False  # Flag indicating if connection was rejected
+        self.rejection_reason = ""  # Reason for connection rejection
 
         # FIFO (named pipe) output
         self.fifo_path = fifo_path
@@ -1196,8 +1198,14 @@ class RadioClient:
             print(f"Failed to fetch countries: {e}", file=sys.stderr)
             return []
     
-    async def check_connection_allowed(self) -> bool:
-        """Check if connection is allowed via /connection endpoint."""
+    async def check_connection_allowed(self) -> tuple[bool, str]:
+        """Check if connection is allowed via /connection endpoint.
+
+        Returns:
+            Tuple of (allowed, reason) where:
+            - allowed: True if connection is allowed, False otherwise
+            - reason: Rejection reason if not allowed, empty string if allowed
+        """
         # Build HTTP URL for connection check
         protocol = 'https' if self.ssl else 'http'
         
@@ -1239,7 +1247,7 @@ class RadioClient:
                     if not data.get('allowed', False):
                         reason = data.get('reason', 'Unknown reason')
                         self._log(f"Connection rejected: {reason}")
-                        return False
+                        return False, reason
                     
                     # Store bypassed status (deprecated), allowed IQ modes, and session time
                     self.bypassed = data.get('bypassed', False)
@@ -1252,17 +1260,21 @@ class RadioClient:
                     iq_modes_msg = f", allowed IQ modes: {', '.join(self.allowed_iq_modes)}" if self.allowed_iq_modes else ""
                     session_msg = f", max session: {self.max_session_time}s" if self.max_session_time > 0 else ""
                     self._log(f"Connection allowed (client IP: {client_ip}){bypassed_msg}{iq_modes_msg}{session_msg}")
-                    return True
+                    return True, ""
                     
         except Exception as e:
             print(f"Connection check failed: {e}", file=sys.stderr)
             print("Attempting connection anyway...", file=sys.stderr)
-            return True  # Continue on error (like the web UI does)
+            return True, ""  # Continue on error (like the web UI does)
     
     async def run_once(self):
         """Single connection attempt."""
         # Check if connection is allowed before attempting WebSocket connection
-        if not await self.check_connection_allowed():
+        allowed, reason = await self.check_connection_allowed()
+        if not allowed:
+            # Store rejection reason for GUI to handle
+            self.connection_rejected = True
+            self.rejection_reason = reason
             return 1
 
         # Fetch server description

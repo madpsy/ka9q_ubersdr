@@ -4481,27 +4481,8 @@ class RadioGUI:
             self.refresh_devices_btn.config(state='disabled')
             self.fifo_entry.config(state='disabled')
 
-            # Connect spectrum display after a delay to ensure audio connection is established
-            if self.spectrum and SPECTRUM_AVAILABLE:
-                def connect_spectrum_delayed():
-                    try:
-                        # Build server string from hostname and port
-                        hostname = self.server_var.get().strip()
-                        port = self.port_var.get().strip()
-                        server = f"{hostname}:{port}" if ':' not in hostname else hostname
-                        # Pass the audio channel's user_session_id, TLS setting, and password to spectrum
-                        use_tls = self.tls_var.get()
-                        password = self.config.get('password')
-                        self.spectrum.connect(server, frequency, self.client.user_session_id, use_tls=use_tls, password=password)
-                        # Set tuned frequency for bandwidth filter visualization
-                        self.spectrum.tuned_freq = frequency
-                        self.log_status("Spectrum display connected")
-                    except Exception as e:
-                        self.log_status(f"Spectrum display error: {e}")
-
-                # Delay spectrum connection by 2000ms (2 seconds) to allow audio connection to establish
-                # and avoid rate limiting (HTTP 429)
-                self.root.after(2000, connect_spectrum_delayed)
+            # Note: Spectrum connection is now handled in check_status_updates()
+            # after connection is confirmed to be allowed
 
             # Construct server string for logging
             hostname = self.server_var.get().strip()
@@ -4534,6 +4515,10 @@ class RadioGUI:
         if self.client:
             self.client.running = False
             self.log_status("Disconnecting...")
+
+        # Clear password from config so it's not reused on next connection
+        if 'password' in self.config:
+            del self.config['password']
 
         # Stop band state polling
         self.stop_band_state_polling()
@@ -4704,6 +4689,40 @@ class RadioGUI:
     def check_status_updates(self):
         """Check for status updates from the client thread."""
         try:
+            # Check if connection was rejected and needs password
+            if self.client and hasattr(self.client, 'connection_rejected') and self.client.connection_rejected:
+                self.client.connection_rejected = False  # Reset flag
+                reason = getattr(self.client, 'rejection_reason', 'Connection not allowed')
+
+                # Prompt user for bypass password
+                password = simpledialog.askstring(
+                    "Connection Rejected",
+                    f"{reason}\n\nEnter bypass password (or Cancel to abort):",
+                    show='*'
+                )
+
+                if password:
+                    # User provided password - retry connection
+                    self.log_status("Retrying connection with bypass password...")
+                    self.client.password = password
+                    self.config['password'] = password  # Store for future use
+
+                    # Reset client state and retry
+                    self.client.running = True
+                    self.client.connection_rejected = False
+
+                    # Restart client thread
+                    self.client_thread = threading.Thread(target=self.run_client, daemon=True)
+                    self.client_thread.start()
+                else:
+                    # User cancelled - stop connection attempt
+                    self.log_status("Connection cancelled by user")
+                    self.connected = False
+                    self.connecting = False
+                    self.connect_btn.config(text="Connect", state='normal')
+                    self.cancel_btn.grid_remove()
+                    self.apply_freq_btn.state(['disabled'])
+
             while True:
                 msg_type, msg = self.status_queue.get_nowait()
 
@@ -4786,6 +4805,30 @@ class RadioGUI:
                             if allowed_iq_modes:
                                 modes_str = ', '.join([m.upper() for m in allowed_iq_modes])
                                 self.log_status(f"High bandwidth IQ modes enabled: {modes_str}")
+
+                        # Connect spectrum display after connection is confirmed allowed
+                        if self.spectrum and SPECTRUM_AVAILABLE:
+                            def connect_spectrum_delayed():
+                                try:
+                                    # Build server string from hostname and port
+                                    hostname = self.server_var.get().strip()
+                                    port = self.port_var.get().strip()
+                                    server = f"{hostname}:{port}" if ':' not in hostname else hostname
+                                    # Get current frequency
+                                    frequency = self.get_frequency_hz()
+                                    # Pass the audio channel's user_session_id, TLS setting, and password to spectrum
+                                    use_tls = self.tls_var.get()
+                                    password = self.config.get('password')
+                                    self.spectrum.connect(server, frequency, self.client.user_session_id, use_tls=use_tls, password=password)
+                                    # Set tuned frequency for bandwidth filter visualization
+                                    self.spectrum.tuned_freq = frequency
+                                    self.log_status("Spectrum display connected")
+                                except Exception as e:
+                                    self.log_status(f"Spectrum display error: {e}")
+
+                            # Delay spectrum connection by 2000ms (2 seconds) to allow audio connection to establish
+                            # and avoid rate limiting (HTTP 429)
+                            self.root.after(2000, connect_spectrum_delayed)
 
                         # Start session timer (always show, displays "Unlimited" if max_session_time=0)
                         if self.client and hasattr(self.client, 'max_session_time'):

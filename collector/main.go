@@ -26,32 +26,34 @@ const Version = "0.1.0"
 
 // Instance represents an UberSDR instance
 type Instance struct {
-	SecretUUID          string    `json:"-"`  // Secret UUID (not exposed in API)
-	PublicUUID          string    `json:"id"` // Public UUID for API access
-	Callsign            string    `json:"callsign"`
-	Name                string    `json:"name"`
-	Location            string    `json:"location"`
-	Latitude            float64   `json:"latitude"`
-	Longitude           float64   `json:"longitude"`
-	Altitude            int       `json:"altitude"`
-	Maidenhead          string    `json:"maidenhead"` // 6-character Maidenhead locator
-	PublicURL           string    `json:"public_url"`
-	Version             string    `json:"version"`
-	Host                string    `json:"host,omitempty"`
-	Port                int       `json:"port,omitempty"`
-	TLS                 bool      `json:"tls,omitempty"`
-	CWSkimmer           bool      `json:"cw_skimmer"`
-	DigitalDecodes      bool      `json:"digital_decodes"`
-	NoiseFloor          bool      `json:"noise_floor"`
-	MaxClients          int       `json:"max_clients"`
-	AvailableClients    int       `json:"available_clients"`    // Current number of available client slots
-	MaxSessionTime      int       `json:"max_session_time"`     // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes       []string  `json:"public_iq_modes"`      // List of IQ modes accessible without authentication
-	ReporterIP          string    `json:"reporter_ip"`          // IP address that last reported this instance
-	SuccessfulCallbacks int       `json:"successful_callbacks"` // Number of successful verification callbacks
-	FirstSeen           time.Time `json:"first_seen"`
-	LastSeen            time.Time `json:"last_seen"`
-	LastReportAge       int64     `json:"last_report_age_seconds"` // Computed field
+	SecretUUID          string             `json:"-"`  // Secret UUID (not exposed in API)
+	PublicUUID          string             `json:"id"` // Public UUID for API access
+	Callsign            string             `json:"callsign"`
+	Name                string             `json:"name"`
+	Location            string             `json:"location"`
+	Latitude            float64            `json:"latitude"`
+	Longitude           float64            `json:"longitude"`
+	Altitude            int                `json:"altitude"`
+	Maidenhead          string             `json:"maidenhead"` // 6-character Maidenhead locator
+	PublicURL           string             `json:"public_url"`
+	Version             string             `json:"version"`
+	Host                string             `json:"host,omitempty"`
+	Port                int                `json:"port,omitempty"`
+	TLS                 bool               `json:"tls,omitempty"`
+	CWSkimmer           bool               `json:"cw_skimmer"`
+	DigitalDecodes      bool               `json:"digital_decodes"`
+	NoiseFloor          bool               `json:"noise_floor"`
+	MaxClients          int                `json:"max_clients"`
+	AvailableClients    int                `json:"available_clients"`               // Current number of available client slots
+	MaxSessionTime      int                `json:"max_session_time"`                // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes       []string           `json:"public_iq_modes"`                 // List of IQ modes accessible without authentication
+	ReporterIP          string             `json:"reporter_ip"`                     // IP address that last reported this instance
+	SuccessfulCallbacks int                `json:"successful_callbacks"`            // Number of successful verification callbacks
+	BandConditions      map[string]float64 `json:"band_conditions,omitempty"`       // Band name to FT8 SNR mapping (only included with conditions=true)
+	ConditionsUpdatedAt string             `json:"conditions_updated_at,omitempty"` // Timestamp of band conditions (only included with conditions=true)
+	FirstSeen           time.Time          `json:"first_seen"`
+	LastSeen            time.Time          `json:"last_seen"`
+	LastReportAge       int64              `json:"last_report_age_seconds"` // Computed field
 }
 
 // InstanceUpdate represents the data received from an instance
@@ -1327,4 +1329,40 @@ func (c *Collector) handleGetNoiseFloor(w http.ResponseWriter, r *http.Request) 
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+// getBandConditions fetches simplified band condition data (just FT8 SNR values) for an instance
+// Returns a map of band name to FT8 SNR value, and the updated_at timestamp
+func (c *Collector) getBandConditions(publicUUID string) (map[string]float64, string) {
+	var data string
+	var updatedAt time.Time
+	err := c.db.QueryRow(`
+		SELECT data, updated_at
+		FROM noise_floor_data
+		WHERE public_uuid = ?
+	`, publicUUID).Scan(&data, &updatedAt)
+
+	if err != nil {
+		// No data available or error
+		return nil, ""
+	}
+
+	// Parse the full noise floor JSON
+	var fullData map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &fullData); err != nil {
+		log.Printf("Failed to unmarshal noise floor data for %s: %v", publicUUID, err)
+		return nil, ""
+	}
+
+	// Extract just the ft8_snr values for each band
+	conditions := make(map[string]float64)
+	for band, bandDataInterface := range fullData {
+		if bandData, ok := bandDataInterface.(map[string]interface{}); ok {
+			if ft8SNR, ok := bandData["ft8_snr"].(float64); ok {
+				conditions[band] = ft8SNR
+			}
+		}
+	}
+
+	return conditions, updatedAt.Format(time.RFC3339)
 }

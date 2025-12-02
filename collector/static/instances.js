@@ -105,7 +105,7 @@ function createBandBadge(band, snr) {
     `;
 }
 
-function createInstanceCard(instance, noiseFloorData, isClosest = false) {
+function createInstanceCard(instance, isClosest = false) {
     const isOnline = instance.last_report_age_seconds < 1800; // 30 minutes
     const features = [];
     
@@ -124,20 +124,17 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
         `;
     }
     
-    // Parse noise floor data if available
+    // Parse band conditions if available (now included directly in instance data)
     let bandBadges = '';
-    if (noiseFloorData && noiseFloorData.data) {
-        // The structure from the API is: { data: { "160m": {...}, "80m": {...}, ... }, public_uuid: "...", updated_at: "..." }
-        // Each band object has ft8_snr field
-        const bands = noiseFloorData.data;
+    if (instance.band_conditions) {
+        // Band conditions are now a simple map of band name to FT8 SNR value
         bandBadges = BANDS.map(band => {
-            const bandData = bands[band];
-            const snr = bandData ? bandData.ft8_snr : null;
+            const snr = instance.band_conditions[band];
             return createBandBadge(band, snr);
         }).join('');
     } else if (instance.noise_floor) {
         // Show "Loading..." badges if noise floor is enabled but data not yet available
-        bandBadges = BANDS.map(band => 
+        bandBadges = BANDS.map(band =>
             `<div class="band-badge unknown"><span>${band}</span><span class="band-badge-snr">...</span></div>`
         ).join('');
     }
@@ -148,7 +145,7 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
             <div class="band-badges">
                 ${bandBadges || '<div style="opacity: 0.7; font-size: 0.9em;">No data available</div>'}
             </div>
-            ${noiseFloorData ? `<div style="margin-top: 8px; font-size: 0.8em; opacity: 0.7;">Updated: ${formatTimestamp(noiseFloorData.updated_at)}</div>` : ''}
+            ${instance.conditions_updated_at ? `<div style="margin-top: 8px; font-size: 0.8em; opacity: 0.7;">Updated: ${formatTimestamp(instance.conditions_updated_at)}</div>` : ''}
         </div>
     ` : '';
     
@@ -239,7 +236,8 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
 
 async function fetchInstances() {
     try {
-        const response = await fetch('/api/instances');
+        // Request instances with band conditions included
+        const response = await fetch('/api/instances?conditions=true');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -248,22 +246,6 @@ async function fetchInstances() {
     } catch (error) {
         console.error('Error fetching instances:', error);
         throw error;
-    }
-}
-
-async function fetchNoiseFloor(publicUUID) {
-    try {
-        const response = await fetch(`/api/noisefloor/${publicUUID}`);
-        if (!response.ok) {
-            if (response.status === 404) {
-                return null; // No noise floor data available yet
-            }
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return await response.json();
-    } catch (error) {
-        console.error(`Error fetching noise floor for ${publicUUID}:`, error);
-        return null;
     }
 }
 
@@ -472,26 +454,10 @@ async function loadAndDisplayInstances() {
             instances.sort((a, b) => a.distance - b.distance);
         }
         
-        // Fetch noise floor data for instances that have it enabled
-        const noiseFloorPromises = instances.map(async (instance) => {
-            if (instance.noise_floor) {
-                return {
-                    id: instance.id,
-                    data: await fetchNoiseFloor(instance.id)
-                };
-            }
-            return { id: instance.id, data: null };
-        });
-        
-        const noiseFloorResults = await Promise.all(noiseFloorPromises);
-        const noiseFloorMap = {};
-        noiseFloorResults.forEach(result => {
-            noiseFloorMap[result.id] = result.data;
-        });
-        
         // Create instance cards - mark the first one as closest if user location is available
+        // Band conditions are now included directly in the instance data (no separate fetch needed)
         const cards = instances.map((instance, index) =>
-            createInstanceCard(instance, noiseFloorMap[instance.id], userLocation && index === 0)
+            createInstanceCard(instance, userLocation && index === 0)
         ).join('');
         
         containerEl.innerHTML = cards;

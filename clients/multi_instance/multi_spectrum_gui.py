@@ -954,8 +954,15 @@ class MultiSpectrumGUI:
         try:
             freq_hz = self._get_frequency_hz()
 
-            # Constrain to valid range (100 kHz - 30 MHz)
-            freq_hz = max(100000, min(30000000, freq_hz))
+            # Validate frequency range (100 kHz - 30 MHz)
+            if freq_hz < 100000:
+                messagebox.showerror("Invalid Frequency",
+                                   f"Frequency must be at least 100 kHz\n(You entered: {freq_hz/1e3:.3f} kHz)")
+                return
+            elif freq_hz > 30000000:
+                messagebox.showerror("Invalid Frequency",
+                                   f"Frequency must be at most 30 MHz\n(You entered: {freq_hz/1e6:.6f} MHz)")
+                return
 
             # Update all connected instances
             for instance in self.instance_manager.active_instances:
@@ -1040,7 +1047,7 @@ class MultiSpectrumGUI:
         ttk.Label(compare_frame, text="Compare:", font=('TkDefaultFont', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
 
         # Get instance names for dropdown
-        instance_names = ["None"] + [inst.name for inst in self.instance_manager.instances]
+        instance_names = ["None"] + [inst.get_display_name() for inst in self.instance_manager.instances]
 
         ttk.Label(compare_frame, text="A:").pack(side=tk.LEFT, padx=(5, 2))
         compare_a_combo = ttk.Combobox(compare_frame, textvariable=self.compare_instance_a,
@@ -1078,7 +1085,7 @@ class MultiSpectrumGUI:
         # Create labels for each instance with two columns
         self.signal_level_labels = {}
         for instance in self.instance_manager.instances:
-            frame = ttk.LabelFrame(scrollable_frame, text=instance.name, padding="5")
+            frame = ttk.LabelFrame(scrollable_frame, text=instance.get_display_name(), padding="5")
             frame.pack(fill=tk.X, pady=5)
 
             # Create a grid for two columns of metrics

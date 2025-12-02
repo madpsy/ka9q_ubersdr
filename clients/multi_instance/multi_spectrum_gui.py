@@ -100,9 +100,13 @@ class MultiSpectrumGUI:
         
         # Load saved configuration
         self.load_config()
-
+        
         # Open Signal Levels window on startup (after a short delay)
         self.root.after(500, self.show_signal_levels_window)
+        
+        # If no instances exist after loading config, show public instances window
+        if len(self.instance_manager.instances) == 0 and PUBLIC_INSTANCES_AVAILABLE:
+            self.root.after(600, self.add_from_public)
         
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)

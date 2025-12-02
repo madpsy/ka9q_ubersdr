@@ -264,8 +264,8 @@ def create_public_instances_window(parent, on_connect_callback):
         fetch_thread.start()
 
     # Create buttons
-    connect_btn = ttk.Button(button_frame, text="Connect", command=connect_to_instance)
-    connect_btn.pack(side=tk.LEFT, padx=(0, 5))
+    add_btn = ttk.Button(button_frame, text="Add", command=connect_to_instance)
+    add_btn.pack(side=tk.LEFT, padx=(0, 5))
 
     close_btn = ttk.Button(button_frame, text="Close", command=window.destroy)
     close_btn.pack(side=tk.LEFT, padx=(0, 5))

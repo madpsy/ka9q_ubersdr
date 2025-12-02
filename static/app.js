@@ -1030,6 +1030,15 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
                 if (errorMessage) {
                     errorMessage.style.display = 'none';
                 }
+
+                // Reconnect spectrum WebSocket with password
+                if (window.spectrumDisplay) {
+                    log('Reconnecting spectrum WebSocket with bypass password');
+                    window.spectrumDisplay.disconnect();
+                    setTimeout(() => {
+                        window.spectrumDisplay.connect();
+                    }, 100);
+                }
             }
 
             // Enable the play button immediately (or after short delay)

@@ -781,7 +781,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 			&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
 			&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
 			&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.AvailableClients, &inst.MaxSessionTime,
-			&publicIQModesJSON, &inst.ReporterIP,
+			&publicIQModesJSON, &inst.ReporterIP, &inst.SuccessfulCallbacks,
 			&inst.FirstSeen, &inst.LastSeen,
 		)
 		if err != nil {

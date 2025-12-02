@@ -1018,21 +1018,27 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
                 bypassPassword = password;
                 window.bypassPassword = password;
                 log('Bypass password accepted');
-                
+
                 // Hide password UI
                 const passwordContainer = document.getElementById('password-bypass-container');
                 if (passwordContainer) {
                     passwordContainer.style.display = 'none';
                 }
+
+                // Clear any error messages
+                const errorMessage = document.getElementById('password-error-message');
+                if (errorMessage) {
+                    errorMessage.style.display = 'none';
+                }
             }
-            
-            // Enable the play button after 2 second delay
+
+            // Enable the play button immediately (or after short delay)
             setTimeout(() => {
                 audioStartButton.disabled = false;
                 audioStartButton.innerHTML = originalHTML;
                 audioStartButton.style.backgroundColor = ''; // Reset color
-                audioStartButton.style.cursor = '';
-            }, 2000);
+                audioStartButton.style.cursor = ''; // Reset cursor
+            }, password ? 500 : 2000); // Shorter delay if password was used
         }
     } catch (err) {
         console.error('Connection check failed:', err);
@@ -1050,7 +1056,6 @@ window.submitBypassPassword = async function() {
     const errorMessage = document.getElementById('password-error-message');
     const submitButton = document.getElementById('bypass-password-submit');
     const audioStartButton = document.getElementById('audio-start-button');
-    const originalHTML = audioStartButton.innerHTML;
     
     if (!passwordInput || !submitButton) return;
     
@@ -1071,6 +1076,12 @@ window.submitBypassPassword = async function() {
     if (errorMessage) {
         errorMessage.style.display = 'none';
     }
+    
+    // Get the original HTML from the button's data attribute or reconstruct it
+    const originalHTML = `<svg width="80" height="80" viewBox="0 0 80 80">
+                    <polygon points="25,15 25,65 65,40" fill="white"/>
+                </svg>
+                <span>Click to Start</span>`;
     
     // Retry connection check with password
     try {

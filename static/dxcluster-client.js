@@ -26,7 +26,12 @@ class DXClusterClient {
 
         // Determine WebSocket URL based on current page protocol
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/dxcluster?user_session_id=${encodeURIComponent(userSessionId)}`;
+        let wsUrl = `${protocol}//${window.location.host}/ws/dxcluster?user_session_id=${encodeURIComponent(userSessionId)}`;
+
+        // Add bypass password if available
+        if (window.bypassPassword) {
+            wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
+        }
 
         console.log('[DX Cluster] Connecting to:', wsUrl);
 

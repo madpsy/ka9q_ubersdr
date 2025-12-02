@@ -469,7 +469,12 @@ class MinimalRadio {
 
             // Create spectrum WebSocket connection
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/user-spectrum?user_session_id=${encodeURIComponent(this.userSessionID)}`;
+            let wsUrl = `${protocol}//${window.location.host}/ws/user-spectrum?user_session_id=${encodeURIComponent(this.userSessionID)}`;
+
+            // Add bypass password if available
+            if (window.bypassPassword) {
+                wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
+            }
 
             console.log('Connecting to spectrum WebSocket:', wsUrl);
             this.spectrumWs = new WebSocket(wsUrl);

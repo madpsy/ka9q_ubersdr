@@ -826,7 +826,12 @@ class DigitalSpotsMap {
 
     connectWebSocket() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/dxcluster?user_session_id=${encodeURIComponent(this.userSessionID)}`;
+        let wsUrl = `${protocol}//${window.location.host}/ws/dxcluster?user_session_id=${encodeURIComponent(this.userSessionID)}`;
+
+        // Add bypass password if available
+        if (window.bypassPassword) {
+            wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
+        }
 
         console.log('[Digital Spots Map] Connecting to:', wsUrl);
 

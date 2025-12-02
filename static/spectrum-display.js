@@ -375,7 +375,12 @@ class SpectrumDisplay {
         // Get user session ID from app.js (generated on page load)
         const userSessionID = window.userSessionID || (typeof userSessionID !== 'undefined' ? userSessionID : '');
         const wsUrlBase = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/user-spectrum`;
-        const wsUrlWithSession = userSessionID ? `${wsUrlBase}?user_session_id=${encodeURIComponent(userSessionID)}` : wsUrlBase;
+        let wsUrlWithSession = userSessionID ? `${wsUrlBase}?user_session_id=${encodeURIComponent(userSessionID)}` : wsUrlBase;
+
+        // Add bypass password if available
+        if (window.bypassPassword && userSessionID) {
+            wsUrlWithSession += `&password=${encodeURIComponent(window.bypassPassword)}`;
+        }
 
         this.config = {
             wsUrl: config.wsUrl || wsUrlWithSession,

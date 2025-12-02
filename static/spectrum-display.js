@@ -378,7 +378,7 @@ class SpectrumDisplay {
         let wsUrlWithSession = userSessionID ? `${wsUrlBase}?user_session_id=${encodeURIComponent(userSessionID)}` : wsUrlBase;
 
         // Add bypass password if available
-        if (window.bypassPassword && userSessionID) {
+        if (window.bypassPassword) {
             wsUrlWithSession += `&password=${encodeURIComponent(window.bypassPassword)}`;
         }
 

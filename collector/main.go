@@ -44,8 +44,9 @@ type Instance struct {
 	NoiseFloor       bool      `json:"noise_floor"`
 	MaxClients       int       `json:"max_clients"`
 	AvailableClients int       `json:"available_clients"` // Current number of available client slots
-	MaxSessionTime   int       `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes    []string  `json:"public_iq_modes"` // List of IQ modes accessible without authentication
+	MaxSessionTime   int       `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes    []string  `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
+	ReporterIP       string    `json:"reporter_ip"`       // IP address that last reported this instance
 	FirstSeen        time.Time `json:"first_seen"`
 	LastSeen         time.Time `json:"last_seen"`
 	LastReportAge    int64     `json:"last_report_age_seconds"` // Computed field
@@ -71,8 +72,8 @@ type InstanceUpdate struct {
 	NoiseFloor       bool     `json:"noise_floor"`
 	MaxClients       int      `json:"max_clients"`
 	AvailableClients int      `json:"available_clients"` // Current number of available client slots
-	MaxSessionTime   int      `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes    []string `json:"public_iq_modes"` // List of IQ modes accessible without authentication
+	MaxSessionTime   int      `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes    []string `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
 }
 
 // InstanceVerificationRequest represents the request to verify an instance
@@ -97,8 +98,10 @@ type Config struct {
 type Collector struct {
 	db                    *sql.DB
 	config                *Config
-	activeNoiseFloorFetch map[string]bool // Track active noise floor fetches by public_uuid
-	noiseFloorMutex       sync.Mutex      // Protect the activeNoiseFloorFetch map
+	activeNoiseFloorFetch map[string]bool      // Track active noise floor fetches by public_uuid
+	noiseFloorMutex       sync.Mutex           // Protect the activeNoiseFloorFetch map
+	rateLimitMap          map[string]time.Time // Track last POST time per IP
+	rateLimitMutex        sync.Mutex           // Protect the rateLimitMap
 }
 
 func main() {
@@ -146,7 +149,11 @@ func main() {
 		db:                    db,
 		config:                config,
 		activeNoiseFloorFetch: make(map[string]bool),
+		rateLimitMap:          make(map[string]time.Time),
 	}
+
+	// Start background cleanup for rate limit map
+	go collector.cleanupRateLimitMap()
 
 	// Start background cleanup goroutine
 	go collector.cleanupStaleInstances()
@@ -223,11 +230,13 @@ func initDatabase(path string) (*sql.DB, error) {
 		available_clients INTEGER DEFAULT 0,
 		max_session_time INTEGER DEFAULT 0,
 		public_iq_modes TEXT DEFAULT '[]',
+		reporter_ip TEXT,
 		first_seen DATETIME NOT NULL,
 		last_seen DATETIME NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_public_uuid ON instances(public_uuid);
 	CREATE INDEX IF NOT EXISTS idx_last_seen ON instances(last_seen);
+	CREATE INDEX IF NOT EXISTS idx_reporter_ip ON instances(reporter_ip);
 	
 	CREATE TABLE IF NOT EXISTS noise_floor_data (
 		public_uuid TEXT PRIMARY KEY,
@@ -290,6 +299,9 @@ func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Call the next handler
 		next(wrapped, r)
 
+		// Get the real client IP, checking X-Forwarded-For header
+		clientIP := getClientIP(r)
+
 		// Log the request
 		duration := time.Since(start)
 		log.Printf("%s %s %d %s %s",
@@ -297,9 +309,31 @@ func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			r.URL.Path,
 			wrapped.statusCode,
 			duration,
-			r.RemoteAddr,
+			clientIP,
 		)
 	}
+}
+
+// getClientIP extracts the real client IP from the request
+// Checks X-Forwarded-For header first (for proxied requests), then falls back to RemoteAddr
+func getClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header (standard for proxies/load balancers)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// X-Forwarded-For can contain multiple IPs (client, proxy1, proxy2, ...)
+		// The first IP is the original client
+		ips := strings.Split(xff, ",")
+		if len(ips) > 0 {
+			return strings.TrimSpace(ips[0])
+		}
+	}
+
+	// Check X-Real-IP header (alternative used by some proxies)
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+
+	// Fall back to RemoteAddr
+	return r.RemoteAddr
 }
 
 // responseWriter wraps http.ResponseWriter to capture status code
@@ -416,16 +450,45 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Get the client IP for tracking
+	clientIP := getClientIP(r)
+
+	// Check rate limit - only allow one POST per IP per 60 seconds
+	if !c.checkRateLimit(clientIP) {
+		log.Printf("Rate limit exceeded for IP: %s (instance: %s)", clientIP, secretUUID)
+		http.Error(w, "Rate limit exceeded - only one instance update per 60 seconds allowed", http.StatusTooManyRequests)
+		return
+	}
+
 	// Verify instance is publicly accessible by making a callback
 	if !c.verifyInstanceAccessibility(secretUUID, update.Host, update.Port, update.TLS) {
-		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v)", secretUUID, update.Host, update.Port, update.TLS)
+		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v) from IP: %s", secretUUID, update.Host, update.Port, update.TLS, clientIP)
 		http.Error(w, "Instance verification failed - not publicly accessible", http.StatusBadRequest)
 		return
 	}
 
+	// Check if another instance already exists with the same host/port combination
+	// If so, remove it (it will be replaced by this new UUID)
+	var existingSecretUUID string
+	err := c.db.QueryRow("SELECT secret_uuid FROM instances WHERE host = ? AND port = ? AND secret_uuid != ?",
+		update.Host, update.Port, secretUUID).Scan(&existingSecretUUID)
+
+	if err == nil {
+		// Found an existing instance with same host/port but different UUID - remove it
+		_, delErr := c.db.Exec("DELETE FROM instances WHERE secret_uuid = ?", existingSecretUUID)
+		if delErr != nil {
+			log.Printf("Failed to delete existing instance %s with same host/port: %v", existingSecretUUID, delErr)
+		} else {
+			log.Printf("Removed existing instance %s (same host=%s port=%d) to be replaced by %s",
+				existingSecretUUID, update.Host, update.Port, secretUUID)
+		}
+	} else if err != sql.ErrNoRows {
+		log.Printf("Error checking for existing host/port: %v", err)
+	}
+
 	// Check if instance exists
 	var publicUUID string
-	err := c.db.QueryRow("SELECT public_uuid FROM instances WHERE secret_uuid = ?", secretUUID).Scan(&publicUUID)
+	err = c.db.QueryRow("SELECT public_uuid FROM instances WHERE secret_uuid = ?", secretUUID).Scan(&publicUUID)
 
 	now := time.Now()
 
@@ -447,14 +510,14 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				latitude, longitude, altitude, public_url, version,
 				host, port, tls,
 				cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
-				public_iq_modes,
+				public_iq_modes, reporter_ip,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
-			string(publicIQModesJSON),
+			string(publicIQModesJSON), clientIP,
 			now, now,
 		)
 
@@ -464,7 +527,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		log.Printf("New instance registered: %s (public: %s, callsign: %s)", secretUUID, publicUUID, update.Callsign)
+		log.Printf("New instance registered: %s (public: %s, callsign: %s) from IP: %s", secretUUID, publicUUID, update.Callsign, clientIP)
 	} else if err != nil {
 		log.Printf("Database error: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -486,7 +549,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				public_url = ?, version = ?,
 				host = ?, port = ?, tls = ?,
 				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?, available_clients = ?, max_session_time = ?,
-				public_iq_modes = ?,
+				public_iq_modes = ?, reporter_ip = ?,
 				last_seen = ?
 			WHERE secret_uuid = ?`,
 			update.Callsign, update.Name, update.Location,
@@ -494,7 +557,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			update.PublicURL, update.Version,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
-			string(publicIQModesJSON),
+			string(publicIQModesJSON), clientIP,
 			now,
 			secretUUID,
 		)
@@ -505,7 +568,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		log.Printf("Instance updated: %s (public: %s, callsign: %s)", secretUUID, publicUUID, update.Callsign)
+		log.Printf("Instance updated: %s (public: %s, callsign: %s) from IP: %s", secretUUID, publicUUID, update.Callsign, clientIP)
 	}
 
 	// If noise floor is enabled, fetch and store the latest data
@@ -546,7 +609,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 			SELECT public_uuid, callsign, name, location, latitude, longitude,
 			       altitude, public_url, version, host, port, tls,
 			       cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
-			       public_iq_modes,
+			       public_iq_modes, reporter_ip,
 			       first_seen, last_seen
 			FROM instances
 			WHERE host IS NOT NULL
@@ -559,7 +622,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 			SELECT public_uuid, callsign, name, location, latitude, longitude,
 			       altitude, public_url, version, host, port, tls,
 			       cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
-			       public_iq_modes,
+			       public_iq_modes, reporter_ip,
 			       first_seen, last_seen
 			FROM instances
 			WHERE datetime(last_seen) >= datetime('now', '-30 minutes')
@@ -589,7 +652,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 			&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
 			&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
 			&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.AvailableClients, &inst.MaxSessionTime,
-			&publicIQModesJSON,
+			&publicIQModesJSON, &inst.ReporterIP,
 			&inst.FirstSeen, &inst.LastSeen,
 		)
 		if err != nil {
@@ -647,7 +710,7 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
 		       altitude, public_url, version, host, port, tls,
 		       cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
-		       public_iq_modes,
+		       public_iq_modes, reporter_ip,
 		       first_seen, last_seen
 		FROM instances
 		WHERE public_uuid = ?
@@ -656,7 +719,7 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
 		&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
 		&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.AvailableClients, &inst.MaxSessionTime,
-		&publicIQModesJSON,
+		&publicIQModesJSON, &inst.ReporterIP,
 		&inst.FirstSeen, &inst.LastSeen,
 	)
 
@@ -967,6 +1030,46 @@ func (c *Collector) fetchAndStoreNoiseFloor(publicUUID, host string, port int, u
 
 		log.Printf("Stored noise floor data for %s (attempt %d)", publicUUID, attempt)
 		return
+	}
+}
+
+// checkRateLimit checks if an IP is allowed to make a POST request
+// Returns true if allowed, false if rate limit exceeded
+// This marks the IP as "in use" immediately to prevent concurrent requests
+func (c *Collector) checkRateLimit(ip string) bool {
+	c.rateLimitMutex.Lock()
+	defer c.rateLimitMutex.Unlock()
+
+	now := time.Now()
+	lastPost, exists := c.rateLimitMap[ip]
+
+	// If no previous POST or more than 60 seconds have passed, allow it
+	if !exists || now.Sub(lastPost) >= 60*time.Second {
+		// Mark this IP as having an active request NOW (before verification callback)
+		// This prevents concurrent requests from the same IP during the slow verification process
+		c.rateLimitMap[ip] = now
+		return true
+	}
+
+	// Rate limit exceeded - there's either an in-flight request or one completed less than 60s ago
+	return false
+}
+
+// cleanupRateLimitMap periodically removes old entries from the rate limit map
+func (c *Collector) cleanupRateLimitMap() {
+	ticker := time.NewTicker(5 * time.Minute) // Run cleanup every 5 minutes
+	defer ticker.Stop()
+
+	for range ticker.C {
+		c.rateLimitMutex.Lock()
+		now := time.Now()
+		for ip, lastPost := range c.rateLimitMap {
+			// Remove entries older than 2 minutes (well past the 60 second limit)
+			if now.Sub(lastPost) > 2*time.Minute {
+				delete(c.rateLimitMap, ip)
+			}
+		}
+		c.rateLimitMutex.Unlock()
 	}
 }
 

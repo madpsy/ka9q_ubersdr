@@ -239,8 +239,7 @@ function createInstanceCard(instance, noiseFloorData, isClosest = false) {
 
 async function fetchInstances() {
     try {
-        // Use ?all=true to show all instances, not just those seen in last 30 minutes
-        const response = await fetch('/api/instances?all=true');
+        const response = await fetch('/api/instances');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }

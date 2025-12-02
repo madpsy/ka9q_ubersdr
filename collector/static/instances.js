@@ -141,7 +141,10 @@ function createInstanceCard(instance, isClosest = false) {
     
     const bandSection = instance.noise_floor ? `
         <div class="band-status-section">
-            <div class="band-status-title">📡 Current Band Conditions</div>
+            <div class="band-status-header">
+                <div class="band-status-title">📡 Current Band Conditions</div>
+                <button class="details-btn" onclick="showNoiseFloorDetails('${instance.id}', '${instance.callsign}')">Details</button>
+            </div>
             <div class="band-badges">
                 ${bandBadges || '<div style="opacity: 0.7; font-size: 0.9em;">No data available</div>'}
             </div>
@@ -498,3 +501,148 @@ async function init() {
     // Refresh periodically
     setInterval(loadAndDisplayInstances, REFRESH_INTERVAL);
 }
+
+// Show noise floor details modal
+async function showNoiseFloorDetails(instanceId, callsign) {
+    const modal = document.getElementById('noiseFloorModal');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalContent = document.getElementById('modalContent');
+    
+    // Show modal with loading state
+    modal.classList.add('active');
+    modalTitle.textContent = `Noise Floor Details - ${callsign}`;
+    modalContent.innerHTML = `
+        <div class="modal-loading">
+            <div class="modal-spinner"></div>
+            <p>Loading noise floor data...</p>
+        </div>
+    `;
+    
+    try {
+        const response = await fetch(`/api/noisefloor/${instanceId}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const noiseFloorData = await response.json();
+        
+        // Display the noise floor data
+        displayNoiseFloorData(noiseFloorData, modalContent);
+        
+    } catch (error) {
+        console.error('Error fetching noise floor data:', error);
+        modalContent.innerHTML = `
+            <div class="modal-error">
+                <p>❌ Failed to load noise floor data</p>
+                <p style="font-size: 0.9em; margin-top: 10px;">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+// Display noise floor data in modal
+function displayNoiseFloorData(noiseFloorData, container) {
+    const data = noiseFloorData.data;
+    const updatedAt = noiseFloorData.updated_at;
+    
+    // Sort bands by frequency (using a predefined order)
+    const bandOrder = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '2m'];
+    const sortedBands = Object.keys(data).sort((a, b) => {
+        const aIndex = bandOrder.indexOf(a);
+        const bIndex = bandOrder.indexOf(b);
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+    });
+    
+    let html = '<div class="noise-floor-grid">';
+    
+    for (const band of sortedBands) {
+        const bandData = data[band];
+        
+        html += `
+            <div class="noise-floor-card">
+                <h3>${band}</h3>
+                <div class="noise-floor-metric">
+                    <span class="noise-floor-metric-label">Min Level:</span>
+                    <span class="noise-floor-metric-value">${bandData.min_db?.toFixed(1) ?? 'N/A'} dB</span>
+                </div>
+                <div class="noise-floor-metric">
+                    <span class="noise-floor-metric-label">Max Level:</span>
+                    <span class="noise-floor-metric-value">${bandData.max_db?.toFixed(1) ?? 'N/A'} dB</span>
+                </div>
+                <div class="noise-floor-metric">
+                    <span class="noise-floor-metric-label">Mean:</span>
+                    <span class="noise-floor-metric-value">${bandData.mean_db?.toFixed(1) ?? 'N/A'} dB</span>
+                </div>
+                <div class="noise-floor-metric">
+                    <span class="noise-floor-metric-label">Median:</span>
+                    <span class="noise-floor-metric-value">${bandData.median_db?.toFixed(1) ?? 'N/A'} dB</span>
+                </div>
+                <div class="noise-floor-metric">
+                    <span class="noise-floor-metric-label">P5:</span>
+                    <span class="noise-floor-metric-value">${bandData.p5_db?.toFixed(1) ?? 'N/A'} dB</span>
+                </div>
+                <div class="noise-floor-metric">
+                    <span class="noise-floor-metric-label">P10:</span>
+                    <span class="noise-floor-metric-value">${bandData.p10_db?.toFixed(1) ?? 'N/A'} dB</span>
+                </div>
+                <div class="noise-floor-metric">
+                    <span class="noise-floor-metric-label">P95:</span>
+                    <span class="noise-floor-metric-value">${bandData.p95_db?.toFixed(1) ?? 'N/A'} dB</span>
+                </div>
+                <div class="noise-floor-metric">
+                    <span class="noise-floor-metric-label">Dynamic Range:</span>
+                    <span class="noise-floor-metric-value">${bandData.dynamic_range?.toFixed(1) ?? 'N/A'} dB</span>
+                </div>
+                <div class="noise-floor-metric">
+                    <span class="noise-floor-metric-label">Occupancy:</span>
+                    <span class="noise-floor-metric-value">${bandData.occupancy_pct?.toFixed(1) ?? 'N/A'}%</span>
+                </div>
+                <div class="noise-floor-metric">
+                    <span class="noise-floor-metric-label">FT8 SNR:</span>
+                    <span class="noise-floor-metric-value" style="color: ${getBandConditionColor(bandData.ft8_snr)}">${bandData.ft8_snr?.toFixed(1) ?? 'N/A'} dB</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    html += '</div>';
+    
+    // Add timestamp
+    const date = new Date(updatedAt);
+    html += `
+        <div class="modal-timestamp">
+            Last updated: ${date.toLocaleString()}
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+// Get color for band condition based on SNR
+function getBandConditionColor(snr) {
+    if (snr === null || snr === undefined) return '#9ca3af';
+    if (snr < 6) return '#ef4444';
+    if (snr < 20) return '#ff9800';
+    if (snr < 30) return '#fbbf24';
+    return '#22c55e';
+}
+
+// Close noise floor modal
+function closeNoiseFloorModal() {
+    const modal = document.getElementById('noiseFloorModal');
+    modal.classList.remove('active');
+}
+
+// Close modal when clicking outside
+document.addEventListener('DOMContentLoaded', () => {
+    const modal = document.getElementById('noiseFloorModal');
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeNoiseFloorModal();
+            }
+        });
+    }
+});

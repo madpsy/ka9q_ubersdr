@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -336,6 +337,127 @@ func getClientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+// validatePublicHost checks if a host is a publicly accessible address
+// Rejects local, private, loopback, link-local, and other reserved addresses
+func validatePublicHost(host string) error {
+	if host == "" {
+		return fmt.Errorf("host cannot be empty")
+	}
+
+	// Resolve the host to IP addresses
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		// If it doesn't resolve, try parsing it as an IP directly
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return fmt.Errorf("invalid host: cannot resolve or parse as IP")
+		}
+		ips = []net.IP{ip}
+	}
+
+	// Check each resolved IP
+	for _, ip := range ips {
+		if !isPublicIP(ip) {
+			return fmt.Errorf("host resolves to non-public IP address: %s", ip.String())
+		}
+	}
+
+	return nil
+}
+
+// isPublicIP checks if an IP address is publicly routable
+// Returns false for private, loopback, link-local, multicast, and other reserved addresses
+func isPublicIP(ip net.IP) bool {
+	// Check for IPv4 private/reserved ranges
+	if ip.To4() != nil {
+		// Loopback (127.0.0.0/8)
+		if ip.IsLoopback() {
+			return false
+		}
+		// Private networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+		if ip.IsPrivate() {
+			return false
+		}
+		// Link-local (169.254.0.0/16)
+		if ip.IsLinkLocalUnicast() {
+			return false
+		}
+		// Multicast (224.0.0.0/4)
+		if ip.IsMulticast() {
+			return false
+		}
+		// Broadcast and other reserved
+		if ip.Equal(net.IPv4bcast) || ip.Equal(net.IPv4zero) {
+			return false
+		}
+		// Check for additional reserved ranges
+		// 0.0.0.0/8 (current network)
+		if ip[0] == 0 {
+			return false
+		}
+		// 100.64.0.0/10 (shared address space / carrier-grade NAT)
+		if ip[0] == 100 && (ip[1]&0xC0) == 64 {
+			return false
+		}
+		// 192.0.0.0/24 (IETF protocol assignments)
+		if ip[0] == 192 && ip[1] == 0 && ip[2] == 0 {
+			return false
+		}
+		// 192.0.2.0/24 (TEST-NET-1)
+		if ip[0] == 192 && ip[1] == 0 && ip[2] == 2 {
+			return false
+		}
+		// 198.18.0.0/15 (benchmarking)
+		if ip[0] == 198 && (ip[1] == 18 || ip[1] == 19) {
+			return false
+		}
+		// 198.51.100.0/24 (TEST-NET-2)
+		if ip[0] == 198 && ip[1] == 51 && ip[2] == 100 {
+			return false
+		}
+		// 203.0.113.0/24 (TEST-NET-3)
+		if ip[0] == 203 && ip[1] == 0 && ip[2] == 113 {
+			return false
+		}
+		// 240.0.0.0/4 (reserved for future use)
+		if ip[0] >= 240 {
+			return false
+		}
+	} else {
+		// IPv6 checks
+		// Loopback (::1)
+		if ip.IsLoopback() {
+			return false
+		}
+		// Link-local (fe80::/10)
+		if ip.IsLinkLocalUnicast() {
+			return false
+		}
+		// Multicast (ff00::/8)
+		if ip.IsMulticast() {
+			return false
+		}
+		// Unique local addresses (fc00::/7)
+		if len(ip) == 16 && (ip[0]&0xFE) == 0xFC {
+			return false
+		}
+		// IPv4-mapped IPv6 addresses (::ffff:0:0/96)
+		if ip.To4() != nil {
+			return isPublicIP(ip.To4())
+		}
+		// Unspecified address (::)
+		if ip.IsUnspecified() {
+			return false
+		}
+		// Documentation prefix (2001:db8::/32)
+		if len(ip) == 16 && ip[0] == 0x20 && ip[1] == 0x01 && ip[2] == 0x0d && ip[3] == 0xb8 {
+			return false
+		}
+	}
+
+	return true
+}
+
 // responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
 	http.ResponseWriter
@@ -447,6 +569,13 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 	// Validate field values
 	if err := validateInstanceUpdate(&update); err != nil {
 		http.Error(w, fmt.Sprintf("Validation error: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate that the host is not a local/reserved address
+	if err := validatePublicHost(update.Host); err != nil {
+		log.Printf("Host validation failed for %s: %v", secretUUID, err)
+		http.Error(w, fmt.Sprintf("Host validation error: %v", err), http.StatusBadRequest)
 		return
 	}
 

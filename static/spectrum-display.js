@@ -728,14 +728,21 @@ class SpectrumDisplay {
         // Check if connection will be allowed before attempting WebSocket connection
         try {
             const userSessionID = window.userSessionID || '';
+            const requestBody = {
+                user_session_id: userSessionID
+            };
+
+            // Add bypass password if available
+            if (window.bypassPassword) {
+                requestBody.password = window.bypassPassword;
+            }
+
             const checkResponse = await fetch('/connection', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    user_session_id: userSessionID
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const checkData = await checkResponse.json();

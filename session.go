@@ -125,11 +125,16 @@ func (sm *SessionManager) CreateSessionWithIP(frequency uint64, mode string, sou
 
 // CreateSessionWithUserID creates a new session with IP tracking and user session ID
 func (sm *SessionManager) CreateSessionWithUserID(frequency uint64, mode string, sourceIP, clientIP, userSessionID string) (*Session, error) {
-	return sm.CreateSessionWithBandwidth(frequency, mode, 3000, sourceIP, clientIP, userSessionID)
+	return sm.CreateSessionWithBandwidthAndPassword(frequency, mode, 3000, sourceIP, clientIP, userSessionID, "")
 }
 
 // CreateSessionWithBandwidth creates a new session with a unique channel and specified bandwidth
 func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode string, bandwidth int, sourceIP, clientIP, userSessionID string) (*Session, error) {
+	return sm.CreateSessionWithBandwidthAndPassword(frequency, mode, bandwidth, sourceIP, clientIP, userSessionID, "")
+}
+
+// CreateSessionWithBandwidthAndPassword creates a new session with a unique channel, specified bandwidth, and bypass password
+func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64, mode string, bandwidth int, sourceIP, clientIP, userSessionID, password string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -143,7 +148,7 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	// Check session limit based on unique user_session_ids
 	// Skip this check if the IP is in the bypass list OR if this is an internal session (no IP)
 	// Internal sessions (noise floor, decoders) have empty ClientIP and should not count towards user limits
-	if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+	if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {
 		// If userSessionID is empty, treat as a unique user for each session
 		if userSessionID == "" {
 			// No UUID provided - count as unique user per session (legacy behavior)
@@ -165,7 +170,7 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 	// Check if we've reached the maximum unique UUIDs per IP (if configured)
 	// Skip this check if the IP is in the bypass list
 	if sm.config.Server.MaxSessionsIP > 0 && clientIP != "" && userSessionID != "" {
-		if !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+		if !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {
 			// Check if this is a new UUID for this IP
 			if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
 				// IP exists, check if UUID is new
@@ -236,23 +241,24 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 
 	// Create session with default bandwidth edges (50 Hz to bandwidth Hz for SSB)
 	session := &Session{
-		ID:            sessionID,
-		ChannelName:   channelName,
-		SSRC:          ssrc,
-		Frequency:     frequency,
-		Mode:          mode,
-		Bandwidth:     bandwidth,
-		BandwidthLow:  50,        // Default low edge
-		BandwidthHigh: bandwidth, // Default high edge
-		SampleRate:    sampleRate,
-		Channels:      channels,
-		CreatedAt:     time.Now(),
-		LastActive:    time.Now(),
-		AudioChan:     make(chan []byte, 100), // Buffer 100 audio packets
-		Done:          make(chan struct{}),
-		SourceIP:      sourceIP,
-		ClientIP:      clientIP,
-		UserSessionID: userSessionID,
+		ID:             sessionID,
+		ChannelName:    channelName,
+		SSRC:           ssrc,
+		Frequency:      frequency,
+		Mode:           mode,
+		Bandwidth:      bandwidth,
+		BandwidthLow:   50,        // Default low edge
+		BandwidthHigh:  bandwidth, // Default high edge
+		SampleRate:     sampleRate,
+		Channels:       channels,
+		CreatedAt:      time.Now(),
+		LastActive:     time.Now(),
+		AudioChan:      make(chan []byte, 100), // Buffer 100 audio packets
+		Done:           make(chan struct{}),
+		SourceIP:       sourceIP,
+		ClientIP:       clientIP,
+		UserSessionID:  userSessionID,
+		BypassPassword: password, // Store the password in the session
 	}
 
 	// Translate mode for radiod (e.g., "fm" -> "pm")
@@ -317,16 +323,21 @@ func (sm *SessionManager) CreateSpectrumSession() (*Session, error) {
 
 // CreateSpectrumSessionWithIP creates a new spectrum session with IP tracking
 func (sm *SessionManager) CreateSpectrumSessionWithIP(sourceIP, clientIP string) (*Session, error) {
-	return sm.createSpectrumSessionWithUserID(sourceIP, clientIP, "")
+	return sm.createSpectrumSessionWithUserIDAndPassword(sourceIP, clientIP, "", "")
 }
 
 // CreateSpectrumSessionWithUserID creates a new spectrum session with IP tracking and user session ID
 func (sm *SessionManager) CreateSpectrumSessionWithUserID(sourceIP, clientIP, userSessionID string) (*Session, error) {
-	return sm.createSpectrumSessionWithUserID(sourceIP, clientIP, userSessionID)
+	return sm.createSpectrumSessionWithUserIDAndPassword(sourceIP, clientIP, userSessionID, "")
 }
 
-// createSpectrumSessionWithUserID is the internal implementation
-func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, userSessionID string) (*Session, error) {
+// CreateSpectrumSessionWithUserIDAndPassword creates a new spectrum session with IP tracking, user session ID, and bypass password
+func (sm *SessionManager) CreateSpectrumSessionWithUserIDAndPassword(sourceIP, clientIP, userSessionID, password string) (*Session, error) {
+	return sm.createSpectrumSessionWithUserIDAndPassword(sourceIP, clientIP, userSessionID, password)
+}
+
+// createSpectrumSessionWithUserIDAndPassword is the internal implementation
+func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, clientIP, userSessionID, password string) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -340,7 +351,7 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 	// Check session limit based on unique user_session_ids
 	// Skip this check if the IP is in the bypass list OR if this is an internal session (no IP)
 	// Internal sessions (noise floor, decoders) have empty ClientIP and should not count towards user limits
-	if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+	if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {
 		// If userSessionID is empty, treat as a unique user for each session
 		if userSessionID == "" {
 			// No UUID provided - count as unique user per session (legacy behavior)
@@ -362,7 +373,7 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 	// Check if we've reached the maximum unique UUIDs per IP (if configured)
 	// Skip this check if the IP is in the bypass list
 	if sm.config.Server.MaxSessionsIP > 0 && clientIP != "" && userSessionID != "" {
-		if !sm.config.Server.IsIPTimeoutBypassed(clientIP) {
+		if !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {
 			// Check if this is a new UUID for this IP
 			if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
 				// IP exists, check if UUID is new
@@ -425,21 +436,22 @@ func (sm *SessionManager) createSpectrumSessionWithUserID(sourceIP, clientIP, us
 
 	// Create spectrum session
 	session := &Session{
-		ID:            sessionID,
-		ChannelName:   channelName,
-		SSRC:          ssrc,
-		Frequency:     frequency,
-		Mode:          "spectrum",
-		IsSpectrum:    true,
-		BinCount:      binCount,
-		BinBandwidth:  binBandwidth,
-		CreatedAt:     time.Now(),
-		LastActive:    time.Now(),
-		SpectrumChan:  make(chan []float32, 10), // Buffer spectrum updates
-		Done:          make(chan struct{}),
-		SourceIP:      sourceIP,
-		ClientIP:      clientIP,
-		UserSessionID: userSessionID,
+		ID:             sessionID,
+		ChannelName:    channelName,
+		SSRC:           ssrc,
+		Frequency:      frequency,
+		Mode:           "spectrum",
+		IsSpectrum:     true,
+		BinCount:       binCount,
+		BinBandwidth:   binBandwidth,
+		CreatedAt:      time.Now(),
+		LastActive:     time.Now(),
+		SpectrumChan:   make(chan []float32, 10), // Buffer spectrum updates
+		Done:           make(chan struct{}),
+		SourceIP:       sourceIP,
+		ClientIP:       clientIP,
+		UserSessionID:  userSessionID,
+		BypassPassword: password, // Store the password in the session
 	}
 
 	// Create radiod spectrum channel

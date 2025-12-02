@@ -124,15 +124,19 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 		return
 	}
 
-	// Check connection rate limit (unless IP is bypassed)
-	if !swsh.sessions.config.Server.IsIPTimeoutBypassed(clientIP) && !swsh.connRateLimiter.AllowConnection(clientIP) {
+	// Get password from query string (optional)
+	query := r.URL.Query()
+	password := query.Get("password")
+
+	// Check connection rate limit (unless IP is bypassed via IP list or password)
+	if !swsh.sessions.config.Server.IsIPTimeoutBypassed(clientIP, password) && !swsh.connRateLimiter.AllowConnection(clientIP) {
 		log.Printf("Connection rate limit exceeded for IP: %s (client IP: %s)", sourceIP, clientIP)
 		http.Error(w, "Too Many Requests - Connection rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 
 	// Get user session ID from query string (required)
-	userSessionID := r.URL.Query().Get("user_session_id")
+	userSessionID := query.Get("user_session_id")
 
 	// Validate user session ID - must be a valid UUID
 	if !isValidUUID(userSessionID) {
@@ -180,8 +184,8 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	// Start stats logger if not already running
 	startStatsLogger()
 
-	// Create spectrum session with IP tracking and user session ID
-	session, err := swsh.sessions.CreateSpectrumSessionWithUserID(sourceIP, clientIP, userSessionID)
+	// Create spectrum session with IP tracking, user session ID, and bypass password
+	session, err := swsh.sessions.CreateSpectrumSessionWithUserIDAndPassword(sourceIP, clientIP, userSessionID, password)
 	if err != nil {
 		log.Printf("Failed to create spectrum session: %v", err)
 
@@ -196,6 +200,7 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 
 	// Store WebSocket connection reference in session for kick functionality
 	session.WSConn = conn
+	// Password is already stored in session during creation
 
 	if userSessionID != "" {
 		log.Printf("Spectrum WebSocket session created: %s, user_session_id: %s, source IP: %s, client IP: %s", session.ID, userSessionID, sourceIP, clientIP)

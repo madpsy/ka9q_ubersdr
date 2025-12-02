@@ -464,8 +464,8 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Create initial session with IP tracking and user session ID
-	session, err := wsh.sessions.CreateSessionWithUserID(frequency, mode, sourceIP, clientIP, userSessionID)
+	// Create initial session with IP tracking, user session ID, and bypass password
+	session, err := wsh.sessions.CreateSessionWithBandwidthAndPassword(frequency, mode, 3000, sourceIP, clientIP, userSessionID, password)
 	if err != nil {
 		log.Printf("Failed to create session: %v", err)
 
@@ -482,8 +482,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Store bypass password in session for later bypass checks
-	session.BypassPassword = password
+	// Password is already stored in session during creation
 
 	// Store WebSocket connection reference in session for kick functionality
 	session.WSConn = conn

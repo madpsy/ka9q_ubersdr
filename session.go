@@ -391,6 +391,13 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 				if !uuidSet[userSessionID] {
 					// New UUID for this IP, check limit
 					if len(uuidSet) >= sm.config.Server.MaxSessionsIP {
+						// Log debug info about which UUIDs are registered for this IP
+						uuidList := make([]string, 0, len(uuidSet))
+						for uuid := range uuidSet {
+							uuidList = append(uuidList, uuid)
+						}
+						log.Printf("DEBUG: IP %s has %d UUIDs: %v (trying to add: %s, password provided: %v)",
+							clientIP, len(uuidSet), uuidList, userSessionID, password != "")
 						return nil, fmt.Errorf("maximum unique users per IP reached (%d)", sm.config.Server.MaxSessionsIP)
 					}
 				}

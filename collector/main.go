@@ -1048,6 +1048,13 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 		}
 
 		log.Printf("Instance %s verified successfully at %s (attempt %d)", secretUUID, callbackURL, attempt)
+
+		// Increment successful_callbacks counter in database
+		_, err = c.db.Exec("UPDATE instances SET successful_callbacks = successful_callbacks + 1 WHERE secret_uuid = ?", secretUUID)
+		if err != nil {
+			log.Printf("Failed to increment successful_callbacks for %s: %v", secretUUID, err)
+		}
+
 		return true
 	}
 

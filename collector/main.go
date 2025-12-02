@@ -26,31 +26,32 @@ const Version = "0.1.0"
 
 // Instance represents an UberSDR instance
 type Instance struct {
-	SecretUUID       string    `json:"-"`  // Secret UUID (not exposed in API)
-	PublicUUID       string    `json:"id"` // Public UUID for API access
-	Callsign         string    `json:"callsign"`
-	Name             string    `json:"name"`
-	Location         string    `json:"location"`
-	Latitude         float64   `json:"latitude"`
-	Longitude        float64   `json:"longitude"`
-	Altitude         int       `json:"altitude"`
-	Maidenhead       string    `json:"maidenhead"` // 6-character Maidenhead locator
-	PublicURL        string    `json:"public_url"`
-	Version          string    `json:"version"`
-	Host             string    `json:"host,omitempty"`
-	Port             int       `json:"port,omitempty"`
-	TLS              bool      `json:"tls,omitempty"`
-	CWSkimmer        bool      `json:"cw_skimmer"`
-	DigitalDecodes   bool      `json:"digital_decodes"`
-	NoiseFloor       bool      `json:"noise_floor"`
-	MaxClients       int       `json:"max_clients"`
-	AvailableClients int       `json:"available_clients"` // Current number of available client slots
-	MaxSessionTime   int       `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes    []string  `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
-	ReporterIP       string    `json:"reporter_ip"`       // IP address that last reported this instance
-	FirstSeen        time.Time `json:"first_seen"`
-	LastSeen         time.Time `json:"last_seen"`
-	LastReportAge    int64     `json:"last_report_age_seconds"` // Computed field
+	SecretUUID          string    `json:"-"`  // Secret UUID (not exposed in API)
+	PublicUUID          string    `json:"id"` // Public UUID for API access
+	Callsign            string    `json:"callsign"`
+	Name                string    `json:"name"`
+	Location            string    `json:"location"`
+	Latitude            float64   `json:"latitude"`
+	Longitude           float64   `json:"longitude"`
+	Altitude            int       `json:"altitude"`
+	Maidenhead          string    `json:"maidenhead"` // 6-character Maidenhead locator
+	PublicURL           string    `json:"public_url"`
+	Version             string    `json:"version"`
+	Host                string    `json:"host,omitempty"`
+	Port                int       `json:"port,omitempty"`
+	TLS                 bool      `json:"tls,omitempty"`
+	CWSkimmer           bool      `json:"cw_skimmer"`
+	DigitalDecodes      bool      `json:"digital_decodes"`
+	NoiseFloor          bool      `json:"noise_floor"`
+	MaxClients          int       `json:"max_clients"`
+	AvailableClients    int       `json:"available_clients"`    // Current number of available client slots
+	MaxSessionTime      int       `json:"max_session_time"`     // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes       []string  `json:"public_iq_modes"`      // List of IQ modes accessible without authentication
+	ReporterIP          string    `json:"reporter_ip"`          // IP address that last reported this instance
+	SuccessfulCallbacks int       `json:"successful_callbacks"` // Number of successful verification callbacks
+	FirstSeen           time.Time `json:"first_seen"`
+	LastSeen            time.Time `json:"last_seen"`
+	LastReportAge       int64     `json:"last_report_age_seconds"` // Computed field
 }
 
 // InstanceUpdate represents the data received from an instance
@@ -103,6 +104,8 @@ type Collector struct {
 	noiseFloorMutex       sync.Mutex           // Protect the activeNoiseFloorFetch map
 	rateLimitMap          map[string]time.Time // Track last POST time per IP
 	rateLimitMutex        sync.Mutex           // Protect the rateLimitMap
+	getRateLimitMap       map[string]time.Time // Track last GET /api/instances time per IP
+	getRateLimitMutex     sync.Mutex           // Protect the getRateLimitMap
 }
 
 func main() {
@@ -151,10 +154,12 @@ func main() {
 		config:                config,
 		activeNoiseFloorFetch: make(map[string]bool),
 		rateLimitMap:          make(map[string]time.Time),
+		getRateLimitMap:       make(map[string]time.Time),
 	}
 
-	// Start background cleanup for rate limit map
+	// Start background cleanup for rate limit maps
 	go collector.cleanupRateLimitMap()
+	go collector.cleanupGetRateLimitMap()
 
 	// Start background cleanup goroutine
 	go collector.cleanupStaleInstances()
@@ -232,12 +237,14 @@ func initDatabase(path string) (*sql.DB, error) {
 		max_session_time INTEGER DEFAULT 0,
 		public_iq_modes TEXT DEFAULT '[]',
 		reporter_ip TEXT,
+		successful_callbacks INTEGER DEFAULT 0,
 		first_seen DATETIME NOT NULL,
 		last_seen DATETIME NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_public_uuid ON instances(public_uuid);
 	CREATE INDEX IF NOT EXISTS idx_last_seen ON instances(last_seen);
 	CREATE INDEX IF NOT EXISTS idx_reporter_ip ON instances(reporter_ip);
+	CREATE INDEX IF NOT EXISTS idx_successful_callbacks ON instances(successful_callbacks);
 	
 	CREATE TABLE IF NOT EXISTS noise_floor_data (
 		public_uuid TEXT PRIMARY KEY,
@@ -1140,13 +1147,16 @@ func (c *Collector) fetchAndStoreNoiseFloor(publicUUID, host string, port int, u
 
 		// Store in database
 		now := time.Now()
+		jsonDataStr := string(jsonData)
+		dataSize := len(jsonDataStr)
+
 		_, err = c.db.Exec(`
 			INSERT INTO noise_floor_data (public_uuid, data, updated_at)
 			VALUES (?, ?, ?)
 			ON CONFLICT(public_uuid) DO UPDATE SET
 				data = excluded.data,
 				updated_at = excluded.updated_at
-		`, publicUUID, string(jsonData), now)
+		`, publicUUID, jsonDataStr, now)
 
 		if err != nil {
 			log.Printf("Failed to store noise floor data for %s (attempt %d/%d): %v", publicUUID, attempt, maxRetries, err)
@@ -1157,7 +1167,7 @@ func (c *Collector) fetchAndStoreNoiseFloor(publicUUID, host string, port int, u
 			return
 		}
 
-		log.Printf("Stored noise floor data for %s (attempt %d)", publicUUID, attempt)
+		log.Printf("Stored noise floor data for %s (attempt %d, size: %d bytes)", publicUUID, attempt, dataSize)
 		return
 	}
 }
@@ -1184,7 +1194,26 @@ func (c *Collector) checkRateLimit(ip string) bool {
 	return false
 }
 
-// cleanupRateLimitMap periodically removes old entries from the rate limit map
+// checkGetRateLimit checks if an IP is allowed to make a GET /api/instances request
+// Returns true if allowed, false if rate limit exceeded (1 request per second)
+func (c *Collector) checkGetRateLimit(ip string) bool {
+	c.getRateLimitMutex.Lock()
+	defer c.getRateLimitMutex.Unlock()
+
+	now := time.Now()
+	lastGet, exists := c.getRateLimitMap[ip]
+
+	// If no previous GET or more than 1 second has passed, allow it
+	if !exists || now.Sub(lastGet) >= 1*time.Second {
+		c.getRateLimitMap[ip] = now
+		return true
+	}
+
+	// Rate limit exceeded
+	return false
+}
+
+// cleanupRateLimitMap periodically removes old entries from the POST rate limit map
 func (c *Collector) cleanupRateLimitMap() {
 	ticker := time.NewTicker(5 * time.Minute) // Run cleanup every 5 minutes
 	defer ticker.Stop()
@@ -1199,6 +1228,24 @@ func (c *Collector) cleanupRateLimitMap() {
 			}
 		}
 		c.rateLimitMutex.Unlock()
+	}
+}
+
+// cleanupGetRateLimitMap periodically removes old entries from the GET rate limit map
+func (c *Collector) cleanupGetRateLimitMap() {
+	ticker := time.NewTicker(1 * time.Minute) // Run cleanup every minute
+	defer ticker.Stop()
+
+	for range ticker.C {
+		c.getRateLimitMutex.Lock()
+		now := time.Now()
+		for ip, lastGet := range c.getRateLimitMap {
+			// Remove entries older than 5 seconds (well past the 1 second limit)
+			if now.Sub(lastGet) > 5*time.Second {
+				delete(c.getRateLimitMap, ip)
+			}
+		}
+		c.getRateLimitMutex.Unlock()
 	}
 }
 

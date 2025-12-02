@@ -167,16 +167,51 @@
 
         .config-section {
             margin-bottom: 30px;
-            padding: 20px;
             background: #f8f9fa;
             border-radius: 5px;
+            border: 1px solid #dee2e6;
         }
 
-        .config-section h3 {
-            margin-bottom: 15px;
+        .config-section-header {
+            padding: 15px 20px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #e9ecef;
+            border-radius: 5px 5px 0 0;
+            transition: background 0.2s;
+        }
+
+        .config-section-header:hover {
+            background: #dee2e6;
+        }
+
+        .config-section-header h3 {
+            margin: 0;
             color: #333;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 10px;
+            font-weight: bold;
+        }
+
+        .config-section-toggle {
+            font-size: 20px;
+            font-weight: bold;
+            color: #667eea;
+            transition: transform 0.3s;
+        }
+
+        .config-section-toggle.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .config-section-content {
+            padding: 20px;
+            display: none;
+        }
+
+        .config-section-content.expanded {
+            display: block;
         }
 
         .config-field {
@@ -915,11 +950,40 @@
                     const sectionDiv = document.createElement('div');
                     sectionDiv.className = 'config-section';
                     
+                    // Create collapsible header
+                    const header = document.createElement('div');
+                    header.className = 'config-section-header';
+                    
                     const title = document.createElement('h3');
                     title.textContent = section.charAt(0).toUpperCase() + section.slice(1);
-                    sectionDiv.appendChild(title);
-
-                    renderFields(sectionDiv, values, section);
+                    
+                    const toggle = document.createElement('span');
+                    toggle.className = 'config-section-toggle collapsed';
+                    toggle.textContent = '▼';
+                    
+                    header.appendChild(title);
+                    header.appendChild(toggle);
+                    sectionDiv.appendChild(header);
+                    
+                    // Create collapsible content
+                    const content = document.createElement('div');
+                    content.className = 'config-section-content';
+                    
+                    renderFields(content, values, section);
+                    sectionDiv.appendChild(content);
+                    
+                    // Add click handler to toggle
+                    header.addEventListener('click', () => {
+                        const isExpanded = content.classList.contains('expanded');
+                        if (isExpanded) {
+                            content.classList.remove('expanded');
+                            toggle.classList.add('collapsed');
+                        } else {
+                            content.classList.add('expanded');
+                            toggle.classList.remove('collapsed');
+                        }
+                    });
+                    
                     container.appendChild(sectionDiv);
                 }
             }

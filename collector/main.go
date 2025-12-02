@@ -736,6 +736,14 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Get client IP and check rate limit (1 request per second)
+	clientIP := getClientIP(r)
+	if !c.checkGetRateLimit(clientIP) {
+		log.Printf("GET rate limit exceeded for IP: %s", clientIP)
+		http.Error(w, "Rate limit exceeded - only one request per second allowed", http.StatusTooManyRequests)
+		return
+	}
+
 	// Check for 'all' query parameter to show all instances regardless of last_seen
 	showAll := r.URL.Query().Get("all") == "true"
 

@@ -370,9 +370,20 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		}
 	}
 
+	// Check if this UUID already has a spectrum session
+	// If so, we'll replace it (allows reconnection after disconnection)
+	// We need to check this BEFORE the IP limit check because replacing an existing
+	// session shouldn't count as a new UUID for IP limit purposes
+	isReplacingExistingSession := false
+	if userSessionID != "" {
+		if _, exists := sm.uuidSpectrumSessions[userSessionID]; exists {
+			isReplacingExistingSession = true
+		}
+	}
+
 	// Check if we've reached the maximum unique UUIDs per IP (if configured)
-	// Skip this check if the IP is in the bypass list
-	if sm.config.Server.MaxSessionsIP > 0 && clientIP != "" && userSessionID != "" {
+	// Skip this check if the IP is in the bypass list OR if we're replacing an existing session
+	if sm.config.Server.MaxSessionsIP > 0 && clientIP != "" && userSessionID != "" && !isReplacingExistingSession {
 		if !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {
 			// Check if this is a new UUID for this IP
 			if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
@@ -388,9 +399,8 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 		}
 	}
 
-	// Check if this UUID already has a spectrum session
-	// If so, replace it (allows reconnection after disconnection)
-	if userSessionID != "" {
+	// Now actually replace the existing spectrum session if needed
+	if userSessionID != "" && isReplacingExistingSession {
 		if existingSessionID, exists := sm.uuidSpectrumSessions[userSessionID]; exists {
 			log.Printf("Replacing existing spectrum session %s for UUID %s (reconnection detected)", existingSessionID, userSessionID)
 			// Unlock before calling DestroySession to avoid deadlock

@@ -177,6 +177,13 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 				if !uuidSet[userSessionID] {
 					// New UUID for this IP, check limit
 					if len(uuidSet) >= sm.config.Server.MaxSessionsIP {
+						// Log debug info about which UUIDs are registered for this IP
+						uuidList := make([]string, 0, len(uuidSet))
+						for uuid := range uuidSet {
+							uuidList = append(uuidList, uuid)
+						}
+						log.Printf("DEBUG AUDIO: IP %s has %d UUIDs: %v (trying to add: %s, password provided: %v, bypass check: %v)",
+							clientIP, len(uuidSet), uuidList, userSessionID, password != "", sm.config.Server.IsIPTimeoutBypassed(clientIP, password))
 						return nil, fmt.Errorf("maximum unique users per IP reached (%d)", sm.config.Server.MaxSessionsIP)
 					}
 				}
@@ -351,6 +358,8 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 	// Check session limit based on unique user_session_ids
 	// Skip this check if the IP is in the bypass list OR if this is an internal session (no IP)
 	// Internal sessions (noise floor, decoders) have empty ClientIP and should not count towards user limits
+	log.Printf("DEBUG SPECTRUM: Checking limits for IP %s, UUID %s, password provided: %v, bypass result: %v",
+		clientIP, userSessionID, password != "", sm.config.Server.IsIPTimeoutBypassed(clientIP, password))
 	if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {
 		// If userSessionID is empty, treat as a unique user for each session
 		if userSessionID == "" {
@@ -396,8 +405,8 @@ func (sm *SessionManager) createSpectrumSessionWithUserIDAndPassword(sourceIP, c
 						for uuid := range uuidSet {
 							uuidList = append(uuidList, uuid)
 						}
-						log.Printf("DEBUG: IP %s has %d UUIDs: %v (trying to add: %s, password provided: %v)",
-							clientIP, len(uuidSet), uuidList, userSessionID, password != "")
+						log.Printf("DEBUG SPECTRUM: IP %s has %d UUIDs: %v (trying to add: %s, password provided: %v, bypass check: %v)",
+							clientIP, len(uuidSet), uuidList, userSessionID, password != "", sm.config.Server.IsIPTimeoutBypassed(clientIP, password))
 						return nil, fmt.Errorf("maximum unique users per IP reached (%d)", sm.config.Server.MaxSessionsIP)
 					}
 				}

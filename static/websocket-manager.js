@@ -31,18 +31,25 @@ export class WebSocketManager {
     // Check if connection will be allowed before attempting
     async checkConnection() {
         try {
+            const requestBody = {
+                user_session_id: this.userSessionID
+            };
+
+            // Add bypass password if available
+            if (window.bypassPassword) {
+                requestBody.password = window.bypassPassword;
+            }
+
             const response = await fetch('/connection', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    user_session_id: this.userSessionID
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const data = await response.json();
-            
+
             return {
                 allowed: data.allowed,
                 reason: data.reason,
@@ -104,7 +111,12 @@ export class WebSocketManager {
 
         // Build WebSocket URL
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${frequency}&mode=${mode}&bandwidthLow=${bandwidthLow}&bandwidthHigh=${bandwidthHigh}&user_session_id=${encodeURIComponent(this.userSessionID)}`;
+        let wsUrl = `${protocol}//${window.location.host}/ws?frequency=${frequency}&mode=${mode}&bandwidthLow=${bandwidthLow}&bandwidthHigh=${bandwidthHigh}&user_session_id=${encodeURIComponent(this.userSessionID)}`;
+
+        // Add bypass password if available
+        if (window.bypassPassword) {
+            wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
+        }
 
         this.log(`Connecting to ${wsUrl}...`);
 

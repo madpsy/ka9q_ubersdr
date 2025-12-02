@@ -30,6 +30,15 @@
                 </svg>
                 <span>Click to Start</span>
             </button>
+            <!-- Password bypass UI (hidden by default) -->
+            <div id="password-bypass-container" class="password-bypass-container" style="display: none;">
+                <p style="color: #ecf0f1; margin-bottom: 10px; font-size: 16px;">Do you have a bypass password?</p>
+                <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
+                    <input type="password" id="bypass-password-input" placeholder="Enter password" style="padding: 10px; font-size: 14px; border: 2px solid #7f8c8d; background: #34495e; color: #ecf0f1; border-radius: 4px; width: 250px;">
+                    <button id="bypass-password-submit" onclick="submitBypassPassword()" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">Submit</button>
+                </div>
+                <p id="password-error-message" style="color: #dc3545; margin-top: 10px; font-size: 14px; display: none;"></p>
+            </div>
             <div class="overlay-buttons-container">
                 <button id="band-conditions-button" class="band-conditions-button blue-button" style="display: none;" onclick="window.open('/bandconditions.html', '_blank')">
                     <span>Band Conditions</span>

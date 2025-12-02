@@ -42,6 +42,10 @@ const userSessionID = generateUserSessionID();
 window.userSessionID = userSessionID;
 console.log('User session ID:', userSessionID);
 
+// Store bypass password globally (for WebSocket connections)
+let bypassPassword = null;
+window.bypassPassword = null;
+
 // Initialize WebSocket Manager immediately after userSessionID is generated
 const wsManager = new WebSocketManager({
     userSessionID: userSessionID,
@@ -947,16 +951,23 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Check connection status on page load
-async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML) {
+async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML, password = null) {
     try {
+        const requestBody = {
+            user_session_id: userSessionID
+        };
+        
+        // Add password if provided
+        if (password) {
+            requestBody.password = password;
+        }
+
         const checkResponse = await fetch('/connection', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                user_session_id: userSessionID
-            })
+            body: JSON.stringify(requestBody)
         });
 
         const checkData = await checkResponse.json();
@@ -982,14 +993,45 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
 
                 audioStartButton.innerHTML = `<span>${errorIcon} ${checkData.reason}</span>`;
 
+                // Show password bypass UI (unless this was already a password attempt)
+                if (!password) {
+                    const passwordContainer = document.getElementById('password-bypass-container');
+                    if (passwordContainer) {
+                        passwordContainer.style.display = 'block';
+                        // Focus on password input
+                        setTimeout(() => {
+                            const passwordInput = document.getElementById('bypass-password-input');
+                            if (passwordInput) {
+                                passwordInput.focus();
+                            }
+                        }, 100);
+                    }
+                }
+
                 // Also log the error
                 log(`Connection not allowed: ${checkData.reason}`, 'error');
             }
         } else {
-            // Connection allowed - enable the play button after 2 second delay
+            // Connection allowed
+            // If password was used, store it for WebSocket connections
+            if (password) {
+                bypassPassword = password;
+                window.bypassPassword = password;
+                log('Bypass password accepted');
+                
+                // Hide password UI
+                const passwordContainer = document.getElementById('password-bypass-container');
+                if (passwordContainer) {
+                    passwordContainer.style.display = 'none';
+                }
+            }
+            
+            // Enable the play button after 2 second delay
             setTimeout(() => {
                 audioStartButton.disabled = false;
                 audioStartButton.innerHTML = originalHTML;
+                audioStartButton.style.backgroundColor = ''; // Reset color
+                audioStartButton.style.cursor = '';
             }, 2000);
         }
     } catch (err) {
@@ -1001,6 +1043,77 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
         }, 2000);
     }
 }
+
+// Submit bypass password
+window.submitBypassPassword = async function() {
+    const passwordInput = document.getElementById('bypass-password-input');
+    const errorMessage = document.getElementById('password-error-message');
+    const submitButton = document.getElementById('bypass-password-submit');
+    const audioStartButton = document.getElementById('audio-start-button');
+    const originalHTML = audioStartButton.innerHTML;
+    
+    if (!passwordInput || !submitButton) return;
+    
+    const password = passwordInput.value.trim();
+    
+    if (!password) {
+        if (errorMessage) {
+            errorMessage.textContent = 'Please enter a password';
+            errorMessage.style.display = 'block';
+        }
+        return;
+    }
+    
+    // Disable submit button and show loading state
+    submitButton.disabled = true;
+    submitButton.textContent = 'Checking...';
+    
+    if (errorMessage) {
+        errorMessage.style.display = 'none';
+    }
+    
+    // Retry connection check with password
+    try {
+        await checkConnectionOnLoad(audioStartButton, document.getElementById('audio-start-overlay'), originalHTML, password);
+        
+        // Check if connection was successful
+        if (bypassPassword === password) {
+            // Success - password was accepted
+            log('Connection allowed with bypass password');
+        } else {
+            // Password was rejected
+            if (errorMessage) {
+                errorMessage.textContent = 'Invalid password';
+                errorMessage.style.display = 'block';
+            }
+            passwordInput.value = '';
+            passwordInput.focus();
+        }
+    } catch (err) {
+        console.error('Password check failed:', err);
+        if (errorMessage) {
+            errorMessage.textContent = 'Connection error. Please try again.';
+            errorMessage.style.display = 'block';
+        }
+    } finally {
+        // Re-enable submit button
+        submitButton.disabled = false;
+        submitButton.textContent = 'Submit';
+    }
+};
+
+// Add Enter key support for password input
+document.addEventListener('DOMContentLoaded', () => {
+    const passwordInput = document.getElementById('bypass-password-input');
+    if (passwordInput) {
+        passwordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                window.submitBypassPassword();
+            }
+        });
+    }
+});
 
 // Show full-screen overlay for terminated sessions
 function showTerminatedOverlay(message) {

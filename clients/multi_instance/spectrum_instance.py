@@ -13,6 +13,7 @@ class SpectrumInstance:
     def __init__(self, instance_id: int):
         self.instance_id = instance_id
         self.name = f"Instance {instance_id}"
+        self.callsign = ""  # Operator callsign
         self.host = ""
         self.port = 8080
         self.tls = False
@@ -47,6 +48,7 @@ class SpectrumInstance:
         """Convert instance to dictionary for saving."""
         return {
             'name': self.name,
+            'callsign': self.callsign,
             'host': self.host,
             'port': self.port,
             'tls': self.tls,
@@ -59,9 +61,16 @@ class SpectrumInstance:
         """Create instance from dictionary."""
         instance = cls(instance_id)
         instance.name = data.get('name', f"Instance {instance_id}")
+        instance.callsign = data.get('callsign', '')
         instance.host = data.get('host', 'localhost')
         instance.port = data.get('port', 8080)
         instance.tls = data.get('tls', False)
         instance.frequency = data.get('frequency', 14100000)
         instance.enabled = data.get('enabled', False)
         return instance
+    
+    def get_display_name(self) -> str:
+        """Get the display name with callsign prefix if available."""
+        if self.callsign:
+            return f"({self.callsign}) {self.name}"
+        return self.name

@@ -61,6 +61,13 @@ class MultiSpectrumGUI:
 
         # Scroll mode state
         self.scroll_mode = tk.StringVar(value="pan")  # Default to pan mode
+        self.step_size = tk.StringVar(value="1 kHz")  # Default step size
+        self.center_tune = tk.BooleanVar(value=True)  # Center tune enabled by default
+
+        # Frequency input state
+        self.frequency_input = tk.StringVar(value="14.100000")  # Default 14.1 MHz
+        self.frequency_unit = tk.StringVar(value="MHz")  # Default unit
+        self.prev_frequency_unit = "MHz"  # Track previous unit for conversion
 
         # Mode and bandwidth state
         self.current_mode = tk.StringVar(value="USB")
@@ -73,6 +80,15 @@ class MultiSpectrumGUI:
         self.current_frequency = None  # Current hover frequency
         self.current_cursor_x = -1  # Current cursor X position for synchronization
         self.currently_hovered_spectrum = None  # Track which spectrum is currently being hovered
+
+        # Comparison state
+        self.compare_instance_a = tk.StringVar(value="None")
+        self.compare_instance_b = tk.StringVar(value="None")
+        self.comparison_history = {}  # instance_id -> list of recent (timestamp, peak, floor, snr) tuples
+        self.comparison_diff_history = {}  # Store difference history for smoothing: 'a_id:b_id' -> list of (timestamp, diff_peak, diff_floor, diff_snr)
+        self.comparison_window = 0.5  # 500ms averaging window
+        self.comparison_last_update = 0  # Last time we updated the comparison display
+        self.comparison_update_interval = 0.2  # Update comparison display every 200ms
         
         # Update rate tracking for throttling (using server-reported rates)
         self.update_times = {}  # instance_id -> list of recent update timestamps (for frame skipping)
@@ -132,13 +148,26 @@ class MultiSpectrumGUI:
                        value="zoom", command=self._on_scroll_mode_change).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Radiobutton(control_frame, text="Pan", variable=self.scroll_mode,
                        value="pan", command=self._on_scroll_mode_change).pack(side=tk.LEFT, padx=(0, 5))
+
+        # Step size selector (for pan mode)
+        ttk.Label(control_frame, text="Step:").pack(side=tk.LEFT, padx=(10, 5))
+        step_combo = ttk.Combobox(control_frame, textvariable=self.step_size,
+                                  values=["10 Hz", "100 Hz", "500 Hz", "1 kHz", "10 kHz"],
+                                  state='readonly', width=8)
+        step_combo.pack(side=tk.LEFT, padx=(0, 5))
+        step_combo.bind('<<ComboboxSelected>>', lambda e: self._on_step_size_changed())
+
+        # Center tune checkbox
+        ttk.Checkbutton(control_frame, text="Center Tune",
+                       variable=self.center_tune,
+                       command=self._on_center_tune_changed).pack(side=tk.LEFT, padx=(10, 5))
         
         # Instance list (left side)
         list_frame = ttk.LabelFrame(main_frame, text="Instances", padding="10")
         list_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         
         # Scrollable instance list
-        list_canvas = tk.Canvas(list_frame, height=200)
+        list_canvas = tk.Canvas(list_frame, height=100)
         list_scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=list_canvas.yview)
         self.instance_list_frame = ttk.Frame(list_canvas)
         
@@ -155,6 +184,22 @@ class MultiSpectrumGUI:
         # Modes section (between instance list and spectrum displays)
         modes_frame = ttk.LabelFrame(main_frame, text="Modes", padding="10")
         modes_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+
+        # Frequency input
+        ttk.Label(modes_frame, text="Frequency:").pack(side=tk.LEFT, padx=(0, 5))
+        freq_entry = ttk.Entry(modes_frame, textvariable=self.frequency_input, width=12)
+        freq_entry.pack(side=tk.LEFT, padx=(0, 5))
+        freq_entry.bind('<Return>', lambda e: self._apply_frequency())
+
+        # Unit selector
+        unit_combo = ttk.Combobox(modes_frame, textvariable=self.frequency_unit,
+                                  values=["Hz", "kHz", "MHz"], state='readonly', width=6)
+        unit_combo.pack(side=tk.LEFT, padx=(0, 5))
+        unit_combo.bind('<<ComboboxSelected>>', lambda e: self._on_frequency_unit_changed())
+
+        # Apply button
+        ttk.Button(modes_frame, text="Apply", width=8,
+                  command=self._apply_frequency).pack(side=tk.LEFT, padx=(0, 20))
 
         # Mode selection
         ttk.Label(modes_frame, text="Mode:").pack(side=tk.LEFT, padx=(0, 5))
@@ -234,10 +279,11 @@ class MultiSpectrumGUI:
                                   f"Maximum {self.MAX_INSTANCES} instances allowed")
             return
         
-        def on_select(host, port, tls, name):
+        def on_select(host, port, tls, name, callsign=None):
             """Callback when user selects a public instance."""
             instance = SpectrumInstance(len(self.instance_manager.instances))
             instance.name = name
+            instance.callsign = callsign if callsign else ""
             instance.host = host
             instance.port = port
             instance.tls = tls
@@ -324,16 +370,26 @@ class MultiSpectrumGUI:
             
             # Create click-to-tune variable (always enabled for multi-instance)
             click_tune_var = tk.BooleanVar(value=True)
-            
+
             # SpectrumDisplay creates and packs its own canvas internally
             instance.spectrum = SpectrumDisplay(spectrum_frame, width=1300, height=200,
-                                               click_tune_var=click_tune_var)
+                                               click_tune_var=click_tune_var,
+                                               center_tune_var=self.center_tune)
             
             # Set up frequency callback for click-to-tune synchronization
             instance.spectrum.set_frequency_callback(
                 lambda freq, src=instance.spectrum: self._on_frequency_change(freq, src)
             )
             
+            # Set up frequency step callback for pan mode
+            instance.spectrum.set_frequency_step_callback(
+                lambda direction, src=instance.spectrum: self._on_frequency_step(direction, src)
+            )
+
+            # Set initial scroll mode and step size
+            instance.spectrum.set_scroll_mode(self.scroll_mode.get())
+            instance.spectrum.set_step_size(self._get_step_size_hz())
+
             # Set up synchronization callbacks
             self._setup_sync_callbacks(instance.spectrum, instance.instance_id)
 
@@ -614,26 +670,17 @@ class MultiSpectrumGUI:
             frequency: New frequency in Hz
             source_spectrum: The spectrum display that initiated the change
         """
-        import asyncio
-        
         if not self.sync_enabled.get() or self._syncing:
             return
-        
+
         self._syncing = True
-        
-        # Update frequency for all connected instances
+
+        # Update frequency for all connected instances using update_center_frequency
+        # which respects the center_tune setting
         for instance in self.instance_manager.active_instances:
             if instance.spectrum and instance.spectrum.connected:
-                # Update tuned frequency
-                instance.spectrum.tuned_freq = frequency
-                
-                # Send pan command to center on new frequency if connected
-                if instance.spectrum.event_loop:
-                    asyncio.run_coroutine_threadsafe(
-                        instance.spectrum._send_pan_command(frequency),
-                        instance.spectrum.event_loop
-                    )
-        
+                instance.spectrum.update_center_frequency(frequency)
+
         self._syncing = False
         print(f"Synchronized frequency to {frequency/1e6:.6f} MHz across all instances")
     
@@ -644,22 +691,32 @@ class MultiSpectrumGUI:
             direction: +1 for up, -1 for down
             source_spectrum: The spectrum display that initiated the step
         """
-        if not self.sync_enabled.get() or self._syncing:
+        # Don't block if syncing is in progress
+        if self._syncing:
             return
         
         self._syncing = True
-        
-        # Calculate step size (use 1 kHz steps)
-        step_size = 1000  # 1 kHz
+
+        # Get step size from dropdown
+        step_size = self._get_step_size_hz()
         frequency_change = direction * step_size
         
-        # Update frequency for all connected instances
-        for instance in self.instance_manager.active_instances:
-            if instance.spectrum and instance.spectrum.connected:
-                new_freq = instance.spectrum.tuned_freq + frequency_change
+        # Update frequency for all connected instances (or just source if sync disabled)
+        if self.sync_enabled.get():
+            # Sync to all instances
+            for instance in self.instance_manager.active_instances:
+                if instance.spectrum and instance.spectrum.connected:
+                    new_freq = instance.spectrum.tuned_freq + frequency_change
+                    # Constrain to valid range
+                    new_freq = max(100000, min(30000000, new_freq))
+                    instance.spectrum.update_center_frequency(new_freq)
+        else:
+            # Only update the source spectrum
+            if source_spectrum and source_spectrum.connected:
+                new_freq = source_spectrum.tuned_freq + frequency_change
                 # Constrain to valid range
                 new_freq = max(100000, min(30000000, new_freq))
-                instance.spectrum.update_center_frequency(new_freq)
+                source_spectrum.update_center_frequency(new_freq)
         
         self._syncing = False
     
@@ -747,6 +804,100 @@ class MultiSpectrumGUI:
                 instance.spectrum.set_scroll_mode(mode)
         print(f"Scroll mode changed to: {mode}")
 
+    def _get_step_size_hz(self) -> int:
+        """Get the current step size in Hz."""
+        step_str = self.step_size.get()
+        if "10 Hz" in step_str:
+            return 10
+        elif "100 Hz" in step_str:
+            return 100
+        elif "500 Hz" in step_str:
+            return 500
+        elif "1 kHz" in step_str:
+            return 1000
+        elif "10 kHz" in step_str:
+            return 10000
+        return 1000  # Default
+
+    def _on_step_size_changed(self):
+        """Handle step size change - update all spectrum displays."""
+        step_hz = self._get_step_size_hz()
+        # Update all connected spectrum displays
+        for instance in self.instance_manager.active_instances:
+            if instance.spectrum and instance.connected:
+                instance.spectrum.set_step_size(step_hz)
+
+    def _on_center_tune_changed(self):
+        """Handle center tune checkbox change."""
+        # The center_tune_var is already shared with all spectrum displays
+        # so they will automatically use the new setting
+        enabled = self.center_tune.get()
+        print(f"Center tune {'enabled' if enabled else 'disabled'}")
+
+    def _get_frequency_hz(self) -> int:
+        """Convert frequency from current unit to Hz."""
+        try:
+            freq_value = float(self.frequency_input.get())
+            unit = self.frequency_unit.get()
+
+            if unit == "MHz":
+                return int(freq_value * 1e6)
+            elif unit == "kHz":
+                return int(freq_value * 1e3)
+            else:  # Hz
+                return int(freq_value)
+        except ValueError:
+            raise ValueError("Invalid frequency value")
+
+    def _on_frequency_unit_changed(self):
+        """Handle frequency unit change - convert current value to new unit."""
+        try:
+            # Get current value and convert from previous unit to Hz
+            freq_value = float(self.frequency_input.get())
+            old_unit = self.prev_frequency_unit
+
+            # Convert from old unit to Hz
+            if old_unit == "MHz":
+                freq_hz = int(freq_value * 1e6)
+            elif old_unit == "kHz":
+                freq_hz = int(freq_value * 1e3)
+            else:  # Hz
+                freq_hz = int(freq_value)
+
+            # Convert from Hz to new unit
+            new_unit = self.frequency_unit.get()
+            if new_unit == "MHz":
+                new_value = freq_hz / 1e6
+                self.frequency_input.set(f"{new_value:.6f}")
+            elif new_unit == "kHz":
+                new_value = freq_hz / 1e3
+                self.frequency_input.set(f"{new_value:.3f}")
+            else:  # Hz
+                self.frequency_input.set(str(freq_hz))
+
+            # Update previous unit for next conversion
+            self.prev_frequency_unit = new_unit
+        except ValueError:
+            # If conversion fails, just update the previous unit
+            self.prev_frequency_unit = self.frequency_unit.get()
+
+    def _apply_frequency(self):
+        """Apply the frequency from the input field to all connected instances."""
+        try:
+            freq_hz = self._get_frequency_hz()
+
+            # Constrain to valid range (100 kHz - 30 MHz)
+            freq_hz = max(100000, min(30000000, freq_hz))
+
+            # Update all connected instances
+            for instance in self.instance_manager.active_instances:
+                if instance.spectrum and instance.spectrum.connected:
+                    instance.spectrum.update_center_frequency(freq_hz)
+
+            print(f"Applied frequency: {freq_hz/1e6:.6f} MHz to all instances")
+        except ValueError as e:
+            messagebox.showerror("Invalid Frequency", str(e))
+
     def _update_all_bandwidths(self):
         """Update bandwidth filter on all connected spectrum displays."""
         bandwidth = self.current_bandwidth.get()
@@ -815,6 +966,28 @@ class MultiSpectrumGUI:
         self.bw_label = ttk.Label(bw_frame, text="--- Hz", font=('TkDefaultFont', 10))
         self.bw_label.pack(side=tk.LEFT, padx=(5, 0))
 
+        # Comparison controls
+        compare_frame = ttk.Frame(self.signal_levels_window, padding="10")
+        compare_frame.pack(fill=tk.X)
+        ttk.Label(compare_frame, text="Compare:", font=('TkDefaultFont', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
+
+        # Get instance names for dropdown
+        instance_names = ["None"] + [inst.name for inst in self.instance_manager.instances]
+
+        ttk.Label(compare_frame, text="A:").pack(side=tk.LEFT, padx=(5, 2))
+        compare_a_combo = ttk.Combobox(compare_frame, textvariable=self.compare_instance_a,
+                                       values=instance_names, state='readonly', width=20)
+        compare_a_combo.pack(side=tk.LEFT, padx=(0, 10))
+        compare_a_combo.bind('<<ComboboxSelected>>', lambda e: self._on_comparison_changed())
+
+        ttk.Label(compare_frame, text="B:").pack(side=tk.LEFT, padx=(5, 2))
+        compare_b_combo = ttk.Combobox(compare_frame, textvariable=self.compare_instance_b,
+                                       values=instance_names, state='readonly', width=20)
+        compare_b_combo.pack(side=tk.LEFT, padx=(0, 5))
+        compare_b_combo.bind('<<ComboboxSelected>>', lambda e: self._on_comparison_changed())
+
+        ttk.Label(compare_frame, text="(A - B, 500ms avg)", font=('TkDefaultFont', 9, 'italic')).pack(side=tk.LEFT, padx=(10, 0))
+
         # Separator
         ttk.Separator(self.signal_levels_window, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10)
 
@@ -849,6 +1022,8 @@ class MultiSpectrumGUI:
                      anchor=tk.CENTER).grid(row=0, column=0, columnspan=2, pady=(0, 5))
             ttk.Label(metrics_frame, text="In Bandwidth", font=('TkDefaultFont', 9, 'bold'),
                      anchor=tk.CENTER).grid(row=0, column=2, columnspan=2, pady=(0, 5))
+            ttk.Label(metrics_frame, text="Difference (A-B)", font=('TkDefaultFont', 9, 'bold'),
+                     anchor=tk.CENTER).grid(row=0, column=4, columnspan=2, pady=(0, 5))
 
             # Left column - Hover frequency (just level)
             ttk.Label(metrics_frame, text="Level:", width=10, anchor=tk.W).grid(row=1, column=0, sticky=tk.W, padx=2)
@@ -856,7 +1031,7 @@ class MultiSpectrumGUI:
                                          font=('TkDefaultFont', 9, 'bold'))
             hover_level_label.grid(row=1, column=1, sticky=tk.E, padx=2)
 
-            # Right column - Bandwidth metrics
+            # Middle column - Bandwidth metrics
             ttk.Label(metrics_frame, text="Peak:", width=10, anchor=tk.W).grid(row=1, column=2, sticky=tk.W, padx=(10, 2))
             bw_peak_label = ttk.Label(metrics_frame, text="--- dB", width=10, anchor=tk.E,
                                      font=('TkDefaultFont', 9))
@@ -872,12 +1047,31 @@ class MultiSpectrumGUI:
                                     font=('TkDefaultFont', 9, 'bold'))
             bw_snr_label.grid(row=3, column=3, sticky=tk.E, padx=2)
 
+            # Right column - Comparison differences
+            ttk.Label(metrics_frame, text="Peak:", width=10, anchor=tk.W).grid(row=1, column=4, sticky=tk.W, padx=(10, 2))
+            diff_peak_label = ttk.Label(metrics_frame, text="---", width=10, anchor=tk.E,
+                                       font=('TkDefaultFont', 9))
+            diff_peak_label.grid(row=1, column=5, sticky=tk.E, padx=2)
+
+            ttk.Label(metrics_frame, text="Floor:", width=10, anchor=tk.W).grid(row=2, column=4, sticky=tk.W, padx=(10, 2))
+            diff_floor_label = ttk.Label(metrics_frame, text="---", width=10, anchor=tk.E,
+                                        font=('TkDefaultFont', 9))
+            diff_floor_label.grid(row=2, column=5, sticky=tk.E, padx=2)
+
+            ttk.Label(metrics_frame, text="SNR:", width=10, anchor=tk.W).grid(row=3, column=4, sticky=tk.W, padx=(10, 2))
+            diff_snr_label = ttk.Label(metrics_frame, text="---", width=10, anchor=tk.E,
+                                      font=('TkDefaultFont', 9, 'bold'))
+            diff_snr_label.grid(row=3, column=5, sticky=tk.E, padx=2)
+
             # Store all labels for this instance
             self.signal_level_labels[instance.instance_id] = {
                 'hover_level': hover_level_label,
                 'bw_peak': bw_peak_label,
                 'bw_floor': bw_floor_label,
-                'bw_snr': bw_snr_label
+                'bw_snr': bw_snr_label,
+                'diff_peak': diff_peak_label,
+                'diff_floor': diff_floor_label,
+                'diff_snr': diff_snr_label
             }
 
         # Handle window close
@@ -1099,6 +1293,19 @@ class MultiSpectrumGUI:
                         labels['bw_peak'].config(text=f"{peak_db:.1f} dB", foreground='blue')
                         labels['bw_floor'].config(text=f"{floor_db:.1f} dB", foreground='orange')
                         labels['bw_snr'].config(text=f"{snr_db:.1f} dB", foreground='green')
+                        
+                        # Store in history for comparison averaging
+                        if instance.instance_id not in self.comparison_history:
+                            self.comparison_history[instance.instance_id] = []
+                        
+                        history = self.comparison_history[instance.instance_id]
+                        history.append((current_time, peak_db, floor_db, snr_db))
+                        
+                        # Remove old entries outside the 500ms window
+                        cutoff_time = current_time - self.comparison_window
+                        self.comparison_history[instance.instance_id] = [
+                            entry for entry in history if entry[0] >= cutoff_time
+                        ]
                     else:
                         labels['bw_peak'].config(text="--- dB", foreground='gray')
                         labels['bw_floor'].config(text="--- dB", foreground='gray')
@@ -1109,6 +1316,168 @@ class MultiSpectrumGUI:
                     labels['bw_peak'].config(text="--- dB", foreground='gray')
                     labels['bw_floor'].config(text="--- dB", foreground='gray')
                     labels['bw_snr'].config(text="--- dB", foreground='gray')
+
+        # Update comparison differences
+        self._update_comparison_differences()
+
+    def _on_comparison_changed(self):
+        """Handle comparison instance selection change."""
+        # Clear comparison history when selection changes
+        self.comparison_history.clear()
+        self.comparison_diff_history.clear()
+        self.comparison_last_update = 0
+        # Update will happen on next _update_signal_levels cycle
+
+    def _update_comparison_differences(self):
+        """Update the comparison difference displays."""
+        import time
+        
+        current_time = time.time()
+        
+        # Throttle display updates to every 200ms
+        if current_time - self.comparison_last_update < self.comparison_update_interval:
+            return
+        
+        self.comparison_last_update = current_time
+        
+        instance_a_name = self.compare_instance_a.get()
+        instance_b_name = self.compare_instance_b.get()
+        
+        if instance_a_name == "None" or instance_b_name == "None":
+            # Clear all comparison displays
+            for labels in self.signal_level_labels.values():
+                labels['diff_peak'].config(text="---", foreground='black')
+                labels['diff_floor'].config(text="---", foreground='black')
+                labels['diff_snr'].config(text="---", foreground='black')
+            return
+        
+        # Find the instance IDs
+        instance_a_id = None
+        instance_b_id = None
+        for instance in self.instance_manager.instances:
+            if instance.get_display_name() == instance_a_name:
+                instance_a_id = instance.instance_id
+            if instance.get_display_name() == instance_b_name:
+                instance_b_id = instance.instance_id
+        
+        if instance_a_id is None or instance_b_id is None:
+            return
+        
+        # Calculate averaged values for both instances
+        def get_averaged_metrics(instance_id):
+            history = self.comparison_history.get(instance_id, [])
+            if not history:
+                return None
+            
+            # Average over the history window
+            peak_sum = sum(entry[1] for entry in history)
+            floor_sum = sum(entry[2] for entry in history)
+            snr_sum = sum(entry[3] for entry in history)
+            count = len(history)
+            
+            return {
+                'peak': peak_sum / count,
+                'floor': floor_sum / count,
+                'snr': snr_sum / count
+            }
+        
+        metrics_a = get_averaged_metrics(instance_a_id)
+        metrics_b = get_averaged_metrics(instance_b_id)
+        
+        if metrics_a is None or metrics_b is None:
+            # Not enough data yet
+            for labels in self.signal_level_labels.values():
+                labels['diff_peak'].config(text="---", foreground='black')
+                labels['diff_floor'].config(text="---", foreground='black')
+                labels['diff_snr'].config(text="---", foreground='black')
+            return
+        
+        # Calculate instantaneous differences (A - B)
+        diff_peak = metrics_a['peak'] - metrics_b['peak']
+        diff_floor = metrics_a['floor'] - metrics_b['floor']
+        diff_snr = metrics_a['snr'] - metrics_b['snr']
+        
+        # Store difference in history for smoothing
+        diff_key = f"{instance_a_id}:{instance_b_id}"
+        
+        if diff_key not in self.comparison_diff_history:
+            self.comparison_diff_history[diff_key] = []
+        
+        diff_history = self.comparison_diff_history[diff_key]
+        diff_history.append((current_time, diff_peak, diff_floor, diff_snr))
+        
+        # Remove old entries outside the 500ms window
+        cutoff_time = current_time - self.comparison_window
+        self.comparison_diff_history[diff_key] = [
+            entry for entry in diff_history if entry[0] >= cutoff_time
+        ]
+        
+        # Calculate smoothed differences by averaging over the window
+        smoothed_history = self.comparison_diff_history[diff_key]
+        
+        # Require at least 3 samples before displaying (ensures we have some averaging)
+        if len(smoothed_history) < 3:
+            # Not enough data yet
+            for labels in self.signal_level_labels.values():
+                labels['diff_peak'].config(text="---", foreground='black')
+                labels['diff_floor'].config(text="---", foreground='black')
+                labels['diff_snr'].config(text="---", foreground='black')
+            return
+        
+        # Average the differences over the window
+        diff_peak = sum(entry[1] for entry in smoothed_history) / len(smoothed_history)
+        diff_floor = sum(entry[2] for entry in smoothed_history) / len(smoothed_history)
+        diff_snr = sum(entry[3] for entry in smoothed_history) / len(smoothed_history)
+        
+        # Update displays for both instances
+        for instance_id, labels in self.signal_level_labels.items():
+            if instance_id == instance_a_id:
+                # Show positive differences for instance A
+                # Peak: higher is better (green if positive)
+                # Floor: lower is better (green if negative, meaning A has lower/better floor)
+                # SNR: higher is better (green if positive)
+                color_peak = 'green' if diff_peak >= 0 else 'red'
+                color_floor = 'red' if diff_floor >= 0 else 'green'  # Inverted: lower floor is better
+                color_snr = 'green' if diff_snr >= 0 else 'red'
+                
+                labels['diff_peak'].config(
+                    text=f"{diff_peak:+.1f} dB",
+                    foreground=color_peak
+                )
+                labels['diff_floor'].config(
+                    text=f"{diff_floor:+.1f} dB",
+                    foreground=color_floor
+                )
+                labels['diff_snr'].config(
+                    text=f"{diff_snr:+.1f} dB",
+                    foreground=color_snr
+                )
+            elif instance_id == instance_b_id:
+                # Show negative differences for instance B (B - A = -(A - B))
+                # Peak: higher is better (green if A-B is negative, meaning B is higher)
+                # Floor: lower is better (green if A-B is positive, meaning B is lower/better)
+                # SNR: higher is better (green if A-B is negative, meaning B is higher)
+                color_peak = 'red' if diff_peak >= 0 else 'green'
+                color_floor = 'green' if diff_floor >= 0 else 'red'  # Inverted: lower floor is better
+                color_snr = 'red' if diff_snr >= 0 else 'green'
+                
+                labels['diff_peak'].config(
+                    text=f"{-diff_peak:+.1f} dB",
+                    foreground=color_peak
+                )
+                labels['diff_floor'].config(
+                    text=f"{-diff_floor:+.1f} dB",
+                    foreground=color_floor
+                )
+                labels['diff_snr'].config(
+                    text=f"{-diff_snr:+.1f} dB",
+                    foreground=color_snr
+                )
+            else:
+                # Clear for other instances
+                labels['diff_peak'].config(text="---", foreground='black')
+                labels['diff_floor'].config(text="---", foreground='black')
+                labels['diff_snr'].config(text="---", foreground='black')
 
 
 def main():

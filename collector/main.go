@@ -746,13 +746,16 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check if conditions parameter is set
+	includeConditions := r.URL.Query().Get("conditions") == "true"
+
 	// First, let's check what instances exist in the database
 	var totalCount, recentCount, withCallbacksCount int
 	c.db.QueryRow("SELECT COUNT(*) FROM instances").Scan(&totalCount)
 	c.db.QueryRow("SELECT COUNT(*) FROM instances WHERE datetime(last_seen) >= datetime('now', '-30 minutes')").Scan(&recentCount)
 	c.db.QueryRow("SELECT COUNT(*) FROM instances WHERE datetime(last_seen) >= datetime('now', '-30 minutes') AND successful_callbacks >= 2").Scan(&withCallbacksCount)
 
-	log.Printf("GET /api/instances: total=%d, recent(30min)=%d, with_callbacks(>=2)=%d", totalCount, recentCount, withCallbacksCount)
+	log.Printf("GET /api/instances: total=%d, recent(30min)=%d, with_callbacks(>=2)=%d, conditions=%v", totalCount, recentCount, withCallbacksCount, includeConditions)
 
 	// Query only instances seen in the last 30 minutes with at least 2 successful callbacks
 	query := `
@@ -808,6 +811,15 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 
 		// Calculate Maidenhead locator
 		inst.Maidenhead = latLonToMaidenhead(inst.Latitude, inst.Longitude)
+
+		// If conditions parameter is set and instance has noise floor enabled, fetch band conditions
+		if includeConditions && inst.NoiseFloor {
+			conditions, updatedAt := c.getBandConditions(inst.PublicUUID)
+			if conditions != nil {
+				inst.BandConditions = conditions
+				inst.ConditionsUpdatedAt = updatedAt
+			}
+		}
 
 		instances = append(instances, inst)
 	}

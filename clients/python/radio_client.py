@@ -280,6 +280,7 @@ class RadioClient:
         self.password = password
         
         self.user_session_id = str(uuid.uuid4())
+        self.server_session_id = None  # Will be set from server's status message
         self.running = True
         self.start_time = None
         self.sample_rate = 12000  # Default, will be updated from server
@@ -1103,8 +1104,10 @@ class RadioClient:
                     self.running = False
         
         elif msg_type == 'status':
-            # Print status information
+            # Store session ID from server (like web UI does)
             session_id = message.get('sessionId', 'unknown')
+            if session_id != 'unknown':
+                self.server_session_id = session_id
             freq = message.get('frequency', 0)
             mode = message.get('mode', 'unknown')
             # print(f"Status: Session {session_id}, {freq} Hz, mode {mode}", file=sys.stderr)  # Removed: too verbose during rapid frequency changes

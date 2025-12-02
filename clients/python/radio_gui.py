@@ -98,6 +98,14 @@ except ImportError:
     EQ_AVAILABLE = False
     print("Warning: EQ display not available (missing dependencies)")
 
+# Import users display
+try:
+    from users_display import create_users_window
+    USERS_AVAILABLE = True
+except ImportError:
+    USERS_AVAILABLE = False
+    print("Warning: Users display not available (missing dependencies)")
+
 # Import shared WebSocket manager
 try:
     from dxcluster_websocket import DXClusterWebSocket
@@ -319,6 +327,10 @@ class RadioGUI:
         # MIDI controller (separate window)
         self.midi_window = None
         self.midi_controller = None
+
+        # Users display (separate window)
+        self.users_window = None
+        self.users_display = None
 
         # Create UI
         self.create_widgets()
@@ -1221,12 +1233,12 @@ class RadioGUI:
             button_frame.pack(side=tk.TOP, pady=(5, 5))
 
             if WATERFALL_AVAILABLE:
-                waterfall_btn = ttk.Button(button_frame, text="RF Spectrum",
+                waterfall_btn = ttk.Button(button_frame, text="RF Spec",
                                           command=self.open_waterfall_window)
                 waterfall_btn.pack(side=tk.LEFT, padx=(0, 5))
 
             if AUDIO_SPECTRUM_AVAILABLE:
-                self.audio_spectrum_btn = ttk.Button(button_frame, text="Audio Spectrum",
+                self.audio_spectrum_btn = ttk.Button(button_frame, text="Audio Spec",
                                       command=self.open_audio_spectrum_window)
                 self.audio_spectrum_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
@@ -1258,7 +1270,7 @@ class RadioGUI:
 
             # Noise floor button (always available)
             if NOISE_FLOOR_AVAILABLE:
-                self.noise_floor_btn = ttk.Button(button_frame, text="Noise",
+                self.noise_floor_btn = ttk.Button(button_frame, text="Noise", width=6,
                                                  command=self.open_noise_floor_window)
                 self.noise_floor_btn.pack(side=tk.LEFT, padx=(0, 5))
             else:
@@ -1273,9 +1285,17 @@ class RadioGUI:
                 self.space_weather_btn = None
 
             # MIDI controller button
-            self.midi_btn = ttk.Button(button_frame, text="MIDI",
+            self.midi_btn = ttk.Button(button_frame, text="MIDI", width=6,
                                        command=self.open_midi_window)
             self.midi_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            # Users button (always available)
+            if USERS_AVAILABLE:
+                self.users_btn = ttk.Button(button_frame, text="Users", width=6,
+                                           command=self.open_users_window)
+                self.users_btn.pack(side=tk.LEFT, padx=(0, 5))
+            else:
+                self.users_btn = None
 
             # Scroll mode selector removed from here - now in waterfall window title section
             self.scroll_mode_var = tk.StringVar(value="pan")
@@ -4038,6 +4058,82 @@ class RadioGUI:
             self.client.update_eq(band_gains)
             self.log_status(f"EQ enabled: {len(band_gains)} bands")
 
+    def open_users_window(self):
+        """Open a separate users display window."""
+        # Don't open multiple windows
+        if self.users_window and self.users_window.winfo_exists():
+            self.users_window.lift()  # Bring to front
+            return
+
+        if not self.connected:
+            messagebox.showinfo("Not Connected", "Please connect to the server first.")
+            return
+
+        try:
+            # Get server URL and TLS setting
+            hostname = self.server_var.get().strip()
+            port = self.port_var.get().strip()
+            server = f"{hostname}:{port}" if ':' not in hostname else hostname
+            use_tls = self.tls_var.get()
+
+            # Get session ID from client (use server-assigned session ID, not client-generated UUID)
+            session_id = self.client.server_session_id if self.client else None
+
+            # Create tune callback
+            def tune_to_channel(freq_hz, mode, bw_low, bw_high):
+                """Tune to another user's channel."""
+                # Set frequency
+                self.set_frequency_hz(int(freq_hz))
+                
+                # Set mode if not locked
+                if not self.mode_lock_var.get():
+                    # Map mode names
+                    mode_map = {
+                        'USB': 'USB', 'LSB': 'LSB', 'AM': 'AM', 'SAM': 'SAM',
+                        'CWU': 'CWU', 'CWL': 'CWL', 'FM': 'FM', 'NFM': 'NFM',
+                        'IQ': 'IQ', 'IQ48': 'IQ48', 'IQ96': 'IQ96',
+                        'IQ192': 'IQ192', 'IQ384': 'IQ384'
+                    }
+                    mapped_mode = mode_map.get(mode.upper(), 'USB')
+                    self.mode_var.set(mapped_mode)
+                    self.on_mode_changed()
+                
+                # Set bandwidth
+                self.bw_low_var.set(bw_low)
+                self.bw_high_var.set(bw_high)
+                self.bw_low_label.config(text=f"{bw_low} Hz")
+                self.bw_high_label.config(text=f"{bw_high} Hz")
+                
+                # Update client bandwidth values
+                if self.client:
+                    self.client.bandwidth_low = bw_low
+                    self.client.bandwidth_high = bw_high
+                
+                # Update spectrum displays
+                if self.spectrum:
+                    self.spectrum.update_bandwidth(bw_low, bw_high)
+                if self.waterfall_display:
+                    self.waterfall_display.update_bandwidth(bw_low, bw_high)
+                if self.audio_spectrum_display:
+                    self.audio_spectrum_display.update_bandwidth(bw_low, bw_high)
+                
+                # Apply changes if connected (this will send tune message with new bandwidth)
+                if self.connected:
+                    self.apply_frequency()
+                
+                self.log_status(f"Tuned to user channel: {freq_hz/1e6:.6f} MHz, {mode}, {bw_low}-{bw_high} Hz")
+
+            # Create users window
+            self.users_window, self.users_display = create_users_window(
+                self.root, server, use_tls, session_id, tune_to_channel
+            )
+
+            self.log_status("Users window opened")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open users window: {e}")
+            self.log_status(f"ERROR: Failed to open users window - {e}")
+
     def open_midi_window(self):
         """Open MIDI controller configuration window."""
         # Check if controller exists but window is hidden
@@ -4583,6 +4679,13 @@ class RadioGUI:
             self.public_instances_window = None
             self.log_status("Public instances window closed")
 
+        # Close users window
+        if self.users_window and self.users_window.winfo_exists():
+            self.users_window.destroy()
+            self.users_window = None
+            self.users_display = None
+            self.log_status("Users window closed")
+
         # Close EQ window
         if self.eq_window and self.eq_window.winfo_exists():
             self.eq_window.destroy()
@@ -4917,6 +5020,10 @@ class RadioGUI:
                             #     if CW_SPOTS_AVAILABLE and desc.get('cw_skimmer', False):
                             #         self.root.after(2800, self.auto_open_cw_spots)
 
+                            # Auto-open users window on successful connection
+                            if USERS_AVAILABLE:
+                                self.root.after(700, self.open_users_window)
+
                             # Fetch bookmarks and bands after connection is established
                             self.root.after(500, self.fetch_bookmarks)
                             self.root.after(600, self.fetch_bands)
@@ -5234,6 +5341,10 @@ class RadioGUI:
         # Close public instances window if open
         if self.public_instances_window and self.public_instances_window.winfo_exists():
             self.public_instances_window.destroy()
+
+        # Close users window if open
+        if self.users_window and self.users_window.winfo_exists():
+            self.users_window.destroy()
 
         # Close EQ window if open
         if self.eq_window and self.eq_window.winfo_exists():

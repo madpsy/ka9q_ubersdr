@@ -1153,11 +1153,19 @@ func (c *Collector) fetchAndStoreNoiseFloor(publicUUID, host string, port int, u
 			return
 		}
 
-		// Store in database
-		now := time.Now()
+		// Check data size before storing
 		jsonDataStr := string(jsonData)
 		dataSize := len(jsonDataStr)
 
+		// Reject data larger than 10KB
+		const maxSize = 10 * 1024 // 10KB
+		if dataSize > maxSize {
+			log.Printf("Noise floor data too large for %s: %d bytes (max: %d bytes), skipping storage", publicUUID, dataSize, maxSize)
+			return
+		}
+
+		// Store in database
+		now := time.Now()
 		_, err = c.db.Exec(`
 			INSERT INTO noise_floor_data (public_uuid, data, updated_at)
 			VALUES (?, ?, ?)

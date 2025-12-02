@@ -1000,6 +1000,12 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 	isBypassed := sessions.config.Server.IsIPTimeoutBypassed(clientIP, req.Password)
 	sessionTimeout := sessions.config.Server.SessionTimeout
 	maxSessionTime := sessions.config.Server.MaxSessionTime
+
+	// If session_timeout is 0, use max_session_time value
+	if sessionTimeout == 0 && maxSessionTime > 0 {
+		sessionTimeout = maxSessionTime
+	}
+
 	if isBypassed {
 		// Bypassed IPs get 0 for both timeouts (unlimited)
 		sessionTimeout = 0

@@ -259,9 +259,10 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Server.MaxSessions == 0 {
 		config.Server.MaxSessions = 50
 	}
-	if config.Server.SessionTimeout == 0 {
-		config.Server.SessionTimeout = 300
-	}
+	// Note: SessionTimeout of 0 is valid (means no timeout), so we don't set a default
+	// The default is only applied if the field is not present in the YAML at all
+	// Since YAML unmarshaling will set it to 0 if not specified, we can't distinguish
+	// between "not specified" and "explicitly set to 0", so we leave it as-is
 	if config.Server.CmdRateLimit == 0 {
 		config.Server.CmdRateLimit = 10 // Default 10 commands/sec per channel
 	}

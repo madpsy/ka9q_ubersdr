@@ -430,9 +430,10 @@ class MultiSpectrumGUI:
             instance.status_var.set("Connected")
             # Initialize bandwidth filter on newly connected spectrum
             self.root.after(500, self._update_all_bandwidths)
-            # Sync zoom level with existing instances if sync is enabled
+            # Sync zoom level and frequency with existing instances if sync is enabled
             if self.sync_enabled.get():
                 self.root.after(1000, lambda: self._sync_new_instance_zoom(instance))
+                self.root.after(1200, lambda: self._sync_new_instance_frequency(instance))
             # Recalculate target throttle rate after connection (give it time to get server rate)
             self.root.after(1000, self._update_target_rate)
         else:
@@ -815,6 +816,25 @@ class MultiSpectrumGUI:
             )
             print(f"Synced new instance to existing zoom: {frequency/1e6:.6f} MHz, {bandwidth/1e3:.1f} kHz")
     
+    def _sync_new_instance_frequency(self, new_instance: SpectrumInstance):
+        """Synchronize a newly connected instance's tuned frequency to match existing instances."""
+        # Find a connected instance to copy frequency from
+        source_spectrum = None
+        for instance in self.instance_manager.active_instances:
+            if instance != new_instance and instance.spectrum and instance.spectrum.connected:
+                source_spectrum = instance.spectrum
+                break
+
+        if not source_spectrum or not new_instance.spectrum or not new_instance.spectrum.connected:
+            return
+
+        # Get tuned frequency from source
+        tuned_freq = source_spectrum.tuned_freq
+
+        # Apply to new instance
+        new_instance.spectrum.update_center_frequency(tuned_freq)
+        print(f"Synced new instance to existing frequency: {tuned_freq/1e6:.6f} MHz")
+
     def _update_target_rate(self):
         """Update target throttle rate based on server-reported rates from all connected instances."""
         rates = []

@@ -755,17 +755,26 @@ class SpectrumDisplay {
                 // CRITICAL: Return here to prevent WebSocket creation
                 return;
             }
-console.log('Spectrum connection check passed');
-} catch (err) {
-console.error('Spectrum connection check failed:', err);
-// Continue with connection attempt even if check fails
-}
+            console.log('Spectrum connection check passed');
+        } catch (err) {
+            console.error('Spectrum connection check failed:', err);
+            // Continue with connection attempt even if check fails
+        }
 
-console.log('Connecting to spectrum WebSocket:', this.config.wsUrl);
+        // Build WebSocket URL with session ID and password (if available)
+        const userSessionID = window.userSessionID || '';
+        const wsUrlBase = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/user-spectrum`;
+        let wsUrl = userSessionID ? `${wsUrlBase}?user_session_id=${encodeURIComponent(userSessionID)}` : wsUrlBase;
 
+        // Add bypass password if available
+        if (window.bypassPassword) {
+            wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
+        }
+
+        console.log('Connecting to spectrum WebSocket:', wsUrl);
 
         try {
-            this.ws = new WebSocket(this.config.wsUrl);
+            this.ws = new WebSocket(wsUrl);
 
             this.ws.onopen = () => {
                 console.log('Spectrum WebSocket connected');

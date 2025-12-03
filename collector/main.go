@@ -49,7 +49,7 @@ type Instance struct {
 	AvailableClients    int                `json:"available_clients"`               // Current number of available client slots
 	MaxSessionTime      int                `json:"max_session_time"`                // Maximum session time in seconds (0 = unlimited)
 	PublicIQModes       []string           `json:"public_iq_modes"`                 // List of IQ modes accessible without authentication
-	ReporterIP          string             `json:"reporter_ip"`                     // IP address that last reported this instance
+	ReporterIP          string             `json:"-"`                               // IP address that last reported this instance (not exposed in API)
 	SuccessfulCallbacks int                `json:"successful_callbacks"`            // Number of successful verification callbacks
 	BandConditions      map[string]float64 `json:"band_conditions,omitempty"`       // Band name to FT8 SNR mapping (only included with conditions=true)
 	ConditionsUpdatedAt string             `json:"conditions_updated_at,omitempty"` // Timestamp of band conditions (only included with conditions=true)

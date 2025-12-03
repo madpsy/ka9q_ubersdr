@@ -416,6 +416,15 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Check if User-Agent mapping exists (ensures /connection was called first)
+	if wsh.sessions.GetUserAgent(userSessionID) == "" {
+		log.Printf("Rejected WebSocket connection: no User-Agent mapping for user_session_id %s from %s (client IP: %s)", userSessionID, sourceIP, clientIP)
+		if err := wsh.sendError(conn, "Invalid session. Please refresh the page and try again."); err != nil {
+			log.Printf("Failed to send error message: %v", err)
+		}
+		return
+	}
+
 	// Get bandwidth parameters from query string (optional)
 	// Wide IQ modes should not have bandwidth parameters - they use preset values
 	wideIQModes := map[string]bool{

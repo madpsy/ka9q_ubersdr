@@ -1,0 +1,98 @@
+services:
+  # ka9q-radio backend (radiod) - SDR receiver daemon
+  ka9q-radio:
+    image: madpsy/ka9q-radio:latest
+    container_name: ka9q-radio
+    privileged: true
+    restart: unless-stopped
+
+    # Use external bridge network for multicast communication
+    networks:
+      - sdr-network
+
+    volumes:
+      # Mount USB devices for SDR hardware access
+      - /dev/bus/usb:/dev/bus/usb
+      # Persistent configuration - initialized from templates on first run
+      # Edit configs in the volume, they will persist across container restarts
+      # To reset to defaults, delete the volume: docker volume rm docker_radiod-config
+      - radiod-config:/etc/ka9q-radio
+      # Persistent data directory for recordings and wisdom
+      - radiod-data:/var/lib/ka9q-radio
+      # Optional: Mount custom configuration from host (overrides persistent volume)
+      # - ../../ka9q-radio/docker/radiod@ubersdr.conf:/etc/ka9q-radio/radiod@ubersdr.conf
+
+    environment:
+      - TZ=${TZ:-UTC}
+
+    # Optional: Override the default command to use a different config
+    # command: ["/usr/local/sbin/radiod", "/etc/ka9q-radio/radiod@custom.conf"]
+
+    # Healthcheck
+    healthcheck:
+      test: [CMD, pgrep, -x, radiod]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ka9q_ubersdr service - Web interface
+  ubersdr:
+    image: madpsy/ka9q_ubersdr:latest
+    container_name: ka9q_ubersdr
+    restart: unless-stopped
+
+    # Wait for ka9q-radio to be healthy before starting
+    depends_on:
+      ka9q-radio:
+        condition: service_healthy
+
+    # Use external bridge network for multicast communication with radiod
+    networks:
+      - sdr-network
+
+    # Expose web interface port
+    ports:
+      - 8080:8080
+
+    # Environment variables
+    environment:
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - TZ=${TZ:-UTC}
+      - DEBUG=true
+
+    # Volumes for persistent configuration only (static files are part of the image)
+    volumes:
+      - ubersdr-config:/app/config
+
+    # Healthcheck
+    healthcheck:
+      test: [CMD, wget, --no-verbose, --tries=1, --spider, http://localhost:8080/]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+    # Resource limits (optional)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 1G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 256M
+
+# Shared network between ka9q-radio and ubersdr containers
+# Docker Compose will create this automatically with the specified subnet
+networks:
+  sdr-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  radiod-config:
+  radiod-data:
+  ubersdr-config:

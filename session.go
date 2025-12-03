@@ -55,6 +55,7 @@ type SessionManager struct {
 	userSessionUUIDs     map[string]int             // Map of user_session_id to count of sessions (for limiting unique users)
 	ipToUUIDs            map[string]map[string]bool // Map of IP address to set of UUIDs (for limiting unique UUIDs per IP)
 	userAgents           map[string]string          // Map of user_session_id to User-Agent string
+	userAgentLastSeen    map[string]time.Time       // Map of user_session_id to last time it had an active session
 	uuidAudioSessions    map[string]string          // Map of user_session_id to audio session ID (enforces 1 audio per UUID)
 	uuidSpectrumSessions map[string]string          // Map of user_session_id to spectrum session ID (enforces 1 spectrum per UUID)
 	mu                   sync.RWMutex
@@ -77,6 +78,7 @@ func NewSessionManager(config *Config, radiod *RadiodController) *SessionManager
 		userSessionUUIDs:     make(map[string]int),
 		ipToUUIDs:            make(map[string]map[string]bool),
 		userAgents:           make(map[string]string),
+		userAgentLastSeen:    make(map[string]time.Time),
 		uuidAudioSessions:    make(map[string]string),
 		uuidSpectrumSessions: make(map[string]string),
 		config:               config,
@@ -822,7 +824,7 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	return nil
 }
 
-// cleanupLoop periodically checks for and removes inactive sessions and expired kicked UUIDs
+// cleanupLoop periodically checks for and removes inactive sessions, expired kicked UUIDs, and orphaned User-Agent entries
 func (sm *SessionManager) cleanupLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -830,6 +832,7 @@ func (sm *SessionManager) cleanupLoop() {
 	for range ticker.C {
 		sm.cleanupInactiveSessions()
 		sm.cleanupExpiredKickedUUIDs()
+		sm.cleanupOrphanedUserAgents()
 	}
 }
 
@@ -922,6 +925,50 @@ func (sm *SessionManager) cleanupExpiredKickedUUIDs() {
 		}
 		sm.mu.Unlock()
 		log.Printf("Cleaned up %d expired kicked UUID(s)", len(toRemove))
+	}
+}
+
+// cleanupOrphanedUserAgents removes User-Agent entries for UUIDs that haven't had an active session for 5 minutes
+func (sm *SessionManager) cleanupOrphanedUserAgents() {
+	const orphanTimeout = 5 * time.Minute
+	now := time.Now()
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	// Build set of UUIDs with active sessions
+	activeUUIDs := make(map[string]bool)
+	for _, session := range sm.sessions {
+		if session.UserSessionID != "" {
+			activeUUIDs[session.UserSessionID] = true
+			// Update last seen time for active sessions
+			sm.userAgentLastSeen[session.UserSessionID] = now
+		}
+	}
+
+	// Find orphaned User-Agent entries (no active session and last seen > 5 minutes ago)
+	var toRemove []string
+	for uuid := range sm.userAgents {
+		if !activeUUIDs[uuid] {
+			// No active session for this UUID
+			lastSeen, exists := sm.userAgentLastSeen[uuid]
+			if !exists || now.Sub(lastSeen) > orphanTimeout {
+				toRemove = append(toRemove, uuid)
+			}
+		}
+	}
+
+	// Remove orphaned entries
+	if len(toRemove) > 0 {
+		for _, uuid := range toRemove {
+			userAgent := sm.userAgents[uuid]
+			delete(sm.userAgents, uuid)
+			delete(sm.userAgentLastSeen, uuid)
+			log.Printf("Cleaned up orphaned User-Agent entry for UUID %s (User-Agent: %s, no active session for >5 minutes)",
+				uuid, userAgent)
+		}
+		log.Printf("User-Agent cleanup: removed %d orphaned entries (total remaining: %d)",
+			len(toRemove), len(sm.userAgents))
 	}
 }
 
@@ -1092,7 +1139,7 @@ func (sm *SessionManager) CanAcceptNewIP(clientIP, userSessionID string) bool {
 	return true
 }
 
-// SetUserAgent stores the User-Agent string for a user_session_id
+// SetUserAgent stores the User-Agent string for a user_session_id and updates last seen time
 func (sm *SessionManager) SetUserAgent(userSessionID, userAgent string) {
 	if userSessionID == "" {
 		return
@@ -1102,6 +1149,7 @@ func (sm *SessionManager) SetUserAgent(userSessionID, userAgent string) {
 	defer sm.mu.Unlock()
 
 	sm.userAgents[userSessionID] = userAgent
+	sm.userAgentLastSeen[userSessionID] = time.Now()
 }
 
 // GetUserAgent retrieves the User-Agent string for a user_session_id

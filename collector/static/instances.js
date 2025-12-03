@@ -187,6 +187,12 @@ function createInstanceCard(instance, isClosest = false) {
                     <span class="instance-info-label">🔧 Version:</span>
                     <span class="instance-info-value">${instance.version}</span>
                 </div>
+                ${instance.cpu_model && instance.cpu_model !== '' ? `
+                <div class="instance-info-row">
+                    <span class="instance-info-label">🖥️ CPU:</span>
+                    <span class="instance-info-value">${instance.cpu_model}</span>
+                </div>
+                ` : ''}
                 ${features.length > 0 ? `
                 <div class="instance-info-row">
                     <span class="instance-info-label">✨ Features:</span>

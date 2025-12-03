@@ -37,6 +37,8 @@ type Instance struct {
 	Maidenhead          string             `json:"maidenhead"` // 6-character Maidenhead locator
 	PublicURL           string             `json:"public_url"`
 	Version             string             `json:"version"`
+	CPUModel            string             `json:"cpu_model"` // CPU model name
+	CPUCores            int                `json:"cpu_cores"` // Number of CPU cores
 	Host                string             `json:"host,omitempty"`
 	Port                int                `json:"port,omitempty"`
 	TLS                 bool               `json:"tls,omitempty"`
@@ -67,6 +69,8 @@ type InstanceUpdate struct {
 	Altitude         int      `json:"altitude"`
 	PublicURL        string   `json:"public_url"`
 	Version          string   `json:"version"`
+	CPUModel         string   `json:"cpu_model"` // CPU model name
+	CPUCores         int      `json:"cpu_cores"` // Number of CPU cores
 	Timestamp        int64    `json:"timestamp"`
 	Host             string   `json:"host"`
 	Port             int      `json:"port"`
@@ -228,6 +232,8 @@ func initDatabase(path string) (*sql.DB, error) {
 		altitude INTEGER NOT NULL,
 		public_url TEXT NOT NULL,
 		version TEXT NOT NULL,
+		cpu_model TEXT DEFAULT '',
+		cpu_cores INTEGER DEFAULT 0,
 		host TEXT,
 		port INTEGER,
 		tls BOOLEAN,
@@ -645,14 +651,14 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		_, err = c.db.Exec(`
 			INSERT INTO instances (
 				secret_uuid, public_uuid, callsign, name, location,
-				latitude, longitude, altitude, public_url, version,
+				latitude, longitude, altitude, public_url, version, cpu_model, cpu_cores,
 				host, port, tls,
 				cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
 				public_iq_modes, reporter_ip,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
-			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version,
+			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version, update.CPUModel, update.CPUCores,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
 			string(publicIQModesJSON), clientIP,
@@ -684,7 +690,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			UPDATE instances SET
 				callsign = ?, name = ?, location = ?,
 				latitude = ?, longitude = ?, altitude = ?,
-				public_url = ?, version = ?,
+				public_url = ?, version = ?, cpu_model = ?, cpu_cores = ?,
 				host = ?, port = ?, tls = ?,
 				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?, available_clients = ?, max_session_time = ?,
 				public_iq_modes = ?, reporter_ip = ?,
@@ -692,7 +698,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			WHERE secret_uuid = ?`,
 			update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude,
-			update.PublicURL, update.Version,
+			update.PublicURL, update.Version, update.CPUModel, update.CPUCores,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
 			string(publicIQModesJSON), clientIP,
@@ -752,7 +758,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 	// Query only instances seen in the last 30 minutes with at least 2 successful callbacks
 	query := `
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
-		       altitude, public_url, version, host, port, tls,
+		       altitude, public_url, version, cpu_model, cpu_cores, host, port, tls,
 		       cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
 		       public_iq_modes, reporter_ip, successful_callbacks,
 		       first_seen, last_seen
@@ -782,7 +788,7 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		err := rows.Scan(
 			&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 			&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
-			&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
+			&inst.Version, &inst.CPUModel, &inst.CPUCores, &inst.Host, &inst.Port, &inst.TLS,
 			&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.AvailableClients, &inst.MaxSessionTime,
 			&publicIQModesJSON, &inst.ReporterIP, &inst.SuccessfulCallbacks,
 			&inst.FirstSeen, &inst.LastSeen,
@@ -849,7 +855,7 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	var publicIQModesJSON string
 	err := c.db.QueryRow(`
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
-		       altitude, public_url, version, host, port, tls,
+		       altitude, public_url, version, cpu_model, cpu_cores, host, port, tls,
 		       cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
 		       public_iq_modes, reporter_ip,
 		       first_seen, last_seen
@@ -858,7 +864,7 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	`, publicUUID).Scan(
 		&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 		&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
-		&inst.Version, &inst.Host, &inst.Port, &inst.TLS,
+		&inst.Version, &inst.CPUModel, &inst.CPUCores, &inst.Host, &inst.Port, &inst.TLS,
 		&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.AvailableClients, &inst.MaxSessionTime,
 		&publicIQModesJSON, &inst.ReporterIP,
 		&inst.FirstSeen, &inst.LastSeen,

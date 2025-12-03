@@ -24,7 +24,7 @@
     <main>
         <section class="hero">
             <div class="container">
-                <h2>Open Source Web based HF SDR</h2>
+                <h2>Open Source Web Based HF SDR</h2>
                 <p class="hero-description">
                     A powerful, web-based SDR platform for amateur radio enthusiasts, providing real-time access to the entire HF spectrum
                     and digital mode decoding capabilities. Based on the affordable RX-888 MKII and generic PC hardware. Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank" rel="noopener noreferrer" class="inline-link">ka9q-radio</a>.
@@ -35,6 +35,9 @@
                         View Available Instances
                     </a>
                     <a href="#features" class="secondary-button">Learn More</a>
+                </div>
+                <div class="hero-screenshot">
+                    <img src="screenshots/websdr.png" alt="UberSDR Web Interface Screenshot" class="screenshot-image">
                 </div>
             </div>
         </section>
@@ -145,6 +148,38 @@
                             Download
                         </div>
                     </a>
+                </div>
+
+                <div class="client-carousel-container">
+                    <h3 style="text-align: center; margin-bottom: 2rem; color: var(--text-primary);">Desktop Client Screenshots</h3>
+                    <div class="carousel">
+                        <button class="carousel-btn carousel-btn-prev" onclick="moveCarousel(-1)">‹</button>
+                        <div class="carousel-track">
+                            <div class="carousel-slide active">
+                                <img src="screenshots/client_multple_windows.png" alt="Client Multiple Windows">
+                                <p class="carousel-caption">Multiple Windows Support</p>
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/client_conditions.png" alt="Client Band Conditions View">
+                                <p class="carousel-caption">Band Conditions Monitoring</p>
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/client_cw.png" alt="Client CW Spots View">
+                                <p class="carousel-caption">CW Spots Display</p>
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/client_instances.png" alt="Client Instance Discovery">
+                                <p class="carousel-caption">Instance Discovery</p>
+                            </div>
+                        </div>
+                        <button class="carousel-btn carousel-btn-next" onclick="moveCarousel(1)">›</button>
+                    </div>
+                    <div class="carousel-dots">
+                        <span class="dot active" onclick="currentSlide(1)"></span>
+                        <span class="dot" onclick="currentSlide(2)"></span>
+                        <span class="dot" onclick="currentSlide(3)"></span>
+                        <span class="dot" onclick="currentSlide(4)"></span>
+                    </div>
                 </div>
 
                 <h2 style="margin-top: 3rem;">Drivers</h2>

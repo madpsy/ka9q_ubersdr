@@ -27,16 +27,16 @@ async function fetchInstanceStats() {
 
     try {
         const response = await fetch('https://instances.ubersdr.org/api/instances');
-        
+
         if (!response.ok) {
             throw new Error('Failed to fetch instance data');
         }
 
         const data = await response.json();
-        
+
         // Calculate statistics
         const instanceCount = data.length || 0;
-        
+
         // Count unique countries
         const countries = new Set();
         data.forEach(instance => {
@@ -45,19 +45,19 @@ async function fetchInstanceStats() {
             }
         });
         const countryCount = countries.size;
-        
+
         // Count unique bands (estimate based on typical SDR coverage)
         // This is a placeholder - adjust based on actual API data structure
         const bandCount = estimateBandCount(data);
-        
+
         // Animate the numbers
         animateValue(instanceCountEl, 0, instanceCount, 1000);
         animateValue(countryCountEl, 0, countryCount, 1000);
         animateValue(bandCountEl, 0, bandCount, 1000);
-        
+
     } catch (error) {
         console.error('Error fetching instance stats:', error);
-        
+
         // Show fallback values
         instanceCountEl.textContent = '10+';
         countryCountEl.textContent = '5+';
@@ -75,13 +75,13 @@ function estimateBandCount(instances) {
     // If the API provides band information, use it
     // Otherwise, return a reasonable estimate
     const uniqueBands = new Set();
-    
+
     instances.forEach(instance => {
         if (instance.bands && Array.isArray(instance.bands)) {
             instance.bands.forEach(band => uniqueBands.add(band));
         }
     });
-    
+
     // If we found band data, return it; otherwise return estimate
     return uniqueBands.size > 0 ? uniqueBands.size : 20;
 }
@@ -90,24 +90,24 @@ function estimateBandCount(instances) {
 function animateValue(element, start, end, duration) {
     const startTime = performance.now();
     const range = end - start;
-    
+
     function update(currentTime) {
         const elapsed = currentTime - startTime;
         const progress = Math.min(elapsed / duration, 1);
-        
+
         // Easing function for smooth animation
         const easeOutQuart = 1 - Math.pow(1 - progress, 4);
         const current = Math.floor(start + range * easeOutQuart);
-        
+
         element.textContent = current;
-        
+
         if (progress < 1) {
             requestAnimationFrame(update);
         } else {
             element.textContent = end;
         }
     }
-    
+
     requestAnimationFrame(update);
 }
 
@@ -185,19 +185,19 @@ function trackExternalLinks() {
 document.addEventListener('DOMContentLoaded', () => {
     // Fetch and display instance statistics
     fetchInstanceStats();
-    
+
     // Initialize scroll animations
     handleScrollAnimations();
-    
+
     // Initialize parallax effect
     handleParallax();
-    
+
     // Initialize header scroll effect
     handleHeaderScroll();
-    
+
     // Track external links
     trackExternalLinks();
-    
+
     console.log('UberSDR website initialized');
 });
 
@@ -218,7 +218,7 @@ document.addEventListener('keydown', (e) => {
             instancesSection.scrollIntoView({ behavior: 'smooth' });
         }
     }
-    
+
     // Press 'f' to go to features section
     if (e.key === 'f' || e.key === 'F') {
         const featuresSection = document.getElementById('features');
@@ -228,8 +228,53 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// Carousel functionality
+let currentSlideIndex = 1;
+
+function moveCarousel(direction) {
+    showSlide(currentSlideIndex += direction);
+}
+
+function currentSlide(n) {
+    showSlide(currentSlideIndex = n);
+}
+
+function showSlide(n) {
+    const slides = document.querySelectorAll('.carousel-slide');
+    const dots = document.querySelectorAll('.dot');
+
+    if (n > slides.length) {
+        currentSlideIndex = 1;
+    }
+    if (n < 1) {
+        currentSlideIndex = slides.length;
+    }
+
+    // Hide all slides
+    slides.forEach(slide => {
+        slide.classList.remove('active');
+    });
+
+    // Remove active class from all dots
+    dots.forEach(dot => {
+        dot.classList.remove('active');
+    });
+
+    // Show current slide and activate corresponding dot
+    if (slides[currentSlideIndex - 1]) {
+        slides[currentSlideIndex - 1].classList.add('active');
+    }
+    if (dots[currentSlideIndex - 1]) {
+        dots[currentSlideIndex - 1].classList.add('active');
+    }
+}
+
 // Export functions for potential use in other scripts
 window.UberSDR = {
     fetchInstanceStats,
     animateValue
 };
+
+// Make carousel functions globally available
+window.moveCarousel = moveCarousel;
+window.currentSlide = currentSlide;

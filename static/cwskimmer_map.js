@@ -112,6 +112,9 @@ class CWSkimmerMap {
         // Load receiver location
         await this.loadReceiverLocation();
 
+        // Register connection before connecting to websocket
+        await this.registerConnection();
+
         // Connect to websocket
         this.connectWebSocket();
 
@@ -836,6 +839,40 @@ class CWSkimmerMap {
             offset: [0, -15],
             permanent: false
         });
+    }
+
+    async registerConnection() {
+        try {
+            const body = {
+                user_session_id: this.userSessionID
+            };
+
+            // Add bypass password if available
+            if (window.bypassPassword) {
+                body.password = window.bypassPassword;
+            }
+
+            const response = await fetch('/connection', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) {
+                if (response.status === 429) {
+                    console.error('[CW Skimmer Map] Rate limited. Please try again later.');
+                    this.updateStatus('disconnected', 'Rate Limited');
+                    return;
+                }
+                console.error('[CW Skimmer Map] Failed to register connection:', response.status);
+            } else {
+                console.log('[CW Skimmer Map] Connection registered successfully');
+            }
+        } catch (error) {
+            console.error('[CW Skimmer Map] Error registering connection:', error);
+        }
     }
 
     connectWebSocket() {

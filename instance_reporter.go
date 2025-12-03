@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shirou/gopsutil/v3/cpu"
 	"gopkg.in/yaml.v3"
 )
 
@@ -36,16 +37,18 @@ type InstanceReport struct {
 	PublicURL        string   `json:"public_url"`
 	Version          string   `json:"version"`
 	Timestamp        int64    `json:"timestamp"`
-	Host             string   `json:"host,omitempty"`  // Optional: tells clients how to connect to this instance
-	Port             int      `json:"port,omitempty"`  // Optional: port for client connections
-	TLS              bool     `json:"tls,omitempty"`   // Optional: whether TLS is required for connections
-	CWSkimmer        bool     `json:"cw_skimmer"`      // Whether CW Skimmer is enabled
-	DigitalDecodes   bool     `json:"digital_decodes"` // Whether digital decoding is enabled
-	NoiseFloor       bool     `json:"noise_floor"`     // Whether noise floor monitoring is enabled
-	MaxClients       int      `json:"max_clients"`     // Maximum number of clients allowed
+	Host             string   `json:"host,omitempty"`    // Optional: tells clients how to connect to this instance
+	Port             int      `json:"port,omitempty"`    // Optional: port for client connections
+	TLS              bool     `json:"tls,omitempty"`     // Optional: whether TLS is required for connections
+	CWSkimmer        bool     `json:"cw_skimmer"`        // Whether CW Skimmer is enabled
+	DigitalDecodes   bool     `json:"digital_decodes"`   // Whether digital decoding is enabled
+	NoiseFloor       bool     `json:"noise_floor"`       // Whether noise floor monitoring is enabled
+	MaxClients       int      `json:"max_clients"`       // Maximum number of clients allowed
 	AvailableClients int      `json:"available_clients"` // Current number of available client slots
-	MaxSessionTime   int      `json:"max_session_time"` // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes    []string `json:"public_iq_modes"` // List of IQ modes accessible without authentication
+	MaxSessionTime   int      `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes    []string `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
+	CPUModel         string   `json:"cpu_model"`         // CPU model name
+	CPUCores         int      `json:"cpu_cores"`         // Number of CPU cores
 }
 
 // NewInstanceReporter creates a new instance reporter
@@ -191,6 +194,30 @@ func (ir *InstanceReporter) reportLoop() {
 	}
 }
 
+// getCPUInfo retrieves CPU model and core count information
+func (ir *InstanceReporter) getCPUInfo() (string, int) {
+	info, err := cpu.Info()
+	if err != nil {
+		log.Printf("Failed to get CPU info: %v", err)
+		return "Unknown", 0
+	}
+
+	if len(info) > 0 {
+		// Get model name from first CPU
+		model := info[0].ModelName
+
+		// Get total number of cores (sum across all CPUs)
+		totalCores := 0
+		for _, cpuInfo := range info {
+			totalCores += int(cpuInfo.Cores)
+		}
+
+		return model, totalCores
+	}
+
+	return "Unknown", 0
+}
+
 // sendReport sends the current instance information to the central server
 // Retries up to 3 times with 10 second delays between attempts
 func (ir *InstanceReporter) sendReport() error {
@@ -221,6 +248,9 @@ func (ir *InstanceReporter) sendReport() error {
 	// Construct public_url from instance connection info
 	publicURL := ir.config.InstanceReporting.ConstructPublicURL()
 
+	// Get CPU information
+	cpuModel, cpuCores := ir.getCPUInfo()
+
 	report := InstanceReport{
 		UUID:             ir.config.InstanceReporting.InstanceUUID,
 		Callsign:         ir.config.Admin.Callsign,
@@ -242,6 +272,8 @@ func (ir *InstanceReporter) sendReport() error {
 		AvailableClients: availableClients,
 		MaxSessionTime:   ir.config.Server.MaxSessionTime,
 		PublicIQModes:    publicIQModes,
+		CPUModel:         cpuModel,
+		CPUCores:         cpuCores,
 	}
 
 	jsonData, err := json.Marshal(report)

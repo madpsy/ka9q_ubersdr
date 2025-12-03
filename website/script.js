@@ -20,6 +20,11 @@ async function fetchInstanceStats() {
     const countryCountEl = document.getElementById('countryCount');
     const bandCountEl = document.getElementById('bandCount');
 
+    // Check if elements exist (they may not be on this page)
+    if (!instanceCountEl || !countryCountEl || !bandCountEl) {
+        return;
+    }
+
     // Add loading animation
     [instanceCountEl, countryCountEl, bandCountEl].forEach(el => {
         el.classList.add('loading');
@@ -240,8 +245,11 @@ function currentSlide(n) {
 }
 
 function showSlide(n) {
-    const slides = document.querySelectorAll('.carousel-slide');
-    const dots = document.querySelectorAll('.dot');
+    const carousel = document.querySelector('.client-carousel-container .carousel');
+    if (!carousel) return;
+
+    const slides = carousel.querySelectorAll('.carousel-slide');
+    const dots = document.querySelector('.client-carousel-container .carousel-dots').querySelectorAll('.dot');
 
     if (n > slides.length) {
         currentSlideIndex = 1;
@@ -269,6 +277,166 @@ function showSlide(n) {
     }
 }
 
+// Second carousel functionality (for drivers)
+let currentSlideIndex2 = 1;
+
+function moveCarousel2(direction) {
+    showSlide2(currentSlideIndex2 += direction);
+}
+
+function currentSlide2(n) {
+    showSlide2(currentSlideIndex2 = n);
+}
+
+function showSlide2(n) {
+    const carousel = document.querySelector('.carousel-drivers');
+    if (!carousel) return;
+
+    const slides = carousel.querySelectorAll('.carousel-slide');
+    const dots = document.querySelectorAll('.carousel-dots-drivers .dot');
+
+    if (n > slides.length) {
+        currentSlideIndex2 = 1;
+    }
+    if (n < 1) {
+        currentSlideIndex2 = slides.length;
+    }
+
+    // Hide all slides
+    slides.forEach(slide => {
+        slide.classList.remove('active');
+    });
+
+    // Remove active class from all dots
+    dots.forEach(dot => {
+        dot.classList.remove('active');
+    });
+
+    // Show current slide and activate corresponding dot
+    if (slides[currentSlideIndex2 - 1]) {
+        slides[currentSlideIndex2 - 1].classList.add('active');
+    }
+    if (dots[currentSlideIndex2 - 1]) {
+        dots[currentSlideIndex2 - 1].classList.add('active');
+    }
+}
+
+// Third carousel functionality (for hero screenshots)
+let currentSlideIndex3 = 1;
+
+function moveCarousel3(direction) {
+    showSlide3(currentSlideIndex3 += direction);
+}
+
+function currentSlide3(n) {
+    showSlide3(currentSlideIndex3 = n);
+}
+
+function showSlide3(n) {
+    const carousel = document.querySelector('.carousel-hero');
+    if (!carousel) return;
+
+    const slides = carousel.querySelectorAll('.carousel-slide');
+    const dots = document.querySelectorAll('.carousel-dots-hero .dot');
+
+    if (n > slides.length) {
+        currentSlideIndex3 = 1;
+    }
+    if (n < 1) {
+        currentSlideIndex3 = slides.length;
+    }
+
+    // Hide all slides
+    slides.forEach(slide => {
+        slide.classList.remove('active');
+    });
+
+    // Remove active class from all dots
+    dots.forEach(dot => {
+        dot.classList.remove('active');
+    });
+
+    // Show current slide and activate corresponding dot
+    if (slides[currentSlideIndex3 - 1]) {
+        slides[currentSlideIndex3 - 1].classList.add('active');
+    }
+    if (dots[currentSlideIndex3 - 1]) {
+        dots[currentSlideIndex3 - 1].classList.add('active');
+    }
+}
+
+// Auto-advance admin carousel every 2 seconds
+let adminCarouselInterval;
+
+function startAdminCarouselAutoplay() {
+    adminCarouselInterval = setInterval(() => {
+        moveCarousel4(1);
+    }, 2000);
+}
+
+function stopAdminCarouselAutoplay() {
+    if (adminCarouselInterval) {
+        clearInterval(adminCarouselInterval);
+    }
+}
+
+// Initialize admin carousel autoplay
+document.addEventListener('DOMContentLoaded', () => {
+    const adminCarousel = document.querySelector('.carousel-admin');
+    if (adminCarousel) {
+        // Pause autoplay on hover
+        adminCarousel.addEventListener('mouseenter', stopAdminCarouselAutoplay);
+        adminCarousel.addEventListener('mouseleave', startAdminCarouselAutoplay);
+
+        // Start autoplay
+        startAdminCarouselAutoplay();
+    }
+});
+
+// Fourth carousel functionality (for admin screenshots)
+let currentSlideIndex4 = 1;
+
+function moveCarousel4(direction) {
+    showSlide4(currentSlideIndex4 += direction);
+}
+
+function currentSlide4(n) {
+    showSlide4(currentSlideIndex4 = n);
+}
+
+function showSlide4(n) {
+    const carousel = document.querySelector('.carousel-admin');
+    if (!carousel) return;
+
+    const slides = carousel.querySelectorAll('.carousel-slide');
+    const dots = document.querySelectorAll('.carousel-dots-admin .dot');
+
+    if (n > slides.length) {
+        currentSlideIndex4 = 1;
+    }
+    if (n < 1) {
+        currentSlideIndex4 = slides.length;
+    }
+
+    // Hide all slides
+    slides.forEach(slide => {
+        slide.classList.remove('active');
+    });
+
+    // Remove active class from all dots
+    dots.forEach(dot => {
+        dot.classList.remove('active');
+    });
+
+    // Show current slide and activate corresponding dot
+    if (slides[currentSlideIndex4 - 1]) {
+        slides[currentSlideIndex4 - 1].classList.add('active');
+    }
+    if (dots[currentSlideIndex4 - 1]) {
+        dots[currentSlideIndex4 - 1].classList.add('active');
+    }
+}
+
 // Export functions for potential use in other scripts
 window.UberSDR = {
     fetchInstanceStats,
@@ -278,3 +446,9 @@ window.UberSDR = {
 // Make carousel functions globally available
 window.moveCarousel = moveCarousel;
 window.currentSlide = currentSlide;
+window.moveCarousel2 = moveCarousel2;
+window.currentSlide2 = currentSlide2;
+window.moveCarousel3 = moveCarousel3;
+window.currentSlide3 = currentSlide3;
+window.moveCarousel4 = moveCarousel4;
+window.currentSlide4 = currentSlide4;

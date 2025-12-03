@@ -192,6 +192,21 @@ nav a:hover {
     max-width: 1000px;
     margin-left: auto;
     margin-right: auto;
+    position: relative;
+}
+
+.hero-screenshot .carousel {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+}
+
+.hero-screenshot .carousel-slide {
+    padding: 0;
+}
+
+.hero-screenshot .carousel-slide img {
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
 .screenshot-image {
@@ -206,6 +221,10 @@ nav a:hover {
 .screenshot-image:hover {
     transform: translateY(-5px);
     box-shadow: 0 25px 70px rgba(0, 0, 0, 0.6);
+}
+
+.hero-screenshot .carousel-dots {
+    margin-top: 2rem;
 }
 
 /* Features Section */
@@ -479,8 +498,14 @@ nav a:hover {
 }
 
 /* Carousel Styles */
-.client-carousel-container {
+.client-carousel-container,
+.driver-carousel-container {
     margin-top: 4rem;
+    padding: 2rem 0;
+}
+
+.admin-carousel-container {
+    margin-top: 2rem;
     padding: 2rem 0;
 }
 

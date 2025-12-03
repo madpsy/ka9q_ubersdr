@@ -37,7 +37,42 @@
                     <a href="#features" class="secondary-button">Learn More</a>
                 </div>
                 <div class="hero-screenshot">
-                    <img src="screenshots/websdr.png" alt="UberSDR Web Interface Screenshot" class="screenshot-image">
+                    <div class="carousel carousel-hero">
+                        <button class="carousel-btn carousel-btn-prev" onclick="moveCarousel3(-1)">‹</button>
+                        <div class="carousel-track">
+                            <div class="carousel-slide active">
+                                <img src="screenshots/websdr.png" alt="UberSDR Web Interface" class="screenshot-image">
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/digitalmap.png" alt="Digital Spots Map" class="screenshot-image">
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/noisefloor.png" alt="Noise Floor Monitoring" class="screenshot-image">
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/spotmap.png" alt="Spot Map" class="screenshot-image">
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/audio_visualisation.png" alt="Audio Visualization" class="screenshot-image">
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/bycountry.png" alt="Statistics by Country" class="screenshot-image">
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/dynamicrange.png" alt="Dynamic Range Analysis" class="screenshot-image">
+                            </div>
+                        </div>
+                        <button class="carousel-btn carousel-btn-next" onclick="moveCarousel3(1)">›</button>
+                    </div>
+                    <div class="carousel-dots carousel-dots-hero">
+                        <span class="dot active" onclick="currentSlide3(1)"></span>
+                        <span class="dot" onclick="currentSlide3(2)"></span>
+                        <span class="dot" onclick="currentSlide3(3)"></span>
+                        <span class="dot" onclick="currentSlide3(4)"></span>
+                        <span class="dot" onclick="currentSlide3(5)"></span>
+                        <span class="dot" onclick="currentSlide3(6)"></span>
+                        <span class="dot" onclick="currentSlide3(7)"></span>
+                    </div>
                 </div>
             </div>
         </section>
@@ -52,9 +87,9 @@
                         <p>Monitor all HF bands in real-time with background data collection. Historical data is stored enabling analysis of propagation patterns over time.</p>
                     </div>
                     <div class="feature-card">
-                        <div class="feature-icon">🌍</div>
-                        <h3>Global Network</h3>
-                        <p>Our goal is to build a network of receivers from around the world.<br><br>Public directory service to discover available instances.</p>
+                        <div class="feature-icon">👥</div>
+                        <h3>Many Users</h3>
+                        <p>Supports tens or even hundreds of simultaneous users, each independently accessing any HF band at the same time.<br><br>Efficient architecture ensures minimal resource usage per user for both demodulated and IQ channels.</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-icon">🔊</div>
@@ -79,17 +114,32 @@
                     <div class="feature-card">
                         <div class="feature-icon">🤖</div>
                         <h3>MQTT Support</h3>
-                        <p>MQTT support for real time metrics and decoder data. Perfect for automation with Home Assistant and Node-RED.</p>
+                        <p>MQTT support for real time metrics and decoder data. Perfect for automation and dashboards with Home Assistant and Node-RED.</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-icon">📈</div>
                         <h3>Prometheus Endpoint</h3>
-                        <p>Prometheus endpoint for integration into Grafana.</p>
+                        <p>Prometheus endpoint for integration into Grafana to generate useful metric visualisations.</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-icon">⚙️</div>
                         <h3>Admin Control Center</h3>
-                        <p>Admin control center for configuration, management and access control.</p>
+                        <p>Web based Admin control center for configuration, management and access control. Includes configuring background decoders and monitoirng system health.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🔓</div>
+                        <h3>Public or Private</h3>
+                        <p>Owners can make their instance public or keep it private. Public instances are discoverable by any client application.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">⚡</div>
+                        <h3>API Driven</h3>
+                        <p>Frontend is entirely API driven, making creating custom client applications easy.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">💻</div>
+                        <h3>Modest Hardware</h3>
+                        <p>Minimal CPU requirements means even 10 year old mini PCs can support 50+ simultaneous channels.</p>
                     </div>
                 </div>
             </div>
@@ -97,10 +147,9 @@
 
         <section id="instances" class="instances-section">
             <div class="container">
-                <h2>Available Instances</h2>
+                <h2>Public Instance Directory</h2>
                 <p class="section-description">
-                    Explore publically accessible instances of UberSDR. Each instance provides access to the local 
-                    HF radio spectrum and unique propagation conditions.
+                    Explore publically accessible instances of UberSDR. The owner of each instance can choose to make it public and be added to the directory service.<br><br>The directory is integrated into all clients to make discovering other instances quick and easy.
                 </p>
                 <div class="map-container">
                     <a href="https://instances.ubersdr.org" class="map-link" target="_blank" rel="noopener noreferrer">
@@ -206,6 +255,33 @@
                         </div>
                     </a>
                 </div>
+
+                <div class="driver-carousel-container">
+                    <h3 style="text-align: center; margin-bottom: 2rem; color: var(--text-primary);">Third-Party Application Screenshots</h3>
+                    <div class="carousel carousel-drivers">
+                        <button class="carousel-btn carousel-btn-prev" onclick="moveCarousel2(-1)">‹</button>
+                        <div class="carousel-track">
+                            <div class="carousel-slide active">
+                                <img src="screenshots/cwskimmer_monitor.png" alt="CW Skimmer Monitor">
+                                <p class="carousel-caption">CW Skimmer Monitor</p>
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/sdrplus.png" alt="SDR++ Application">
+                                <p class="carousel-caption">SDR++ with UberSDR</p>
+                            </div>
+                            <div class="carousel-slide">
+                                <img src="screenshots/gqrx.png" alt="Gqrx Application">
+                                <p class="carousel-caption">Gqrx with UberSDR</p>
+                            </div>
+                        </div>
+                        <button class="carousel-btn carousel-btn-next" onclick="moveCarousel2(1)">›</button>
+                    </div>
+                    <div class="carousel-dots carousel-dots-drivers">
+                        <span class="dot active" onclick="currentSlide2(1)"></span>
+                        <span class="dot" onclick="currentSlide2(2)"></span>
+                        <span class="dot" onclick="currentSlide2(3)"></span>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -216,7 +292,7 @@
                     Set up your own UberSDR instance with affordable hardware and our Docker-based software.
                     Join the network and share your local radio spectrum with the community.
                 </p>
-                
+
                 <div class="hardware-requirements">
                     <h3>What You Need</h3>
                     <div class="requirements-grid">
@@ -272,6 +348,38 @@
                     <div class="instructions-content">
                         <p>For now, please refer to the <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank" rel="noopener noreferrer" class="inline-link">GitHub repository</a> for setup information.</p>
                         <p class="coming-soon">📝 More detailed instructions coming soon!</p>
+                    </div>
+
+                    <div class="admin-carousel-container">
+                        <h3 style="text-align: center; margin-bottom: 2rem; color: var(--text-primary);">Admin Control Center</h3>
+                        <div class="carousel carousel-admin">
+                            <button class="carousel-btn carousel-btn-prev" onclick="moveCarousel4(-1)">‹</button>
+                            <div class="carousel-track">
+                                <div class="carousel-slide active">
+                                    <img src="screenshots/admin_decoders.png" alt="Admin Decoders Management">
+                                    <p class="carousel-caption">Decoder Management</p>
+                                </div>
+                                <div class="carousel-slide">
+                                    <img src="screenshots/admin_extensions.png" alt="Admin Extensions Configuration">
+                                    <p class="carousel-caption">Extensions Configuration</p>
+                                </div>
+                                <div class="carousel-slide">
+                                    <img src="screenshots/admin_health.png" alt="Admin System Health">
+                                    <p class="carousel-caption">System Health Monitoring</p>
+                                </div>
+                                <div class="carousel-slide">
+                                    <img src="screenshots/admin_sessions.png" alt="Admin Active Sessions">
+                                    <p class="carousel-caption">Active Sessions</p>
+                                </div>
+                            </div>
+                            <button class="carousel-btn carousel-btn-next" onclick="moveCarousel4(1)">›</button>
+                        </div>
+                        <div class="carousel-dots carousel-dots-admin">
+                            <span class="dot active" onclick="currentSlide4(1)"></span>
+                            <span class="dot" onclick="currentSlide4(2)"></span>
+                            <span class="dot" onclick="currentSlide4(3)"></span>
+                            <span class="dot" onclick="currentSlide4(4)"></span>
+                        </div>
                     </div>
                 </div>
             </div>

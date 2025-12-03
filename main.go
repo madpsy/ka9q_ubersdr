@@ -662,6 +662,10 @@ func main() {
 	connRateLimiter := NewIPConnectionRateLimiter(config.Server.ConnRateLimit)
 	log.Printf("Connection rate limiting: %d connections/sec per IP (0 = unlimited)", config.Server.ConnRateLimit)
 
+	// Initialize /connection endpoint rate limiter
+	connectionEndpointRateLimiter := NewConnectionRateLimiter(config.Server.SessionsPerMinute)
+	log.Printf("/connection endpoint rate limiting: %d requests/min per IP (0 = unlimited)", config.Server.SessionsPerMinute)
+
 	// Initialize aggregate endpoint rate limiter (1 request per 5 seconds per IP)
 	aggregateRateLimiter := NewAggregateRateLimiter()
 	log.Printf("Aggregate endpoint rate limiting: 1 request per 5 seconds per IP")
@@ -684,6 +688,7 @@ func main() {
 		defer ticker.Stop()
 		for range ticker.C {
 			connRateLimiter.Cleanup()
+			connectionEndpointRateLimiter.Cleanup()
 			aggregateRateLimiter.Cleanup()
 			fftRateLimiter.Cleanup()
 			spaceWeatherRateLimiter.Cleanup()
@@ -701,7 +706,7 @@ func main() {
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
-		handleConnectionCheck(w, r, sessions, ipBanManager)
+		handleConnectionCheck(w, r, sessions, ipBanManager, connectionEndpointRateLimiter)
 	})
 	http.HandleFunc("/ws", wsHandler.HandleWebSocket)
 	// http.HandleFunc("/ws/spectrum", spectrumWsHandler.HandleWebSocket) // Old endpoint - DISABLED
@@ -950,7 +955,7 @@ type ConnectionCheckResponse struct {
 }
 
 // handleConnectionCheck checks if a connection will be allowed before WebSocket upgrade
-func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *SessionManager, ipBanManager *IPBanManager) {
+func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *SessionManager, ipBanManager *IPBanManager, rateLimiter *ConnectionRateLimiter) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Only accept POST requests
@@ -960,6 +965,20 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 			Allowed: false,
 			Reason:  "Method not allowed, use POST",
 		})
+		return
+	}
+
+	// Get client IP for rate limiting
+	clientIP := getClientIP(r)
+
+	// Check rate limit (10 requests per minute per IP by default)
+	if !rateLimiter.AllowRequest(clientIP) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(ConnectionCheckResponse{
+			Allowed: false,
+			Reason:  "Rate limit exceeded. Please wait before trying again.",
+		})
+		log.Printf("/connection endpoint rate limit exceeded for IP: %s", clientIP)
 		return
 	}
 
@@ -974,14 +993,13 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		return
 	}
 
-	// Get source IP address and strip port number
+	// Get source IP address and strip port number (already done above for rate limiting)
 	sourceIP := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
 		sourceIP = host
 	}
 
-	clientIP := sourceIP
-
+	// clientIP was already set above for rate limiting, reuse it here
 	// Check X-Forwarded-For header for true source IP (first IP in the list)
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
@@ -994,6 +1012,8 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		if host, _, err := net.SplitHostPort(clientIP); err == nil {
 			clientIP = host
 		}
+	} else {
+		clientIP = sourceIP
 	}
 
 	// Check if this IP is in the timeout bypass list or if valid password provided

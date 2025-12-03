@@ -70,6 +70,12 @@ server:
   # Set to 0 to disable rate limiting
   # Recommended: 1 (allows normal reconnections while preventing abuse)
   conn_rate_limit: 1
+  # /connection endpoint rate limit per IP (requests per minute)
+  # This limits how many /connection pre-flight checks can be made from a single IP per minute
+  # Helps prevent abuse of the connection check endpoint
+  # Set to 0 to disable rate limiting
+  # Recommended: 10 (allows normal usage while preventing abuse)
+  sessions_per_minute: 10
   # List of IP addresses or CIDR ranges that bypass all session limits
   # Useful for trusted IPs like localhost, admin networks, or specific users
   # Bypassed IPs are exempt from:

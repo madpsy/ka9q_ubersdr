@@ -471,3 +471,69 @@ func (srl *SummaryRateLimiter) GetStats() int {
 	defer srl.mu.RUnlock()
 	return len(srl.limiters)
 }
+
+// ConnectionRateLimiter manages rate limiters for /connection endpoint requests per IP
+// Limits to configurable requests per minute per IP (default 10 per 60 seconds)
+type ConnectionRateLimiter struct {
+	limiters map[string]*RateLimiter
+	rate     int // requests per minute per IP
+	mu       sync.RWMutex
+}
+
+// NewConnectionRateLimiter creates a new connection endpoint rate limiter
+// rate is the number of requests per minute (e.g., 10 = 10 requests per 60 seconds)
+func NewConnectionRateLimiter(rate int) *ConnectionRateLimiter {
+	return &ConnectionRateLimiter{
+		limiters: make(map[string]*RateLimiter),
+		rate:     rate,
+	}
+}
+
+// AllowRequest checks if a /connection request is allowed for the given IP
+// Returns true if allowed, false if rate limit exceeded
+func (crl *ConnectionRateLimiter) AllowRequest(ip string) bool {
+	if crl.rate <= 0 {
+		return true // Rate limiting disabled
+	}
+
+	crl.mu.Lock()
+	limiter, exists := crl.limiters[ip]
+	if !exists {
+		// Create a rate limiter with rate tokens max, refilling at rate/60 tokens/sec
+		// For example: 10 requests per minute = 10 tokens max, 0.1667 tokens/sec refill rate
+		refillRate := float64(crl.rate) / 60.0
+		limiter = &RateLimiter{
+			tokens:     float64(crl.rate),
+			maxTokens:  float64(crl.rate),
+			refillRate: refillRate,
+			lastRefill: time.Now(),
+		}
+		crl.limiters[ip] = limiter
+	}
+	crl.mu.Unlock()
+
+	return limiter.Allow()
+}
+
+// Cleanup removes rate limiters for IPs that haven't been used recently
+func (crl *ConnectionRateLimiter) Cleanup() {
+	crl.mu.Lock()
+	defer crl.mu.Unlock()
+
+	now := time.Now()
+	for ip, limiter := range crl.limiters {
+		limiter.mu.Lock()
+		// Remove limiters that haven't been used in the last 10 minutes
+		if now.Sub(limiter.lastRefill) > 10*time.Minute {
+			delete(crl.limiters, ip)
+		}
+		limiter.mu.Unlock()
+	}
+}
+
+// GetStats returns the current number of tracked IPs
+func (crl *ConnectionRateLimiter) GetStats() int {
+	crl.mu.RLock()
+	defer crl.mu.RUnlock()
+	return len(crl.limiters)
+}

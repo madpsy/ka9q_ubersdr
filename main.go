@@ -968,21 +968,7 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		return
 	}
 
-	// Get client IP for rate limiting
-	clientIP := getClientIP(r)
-
-	// Check rate limit (10 requests per minute per IP by default)
-	if !rateLimiter.AllowRequest(clientIP) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		json.NewEncoder(w).Encode(ConnectionCheckResponse{
-			Allowed: false,
-			Reason:  "Rate limit exceeded. Please wait before trying again.",
-		})
-		log.Printf("/connection endpoint rate limit exceeded for IP: %s", clientIP)
-		return
-	}
-
-	// Parse request body
+	// Parse request body first to get password for bypass check
 	var req ConnectionCheckRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -993,31 +979,24 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		return
 	}
 
-	// Get source IP address and strip port number (already done above for rate limiting)
-	sourceIP := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(sourceIP); err == nil {
-		sourceIP = host
-	}
+	// Get client IP
+	clientIP := getClientIP(r)
 
-	// clientIP was already set above for rate limiting, reuse it here
-	// Check X-Forwarded-For header for true source IP (first IP in the list)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-		// We want the first one (the true client)
-		clientIP = strings.TrimSpace(xff)
-		if commaIdx := strings.Index(clientIP, ","); commaIdx != -1 {
-			clientIP = strings.TrimSpace(clientIP[:commaIdx])
-		}
-		// Strip port if present in X-Forwarded-For
-		if host, _, err := net.SplitHostPort(clientIP); err == nil {
-			clientIP = host
-		}
-	} else {
-		clientIP = sourceIP
-	}
-
-	// Check if this IP is in the timeout bypass list or if valid password provided
+	// Check if this IP is bypassed (or valid password provided) - bypassed IPs skip rate limiting
 	isBypassed := sessions.config.Server.IsIPTimeoutBypassed(clientIP, req.Password)
+
+	// Check rate limit (10 requests per minute per IP by default) - skip for bypassed IPs
+	if !isBypassed && !rateLimiter.AllowRequest(clientIP) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(ConnectionCheckResponse{
+			Allowed: false,
+			Reason:  "Rate limit exceeded. Please wait before trying again.",
+		})
+		log.Printf("/connection endpoint rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	// isBypassed was already checked above for rate limiting
 	sessionTimeout := sessions.config.Server.SessionTimeout
 	maxSessionTime := sessions.config.Server.MaxSessionTime
 

@@ -235,7 +235,7 @@
             }
             
             if (decoderResponse.ok) {
-                const decoderConfig = await response.json();
+                const decoderConfig = await decoderResponse.json();
                 
                 if (decoderConfig.decoder) {
                     setCheckboxValue('decoderEnabled', decoderConfig.decoder.enabled);

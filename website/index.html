@@ -27,12 +27,16 @@
                 <h2>Open Source Web Based HF SDR</h2>
                 <p class="hero-description">
                     A powerful, web-based SDR platform for amateur radio enthusiasts, providing real-time access to the entire HF spectrum
-                    and digital mode decoding capabilities. Based on the affordable RX-888 MKII and generic PC hardware. Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank" rel="noopener noreferrer" class="inline-link">ka9q-radio</a>.
+                    and multi-band WSJT-X skimming. Support for third party software via SoapySDR as well as a native desktop client. Based on the affordable RX-888 MKII and generic PC hardware. Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank" rel="noopener noreferrer" class="inline-link">ka9q-radio</a>.
                 </p>
                 <div class="hero-buttons">
                     <a href="https://instances.ubersdr.org" class="primary-button" target="_blank" rel="noopener noreferrer">
                         <span class="button-icon">🗺️</span>
                         View Available Instances
+                    </a>
+                    <a href="#build-your-own" class="secondary-button">
+                        <span class="button-icon">🔧</span>
+                        Build Your Own
                     </a>
                     <a href="#features" class="secondary-button">Learn More</a>
                 </div>
@@ -163,7 +167,7 @@
             </div>
         </section>
 
-        <section class="downloads">
+        <section id="desktop-client" class="downloads">
             <div class="container">
                 <h2>Desktop Client</h2>
                 <p class="section-description">
@@ -285,7 +289,7 @@
             </div>
         </section>
 
-        <section class="build-your-own">
+        <section id="build-your-own" class="build-your-own">
             <div class="container">
                 <h2>Build Your Own UberSDR Instance</h2>
                 <p class="section-description">
@@ -297,19 +301,33 @@
                     <h3>What You Need</h3>
                     <div class="requirements-grid">
                         <div class="requirement-card">
-                            <div class="requirement-icon">📡</div>
+                            <div class="requirement-icon">
+                                <img src="rx888.png" alt="RX-888 MkII" class="requirement-icon-image">
+                            </div>
                             <h4>SDR Hardware</h4>
                             <p><strong>RX-888 MkII</strong></p>
                             <p>High-performance SDR receiver available from AliExpress. Offers excellent dynamic range and wide frequency coverage.</p>
                         </div>
                         <div class="requirement-card">
-                            <div class="requirement-icon">💻</div>
+                            <div class="requirement-icon">📡</div>
+                            <h4>Antenna</h4>
+                            <p><strong>Receive Antenna</strong></p>
+                            <p>An active loop or random long wire make great receive antenna choices for HF reception.<br><br>Optionally add a low and/or high pass filter.</p>
+                            <ul>
+                                <li>~1 MHz high pass filter</li>
+                                <li>~40 MHz low pass filter</li>
+                            </ul>
+                        </div>
+                        <div class="requirement-card">
+                            <div class="requirement-icon">
+                                <img src="minipc.png" alt="Mini PC" class="requirement-icon-image">
+                            </div>
                             <h4>Computer</h4>
                             <p><strong>Low-Power PC Options:</strong></p>
                             <ul>
                                 <li>N100/N150 based mini PC (new)</li>
                                 <li>HP EliteDesk or similar (used from eBay)</li>
-                                <li>Any x86_64 system with a recent CPU</li>
+                                <li>Any x86_64 system with a recent CPU and USB 3</li>
                             </ul>
                         </div>
                         <div class="requirement-card">
@@ -345,9 +363,101 @@
 
                 <div class="setup-instructions">
                     <h3>Installation Instructions</h3>
-                    <div class="instructions-content">
-                        <p>For now, please refer to the <a href="https://github.com/madpsy/ka9q_ubersdr" target="_blank" rel="noopener noreferrer" class="inline-link">GitHub repository</a> for setup information.</p>
-                        <p class="coming-soon">📝 More detailed instructions coming soon!</p>
+                    <div class="installation-steps">
+                        <div class="install-step">
+                            <div class="install-step-number">1</div>
+                            <div class="install-step-content">
+                                <div class="install-step-icon">
+                                    <img src="minipc.png" alt="Mini PC" class="install-icon-image">
+                                </div>
+                                <div class="install-step-text">
+                                    <h4>Grab Your Mini PC</h4>
+                                    <p>Will need a monitor/keyboard and USB memory stick.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="install-step">
+                            <div class="install-step-number">2</div>
+                            <div class="install-step-content">
+                                <div class="install-step-icon">
+                                    <img src="ubuntu.png" alt="Ubuntu" class="install-icon-image">
+                                </div>
+                                <div class="install-step-text">
+                                    <h4>Install Ubuntu</h4>
+                                    <p>Create a bootable Ubuntu USB memory stick and install Ubuntu Server 24.04. Ensure to choose <a href="https://ubuntu.com/download/server" target="_blank" rel="noopener noreferrer" class="inline-link">Ubuntu Server</a> as we do not want a GUI. Make sure you select to install OpenSSH Server when asked. </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="install-step">
+                            <div class="install-step-number">3</div>
+                            <div class="install-step-content">
+                                <div class="install-step-icon">
+                                    <img src="rx888.png" alt="RX-888 MkII" class="install-icon-image">
+                                </div>
+                                <div class="install-step-text">
+                                    <h4>Plug in RX-888 MkII</h4>
+                                    <p>Using the provided USB 3 cable plug the SDR into the computer. Probably a good idea to attach the antenna at this point. Ensure it is plugged into the SMA socket marked 'H'.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="install-step">
+                            <div class="install-step-number">4</div>
+                            <div class="install-step-content">
+                                <div class="install-step-icon">
+                                    <img src="logo.png" alt="UberSDR" class="install-icon-image">
+                                </div>
+                                <div class="install-step-text">
+                                    <h4>Install UberSDR</h4>
+                                    <p>SSH into your newly installed UberSDR computer and run the following commands:</p>
+                                    <div class="code-block-wrapper">
+                                        <button class="copy-button" onclick="copyCode(this)" title="Copy to clipboard">
+                                            <span class="copy-icon">📋</span>
+                                        </button>
+                                        <pre class="code-block"><code>sudo apt update && sudo apt upgrade -y
+sudo apt install -y curl
+curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install.sh | bash</code></pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="install-step">
+                            <div class="install-step-number">5</div>
+                            <div class="install-step-content">
+                                <div class="install-step-icon">⚙️</div>
+                                <div class="install-step-text">
+                                    <h4>Configure UberSDR</h4>
+                                    <p>Open a web browser on your desktop/laptop: <a href="http://ubersdr.local:8080/admin.html" target="_blank" rel="noopener noreferrer" class="inline-link">http://ubersdr.local:8080/admin.html</a> and log in with the password you set during install.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="install-step">
+                            <div class="install-step-number">6</div>
+                            <div class="install-step-content">
+                                <div class="install-step-icon">
+                                    <img src="logo.png" alt="UberSDR" class="install-icon-image">
+                                </div>
+                                <div class="install-step-text">
+                                    <h4>Download Desktop Client</h4>
+                                    <p>Download the <a href="#desktop-client" class="inline-link">desktop client</a> for your operating system. You can also access the <a href="http://ubersdr.local:8080/" target="_blank" rel="noopener noreferrer" class="inline-link">web interface</a> directly.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="install-step">
+                            <div class="install-step-number">7</div>
+                            <div class="install-step-content">
+                                <div class="install-step-icon">🌍</div>
+                                <div class="install-step-text">
+                                    <h4>Make Public (Optional)</h4>
+                                    <p>Share your instance with the community by making it public.</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="admin-carousel-container">

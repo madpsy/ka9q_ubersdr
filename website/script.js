@@ -451,4 +451,51 @@ window.currentSlide2 = currentSlide2;
 window.moveCarousel3 = moveCarousel3;
 window.currentSlide3 = currentSlide3;
 window.moveCarousel4 = moveCarousel4;
+
+// Copy code to clipboard function
+function copyCode(button) {
+    const codeBlock = button.parentElement.querySelector('code');
+    const textToCopy = codeBlock.textContent;
+    
+    // Use the Clipboard API
+    navigator.clipboard.writeText(textToCopy).then(() => {
+        // Change icon to checkmark temporarily
+        const icon = button.querySelector('.copy-icon');
+        const originalIcon = icon.textContent;
+        icon.textContent = '✓';
+        button.style.backgroundColor = 'var(--success)';
+        
+        // Reset after 2 seconds
+        setTimeout(() => {
+            icon.textContent = originalIcon;
+            button.style.backgroundColor = '';
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy text: ', err);
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = textToCopy;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            const icon = button.querySelector('.copy-icon');
+            const originalIcon = icon.textContent;
+            icon.textContent = '✓';
+            button.style.backgroundColor = 'var(--success)';
+            setTimeout(() => {
+                icon.textContent = originalIcon;
+                button.style.backgroundColor = '';
+            }, 2000);
+        } catch (err) {
+            console.error('Fallback: Failed to copy', err);
+        }
+        document.body.removeChild(textArea);
+    });
+}
+
+// Make copyCode function globally available
+window.copyCode = copyCode;
 window.currentSlide4 = currentSlide4;

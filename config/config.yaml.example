@@ -605,6 +605,11 @@ instance_reporting:
   # Set to false for local testing with HTTP-only collector
   use_https: true
 
+  # Automatically use your public IP address for public access
+  # When enabled, the instance reporter will automatically detect and use your public IP
+  # Default: false
+  use_myip: false
+
   # Central server hostname for instance reporting
   # Default: instances.ubersdr.org
   hostname: "instances.ubersdr.org"

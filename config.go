@@ -158,6 +158,7 @@ type SpaceWeatherConfig struct {
 type InstanceReportingConfig struct {
 	Enabled           bool                   `yaml:"enabled"`             // Enable/disable instance reporting
 	UseHTTPS          bool                   `yaml:"use_https"`           // Use HTTPS (true) or HTTP (false) for connections
+	UseMyIP           bool                   `yaml:"use_myip"`            // Automatically use public IP for public access
 	Hostname          string                 `yaml:"hostname"`            // Central server hostname
 	Port              int                    `yaml:"port"`                // Central server port
 	ReportIntervalSec int                    `yaml:"report_interval_sec"` // Seconds between reports

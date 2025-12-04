@@ -48,6 +48,7 @@ type InstanceReport struct {
 	Host             string   `json:"host,omitempty"`    // Optional: tells clients how to connect to this instance
 	Port             int      `json:"port,omitempty"`    // Optional: port for client connections
 	TLS              bool     `json:"tls,omitempty"`     // Optional: whether TLS is required for connections
+	UseMyIP          bool     `json:"use_myip"`          // Automatically use public IP for public access
 	CWSkimmer        bool     `json:"cw_skimmer"`        // Whether CW Skimmer is enabled
 	DigitalDecodes   bool     `json:"digital_decodes"`   // Whether digital decoding is enabled
 	NoiseFloor       bool     `json:"noise_floor"`       // Whether noise floor monitoring is enabled
@@ -277,6 +278,7 @@ func (ir *InstanceReporter) sendReport() error {
 		Host:             ir.config.InstanceReporting.Instance.Host,
 		Port:             ir.config.InstanceReporting.Instance.Port,
 		TLS:              ir.config.InstanceReporting.Instance.TLS,
+		UseMyIP:          ir.config.InstanceReporting.UseMyIP,
 		CWSkimmer:        cwSkimmerEnabled,
 		DigitalDecodes:   ir.config.Decoder.Enabled,
 		NoiseFloor:       ir.config.NoiseFloor.Enabled,

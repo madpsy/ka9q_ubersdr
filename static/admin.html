@@ -747,7 +747,25 @@
                             return true;
                         }
                     }
-                    
+
+                    // Check for return URL parameter
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const returnUrl = urlParams.get('return');
+
+                    if (returnUrl) {
+                        // Validate return URL is same-origin (security check)
+                        try {
+                            const decodedUrl = decodeURIComponent(returnUrl);
+                            // Only allow relative URLs starting with /
+                            if (decodedUrl.startsWith('/') && !decodedUrl.startsWith('//')) {
+                                window.location.href = decodedUrl;
+                                return true;
+                            }
+                        } catch (e) {
+                            console.error('Invalid return URL:', e);
+                        }
+                    }
+
                     // Valid session exists, skip login
                     document.getElementById('loginBox').style.display = 'none';
                     document.getElementById('configEditor').classList.add('active');
@@ -841,6 +859,24 @@
                             // Redirect to setup wizard
                             window.location.href = '/setup-wizard.html';
                             return;
+                        }
+                    }
+                    
+                    // Check for return URL parameter
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const returnUrl = urlParams.get('return');
+                    
+                    if (returnUrl) {
+                        // Validate return URL is same-origin (security check)
+                        try {
+                            const decodedUrl = decodeURIComponent(returnUrl);
+                            // Only allow relative URLs starting with /
+                            if (decodedUrl.startsWith('/') && !decodedUrl.startsWith('//')) {
+                                window.location.href = decodedUrl;
+                                return;
+                            }
+                        } catch (e) {
+                            console.error('Invalid return URL:', e);
                         }
                     }
                     

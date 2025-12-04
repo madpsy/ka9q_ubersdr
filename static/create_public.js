@@ -21,9 +21,10 @@ async function loadCurrentConfig() {
     try {
         const response = await fetch('/admin/config');
         
-        // If unauthorized, redirect to admin login
+        // If unauthorized, redirect to admin login with return URL
         if (response.status === 401) {
-            window.location.href = '/admin.html';
+            const returnUrl = encodeURIComponent(window.location.pathname);
+            window.location.href = `/admin.html?return=${returnUrl}`;
             return;
         }
         

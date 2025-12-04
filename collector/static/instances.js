@@ -168,9 +168,9 @@ function createInstanceCard(instance, isClosest = false) {
                     </span>
                 </div>
             </div>
-            <div class="instance-name">
-                ${instance.name}
-                <button class="uuid-btn" onclick="showUUIDModal('${instance.public_uuid || ''}', '${instance.callsign}')">UUID</button>
+            <div class="instance-name" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>${instance.name}</span>
+                <button class="uuid-btn" onclick="showUUIDModal('${instance.public_uuid || ''}', '${instance.callsign}')" style="margin-left: auto;">UUID</button>
             </div>
             
             <div class="instance-info">
@@ -654,7 +654,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // Show UUID modal
 let currentUUID = '';
 
-function showUUIDModal(uuid, callsign) {
+// Expose functions globally for onclick handlers
+window.showUUIDModal = function(uuid, callsign) {
     const modal = document.getElementById('uuidModal');
     const modalTitle = document.getElementById('uuidModalTitle');
     const uuidDisplay = document.getElementById('uuidDisplay');
@@ -678,14 +679,14 @@ function showUUIDModal(uuid, callsign) {
 }
 
 // Close UUID modal
-function closeUUIDModal() {
+window.closeUUIDModal = function() {
     const modal = document.getElementById('uuidModal');
     modal.classList.remove('active');
     currentUUID = '';
 }
 
 // Copy UUID to clipboard
-async function copyUUID() {
+window.copyUUID = async function() {
     const copyBtn = document.getElementById('copyUUIDBtn');
     
     if (!currentUUID || currentUUID === '') {

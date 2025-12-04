@@ -17,6 +17,11 @@ fi
 echo "=== Installing Avahi (mDNS/Bonjour) support ==="
 apt update && apt install -y avahi-daemon avahi-utils
 
+echo "=== Configuring Avahi daemon ==="
+# Configure hostname and domain in avahi-daemon.conf
+sed -i 's/^#*host-name=.*/host-name=ubersdr/' /etc/avahi/avahi-daemon.conf
+sed -i 's/^#*domain-name=.*/domain-name=local/' /etc/avahi/avahi-daemon.conf
+
 echo "=== Creating mDNS service advertisement ==="
 mkdir -p /etc/avahi/services
 

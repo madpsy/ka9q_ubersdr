@@ -94,9 +94,9 @@ function updateReviewSection() {
     if (generatedUUID) {
         // Use the newly generated UUID from this session
         uuid = generatedUUID;
-    } else if (currentConfig.instance_reporting?.public_uuid) {
-        // Use existing UUID from config
-        uuid = currentConfig.instance_reporting.public_uuid;
+    } else if (currentConfig.instance_reporting?.instance_uuid) {
+        // Use existing UUID from config (field name is instance_uuid)
+        uuid = currentConfig.instance_reporting.instance_uuid;
     } else {
         // No UUID yet
         uuid = 'Will be generated on first test';
@@ -227,7 +227,7 @@ async function finishWizard() {
                 hostname: 'instances.ubersdr.org',  // Default hostname
                 port: 443,  // Default HTTPS port
                 report_interval_sec: 120,  // Default 2 minutes
-                public_uuid: generatedUUID || currentConfig.instance_reporting?.public_uuid || generateUUID()
+                instance_uuid: generatedUUID || currentConfig.instance_reporting?.instance_uuid || generateUUID()
             }
         };
 
@@ -291,7 +291,7 @@ function generateUUID() {
 async function testInstanceReporter() {
     const button = document.getElementById('testButton');
     const testResult = document.getElementById('testResult');
-    const finishButton = document.querySelector('.wizard-nav .btn-primary');
+    const finishButton = document.getElementById('finishBtn');
     const originalText = button.textContent;
 
     button.disabled = true;
@@ -301,7 +301,7 @@ async function testInstanceReporter() {
 
     try {
         // Generate UUID if it doesn't exist
-        if (!generatedUUID && !currentConfig.instance_reporting?.public_uuid) {
+        if (!generatedUUID && !currentConfig.instance_reporting?.instance_uuid) {
             generatedUUID = generateUUID();
             // Update the review display
             document.getElementById('reviewUUID').textContent = generatedUUID;
@@ -321,7 +321,7 @@ async function testInstanceReporter() {
                 hostname: 'instances.ubersdr.org',
                 port: 443,
                 report_interval_sec: 120,
-                public_uuid: generatedUUID || currentConfig.instance_reporting?.public_uuid
+                instance_uuid: generatedUUID || currentConfig.instance_reporting?.instance_uuid
             }
         };
 

@@ -421,6 +421,7 @@ func (ir *InstanceReporter) GetReportStatus() map[string]interface{} {
 
 	status := map[string]interface{}{
 		"enabled":               ir.config.InstanceReporting.Enabled,
+		"hostname":              ir.config.InstanceReporting.Hostname,
 		"last_response_code":    ir.lastResponseCode,
 		"last_response_status":  ir.lastResponseStatus,
 		"last_response_message": ir.lastResponseMessage,

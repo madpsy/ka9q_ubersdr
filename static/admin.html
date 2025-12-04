@@ -5103,40 +5103,43 @@
 
         // UUID copy and view functions
         function copyUUID(uuid) {
-            // Use the Clipboard API to copy the UUID
-            navigator.clipboard.writeText(uuid).then(() => {
-                showAlert('UUID copied to clipboard: ' + uuid, 'success');
-            }).catch(err => {
-                // Fallback for older browsers
-                const textArea = document.createElement('textarea');
-                textArea.value = uuid;
-                textArea.style.position = 'fixed';
-                textArea.style.left = '-999999px';
-                document.body.appendChild(textArea);
-                textArea.select();
-                try {
-                    document.execCommand('copy');
+            // Use fallback method that works in all browsers (HTTP and HTTPS)
+            const textArea = document.createElement('textarea');
+            textArea.value = uuid;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
                     showAlert('UUID copied to clipboard: ' + uuid, 'success');
-                } catch (err) {
-                    showAlert('Failed to copy UUID: ' + err.message, 'error');
+                } else {
+                    showAlert('Failed to copy UUID', 'error');
                 }
-                document.body.removeChild(textArea);
-            });
+            } catch (err) {
+                showAlert('Failed to copy UUID: ' + err.message, 'error');
+            }
+
+            document.body.removeChild(textArea);
         }
 
         async function viewInstance(uuid) {
             try {
-                // Fetch the config to get the instance reporter hostname
-                const response = await authenticatedFetch('/admin/config');
+                // Fetch the instance reporter health to get the hostname
+                const response = await authenticatedFetch('/admin/instance-reporter-health');
                 if (!response) return; // Auth failed, already handled
 
                 if (!response.ok) {
-                    throw new Error('Failed to load config');
+                    throw new Error('Failed to load instance reporter status');
                 }
 
-                const config = await response.json();
-                const hostname = config.instance_reporter?.hostname;
-                
+                const healthData = await response.json();
+                const hostname = healthData.hostname;
+
                 if (!hostname) {
                     showAlert('Instance reporter hostname not configured', 'error');
                     return;

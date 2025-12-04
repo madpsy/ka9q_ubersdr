@@ -478,9 +478,9 @@
                 <p class="step-description">Configure access control and session limits</p>
 
                 <div class="form-group">
-                    <label for="bypassPassword">Bypass Password *</label>
-                    <input type="password" id="bypassPassword" name="bypassPassword" required placeholder="Enter a secure password">
-                    <div class="help-text">Password for unlimited access (bypasses session limits)</div>
+                    <label for="bypassPassword">Bypass Password <span class="optional">(optional)</span></label>
+                    <input type="password" id="bypassPassword" name="bypassPassword" placeholder="Enter a secure password">
+                    <div class="help-text">Password for unlimited access (bypasses session limits). Leave empty to disable.</div>
                     <div class="password-generator">
                         <button type="button" id="generatePassword">Generate Secure Password</button>
                         <div class="generated-password" id="generatedPassword" style="display: none;"></div>

@@ -263,7 +263,7 @@
                     asl: parseInt(formData.asl)
                 },
                 server: {
-                    bypass_passwords: [formData.bypassPassword],
+                    bypass_passwords: formData.bypassPassword ? [formData.bypassPassword] : [],
                     max_session_time: parseInt(formData.maxSessionTime),
                     max_sessions: parseInt(formData.maxSessions),
                     max_sessions_ip: parseInt(formData.maxSessionsIP)

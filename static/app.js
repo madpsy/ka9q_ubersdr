@@ -6808,7 +6808,7 @@ function copyUUIDToClipboard() {
         textArea.select();
         try {
             document.execCommand('copy');
-            showNotification('UUID copied to clipboard', 'success', 3000);
+            showNotification('UUID copied to clipboard - Use this in the desktop client application', 'success', 3000);
             log('UUID copied to clipboard');
         } catch (err) {
             console.error('Failed to copy UUID:', err);

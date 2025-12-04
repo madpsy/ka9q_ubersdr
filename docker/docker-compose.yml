@@ -24,6 +24,8 @@ services:
       - radiod-data:/var/lib/ka9q-radio
       # Optional: Mount custom configuration from host (overrides persistent volume)
       # - ../../ka9q-radio/docker/radiod@ubersdr.conf:/etc/ka9q-radio/radiod@ubersdr.conf
+      # Shared volume for restart trigger
+      - restart-trigger:/var/run/restart-trigger
 
     environment:
       - TZ=${TZ:-UTC}
@@ -70,6 +72,8 @@ services:
     # Volumes for persistent configuration only (static files are part of the image)
     volumes:
       - ubersdr-config:/app/config
+      # Shared volume for restart trigger
+      - restart-trigger:/var/run/restart-trigger
 
     # Healthcheck
     healthcheck:
@@ -102,3 +106,4 @@ volumes:
   radiod-config:
   radiod-data:
   ubersdr-config:
+  restart-trigger:

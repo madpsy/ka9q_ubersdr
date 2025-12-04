@@ -204,6 +204,13 @@ else
     echo "Warning: Config file not found at /app/config/config.yaml"
 fi
 
+# Trigger radiod restart on ubersdr startup
+if [ "$1" = "ka9q_ubersdr" ]; then
+    echo "Triggering radiod restart..."
+    mkdir -p /var/run/restart-trigger
+    touch /var/run/restart-trigger/restart
+fi
+
 # If the command is ka9q_ubersdr, add the -config-dir flag
 if [ "$1" = "ka9q_ubersdr" ]; then
     shift

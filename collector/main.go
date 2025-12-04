@@ -989,6 +989,17 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleMyIP returns the requestor's public IPv4 address
 func handleMyIP(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers to allow cross-origin requests
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return

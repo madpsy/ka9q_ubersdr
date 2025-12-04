@@ -5024,6 +5024,10 @@
                 <span style="color: ${statusValueColor}; font-size: 14px; font-weight: bold;">Response Status: ${statusValueDisplay}</span><br>
                 <span style="color: #666; font-size: 14px;">Response Message: ${messageDisplay}</span><br>
                 <span style="color: #667eea; font-size: 14px; font-family: monospace;">Public UUID: ${publicUUIDDisplay}</span>
+                ${publicUUIDDisplay !== 'N/A' ? `
+                    <button class="btn" style="padding: 4px 8px; font-size: 11px; margin-left: 10px;" onclick="copyUUID('${publicUUIDDisplay}')">Copy</button>
+                    <button class="btn" style="padding: 4px 8px; font-size: 11px; margin-left: 5px;" onclick="viewInstance('${publicUUIDDisplay}')">View</button>
+                ` : ''}
             `;
 
             // Add error message if present
@@ -5095,6 +5099,55 @@
             }
 
             container.appendChild(statusSection);
+        }
+
+        // UUID copy and view functions
+        function copyUUID(uuid) {
+            // Use the Clipboard API to copy the UUID
+            navigator.clipboard.writeText(uuid).then(() => {
+                showAlert('UUID copied to clipboard: ' + uuid, 'success');
+            }).catch(err => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = uuid;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-999999px';
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    showAlert('UUID copied to clipboard: ' + uuid, 'success');
+                } catch (err) {
+                    showAlert('Failed to copy UUID: ' + err.message, 'error');
+                }
+                document.body.removeChild(textArea);
+            });
+        }
+
+        async function viewInstance(uuid) {
+            try {
+                // Fetch the config to get the instance reporter hostname
+                const response = await authenticatedFetch('/admin/config');
+                if (!response) return; // Auth failed, already handled
+
+                if (!response.ok) {
+                    throw new Error('Failed to load config');
+                }
+
+                const config = await response.json();
+                const hostname = config.instance_reporter?.hostname;
+                
+                if (!hostname) {
+                    showAlert('Instance reporter hostname not configured', 'error');
+                    return;
+                }
+
+                // Open the instance reporter URL in a new tab
+                const url = `https://${hostname}/?uuid=${uuid}&conditions=true`;
+                window.open(url, '_blank');
+            } catch (error) {
+                showAlert('Error opening instance view: ' + error.message, 'error');
+            }
         }
     </script>
 </body>

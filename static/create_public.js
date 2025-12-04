@@ -15,12 +15,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadCurrentConfig() {
     try {
         const response = await fetch('/admin/config');
+        
+        // If unauthorized, redirect to admin login
+        if (response.status === 401) {
+            window.location.href = '/admin.html';
+            return;
+        }
+        
         if (!response.ok) {
             throw new Error('Failed to load configuration');
         }
-        
+
         currentConfig = await response.json();
-        
+
         // Populate form fields with current values
         populateFormFields();
     } catch (error) {

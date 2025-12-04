@@ -261,6 +261,24 @@ async function fetchInstances() {
     }
 }
 
+async function fetchSingleInstance(uuid) {
+    try {
+        const response = await fetch(`/api/instances/${uuid}`);
+        if (!response.ok) {
+            if (response.status === 404) {
+                throw new Error(`Instance with UUID ${uuid} not found`);
+            }
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const instance = await response.json();
+        // Return as array for consistency with fetchInstances
+        return [instance];
+    } catch (error) {
+        console.error('Error fetching instance:', error);
+        throw error;
+    }
+}
+
 function initMap() {
     // Initialize the map centered on the world
     map = L.map('map').setView([20, 0], 2);
@@ -442,7 +460,18 @@ async function loadAndDisplayInstances() {
         statusEl.textContent = 'Loading instances...';
         statusEl.className = 'status-bar loading';
         
-        const instances = await fetchInstances();
+        // Check if a specific UUID is requested via URL parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const requestedUUID = urlParams.get('uuid');
+
+        let instances;
+        if (requestedUUID) {
+            // Fetch only the specific instance
+            instances = await fetchSingleInstance(requestedUUID);
+        } else {
+            // Fetch all instances
+            instances = await fetchInstances();
+        }
         
         if (instances.length === 0) {
             containerEl.innerHTML = '<div class="no-instances">No instances currently registered. Check back later!</div>';
@@ -478,7 +507,9 @@ async function loadAndDisplayInstances() {
         updateMap(instances);
         
         let statusText = `${instances.length} instance${instances.length !== 1 ? 's' : ''} found`;
-        if (userLocation) {
+        if (requestedUUID) {
+            statusText = `Showing instance: ${instances[0]?.callsign || 'Unknown'}`;
+        } else if (userLocation) {
             statusText += ` • Sorted by distance from your location`;
         }
         statusText += ` • Last updated: ${new Date().toLocaleTimeString()}`;

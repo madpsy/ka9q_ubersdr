@@ -3062,3 +3062,96 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 		log.Printf("Error encoding response: %v", err)
 	}
 }
+
+// HandleWizardStatus checks if the setup wizard should be shown
+func (ah *AdminHandler) HandleWizardStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Read current config to check wizard flag
+	data, err := os.ReadFile(ah.configFile)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var configMap map[string]interface{}
+	if err := yaml.Unmarshal(data, &configMap); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Check if wizard flag exists and is true
+	needsWizard := true // Default to true if not set
+	if admin, ok := configMap["admin"].(map[string]interface{}); ok {
+		if wizard, ok := admin["wizard"].(bool); ok {
+			needsWizard = wizard
+		}
+	}
+
+	response := map[string]interface{}{
+		"needs_wizard": needsWizard,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding wizard status: %v", err)
+	}
+}
+
+// HandleWizardComplete marks the setup wizard as complete
+func (ah *AdminHandler) HandleWizardComplete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Read current config
+	data, err := os.ReadFile(ah.configFile)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var configMap map[string]interface{}
+	if err := yaml.Unmarshal(data, &configMap); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Set wizard flag to false
+	if admin, ok := configMap["admin"].(map[string]interface{}); ok {
+		admin["wizard"] = false
+	} else {
+		// Create admin section if it doesn't exist
+		configMap["admin"] = map[string]interface{}{
+			"wizard": false,
+		}
+	}
+
+	// Write back to file
+	yamlData, err := yaml.Marshal(configMap)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(ah.configFile, yamlData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Setup wizard completed successfully",
+	}); err != nil {
+		log.Printf("Error encoding wizard complete response: %v", err)
+	}
+}

@@ -732,6 +732,17 @@
             try {
                 const response = await fetch('/admin/config');
                 if (response.ok) {
+                    // Check if wizard needs to run before showing admin panel
+                    const wizardResponse = await fetch('/admin/wizard-status');
+                    if (wizardResponse.ok) {
+                        const wizardData = await wizardResponse.json();
+                        if (wizardData.needs_wizard) {
+                            // Redirect to setup wizard
+                            window.location.href = '/setup-wizard.html';
+                            return true;
+                        }
+                    }
+                    
                     // Valid session exists, skip login
                     document.getElementById('loginBox').style.display = 'none';
                     document.getElementById('configEditor').classList.add('active');
@@ -817,6 +828,17 @@
                 });
 
                 if (response.ok) {
+                    // Check if wizard needs to run before showing admin panel
+                    const wizardResponse = await fetch('/admin/wizard-status');
+                    if (wizardResponse.ok) {
+                        const wizardData = await wizardResponse.json();
+                        if (wizardData.needs_wizard) {
+                            // Redirect to setup wizard
+                            window.location.href = '/setup-wizard.html';
+                            return;
+                        }
+                    }
+                    
                     // Session cookie is set automatically by the browser
                     document.getElementById('loginBox').style.display = 'none';
                     document.getElementById('configEditor').classList.add('active');

@@ -2,6 +2,8 @@
 
 # Admin settings
 admin:
+  # Show setup wizard on first run (automatically set to false after completion)
+  wizard: true
   # Admin password for configuration access
   password: "mypassword"
   # Description HTML to display in the top right of the page

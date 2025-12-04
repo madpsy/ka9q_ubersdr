@@ -529,6 +529,58 @@
             opacity: 0.7;
             border-top: 1px solid rgba(255, 255, 255, 0.2);
         }
+
+        .uuid-btn {
+            padding: 4px 12px;
+            background: rgba(139, 92, 246, 0.8);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.75em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 10px;
+        }
+
+        .uuid-btn:hover {
+            background: #8b5cf6;
+            transform: translateY(-1px);
+        }
+
+        .uuid-display {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 1.1em;
+            color: #60a5fa;
+            word-break: break-all;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .copy-btn {
+            padding: 10px 20px;
+            background: #10b981;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .copy-btn:hover {
+            background: #059669;
+            transform: translateY(-1px);
+        }
+
+        .copy-btn.copied {
+            background: #3b82f6;
+        }
     </style>
 </head>
 <body>
@@ -587,6 +639,20 @@
                 </div>
             </div>
         </div>
+    <!-- UUID Modal -->
+    <div id="uuidModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="uuidModalTitle">Instance UUID</h2>
+                <button class="modal-close" onclick="closeUUIDModal()">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="uuid-display" id="uuidDisplay"></div>
+                <button class="copy-btn" id="copyUUIDBtn" onclick="copyUUID()">📋 Copy to Clipboard</button>
+            </div>
+        </div>
+    </div>
+
     </div>
 
     <script src="instances.js"></script>

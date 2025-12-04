@@ -168,7 +168,10 @@ function createInstanceCard(instance, isClosest = false) {
                     </span>
                 </div>
             </div>
-            <div class="instance-name">${instance.name}</div>
+            <div class="instance-name">
+                ${instance.name}
+                <button class="uuid-btn" onclick="showUUIDModal('${instance.public_uuid || ''}', '${instance.callsign}')">UUID</button>
+            </div>
             
             <div class="instance-info">
                 <div class="instance-info-row">
@@ -648,6 +651,79 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
                 closeNoiseFloorModal();
+// Show UUID modal
+let currentUUID = '';
+
+function showUUIDModal(uuid, callsign) {
+    const modal = document.getElementById('uuidModal');
+    const modalTitle = document.getElementById('uuidModalTitle');
+    const uuidDisplay = document.getElementById('uuidDisplay');
+    const copyBtn = document.getElementById('copyUUIDBtn');
+    
+    currentUUID = uuid;
+    modalTitle.textContent = `Instance UUID - ${callsign}`;
+    
+    if (uuid && uuid !== '') {
+        uuidDisplay.textContent = uuid;
+    } else {
+        uuidDisplay.textContent = 'No UUID available';
+        uuidDisplay.style.opacity = '0.5';
+    }
+    
+    // Reset copy button
+    copyBtn.textContent = '📋 Copy to Clipboard';
+    copyBtn.classList.remove('copied');
+    
+    modal.classList.add('active');
+}
+
+// Close UUID modal
+function closeUUIDModal() {
+    const modal = document.getElementById('uuidModal');
+    modal.classList.remove('active');
+    currentUUID = '';
+}
+
+// Copy UUID to clipboard
+async function copyUUID() {
+    const copyBtn = document.getElementById('copyUUIDBtn');
+    
+    if (!currentUUID || currentUUID === '') {
+        return;
+    }
+    
+    try {
+        await navigator.clipboard.writeText(currentUUID);
+        copyBtn.textContent = '✓ Copied!';
+        copyBtn.classList.add('copied');
+        
+        // Reset button after 2 seconds
+        setTimeout(() => {
+            copyBtn.textContent = '📋 Copy to Clipboard';
+            copyBtn.classList.remove('copied');
+        }, 2000);
+    } catch (err) {
+        console.error('Failed to copy UUID:', err);
+        copyBtn.textContent = '❌ Failed to copy';
+        
+        // Reset button after 2 seconds
+        setTimeout(() => {
+            copyBtn.textContent = '📋 Copy to Clipboard';
+        }, 2000);
+    }
+}
+
+// Close UUID modal when clicking outside
+document.addEventListener('DOMContentLoaded', () => {
+    const uuidModal = document.getElementById('uuidModal');
+    if (uuidModal) {
+        uuidModal.addEventListener('click', (e) => {
+            if (e.target === uuidModal) {
+                closeUUIDModal();
+            }
+        });
+    }
+});
             }
         });
     }

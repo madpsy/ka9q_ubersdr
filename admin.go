@@ -2899,6 +2899,7 @@ func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *h
 	// If not enabled, return early
 	if !ah.config.InstanceReporting.Enabled {
 		status["message"] = "Instance reporting is not enabled"
+		status["healthy"] = true // Not enabled is not unhealthy
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(status); err != nil {
 			log.Printf("Error encoding instance reporter status: %v", err)
@@ -2909,6 +2910,8 @@ func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *h
 	// Check if instance reporter exists
 	if ah.instanceReporter == nil {
 		status["message"] = "Instance reporter not initialized"
+		status["healthy"] = false
+		status["issues"] = []string{"Instance reporter not initialized"}
 		w.WriteHeader(http.StatusServiceUnavailable)
 		if err := json.NewEncoder(w).Encode(status); err != nil {
 			log.Printf("Error encoding instance reporter status: %v", err)
@@ -2922,6 +2925,45 @@ func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *h
 	// Merge the report status into our response
 	for k, v := range reportStatus {
 		status[k] = v
+	}
+
+	// Determine health based on response code and status
+	healthy := true
+	issues := []string{}
+
+	// Check if we have a last response code
+	if lastCode, ok := status["last_response_code"].(int); ok {
+		if lastCode != 200 {
+			healthy = false
+			issues = append(issues, fmt.Sprintf("Last HTTP response code was %d (expected 200)", lastCode))
+		}
+	} else {
+		// No response code yet - not necessarily unhealthy if we haven't reported yet
+		if lastError, ok := status["last_report_error"].(string); ok && lastError != "" {
+			healthy = false
+			issues = append(issues, fmt.Sprintf("Last report error: %s", lastError))
+		}
+	}
+
+	// Check if status is "ok"
+	if lastStatus, ok := status["last_response_status"].(string); ok {
+		if lastStatus != "ok" {
+			healthy = false
+			issues = append(issues, fmt.Sprintf("Last response status was '%s' (expected 'ok')", lastStatus))
+		}
+	}
+
+	// Check for errors
+	if lastError, ok := status["last_report_error"].(string); ok && lastError != "" {
+		healthy = false
+		if len(issues) == 0 {
+			issues = append(issues, fmt.Sprintf("Last report error: %s", lastError))
+		}
+	}
+
+	status["healthy"] = healthy
+	if len(issues) > 0 {
+		status["issues"] = issues
 	}
 
 	w.WriteHeader(http.StatusOK)

@@ -4943,9 +4943,27 @@
             const statusIcon = data.healthy ? '✅' : '❌';
             const statusColor = data.healthy ? '#28a745' : '#dc3545';
 
-            statusSection.innerHTML = `
-                <h3 style="color: ${statusColor};">${statusIcon} Instance Reporter Health</h3>
-            `;
+            const headerDiv = document.createElement('div');
+            headerDiv.style.display = 'flex';
+            headerDiv.style.justifyContent = 'space-between';
+            headerDiv.style.alignItems = 'center';
+            headerDiv.style.marginBottom = '15px';
+
+            const titleH3 = document.createElement('h3');
+            titleH3.style.color = statusColor;
+            titleH3.style.margin = '0';
+            titleH3.textContent = `${statusIcon} Instance Reporter Health`;
+            headerDiv.appendChild(titleH3);
+
+            const testButton = document.createElement('button');
+            testButton.className = 'btn';
+            testButton.style.padding = '6px 12px';
+            testButton.style.fontSize = '12px';
+            testButton.textContent = 'Test';
+            testButton.onclick = testInstanceReporter;
+            headerDiv.appendChild(testButton);
+
+            statusSection.appendChild(headerDiv);
 
             // Overall status
             const statusDiv = document.createElement('div');
@@ -5099,6 +5117,53 @@
             }
 
             container.appendChild(statusSection);
+        }
+
+        // Test instance reporter function
+        async function testInstanceReporter() {
+            const button = event.target;
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Testing...';
+
+            try {
+                const response = await authenticatedFetch('/admin/instance-reporter-trigger', {
+                    method: 'POST'
+                });
+
+                if (!response) {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                    return; // Auth failed, already handled
+                }
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to trigger instance reporter');
+                }
+
+                const result = await response.json();
+
+                // Format the response for display
+                let message = 'Instance reporter test completed:\n\n';
+                message += `HTTP Response Code: ${result.collector_response_code || 'N/A'}\n`;
+                message += `Status: ${result.collector_response_status || 'N/A'}\n`;
+                message += `Message: ${result.collector_response_message || 'N/A'}\n`;
+                if (result.public_uuid) {
+                    message += `Public UUID: ${result.public_uuid}\n`;
+                }
+
+                // Show success alert with details
+                showAlert(message, result.collector_response_code === 200 ? 'success' : 'error');
+
+                // Reload the health status to show updated information
+                await loadMonitorHealth();
+            } catch (error) {
+                showAlert('Error testing instance reporter: ' + error.message, 'error');
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
         }
 
         // UUID copy and view functions

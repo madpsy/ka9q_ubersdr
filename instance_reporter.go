@@ -532,3 +532,14 @@ func (ir *InstanceReporter) GetEffectiveHost() string {
 	}
 	return ir.config.InstanceReporting.Instance.Host
 }
+
+// TriggerReport manually triggers an immediate instance report
+// This is called by the admin API endpoint to force a report
+func (ir *InstanceReporter) TriggerReport() error {
+	if !ir.config.InstanceReporting.Enabled {
+		return fmt.Errorf("instance reporting is not enabled")
+	}
+
+	// Send the report immediately
+	return ir.sendReport()
+}

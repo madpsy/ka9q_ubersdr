@@ -2971,3 +2971,94 @@ func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *h
 		log.Printf("Error encoding instance reporter status: %v", err)
 	}
 }
+
+// HandleInstanceReporterTrigger triggers an immediate instance report
+// This is an admin-only endpoint that manually triggers the instance reporter to send a POST
+// Returns the response from the collector server
+func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if instance reporting is enabled
+	if !ah.config.InstanceReporting.Enabled {
+		http.Error(w, "Instance reporting is not enabled", http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "Instance reporting is not enabled",
+		}); err != nil {
+			log.Printf("Error encoding response: %v", err)
+		}
+		return
+	}
+
+	// Check if instance reporter exists
+	if ah.instanceReporter == nil {
+		http.Error(w, "Instance reporter not initialized", http.StatusServiceUnavailable)
+		if err := json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "Instance reporter not initialized",
+		}); err != nil {
+			log.Printf("Error encoding response: %v", err)
+		}
+		return
+	}
+
+	// Trigger an immediate report
+	if err := ah.instanceReporter.TriggerReport(); err != nil {
+		// Get the report status to include collector response details
+		reportStatus := ah.instanceReporter.GetReportStatus()
+
+		response := map[string]interface{}{
+			"status":  "error",
+			"message": fmt.Sprintf("Failed to trigger report: %v", err),
+		}
+
+		// Include collector response details if available
+		if lastCode, ok := reportStatus["last_response_code"].(int); ok && lastCode > 0 {
+			response["collector_response_code"] = lastCode
+		}
+		if lastStatus, ok := reportStatus["last_response_status"].(string); ok && lastStatus != "" {
+			response["collector_response_status"] = lastStatus
+		}
+		if lastMessage, ok := reportStatus["last_response_message"].(string); ok && lastMessage != "" {
+			response["collector_response_message"] = lastMessage
+		}
+
+		http.Error(w, fmt.Sprintf("Failed to trigger report: %v", err), http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding response: %v", err)
+		}
+		return
+	}
+
+	// Get the report status to include collector response details
+	reportStatus := ah.instanceReporter.GetReportStatus()
+
+	response := map[string]interface{}{
+		"status":  "success",
+		"message": "Instance report triggered successfully",
+	}
+
+	// Include collector response details
+	if lastCode, ok := reportStatus["last_response_code"].(int); ok {
+		response["collector_response_code"] = lastCode
+	}
+	if lastStatus, ok := reportStatus["last_response_status"].(string); ok {
+		response["collector_response_status"] = lastStatus
+	}
+	if lastMessage, ok := reportStatus["last_response_message"].(string); ok {
+		response["collector_response_message"] = lastMessage
+	}
+	if publicUUID, ok := reportStatus["public_uuid"].(string); ok && publicUUID != "" {
+		response["public_uuid"] = publicUUID
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
+}

@@ -257,9 +257,18 @@
         hideMessages();
 
         try {
-            // Prepare main config update
+            // Load existing config first to preserve all fields
+            const existingConfigResponse = await fetch('/admin/config');
+            if (!existingConfigResponse.ok) {
+                throw new Error('Failed to load existing configuration');
+            }
+            const existingConfig = await existingConfigResponse.json();
+
+            // Merge wizard changes into existing config
             const mainConfig = {
+                ...existingConfig,
                 admin: {
+                    ...existingConfig.admin,
                     callsign: formData.callsign.toUpperCase(),
                     name: formData.stationName,
                     email: formData.email,
@@ -272,12 +281,14 @@
                     asl: parseInt(formData.asl)
                 },
                 server: {
-                    bypass_passwords: formData.bypassPassword ? [formData.bypassPassword] : [],
+                    ...existingConfig.server,
+                    bypass_passwords: formData.bypassPassword ? [formData.bypassPassword] : (existingConfig.server?.bypass_passwords || []),
                     max_session_time: parseInt(formData.maxSessionTime),
                     max_sessions: parseInt(formData.maxSessions),
                     max_sessions_ip: parseInt(formData.maxSessionsIP)
                 },
                 dxcluster: {
+                    ...existingConfig.dxcluster,
                     enabled: formData.dxclusterEnabled,
                     callsign: formData.dxclusterEnabled ? formData.dxclusterCallsign.toUpperCase() : ''
                 }
@@ -298,18 +309,16 @@
 
             // Prepare decoder config if enabled
             if (formData.decoderEnabled) {
-                // First, try to load existing decoder config to get existing bands
+                // Load existing decoder config to preserve all fields
+                const existingDecoderResponse = await fetch('/admin/decoder-config');
+                let existingDecoderConfig = {};
                 let existingBands = [];
-                try {
-                    const existingDecoderResponse = await fetch('/admin/decoder-config');
-                    if (existingDecoderResponse.ok) {
-                        const existingDecoderConfig = await existingDecoderResponse.json();
-                        if (existingDecoderConfig.decoder && existingDecoderConfig.decoder.bands) {
-                            existingBands = existingDecoderConfig.decoder.bands;
-                        }
+
+                if (existingDecoderResponse.ok) {
+                    existingDecoderConfig = await existingDecoderResponse.json();
+                    if (existingDecoderConfig.decoder && existingDecoderConfig.decoder.bands) {
+                        existingBands = existingDecoderConfig.decoder.bands;
                     }
-                } catch (error) {
-                    console.log('No existing decoder config found, will create new');
                 }
 
                 // Enable/disable existing bands based on checkbox state
@@ -325,8 +334,11 @@
                     });
                 }
 
+                // Merge wizard changes into existing decoder config
                 const decoderConfig = {
+                    ...existingDecoderConfig,
                     decoder: {
+                        ...existingDecoderConfig.decoder,
                         enabled: true,
                         receiver_callsign: formData.receiverCallsign.toUpperCase(),
                         receiver_locator: formData.receiverLocator.toUpperCase(),

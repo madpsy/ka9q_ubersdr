@@ -644,13 +644,6 @@ function closeNoiseFloorModal() {
     modal.classList.remove('active');
 }
 
-// Close modal when clicking outside
-document.addEventListener('DOMContentLoaded', () => {
-    const modal = document.getElementById('noiseFloorModal');
-    if (modal) {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                closeNoiseFloorModal();
 // Show UUID modal
 let currentUUID = '';
 
@@ -666,6 +659,7 @@ window.showUUIDModal = function(uuid, callsign) {
     
     if (uuid && uuid !== '') {
         uuidDisplay.textContent = uuid;
+        uuidDisplay.style.opacity = '1';
     } else {
         uuidDisplay.textContent = 'No UUID available';
         uuidDisplay.style.opacity = '0.5';
@@ -676,14 +670,14 @@ window.showUUIDModal = function(uuid, callsign) {
     copyBtn.classList.remove('copied');
     
     modal.classList.add('active');
-}
+};
 
 // Close UUID modal
 window.closeUUIDModal = function() {
     const modal = document.getElementById('uuidModal');
     modal.classList.remove('active');
     currentUUID = '';
-}
+};
 
 // Copy UUID to clipboard
 window.copyUUID = async function() {
@@ -712,7 +706,7 @@ window.copyUUID = async function() {
             copyBtn.textContent = '📋 Copy to Clipboard';
         }, 2000);
     }
-}
+};
 
 // Add event delegation for UUID buttons
 document.addEventListener('click', (e) => {
@@ -723,17 +717,22 @@ document.addEventListener('click', (e) => {
     }
 });
 
-// Close UUID modal when clicking outside
+// Close modals when clicking outside
 document.addEventListener('DOMContentLoaded', () => {
+    const noiseFloorModal = document.getElementById('noiseFloorModal');
+    if (noiseFloorModal) {
+        noiseFloorModal.addEventListener('click', (e) => {
+            if (e.target === noiseFloorModal) {
+                closeNoiseFloorModal();
+            }
+        });
+    }
+    
     const uuidModal = document.getElementById('uuidModal');
     if (uuidModal) {
         uuidModal.addEventListener('click', (e) => {
             if (e.target === uuidModal) {
                 window.closeUUIDModal();
-            }
-        });
-    }
-});
             }
         });
     }

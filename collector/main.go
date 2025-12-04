@@ -176,6 +176,7 @@ func main() {
 	http.HandleFunc("/api/instances/", loggingMiddleware(collector.handleGetInstance))
 	http.HandleFunc("/api/lookup/", loggingMiddleware(collector.handleLookupPublicUUID))
 	http.HandleFunc("/api/noisefloor/", loggingMiddleware(collector.handleGetNoiseFloor))
+	http.HandleFunc("/api/myip", loggingMiddleware(handleMyIP))
 	http.HandleFunc("/health", loggingMiddleware(handleHealth))
 
 	// Serve static files
@@ -983,6 +984,29 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
 		"version": Version,
+	})
+}
+
+// handleMyIP returns the requestor's public IPv4 address
+func handleMyIP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get the client IP
+	clientIP := getClientIP(r)
+
+	// Parse the IP to extract just the IPv4 address (remove port if present)
+	ip := clientIP
+	if host, _, err := net.SplitHostPort(clientIP); err == nil {
+		ip = host
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"ip": ip,
 	})
 }
 

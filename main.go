@@ -1315,7 +1315,13 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	}
 
 	// Construct public_url from instance connection info
-	publicURL := config.InstanceReporting.ConstructPublicURL()
+	// Use effective host from instance reporter if available (for use_myip feature)
+	var publicURL string
+	if instanceReporter != nil {
+		publicURL = config.InstanceReporting.ConstructPublicURL(instanceReporter.GetEffectiveHost())
+	} else {
+		publicURL = config.InstanceReporting.ConstructPublicURL()
+	}
 
 	// Build list of public IQ modes (modes that don't require authentication)
 	publicIQModes := []string{}

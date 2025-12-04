@@ -30,6 +30,7 @@ type InstanceReporter struct {
 	lastPublicUUID      string       // Last 'public_uuid' field from JSON response
 	lastReportTime      time.Time    // Time of last report attempt
 	lastReportError     string       // Last error message if any
+	detectedPublicIP    string       // Auto-detected public IP (when use_myip is true)
 	mu                  sync.RWMutex // Protects the above fields
 }
 
@@ -227,6 +228,65 @@ func (ir *InstanceReporter) getCPUInfo() (string, int) {
 	return "Unknown", 0
 }
 
+// getPublicIP fetches the public IP address from the collector's /api/myip endpoint
+func (ir *InstanceReporter) getPublicIP() (string, error) {
+	// Build URL with http or https based on config
+	protocol := "https"
+	defaultPort := 443
+	if !ir.config.InstanceReporting.UseHTTPS {
+		protocol = "http"
+		defaultPort = 80
+	}
+
+	// Build the /api/myip URL
+	var url string
+	if ir.config.InstanceReporting.Port == defaultPort {
+		url = fmt.Sprintf("%s://%s/api/myip",
+			protocol,
+			ir.config.InstanceReporting.Hostname)
+	} else {
+		url = fmt.Sprintf("%s://%s:%d/api/myip",
+			protocol,
+			ir.config.InstanceReporting.Hostname,
+			ir.config.InstanceReporting.Port)
+	}
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("User-Agent", fmt.Sprintf("UberSDR/%s", Version))
+
+	resp, err := ir.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch public IP from %s: %w", url, err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("[Instance Reporter] Error closing response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("server returned status %d when fetching public IP", resp.StatusCode)
+	}
+
+	// Parse the JSON response
+	var responseData map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&responseData); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	ip, ok := responseData["ip"].(string)
+	if !ok || ip == "" {
+		return "", fmt.Errorf("no IP address in response")
+	}
+
+	log.Printf("Fetched public IP from collector: %s", ip)
+	return ip, nil
+}
+
 // sendReport sends the current instance information to the central server
 // Retries up to 3 times with 10 second delays between attempts
 func (ir *InstanceReporter) sendReport() error {
@@ -234,6 +294,23 @@ func (ir *InstanceReporter) sendReport() error {
 	ir.mu.Lock()
 	ir.lastReportTime = time.Now()
 	ir.mu.Unlock()
+
+	// If use_myip is enabled, fetch the public IP from the collector
+	host := ir.config.InstanceReporting.Instance.Host
+	if ir.config.InstanceReporting.UseMyIP {
+		publicIP, err := ir.getPublicIP()
+		if err != nil {
+			log.Printf("Failed to fetch public IP (will use configured host): %v", err)
+			// Fall back to configured host if fetching fails
+		} else {
+			host = publicIP
+			log.Printf("Using auto-detected public IP: %s", host)
+			// Store the detected IP for use in public_url construction
+			ir.mu.Lock()
+			ir.detectedPublicIP = publicIP
+			ir.mu.Unlock()
+		}
+	}
 	// Get capability information directly from config (no HTTP call needed)
 	cwSkimmerEnabled := false
 	if ir.cwskimmerConfig != nil {
@@ -258,8 +335,8 @@ func (ir *InstanceReporter) sendReport() error {
 		}
 	}
 
-	// Construct public_url from instance connection info
-	publicURL := ir.config.InstanceReporting.ConstructPublicURL()
+	// Construct public_url from instance connection info using effective host
+	publicURL := ir.config.InstanceReporting.ConstructPublicURL(ir.GetEffectiveHost())
 
 	// Get CPU information
 	cpuModel, cpuCores := ir.getCPUInfo()
@@ -275,7 +352,7 @@ func (ir *InstanceReporter) sendReport() error {
 		PublicURL:        publicURL,
 		Version:          Version,
 		Timestamp:        time.Now().Unix(),
-		Host:             ir.config.InstanceReporting.Instance.Host,
+		Host:             host, // Use the host variable (either configured or auto-detected)
 		Port:             ir.config.InstanceReporting.Instance.Port,
 		TLS:              ir.config.InstanceReporting.Instance.TLS,
 		UseMyIP:          ir.config.InstanceReporting.UseMyIP,
@@ -343,7 +420,11 @@ func (ir *InstanceReporter) sendReport() error {
 			}
 			return lastErr
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("[Instance Reporter] Error closing response body: %v", err)
+			}
+		}()
 
 		// Check for redirect responses
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
@@ -437,4 +518,17 @@ func (ir *InstanceReporter) GetReportStatus() map[string]interface{} {
 	}
 
 	return status
+}
+
+// GetEffectiveHost returns the host to use for public access
+// If use_myip is enabled and a public IP has been detected, returns that
+// Otherwise returns the configured host
+func (ir *InstanceReporter) GetEffectiveHost() string {
+	ir.mu.RLock()
+	defer ir.mu.RUnlock()
+
+	if ir.config.InstanceReporting.UseMyIP && ir.detectedPublicIP != "" {
+		return ir.detectedPublicIP
+	}
+	return ir.config.InstanceReporting.Instance.Host
 }

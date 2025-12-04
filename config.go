@@ -611,8 +611,15 @@ func (pc *PrometheusConfig) IsIPAllowed(ipStr string) bool {
 }
 
 // ConstructPublicURL builds a public URL from instance connection info
-func (irc *InstanceReportingConfig) ConstructPublicURL() string {
+// If effectiveHost is provided (non-empty), it will be used instead of the configured host
+func (irc *InstanceReportingConfig) ConstructPublicURL(effectiveHost ...string) string {
 	host := irc.Instance.Host
+
+	// Use effectiveHost if provided (for use_myip feature)
+	if len(effectiveHost) > 0 && effectiveHost[0] != "" {
+		host = effectiveHost[0]
+	}
+
 	port := irc.Instance.Port
 	tls := irc.Instance.TLS
 

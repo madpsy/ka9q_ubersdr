@@ -285,7 +285,7 @@
 
             // Save main config
             const mainResponse = await fetch('/admin/config', {
-                method: 'POST',
+                method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
                 },
@@ -339,7 +339,7 @@
 
                 // Save decoder config
                 const decoderResponse = await fetch('/admin/decoder-config', {
-                    method: 'POST',
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json'
                     },

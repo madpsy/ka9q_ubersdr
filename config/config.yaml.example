@@ -636,5 +636,5 @@ instance_reporting:
   # Leave empty if you don't want to report connection details
   instance:
     host: ""
-    port: 0
+    port: 8080
     tls: false

@@ -48,24 +48,22 @@
                     </ul>
                 </div>
 
-                <div class="info-box warning">
-                    <h3>🔒 Privacy & Security</h3>
-                    <ul>
-                        <li>Only basic information is shared (callsign, location, connection details)</li>
-                        <li>Your admin password is never transmitted</li>
-                        <li>You can disable reporting at any time</li>
-                        <li>Connection details are optional - you control what's shared</li>
-                    </ul>
-                </div>
-
                 <div class="info-box">
-                    <h3>📊 What Gets Reported?</h3>
-                    <ul>
-                        <li>Instance UUID (unique identifier)</li>
-                        <li>Callsign and location (from your admin settings)</li>
-                        <li>Public connection details (if you provide them)</li>
-                        <li>Basic statistics (number of users, uptime)</li>
-                    </ul>
+                    <h3>🌐 Ways to Make Your Instance Public</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">
+                        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <h4 style="margin-top: 0; color: #667eea;">🔌 Port Forwarding (HTTP)</h4>
+                            <p style="margin: 0; font-size: 14px;">Forward port 8080 to your UberSDR host IP in your router</p>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <h4 style="margin-top: 0; color: #667eea;">🔒 Port Forwarding (HTTPS)</h4>
+                            <p style="margin: 0; font-size: 14px;">Install a proxy in front of UberSDR which performs HTTPS termination (e.g. Nginx or Caddy)</p>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <h4 style="margin-top: 0; color: #667eea;">☁️ Cloudflare Tunnel</h4>
+                            <p style="margin: 0; font-size: 14px;">If you have your own domain configured in Cloudflare you can <a href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/" target="_blank" rel="noopener noreferrer">create a tunnel</a></p>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -79,29 +77,27 @@
                         <input type="checkbox" id="useMyIP" checked>
                         <span>Automatically use my public IP address</span>
                     </label>
-                    <small>When enabled, the system will automatically detect and use your public IP address. Disable this if you have a custom domain or want to manually specify connection details.</small>
+                    <small>When enabled, the system will automatically detect and use your public IP address. Disable this if you have a custom domain.</small>
                 </div>
 
-                <div id="manualConnectionFields" style="display: none;">
-                    <div class="form-group">
-                        <label for="instanceHost">Public Hostname or IP Address *</label>
-                        <input type="text" id="instanceHost" placeholder="e.g., sdr.example.com or 203.0.113.42">
-                        <small>The hostname or IP address that users will use to connect to your SDR</small>
-                    </div>
+                <div class="form-group" id="hostnameField" style="display: none;">
+                    <label for="instanceHost">Public Hostname or IP Address *</label>
+                    <input type="text" id="instanceHost" placeholder="e.g., sdr.example.com or 203.0.113.42">
+                    <small>The hostname or IP address that users will use to connect to your SDR</small>
+                </div>
 
-                    <div class="form-group">
-                        <label for="instancePort">Public Port *</label>
-                        <input type="number" id="instancePort" value="8080" min="1" max="65535">
-                        <small>The port number users will connect to (typically 8080 for HTTP or 443 for HTTPS)</small>
-                    </div>
+                <div class="form-group">
+                    <label for="instancePort">Public Port *</label>
+                    <input type="number" id="instancePort" value="8080" min="1" max="65535">
+                    <small>The port number users will connect to (typically 8080 for HTTP or 443 for HTTPS)</small>
+                </div>
 
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="instanceTLS">
-                            <span>Use TLS/HTTPS for public connections</span>
-                        </label>
-                        <small>Enable if your public connection uses HTTPS/WSS (recommended for security)</small>
-                    </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="instanceTLS">
+                        <span>Use TLS/HTTPS for public connections</span>
+                    </label>
+                    <small>Enable if your public connection uses HTTPS/WSS (recommended for security)</small>
                 </div>
 
                 <div class="info-box">

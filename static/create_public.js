@@ -73,17 +73,17 @@ function setupEventListeners() {
     });
 }
 
-// Toggle manual connection fields visibility
+// Toggle hostname field visibility
 function toggleManualConnectionFields() {
     const useMyIP = document.getElementById('useMyIP').checked;
-    const manualFields = document.getElementById('manualConnectionFields');
-    
+    const hostnameField = document.getElementById('hostnameField');
+
     if (useMyIP) {
-        manualFields.style.display = 'none';
+        hostnameField.style.display = 'none';
     } else {
-        manualFields.style.display = 'block';
+        hostnameField.style.display = 'block';
     }
-    
+
     updateReviewSection();
 }
 
@@ -110,18 +110,19 @@ function updateReviewSection() {
     
     // Connection settings
     document.getElementById('reviewUseMyIP').textContent = useMyIP ? 'Yes' : 'No';
-    
+
+    // Always show port and TLS
+    document.getElementById('reviewPortItem').style.display = 'flex';
+    document.getElementById('reviewTLSItem').style.display = 'flex';
+    document.getElementById('reviewPort').textContent = instancePort;
+    document.getElementById('reviewTLS').textContent = instanceTLS ? 'Yes' : 'No';
+
+    // Only show hostname if not using auto IP
     if (useMyIP) {
         document.getElementById('reviewHostItem').style.display = 'none';
-        document.getElementById('reviewPortItem').style.display = 'none';
-        document.getElementById('reviewTLSItem').style.display = 'none';
     } else {
         document.getElementById('reviewHostItem').style.display = 'flex';
-        document.getElementById('reviewPortItem').style.display = 'flex';
-        document.getElementById('reviewTLSItem').style.display = 'flex';
         document.getElementById('reviewHost').textContent = instanceHost || '(not set)';
-        document.getElementById('reviewPort').textContent = instancePort;
-        document.getElementById('reviewTLS').textContent = instanceTLS ? 'Yes' : 'No';
     }
 }
 

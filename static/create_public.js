@@ -8,6 +8,11 @@ let generatedUUID = null;
 document.addEventListener('DOMContentLoaded', async () => {
     await loadCurrentConfig();
     setupEventListeners();
+    // Ensure finish button is disabled initially
+    const finishBtn = document.getElementById('finishBtn');
+    if (finishBtn) {
+        finishBtn.disabled = true;
+    }
     updateNavigationButtons();
 });
 

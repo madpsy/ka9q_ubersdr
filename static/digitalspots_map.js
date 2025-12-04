@@ -924,6 +924,8 @@ class DigitalSpotsMap {
 
     handleMessage(message) {
         if (message.type === 'digital_spot') {
+            // Ensure we're marked as connected when receiving data
+            this.updateStatus('connected', 'Connected');
             this.handleDigitalSpot(message.data);
         } else if (message.type === 'status') {
             // Handle connection status updates

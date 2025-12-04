@@ -679,13 +679,17 @@ window.showUUIDModal = function(uuid, callsign) {
     
     console.log('Adding active class to modal');
     modal.classList.add('active');
+    // Force display as a workaround for CSS issues
+    modal.style.display = 'flex';
     console.log('Modal classes after add:', modal.className);
+    console.log('Modal display style:', modal.style.display);
 };
 
 // Close UUID modal
 window.closeUUIDModal = function() {
     const modal = document.getElementById('uuidModal');
     modal.classList.remove('active');
+    modal.style.display = 'none';
     currentUUID = '';
 };
 

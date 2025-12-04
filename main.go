@@ -701,8 +701,14 @@ func main() {
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
 	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics) // New per-user spectrum
 
+	// Initialize instance reporter (before admin handler so it can be passed in)
+	var instanceReporter *InstanceReporter
+	if config.InstanceReporting.Enabled {
+		instanceReporter = NewInstanceReporter(config, cwskimmerConfig, sessions, configPath)
+	}
+
 	// Initialize admin handler (pass all components for proper shutdown during restart)
-	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer)
+	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter)
 
 	// Setup HTTP routes
 	http.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
@@ -872,6 +878,7 @@ func main() {
 		handleDecoderHealth(w, r, multiDecoder)
 	}))
 	http.HandleFunc("/admin/cwskimmer-health", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerHealth))
+	http.HandleFunc("/admin/instance-reporter-health", adminHandler.AuthMiddleware(adminHandler.HandleInstanceReporterHealth))
 
 	// Open log file for HTTP request logging
 	// If LogFile is a relative path and we have a config directory, prepend it
@@ -920,9 +927,8 @@ func main() {
 	log.Printf("Server listening on %s", config.Server.Listen)
 	log.Println("Open http://localhost:8080 in your browser")
 
-	// Initialize instance reporter after HTTP server is listening
-	if config.InstanceReporting.Enabled {
-		instanceReporter := NewInstanceReporter(config, cwskimmerConfig, sessions, configPath)
+	// Start instance reporter after HTTP server is listening
+	if instanceReporter != nil {
 		if err := instanceReporter.Start(); err != nil {
 			log.Printf("Warning: Failed to start instance reporter: %v", err)
 		} else {

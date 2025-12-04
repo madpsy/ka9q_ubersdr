@@ -161,6 +161,7 @@ type AdminHandler struct {
 	spaceWeatherMonitor *SpaceWeatherMonitor
 	cwSkimmerConfig     *CWSkimmerConfig
 	cwSkimmerClient     *CWSkimmerClient
+	instanceReporter    *InstanceReporter
 }
 
 // restartServer triggers a server restart after a short delay
@@ -222,7 +223,7 @@ func (ah *AdminHandler) restartServer() {
 }
 
 // NewAdminHandler creates a new admin handler
-func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient) *AdminHandler {
+func NewAdminHandler(config *Config, configFile string, configDir string, sessions *SessionManager, ipBanManager *IPBanManager, audioReceiver *AudioReceiver, userSpectrumManager *UserSpectrumManager, noiseFloorMonitor *NoiseFloorMonitor, multiDecoder *MultiDecoder, dxCluster *DXClusterClient, spaceWeatherMonitor *SpaceWeatherMonitor, cwSkimmerConfig *CWSkimmerConfig, cwSkimmerClient *CWSkimmerClient, instanceReporter *InstanceReporter) *AdminHandler {
 	return &AdminHandler{
 		config:              config,
 		configFile:          configFile,
@@ -238,6 +239,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		spaceWeatherMonitor: spaceWeatherMonitor,
 		cwSkimmerConfig:     cwSkimmerConfig,
 		cwSkimmerClient:     cwSkimmerClient,
+		instanceReporter:    instanceReporter,
 	}
 }
 
@@ -2881,5 +2883,49 @@ func (ah *AdminHandler) HandleCWSkimmerHealth(w http.ResponseWriter, r *http.Req
 
 	if err := json.NewEncoder(w).Encode(status); err != nil {
 		log.Printf("Error encoding CW Skimmer health status: %v", err)
+	}
+}
+
+// HandleInstanceReporterHealth serves the health status of the instance reporter
+// This is an admin-only endpoint, so IP ban checking is not needed (handled by auth middleware)
+func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Build health status response
+	status := map[string]interface{}{
+		"enabled": ah.config.InstanceReporting.Enabled,
+	}
+
+	// If not enabled, return early
+	if !ah.config.InstanceReporting.Enabled {
+		status["message"] = "Instance reporting is not enabled"
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			log.Printf("Error encoding instance reporter status: %v", err)
+		}
+		return
+	}
+
+	// Check if instance reporter exists
+	if ah.instanceReporter == nil {
+		status["message"] = "Instance reporter not initialized"
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			log.Printf("Error encoding instance reporter status: %v", err)
+		}
+		return
+	}
+
+	// Get report status from instance reporter
+	reportStatus := ah.instanceReporter.GetReportStatus()
+
+	// Merge the report status into our response
+	for k, v := range reportStatus {
+		status[k] = v
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("Error encoding instance reporter status: %v", err)
 	}
 }

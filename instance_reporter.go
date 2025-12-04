@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,12 +18,17 @@ import (
 
 // InstanceReporter handles reporting instance information to central server
 type InstanceReporter struct {
-	config          *Config
-	cwskimmerConfig *CWSkimmerConfig
-	sessions        *SessionManager
-	configPath      string
-	httpClient      *http.Client
-	stopChan        chan struct{}
+	config             *Config
+	cwskimmerConfig    *CWSkimmerConfig
+	sessions           *SessionManager
+	configPath         string
+	httpClient         *http.Client
+	stopChan           chan struct{}
+	lastResponseCode   int          // Last HTTP response code from collector
+	lastResponseStatus string       // Last 'status' field from JSON response
+	lastReportTime     time.Time    // Time of last report attempt
+	lastReportError    string       // Last error message if any
+	mu                 sync.RWMutex // Protects the above fields
 }
 
 // InstanceReport represents the data sent to the central server
@@ -221,6 +227,10 @@ func (ir *InstanceReporter) getCPUInfo() (string, int) {
 // sendReport sends the current instance information to the central server
 // Retries up to 3 times with 10 second delays between attempts
 func (ir *InstanceReporter) sendReport() error {
+	// Update last report time
+	ir.mu.Lock()
+	ir.lastReportTime = time.Now()
+	ir.mu.Unlock()
 	// Get capability information directly from config (no HTTP call needed)
 	cwSkimmerEnabled := false
 	if ir.cwskimmerConfig != nil {
@@ -346,16 +356,68 @@ func (ir *InstanceReporter) sendReport() error {
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 			lastErr = fmt.Errorf("server returned status %d for %s (attempt %d/%d)", resp.StatusCode, url, attempt, maxRetries)
 			log.Printf("%v", lastErr)
+
+			// Store error response
+			ir.mu.Lock()
+			ir.lastResponseCode = resp.StatusCode
+			ir.lastResponseStatus = ""
+			ir.lastReportError = lastErr.Error()
+			ir.mu.Unlock()
+
 			if attempt < maxRetries {
 				time.Sleep(retryDelay)
 				continue
 			}
+
 			return lastErr
 		}
+
+		// Parse the response to get the status field
+		var responseData map[string]interface{}
+		responseStatus := ""
+		if err := json.NewDecoder(resp.Body).Decode(&responseData); err == nil {
+			if status, ok := responseData["status"].(string); ok {
+				responseStatus = status
+			}
+		}
+
+		// Store successful response
+		ir.mu.Lock()
+		ir.lastResponseCode = resp.StatusCode
+		ir.lastResponseStatus = responseStatus
+		ir.lastReportError = ""
+		ir.mu.Unlock()
 
 		log.Printf("Successfully reported instance to %s (status: %d, attempt: %d)", url, resp.StatusCode, attempt)
 		return nil
 	}
 
+	// Store final error if all retries failed
+	if lastErr != nil {
+		ir.mu.Lock()
+		ir.lastReportError = lastErr.Error()
+		ir.mu.Unlock()
+	}
+
 	return lastErr
+}
+
+// GetReportStatus returns the current instance reporting status
+func (ir *InstanceReporter) GetReportStatus() map[string]interface{} {
+	ir.mu.RLock()
+	defer ir.mu.RUnlock()
+
+	status := map[string]interface{}{
+		"enabled":              ir.config.InstanceReporting.Enabled,
+		"last_response_code":   ir.lastResponseCode,
+		"last_response_status": ir.lastResponseStatus,
+		"last_report_error":    ir.lastReportError,
+	}
+
+	if !ir.lastReportTime.IsZero() {
+		status["last_report_time"] = ir.lastReportTime.Format(time.RFC3339)
+		status["seconds_since_last_report"] = int(time.Since(ir.lastReportTime).Seconds())
+	}
+
+	return status
 }

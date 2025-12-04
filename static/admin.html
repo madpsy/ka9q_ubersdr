@@ -4087,30 +4087,32 @@
         // Monitor health management
         async function loadMonitorHealth() {
             try {
-                // Fetch noise floor, space weather, decoder, and CW Skimmer health
-                const [nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all([
+                // Fetch instance reporter, noise floor, space weather, decoder, and CW Skimmer health
+                const [instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all([
+                    authenticatedFetch('/admin/instance-reporter-health'),
                     authenticatedFetch('/admin/noisefloor-health'),
                     authenticatedFetch('/admin/spaceweather-health'),
                     authenticatedFetch('/admin/decoder-health'),
                     authenticatedFetch('/admin/cwskimmer-health')
                 ]);
                 
-                if (!nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) {
+                if (!instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
                 }
 
+                const instanceReporterHealth = (instanceReporterResponse.ok || instanceReporterResponse.status === 503) ? await instanceReporterResponse.json() : null;
                 const nfHealth = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swHealth = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
                 const decoderHealth = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
                 const cwSkimmerHealth = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
 
-                renderMonitorHealth({ noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth }, false);
+                renderMonitorHealth({ instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth }, false);
                 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
-                    const allHealthy = (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false);
+                    const allHealthy = (instanceReporterHealth?.healthy !== false) && (nfHealth?.healthy !== false) && (swHealth?.healthy !== false) && (decoderHealth?.healthy !== false) && (cwSkimmerHealth?.healthy !== false);
                     if (allHealthy) {
                         showAlert('Health check completed - all systems healthy', 'success');
                     } else {
@@ -4149,22 +4151,24 @@
 
         async function loadMonitorHealthDetailed() {
             try {
-                // Fetch noise floor, space weather, decoder, and CW Skimmer detailed diagnostics
-                const [nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all([
+                // Fetch instance reporter, noise floor, space weather, decoder, and CW Skimmer detailed diagnostics
+                const [instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all([
+                    authenticatedFetch('/admin/instance-reporter-health'),
                     authenticatedFetch('/admin/noisefloor-health?detailed=true'),
                     authenticatedFetch('/admin/spaceweather-health?detailed=true'),
                     authenticatedFetch('/admin/decoder-health?detailed=true'),
                     authenticatedFetch('/admin/cwskimmer-health?detailed=true')
                 ]);
                 
-                if (!nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) return; // Auth failed, already handled
+                if (!instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) return; // Auth failed, already handled
 
+                const instanceReporterDiag = (instanceReporterResponse.ok || instanceReporterResponse.status === 503) ? await instanceReporterResponse.json() : null;
                 const nfDiag = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swDiag = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
                 const decoderDiag = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
                 const cwSkimmerDiag = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
 
-                renderMonitorHealth({ noiseFloor: nfDiag, spaceWeather: swDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag }, true);
+                renderMonitorHealth({ instanceReporter: instanceReporterDiag, noiseFloor: nfDiag, spaceWeather: swDiag, decoder: decoderDiag, cwSkimmer: cwSkimmerDiag }, true);
                 showAlert('Detailed diagnostics loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading detailed diagnostics: ' + error.message, 'error');
@@ -4178,12 +4182,13 @@
 
             // Add summary warning banner at the top if any system has issues
             if (!isDetailed) {
+                const hasInstanceReporterIssues = data.instanceReporter && data.instanceReporter.enabled && !data.instanceReporter.healthy;
                 const hasNoiseFloorIssues = data.noiseFloor && !data.noiseFloor.healthy;
                 const hasSpaceWeatherIssues = data.spaceWeather && !data.spaceWeather.healthy;
                 const hasDecoderIssues = data.decoder && !data.decoder.healthy;
                 const hasCWSkimmerIssues = data.cwSkimmer && data.cwSkimmer.enabled && !data.cwSkimmer.healthy;
                 
-                if (hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues || hasCWSkimmerIssues) {
+                if (hasInstanceReporterIssues || hasNoiseFloorIssues || hasSpaceWeatherIssues || hasDecoderIssues || hasCWSkimmerIssues) {
                     const warningBanner = document.createElement('div');
                     warningBanner.style.padding = '20px';
                     warningBanner.style.background = '#fff3cd';
@@ -4205,6 +4210,12 @@
                     issuesList.style.color = '#856404';
                     issuesList.style.fontSize = '15px';
                     issuesList.style.lineHeight = '1.8';
+
+                    if (hasInstanceReporterIssues) {
+                        const li = document.createElement('li');
+                        li.innerHTML = '<strong>Instance Reporter:</strong> ' + (data.instanceReporter.issues && data.instanceReporter.issues.length > 0 ? data.instanceReporter.issues.join(', ') : 'System unhealthy');
+                        issuesList.appendChild(li);
+                    }
                     
                     if (hasNoiseFloorIssues) {
                         const li = document.createElement('li');
@@ -4237,6 +4248,26 @@
 
             if (isDetailed) {
                 // Render detailed diagnostics for all systems
+                if (data.instanceReporter) {
+                    const irSection = document.createElement('div');
+                    irSection.className = 'config-section';
+                    irSection.innerHTML = '<h3>🔍 Instance Reporter - Detailed Diagnostics</h3>';
+
+                    const irPre = document.createElement('pre');
+                    irPre.style.background = '#fff';
+                    irPre.style.padding = '15px';
+                    irPre.style.borderRadius = '5px';
+                    irPre.style.overflow = 'auto';
+                    irPre.style.fontFamily = 'monospace';
+                    irPre.style.fontSize = '13px';
+                    irPre.style.lineHeight = '1.5';
+                    irPre.style.whiteSpace = 'pre-wrap';
+                    irPre.style.wordWrap = 'break-word';
+                    irPre.textContent = JSON.stringify(data.instanceReporter, null, 2);
+                    irSection.appendChild(irPre);
+                    container.appendChild(irSection);
+                }
+
                 if (data.noiseFloor) {
                     const nfSection = document.createElement('div');
                     nfSection.className = 'config-section';
@@ -4297,6 +4328,11 @@
                     container.appendChild(decoderSection);
                 }
             } else {
+                // Render instance reporter health status (first, only if enabled)
+                if (data.instanceReporter && data.instanceReporter.enabled) {
+                    renderInstanceReporterHealth(container, data.instanceReporter);
+                }
+
                 // Render noise floor health status
                 if (data.noiseFloor) {
                     renderNoiseFloorHealth(container, data.noiseFloor);
@@ -4847,6 +4883,159 @@
             const stats = [
                 { label: 'Connection Status', value: data.connected ? 'Connected' : 'Disconnected', icon: data.connected ? '🟢' : '🔴' },
                 { label: 'Recent Spots', value: recentSpots ? 'Yes' : 'No', icon: recentSpots ? '✅' : '⚠️' }
+            ];
+
+            stats.forEach(stat => {
+                const statCard = document.createElement('div');
+                statCard.style.padding = '15px';
+                statCard.style.background = '#f8f9fa';
+                statCard.style.borderRadius = '5px';
+                statCard.style.textAlign = 'center';
+                statCard.innerHTML = `
+                    <div style="font-size: 24px; margin-bottom: 5px;">${stat.icon}</div>
+                    <div style="font-size: 18px; font-weight: bold; color: #667eea; margin-bottom: 5px;">${stat.value}</div>
+                    <div style="font-size: 12px; color: #666;">${stat.label}</div>
+                `;
+                statsDiv.appendChild(statCard);
+            });
+            statusSection.appendChild(statsDiv);
+
+            // Issues list
+            if (data.issues && data.issues.length > 0) {
+                const issuesDiv = document.createElement('div');
+                issuesDiv.style.padding = '15px';
+                issuesDiv.style.background = '#fff3cd';
+                issuesDiv.style.border = '1px solid #ffeaa7';
+                issuesDiv.style.borderRadius = '5px';
+                issuesDiv.style.marginBottom = '20px';
+
+                const issuesTitle = document.createElement('strong');
+                issuesTitle.textContent = '⚠️ Issues Detected:';
+                issuesTitle.style.display = 'block';
+                issuesTitle.style.marginBottom = '10px';
+                issuesDiv.appendChild(issuesTitle);
+
+                const issuesList = document.createElement('ul');
+                issuesList.style.marginLeft = '20px';
+                data.issues.forEach(issue => {
+                    const li = document.createElement('li');
+                    li.textContent = issue;
+                    li.style.marginBottom = '5px';
+                    issuesList.appendChild(li);
+                });
+                issuesDiv.appendChild(issuesList);
+                statusSection.appendChild(issuesDiv);
+            }
+
+            container.appendChild(statusSection);
+        }
+
+        function renderInstanceReporterHealth(container, data) {
+            // Only render if instance reporting is enabled
+            if (!data.enabled) {
+                return;
+            }
+
+            // Render instance reporter health status
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+
+            const statusIcon = data.healthy ? '✅' : '❌';
+            const statusColor = data.healthy ? '#28a745' : '#dc3545';
+
+            statusSection.innerHTML = `
+                <h3 style="color: ${statusColor};">${statusIcon} Instance Reporter Health</h3>
+            `;
+
+            // Overall status
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = data.healthy ? '#d4edda' : '#f8d7da';
+            statusDiv.style.border = `1px solid ${data.healthy ? '#c3e6cb' : '#f5c6cb'}`;
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+
+            // Format last report time
+            let lastReportDisplay = 'Never';
+            if (data.last_report_time && data.last_report_time !== '0001-01-01T00:00:00Z') {
+                try {
+                    const lastReportDate = new Date(data.last_report_time);
+                    const now = new Date();
+                    const diffMs = now - lastReportDate;
+                    const diffSecs = Math.floor(diffMs / 1000);
+
+                    if (diffSecs < 60) {
+                        lastReportDisplay = `${diffSecs}s ago`;
+                    } else if (diffSecs < 3600) {
+                        lastReportDisplay = `${Math.floor(diffSecs / 60)}m ago`;
+                    } else if (diffSecs < 86400) {
+                        lastReportDisplay = `${Math.floor(diffSecs / 3600)}h ago`;
+                    } else {
+                        lastReportDisplay = `${Math.floor(diffSecs / 86400)}d ago`;
+                    }
+                } catch (e) {
+                    lastReportDisplay = data.last_report_time;
+                }
+            }
+
+            // Format response code with color
+            let responseCodeDisplay = 'N/A';
+            let responseCodeColor = '#666';
+            if (data.last_response_code) {
+                responseCodeDisplay = data.last_response_code.toString();
+                if (data.last_response_code === 200) {
+                    responseCodeColor = '#28a745'; // Green for success
+                } else if (data.last_response_code >= 400) {
+                    responseCodeColor = '#dc3545'; // Red for errors
+                } else if (data.last_response_code >= 300) {
+                    responseCodeColor = '#ffc107'; // Yellow for redirects
+                }
+            }
+
+            // Format status value with color
+            let statusValueDisplay = 'N/A';
+            let statusValueColor = '#666';
+            if (data.last_response_status) {
+                statusValueDisplay = data.last_response_status;
+                if (data.last_response_status === 'ok') {
+                    statusValueColor = '#28a745'; // Green for ok
+                } else {
+                    statusValueColor = '#dc3545'; // Red for other values
+                }
+            }
+
+            statusDiv.innerHTML = `
+                <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
+                <span style="color: #666; font-size: 14px;">Enabled: Yes</span><br>
+                <span style="color: #666; font-size: 14px;">Last Report: ${lastReportDisplay}</span><br>
+                <span style="color: ${responseCodeColor}; font-size: 14px; font-weight: bold;">HTTP Response Code: ${responseCodeDisplay}</span><br>
+                <span style="color: ${statusValueColor}; font-size: 14px; font-weight: bold;">Response Status: ${statusValueDisplay}</span>
+            `;
+
+            // Add error message if present
+            if (data.last_report_error) {
+                const errorSpan = document.createElement('span');
+                errorSpan.style.color = '#dc3545';
+                errorSpan.style.fontSize = '14px';
+                errorSpan.style.fontWeight = 'bold';
+                errorSpan.style.display = 'block';
+                errorSpan.style.marginTop = '5px';
+                errorSpan.textContent = `Error: ${data.last_report_error}`;
+                statusDiv.appendChild(errorSpan);
+            }
+
+            statusSection.appendChild(statusDiv);
+
+            // Statistics
+            const statsDiv = document.createElement('div');
+            statsDiv.style.display = 'grid';
+            statsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+            statsDiv.style.gap = '15px';
+            statsDiv.style.marginBottom = '20px';
+
+            const stats = [
+                { label: 'Reporting Status', value: data.healthy ? 'Active' : 'Issues Detected', icon: data.healthy ? '🟢' : '🔴' },
+                { label: 'Last Response', value: responseCodeDisplay, icon: data.last_response_code === 200 ? '✅' : '⚠️' }
             ];
 
             stats.forEach(stat => {

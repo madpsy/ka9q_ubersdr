@@ -29,6 +29,7 @@ class DigitalSpotsMap {
         this.liveMessagesCallsignFilter = ''; // Callsign filter
         this.bandConditionsInterval = null; // Store band conditions update interval
         this.bandConditionsAvailable = false; // Track if band conditions are available
+        this.currentStatus = 'disconnected'; // Track current connection status to avoid unnecessary DOM updates
 
         // Track spots per minute
         this.spotTimestamps = []; // Array of timestamps for rate calculation
@@ -1162,6 +1163,12 @@ class DigitalSpotsMap {
     }
 
     updateStatus(status, text) {
+        // Only update DOM if status has actually changed
+        if (this.currentStatus === status) {
+            return;
+        }
+
+        this.currentStatus = status;
         const badge = document.getElementById('status-badge');
         if (badge) {
             badge.textContent = text;

@@ -89,8 +89,13 @@ function updateReviewSection() {
     const instancePort = document.getElementById('instancePort').value;
     const instanceTLS = document.getElementById('instanceTLS').checked;
     
-    // Public UUID
-    const uuid = generatedUUID || currentConfig.instance_reporting?.public_uuid || 'Will be generated on first test';
+    // Public UUID - show existing or indicate it will be generated
+    let uuid = currentConfig.instance_reporting?.public_uuid;
+    if (!uuid && !generatedUUID) {
+        uuid = 'Will be generated on first test';
+    } else if (generatedUUID) {
+        uuid = generatedUUID;
+    }
     document.getElementById('reviewUUID').textContent = uuid;
     
     // Connection settings
@@ -143,6 +148,14 @@ function showStep(step) {
     
     // Update navigation buttons
     updateNavigationButtons();
+
+    // If we're on step 3, ensure finish button is disabled until test passes
+    if (step === 3) {
+        const finishBtn = document.getElementById('finishBtn');
+        if (finishBtn) {
+            finishBtn.disabled = !testPassed;
+        }
+    }
     
     // Scroll to top
     window.scrollTo({ top: 0, behavior: 'smooth' });

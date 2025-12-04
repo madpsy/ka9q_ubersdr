@@ -18,17 +18,19 @@ import (
 
 // InstanceReporter handles reporting instance information to central server
 type InstanceReporter struct {
-	config             *Config
-	cwskimmerConfig    *CWSkimmerConfig
-	sessions           *SessionManager
-	configPath         string
-	httpClient         *http.Client
-	stopChan           chan struct{}
-	lastResponseCode   int          // Last HTTP response code from collector
-	lastResponseStatus string       // Last 'status' field from JSON response
-	lastReportTime     time.Time    // Time of last report attempt
-	lastReportError    string       // Last error message if any
-	mu                 sync.RWMutex // Protects the above fields
+	config              *Config
+	cwskimmerConfig     *CWSkimmerConfig
+	sessions            *SessionManager
+	configPath          string
+	httpClient          *http.Client
+	stopChan            chan struct{}
+	lastResponseCode    int          // Last HTTP response code from collector
+	lastResponseStatus  string       // Last 'status' field from JSON response
+	lastResponseMessage string       // Last 'message' field from JSON response
+	lastPublicUUID      string       // Last 'public_uuid' field from JSON response
+	lastReportTime      time.Time    // Time of last report attempt
+	lastReportError     string       // Last error message if any
+	mu                  sync.RWMutex // Protects the above fields
 }
 
 // InstanceReport represents the data sent to the central server
@@ -372,12 +374,20 @@ func (ir *InstanceReporter) sendReport() error {
 			return lastErr
 		}
 
-		// Parse the response to get the status field
+		// Parse the response to get the status, message, and public_uuid fields
 		var responseData map[string]interface{}
 		responseStatus := ""
+		responseMessage := ""
+		publicUUID := ""
 		if err := json.NewDecoder(resp.Body).Decode(&responseData); err == nil {
 			if status, ok := responseData["status"].(string); ok {
 				responseStatus = status
+			}
+			if message, ok := responseData["message"].(string); ok {
+				responseMessage = message
+			}
+			if pubUUID, ok := responseData["public_uuid"].(string); ok {
+				publicUUID = pubUUID
 			}
 		}
 
@@ -385,6 +395,8 @@ func (ir *InstanceReporter) sendReport() error {
 		ir.mu.Lock()
 		ir.lastResponseCode = resp.StatusCode
 		ir.lastResponseStatus = responseStatus
+		ir.lastResponseMessage = responseMessage
+		ir.lastPublicUUID = publicUUID
 		ir.lastReportError = ""
 		ir.mu.Unlock()
 
@@ -408,10 +420,12 @@ func (ir *InstanceReporter) GetReportStatus() map[string]interface{} {
 	defer ir.mu.RUnlock()
 
 	status := map[string]interface{}{
-		"enabled":              ir.config.InstanceReporting.Enabled,
-		"last_response_code":   ir.lastResponseCode,
-		"last_response_status": ir.lastResponseStatus,
-		"last_report_error":    ir.lastReportError,
+		"enabled":               ir.config.InstanceReporting.Enabled,
+		"last_response_code":    ir.lastResponseCode,
+		"last_response_status":  ir.lastResponseStatus,
+		"last_response_message": ir.lastResponseMessage,
+		"public_uuid":           ir.lastPublicUUID,
+		"last_report_error":     ir.lastReportError,
 	}
 
 	if !ir.lastReportTime.IsZero() {

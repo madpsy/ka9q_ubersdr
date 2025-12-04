@@ -5004,12 +5004,26 @@
                 }
             }
 
+            // Format message display
+            let messageDisplay = 'N/A';
+            if (data.last_response_message) {
+                messageDisplay = data.last_response_message;
+            }
+
+            // Format public UUID display
+            let publicUUIDDisplay = 'N/A';
+            if (data.public_uuid) {
+                publicUUIDDisplay = data.public_uuid;
+            }
+
             statusDiv.innerHTML = `
                 <strong style="font-size: 16px;">Status: ${data.healthy ? 'Healthy' : 'Unhealthy'}</strong><br>
                 <span style="color: #666; font-size: 14px;">Enabled: Yes</span><br>
                 <span style="color: #666; font-size: 14px;">Last Report: ${lastReportDisplay}</span><br>
                 <span style="color: ${responseCodeColor}; font-size: 14px; font-weight: bold;">HTTP Response Code: ${responseCodeDisplay}</span><br>
-                <span style="color: ${statusValueColor}; font-size: 14px; font-weight: bold;">Response Status: ${statusValueDisplay}</span>
+                <span style="color: ${statusValueColor}; font-size: 14px; font-weight: bold;">Response Status: ${statusValueDisplay}</span><br>
+                <span style="color: #666; font-size: 14px;">Response Message: ${messageDisplay}</span><br>
+                <span style="color: #667eea; font-size: 14px; font-family: monospace;">Public UUID: ${publicUUIDDisplay}</span>
             `;
 
             // Add error message if present

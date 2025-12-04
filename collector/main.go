@@ -501,17 +501,17 @@ func validateInstanceUpdate(update *InstanceUpdate) error {
 	}
 
 	// Validate string length limits
-	if len(update.Callsign) > 20 {
-		return fmt.Errorf("callsign too long (max 20 characters)")
+	if len(update.Callsign) > 10 {
+		return fmt.Errorf("callsign too long (max 10 characters)")
 	}
 	if len(update.Name) > 100 {
 		return fmt.Errorf("name too long (max 100 characters)")
 	}
-	if len(update.Location) > 200 {
-		return fmt.Errorf("location too long (max 200 characters)")
+	if len(update.Location) > 100 {
+		return fmt.Errorf("location too long (max 100 characters)")
 	}
-	if len(update.Version) > 50 {
-		return fmt.Errorf("version too long (max 50 characters)")
+	if len(update.Version) > 10 {
+		return fmt.Errorf("version too long (max 10 characters)")
 	}
 
 	// Validate coordinate ranges
@@ -539,8 +539,8 @@ func validateInstanceUpdate(update *InstanceUpdate) error {
 		if parsedURL.Host == "" {
 			return fmt.Errorf("public_url must have a valid host")
 		}
-		if len(update.PublicURL) > 500 {
-			return fmt.Errorf("public_url too long (max 500 characters)")
+		if len(update.PublicURL) > 100 {
+			return fmt.Errorf("public_url too long (max 100 characters)")
 		}
 	}
 
@@ -549,8 +549,18 @@ func validateInstanceUpdate(update *InstanceUpdate) error {
 
 // handleInstanceUpdate handles POST requests from instances
 func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request) {
+	// Helper function to send JSON error responses
+	sendError := func(statusCode int, message string) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(statusCode)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": message,
+		})
+	}
+
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		sendError(http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -558,39 +568,39 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 	// URL format: /api/instance/{uuid}
 	secretUUID := r.URL.Path[len("/api/instance/"):]
 	if secretUUID == "" {
-		http.Error(w, "Missing instance UUID", http.StatusBadRequest)
+		sendError(http.StatusBadRequest, "Missing instance UUID")
 		return
 	}
 
 	// Validate UUID format
 	if _, err := uuid.Parse(secretUUID); err != nil {
-		http.Error(w, "Invalid UUID format", http.StatusBadRequest)
+		sendError(http.StatusBadRequest, "Invalid UUID format")
 		return
 	}
 
 	// Parse request body
 	var update InstanceUpdate
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		sendError(http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	// Verify UUID in body matches URL
 	if update.UUID != secretUUID {
-		http.Error(w, "UUID mismatch", http.StatusBadRequest)
+		sendError(http.StatusBadRequest, "UUID mismatch")
 		return
 	}
 
 	// Validate field values
 	if err := validateInstanceUpdate(&update); err != nil {
-		http.Error(w, fmt.Sprintf("Validation error: %v", err), http.StatusBadRequest)
+		sendError(http.StatusBadRequest, fmt.Sprintf("Validation error: %v", err))
 		return
 	}
 
 	// Validate that the host is not a local/reserved address
 	if err := validatePublicHost(update.Host); err != nil {
 		log.Printf("Host validation failed for %s: %v", secretUUID, err)
-		http.Error(w, fmt.Sprintf("Host validation error: %v", err), http.StatusBadRequest)
+		sendError(http.StatusBadRequest, fmt.Sprintf("Host validation error: %v", err))
 		return
 	}
 
@@ -600,21 +610,37 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 	// Check rate limit - only allow one POST per IP per 60 seconds
 	if !c.checkRateLimit(clientIP) {
 		log.Printf("Rate limit exceeded for IP: %s (instance: %s)", clientIP, secretUUID)
-		http.Error(w, "Rate limit exceeded - only one instance update per 60 seconds allowed", http.StatusTooManyRequests)
+		sendError(http.StatusTooManyRequests, "Rate limit exceeded - only one instance update per 60 seconds allowed")
 		return
 	}
 
 	// Verify instance is publicly accessible by making a callback
 	if !c.verifyInstanceAccessibility(secretUUID, update.Host, update.Port, update.TLS) {
 		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v) from IP: %s", secretUUID, update.Host, update.Port, update.TLS, clientIP)
-		http.Error(w, "Instance verification failed - not publicly accessible", http.StatusBadRequest)
+		sendError(http.StatusBadRequest, "Instance verification failed - not publicly accessible")
+		return
+	}
+
+	// Check if callsign is already in use by another instance
+	var existingCallsignUUID string
+	err := c.db.QueryRow("SELECT secret_uuid FROM instances WHERE callsign = ? AND secret_uuid != ?",
+		update.Callsign, secretUUID).Scan(&existingCallsignUUID)
+
+	if err == nil {
+		// Found an existing instance with the same callsign but different UUID
+		log.Printf("Callsign %s already in use by instance %s, rejecting registration for %s", update.Callsign, existingCallsignUUID, secretUUID)
+		sendError(http.StatusConflict, fmt.Sprintf("Callsign %s is already registered to another instance", update.Callsign))
+		return
+	} else if err != sql.ErrNoRows {
+		log.Printf("Error checking for existing callsign: %v", err)
+		sendError(http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	// Check if another instance already exists with the same host/port combination
 	// If so, remove it (it will be replaced by this new UUID)
 	var existingSecretUUID string
-	err := c.db.QueryRow("SELECT secret_uuid FROM instances WHERE host = ? AND port = ? AND secret_uuid != ?",
+	err = c.db.QueryRow("SELECT secret_uuid FROM instances WHERE host = ? AND port = ? AND secret_uuid != ?",
 		update.Host, update.Port, secretUUID).Scan(&existingSecretUUID)
 
 	if err == nil {
@@ -644,7 +670,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		publicIQModesJSON, err := json.Marshal(update.PublicIQModes)
 		if err != nil {
 			log.Printf("Failed to marshal public_iq_modes: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			sendError(http.StatusInternalServerError, "Internal server error")
 			return
 		}
 
@@ -667,14 +693,14 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 
 		if err != nil {
 			log.Printf("Failed to insert instance: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			sendError(http.StatusInternalServerError, "Internal server error")
 			return
 		}
 
 		log.Printf("New instance registered: %s (public: %s, callsign: %s) from IP: %s", secretUUID, publicUUID, update.Callsign, clientIP)
 	} else if err != nil {
 		log.Printf("Database error: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		sendError(http.StatusInternalServerError, "Internal server error")
 		return
 	} else {
 		// Existing instance - update
@@ -682,7 +708,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		publicIQModesJSON, err := json.Marshal(update.PublicIQModes)
 		if err != nil {
 			log.Printf("Failed to marshal public_iq_modes: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			sendError(http.StatusInternalServerError, "Internal server error")
 			return
 		}
 
@@ -708,7 +734,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 
 		if err != nil {
 			log.Printf("Failed to update instance: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			sendError(http.StatusInternalServerError, "Internal server error")
 			return
 		}
 

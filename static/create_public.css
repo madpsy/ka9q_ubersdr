@@ -358,8 +358,15 @@ body {
     color: white;
 }
 
-.btn-success:hover {
+.btn-success:hover:not(:disabled) {
     background: #218838;
+}
+
+.btn-success:disabled {
+    background: #6c757d;
+    color: #adb5bd;
+    cursor: not-allowed;
+    opacity: 0.65;
 }
 
 .btn-secondary {

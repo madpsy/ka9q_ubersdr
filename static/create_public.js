@@ -6,16 +6,12 @@ let generatedUUID = null;
 
 // Initialize wizard on page load
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('[WIZARD] Page loaded, testPassed:', testPassed);
     await loadCurrentConfig();
     setupEventListeners();
     // Ensure finish button is disabled initially
     const finishBtn = document.getElementById('finishBtn');
     if (finishBtn) {
-        console.log('[WIZARD] Setting finishBtn.disabled = true on init');
         finishBtn.disabled = true;
-    } else {
-        console.log('[WIZARD] ERROR: finishBtn not found on init');
     }
     updateNavigationButtons();
 });
@@ -172,8 +168,6 @@ function updateNavigationButtons() {
     const nextBtn = document.getElementById('nextBtn');
     const finishBtn = document.getElementById('finishBtn');
 
-    console.log('[WIZARD] updateNavigationButtons called, currentStep:', currentStep, 'testPassed:', testPassed);
-
     // Show/hide previous button
     prevBtn.style.display = currentStep > 1 ? 'inline-block' : 'none';
 
@@ -181,13 +175,11 @@ function updateNavigationButtons() {
     if (currentStep < 3) {
         nextBtn.style.display = 'inline-block';
         finishBtn.style.display = 'none';
-        console.log('[WIZARD] Step < 3, hiding finish button');
     } else {
         nextBtn.style.display = 'none';
         finishBtn.style.display = 'inline-block';
         // Always check test status when showing finish button
         finishBtn.disabled = !testPassed;
-        console.log('[WIZARD] Step 3, showing finish button, disabled:', finishBtn.disabled, '(!testPassed =', !testPassed, ')');
     }
 }
 
@@ -400,7 +392,6 @@ async function testInstanceReporter() {
             testResult.style.border = '1px solid #c3e6cb';
             testResult.style.color = '#155724';
             testPassed = true;
-            console.log('[WIZARD] Test PASSED, setting testPassed = true, enabling button');
             finishButton.disabled = false;
             // Show the success info box
             document.getElementById('successInfo').style.display = 'block';
@@ -410,7 +401,6 @@ async function testInstanceReporter() {
             testResult.style.border = '1px solid #f5c6cb';
             testResult.style.color = '#721c24';
             testPassed = false;
-            console.log('[WIZARD] Test FAILED, setting testPassed = false, disabling button');
             finishButton.disabled = true;
             // Hide the success info box
             document.getElementById('successInfo').style.display = 'none';

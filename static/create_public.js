@@ -288,8 +288,8 @@ async function finishWizard() {
             };
         }
         
-        // Save configuration (no restart needed for instance_reporting)
-        const response = await fetch('/admin/config', {
+        // Save configuration with restart to apply instance_reporting changes
+        const response = await fetch('/admin/config?restart=true', {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
@@ -303,12 +303,12 @@ async function finishWizard() {
         }
         
         const result = await response.json();
-        showAlert(result.message || 'Configuration saved successfully!', 'success');
+        showAlert(result.message || 'Configuration saved successfully! Server is restarting...', 'success');
         
-        // Redirect to admin panel after a short delay
+        // Show restart countdown and redirect to admin panel
         setTimeout(() => {
-            window.location.href = '/admin.html';
-        }, 2000);
+            showRestartCountdown();
+        }, 500);
         
     } catch (error) {
         showAlert('Error saving configuration: ' + error.message, 'error');
@@ -454,4 +454,25 @@ function showAlert(message, type) {
     
     // Scroll alert into view
     alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Show restart countdown overlay
+function showRestartCountdown() {
+    const overlay = document.getElementById('restartOverlay');
+    const countdownEl = document.getElementById('countdownNumber');
+    overlay.style.display = 'flex';
+
+    let countdown = 15;
+    countdownEl.textContent = countdown;
+
+    const interval = setInterval(() => {
+        countdown--;
+        countdownEl.textContent = countdown;
+
+        if (countdown <= 0) {
+            clearInterval(interval);
+            // Redirect to admin panel
+            window.location.href = '/admin.html';
+        }
+    }, 1000);
 }

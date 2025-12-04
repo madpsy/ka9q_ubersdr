@@ -712,17 +712,21 @@ window.copyUUID = async function() {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Setting up modal event listeners');
     
-    // Add event delegation for UUID buttons
+    // Add event delegation for UUID buttons - use capture phase to catch before inline handlers
     document.addEventListener('click', (e) => {
-        if (e.target.classList.contains('uuid-btn')) {
+        // Check if the clicked element or its parent is a uuid-btn
+        const uuidBtn = e.target.closest('.uuid-btn');
+        if (uuidBtn) {
             e.preventDefault();
             e.stopPropagation();
-            const uuid = e.target.dataset.uuid;
-            const callsign = e.target.dataset.callsign;
+            e.stopImmediatePropagation();
+            const uuid = uuidBtn.dataset.uuid;
+            const callsign = uuidBtn.dataset.callsign;
             console.log('UUID button clicked:', uuid, callsign);
             window.showUUIDModal(uuid, callsign);
+            return false;
         }
-    });
+    }, true); // Use capture phase
     
     const noiseFloorModal = document.getElementById('noiseFloorModal');
     if (noiseFloorModal) {

@@ -6,6 +6,8 @@
     let currentStep = 1;
     const totalSteps = 4;
     let formData = {};
+    let map = null;
+    let marker = null;
 
     // DOM elements
     const prevBtn = document.getElementById('prevBtn');
@@ -19,6 +21,7 @@
         setupEventListeners();
         updateUI();
         loadExistingConfig();
+        initializeMap();
         
         // Auto-fill callsign fields when main callsign is entered
         document.getElementById('callsign').addEventListener('input', function(e) {
@@ -65,6 +68,13 @@
                 step.classList.add('active');
             }
         });
+
+        // Refresh map when returning to step 1
+        if (currentStep === 1 && map) {
+            setTimeout(() => {
+                map.invalidateSize();
+            }, 100);
+        }
 
         // Update button visibility and text
         prevBtn.style.visibility = currentStep === 1 ? 'hidden' : 'visible';
@@ -169,6 +179,13 @@
         try {
             // Try to load existing config to pre-fill fields
             const response = await fetch('/admin/config');
+            
+            // If unauthorized, redirect to admin login
+            if (response.status === 401) {
+                window.location.href = '/admin.html';
+                return;
+            }
+            
             if (response.ok) {
                 const config = await response.json();
                 
@@ -201,6 +218,13 @@
 
             // Try to load decoder config
             const decoderResponse = await fetch('/admin/decoder-config');
+            
+            // If unauthorized, redirect to admin login
+            if (decoderResponse.status === 401) {
+                window.location.href = '/admin.html';
+                return;
+            }
+            
             if (decoderResponse.ok) {
                 const decoderConfig = await response.json();
                 
@@ -354,6 +378,58 @@
         passwordField.value = password;
         generatedPasswordDiv.textContent = password;
         generatedPasswordDiv.style.display = 'block';
+    }
+
+    function initializeMap() {
+        // Get initial coordinates or use default (London, UK)
+        const latInput = document.getElementById('latitude');
+        const lonInput = document.getElementById('longitude');
+        const initialLat = parseFloat(latInput.value) || 51.5074;
+        const initialLon = parseFloat(lonInput.value) || -0.1278;
+
+        // Initialize map
+        map = L.map('location-map').setView([initialLat, initialLon], 10);
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        // Add draggable marker
+        marker = L.marker([initialLat, initialLon], {
+            draggable: true
+        }).addTo(map);
+
+        // Update inputs when marker is dragged
+        marker.on('dragend', function(e) {
+            const position = marker.getLatLng();
+            latInput.value = position.lat.toFixed(6);
+            lonInput.value = position.lng.toFixed(6);
+        });
+
+        // Update marker when inputs change
+        latInput.addEventListener('input', updateMarkerFromInputs);
+        lonInput.addEventListener('input', updateMarkerFromInputs);
+
+        // Allow clicking on map to move marker
+        map.on('click', function(e) {
+            marker.setLatLng(e.latlng);
+            latInput.value = e.latlng.lat.toFixed(6);
+            lonInput.value = e.latlng.lng.toFixed(6);
+        });
+    }
+
+    function updateMarkerFromInputs() {
+        const latInput = document.getElementById('latitude');
+        const lonInput = document.getElementById('longitude');
+        const lat = parseFloat(latInput.value);
+        const lon = parseFloat(lonInput.value);
+
+        if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+            marker.setLatLng([lat, lon]);
+            map.setView([lat, lon], map.getZoom());
+        }
     }
 
     // Helper functions

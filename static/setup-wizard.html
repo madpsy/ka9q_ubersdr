@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UberSDR Setup Wizard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         * {
             margin: 0;
@@ -171,6 +173,26 @@
             font-weight: normal;
             color: #718096;
             font-size: 12px;
+        }
+
+        #location-map {
+            height: 400px;
+            width: 100%;
+            margin: 15px 0;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            z-index: 1;
+        }
+
+        .map-container {
+            margin: 20px 0;
+        }
+
+        .map-help {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 8px;
+            font-style: italic;
         }
 
         input[type="text"],
@@ -436,6 +458,11 @@
                         <input type="number" id="longitude" name="longitude" step="0.000001" required placeholder="-71.0589">
                         <div class="help-text">Decimal degrees (e.g., -71.0589)</div>
                     </div>
+                </div>
+
+                <div class="map-container">
+                    <div id="location-map"></div>
+                    <p class="map-help">💡 Drag the marker to set your location, or enter coordinates above</p>
                 </div>
 
                 <div class="form-group">

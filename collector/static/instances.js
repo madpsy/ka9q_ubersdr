@@ -263,7 +263,7 @@ async function fetchInstances() {
 
 async function fetchSingleInstance(uuid) {
     try {
-        const response = await fetch(`/api/instances/${uuid}`);
+        const response = await fetch(`/api/instances/${uuid}?conditions=true`);
         if (!response.ok) {
             if (response.status === 404) {
                 throw new Error(`Instance with UUID ${uuid} not found`);

@@ -877,6 +877,9 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if conditions parameter is set
+	includeConditions := r.URL.Query().Get("conditions") == "true"
+
 	var inst Instance
 	var publicIQModesJSON string
 	err := c.db.QueryRow(`
@@ -917,6 +920,15 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 
 	// Calculate Maidenhead locator
 	inst.Maidenhead = latLonToMaidenhead(inst.Latitude, inst.Longitude)
+
+	// If conditions parameter is set and instance has noise floor enabled, fetch band conditions
+	if includeConditions && inst.NoiseFloor {
+		conditions, updatedAt := c.getBandConditions(inst.PublicUUID)
+		if conditions != nil {
+			inst.BandConditions = conditions
+			inst.ConditionsUpdatedAt = updatedAt
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

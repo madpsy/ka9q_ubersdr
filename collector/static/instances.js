@@ -170,7 +170,7 @@ function createInstanceCard(instance, isClosest = false) {
             </div>
             <div class="instance-name" style="display: flex; justify-content: space-between; align-items: center;">
                 <span>${instance.name}</span>
-                <button class="uuid-btn" onclick="showUUIDModal('${instance.public_uuid || ''}', '${instance.callsign}')" style="margin-left: auto;">UUID</button>
+                <button class="uuid-btn" data-uuid="${instance.public_uuid || ''}" data-callsign="${instance.callsign}" style="margin-left: auto;">UUID</button>
             </div>
             
             <div class="instance-info">
@@ -714,13 +714,22 @@ window.copyUUID = async function() {
     }
 }
 
+// Add event delegation for UUID buttons
+document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('uuid-btn')) {
+        const uuid = e.target.dataset.uuid;
+        const callsign = e.target.dataset.callsign;
+        window.showUUIDModal(uuid, callsign);
+    }
+});
+
 // Close UUID modal when clicking outside
 document.addEventListener('DOMContentLoaded', () => {
     const uuidModal = document.getElementById('uuidModal');
     if (uuidModal) {
         uuidModal.addEventListener('click', (e) => {
             if (e.target === uuidModal) {
-                closeUUIDModal();
+                window.closeUUIDModal();
             }
         });
     }

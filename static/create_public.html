@@ -35,7 +35,7 @@
                 
                 <div class="info-box">
                     <h3>📡 What is Instance Reporting?</h3>
-                    <p>Instance reporting allows your UberSDR to be listed in the public registry at <strong>ubersdr.org</strong>, making it discoverable by other radio enthusiasts worldwide.</p>
+                    <p>Instance reporting allows your UberSDR to be listed in the public registry at <a href="https://instances.ubersdr.org" target="_blank" rel="noopener noreferrer" style="color: #333; font-weight: bold; text-decoration: underline;"><strong>instances.ubersdr.org</strong></a>, making it discoverable by other radio enthusiasts worldwide.</p>
                 </div>
 
                 <div class="info-box">
@@ -92,7 +92,7 @@
                     <small>The port number users will connect to (typically 8080 for HTTP or 443 for HTTPS)</small>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" id="tlsField">
                     <label class="checkbox-label">
                         <input type="checkbox" id="instanceTLS">
                         <span>Use TLS/HTTPS for public connections</span>
@@ -101,7 +101,7 @@
                 </div>
 
                 <div class="info-box">
-                    <strong>💡 Tip:</strong> If you're behind a router, make sure to configure port forwarding to allow external connections to your UberSDR instance.
+                    <strong>💡 Tip:</strong> If not using Cloudflare Tunnel, ensure port forwarding is correctly configured on your router - either directly to your UberSDR instance or, if you have configured a proxy, it should forward to that.
                 </div>
             </div>
 

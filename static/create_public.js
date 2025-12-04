@@ -73,15 +73,20 @@ function setupEventListeners() {
     });
 }
 
-// Toggle hostname field visibility
+// Toggle hostname and TLS field visibility
 function toggleManualConnectionFields() {
     const useMyIP = document.getElementById('useMyIP').checked;
     const hostnameField = document.getElementById('hostnameField');
+    const tlsField = document.getElementById('tlsField');
 
     if (useMyIP) {
         hostnameField.style.display = 'none';
+        tlsField.style.display = 'none';
+        // Uncheck TLS when using auto IP
+        document.getElementById('instanceTLS').checked = false;
     } else {
         hostnameField.style.display = 'block';
+        tlsField.style.display = 'block';
     }
 
     updateReviewSection();
@@ -111,18 +116,19 @@ function updateReviewSection() {
     // Connection settings
     document.getElementById('reviewUseMyIP').textContent = useMyIP ? 'Yes' : 'No';
 
-    // Always show port and TLS
+    // Always show port
     document.getElementById('reviewPortItem').style.display = 'flex';
-    document.getElementById('reviewTLSItem').style.display = 'flex';
     document.getElementById('reviewPort').textContent = instancePort;
-    document.getElementById('reviewTLS').textContent = instanceTLS ? 'Yes' : 'No';
 
-    // Only show hostname if not using auto IP
+    // Only show hostname and TLS if not using auto IP
     if (useMyIP) {
         document.getElementById('reviewHostItem').style.display = 'none';
+        document.getElementById('reviewTLSItem').style.display = 'none';
     } else {
         document.getElementById('reviewHostItem').style.display = 'flex';
         document.getElementById('reviewHost').textContent = instanceHost || '(not set)';
+        document.getElementById('reviewTLSItem').style.display = 'flex';
+        document.getElementById('reviewTLS').textContent = instanceTLS ? 'Yes' : 'No';
     }
 }
 
@@ -237,10 +243,11 @@ async function finishWizard() {
             }
         };
 
-        // Add instance connection details if not using myip
+        // Add instance connection details
+        const instancePort = parseInt(document.getElementById('instancePort').value);
+
         if (!useMyIP) {
             const instanceHost = document.getElementById('instanceHost').value.trim();
-            const instancePort = parseInt(document.getElementById('instancePort').value);
             const instanceTLS = document.getElementById('instanceTLS').checked;
 
             updatedConfig.instance_reporting.instance = {
@@ -249,10 +256,10 @@ async function finishWizard() {
                 tls: instanceTLS
             };
         } else {
-            // Clear instance details if using myip
+            // When using myip, clear hostname and force TLS to false
             updatedConfig.instance_reporting.instance = {
                 host: '',
-                port: 0,
+                port: instancePort,
                 tls: false
             };
         }
@@ -331,10 +338,11 @@ async function testInstanceReporter() {
             }
         };
 
-        // Add instance connection details if not using myip
+        // Add instance connection details
+        const instancePort = parseInt(document.getElementById('instancePort').value);
+
         if (!useMyIP) {
             const instanceHost = document.getElementById('instanceHost').value.trim();
-            const instancePort = parseInt(document.getElementById('instancePort').value);
             const instanceTLS = document.getElementById('instanceTLS').checked;
 
             testConfig.instance_reporting.instance = {
@@ -343,9 +351,10 @@ async function testInstanceReporter() {
                 tls: instanceTLS
             };
         } else {
+            // When using myip, clear hostname and force TLS to false
             testConfig.instance_reporting.instance = {
                 host: '',
-                port: 0,
+                port: instancePort,
                 tls: false
             };
         }

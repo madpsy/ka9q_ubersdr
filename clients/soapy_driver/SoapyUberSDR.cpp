@@ -28,6 +28,7 @@
 #include <iomanip>
 #include <random>
 #include <algorithm>
+#include <set>
 #include <curl/curl.h>
 
 // Base64 decoding
@@ -103,9 +104,11 @@ std::string generateUUID() {
     return ss.str();
 }
 
-// Use TLS-enabled client configuration
-typedef websocketpp::client<websocketpp::config::asio_tls_client> client;
-typedef websocketpp::config::asio_tls_client::message_type::ptr message_ptr;
+// Support both TLS and non-TLS WebSocket connections
+typedef websocketpp::client<websocketpp::config::asio_tls_client> tls_client;
+typedef websocketpp::client<websocketpp::config::asio_client> plain_client;
+typedef websocketpp::config::asio_tls_client::message_type::ptr tls_message_ptr;
+typedef websocketpp::config::asio_client::message_type::ptr plain_message_ptr;
 typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
 
 /***********************************************************************
@@ -199,9 +202,11 @@ private:
     uint64_t _currentFrequency;
     double _sampleRate;
     std::vector<std::string> _allowedIQModes;
+    bool _useTLS;
     
-    // WebSocket client
-    client _wsClient;
+    // WebSocket clients (only one will be used based on protocol)
+    tls_client _tlsClient;
+    plain_client _plainClient;
     websocketpp::connection_hdl _wsHandle;
     std::thread _wsThread;
     std::atomic<bool> _streaming;
@@ -215,7 +220,8 @@ private:
     // Helper functions
     double modeToSampleRate(const std::string &mode) const;
     std::string sampleRateToMode(double rate) const;
-    void handleMessage(websocketpp::connection_hdl hdl, message_ptr msg);
+    void handleTLSMessage(websocketpp::connection_hdl hdl, tls_message_ptr msg);
+    void handlePlainMessage(websocketpp::connection_hdl hdl, plain_message_ptr msg);
     void sendTuneCommand(uint64_t freq, const std::string &mode);
     bool checkConnectionAllowed();
     void connectWebSocket();
@@ -237,12 +243,15 @@ SoapyUberSDR::SoapyUberSDR(const SoapySDR::Kwargs &args)
     _connected = false;
     _userSessionID = generateUUID();
     
+    // Detect if we should use TLS based on URL protocol
+    _useTLS = (_serverURL.find("wss://") == 0);
+    
     if (!_password.empty()) {
-        SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Created device for %s mode=%s (with password)",
-                       _serverURL.c_str(), _currentMode.c_str());
+        SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Created device for %s mode=%s (with password) [%s]",
+                       _serverURL.c_str(), _currentMode.c_str(), _useTLS ? "TLS" : "Plain");
     } else {
-        SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Created device for %s mode=%s",
-                       _serverURL.c_str(), _currentMode.c_str());
+        SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Created device for %s mode=%s [%s]",
+                       _serverURL.c_str(), _currentMode.c_str(), _useTLS ? "TLS" : "Plain");
     }
 }
 
@@ -552,43 +561,83 @@ std::string SoapyUberSDR::sampleRateToMode(double rate) const
     return "iq384";
 }
 
-void SoapyUberSDR::handleMessage(websocketpp::connection_hdl hdl, message_ptr msg)
+void SoapyUberSDR::handleTLSMessage(websocketpp::connection_hdl hdl, tls_message_ptr msg)
 {
     try {
         std::string payload = msg->get_payload();
-        
+
         size_t typePos = payload.find("\"type\"");
         if (typePos == std::string::npos) return;
-        
+
         size_t audioPos = payload.find("\"audio\"", typePos);
         if (audioPos == std::string::npos) return;
-        
+
         size_t dataPos = payload.find("\"data\"");
         if (dataPos == std::string::npos) return;
-        
+
         size_t dataStart = payload.find("\"", dataPos + 6) + 1;
         size_t dataEnd = payload.find("\"", dataStart);
         if (dataStart == std::string::npos || dataEnd == std::string::npos) return;
-        
+
         std::string base64Data = payload.substr(dataStart, dataEnd - dataStart);
-        
+
         std::vector<uint8_t> pcmBytes = base64_decode(base64Data);
-        
+
         size_t numSamples = pcmBytes.size() / 4;
         std::vector<std::complex<float>> iqSamples(numSamples);
-        
+
         for (size_t i = 0; i < numSamples; i++) {
             int16_t I = (pcmBytes[i*4] << 8) | pcmBytes[i*4+1];
             int16_t Q = (pcmBytes[i*4+2] << 8) | pcmBytes[i*4+3];
             iqSamples[i] = std::complex<float>(I / 32768.0f, Q / 32768.0f);
         }
-        
+
         std::lock_guard<std::mutex> lock(_bufferMutex);
         _iqBuffers.push(std::move(iqSamples));
         _bufferCV.notify_one();
-        
+
     } catch (const std::exception &e) {
-        SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Message handling error: %s", e.what());
+        SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: TLS message handling error: %s", e.what());
+    }
+}
+
+void SoapyUberSDR::handlePlainMessage(websocketpp::connection_hdl hdl, plain_message_ptr msg)
+{
+    try {
+        std::string payload = msg->get_payload();
+
+        size_t typePos = payload.find("\"type\"");
+        if (typePos == std::string::npos) return;
+
+        size_t audioPos = payload.find("\"audio\"", typePos);
+        if (audioPos == std::string::npos) return;
+
+        size_t dataPos = payload.find("\"data\"");
+        if (dataPos == std::string::npos) return;
+
+        size_t dataStart = payload.find("\"", dataPos + 6) + 1;
+        size_t dataEnd = payload.find("\"", dataStart);
+        if (dataStart == std::string::npos || dataEnd == std::string::npos) return;
+
+        std::string base64Data = payload.substr(dataStart, dataEnd - dataStart);
+
+        std::vector<uint8_t> pcmBytes = base64_decode(base64Data);
+
+        size_t numSamples = pcmBytes.size() / 4;
+        std::vector<std::complex<float>> iqSamples(numSamples);
+
+        for (size_t i = 0; i < numSamples; i++) {
+            int16_t I = (pcmBytes[i*4] << 8) | pcmBytes[i*4+1];
+            int16_t Q = (pcmBytes[i*4+2] << 8) | pcmBytes[i*4+3];
+            iqSamples[i] = std::complex<float>(I / 32768.0f, Q / 32768.0f);
+        }
+
+        std::lock_guard<std::mutex> lock(_bufferMutex);
+        _iqBuffers.push(std::move(iqSamples));
+        _bufferCV.notify_one();
+
+    } catch (const std::exception &e) {
+        SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Plain message handling error: %s", e.what());
     }
 }
 
@@ -597,7 +646,13 @@ void SoapyUberSDR::sendTuneCommand(uint64_t freq, const std::string &mode)
     try {
         std::stringstream ss;
         ss << "{\"type\":\"tune\",\"frequency\":" << freq << ",\"mode\":\"" << mode << "\"}";
-        _wsClient.send(_wsHandle, ss.str(), websocketpp::frame::opcode::text);
+
+        if (_useTLS) {
+            _tlsClient.send(_wsHandle, ss.str(), websocketpp::frame::opcode::text);
+        } else {
+            _plainClient.send(_wsHandle, ss.str(), websocketpp::frame::opcode::text);
+        }
+
         SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyUberSDR: Sent tune command: %s", ss.str().c_str());
     } catch (const std::exception &e) {
         SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Failed to send tune command: %s", e.what());
@@ -754,7 +809,7 @@ void SoapyUberSDR::connectWebSocket()
     if (!checkConnectionAllowed()) {
         throw std::runtime_error("Connection not allowed by server");
     }
-    
+
     std::stringstream ss;
     ss << _serverURL;
     if (_serverURL.find('?') == std::string::npos)
@@ -778,78 +833,223 @@ void SoapyUberSDR::connectWebSocket()
         }
         ss << "&password=" << encodedPassword;
     }
-    
+
     std::string wsURL = ss.str();
-    
-    SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Connecting to %s", wsURL.c_str());
-    
-    _wsClient.clear_access_channels(websocketpp::log::alevel::all);
-    _wsClient.clear_error_channels(websocketpp::log::elevel::all);
-    _wsClient.init_asio();
-    
-    // Set up TLS/SSL context for secure WebSocket connections
-    _wsClient.set_tls_init_handler([](websocketpp::connection_hdl) {
-        context_ptr ctx = websocketpp::lib::make_shared<websocketpp::lib::asio::ssl::context>(
-            websocketpp::lib::asio::ssl::context::sslv23);
-        
-        try {
-            ctx->set_options(websocketpp::lib::asio::ssl::context::default_workarounds |
-                           websocketpp::lib::asio::ssl::context::no_sslv2 |
-                           websocketpp::lib::asio::ssl::context::no_sslv3 |
-                           websocketpp::lib::asio::ssl::context::single_dh_use);
-            
-            // Set verify mode to none to accept self-signed certificates
-            // In production, you might want to verify certificates properly
-            ctx->set_verify_mode(websocketpp::lib::asio::ssl::verify_none);
-        } catch (std::exception &e) {
-            SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: TLS init error: %s", e.what());
+
+    SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Connecting to %s [%s]", wsURL.c_str(), _useTLS ? "TLS" : "Plain");
+
+    if (_useTLS) {
+        // TLS WebSocket connection
+        _tlsClient.clear_access_channels(websocketpp::log::alevel::all);
+        _tlsClient.clear_error_channels(websocketpp::log::elevel::all);
+        _tlsClient.init_asio();
+
+        // Set up TLS/SSL context for secure WebSocket connections
+        _tlsClient.set_tls_init_handler([](websocketpp::connection_hdl) {
+            context_ptr ctx = websocketpp::lib::make_shared<websocketpp::lib::asio::ssl::context>(
+                websocketpp::lib::asio::ssl::context::sslv23);
+
+            try {
+                ctx->set_options(websocketpp::lib::asio::ssl::context::default_workarounds |
+                               websocketpp::lib::asio::ssl::context::no_sslv2 |
+                               websocketpp::lib::asio::ssl::context::no_sslv3 |
+                               websocketpp::lib::asio::ssl::context::single_dh_use);
+
+                // Set verify mode to none to accept self-signed certificates
+                ctx->set_verify_mode(websocketpp::lib::asio::ssl::verify_none);
+            } catch (std::exception &e) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: TLS init error: %s", e.what());
+            }
+            return ctx;
+        });
+
+        _tlsClient.set_user_agent("UberSDR_Soapy/1.0");
+
+        _tlsClient.set_message_handler([this](websocketpp::connection_hdl hdl, tls_message_ptr msg) {
+            handleTLSMessage(hdl, msg);
+        });
+
+        websocketpp::lib::error_code ec;
+        tls_client::connection_ptr con = _tlsClient.get_connection(wsURL, ec);
+        if (ec) {
+            throw std::runtime_error("TLS WebSocket connection failed: " + ec.message());
         }
-        return ctx;
-    });
-    
-    // Set User-Agent header
-    _wsClient.set_user_agent("UberSDR_Soapy/1.0");
-    
-    _wsClient.set_message_handler([this](websocketpp::connection_hdl hdl, message_ptr msg) {
-        handleMessage(hdl, msg);
-    });
-    
-    websocketpp::lib::error_code ec;
-    client::connection_ptr con = _wsClient.get_connection(wsURL, ec);
-    if (ec) {
-        throw std::runtime_error("WebSocket connection failed: " + ec.message());
+
+        _wsHandle = con->get_handle();
+        _tlsClient.connect(con);
+
+        _wsThread = std::thread([this]() {
+            try {
+                _tlsClient.run();
+            } catch (const std::exception &e) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: TLS WebSocket thread error: %s", e.what());
+            }
+        });
+    } else {
+        // Plain WebSocket connection
+        _plainClient.clear_access_channels(websocketpp::log::alevel::all);
+        _plainClient.clear_error_channels(websocketpp::log::elevel::all);
+        _plainClient.init_asio();
+
+        _plainClient.set_user_agent("UberSDR_Soapy/1.0");
+
+        _plainClient.set_message_handler([this](websocketpp::connection_hdl hdl, plain_message_ptr msg) {
+            handlePlainMessage(hdl, msg);
+        });
+
+        websocketpp::lib::error_code ec;
+        plain_client::connection_ptr con = _plainClient.get_connection(wsURL, ec);
+        if (ec) {
+            throw std::runtime_error("Plain WebSocket connection failed: " + ec.message());
+        }
+
+        _wsHandle = con->get_handle();
+        _plainClient.connect(con);
+
+        _wsThread = std::thread([this]() {
+            try {
+                _plainClient.run();
+            } catch (const std::exception &e) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Plain WebSocket thread error: %s", e.what());
+            }
+        });
     }
-    
-    _wsHandle = con->get_handle();
-    _wsClient.connect(con);
-    
-    _wsThread = std::thread([this]() {
-        try {
-            _wsClient.run();
-        } catch (const std::exception &e) {
-            SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: WebSocket thread error: %s", e.what());
-        }
-    });
-    
+
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     _connected = true;
-    
+
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: WebSocket connected");
 }
 
 void SoapyUberSDR::disconnectWebSocket()
 {
     _connected = false;
-    
+
     try {
-        _wsClient.close(_wsHandle, websocketpp::close::status::normal, "");
-        _wsClient.stop();
+        if (_useTLS) {
+            _tlsClient.close(_wsHandle, websocketpp::close::status::normal, "");
+            _tlsClient.stop();
+        } else {
+            _plainClient.close(_wsHandle, websocketpp::close::status::normal, "");
+            _plainClient.stop();
+        }
     } catch (...) {}
-    
+
     if (_wsThread.joinable())
         _wsThread.join();
-    
+
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: WebSocket disconnected");
+}
+
+// Helper function to discover local instances via mDNS
+static std::vector<std::map<std::string, std::string>> discoverLocalInstances()
+{
+    std::vector<std::map<std::string, std::string>> instances;
+
+    // Try to discover local instances using avahi-browse (Linux) or dns-sd (macOS)
+    // This is a simple implementation that runs the system command
+
+    #ifdef __linux__
+    // Use avahi-browse on Linux
+    FILE* pipe = popen("avahi-browse -t -r _ubersdr._tcp 2>/dev/null | grep -A 10 'hostname ='", "r");
+    #elif __APPLE__
+    // Use dns-sd on macOS
+    FILE* pipe = popen("timeout 2 dns-sd -B _ubersdr._tcp 2>/dev/null", "r");
+    #else
+    // Not supported on other platforms
+    return instances;
+    #endif
+
+    if (!pipe) {
+        // avahi-browse not available - this is not an error, just means no local discovery
+        return instances;
+    }
+
+    char buffer[256];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        output += buffer;
+    }
+    pclose(pipe);
+
+    // Parse avahi-browse output (Linux)
+    #ifdef __linux__
+    // Look for hostname and port in avahi-browse output
+    // Format: "hostname = [ubersdr.local]" and "port = [8080]"
+    // Prefer IPv4 over IPv6 by checking the address field
+    std::map<std::string, std::map<std::string, std::string>> instanceMap;
+    size_t pos = 0;
+    while (true) {
+        size_t hostnamePos = output.find("hostname = [", pos);
+        if (hostnamePos == std::string::npos) break;
+
+        size_t hostnameStart = hostnamePos + 12;
+        size_t hostnameEnd = output.find("]", hostnameStart);
+        if (hostnameEnd == std::string::npos) break;
+
+        std::string hostname = output.substr(hostnameStart, hostnameEnd - hostnameStart);
+
+        // Look for address after hostname to determine IPv4 vs IPv6 and capture the IP
+        size_t addressPos = output.find("address = [", hostnameEnd);
+        bool isIPv4 = false;
+        std::string ipAddress;
+        if (addressPos != std::string::npos && addressPos < hostnameEnd + 100) {
+            size_t addressStart = addressPos + 11;
+            size_t addressEnd = output.find("]", addressStart);
+            if (addressEnd != std::string::npos) {
+                ipAddress = output.substr(addressStart, addressEnd - addressStart);
+                // Simple check: IPv4 addresses don't contain colons (except in port), IPv6 do
+                isIPv4 = (ipAddress.find(':') == std::string::npos);
+            }
+        }
+
+        // Look for port after hostname
+        size_t portPos = output.find("port = [", hostnameEnd);
+        if (portPos == std::string::npos || portPos > hostnameEnd + 200) {
+            pos = hostnameEnd;
+            continue;
+        }
+
+        size_t portStart = portPos + 8;
+        size_t portEnd = output.find("]", portStart);
+        if (portEnd == std::string::npos) {
+            pos = hostnameEnd;
+            continue;
+        }
+
+        std::string port = output.substr(portStart, portEnd - portStart);
+
+        // Remove .local suffix if present
+        if (hostname.length() > 6 && hostname.substr(hostname.length() - 6) == ".local") {
+            hostname = hostname.substr(0, hostname.length() - 6);
+        }
+
+        // Create unique key
+        std::string uniqueKey = hostname + ":" + port;
+
+        // Only add/replace if this is IPv4, or if we haven't seen this instance yet
+        if (isIPv4 || instanceMap.find(uniqueKey) == instanceMap.end()) {
+            std::map<std::string, std::string> instance;
+            instance["name"] = hostname;
+            // Use IP address instead of .local hostname for better compatibility
+            instance["host"] = isIPv4 && !ipAddress.empty() ? ipAddress : hostname + ".local";
+            instance["port"] = port;
+            instance["tls"] = "false";
+            instance["public_iq_modes"] = "iq48,iq96,iq192,iq384";
+            instance["local"] = "true";
+            instanceMap[uniqueKey] = instance;
+        }
+
+        pos = portEnd;
+    }
+
+    // Convert map to vector
+    for (const auto& pair : instanceMap) {
+        instances.push_back(pair.second);
+    }
+    #endif
+
+    return instances;
 }
 
 // Helper function to fetch public instances from API
@@ -1031,11 +1231,58 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
             results.push_back(dev);
         }
     } else {
-        // Automatic discovery mode - fetch public instances
-        SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: Discovering public instances...");
-        
+        // Automatic discovery mode - discover local and fetch public instances
+        SoapySDR::log(SOAPY_SDR_INFO, "SoapyUberSDR: Discovering local and public instances...");
+
+        // First, discover local instances via mDNS
+        auto localInstances = discoverLocalInstances();
+        if (!localInstances.empty()) {
+            SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Found %zu local instance(s)", localInstances.size());
+
+            // Create devices for each local instance
+            for (const auto& instance : localInstances) {
+                std::string host = instance.at("host");
+                std::string port = instance.at("port");
+                std::string name = instance.count("name") ? instance.at("name") : host;
+
+                // Parse public_iq_modes
+                std::vector<std::string> publicModes;
+                if (instance.count("public_iq_modes")) {
+                    std::string modesStr = instance.at("public_iq_modes");
+                    size_t pos = 0;
+                    while (pos < modesStr.length()) {
+                        size_t commaPos = modesStr.find(",", pos);
+                        if (commaPos == std::string::npos) {
+                            publicModes.push_back(modesStr.substr(pos));
+                            break;
+                        }
+                        publicModes.push_back(modesStr.substr(pos, commaPos - pos));
+                        pos = commaPos + 1;
+                    }
+                }
+
+                // Build WebSocket URL
+                std::string serverURL = "ws://" + host + ":" + port + "/ws";
+
+                // Only create devices for available IQ modes
+                for (const auto& mode : publicModes) {
+                    // Convert mode to bandwidth display (e.g., "iq48" -> "48 kHz")
+                    std::string bandwidth = mode.substr(2) + " kHz"; // Remove "iq" prefix and add " kHz"
+
+                    SoapySDR::Kwargs dev;
+                    dev["driver"] = "ubersdr";
+                    dev["server"] = serverURL;
+                    dev["mode"] = mode;
+                    dev["label"] = "[Local] " + name + " " + bandwidth;
+                    dev["serial"] = serverURL + ":" + mode;
+                    results.push_back(dev);
+                }
+            }
+        }
+
+        // Then fetch public instances
         auto instances = fetchPublicInstances();
-        
+
         if (instances.empty()) {
             SoapySDR::log(SOAPY_SDR_WARNING, "SoapyUberSDR: No public instances found, using localhost");
             // Fallback to localhost

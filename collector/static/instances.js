@@ -649,10 +649,18 @@ let currentUUID = '';
 
 // Expose functions globally for onclick handlers
 window.showUUIDModal = function(uuid, callsign) {
+    console.log('showUUIDModal called with:', uuid, callsign);
     const modal = document.getElementById('uuidModal');
     const modalTitle = document.getElementById('uuidModalTitle');
     const uuidDisplay = document.getElementById('uuidDisplay');
     const copyBtn = document.getElementById('copyUUIDBtn');
+    
+    console.log('Modal elements:', {modal, modalTitle, uuidDisplay, copyBtn});
+    
+    if (!modal) {
+        console.error('UUID modal element not found!');
+        return;
+    }
     
     currentUUID = uuid;
     modalTitle.textContent = `Instance UUID - ${callsign}`;
@@ -669,7 +677,9 @@ window.showUUIDModal = function(uuid, callsign) {
     copyBtn.textContent = '📋 Copy to Clipboard';
     copyBtn.classList.remove('copied');
     
+    console.log('Adding active class to modal');
     modal.classList.add('active');
+    console.log('Modal classes after add:', modal.className);
 };
 
 // Close UUID modal

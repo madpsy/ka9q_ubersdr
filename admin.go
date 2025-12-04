@@ -2975,6 +2975,7 @@ func (ah *AdminHandler) HandleInstanceReporterHealth(w http.ResponseWriter, r *h
 // HandleInstanceReporterTrigger triggers an immediate instance report
 // This is an admin-only endpoint that manually triggers the instance reporter to send a POST
 // Returns the response from the collector server
+// Accepts optional JSON body with test parameters to override config values temporarily
 func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -2982,18 +2983,6 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-
-	// Check if instance reporting is enabled
-	if !ah.config.InstanceReporting.Enabled {
-		http.Error(w, "Instance reporting is not enabled", http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(map[string]string{
-			"status":  "error",
-			"message": "Instance reporting is not enabled",
-		}); err != nil {
-			log.Printf("Error encoding response: %v", err)
-		}
-		return
-	}
 
 	// Check if instance reporter exists
 	if ah.instanceReporter == nil {
@@ -3007,8 +2996,33 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 		return
 	}
 
-	// Trigger an immediate report
-	if err := ah.instanceReporter.TriggerReport(); err != nil {
+	// Check if request body contains test parameters
+	var testParams map[string]interface{}
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&testParams); err != nil {
+			// If body exists but can't be decoded, it's an error
+			http.Error(w, fmt.Sprintf("Invalid JSON in request body: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// If test parameters provided, use them; otherwise check if enabled
+	if testParams == nil {
+		// No test parameters - using actual config, so check if enabled
+		if !ah.config.InstanceReporting.Enabled {
+			http.Error(w, "Instance reporting is not enabled", http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(map[string]string{
+				"status":  "error",
+				"message": "Instance reporting is not enabled",
+			}); err != nil {
+				log.Printf("Error encoding response: %v", err)
+			}
+			return
+		}
+	}
+
+	// Trigger an immediate report (with optional test parameters)
+	if err := ah.instanceReporter.TriggerReportWithParams(testParams); err != nil {
 		// Get the report status to include collector response details
 		reportStatus := ah.instanceReporter.GetReportStatus()
 

@@ -346,59 +346,33 @@ async function testInstanceReporter() {
 
         // Get form values for the test
         const useMyIP = document.getElementById('useMyIP').checked;
-
-        // Temporarily update config for testing
-        const testConfig = {
-            ...currentConfig,
-            instance_reporting: {
-                ...currentConfig.instance_reporting,
-                enabled: true,
-                use_https: true,
-                use_myip: useMyIP,
-                hostname: 'instances.ubersdr.org',
-                port: 443,
-                report_interval_sec: 120,
-                instance_uuid: generatedUUID || currentConfig.instance_reporting?.instance_uuid
-            }
-        };
-
-        // Add instance connection details
         const instancePort = parseInt(document.getElementById('instancePort').value);
+
+        // Build test parameters to send to the endpoint
+        const testParams = {
+            use_myip: useMyIP,
+            instance_port: instancePort,
+            instance_uuid: generatedUUID || currentConfig.instance_reporting?.instance_uuid
+        };
 
         if (!useMyIP) {
             const instanceHost = document.getElementById('instanceHost').value.trim();
             const instanceTLS = document.getElementById('instanceTLS').checked;
-
-            testConfig.instance_reporting.instance = {
-                host: instanceHost,
-                port: instancePort,
-                tls: instanceTLS
-            };
+            testParams.instance_host = instanceHost;
+            testParams.instance_tls = instanceTLS;
         } else {
             // When using myip, clear hostname and force TLS to false
-            testConfig.instance_reporting.instance = {
-                host: '',
-                port: instancePort,
-                tls: false
-            };
+            testParams.instance_host = '';
+            testParams.instance_tls = false;
         }
 
-        // Save the test config temporarily
-        const saveResponse = await fetch('/admin/config', {
-            method: 'PUT',
+        // Trigger the test with parameters (no config save needed)
+        const response = await fetch('/admin/instance-reporter-trigger', {
+            method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(testConfig)
-        });
-
-        if (!saveResponse.ok) {
-            throw new Error('Failed to save test configuration');
-        }
-
-        // Now trigger the test
-        const response = await fetch('/admin/instance-reporter-trigger', {
-            method: 'POST'
+            body: JSON.stringify(testParams)
         });
 
         if (!response.ok) {

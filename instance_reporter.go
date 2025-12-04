@@ -543,3 +543,227 @@ func (ir *InstanceReporter) TriggerReport() error {
 	// Send the report immediately
 	return ir.sendReport()
 }
+
+// TriggerReportWithParams manually triggers an immediate instance report with optional parameter overrides
+// This is called by the admin API endpoint to test configuration before saving
+// If testParams is nil, behaves exactly like TriggerReport()
+func (ir *InstanceReporter) TriggerReportWithParams(testParams map[string]interface{}) error {
+	// If no test parameters, use normal report
+	if testParams == nil {
+		return ir.TriggerReport()
+	}
+
+	// Send report with parameter overrides
+	return ir.sendReportWithParams(testParams)
+}
+
+// sendReportWithParams sends a report with optional parameter overrides for testing
+// This allows testing configuration without modifying the actual config
+func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface{}) error {
+	// Update last report time
+	ir.mu.Lock()
+	ir.lastReportTime = time.Now()
+	ir.mu.Unlock()
+
+	// Extract test parameters with fallbacks to current config
+	useMyIP := ir.config.InstanceReporting.UseMyIP
+	if val, ok := testParams["use_myip"].(bool); ok {
+		useMyIP = val
+	}
+
+	instanceHost := ir.config.InstanceReporting.Instance.Host
+	if val, ok := testParams["instance_host"].(string); ok && val != "" {
+		instanceHost = val
+	}
+
+	instancePort := ir.config.InstanceReporting.Instance.Port
+	if val, ok := testParams["instance_port"].(float64); ok {
+		instancePort = int(val)
+	} else if val, ok := testParams["instance_port"].(int); ok {
+		instancePort = val
+	}
+
+	instanceTLS := ir.config.InstanceReporting.Instance.TLS
+	if val, ok := testParams["instance_tls"].(bool); ok {
+		instanceTLS = val
+	}
+
+	instanceUUID := ir.config.InstanceReporting.InstanceUUID
+	if val, ok := testParams["instance_uuid"].(string); ok && val != "" {
+		instanceUUID = val
+	}
+
+	// If use_myip is enabled, fetch the public IP from the collector
+	host := instanceHost
+	if useMyIP {
+		publicIP, err := ir.getPublicIP()
+		if err != nil {
+			log.Printf("Failed to fetch public IP (will use configured host): %v", err)
+			// Fall back to configured host if fetching fails
+		} else {
+			host = publicIP
+			log.Printf("Using auto-detected public IP: %s", host)
+		}
+	}
+
+	// Get capability information directly from config (no HTTP call needed)
+	cwSkimmerEnabled := false
+	if ir.cwskimmerConfig != nil {
+		cwSkimmerEnabled = ir.cwskimmerConfig.Enabled
+	}
+
+	// Calculate available client slots (max - current non-bypassed users)
+	currentNonBypassedUsers := ir.sessions.GetNonBypassedUserCount()
+	availableClients := ir.config.Server.MaxSessions - currentNonBypassedUsers
+	if availableClients < 0 {
+		availableClients = 0
+	}
+
+	log.Printf("Testing with parameters: UseMyIP=%v, Host=%s, Port=%d, TLS=%v, UUID=%s",
+		useMyIP, host, instancePort, instanceTLS, instanceUUID)
+
+	// Build list of public IQ modes
+	publicIQModes := []string{}
+	for mode, isPublic := range ir.config.Server.PublicIQModes {
+		if isPublic {
+			publicIQModes = append(publicIQModes, mode)
+		}
+	}
+
+	// Construct public_url from test parameters
+	protocol := "http"
+	if instanceTLS {
+		protocol = "https"
+	}
+	publicURL := fmt.Sprintf("%s://%s:%d", protocol, host, instancePort)
+
+	// Get CPU information
+	cpuModel, cpuCores := ir.getCPUInfo()
+
+	report := InstanceReport{
+		UUID:             instanceUUID,
+		Callsign:         ir.config.Admin.Callsign,
+		Name:             ir.config.Admin.Name,
+		Location:         ir.config.Admin.Location,
+		Latitude:         ir.config.Admin.GPS.Lat,
+		Longitude:        ir.config.Admin.GPS.Lon,
+		Altitude:         ir.config.Admin.ASL,
+		PublicURL:        publicURL,
+		Version:          Version,
+		Timestamp:        time.Now().Unix(),
+		Host:             host,
+		Port:             instancePort,
+		TLS:              instanceTLS,
+		UseMyIP:          useMyIP,
+		CWSkimmer:        cwSkimmerEnabled,
+		DigitalDecodes:   ir.config.Decoder.Enabled,
+		NoiseFloor:       ir.config.NoiseFloor.Enabled,
+		MaxClients:       ir.config.Server.MaxSessions,
+		AvailableClients: availableClients,
+		MaxSessionTime:   ir.config.Server.MaxSessionTime,
+		PublicIQModes:    publicIQModes,
+		CPUModel:         cpuModel,
+		CPUCores:         cpuCores,
+	}
+
+	jsonData, err := json.Marshal(report)
+	if err != nil {
+		return fmt.Errorf("failed to marshal report: %w", err)
+	}
+
+	// Build URL with http or https based on config
+	protocol = "https"
+	defaultPort := 443
+	if !ir.config.InstanceReporting.UseHTTPS {
+		protocol = "http"
+		defaultPort = 80
+	}
+
+	// Build the URL using the test UUID
+	var url string
+	if ir.config.InstanceReporting.Port == defaultPort {
+		url = fmt.Sprintf("%s://%s/api/instance/%s",
+			protocol,
+			ir.config.InstanceReporting.Hostname,
+			instanceUUID)
+	} else {
+		url = fmt.Sprintf("%s://%s:%d/api/instance/%s",
+			protocol,
+			ir.config.InstanceReporting.Hostname,
+			ir.config.InstanceReporting.Port,
+			instanceUUID)
+	}
+
+	// Single attempt for testing (no retries)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", fmt.Sprintf("UberSDR/%s", Version))
+
+	resp, err := ir.httpClient.Do(req)
+	if err != nil {
+		lastErr := fmt.Errorf("failed to send test request to %s: %w", url, err)
+		ir.mu.Lock()
+		ir.lastReportError = lastErr.Error()
+		ir.mu.Unlock()
+		return lastErr
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("[Instance Reporter] Error closing response body: %v", err)
+		}
+	}()
+
+	// Check for redirect responses
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		location := resp.Header.Get("Location")
+		lastErr := fmt.Errorf("server returned redirect %d to %s for %s", resp.StatusCode, location, url)
+		ir.mu.Lock()
+		ir.lastResponseCode = resp.StatusCode
+		ir.lastReportError = lastErr.Error()
+		ir.mu.Unlock()
+		return lastErr
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		lastErr := fmt.Errorf("server returned status %d for %s", resp.StatusCode, url)
+		ir.mu.Lock()
+		ir.lastResponseCode = resp.StatusCode
+		ir.lastResponseStatus = ""
+		ir.lastReportError = lastErr.Error()
+		ir.mu.Unlock()
+		return lastErr
+	}
+
+	// Parse the response to get the status, message, and public_uuid fields
+	var responseData map[string]interface{}
+	responseStatus := ""
+	responseMessage := ""
+	publicUUID := ""
+	if err := json.NewDecoder(resp.Body).Decode(&responseData); err == nil {
+		if status, ok := responseData["status"].(string); ok {
+			responseStatus = status
+		}
+		if message, ok := responseData["message"].(string); ok {
+			responseMessage = message
+		}
+		if pubUUID, ok := responseData["public_uuid"].(string); ok {
+			publicUUID = pubUUID
+		}
+	}
+
+	// Store successful response
+	ir.mu.Lock()
+	ir.lastResponseCode = resp.StatusCode
+	ir.lastResponseStatus = responseStatus
+	ir.lastResponseMessage = responseMessage
+	ir.lastPublicUUID = publicUUID
+	ir.lastReportError = ""
+	ir.mu.Unlock()
+
+	log.Printf("Successfully tested instance report to %s (status: %d)", url, resp.StatusCode)
+	return nil
+}

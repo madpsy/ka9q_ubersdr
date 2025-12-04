@@ -388,6 +388,8 @@ async function testInstanceReporter() {
             testResult.style.color = '#155724';
             testPassed = true;
             finishButton.disabled = false;
+            // Show the success info box
+            document.getElementById('successInfo').style.display = 'block';
             showAlert('✅ Test successful! You can now enable public reporting.', 'success');
         } else {
             testResult.style.background = '#f8d7da';
@@ -395,6 +397,8 @@ async function testInstanceReporter() {
             testResult.style.color = '#721c24';
             testPassed = false;
             finishButton.disabled = true;
+            // Hide the success info box
+            document.getElementById('successInfo').style.display = 'none';
             showAlert('⚠️ Test failed. Please check your settings and try again.', 'error');
         }
     } catch (error) {
@@ -403,6 +407,10 @@ async function testInstanceReporter() {
         testResult.style.background = '#f8d7da';
         testResult.style.border = '1px solid #f5c6cb';
         testResult.style.color = '#721c24';
+        testPassed = false;
+        finishButton.disabled = true;
+        // Hide the success info box
+        document.getElementById('successInfo').style.display = 'none';
         showAlert('Error testing instance reporter: ' + error.message, 'error');
     } finally {
         button.disabled = false;

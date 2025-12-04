@@ -29,30 +29,10 @@ mkdir -p ~/ubersdr
 echo "Fetching docker-compose configuration..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml -o ~/ubersdr/docker-compose-dockerhub.yml
 
-# Prompt for password with confirmation
-echo
-echo "Please enter a strong admin password for the UberSDR web interface:"
-while true; do
-    read -s -p "Password: " password
-    echo
-    read -s -p "Confirm password: " password_confirm
-    echo
-    
-    if [ "$password" = "$password_confirm" ]; then
-        if [ -z "$password" ]; then
-            echo "Password cannot be empty. Please try again."
-            echo
-        else
-            echo "Passwords match!"
-            break
-        fi
-    else
-        echo "Passwords do not match. Please try again."
-        echo
-    fi
-done
+# Generate a random 16-character alphanumeric password
+password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
 
-# Start Docker containers with the provided password
+# Start Docker containers with the generated password
 echo
 echo "Starting UberSDR containers..."
 cd ~/ubersdr
@@ -60,4 +40,8 @@ ADMIN_PASSWORD="$password" docker compose -f docker-compose-dockerhub.yml up -d
 
 echo
 echo "=== Installation Complete ==="
-echo "UberSDR is now running. Access the web interface with the password you set."
+echo
+echo "Your admin password is: $password"
+echo
+echo "Access the web interface at: http://ubersdr.local:8080/admin.html"
+echo

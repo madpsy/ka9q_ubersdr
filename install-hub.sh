@@ -32,10 +32,15 @@ curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/
 # Generate a random 16-character alphanumeric password
 password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
 
-# Start Docker containers with the generated password
+# Clean up any existing containers and network (allow failures)
 echo
-echo "Starting UberSDR containers..."
+echo "Cleaning up any existing containers..."
 cd ~/ubersdr
+docker compose -f docker-compose.yml down 2>/dev/null || true
+docker network rm ka9q_ubersdr_sdr-network 2>/dev/null || true
+
+# Start Docker containers with the generated password
+echo "Starting UberSDR containers..."
 ADMIN_PASSWORD="$password" docker compose -f docker-compose.yml up -d
 
 echo

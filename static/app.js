@@ -1223,6 +1223,16 @@ async function fetchSiteDescription() {
                     }
                 }
 
+                // Show UUID button if public_uuid is available
+                if (data.public_uuid && data.public_uuid.trim() !== '') {
+                    const uuidBtn = document.getElementById('uuid-button');
+                    if (uuidBtn) {
+                        uuidBtn.style.display = 'block';
+                        // Store the UUID for the copy function
+                        window.publicUUID = data.public_uuid;
+                    }
+                }
+
                 // Add map if GPS coordinates are available
                 if (data.receiver && data.receiver.gps &&
                     data.receiver.gps.lat !== 0 && data.receiver.gps.lon !== 0) {
@@ -6769,6 +6779,47 @@ document.addEventListener('DOMContentLoaded', () => {
 window.openBufferConfigModal = openBufferConfigModal;
 window.closeBufferConfigModal = closeBufferConfigModal;
 window.setBufferThreshold = setBufferThreshold;
+
+// Copy UUID to clipboard
+function copyUUIDToClipboard() {
+    if (!window.publicUUID) {
+        showNotification('UUID not available', 'error');
+        return;
+    }
+
+    // Use the Clipboard API if available
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(window.publicUUID)
+            .then(() => {
+                showNotification('UUID copied to clipboard', 'success', 3000);
+                log('UUID copied to clipboard');
+            })
+            .catch(err => {
+                console.error('Failed to copy UUID:', err);
+                showNotification('Failed to copy UUID', 'error');
+            });
+    } else {
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = window.publicUUID;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            showNotification('UUID copied to clipboard', 'success', 3000);
+            log('UUID copied to clipboard');
+        } catch (err) {
+            console.error('Failed to copy UUID:', err);
+            showNotification('Failed to copy UUID', 'error');
+        }
+        document.body.removeChild(textArea);
+    }
+}
+
+// Expose UUID copy function globally
+window.copyUUIDToClipboard = copyUUIDToClipboard;
 
 // Frequency scroll configuration
 let frequencyScrollMode = '1000-fast'; // Default mode

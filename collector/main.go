@@ -608,10 +608,10 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 	// Get the client IP for tracking
 	clientIP := getClientIP(r)
 
-	// Check rate limit - only allow one POST per IP per 60 seconds
+	// Check rate limit - only allow one POST per IP per 10 seconds
 	if !c.checkRateLimit(clientIP) {
 		log.Printf("Rate limit exceeded for IP: %s (instance: %s)", clientIP, secretUUID)
-		sendError(http.StatusTooManyRequests, "Rate limit exceeded - only one instance update per 60 seconds allowed")
+		sendError(http.StatusTooManyRequests, "Rate limit exceeded - only one instance update per 10 seconds allowed")
 		return
 	}
 
@@ -1270,15 +1270,15 @@ func (c *Collector) checkRateLimit(ip string) bool {
 	now := time.Now()
 	lastPost, exists := c.rateLimitMap[ip]
 
-	// If no previous POST or more than 60 seconds have passed, allow it
-	if !exists || now.Sub(lastPost) >= 60*time.Second {
+	// If no previous POST or more than 10 seconds have passed, allow it
+	if !exists || now.Sub(lastPost) >= 10*time.Second {
 		// Mark this IP as having an active request NOW (before verification callback)
 		// This prevents concurrent requests from the same IP during the slow verification process
 		c.rateLimitMap[ip] = now
 		return true
 	}
 
-	// Rate limit exceeded - there's either an in-flight request or one completed less than 60s ago
+	// Rate limit exceeded - there's either an in-flight request or one completed less than 10s ago
 	return false
 }
 

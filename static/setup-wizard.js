@@ -206,6 +206,7 @@
                         const lon = config.admin.gps.lon;
                         marker.setLatLng([lat, lon]);
                         map.setView([lat, lon], 10);
+                        updateMarkerTooltip();
                     }
                 }
 
@@ -409,9 +410,6 @@
             draggable: true
         }).addTo(map);
 
-        // Update tooltip with current form values
-        updateMarkerTooltip();
-
         // Update inputs when marker is dragged
         marker.on('dragend', function(e) {
             const position = marker.getLatLng();
@@ -436,6 +434,9 @@
             lonInput.value = e.latlng.lng.toFixed(6);
             updateMarkerTooltip();
         });
+
+        // Initial tooltip update (after event listeners are set up)
+        updateMarkerTooltip();
     }
 
     function updateMarkerFromInputs() {

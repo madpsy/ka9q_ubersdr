@@ -6791,7 +6791,7 @@ function copyUUIDToClipboard() {
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(window.publicUUID)
             .then(() => {
-                showNotification('UUID copied to clipboard', 'success', 3000);
+                showNotification('UUID copied to clipboard - Use this in the desktop client application', 'success', 3000);
                 log('UUID copied to clipboard');
             })
             .catch(err => {

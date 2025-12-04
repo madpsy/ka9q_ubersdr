@@ -170,7 +170,7 @@ function createInstanceCard(instance, isClosest = false) {
             </div>
             <div class="instance-name" style="display: flex; justify-content: space-between; align-items: center;">
                 <span>${instance.name}</span>
-                <button class="uuid-btn" data-uuid="${instance.public_uuid || ''}" data-callsign="${instance.callsign}" style="margin-left: auto;">UUID</button>
+                <button class="uuid-btn" data-uuid="${instance.id || ''}" data-callsign="${instance.callsign}" style="margin-left: auto;">UUID</button>
             </div>
             
             <div class="instance-info">

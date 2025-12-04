@@ -735,7 +735,7 @@ func main() {
 		handleExtensions(w, r, config)
 	})
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
-		handleDescription(w, r, config, cwskimmerConfig, sessions)
+		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter)
 	})
 	http.HandleFunc("/api/instance", func(w http.ResponseWriter, r *http.Request) {
 		handleInstanceStatus(w, r, config)
@@ -1303,7 +1303,7 @@ func handleExtensions(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 // handleDescription serves the description HTML from config plus all status information
-func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager) {
+func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -1323,6 +1323,15 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	for _, mode := range wideIQModes {
 		if config.Server.PublicIQModes[mode] {
 			publicIQModes = append(publicIQModes, mode)
+		}
+	}
+
+	// Get public_uuid from instance reporter if available
+	publicUUID := ""
+	if instanceReporter != nil {
+		status := instanceReporter.GetReportStatus()
+		if uuid, ok := status["public_uuid"].(string); ok {
+			publicUUID = uuid
 		}
 	}
 
@@ -1351,6 +1360,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"cw_skimmer":           cwskimmerConfig.Enabled,
 		"public_iq_modes":      publicIQModes,
 		"spectrum_poll_period": config.Spectrum.PollPeriodMs,
+		"public_uuid":          publicUUID,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

@@ -708,17 +708,22 @@ window.copyUUID = async function() {
     }
 };
 
-// Add event delegation for UUID buttons
-document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('uuid-btn')) {
-        const uuid = e.target.dataset.uuid;
-        const callsign = e.target.dataset.callsign;
-        window.showUUIDModal(uuid, callsign);
-    }
-});
-
-// Close modals when clicking outside
+// Close modals when clicking outside - setup after DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('Setting up modal event listeners');
+    
+    // Add event delegation for UUID buttons
+    document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('uuid-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const uuid = e.target.dataset.uuid;
+            const callsign = e.target.dataset.callsign;
+            console.log('UUID button clicked:', uuid, callsign);
+            window.showUUIDModal(uuid, callsign);
+        }
+    });
+    
     const noiseFloorModal = document.getElementById('noiseFloorModal');
     if (noiseFloorModal) {
         noiseFloorModal.addEventListener('click', (e) => {

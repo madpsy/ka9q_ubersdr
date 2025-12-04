@@ -24,10 +24,6 @@
             </div>
             <div class="progress-step" data-step="3">
                 <div class="step-number">3</div>
-                <div class="step-label">Settings</div>
-            </div>
-            <div class="progress-step" data-step="4">
-                <div class="step-number">4</div>
                 <div class="step-label">Review</div>
             </div>
         </div>
@@ -113,51 +109,8 @@
                 </div>
             </div>
 
-            <!-- Step 3: Advanced Settings -->
+            <!-- Step 3: Review -->
             <div class="wizard-step" data-step="3">
-                <h2>Advanced Settings</h2>
-                <p class="step-description">Configure reporting behavior and central server connection</p>
-
-                <div class="form-group">
-                    <label for="reportInterval">Report Interval (seconds)</label>
-                    <input type="number" id="reportInterval" value="120" min="60" max="3600" step="60">
-                    <small>How often to send updates to the central server (default: 120 seconds / 2 minutes)</small>
-                </div>
-
-                <div class="form-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="useHTTPS" checked>
-                        <span>Use HTTPS for central server connection</span>
-                    </label>
-                    <small>Recommended: Keep enabled for secure communication with the central registry</small>
-                </div>
-
-                <div class="collapsible-section">
-                    <button type="button" class="collapsible-header" onclick="toggleCollapsible(this)">
-                        <span>▶</span> Central Server Settings (Advanced)
-                    </button>
-                    <div class="collapsible-content">
-                        <div class="form-group">
-                            <label for="hostname">Central Server Hostname</label>
-                            <input type="text" id="hostname" value="instances.ubersdr.org">
-                            <small>Hostname of the central registry server (default: instances.ubersdr.org)</small>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="port">Central Server Port</label>
-                            <input type="number" id="port" value="443" min="1" max="65535">
-                            <small>Port for the central registry server (default: 443 for HTTPS, 8443 for HTTP)</small>
-                        </div>
-
-                        <div class="info-box warning">
-                            <strong>⚠️ Warning:</strong> Only change these settings if you're using a custom registry server. The default values work with the official ubersdr.org registry.
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Step 4: Review -->
-            <div class="wizard-step" data-step="4">
                 <h2>Review Your Settings</h2>
                 <p class="step-description">Please review your configuration before enabling public reporting</p>
 
@@ -189,20 +142,14 @@
                     </div>
                 </div>
 
+                <!-- Test Button Section -->
                 <div class="review-section">
-                    <h3>Reporting Settings</h3>
-                    <div class="review-item">
-                        <span class="review-label">Report Interval:</span>
-                        <span class="review-value" id="reviewInterval">120 seconds</span>
-                    </div>
-                    <div class="review-item">
-                        <span class="review-label">Use HTTPS:</span>
-                        <span class="review-value" id="reviewHTTPS">Yes</span>
-                    </div>
-                    <div class="review-item">
-                        <span class="review-label">Central Server:</span>
-                        <span class="review-value" id="reviewServer">instances.ubersdr.org:443</span>
-                    </div>
+                    <h3>Test Configuration</h3>
+                    <p style="margin-bottom: 15px;">Before completing the wizard, you can test your instance reporting configuration to ensure it's working correctly.</p>
+                    <button type="button" class="btn btn-secondary" id="testButton" onclick="testInstanceReporter()" style="margin-bottom: 15px;">
+                        🧪 Test Instance Reporter
+                    </button>
+                    <div id="testResult" style="display: none; padding: 15px; border-radius: 5px; margin-top: 10px;"></div>
                 </div>
 
                 <div class="info-box success">
@@ -221,7 +168,7 @@
             <button class="btn btn-primary" id="nextBtn" onclick="nextStep()">
                 Next →
             </button>
-            <button class="btn btn-success" id="finishBtn" onclick="finishWizard()" style="display: none;">
+            <button class="btn btn-success" id="finishBtn" onclick="finishWizard()" style="display: none;" disabled>
                 Enable Public Reporting
             </button>
         </div>

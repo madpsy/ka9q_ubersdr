@@ -209,8 +209,8 @@ if [ "$1" = "ka9q_ubersdr" ]; then
     echo "Triggering radiod restart..."
     mkdir -p /var/run/restart-trigger
     touch /var/run/restart-trigger/restart
-    echo "Waiting 2 seconds for radiod to restart..."
-    sleep 2
+    echo "Waiting 5 seconds for radiod to restart..."
+    sleep 5
 fi
 
 # If the command is ka9q_ubersdr, add the -config-dir flag

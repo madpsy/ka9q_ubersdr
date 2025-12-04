@@ -671,7 +671,7 @@
         <!-- Restart Countdown Overlay -->
         <div id="restartOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.9); z-index: 10000; align-items: center; justify-content: center;">
             <div style="text-align: center; color: white;">
-                <div style="font-size: 72px; font-weight: bold; margin-bottom: 20px;" id="countdownNumber">10</div>
+                <div style="font-size: 72px; font-weight: bold; margin-bottom: 20px;" id="countdownNumber">15</div>
                 <h2 style="margin-bottom: 10px;">Server is restarting...</h2>
                 <p style="font-size: 18px; color: #ccc;">You will be redirected to the login page</p>
                 <div style="margin-top: 30px;">
@@ -691,7 +691,7 @@
             const countdownEl = document.getElementById('countdownNumber');
             overlay.style.display = 'flex';
             
-            let countdown = 10;
+            let countdown = 15;
             countdownEl.textContent = countdown;
             
             const interval = setInterval(() => {

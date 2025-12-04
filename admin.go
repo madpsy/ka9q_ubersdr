@@ -3103,7 +3103,7 @@ func (ah *AdminHandler) HandleWizardStatus(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// HandleWizardComplete marks the setup wizard as complete
+// HandleWizardComplete marks the setup wizard as complete and triggers server restart
 func (ah *AdminHandler) HandleWizardComplete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -3148,9 +3148,14 @@ func (ah *AdminHandler) HandleWizardComplete(w http.ResponseWriter, r *http.Requ
 	}
 
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]string{
+
+	// Trigger server restart after response is sent
+	ah.restartServer()
+
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "success",
-		"message": "Setup wizard completed successfully",
+		"message": "Setup wizard completed successfully. Server is restarting...",
+		"restart": true,
 	}); err != nil {
 		log.Printf("Error encoding wizard complete response: %v", err)
 	}

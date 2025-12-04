@@ -294,7 +294,7 @@
                 }
             };
 
-            // Save main config
+            // Save main config (no restart yet)
             const mainResponse = await fetch('/admin/config', {
                 method: 'PUT',
                 headers: {
@@ -375,14 +375,14 @@
                 throw new Error('Failed to mark wizard as complete');
             }
 
-            // Success!
+            // Success! Show restart countdown
             hideLoading();
-            showSuccess('Configuration saved successfully! Redirecting to admin panel...');
+            showSuccess('Configuration saved successfully! Server is restarting...');
             
-            // Redirect to admin panel after 2 seconds
+            // Show restart countdown and redirect
             setTimeout(() => {
-                window.location.href = '/admin.html';
-            }, 2000);
+                showRestartCountdown();
+            }, 500);
 
         } catch (error) {
             hideLoading();
@@ -556,6 +556,27 @@
         document.querySelector(`.wizard-step[data-step="${currentStep}"]`).style.display = 'block';
         prevBtn.disabled = false;
         nextBtn.disabled = false;
+    }
+
+    // Show restart countdown overlay
+    function showRestartCountdown() {
+        const overlay = document.getElementById('restartOverlay');
+        const countdownEl = document.getElementById('countdownNumber');
+        overlay.style.display = 'flex';
+
+        let countdown = 15;
+        countdownEl.textContent = countdown;
+
+        const interval = setInterval(() => {
+            countdown--;
+            countdownEl.textContent = countdown;
+
+            if (countdown <= 0) {
+                clearInterval(interval);
+                // Redirect to login page
+                window.location.href = '/admin.html';
+            }
+        }, 1000);
     }
 
     // Initialize when DOM is ready

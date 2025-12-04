@@ -20,8 +20,8 @@
     function init() {
         setupEventListeners();
         updateUI();
-        loadExistingConfig();
         initializeMap();
+        loadExistingConfig(); // Load config after map is initialized
         
         // Auto-fill callsign fields when main callsign is entered
         document.getElementById('callsign').addEventListener('input', function(e) {
@@ -199,6 +199,14 @@
                     setFieldValue('latitude', config.admin.gps?.lat);
                     setFieldValue('longitude', config.admin.gps?.lon);
                     setFieldValue('asl', config.admin.asl);
+
+                    // Update map with loaded coordinates
+                    if (config.admin.gps?.lat && config.admin.gps?.lon && map && marker) {
+                        const lat = config.admin.gps.lat;
+                        const lon = config.admin.gps.lon;
+                        marker.setLatLng([lat, lon]);
+                        map.setView([lat, lon], 10);
+                    }
                 }
 
                 // Pre-fill server fields
@@ -401,22 +409,32 @@
             draggable: true
         }).addTo(map);
 
+        // Update tooltip with current form values
+        updateMarkerTooltip();
+
         // Update inputs when marker is dragged
         marker.on('dragend', function(e) {
             const position = marker.getLatLng();
             latInput.value = position.lat.toFixed(6);
             lonInput.value = position.lng.toFixed(6);
+            updateMarkerTooltip();
         });
 
         // Update marker when inputs change
         latInput.addEventListener('input', updateMarkerFromInputs);
         lonInput.addEventListener('input', updateMarkerFromInputs);
 
+        // Also update tooltip when other fields change
+        document.getElementById('stationName').addEventListener('input', updateMarkerTooltip);
+        document.getElementById('location').addEventListener('input', updateMarkerTooltip);
+        document.getElementById('asl').addEventListener('input', updateMarkerTooltip);
+
         // Allow clicking on map to move marker
         map.on('click', function(e) {
             marker.setLatLng(e.latlng);
             latInput.value = e.latlng.lat.toFixed(6);
             lonInput.value = e.latlng.lng.toFixed(6);
+            updateMarkerTooltip();
         });
     }
 
@@ -429,7 +447,31 @@
         if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
             marker.setLatLng([lat, lon]);
             map.setView([lat, lon], map.getZoom());
+            updateMarkerTooltip();
         }
+    }
+
+    function updateMarkerTooltip() {
+        if (!marker) return;
+
+        // Get current form values
+        const stationName = document.getElementById('stationName').value || 'Station';
+        const location = document.getElementById('location').value || '';
+        const asl = document.getElementById('asl').value || '0';
+
+        // Build tooltip content
+        let tooltipContent = `<strong>${stationName}</strong>`;
+        if (location) {
+            tooltipContent += `<br>${location}`;
+        }
+        tooltipContent += `<br>${asl}m ASL`;
+
+        // Update or create tooltip
+        marker.bindTooltip(tooltipContent, {
+            permanent: true,
+            direction: 'top',
+            className: 'receiver-tooltip'
+        }).openTooltip();
     }
 
     // Helper functions

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Make Instance Public - UberSDR</title>
+    <link rel="stylesheet" href="create_public.css">
+</head>
+<body>
+    <div class="wizard-container">
+        <div class="wizard-header">
+            <h1>🌐 Make Your Instance Public</h1>
+            <p>Configure your UberSDR instance to appear in the public registry</p>
+        </div>
+
+        <div class="progress-bar">
+            <div class="progress-step active" data-step="1">
+                <div class="step-number">1</div>
+                <div class="step-label">Introduction</div>
+            </div>
+            <div class="progress-step" data-step="2">
+                <div class="step-number">2</div>
+                <div class="step-label">Connection</div>
+            </div>
+            <div class="progress-step" data-step="3">
+                <div class="step-number">3</div>
+                <div class="step-label">Settings</div>
+            </div>
+            <div class="progress-step" data-step="4">
+                <div class="step-number">4</div>
+                <div class="step-label">Review</div>
+            </div>
+        </div>
+
+        <div class="wizard-content">
+            <!-- Step 1: Introduction -->
+            <div class="wizard-step active" data-step="1">
+                <h2>Welcome to the Public Instance Registry</h2>
+                
+                <div class="info-box">
+                    <h3>📡 What is Instance Reporting?</h3>
+                    <p>Instance reporting allows your UberSDR to be listed in the public registry at <strong>ubersdr.org</strong>, making it discoverable by other radio enthusiasts worldwide.</p>
+                </div>
+
+                <div class="info-box">
+                    <h3>✅ Benefits</h3>
+                    <ul>
+                        <li>Share your SDR with the global amateur radio community</li>
+                        <li>Contribute to propagation studies and band condition monitoring</li>
+                        <li>Help others learn about SDR technology</li>
+                        <li>Join a network of public SDR receivers</li>
+                    </ul>
+                </div>
+
+                <div class="info-box warning">
+                    <h3>🔒 Privacy & Security</h3>
+                    <ul>
+                        <li>Only basic information is shared (callsign, location, connection details)</li>
+                        <li>Your admin password is never transmitted</li>
+                        <li>You can disable reporting at any time</li>
+                        <li>Connection details are optional - you control what's shared</li>
+                    </ul>
+                </div>
+
+                <div class="info-box">
+                    <h3>📊 What Gets Reported?</h3>
+                    <ul>
+                        <li>Instance UUID (unique identifier)</li>
+                        <li>Callsign and location (from your admin settings)</li>
+                        <li>Public connection details (if you provide them)</li>
+                        <li>Basic statistics (number of users, uptime)</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Step 2: Connection Settings -->
+            <div class="wizard-step" data-step="2">
+                <h2>Public Connection Settings</h2>
+                <p class="step-description">Configure how users will connect to your UberSDR instance</p>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="useMyIP" checked>
+                        <span>Automatically use my public IP address</span>
+                    </label>
+                    <small>When enabled, the system will automatically detect and use your public IP address. Disable this if you have a custom domain or want to manually specify connection details.</small>
+                </div>
+
+                <div id="manualConnectionFields" style="display: none;">
+                    <div class="form-group">
+                        <label for="instanceHost">Public Hostname or IP Address *</label>
+                        <input type="text" id="instanceHost" placeholder="e.g., sdr.example.com or 203.0.113.42">
+                        <small>The hostname or IP address that users will use to connect to your SDR</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="instancePort">Public Port *</label>
+                        <input type="number" id="instancePort" value="8080" min="1" max="65535">
+                        <small>The port number users will connect to (typically 8080 for HTTP or 443 for HTTPS)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="instanceTLS">
+                            <span>Use TLS/HTTPS for public connections</span>
+                        </label>
+                        <small>Enable if your public connection uses HTTPS/WSS (recommended for security)</small>
+                    </div>
+                </div>
+
+                <div class="info-box">
+                    <strong>💡 Tip:</strong> If you're behind a router, make sure to configure port forwarding to allow external connections to your UberSDR instance.
+                </div>
+            </div>
+
+            <!-- Step 3: Advanced Settings -->
+            <div class="wizard-step" data-step="3">
+                <h2>Advanced Settings</h2>
+                <p class="step-description">Configure reporting behavior and central server connection</p>
+
+                <div class="form-group">
+                    <label for="reportInterval">Report Interval (seconds)</label>
+                    <input type="number" id="reportInterval" value="120" min="60" max="3600" step="60">
+                    <small>How often to send updates to the central server (default: 120 seconds / 2 minutes)</small>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="useHTTPS" checked>
+                        <span>Use HTTPS for central server connection</span>
+                    </label>
+                    <small>Recommended: Keep enabled for secure communication with the central registry</small>
+                </div>
+
+                <div class="collapsible-section">
+                    <button type="button" class="collapsible-header" onclick="toggleCollapsible(this)">
+                        <span>▶</span> Central Server Settings (Advanced)
+                    </button>
+                    <div class="collapsible-content">
+                        <div class="form-group">
+                            <label for="hostname">Central Server Hostname</label>
+                            <input type="text" id="hostname" value="instances.ubersdr.org">
+                            <small>Hostname of the central registry server (default: instances.ubersdr.org)</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="port">Central Server Port</label>
+                            <input type="number" id="port" value="443" min="1" max="65535">
+                            <small>Port for the central registry server (default: 443 for HTTPS, 8443 for HTTP)</small>
+                        </div>
+
+                        <div class="info-box warning">
+                            <strong>⚠️ Warning:</strong> Only change these settings if you're using a custom registry server. The default values work with the official ubersdr.org registry.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Review -->
+            <div class="wizard-step" data-step="4">
+                <h2>Review Your Settings</h2>
+                <p class="step-description">Please review your configuration before enabling public reporting</p>
+
+                <div class="review-section">
+                    <h3>Instance Identity</h3>
+                    <div class="review-item">
+                        <span class="review-label">Instance UUID:</span>
+                        <span class="review-value" id="reviewUUID">Loading...</span>
+                    </div>
+                </div>
+
+                <div class="review-section">
+                    <h3>Public Connection</h3>
+                    <div class="review-item">
+                        <span class="review-label">Auto-detect IP:</span>
+                        <span class="review-value" id="reviewUseMyIP">Yes</span>
+                    </div>
+                    <div class="review-item" id="reviewHostItem" style="display: none;">
+                        <span class="review-label">Hostname/IP:</span>
+                        <span class="review-value" id="reviewHost">-</span>
+                    </div>
+                    <div class="review-item" id="reviewPortItem" style="display: none;">
+                        <span class="review-label">Port:</span>
+                        <span class="review-value" id="reviewPort">-</span>
+                    </div>
+                    <div class="review-item" id="reviewTLSItem" style="display: none;">
+                        <span class="review-label">TLS/HTTPS:</span>
+                        <span class="review-value" id="reviewTLS">No</span>
+                    </div>
+                </div>
+
+                <div class="review-section">
+                    <h3>Reporting Settings</h3>
+                    <div class="review-item">
+                        <span class="review-label">Report Interval:</span>
+                        <span class="review-value" id="reviewInterval">120 seconds</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Use HTTPS:</span>
+                        <span class="review-value" id="reviewHTTPS">Yes</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Central Server:</span>
+                        <span class="review-value" id="reviewServer">instances.ubersdr.org:443</span>
+                    </div>
+                </div>
+
+                <div class="info-box success">
+                    <strong>✅ Ready to Go!</strong> Click "Enable Public Reporting" below to save your settings and start reporting to the central registry.
+                </div>
+            </div>
+        </div>
+
+        <div class="wizard-navigation">
+            <button class="btn btn-secondary" id="prevBtn" onclick="previousStep()" style="display: none;">
+                ← Previous
+            </button>
+            <button class="btn btn-secondary" id="cancelBtn" onclick="cancelWizard()">
+                Cancel
+            </button>
+            <button class="btn btn-primary" id="nextBtn" onclick="nextStep()">
+                Next →
+            </button>
+            <button class="btn btn-success" id="finishBtn" onclick="finishWizard()" style="display: none;">
+                Enable Public Reporting
+            </button>
+        </div>
+
+        <div id="alertBox" class="alert" style="display: none;"></div>
+    </div>
+
+    <script src="create_public.js"></script>
+</body>
+</html>

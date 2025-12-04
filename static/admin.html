@@ -391,7 +391,12 @@
                     <h1>Configuration Editor</h1>
                     <p>Edit UberSDR configuration. Changes require server restart to take effect.</p>
                 </div>
-                <button class="btn btn-secondary" onclick="logout()">Logout</button>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
+                        🌐 Make Instance Public
+                    </button>
+                    <button class="btn btn-secondary" onclick="logout()">Logout</button>
+                </div>
             </div>
 
             <div id="alertBox"></div>
@@ -971,9 +976,23 @@
 
                 currentConfig = await response.json();
                 renderVisualEditor();
+                updatePublicInstanceButton();
                 showAlert('Configuration loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading configuration: ' + error.message, 'error');
+            }
+        }
+
+        // Update public instance button visibility
+        function updatePublicInstanceButton() {
+            const btn = document.getElementById('publicInstanceBtn');
+            if (btn && currentConfig.instance_reporting) {
+                // Show button only if instance_reporting is disabled
+                if (currentConfig.instance_reporting.enabled === false) {
+                    btn.style.display = 'inline-block';
+                } else {
+                    btn.style.display = 'none';
+                }
             }
         }
 

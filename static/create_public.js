@@ -38,17 +38,17 @@ async function loadCurrentConfig() {
 // Populate form fields with current config values
 function populateFormFields() {
     const ir = currentConfig.instance_reporting || {};
-    
+
     // Step 2: Connection settings
     document.getElementById('useMyIP').checked = ir.use_myip !== false;
     document.getElementById('instanceHost').value = ir.instance?.host || '';
     document.getElementById('instancePort').value = ir.instance?.port || 8080;
     document.getElementById('instanceTLS').checked = ir.instance?.tls || false;
-    
+
     // Update manual connection fields visibility
     toggleManualConnectionFields();
-    
-    // Update review section
+
+    // Update review section with loaded config
     updateReviewSection();
 }
 
@@ -89,12 +89,17 @@ function updateReviewSection() {
     const instancePort = document.getElementById('instancePort').value;
     const instanceTLS = document.getElementById('instanceTLS').checked;
     
-    // Public UUID - show existing or indicate it will be generated
-    let uuid = currentConfig.instance_reporting?.public_uuid;
-    if (!uuid && !generatedUUID) {
-        uuid = 'Will be generated on first test';
-    } else if (generatedUUID) {
+    // Public UUID - show existing, generated, or placeholder
+    let uuid;
+    if (generatedUUID) {
+        // Use the newly generated UUID from this session
         uuid = generatedUUID;
+    } else if (currentConfig.instance_reporting?.public_uuid) {
+        // Use existing UUID from config
+        uuid = currentConfig.instance_reporting.public_uuid;
+    } else {
+        // No UUID yet
+        uuid = 'Will be generated on first test';
     }
     document.getElementById('reviewUUID').textContent = uuid;
     
@@ -146,16 +151,8 @@ function showStep(step) {
         document.querySelector(`.progress-step[data-step="${i}"]`).classList.add('completed');
     }
     
-    // Update navigation buttons
+    // Update navigation buttons (this will handle the finish button state)
     updateNavigationButtons();
-
-    // If we're on step 3, ensure finish button is disabled until test passes
-    if (step === 3) {
-        const finishBtn = document.getElementById('finishBtn');
-        if (finishBtn) {
-            finishBtn.disabled = !testPassed;
-        }
-    }
     
     // Scroll to top
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -165,10 +162,10 @@ function updateNavigationButtons() {
     const prevBtn = document.getElementById('prevBtn');
     const nextBtn = document.getElementById('nextBtn');
     const finishBtn = document.getElementById('finishBtn');
-    
+
     // Show/hide previous button
     prevBtn.style.display = currentStep > 1 ? 'inline-block' : 'none';
-    
+
     // Show/hide next and finish buttons
     if (currentStep < 3) {
         nextBtn.style.display = 'inline-block';
@@ -176,7 +173,7 @@ function updateNavigationButtons() {
     } else {
         nextBtn.style.display = 'none';
         finishBtn.style.display = 'inline-block';
-        // Disable finish button initially on step 3 until test passes
+        // Always check test status when showing finish button
         finishBtn.disabled = !testPassed;
     }
 }

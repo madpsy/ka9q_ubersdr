@@ -37,7 +37,6 @@ echo
 echo "Cleaning up any existing containers..."
 cd ~/ubersdr
 docker compose -f docker-compose.yml down 2>/dev/null || true
-docker network rm ka9q_ubersdr_sdr-network 2>/dev/null || true
 
 # Start Docker containers with the generated password
 echo "Starting UberSDR containers..."

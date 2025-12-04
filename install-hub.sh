@@ -27,7 +27,7 @@ curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/
 echo "Creating ~/ubersdr directory..."
 mkdir -p ~/ubersdr
 echo "Fetching docker-compose configuration..."
-curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml -o ~/ubersdr/docker-compose-dockerhub.yml
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml -o ~/ubersdr/docker-compose.yml
 
 # Generate a random 16-character alphanumeric password
 password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
@@ -36,7 +36,7 @@ password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
 echo
 echo "Starting UberSDR containers..."
 cd ~/ubersdr
-ADMIN_PASSWORD="$password" docker compose -f docker-compose-dockerhub.yml up -d
+ADMIN_PASSWORD="$password" docker compose -f docker-compose.yml up -d
 
 echo
 echo "=== Installation Complete ==="

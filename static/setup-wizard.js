@@ -298,6 +298,33 @@
 
             // Prepare decoder config if enabled
             if (formData.decoderEnabled) {
+                // First, try to load existing decoder config to get existing bands
+                let existingBands = [];
+                try {
+                    const existingDecoderResponse = await fetch('/admin/decoder-config');
+                    if (existingDecoderResponse.ok) {
+                        const existingDecoderConfig = await existingDecoderResponse.json();
+                        if (existingDecoderConfig.decoder && existingDecoderConfig.decoder.bands) {
+                            existingBands = existingDecoderConfig.decoder.bands;
+                        }
+                    }
+                } catch (error) {
+                    console.log('No existing decoder config found, will create new');
+                }
+
+                // Enable/disable existing bands based on checkbox state
+                if (existingBands.length > 0) {
+                    existingBands.forEach(band => {
+                        if (band.mode === 'FT8') {
+                            band.enabled = formData.ft8Enabled || false;
+                        } else if (band.mode === 'FT4') {
+                            band.enabled = formData.ft4Enabled || false;
+                        } else if (band.mode === 'WSPR') {
+                            band.enabled = formData.wsprEnabled || false;
+                        }
+                    });
+                }
+
                 const decoderConfig = {
                     decoder: {
                         enabled: true,
@@ -306,29 +333,9 @@
                         receiver_antenna: formData.receiverAntenna || '',
                         pskreporter_enabled: formData.pskreporterEnabled,
                         wsprnet_enabled: formData.wsprnetEnabled,
-                        bands: []
+                        bands: existingBands
                     }
                 };
-
-                // Add enabled modes to bands
-                if (formData.ft8Enabled) {
-                    decoderConfig.decoder.bands.push({
-                        name: 'FT8',
-                        enabled: true
-                    });
-                }
-                if (formData.ft4Enabled) {
-                    decoderConfig.decoder.bands.push({
-                        name: 'FT4',
-                        enabled: true
-                    });
-                }
-                if (formData.wsprEnabled) {
-                    decoderConfig.decoder.bands.push({
-                        name: 'WSPR',
-                        enabled: true
-                    });
-                }
 
                 // Save decoder config
                 const decoderResponse = await fetch('/admin/decoder-config', {

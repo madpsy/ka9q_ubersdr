@@ -45,3 +45,16 @@ echo "Your admin password is: $password"
 echo
 echo "Access the web interface at: http://ubersdr.local:8080/admin.html"
 echo
+
+# Ask if user wants to create FFTW Wisdom
+echo
+read -p "Do you want to create FFTW Wisdom? (takes a while but improves performance) [y/N]: " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo "Creating FFTW Wisdom... This may take several minutes."
+    sudo fftwf-wisdom -v -T 1 -o /var/lib/docker/volumes/docker_radiod-data/_data/wisdom rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160
+    echo "FFTW Wisdom created successfully!"
+else
+    echo "Skipping FFTW Wisdom creation."
+fi
+echo

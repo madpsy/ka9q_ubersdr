@@ -82,6 +82,7 @@ type InstanceUpdate struct {
 	AvailableClients int      `json:"available_clients"` // Current number of available client slots
 	MaxSessionTime   int      `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
 	PublicIQModes    []string `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
+	Test             bool     `json:"test"`              // If true, this is a test report - verify /api/description instead of full callback
 }
 
 // InstanceVerificationRequest represents the request to verify an instance
@@ -615,10 +616,23 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Verify instance is publicly accessible by making a callback
-	if !c.verifyInstanceAccessibility(secretUUID, update.Host, update.Port, update.TLS) {
-		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v) from IP: %s", secretUUID, update.Host, update.Port, update.TLS, clientIP)
+	// Verify instance is publicly accessible
+	// If test=true, check /api/description endpoint instead of full callback
+	if !c.verifyInstanceAccessibility(secretUUID, update.Host, update.Port, update.TLS, update.Test) {
+		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v, test: %v) from IP: %s", secretUUID, update.Host, update.Port, update.TLS, update.Test, clientIP)
 		sendError(http.StatusBadRequest, "Instance verification failed - not publicly accessible")
+		return
+	}
+
+	// If this is a test report, return success without storing in database
+	if update.Test {
+		log.Printf("Test report successful for %s (host: %s, port: %d, tls: %v) from IP: %s", secretUUID, update.Host, update.Port, update.TLS, clientIP)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"message": "Test successful - instance is publicly accessible",
+		})
 		return
 	}
 
@@ -1022,15 +1036,16 @@ func handleMyIP(w http.ResponseWriter, r *http.Request) {
 }
 
 // verifyInstanceAccessibility makes a callback to the instance to verify it's publicly accessible
+// If isTest is true, performs a simple GET to /api/description instead of full callback
 // Retries up to 3 times with 10 second delays between attempts
-func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port int, useTLS bool) bool {
+func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port int, useTLS bool, isTest bool) bool {
 	// Skip verification if host or port is invalid
 	if host == "" || port == 0 {
 		log.Printf("Skipping verification for instance %s: invalid host/port", secretUUID)
 		return false
 	}
 
-	// Build the callback URL
+	// Build the URL
 	protocol := "http"
 	defaultPort := 80
 	if useTLS {
@@ -1038,23 +1053,38 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 		defaultPort = 443
 	}
 
-	// Omit port if it's the default for the protocol
-	var callbackURL string
-	if port == defaultPort {
-		callbackURL = fmt.Sprintf("%s://%s/api/instance", protocol, host)
+	var url string
+	var method string
+	var jsonData []byte
+
+	if isTest {
+		// Test mode: simple GET to /api/description
+		method = "GET"
+		if port == defaultPort {
+			url = fmt.Sprintf("%s://%s/api/description", protocol, host)
+		} else {
+			url = fmt.Sprintf("%s://%s:%d/api/description", protocol, host, port)
+		}
 	} else {
-		callbackURL = fmt.Sprintf("%s://%s:%d/api/instance", protocol, host, port)
-	}
+		// Normal mode: POST callback to /api/instance
+		method = "POST"
+		if port == defaultPort {
+			url = fmt.Sprintf("%s://%s/api/instance", protocol, host)
+		} else {
+			url = fmt.Sprintf("%s://%s:%d/api/instance", protocol, host, port)
+		}
 
-	// Create the verification request
-	reqBody := InstanceVerificationRequest{
-		UUID: secretUUID,
-	}
+		// Create the verification request body
+		reqBody := InstanceVerificationRequest{
+			UUID: secretUUID,
+		}
 
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		log.Printf("Failed to marshal verification request: %v", err)
-		return false
+		var err error
+		jsonData, err = json.Marshal(reqBody)
+		if err != nil {
+			log.Printf("Failed to marshal verification request: %v", err)
+			return false
+		}
 	}
 
 	// Create HTTP client with timeout and TLS config
@@ -1073,8 +1103,15 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 	retryDelay := 10 * time.Second
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Make the POST request
-		req, err := http.NewRequest("POST", callbackURL, bytes.NewBuffer(jsonData))
+		// Create request
+		var req *http.Request
+		var err error
+		if isTest {
+			req, err = http.NewRequest(method, url, nil)
+		} else {
+			req, err = http.NewRequest(method, url, bytes.NewBuffer(jsonData))
+		}
+
 		if err != nil {
 			log.Printf("Failed to create verification request (attempt %d/%d): %v", attempt, maxRetries, err)
 			if attempt < maxRetries {
@@ -1084,12 +1121,14 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 			return false
 		}
 
-		req.Header.Set("Content-Type", "application/json")
+		if !isTest {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		req.Header.Set("User-Agent", fmt.Sprintf("UberSDR-Collector/%s", Version))
 
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("Failed to verify instance %s at %s (attempt %d/%d): %v", secretUUID, callbackURL, attempt, maxRetries, err)
+			log.Printf("Failed to verify instance %s at %s (attempt %d/%d): %v", secretUUID, url, attempt, maxRetries, err)
 			if attempt < maxRetries {
 				time.Sleep(retryDelay)
 				continue
@@ -1108,37 +1147,87 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 			return false
 		}
 
-		// Parse response
-		var verifyResp InstanceVerificationResponse
-		if err := json.NewDecoder(resp.Body).Decode(&verifyResp); err != nil {
-			log.Printf("Failed to decode verification response (attempt %d/%d): %v", attempt, maxRetries, err)
-			if attempt < maxRetries {
-				time.Sleep(retryDelay)
-				continue
+		if isTest {
+			// Test mode: verify /api/description response has required fields
+			var descResp map[string]interface{}
+			if err := json.NewDecoder(resp.Body).Decode(&descResp); err != nil {
+				log.Printf("Failed to decode /api/description response (attempt %d/%d): %v", attempt, maxRetries, err)
+				if attempt < maxRetries {
+					time.Sleep(retryDelay)
+					continue
+				}
+				return false
 			}
-			return false
-		}
 
-		// Verify the response matches what we expect
-		if verifyResp.Host != host || verifyResp.Port != port || verifyResp.TLS != useTLS {
-			log.Printf("Instance verification mismatch for %s (attempt %d/%d): expected host=%s port=%d tls=%v, got host=%s port=%d tls=%v",
-				secretUUID, attempt, maxRetries, host, port, useTLS, verifyResp.Host, verifyResp.Port, verifyResp.TLS)
-			if attempt < maxRetries {
-				time.Sleep(retryDelay)
-				continue
+			// Check for required fields in receiver section
+			receiver, ok := descResp["receiver"].(map[string]interface{})
+			if !ok {
+				log.Printf("Test verification failed: no receiver section in /api/description (attempt %d/%d)", attempt, maxRetries)
+				if attempt < maxRetries {
+					time.Sleep(retryDelay)
+					continue
+				}
+				return false
 			}
-			return false
+
+			// Verify required fields exist
+			requiredFields := []string{"callsign", "name"}
+			for _, field := range requiredFields {
+				if _, ok := receiver[field]; !ok {
+					log.Printf("Test verification failed: missing required field '%s' in receiver section (attempt %d/%d)", field, attempt, maxRetries)
+					if attempt < maxRetries {
+						time.Sleep(retryDelay)
+						continue
+					}
+					return false
+				}
+			}
+
+			// Check for version field at top level
+			if _, ok := descResp["version"]; !ok {
+				log.Printf("Test verification failed: missing version field (attempt %d/%d)", attempt, maxRetries)
+				if attempt < maxRetries {
+					time.Sleep(retryDelay)
+					continue
+				}
+				return false
+			}
+
+			log.Printf("Test verification successful for %s at %s (attempt %d)", secretUUID, url, attempt)
+			return true
+		} else {
+			// Normal mode: verify callback response
+			var verifyResp InstanceVerificationResponse
+			if err := json.NewDecoder(resp.Body).Decode(&verifyResp); err != nil {
+				log.Printf("Failed to decode verification response (attempt %d/%d): %v", attempt, maxRetries, err)
+				if attempt < maxRetries {
+					time.Sleep(retryDelay)
+					continue
+				}
+				return false
+			}
+
+			// Verify the response matches what we expect
+			if verifyResp.Host != host || verifyResp.Port != port || verifyResp.TLS != useTLS {
+				log.Printf("Instance verification mismatch for %s (attempt %d/%d): expected host=%s port=%d tls=%v, got host=%s port=%d tls=%v",
+					secretUUID, attempt, maxRetries, host, port, useTLS, verifyResp.Host, verifyResp.Port, verifyResp.TLS)
+				if attempt < maxRetries {
+					time.Sleep(retryDelay)
+					continue
+				}
+				return false
+			}
+
+			log.Printf("Instance %s verified successfully at %s (attempt %d)", secretUUID, url, attempt)
+
+			// Increment successful_callbacks counter in database
+			_, err = c.db.Exec("UPDATE instances SET successful_callbacks = successful_callbacks + 1 WHERE secret_uuid = ?", secretUUID)
+			if err != nil {
+				log.Printf("Failed to increment successful_callbacks for %s: %v", secretUUID, err)
+			}
+
+			return true
 		}
-
-		log.Printf("Instance %s verified successfully at %s (attempt %d)", secretUUID, callbackURL, attempt)
-
-		// Increment successful_callbacks counter in database
-		_, err = c.db.Exec("UPDATE instances SET successful_callbacks = successful_callbacks + 1 WHERE secret_uuid = ?", secretUUID)
-		if err != nil {
-			log.Printf("Failed to increment successful_callbacks for %s: %v", secretUUID, err)
-		}
-
-		return true
 	}
 
 	return false

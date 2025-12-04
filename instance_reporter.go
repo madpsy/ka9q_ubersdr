@@ -59,6 +59,7 @@ type InstanceReport struct {
 	PublicIQModes    []string `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
 	CPUModel         string   `json:"cpu_model"`         // CPU model name
 	CPUCores         int      `json:"cpu_cores"`         // Number of CPU cores
+	Test             bool     `json:"test,omitempty"`    // If true, this is a test report - collector will verify /api/description instead of full callback
 }
 
 // NewInstanceReporter creates a new instance reporter
@@ -593,6 +594,9 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		instanceUUID = val
 	}
 
+	// This is a test report
+	isTest := true
+
 	// If use_myip is enabled, fetch the public IP from the collector
 	host := instanceHost
 	if useMyIP {
@@ -664,6 +668,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		PublicIQModes:    publicIQModes,
 		CPUModel:         cpuModel,
 		CPUCores:         cpuCores,
+		Test:             isTest,
 	}
 
 	jsonData, err := json.Marshal(report)

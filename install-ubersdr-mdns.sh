@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 
-# --- Ubersdr mDNS/Bonjour advertisement installer ---
+# --- UberSDR mDNS/Bonjour advertisement installer ---
 # This script installs Avahi on the host running Docker and
-# publishes a _http._tcp.local service pointing to port 8080.
+# publishes a _ubersdr._tcp.local service pointing to port 8080
+# with structured TXT records suitable for programmatic discovery.
 
 SERVICE_FILE="/etc/avahi/services/ubersdr.service"
+PORT="${UBERSDR_PORT:-8080}"
 
 # Ensure script is run as root
 if [ "$EUID" -ne 0 ]; then
@@ -22,10 +24,18 @@ cat > "$SERVICE_FILE" <<EOF
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
+  <!-- Human-friendly instance name; clients should NOT parse this -->
   <name replace-wildcards="yes">UberSDR on %h</name>
+
+  <!-- Programmatically discoverable service -->
   <service>
-    <type>_http._tcp</type>
-    <port>8080</port>
+    <!-- Dedicated service type for UberSDR -->
+    <type>_ubersdr._tcp</type>
+    <port>${PORT}</port>
+
+    <!-- Structured TXT records for clients -->
+    <txt-record>product=ubersdr</txt-record>
+    <txt-record>version=1</txt-record>
     <txt-record>path=/</txt-record>
   </service>
 </service-group>
@@ -37,12 +47,20 @@ systemctl restart avahi-daemon
 sleep 1
 
 echo ""
-echo "Ubersdr is now being advertised on your LAN via mDNS"
+echo "UberSDR is now being advertised on your LAN via mDNS/DNS-SD"
 echo ""
-echo "Try accessing it from another computer using:"
-echo "    http://ubersdr.local:8080"
+echo "Service type (for clients):"
+echo "    _ubersdr._tcp.local"
+echo ""
+echo "TXT records:"
+echo "    product=ubersdr"
+echo "    version=1"
+echo "    path=/"
+echo ""
+echo "Default URL from another machine (if your host is resolvable as 'ubersdr.local'):"
+echo "    http://ubersdr.local:${PORT}/"
 echo ""
 echo "You can verify discovery with:"
-echo "    avahi-browse -a | grep -i ubersdr"
+echo "    avahi-browse -rt _ubersdr._tcp"
 echo ""
 echo "Done."

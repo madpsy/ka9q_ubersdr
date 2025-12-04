@@ -573,8 +573,8 @@
 
             if (countdown <= 0) {
                 clearInterval(interval);
-                // Redirect to login page
-                window.location.href = '/admin.html';
+                // Redirect to main radio interface
+                window.location.href = '/';
             }
         }, 1000);
     }

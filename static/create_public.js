@@ -74,22 +74,46 @@ function setupEventListeners() {
 }
 
 // Toggle hostname and TLS field visibility
-function toggleManualConnectionFields() {
+async function toggleManualConnectionFields() {
     const useMyIP = document.getElementById('useMyIP').checked;
     const hostnameField = document.getElementById('hostnameField');
     const tlsField = document.getElementById('tlsField');
+    const detectedIPDiv = document.getElementById('detectedIP');
 
     if (useMyIP) {
         hostnameField.style.display = 'none';
         tlsField.style.display = 'none';
         // Uncheck TLS when using auto IP
         document.getElementById('instanceTLS').checked = false;
+        // Show and fetch IP address
+        detectedIPDiv.style.display = 'block';
+        await fetchPublicIP();
     } else {
         hostnameField.style.display = 'block';
         tlsField.style.display = 'block';
+        // Hide IP address display
+        detectedIPDiv.style.display = 'none';
     }
 
     updateReviewSection();
+}
+
+// Fetch public IP address
+async function fetchPublicIP() {
+    const ipSpan = document.getElementById('ipAddress');
+    ipSpan.textContent = 'Loading...';
+
+    try {
+        const response = await fetch('https://instances.ubersdr.org/api/myip');
+        if (!response.ok) {
+            throw new Error('Failed to fetch IP');
+        }
+        const data = await response.json();
+        ipSpan.textContent = data.ip;
+    } catch (error) {
+        ipSpan.textContent = 'Unable to detect';
+        console.error('Error fetching public IP:', error);
+    }
 }
 
 // Update review section

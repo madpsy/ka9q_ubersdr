@@ -22,7 +22,7 @@ cat > "$SERVICE_FILE" <<EOF
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
-  <name replace-wildcards="yes">Ubersdr on %h</name>
+  <name replace-wildcards="yes">UberSDR on %h</name>
   <service>
     <type>_http._tcp</type>
     <port>8080</port>
@@ -37,7 +37,7 @@ systemctl restart avahi-daemon
 sleep 1
 
 echo ""
-echo "🎉 Ubersdr is now being advertised on your LAN via mDNS!"
+echo "Ubersdr is now being advertised on your LAN via mDNS"
 echo ""
 echo "Try accessing it from another computer using:"
 echo "    http://ubersdr.local:8080"

@@ -63,6 +63,9 @@ function setupEventListeners() {
     // Use My IP checkbox
     document.getElementById('useMyIP').addEventListener('change', toggleManualConnectionFields);
     
+    // TLS checkbox - update port when toggled
+    document.getElementById('instanceTLS').addEventListener('change', handleTLSToggle);
+    
     // Update review when fields change
     const fields = ['useMyIP', 'instanceHost', 'instancePort', 'instanceTLS'];
     fields.forEach(id => {
@@ -74,18 +77,37 @@ function setupEventListeners() {
     });
 }
 
+// Handle TLS checkbox toggle - update port accordingly
+function handleTLSToggle() {
+    const tlsEnabled = document.getElementById('instanceTLS').checked;
+    const portField = document.getElementById('instancePort');
+    
+    if (tlsEnabled) {
+        // Set to HTTPS port
+        portField.value = 443;
+    } else {
+        // Set to HTTP port
+        portField.value = 80;
+    }
+    
+    updateReviewSection();
+}
+
 // Toggle hostname and TLS field visibility
 async function toggleManualConnectionFields() {
     const useMyIP = document.getElementById('useMyIP').checked;
     const hostnameField = document.getElementById('hostnameField');
     const tlsField = document.getElementById('tlsField');
     const detectedIPDiv = document.getElementById('detectedIP');
+    const portField = document.getElementById('instancePort');
 
     if (useMyIP) {
         hostnameField.style.display = 'none';
         tlsField.style.display = 'none';
         // Uncheck TLS when using auto IP
         document.getElementById('instanceTLS').checked = false;
+        // Set port to 80 for Caddy HTTP
+        portField.value = 80;
         // Show and fetch IP address
         detectedIPDiv.style.display = 'block';
         await fetchPublicIP();

@@ -2403,6 +2403,13 @@ function handleFrequencyChange() {
     const MIN_FREQ = 100000;   // 100 kHz
     const MAX_FREQ = 30000000; // 30 MHz
 
+    // Only validate if we have a complete number (7-8 digits)
+    const valueStr = freqInput.value.trim();
+    if (valueStr.length < 6) {
+        // Incomplete input - don't validate yet
+        return;
+    }
+
     if (isNaN(frequency) || frequency < MIN_FREQ || frequency > MAX_FREQ) {
         // Clamp to valid range
         if (isNaN(frequency) || frequency < MIN_FREQ) {
@@ -2421,6 +2428,9 @@ function handleFrequencyChange() {
 
     // Update band selector dropdown
     updateBandSelector();
+
+    // Update spectrum cursor
+    updateSpectrumCursor();
 
     // Update URL with new frequency
     updateURL();
@@ -5921,11 +5931,22 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update cursor and band selector when frequency input changes
         const freqInput = document.getElementById('frequency');
         if (freqInput) {
-            // Only update on 'change' event (when editing is complete)
-            // Removed 'input' event to prevent cursor jumping while typing
-            freqInput.addEventListener('change', () => {
-                updateSpectrumCursor();
-                updateBandSelector();
+            // Add input event listener for real-time validation (digits only)
+            freqInput.addEventListener('input', (e) => {
+                validateFrequencyInput(e.target);
+            });
+            
+            // Add Enter key handler to apply frequency
+            freqInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleFrequencyChange();
+                }
+            });
+            
+            // Add blur handler to apply frequency when focus is lost
+            freqInput.addEventListener('blur', () => {
+                handleFrequencyChange();
             });
         }
     } catch (err) {

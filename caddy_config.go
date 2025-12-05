@@ -151,8 +151,8 @@ func generateHTTPSCaddyfile(host, email string) string {
     auto_https disable_redirects
 }
 
-# HTTP (port 80) - serve without redirect
-http://%s {
+# HTTP (port 80) - respond to any host header
+:80 {
     # Reverse proxy to ubersdr container
     reverse_proxy ubersdr:8080
     

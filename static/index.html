@@ -150,12 +150,12 @@
 
         <div class="controls">
             <div class="control-group">
-                <div style="display: flex; gap: 8px; align-items: center; justify-content: center;">
-                    <div class="frequency-input-wrapper" style="min-width: 200px;">
+                <div style="display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: nowrap;">
+                    <div class="frequency-input-wrapper" style="min-width: 200px; width: 200px;">
                         <input type="number" id="frequency" value="14175000" onchange="handleFrequencyChange()" title="Frequency in Hz (F key to focus - Press Enter to apply)">
                         <span class="frequency-unit">Hz</span>
                     </div>
-                    <button onclick="handleFrequencyChange()" style="padding: 8px 12px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; display: flex; align-items: center; justify-content: center; min-width: 40px; height: 40px;" title="Apply frequency (Enter)">►</button>
+                    <button onclick="handleFrequencyChange()" style="padding: 8px 12px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; display: flex; align-items: center; justify-content: center; min-width: 40px; height: 40px; flex-shrink: 0;" title="Apply frequency (Enter)">►</button>
                     <div style="display: flex; flex-direction: column; gap: 4px;">
                         <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
                             <input type="checkbox" id="spectrum-scroll-enable" onchange="toggleFrequencyScrollDropdown()">

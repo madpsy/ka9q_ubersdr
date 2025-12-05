@@ -597,7 +597,6 @@ body {
     display: flex;
     align-items: center;
     margin-top: 10px;
-    max-width: 150px; /* Limit wrapper width to fit frequency values */
 }
 
 .frequency-input-wrapper input[type="number"],

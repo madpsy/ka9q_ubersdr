@@ -1698,6 +1698,12 @@ function updateStatus(msg) {
         // Update frequency display
         document.getElementById('current-freq').textContent = freqText;
 
+        // Only update frequency input if user is not currently editing it
+        const freqInput = document.getElementById('frequency');
+        if (freqInput && document.activeElement !== freqInput) {
+            freqInput.value = msg.frequency;
+        }
+
         // Update mode display (without band name)
         if (msg.mode) {
             const modeText = msg.mode.toUpperCase();

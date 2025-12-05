@@ -14,12 +14,18 @@ func isIPAddress(host string) bool {
 	return net.ParseIP(host) != nil
 }
 
+// isExampleEmail checks if an email address ends with @example.com
+// These are placeholder emails and should not be used for Let's Encrypt
+func isExampleEmail(email string) bool {
+	return strings.HasSuffix(strings.ToLower(email), "@example.com")
+}
+
 // GenerateCaddyfile generates a Caddyfile based on the instance configuration
 // and writes it to the shared volume for Caddy to use.
 //
 // Logic:
-// - If host is empty OR host is an IP address OR tls is false OR admin.email is empty: Generate HTTP-only config
-// - If host is a valid domain AND tls is true AND admin.email is set: Generate HTTPS config with Let's Encrypt
+// - If host is empty OR host is an IP address OR tls is false OR admin.email is empty OR email ends with @example.com: Generate HTTP-only config
+// - If host is a valid domain AND tls is true AND admin.email is set AND email is not @example.com: Generate HTTPS config with Let's Encrypt
 //
 // The function writes to /etc/caddy-shared/Caddyfile which is mounted as a shared volume
 // between the ubersdr and caddy containers.
@@ -46,7 +52,8 @@ func GenerateCaddyfile(config *Config) error {
 
 	// Decision logic: Only enable HTTPS if ALL conditions are met
 	// AND host is not an IP address (Let's Encrypt requires a domain name)
-	if host != "" && !isIPAddress(host) && tls && email != "" {
+	// AND email is not a placeholder @example.com address
+	if host != "" && !isIPAddress(host) && tls && email != "" && !isExampleEmail(email) {
 		// HTTPS mode with Let's Encrypt
 		mode = "HTTPS with Let's Encrypt"
 		caddyfileContent = generateHTTPSCaddyfile(host, email)
@@ -65,6 +72,8 @@ func GenerateCaddyfile(config *Config) error {
 			log.Printf("Generating Caddyfile for HTTP-only mode: TLS is disabled (host=%s)", host)
 		} else if email == "" {
 			log.Printf("Generating Caddyfile for HTTP-only mode: admin email is empty (host=%s)", host)
+		} else if isExampleEmail(email) {
+			log.Printf("Generating Caddyfile for HTTP-only mode: admin email is a placeholder @example.com address (%s), use a real email for Let's Encrypt", email)
 		}
 	}
 

@@ -51,10 +51,32 @@ function populateFormFields() {
     document.getElementById('instancePort').value = ir.instance?.port || 8080;
     document.getElementById('instanceTLS').checked = ir.instance?.tls || false;
     
+    // Check if admin email ends with @example.com
+    const adminEmail = currentConfig.admin?.email || '';
+    const isExampleEmail = adminEmail.toLowerCase().endsWith('@example.com');
+    
     // Default create_domain to true for new setups (when instance_reporting is not enabled)
     // If instance_reporting is already enabled, use the configured value
-    const defaultCreateDomain = !ir.enabled; // true if not enabled yet, false if already enabled
+    // But disable if email is @example.com
+    const defaultCreateDomain = !ir.enabled && !isExampleEmail; // true if not enabled yet and email is valid
     document.getElementById('createDomain').checked = ir.create_domain !== undefined ? ir.create_domain : defaultCreateDomain;
+    
+    // Disable create domain checkbox and show warning if email is @example.com
+    const createDomainCheckbox = document.getElementById('createDomain');
+    const createDomainWarning = document.getElementById('createDomainWarning');
+    
+    if (isExampleEmail) {
+        createDomainCheckbox.disabled = true;
+        createDomainCheckbox.checked = false;
+        if (createDomainWarning) {
+            createDomainWarning.style.display = 'block';
+        }
+    } else {
+        createDomainCheckbox.disabled = false;
+        if (createDomainWarning) {
+            createDomainWarning.style.display = 'none';
+        }
+    }
 
     // Update domain preview with callsign from config
     // This must happen BEFORE toggleManualConnectionFields which might trigger handleCreateDomainToggle

@@ -81,6 +81,17 @@
                         <span>Create DNS subdomain (<span id="domainPreview">yourcallsign</span>.instance.ubersdr.org)</span>
                     </label>
                     <small>When enabled, a DNS record will be automatically created pointing <strong><span id="domainPreview2">yourcallsign</span>.instance.ubersdr.org</strong> to your public IP address. This is the recommended option for most users. Port will default to 443 and TLS will be enabled.</small>
+                    
+                    <div id="createDomainWarning" style="display: none; margin-top: 10px; padding: 15px; background: #f8d7da; border-left: 4px solid #dc3545; border-radius: 5px;">
+                        <strong style="color: #721c24;">⚠️ Email Address Required</strong>
+                        <p style="margin: 10px 0 0 0; color: #721c24;">
+                            Your admin email address ends with <code>@example.com</code>, which is a placeholder address.
+                            DNS subdomain creation requires a valid email address for Let's Encrypt certificate generation.
+                        </p>
+                        <p style="margin: 10px 0 0 0; color: #721c24;">
+                            Please update your email address in the <a href="/admin.html" style="color: #721c24; font-weight: bold; text-decoration: underline;">Admin Panel → Config tab</a> before using this feature.
+                        </p>
+                    </div>
                 </div>
 
                 <div class="info-box" id="domainInfo" style="display: none; background: #e7f3ff; border-left: 4px solid #667eea;">

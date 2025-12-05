@@ -49,7 +49,19 @@ Add the following to your `config.json`:
 1. Install and configure PowerDNS with the API enabled
 2. Create the zone `instance.ubersdr.org` (or your chosen zone name)
 3. Generate an API key in PowerDNS configuration
-4. Ensure the PowerDNS API is accessible from the collector
+4. **Configure firewall access**: The collector's host IP must be allowed through the firewall to reach the PowerDNS server (default port 8081)
+5. **Configure PowerDNS webserver access**: Add the collector's IP address to the `webserver-allow-from` list in `/etc/powerdns/pdns.conf`:
+   ```
+   webserver-allow-from=127.0.0.1,::1,<collector-ip-address>
+   ```
+   For example:
+   ```
+   webserver-allow-from=127.0.0.1,::1,192.168.1.100
+   ```
+6. Restart PowerDNS after configuration changes:
+   ```bash
+   systemctl restart pdns
+   ```
 
 ## Instance Configuration
 

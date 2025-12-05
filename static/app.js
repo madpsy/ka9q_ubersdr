@@ -6860,23 +6860,15 @@ function copyUUIDToClipboard() {
 window.copyUUIDToClipboard = copyUUIDToClipboard;
 
 // Frequency scroll configuration
-let frequencyScrollMode = '1000-fast'; // Default mode
-let frequencyScrollStep = 1000; // Hz
+let frequencyScrollMode = '500-fast'; // Default mode
+let frequencyScrollStep = 500; // Hz
 let frequencyScrollDelay = 25; // ms (optimized for 40 cmd/sec rate limit - 40 updates/sec)
 
-// Toggle frequency scroll dropdown visibility
+// Toggle frequency scroll dropdown visibility (deprecated - dropdown now always visible)
 function toggleFrequencyScrollDropdown() {
-    const checkbox = document.getElementById('spectrum-scroll-enable');
-    const dropdown = document.getElementById('frequency-scroll-mode');
-    
-    if (checkbox && dropdown) {
-        dropdown.style.display = checkbox.checked ? 'block' : 'none';
-        
-        // Update scroll mode when enabling
-        if (checkbox.checked) {
-            updateFrequencyScrollMode();
-        }
-    }
+    // Function kept for compatibility but no longer needed
+    // Dropdown is now always visible
+    updateFrequencyScrollMode();
 }
 
 // Update frequency scroll mode from dropdown

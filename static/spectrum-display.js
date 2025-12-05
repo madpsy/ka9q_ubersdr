@@ -481,7 +481,7 @@ class SpectrumDisplay {
         this.scrollEnabled = false; // Mouse scroll wheel disabled by default
         this.zoomScrollEnabled = true; // Zoom scroll wheel enabled by default
         this.smoothingEnabled = false; // Temporal smoothing disabled by default
-        this.snapEnabled = true; // 1 KHz snap enabled by default (matches checkbox)
+        this.snapEnabled = true; // Snap enabled by default (uses frequency scroll step value)
         this.hasPerformedInitialZoom = false; // Track if we've done initial zoom on first scroll
         this.setupMouseHandlers();
         this.setupScrollHandler();
@@ -1883,17 +1883,19 @@ class SpectrumDisplay {
                 const startFreq = this.centerFreq - this.totalBandwidth / 2;
                 let freq = startFreq + (x / this.width) * this.totalBandwidth;
 
-                // Apply 1 KHz snap if enabled and in USB/LSB mode
+                // Apply snap if enabled and in USB/LSB mode (uses frequency scroll step value)
                 if (this.snapEnabled) {
                     const currentMode = window.currentMode ? window.currentMode.toLowerCase() : '';
+                    // Get snap step from frequency scroll dropdown (extract number from value like "500-fast")
+                    const snapStep = window.frequencyScrollStep || 1000; // Default to 1 kHz if not set
                     if (currentMode === 'lsb') {
-                        // LSB: add 200 Hz offset, then round to nearest 1 kHz
+                        // LSB: add 200 Hz offset, then round to nearest step
                         const adjustedFreq = freq + 200;
-                        freq = Math.round(adjustedFreq / 1000) * 1000;
+                        freq = Math.round(adjustedFreq / snapStep) * snapStep;
                     } else if (currentMode === 'usb') {
-                        // USB: subtract 200 Hz offset, then round to nearest 1 kHz
+                        // USB: subtract 200 Hz offset, then round to nearest step
                         const adjustedFreq = freq - 200;
-                        freq = Math.round(adjustedFreq / 1000) * 1000;
+                        freq = Math.round(adjustedFreq / snapStep) * snapStep;
                     }
                 }
 
@@ -2858,17 +2860,19 @@ class SpectrumDisplay {
                     const startFreq = this.centerFreq - this.totalBandwidth / 2;
                     let freq = startFreq + (x / this.width) * this.totalBandwidth;
 
-                    // Apply 1 KHz snap if enabled and in USB/LSB mode
+                    // Apply snap if enabled and in USB/LSB mode (uses frequency scroll step value)
                     if (this.snapEnabled) {
                         const currentMode = window.currentMode ? window.currentMode.toLowerCase() : '';
+                        // Get snap step from frequency scroll dropdown (extract number from value like "500-fast")
+                        const snapStep = window.frequencyScrollStep || 1000; // Default to 1 kHz if not set
                         if (currentMode === 'lsb') {
-                            // LSB: add 200 Hz offset, then round to nearest 1 kHz
+                            // LSB: add 200 Hz offset, then round to nearest step
                             const adjustedFreq = freq + 200;
-                            freq = Math.round(adjustedFreq / 1000) * 1000;
+                            freq = Math.round(adjustedFreq / snapStep) * snapStep;
                         } else if (currentMode === 'usb') {
-                            // USB: subtract 200 Hz offset, then round to nearest 1 kHz
+                            // USB: subtract 200 Hz offset, then round to nearest step
                             const adjustedFreq = freq - 200;
-                            freq = Math.round(adjustedFreq / 1000) * 1000;
+                            freq = Math.round(adjustedFreq / snapStep) * snapStep;
                         }
                     }
 
@@ -2967,7 +2971,8 @@ class SpectrumDisplay {
         if (snapCheckbox) {
             snapCheckbox.addEventListener('change', (e) => {
                 this.snapEnabled = e.target.checked;
-                console.log(`Spectrum 1 KHz snap ${this.snapEnabled ? 'enabled' : 'disabled'}`);
+                const snapStep = window.frequencyScrollStep || 1000;
+                console.log(`Spectrum snap ${this.snapEnabled ? 'enabled' : 'disabled'} (step: ${snapStep} Hz)`);
             });
         }
 

@@ -158,18 +158,17 @@
                     <button onclick="handleFrequencyChange()" style="padding: 8px 12px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; display: flex; align-items: center; justify-content: center; min-width: 40px; height: 40px; flex-shrink: 0;" title="Apply frequency (Enter)">►</button>
                     <div style="display: flex; flex-direction: column; gap: 4px;">
                         <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
-                            <input type="checkbox" id="spectrum-scroll-enable" onchange="toggleFrequencyScrollDropdown()">
                             <span>Scroll</span>
                         </label>
-                        <select id="frequency-scroll-mode" style="display: none; padding: 2px 4px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.85em;" onchange="updateFrequencyScrollMode()">
+                        <select id="frequency-scroll-mode" style="padding: 2px 4px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.85em;" onchange="updateFrequencyScrollMode()">
                             <option value="10-slow">10 Hz slow</option>
                             <option value="10-fast">10 Hz fast</option>
                             <option value="100-slow">100 Hz slow</option>
                             <option value="100-fast">100 Hz fast</option>
                             <option value="500-slow">500 Hz slow</option>
-                            <option value="500-fast">500 Hz fast</option>
+                            <option value="500-fast" selected>500 Hz fast</option>
                             <option value="1000-slow">1 kHz slow</option>
-                            <option value="1000-fast" selected>1 kHz fast</option>
+                            <option value="1000-fast">1 kHz fast</option>
                             <option value="10000-slow">10 kHz slow</option>
                             <option value="10000-fast">10 kHz fast</option>
                         </select>

@@ -2384,9 +2384,16 @@ function validateFrequencyInput(input) {
     if (value !== oldValue) {
         input.value = value;
         
-        // Restore cursor position, adjusting for any removed characters
-        const removedChars = oldValue.length - value.length;
-        const newCursorPos = Math.max(0, cursorPos - removedChars);
+        // Calculate how many characters were removed before the cursor
+        let removedBeforeCursor = 0;
+        for (let i = 0; i < cursorPos && i < oldValue.length; i++) {
+            if (!/\d/.test(oldValue[i])) {
+                removedBeforeCursor++;
+            }
+        }
+
+        // Restore cursor position, adjusting only for removed characters before cursor
+        const newCursorPos = Math.max(0, Math.min(value.length, cursorPos - removedBeforeCursor));
         input.setSelectionRange(newCursorPos, newCursorPos);
     }
 }

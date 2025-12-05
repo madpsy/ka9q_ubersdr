@@ -89,6 +89,23 @@ func GenerateCaddyfile(config *Config) error {
 	}
 
 	log.Printf("Successfully generated Caddyfile at %s (mode: %s)", caddyfilePath, mode)
+
+	// Trigger Caddy restart by creating restart trigger file
+	restartTriggerPath := "/var/run/restart-trigger/restart-caddy"
+	restartTriggerDir := filepath.Dir(restartTriggerPath)
+	
+	// Check if restart trigger directory exists (Docker environment)
+	if _, err := os.Stat(restartTriggerDir); err == nil {
+		// Create the restart trigger file
+		if err := os.WriteFile(restartTriggerPath, []byte{}, 0644); err != nil {
+			log.Printf("Warning: Failed to create Caddy restart trigger at %s: %v", restartTriggerPath, err)
+		} else {
+			log.Printf("Created Caddy restart trigger at %s", restartTriggerPath)
+		}
+	} else {
+		log.Printf("Restart trigger directory not found (not in Docker), skipping Caddy restart trigger")
+	}
+
 	return nil
 }
 

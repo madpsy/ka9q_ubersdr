@@ -652,6 +652,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 	// If create_domain=true, use the source IP for verification (DNS not set up yet)
 	// Otherwise use the host field from the JSON
 	verifyHost := update.Host
+	verifyPort := update.Port
 	verifyTLS := update.TLS
 	if update.CreateDomain {
 		// Validate that the host field matches the expected format: <callsign>.<zone_name>
@@ -669,12 +670,15 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		if host, _, err := net.SplitHostPort(clientIP); err == nil {
 			verifyHost = host
 		}
+		// When create_domain is true, always verify on port 80 (HTTP)
+		// DNS doesn't exist yet, so no certificate can be obtained for port 443
+		verifyPort = 80
 		// Ignore TLS errors when create_domain is true (no certificate yet)
 		verifyTLS = false
 	}
 	
 	// If test=true, check /api/description endpoint instead of full callback
-	if !c.verifyInstanceAccessibility(secretUUID, verifyHost, update.Port, verifyTLS, update.Test, update.CreateDomain) {
+	if !c.verifyInstanceAccessibility(secretUUID, verifyHost, verifyPort, verifyTLS, update.Test, update.CreateDomain) {
 		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v, test: %v, create_domain: %v) from IP: %s",
 			secretUUID, verifyHost, update.Port, verifyTLS, update.Test, update.CreateDomain, clientIP)
 		sendError(http.StatusBadRequest, "Instance verification failed - not publicly accessible")

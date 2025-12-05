@@ -72,7 +72,7 @@
                 <div class="form-group">
                     <label class="checkbox-label">
                         <input type="checkbox" id="createDomain">
-                        <span>🌐 Create DNS subdomain (<span id="domainPreview">yourcallsign</span>.instance.ubersdr.org)</span>
+                        <span>Create DNS subdomain (<span id="domainPreview">yourcallsign</span>.instance.ubersdr.org)</span>
                     </label>
                     <small>When enabled, a DNS record will be automatically created pointing <strong><span id="domainPreview2">yourcallsign</span>.instance.ubersdr.org</strong> to your public IP address. This is the recommended option for most users. Port will default to 443 and TLS will be enabled.</small>
                 </div>
@@ -109,24 +109,24 @@
                         <input type="text" id="instanceHost" placeholder="e.g., sdr.example.com or 203.0.113.42">
                         <small>The hostname or IP address that users will use to connect to your SDR</small>
                     </div>
-                </div>
 
-                <div class="form-group">
-                    <label for="instancePort">Public Port *</label>
-                    <input type="number" id="instancePort" value="8080" min="1" max="65535">
-                    <small>The port number users will connect to (typically 8080 for HTTP or 443 for HTTPS)</small>
-                    <div id="portWarning" style="display: none; margin-top: 10px; padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 5px;">
-                        <strong>⚠️ Non-standard port detected</strong>
-                        <p style="margin: 5px 0 0 0;">Port 443 is recommended for DNS subdomain mode. Other ports will work but may require users to specify the port in the URL.</p>
+                    <div class="form-group">
+                        <label for="instancePort">Public Port *</label>
+                        <input type="number" id="instancePort" value="8080" min="1" max="65535">
+                        <small>The port number users will connect to (typically 8080 for HTTP or 443 for HTTPS)</small>
+                        <div id="portWarning" style="display: none; margin-top: 10px; padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 5px;">
+                            <strong>⚠️ Non-standard port detected</strong>
+                            <p style="margin: 5px 0 0 0;">Port 443 is recommended for DNS subdomain mode. Other ports will work but may require users to specify the port in the URL.</p>
+                        </div>
                     </div>
-                </div>
 
-                <div class="form-group" id="tlsField">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="instanceTLS">
-                        <span>Use TLS/HTTPS for public connections</span>
-                    </label>
-                    <small>Enable if your public connection uses HTTPS/WSS (recommended for security)</small>
+                    <div class="form-group" id="tlsField">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="instanceTLS">
+                            <span>Use TLS/HTTPS for public connections</span>
+                        </label>
+                        <small>Enable if your public connection uses HTTPS/WSS (recommended for security)</small>
+                    </div>
                 </div>
 
                 <div class="info-box">

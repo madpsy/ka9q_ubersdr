@@ -126,7 +126,7 @@ func (c *Collector) createOrUpdateDNSRecord(callsign, ipAddress string) error {
 	rrset := PowerDNSRRSet{
 		Name:       fqdn,
 		Type:       "A",
-		TTL:        300, // 5 minutes TTL
+		TTL:        60, // 60 seconds TTL
 		ChangeType: "REPLACE",
 		Records: []PowerDNSRecord{
 			{

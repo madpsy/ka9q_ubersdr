@@ -119,7 +119,7 @@ The collector automatically extracts the source IP from the HTTP request (checki
 ## DNS Record Details
 
 - **Record Type**: A (IPv4 address)
-- **TTL**: 300 seconds (5 minutes)
+- **TTL**: 60 seconds (1 minute)
 - **Format**: `<callsign>.instance.ubersdr.org.` → `<ip_address>`
 - **Update Behavior**: Records are created or updated (REPLACE) on each instance report
 

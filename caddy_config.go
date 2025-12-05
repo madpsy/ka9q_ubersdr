@@ -211,7 +211,7 @@ https://%s {
         format json
     }
 }
-`, host, email, host, host, email)
+`, host, email, email, host)
 
 	// Add www redirect if domain doesn't start with www
 	if !strings.HasPrefix(host, "www.") {

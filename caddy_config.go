@@ -140,7 +140,7 @@ func generateHTTPCaddyfile() string {
 // generateHTTPSCaddyfile generates an HTTPS Caddyfile with Let's Encrypt
 // This requires a valid domain, TLS enabled, and admin email configured
 func generateHTTPSCaddyfile(host, email string) string {
-	// Main domain configuration
+	// Main domain configuration with both HTTP and HTTPS
 	mainConfig := fmt.Sprintf(`# HTTPS configuration with automatic Let's Encrypt certificates
 # Generated automatically by UberSDR based on config.yaml
 # Domain: %s
@@ -151,7 +151,35 @@ func generateHTTPSCaddyfile(host, email string) string {
     auto_https disable_redirects
 }
 
-%s {
+# HTTP (port 80) - serve without redirect
+http://%s {
+    # Reverse proxy to ubersdr container
+    reverse_proxy ubersdr:8080
+    
+    # Enable compression
+    encode gzip
+    
+    # Security headers (no HSTS for HTTP)
+    header {
+        # Prevent clickjacking
+        X-Frame-Options "SAMEORIGIN"
+        # Prevent MIME type sniffing
+        X-Content-Type-Options "nosniff"
+        # Enable XSS protection
+        X-XSS-Protection "1; mode=block"
+        # Referrer policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+    
+    # Logging
+    log {
+        output file /data/access.log
+        format json
+    }
+}
+
+# HTTPS (port 443) - with Let's Encrypt
+https://%s {
     # Email for Let's Encrypt certificate notifications
     tls %s
     
@@ -181,16 +209,21 @@ func generateHTTPSCaddyfile(host, email string) string {
         format json
     }
 }
-`, host, email, host, email)
+`, host, email, host, host, email)
 
 	// Add www redirect if domain doesn't start with www
 	if !strings.HasPrefix(host, "www.") {
 		wwwRedirect := fmt.Sprintf(`
-# Redirect www to non-www
-www.%s {
-    redir https://%s{uri} permanent
+# Redirect www to non-www (HTTP)
+http://www.%s {
+	   redir http://%s{uri} permanent
 }
-`, host, host)
+
+# Redirect www to non-www (HTTPS)
+https://www.%s {
+	   redir https://%s{uri} permanent
+}
+`, host, host, host, host)
 		return mainConfig + wwwRedirect
 	}
 

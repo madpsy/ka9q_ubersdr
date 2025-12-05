@@ -50,14 +50,18 @@ function populateFormFields() {
     document.getElementById('instanceHost').value = ir.instance?.host || '';
     document.getElementById('instancePort').value = ir.instance?.port || 8080;
     document.getElementById('instanceTLS').checked = ir.instance?.tls || false;
-    document.getElementById('createDomain').checked = ir.create_domain || false;
+    
+    // Default create_domain to true for new setups (when instance_reporting is not enabled)
+    // If instance_reporting is already enabled, use the configured value
+    const defaultCreateDomain = !ir.enabled; // true if not enabled yet, false if already enabled
+    document.getElementById('createDomain').checked = ir.create_domain !== undefined ? ir.create_domain : defaultCreateDomain;
 
     // Update domain preview with callsign from config
     // This must happen BEFORE toggleManualConnectionFields which might trigger handleCreateDomainToggle
     updateDomainPreview();
 
     // If create domain is checked, trigger the toggle to show the info box
-    if (ir.create_domain) {
+    if (document.getElementById('createDomain').checked) {
         handleCreateDomainToggle();
     }
 
@@ -111,6 +115,7 @@ function handleCreateDomainToggle() {
     const createDomain = document.getElementById('createDomain').checked;
     const manualConfigSection = document.getElementById('manualConfigSection');
     const domainInfo = document.getElementById('domainInfo');
+    const portForwardingInfo = document.getElementById('portForwardingInfo');
     const instanceHostInput = document.getElementById('instanceHost');
     const portField = document.getElementById('instancePort');
     const tlsCheckbox = document.getElementById('instanceTLS');
@@ -119,11 +124,16 @@ function handleCreateDomainToggle() {
         // Hide manual configuration section
         manualConfigSection.style.display = 'none';
         
-        // Show info box
+        // Hide port forwarding info box
+        if (portForwardingInfo) {
+            portForwardingInfo.style.display = 'none';
+        }
+        
+        // Show DNS info box
         domainInfo.style.display = 'block';
         
         // Set hostname internally (not visible to user)
-        const callsign = (currentConfig.callsign || 'yourcallsign').toLowerCase();
+        const callsign = (currentConfig.admin?.callsign || currentConfig.callsign || 'yourcallsign').toLowerCase();
         instanceHostInput.value = callsign + '.instance.ubersdr.org';
         
         // Auto-set port to 443 and enable TLS
@@ -133,7 +143,12 @@ function handleCreateDomainToggle() {
         // Show manual configuration section
         manualConfigSection.style.display = 'block';
         
-        // Hide info box
+        // Show port forwarding info box
+        if (portForwardingInfo) {
+            portForwardingInfo.style.display = 'block';
+        }
+        
+        // Hide DNS info box
         domainInfo.style.display = 'none';
         
         // Clear hostname

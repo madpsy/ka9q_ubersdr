@@ -602,6 +602,17 @@ instance_reporting:
   # including: UUID, callsign, location, public URL, and basic statistics
   enabled: true
 
+  # Create DNS subdomain for this instance (optional)
+  # When enabled, the collector will create a DNS A record pointing
+  # <callsign>.instance.ubersdr.org to your public IP address
+  # Requirements:
+  #   - host must be set to "<callsign>.instance.ubersdr.org" (lowercase)
+  #   - The collector will use your source IP for the DNS record
+  #   - TLS certificate errors are ignored during verification (no cert yet)
+  # Example: If callsign is "W1ABC", set host to "w1abc.instance.ubersdr.org"
+  # Default: false
+  create_domain: false
+
   # Use HTTPS (true) or HTTP (false) for connections to the central server
   # Default: true (HTTPS)
   # Set to false for local testing with HTTP-only collector
@@ -638,14 +649,3 @@ instance_reporting:
     host: ""
     port: 8080
     tls: false
-    
-    # Create DNS subdomain for this instance (optional)
-    # When enabled, the collector will create a DNS A record pointing
-    # <callsign>.instance.ubersdr.org to your public IP address
-    # Requirements:
-    #   - host must be set to "<callsign>.instance.ubersdr.org" (lowercase)
-    #   - The collector will use your source IP for the DNS record
-    #   - TLS certificate errors are ignored during verification (no cert yet)
-    # Example: If callsign is "W1ABC", set host to "w1abc.instance.ubersdr.org"
-    # Default: false
-    create_domain: false

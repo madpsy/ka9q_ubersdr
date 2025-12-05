@@ -146,6 +146,11 @@ func generateHTTPSCaddyfile(host, email string) string {
 # Domain: %s
 # Email: %s
 
+{
+    # Disable automatic HTTPS redirects - serve HTTP on port 80
+    auto_https disable_redirects
+}
+
 %s {
     # Email for Let's Encrypt certificate notifications
     tls %s

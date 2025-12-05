@@ -585,8 +585,13 @@ class DigitalSpotsMap {
         const MAX_ZOOM = 150;
         const ZOOM_STEP = 10;
 
-        // Apply saved zoom level
-        document.documentElement.style.fontSize = currentZoom + '%';
+        // Apply saved zoom level using CSS zoom property on body
+        const applyZoom = (zoom) => {
+            const scale = zoom / 100;
+            document.body.style.zoom = scale;
+        };
+
+        applyZoom(currentZoom);
 
         // Setup zoom in button
         const zoomInBtn = document.getElementById('zoom-in-btn');
@@ -594,7 +599,7 @@ class DigitalSpotsMap {
             zoomInBtn.addEventListener('click', () => {
                 if (currentZoom < MAX_ZOOM) {
                     currentZoom += ZOOM_STEP;
-                    document.documentElement.style.fontSize = currentZoom + '%';
+                    applyZoom(currentZoom);
                     localStorage.setItem('textZoom', currentZoom);
                     this.updateZoomButtonStates(currentZoom, MIN_ZOOM, MAX_ZOOM);
                 }
@@ -621,7 +626,7 @@ class DigitalSpotsMap {
             zoomOutBtn.addEventListener('click', () => {
                 if (currentZoom > MIN_ZOOM) {
                     currentZoom -= ZOOM_STEP;
-                    document.documentElement.style.fontSize = currentZoom + '%';
+                    applyZoom(currentZoom);
                     localStorage.setItem('textZoom', currentZoom);
                     this.updateZoomButtonStates(currentZoom, MIN_ZOOM, MAX_ZOOM);
                 }

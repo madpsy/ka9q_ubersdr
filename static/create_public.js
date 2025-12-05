@@ -53,7 +53,13 @@ function populateFormFields() {
     document.getElementById('createDomain').checked = ir.create_domain || false;
 
     // Update domain preview with callsign from config
+    // This must happen BEFORE toggleManualConnectionFields which might trigger handleCreateDomainToggle
     updateDomainPreview();
+
+    // If create domain is checked, trigger the toggle to show the info box
+    if (ir.create_domain) {
+        handleCreateDomainToggle();
+    }
 
     // Update manual connection fields visibility
     toggleManualConnectionFields();
@@ -142,10 +148,17 @@ function handleCreateDomainToggle() {
 
 // Update domain preview with callsign from config
 function updateDomainPreview() {
-    const callsign = (currentConfig.callsign || 'yourcallsign').toLowerCase();
-    document.getElementById('domainPreview').textContent = callsign;
-    document.getElementById('domainPreview2').textContent = callsign;
-    document.getElementById('domainPreview3').textContent = callsign;
+    // Get callsign from admin section of config (not instance_reporting)
+    const callsign = (currentConfig.admin?.callsign || currentConfig.callsign || 'yourcallsign').toLowerCase();
+    
+    // Update all domain preview spans
+    const preview1 = document.getElementById('domainPreview');
+    const preview2 = document.getElementById('domainPreview2');
+    const preview3 = document.getElementById('domainPreview3');
+    
+    if (preview1) preview1.textContent = callsign;
+    if (preview2) preview2.textContent = callsign;
+    if (preview3) preview3.textContent = callsign;
     
     // Update hostname internally if create domain is checked
     const createDomain = document.getElementById('createDomain').checked;

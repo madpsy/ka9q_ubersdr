@@ -167,6 +167,14 @@ func main() {
 		getRateLimitMap:       make(map[string]time.Time),
 	}
 
+	// Test PowerDNS connectivity if enabled
+	if config.PowerDNS.Enabled {
+		if err := collector.testPowerDNSConnection(); err != nil {
+			log.Printf("WARNING: PowerDNS connectivity test failed: %v", err)
+			log.Printf("PowerDNS is enabled but not accessible - DNS operations will fail")
+		}
+	}
+
 	// Start background cleanup for rate limit maps
 	go collector.cleanupRateLimitMap()
 	go collector.cleanupGetRateLimitMap()

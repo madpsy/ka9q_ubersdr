@@ -270,3 +270,84 @@ func (c *Collector) deleteDNSRecord(callsign string) error {
 	log.Printf("Successfully deleted DNS record: %s", fqdn)
 	return nil
 }
+
+// PowerDNSZone represents a PowerDNS zone response
+type PowerDNSZone struct {
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Type   string          `json:"type"`
+	RRSets []PowerDNSRRSet `json:"rrsets,omitempty"`
+}
+
+// testPowerDNSConnection tests connectivity to PowerDNS by listing zone records
+func (c *Collector) testPowerDNSConnection() error {
+	if !c.config.PowerDNS.Enabled {
+		return nil // PowerDNS not enabled, skip test
+	}
+	
+	log.Printf("Testing PowerDNS connectivity...")
+	
+	// Ensure zone name ends with a dot
+	zoneName := c.config.PowerDNS.ZoneName
+	if !strings.HasSuffix(zoneName, ".") {
+		zoneName += "."
+	}
+	
+	// Construct the API URL to get zone information
+	// Format: {api_url}/api/v1/servers/{server_id}/zones/{zone_name}
+	apiURL := fmt.Sprintf("%s/api/v1/servers/%s/zones/%s",
+		strings.TrimSuffix(c.config.PowerDNS.APIURL, "/"),
+		c.config.PowerDNS.ServerID,
+		zoneName,
+	)
+	
+	// Create HTTP request
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create PowerDNS test request: %w", err)
+	}
+	
+	req.Header.Set("X-API-Key", c.config.PowerDNS.APIKey)
+	
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	
+	// Execute request
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("PowerDNS API connection failed: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		// Read error response body
+		var errorBody bytes.Buffer
+		errorBody.ReadFrom(resp.Body)
+		return fmt.Errorf("PowerDNS API returned status %d: %s", resp.StatusCode, errorBody.String())
+	}
+	
+	// Parse the zone response
+	var zone PowerDNSZone
+	if err := json.NewDecoder(resp.Body).Decode(&zone); err != nil {
+		return fmt.Errorf("failed to parse PowerDNS zone response: %w", err)
+	}
+	
+	// Count A records in the zone
+	aRecordCount := 0
+	for _, rrset := range zone.RRSets {
+		if rrset.Type == "A" {
+			aRecordCount += len(rrset.Records)
+		}
+	}
+	
+	log.Printf("PowerDNS connectivity test successful!")
+	log.Printf("  Zone: %s", zone.Name)
+	log.Printf("  Type: %s", zone.Type)
+	log.Printf("  A Records: %d", aRecordCount)
+	log.Printf("  Total RRSets: %d", len(zone.RRSets))
+	
+	return nil
+}

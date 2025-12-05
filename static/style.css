@@ -601,9 +601,14 @@ body {
 
 .frequency-input-wrapper input[type="number"],
 .frequency-input-wrapper input[type="text"] {
-    flex: 1;
+    width: 100%;
+    padding: 12px;
     padding-right: 35px; /* Make room for Hz text */
     -moz-appearance: textfield; /* Firefox */
+    border: 2px solid #dee2e6;
+    border-radius: 6px;
+    font-size: 1em;
+    transition: border-color 0.3s;
 }
 
 .frequency-input-wrapper input[type="number"]::-webkit-outer-spin-button,

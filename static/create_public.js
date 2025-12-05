@@ -166,11 +166,13 @@ function updateDomainPreview() {
     // Get callsign from admin section of config (not instance_reporting)
     const callsign = (currentConfig.admin?.callsign || currentConfig.callsign || 'yourcallsign').toLowerCase();
     
-    // Update all domain preview spans
+    // Update all domain preview spans (including intro page)
+    const introCallsign = document.getElementById('introCallsign');
     const preview1 = document.getElementById('domainPreview');
     const preview2 = document.getElementById('domainPreview2');
     const preview3 = document.getElementById('domainPreview3');
     
+    if (introCallsign) introCallsign.textContent = callsign;
     if (preview1) preview1.textContent = callsign;
     if (preview2) preview2.textContent = callsign;
     if (preview3) preview3.textContent = callsign;

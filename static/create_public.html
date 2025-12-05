@@ -51,9 +51,15 @@
                 <div class="info-box">
                     <h3>🌐 Ways to Make Your Instance Public</h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 15px;">
+                        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; border-left: 4px solid #667eea;">
+                            <h4 style="margin-top: 0; color: #667eea;">🎯 Automatic DNS Subdomain (Recommended)</h4>
+                            <p style="margin: 0; font-size: 14px; margin-bottom: 10px;">Get a free subdomain automatically! Your instance will be accessible at:</p>
+                            <p style="margin: 5px 0; font-size: 16px; font-weight: bold; color: #667eea;">https://<span id="introCallsign">yourcallsign</span>.instance.ubersdr.org</p>
+                            <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">💡 <strong>Easiest option:</strong> Just forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host. Automatic DNS and HTTPS certificates included!</p>
+                        </div>
                         <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6;">
-                            <h4 style="margin-top: 0; color: #667eea;">🔌 Port Forwarding with Caddy</h4>
-                            <p style="margin: 0; font-size: 14px; margin-bottom: 10px;">Forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host in your router. Caddy (included in Docker setup) acts as a reverse proxy.</p>
+                            <h4 style="margin-top: 0; color: #667eea;">🔌 Port Forwarding with Your Own Domain</h4>
+                            <p style="margin: 0; font-size: 14px; margin-bottom: 10px;">Use your own domain name. Forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host. Caddy (included in Docker setup) acts as a reverse proxy.</p>
                             <p style="margin: 0; font-size: 13px; color: #666;">💡 <strong>Automatic HTTPS:</strong> When TLS is enabled in config.yaml with a valid domain and email, Caddy automatically obtains and renews Let's Encrypt certificates.</p>
                         </div>
                         <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6;">

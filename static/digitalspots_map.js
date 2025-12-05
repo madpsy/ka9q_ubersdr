@@ -585,10 +585,25 @@ class DigitalSpotsMap {
         const MAX_ZOOM = 150;
         const ZOOM_STEP = 10;
 
-        // Apply saved zoom level using CSS zoom property on body
+        // Apply zoom to all elements except the map
         const applyZoom = (zoom) => {
             const scale = zoom / 100;
-            document.body.style.zoom = scale;
+            // Zoom all UI elements but not the map
+            const elementsToZoom = [
+                '.header',
+                '.legend',
+                '.space-weather-legend',
+                '.distance-legend',
+                '.new-entities-legend',
+                '.live-messages-panel'
+            ];
+            
+            elementsToZoom.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(el => {
+                    el.style.zoom = scale;
+                });
+            });
         };
 
         // Only apply zoom if user has previously set a preference

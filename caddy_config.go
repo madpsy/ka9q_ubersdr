@@ -149,6 +149,8 @@ func generateHTTPSCaddyfile(host, email string) string {
 {
     # Disable automatic HTTPS redirects - serve HTTP on port 80
     auto_https disable_redirects
+    # Email for Let's Encrypt certificate notifications
+    email %s
 }
 
 # HTTP (port 80) - respond to any host header
@@ -180,10 +182,8 @@ func generateHTTPSCaddyfile(host, email string) string {
 
 # HTTPS (port 443) - with Let's Encrypt
 https://%s {
-    # Let's Encrypt with email for notifications
-    tls {
-        email %s
-    }
+    # Enable TLS with Let's Encrypt (email configured globally)
+    tls
     
     # Reverse proxy to ubersdr container
     reverse_proxy ubersdr:8080

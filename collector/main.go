@@ -1305,15 +1305,20 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 				return false
 			}
 
-			// Verify the response matches what we expect
-			if verifyResp.Host != host || verifyResp.Port != port || verifyResp.TLS != useTLS {
-				log.Printf("Instance verification mismatch for %s (attempt %d/%d): expected host=%s port=%d tls=%v, got host=%s port=%d tls=%v",
-					secretUUID, attempt, maxRetries, host, port, useTLS, verifyResp.Host, verifyResp.Port, verifyResp.TLS)
-				if attempt < maxRetries {
-					time.Sleep(retryDelay)
-					continue
+			// When ignoreTLS is true (create_domain mode), skip response validation
+			// The instance will return its final configuration (subdomain, port 443, TLS true)
+			// but we verified using temporary parameters (IP, port 80, TLS false)
+			if !ignoreTLS {
+				// Verify the response matches what we expect
+				if verifyResp.Host != host || verifyResp.Port != port || verifyResp.TLS != useTLS {
+					log.Printf("Instance verification mismatch for %s (attempt %d/%d): expected host=%s port=%d tls=%v, got host=%s port=%d tls=%v",
+						secretUUID, attempt, maxRetries, host, port, useTLS, verifyResp.Host, verifyResp.Port, verifyResp.TLS)
+					if attempt < maxRetries {
+						time.Sleep(retryDelay)
+						continue
+					}
+					return false
 				}
-				return false
 			}
 
 			log.Printf("Instance %s verified successfully at %s (attempt %d)", secretUUID, url, attempt)

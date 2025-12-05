@@ -591,7 +591,10 @@ class DigitalSpotsMap {
             document.body.style.zoom = scale;
         };
 
-        applyZoom(currentZoom);
+        // Only apply zoom if user has previously set a preference
+        if (savedZoom) {
+            applyZoom(currentZoom);
+        }
 
         // Setup zoom in button
         const zoomInBtn = document.getElementById('zoom-in-btn');

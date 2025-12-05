@@ -183,7 +183,7 @@ func generateHTTPSCaddyfile(host, email string) string {
 # HTTPS (port 443) - with Let's Encrypt
 https://%s {
     # Enable TLS with Let's Encrypt (email configured globally)
-    tls
+    tls internal
     
     # Reverse proxy to ubersdr container
     reverse_proxy ubersdr:8080

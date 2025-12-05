@@ -2368,16 +2368,27 @@ function tune() {
 
 // Validate frequency input - only allow digits and max 8 digits
 function validateFrequencyInput(input) {
+    // Store cursor position before any changes
+    const cursorPos = input.selectionStart;
+    const oldValue = input.value;
+    
     // Remove any non-digit characters
-    let value = input.value.replace(/\D/g, '');
+    let value = oldValue.replace(/\D/g, '');
 
     // Limit to 8 digits (max 30000000)
     if (value.length > 8) {
         value = value.substring(0, 8);
     }
 
-    // Update input value
-    input.value = value;
+    // Only update if value actually changed (prevents unnecessary cursor resets)
+    if (value !== oldValue) {
+        input.value = value;
+        
+        // Restore cursor position, adjusting for any removed characters
+        const removedChars = oldValue.length - value.length;
+        const newCursorPos = Math.max(0, cursorPos - removedChars);
+        input.setSelectionRange(newCursorPos, newCursorPos);
+    }
 }
 
 // Handle frequency input change - auto-connect if not connected

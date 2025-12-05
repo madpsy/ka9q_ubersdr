@@ -600,7 +600,8 @@ body {
     max-width: 150px; /* Limit wrapper width to fit frequency values */
 }
 
-.frequency-input-wrapper input[type="number"] {
+.frequency-input-wrapper input[type="number"],
+.frequency-input-wrapper input[type="text"] {
     flex: 1;
     padding-right: 35px; /* Make room for Hz text */
     -moz-appearance: textfield; /* Firefox */

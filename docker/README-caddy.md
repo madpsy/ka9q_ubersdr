@@ -1,6 +1,8 @@
 # UberSDR with Caddy Reverse Proxy
 
-This Docker Compose configuration adds Caddy as a reverse proxy to enable secure HTTPS access to UberSDR while maintaining direct HTTP access on port 8080.
+Caddy is now integrated into the main Docker Compose configurations to provide secure HTTPS access to UberSDR while maintaining direct HTTP access on port 8080.
+
+**NEW: Dynamic Configuration** - The Caddyfile is now automatically generated from your `config.yaml` settings on every startup. No manual Caddyfile editing required!
 
 ## Features
 
@@ -12,20 +14,37 @@ This Docker Compose configuration adds Caddy as a reverse proxy to enable secure
 
 ## Configuration
 
-### 1. Edit the Caddyfile
+### Automatic Caddyfile Generation
 
-Before starting, edit `docker/Caddyfile` and replace:
+The Caddyfile is automatically generated from your `config.yaml` on every startup based on these settings:
 
-- `ubersdr.example.com` with your actual domain name
-- `admin@example.com` with your actual email address (for Let's Encrypt notifications)
+**In `config.yaml`:**
+```yaml
+# Admin email (used for Let's Encrypt notifications)
+admin:
+  email: "admin@example.com"
 
-```bash
-# Example:
-ubersdr.yourdomain.com {
-    tls your-email@yourdomain.com
-    ...
-}
+# Instance connection settings (used for Caddy domain configuration)
+instance_reporting:
+  instance:
+    host: "ubersdr.example.com"  # Your domain name (empty = HTTP-only)
+    port: 8080                    # Port number
+    tls: true                     # Enable HTTPS with Let's Encrypt
 ```
+
+**Configuration Modes:**
+
+1. **HTTP-Only Mode** (Default/Safe)
+   - Used when: `host` is empty OR `tls` is false OR `admin.email` is empty
+   - No certificate requests
+   - Works everywhere (including behind firewalls)
+   - Example: `host: ""` or `tls: false`
+
+2. **HTTPS Mode** (Production)
+   - Used when: `host` is set AND `tls` is true AND `admin.email` is set
+   - Automatic Let's Encrypt certificates
+   - Requires ports 80 and 443 accessible from internet
+   - Example: `host: "ubersdr.example.com"`, `tls: true`, `email: "admin@example.com"`
 
 ### 2. DNS Configuration
 
@@ -35,9 +54,17 @@ Ensure your domain points to your server's public IP address:
 A Record: ubersdr.example.com -> YOUR_PUBLIC_IP
 ```
 
-### 3. Router Port Forwarding
+### DNS Configuration (HTTPS Mode Only)
 
-Configure your router to forward incoming traffic to the host running UberSDR:
+If using HTTPS mode (`tls: true`), ensure your domain points to your server's public IP address:
+
+```
+A Record: ubersdr.example.com → YOUR_PUBLIC_IP
+```
+
+### Router Port Forwarding (HTTPS Mode Only)
+
+If using HTTPS mode, configure your router to forward incoming traffic:
 
 **Required Port Forwards:**
 - **TCP Port 80** → Host IP:80 (for Let's Encrypt certificate validation)
@@ -60,30 +87,41 @@ sudo ufw allow 8080/tcp  # Optional
 
 ## Usage
 
+Caddy is now included in both main Docker Compose files:
+- `docker-compose.yml` - For building from source
+- `docker-compose-dockerhub.yml` - For using pre-built images from Docker Hub
+
 ### Starting the Services
 
+**Using local build:**
 ```bash
 cd docker
-docker-compose -f docker-compose-caddy.yml up -d
+docker-compose up -d
+```
+
+**Using Docker Hub images:**
+```bash
+cd docker
+docker-compose -f docker-compose-dockerhub.yml up -d
 ```
 
 ### Viewing Logs
 
 ```bash
 # All services
-docker-compose -f docker-compose-caddy.yml logs -f
+docker-compose logs -f
 
 # Caddy only
-docker-compose -f docker-compose-caddy.yml logs -f caddy
+docker-compose logs -f caddy
 
 # UberSDR only
-docker-compose -f docker-compose-caddy.yml logs -f ubersdr
+docker-compose logs -f ubersdr
 ```
 
 ### Stopping the Services
 
 ```bash
-docker-compose -f docker-compose-caddy.yml down
+docker-compose down
 ```
 
 ### Updating Configuration
@@ -91,7 +129,7 @@ docker-compose -f docker-compose-caddy.yml down
 After editing the Caddyfile:
 
 ```bash
-docker-compose -f docker-compose-caddy.yml restart caddy
+docker-compose restart caddy
 ```
 
 ## Access Methods
@@ -129,7 +167,27 @@ If Let's Encrypt fails to issue a certificate:
 
 1. Verify DNS is correctly configured
 2. Ensure ports 80 and 443 are accessible from the internet
-3. Check Caddy logs: `docker-compose -f docker-compose-caddy.yml logs caddy`
+3. Check Caddy logs: `docker-compose logs caddy`
+4. Verify your `config.yaml` settings:
+   - `instance_reporting.instance.host` is set to your domain
+   - `instance_reporting.instance.tls` is `true`
+   - `admin.email` is set to a valid email address
+
+**Behind a Firewall?**
+
+If your server is behind a firewall and Let's Encrypt cannot reach it via HTTP-01 challenge:
+
+1. **Recommended**: Set `tls: false` in `config.yaml` to use HTTP-only mode
+   - Caddy will serve HTTP without attempting certificate requests
+   - No failed Let's Encrypt attempts
+   - Works perfectly behind firewalls
+
+2. **Alternative**: Use DNS-01 challenge (requires manual Caddyfile editing)
+   - Allows certificate acquisition without inbound HTTP/HTTPS access
+   - Requires DNS provider API access
+   - See Caddy documentation for DNS provider setup
+
+Caddy will continue running and serving HTTP even if certificates cannot be obtained, so there's no harm in always having it enabled.
 
 ### Connection Issues
 
@@ -146,13 +204,13 @@ Port 8080 remains exposed for direct HTTP access. This is intentional and allows
 - Fallback access if the domain/certificate has issues
 - Development and testing
 
-To disable direct access, remove the `ports` section from the `ubersdr` service in `docker-compose-caddy.yml`.
+To disable direct access, remove the `ports` section from the `ubersdr` service in the Docker Compose file you're using.
 
 ## Security Considerations
 
 - Keep your email address up to date for certificate expiration notifications
 - Consider restricting port 8080 to local network only via firewall rules
-- Regularly update Docker images: `docker-compose -f docker-compose-caddy.yml pull`
+- Regularly update Docker images: `docker-compose pull`
 - Monitor Caddy access logs: `docker exec caddy cat /data/access.log`
 
 ## Volumes
@@ -168,6 +226,6 @@ The configuration uses the following persistent volumes:
 To reset Caddy (e.g., to get new certificates):
 
 ```bash
-docker-compose -f docker-compose-caddy.yml down
-docker volume rm docker_caddy-data docker_caddy-config
-docker-compose -f docker-compose-caddy.yml up -d
+docker-compose down
+docker volume rm docker_caddy-data docker_caddy-config docker_caddy-shared
+docker-compose up -d

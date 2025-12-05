@@ -152,6 +152,8 @@ class DigitalSpotsMap {
         // Periodically re-apply filters to handle aging spots
         // This ensures markers are hidden as they age past the filter threshold
         setInterval(() => this.applyFilters(), 60000); // Every 60 seconds
+        // Setup text zoom controls
+        this.setupTextZoom();
     }
 
     loadPreferences() {
@@ -570,6 +572,101 @@ class DigitalSpotsMap {
             const zoom = this.map.getZoom();
             this.savePreference('mapLat', center.lat);
             this.savePreference('mapLon', center.lng);
+
+    setupTextZoom() {
+        // Load saved zoom level or default to 100%
+        const savedZoom = localStorage.getItem('textZoom');
+        let currentZoom = savedZoom ? parseInt(savedZoom) : 100;
+        
+        const MIN_ZOOM = 70;
+        const MAX_ZOOM = 150;
+        const ZOOM_STEP = 10;
+
+        // Apply saved zoom level
+        document.documentElement.style.fontSize = currentZoom + '%';
+
+        // Setup zoom in button
+        const zoomInBtn = document.getElementById('zoom-in-btn');
+        if (zoomInBtn) {
+            zoomInBtn.addEventListener('click', () => {
+                if (currentZoom < MAX_ZOOM) {
+                    currentZoom += ZOOM_STEP;
+                    document.documentElement.style.fontSize = currentZoom + '%';
+                    localStorage.setItem('textZoom', currentZoom);
+                    this.updateZoomButtonStates(currentZoom, MIN_ZOOM, MAX_ZOOM);
+                }
+            });
+
+            // Add hover effect
+            zoomInBtn.addEventListener('mouseenter', () => {
+                if (currentZoom < MAX_ZOOM) {
+                    zoomInBtn.style.background = '#2a2a2a';
+                    zoomInBtn.style.borderColor = '#666';
+                    zoomInBtn.style.color = '#fff';
+                }
+            });
+            zoomInBtn.addEventListener('mouseleave', () => {
+                zoomInBtn.style.background = '#1a1a1a';
+                zoomInBtn.style.borderColor = '#444';
+                zoomInBtn.style.color = '#aaa';
+            });
+        }
+
+        // Setup zoom out button
+        const zoomOutBtn = document.getElementById('zoom-out-btn');
+        if (zoomOutBtn) {
+            zoomOutBtn.addEventListener('click', () => {
+                if (currentZoom > MIN_ZOOM) {
+                    currentZoom -= ZOOM_STEP;
+                    document.documentElement.style.fontSize = currentZoom + '%';
+                    localStorage.setItem('textZoom', currentZoom);
+                    this.updateZoomButtonStates(currentZoom, MIN_ZOOM, MAX_ZOOM);
+                }
+            });
+
+            // Add hover effect
+            zoomOutBtn.addEventListener('mouseenter', () => {
+                if (currentZoom > MIN_ZOOM) {
+                    zoomOutBtn.style.background = '#2a2a2a';
+                    zoomOutBtn.style.borderColor = '#666';
+                    zoomOutBtn.style.color = '#fff';
+                }
+            });
+            zoomOutBtn.addEventListener('mouseleave', () => {
+                zoomOutBtn.style.background = '#1a1a1a';
+                zoomOutBtn.style.borderColor = '#444';
+                zoomOutBtn.style.color = '#aaa';
+            });
+        }
+
+        // Set initial button states
+        this.updateZoomButtonStates(currentZoom, MIN_ZOOM, MAX_ZOOM);
+    }
+
+    updateZoomButtonStates(currentZoom, minZoom, maxZoom) {
+        const zoomInBtn = document.getElementById('zoom-in-btn');
+        const zoomOutBtn = document.getElementById('zoom-out-btn');
+
+        if (zoomInBtn) {
+            if (currentZoom >= maxZoom) {
+                zoomInBtn.style.opacity = '0.3';
+                zoomInBtn.style.cursor = 'not-allowed';
+            } else {
+                zoomInBtn.style.opacity = '1';
+                zoomInBtn.style.cursor = 'pointer';
+            }
+        }
+
+        if (zoomOutBtn) {
+            if (currentZoom <= minZoom) {
+                zoomOutBtn.style.opacity = '0.3';
+                zoomOutBtn.style.cursor = 'not-allowed';
+            } else {
+                zoomOutBtn.style.opacity = '1';
+                zoomOutBtn.style.cursor = 'pointer';
+            }
+        }
+    }
             this.savePreference('mapZoom', zoom);
         });
     }

@@ -2401,7 +2401,15 @@ function validateFrequencyInput(input) {
 // Handle frequency input change - auto-connect if not connected
 function handleFrequencyChange() {
     const freqInput = document.getElementById('frequency');
-    let frequency = parseInt(freqInput.value);
+    const valueStr = freqInput.value.trim();
+
+    // Don't validate incomplete input (less than 6 digits)
+    // This prevents clamping while user is still typing
+    if (valueStr.length < 6) {
+        return;
+    }
+
+    let frequency = parseInt(valueStr);
 
     // Update page title
     updatePageTitle();
@@ -2409,13 +2417,6 @@ function handleFrequencyChange() {
     // Validate frequency range: 100 kHz to 30 MHz (in Hz)
     const MIN_FREQ = 100000;   // 100 kHz
     const MAX_FREQ = 30000000; // 30 MHz
-
-    // Only validate if we have a complete number (7-8 digits)
-    const valueStr = freqInput.value.trim();
-    if (valueStr.length < 6) {
-        // Incomplete input - don't validate yet
-        return;
-    }
 
     if (isNaN(frequency) || frequency < MIN_FREQ || frequency > MAX_FREQ) {
         // Clamp to valid range

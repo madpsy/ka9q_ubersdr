@@ -183,7 +183,9 @@ func generateHTTPSCaddyfile(host, email string) string {
 # HTTPS (port 443) - with Let's Encrypt
 https://%s {
     # Enable TLS with Let's Encrypt (email configured globally)
-    tls internal
+    tls {
+        # Let's Encrypt will use the email from global config
+    }
     
     # Reverse proxy to ubersdr container
     reverse_proxy ubersdr:8080
@@ -212,22 +214,6 @@ https://%s {
     }
 }
 `, host, email, email, host)
-
-	// Add www redirect if domain doesn't start with www
-	if !strings.HasPrefix(host, "www.") {
-		wwwRedirect := fmt.Sprintf(`
-# Redirect www to non-www (HTTP)
-http://www.%s {
-	   redir http://%s{uri} permanent
-}
-
-# Redirect www to non-www (HTTPS)
-https://www.%s {
-	   redir https://%s{uri} permanent
-}
-`, host, host, host, host)
-		return mainConfig + wwwRedirect
-	}
 
 	return mainConfig
 }

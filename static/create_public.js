@@ -510,7 +510,8 @@ async function testInstanceReporter() {
         // Build test parameters to send to the endpoint
         const testParams = {
             use_myip: createDomain ? false : useMyIP,
-            instance_port: instancePort,
+            // When create_domain is true, collector makes HTTP request, so use port 80 for test
+            instance_port: createDomain ? 80 : instancePort,
             instance_uuid: generatedUUID || currentConfig.instance_reporting?.instance_uuid,
             create_domain: createDomain
         };
@@ -519,7 +520,8 @@ async function testInstanceReporter() {
             // When using create domain, hostname is set internally
             const instanceHost = document.getElementById('instanceHost').value.trim();
             testParams.instance_host = instanceHost;
-            testParams.instance_tls = true;
+            // Collector ignores TLS and makes HTTP request when create_domain is true
+            testParams.instance_tls = false;
         } else if (!useMyIP) {
             const instanceHost = document.getElementById('instanceHost').value.trim();
             const instanceTLS = document.getElementById('instanceTLS').checked;

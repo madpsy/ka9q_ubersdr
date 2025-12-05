@@ -673,9 +673,10 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// If this is a test report, return success without storing in database
+	// If this is a test report, return success without storing in database or modifying DNS
 	if update.Test {
-		log.Printf("Test report successful for %s (host: %s, port: %d, tls: %v) from IP: %s", secretUUID, update.Host, update.Port, update.TLS, clientIP)
+		log.Printf("Test report successful for %s (host: %s, port: %d, tls: %v, create_domain: %v) from IP: %s",
+			secretUUID, update.Host, update.Port, update.TLS, update.CreateDomain, clientIP)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{

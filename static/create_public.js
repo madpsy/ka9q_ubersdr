@@ -50,6 +50,10 @@ function populateFormFields() {
     document.getElementById('instanceHost').value = ir.instance?.host || '';
     document.getElementById('instancePort').value = ir.instance?.port || 8080;
     document.getElementById('instanceTLS').checked = ir.instance?.tls || false;
+    document.getElementById('createDomain').checked = ir.create_domain || false;
+
+    // Update domain preview with callsign from config
+    updateDomainPreview();
 
     // Update manual connection fields visibility
     toggleManualConnectionFields();
@@ -66,8 +70,11 @@ function setupEventListeners() {
     // TLS checkbox - update port when toggled
     document.getElementById('instanceTLS').addEventListener('change', handleTLSToggle);
     
+    // Create domain checkbox
+    document.getElementById('createDomain').addEventListener('change', handleCreateDomainToggle);
+    
     // Update review when fields change
-    const fields = ['useMyIP', 'instanceHost', 'instancePort', 'instanceTLS'];
+    const fields = ['useMyIP', 'instanceHost', 'instancePort', 'instanceTLS', 'createDomain'];
     fields.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -91,6 +98,60 @@ function handleTLSToggle() {
     }
     
     updateReviewSection();
+}
+
+// Handle create domain checkbox toggle
+function handleCreateDomainToggle() {
+    const createDomain = document.getElementById('createDomain').checked;
+    const manualConfigSection = document.getElementById('manualConfigSection');
+    const domainInfo = document.getElementById('domainInfo');
+    const instanceHostInput = document.getElementById('instanceHost');
+    const portField = document.getElementById('instancePort');
+    const tlsCheckbox = document.getElementById('instanceTLS');
+    
+    if (createDomain) {
+        // Hide manual configuration section
+        manualConfigSection.style.display = 'none';
+        
+        // Show info box
+        domainInfo.style.display = 'block';
+        
+        // Set hostname internally (not visible to user)
+        const callsign = (currentConfig.callsign || 'yourcallsign').toLowerCase();
+        instanceHostInput.value = callsign + '.instance.ubersdr.org';
+        
+        // Auto-set port to 443 and enable TLS
+        portField.value = '443';
+        tlsCheckbox.checked = true;
+    } else {
+        // Show manual configuration section
+        manualConfigSection.style.display = 'block';
+        
+        // Hide info box
+        domainInfo.style.display = 'none';
+        
+        // Clear hostname
+        instanceHostInput.value = '';
+        
+        // Reset to defaults
+        toggleManualConnectionFields();
+    }
+    
+    updateReviewSection();
+}
+
+// Update domain preview with callsign from config
+function updateDomainPreview() {
+    const callsign = (currentConfig.callsign || 'yourcallsign').toLowerCase();
+    document.getElementById('domainPreview').textContent = callsign;
+    document.getElementById('domainPreview2').textContent = callsign;
+    document.getElementById('domainPreview3').textContent = callsign;
+    
+    // Update hostname internally if create domain is checked
+    const createDomain = document.getElementById('createDomain').checked;
+    if (createDomain) {
+        document.getElementById('instanceHost').value = callsign + '.instance.ubersdr.org';
+    }
 }
 
 // Toggle hostname and TLS field visibility
@@ -141,6 +202,7 @@ async function fetchPublicIP() {
 
 // Update review section
 function updateReviewSection() {
+    const createDomain = document.getElementById('createDomain').checked;
     const useMyIP = document.getElementById('useMyIP').checked;
     const instanceHost = document.getElementById('instanceHost').value;
     const instancePort = document.getElementById('instancePort').value;
@@ -160,6 +222,10 @@ function updateReviewSection() {
     }
     document.getElementById('reviewUUID').textContent = uuid;
     
+    // Show create domain status
+    document.getElementById('reviewDomainItem').style.display = 'flex';
+    document.getElementById('reviewDomain').textContent = createDomain ? 'Yes (' + instanceHost + ')' : 'No';
+    
     // Connection settings
     document.getElementById('reviewUseMyIP').textContent = useMyIP ? 'Yes' : 'No';
 
@@ -167,15 +233,22 @@ function updateReviewSection() {
     document.getElementById('reviewPortItem').style.display = 'flex';
     document.getElementById('reviewPort').textContent = instancePort;
 
-    // Only show hostname and TLS if not using auto IP
-    if (useMyIP) {
+    // Only show hostname and TLS if not using auto IP and not using create domain
+    if (createDomain) {
         document.getElementById('reviewHostItem').style.display = 'none';
         document.getElementById('reviewTLSItem').style.display = 'none';
+        document.getElementById('reviewUseMyIP').parentElement.style.display = 'none';
     } else {
-        document.getElementById('reviewHostItem').style.display = 'flex';
-        document.getElementById('reviewHost').textContent = instanceHost || '(not set)';
-        document.getElementById('reviewTLSItem').style.display = 'flex';
-        document.getElementById('reviewTLS').textContent = instanceTLS ? 'Yes' : 'No';
+        document.getElementById('reviewUseMyIP').parentElement.style.display = 'flex';
+        if (useMyIP) {
+            document.getElementById('reviewHostItem').style.display = 'none';
+            document.getElementById('reviewTLSItem').style.display = 'none';
+        } else {
+            document.getElementById('reviewHostItem').style.display = 'flex';
+            document.getElementById('reviewHost').textContent = instanceHost || '(not set)';
+            document.getElementById('reviewTLSItem').style.display = 'flex';
+            document.getElementById('reviewTLS').textContent = instanceTLS ? 'Yes' : 'No';
+        }
     }
 }
 
@@ -273,6 +346,7 @@ async function finishWizard() {
         showAlert('Saving configuration...', 'info');
 
         // Build the configuration update with default values
+        const createDomain = document.getElementById('createDomain').checked;
         const useMyIP = document.getElementById('useMyIP').checked;
 
         // Update instance_reporting section with defaults
@@ -282,18 +356,27 @@ async function finishWizard() {
                 ...currentConfig.instance_reporting,
                 enabled: true,
                 use_https: true,  // Default to HTTPS
-                use_myip: useMyIP,
+                use_myip: createDomain ? false : useMyIP,
                 hostname: 'instances.ubersdr.org',  // Default hostname
                 port: 443,  // Default HTTPS port
                 report_interval_sec: 120,  // Default 2 minutes
-                instance_uuid: generatedUUID || currentConfig.instance_reporting?.instance_uuid || generateUUID()
+                instance_uuid: generatedUUID || currentConfig.instance_reporting?.instance_uuid || generateUUID(),
+                create_domain: createDomain
             }
         };
 
         // Add instance connection details
         const instancePort = parseInt(document.getElementById('instancePort').value);
 
-        if (!useMyIP) {
+        if (createDomain) {
+            // When using create domain, hostname is set internally
+            const instanceHost = document.getElementById('instanceHost').value.trim();
+            updatedConfig.instance_reporting.instance = {
+                host: instanceHost,
+                port: instancePort,
+                tls: true
+            };
+        } else if (!useMyIP) {
             const instanceHost = document.getElementById('instanceHost').value.trim();
             const instanceTLS = document.getElementById('instanceTLS').checked;
 
@@ -368,17 +451,24 @@ async function testInstanceReporter() {
         }
 
         // Get form values for the test
+        const createDomain = document.getElementById('createDomain').checked;
         const useMyIP = document.getElementById('useMyIP').checked;
         const instancePort = parseInt(document.getElementById('instancePort').value);
 
         // Build test parameters to send to the endpoint
         const testParams = {
-            use_myip: useMyIP,
+            use_myip: createDomain ? false : useMyIP,
             instance_port: instancePort,
-            instance_uuid: generatedUUID || currentConfig.instance_reporting?.instance_uuid
+            instance_uuid: generatedUUID || currentConfig.instance_reporting?.instance_uuid,
+            create_domain: createDomain
         };
 
-        if (!useMyIP) {
+        if (createDomain) {
+            // When using create domain, hostname is set internally
+            const instanceHost = document.getElementById('instanceHost').value.trim();
+            testParams.instance_host = instanceHost;
+            testParams.instance_tls = true;
+        } else if (!useMyIP) {
             const instanceHost = document.getElementById('instanceHost').value.trim();
             const instanceTLS = document.getElementById('instanceTLS').checked;
             testParams.instance_host = instanceHost;

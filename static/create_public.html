@@ -71,25 +71,54 @@
 
                 <div class="form-group">
                     <label class="checkbox-label">
-                        <input type="checkbox" id="useMyIP" checked>
-                        <span>Automatically use my public IP address</span>
+                        <input type="checkbox" id="createDomain">
+                        <span>🌐 Create DNS subdomain (<span id="domainPreview">yourcallsign</span>.instance.ubersdr.org)</span>
                     </label>
-                    <small>When enabled, the system will automatically detect and use your public IP address. Disable this if you have a custom domain.</small>
-                    <div id="detectedIP" style="margin-top: 10px; padding: 10px; background: #e7f3ff; border-radius: 5px; display: none;">
-                        <strong>Your IP is:</strong> <span id="ipAddress">Loading...</span>
-                    </div>
+                    <small>When enabled, a DNS record will be automatically created pointing <strong><span id="domainPreview2">yourcallsign</span>.instance.ubersdr.org</strong> to your public IP address. This is the recommended option for most users. Port will default to 443 and TLS will be enabled.</small>
                 </div>
 
-                <div class="form-group" id="hostnameField" style="display: none;">
-                    <label for="instanceHost">Public Hostname or IP Address *</label>
-                    <input type="text" id="instanceHost" placeholder="e.g., sdr.example.com or 203.0.113.42">
-                    <small>The hostname or IP address that users will use to connect to your SDR</small>
+                <div class="info-box" id="domainInfo" style="display: none; background: #e7f3ff; border-left: 4px solid #667eea;">
+                    <strong>✅ Automatic DNS Configuration Enabled</strong>
+                    <p style="margin: 10px 0;">Your instance will be accessible at:</p>
+                    <p style="margin: 10px 0; font-size: 18px; font-weight: bold; color: #667eea;">
+                        https://<span id="domainPreview3">yourcallsign</span>.instance.ubersdr.org
+                    </p>
+                    <p style="margin: 10px 0 0 0;"><strong>📡 Port Forwarding Required:</strong></p>
+                    <ul style="margin: 10px 0 0 20px; padding: 0;">
+                        <li>Forward port <strong>80</strong> (HTTP) to your UberSDR host IP address</li>
+                        <li>Forward port <strong>443</strong> (HTTPS) to your UberSDR host IP address</li>
+                        <li>Configure these in your router's port forwarding settings</li>
+                    </ul>
+                    <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">💡 Caddy will automatically obtain and renew Let's Encrypt certificates for your subdomain.</p>
+                </div>
+
+                <div class="form-group" id="manualConfigSection">
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="useMyIP" checked>
+                            <span>Automatically use my public IP address</span>
+                        </label>
+                        <small>When enabled, the system will automatically detect and use your public IP address. Disable this if you have a custom domain.</small>
+                        <div id="detectedIP" style="margin-top: 10px; padding: 10px; background: #e7f3ff; border-radius: 5px; display: none;">
+                            <strong>Your IP is:</strong> <span id="ipAddress">Loading...</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="hostnameField" style="display: none;">
+                        <label for="instanceHost">Public Hostname or IP Address *</label>
+                        <input type="text" id="instanceHost" placeholder="e.g., sdr.example.com or 203.0.113.42">
+                        <small>The hostname or IP address that users will use to connect to your SDR</small>
+                    </div>
                 </div>
 
                 <div class="form-group">
                     <label for="instancePort">Public Port *</label>
                     <input type="number" id="instancePort" value="8080" min="1" max="65535">
                     <small>The port number users will connect to (typically 8080 for HTTP or 443 for HTTPS)</small>
+                    <div id="portWarning" style="display: none; margin-top: 10px; padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 5px;">
+                        <strong>⚠️ Non-standard port detected</strong>
+                        <p style="margin: 5px 0 0 0;">Port 443 is recommended for DNS subdomain mode. Other ports will work but may require users to specify the port in the URL.</p>
+                    </div>
                 </div>
 
                 <div class="form-group" id="tlsField">
@@ -155,6 +184,10 @@
                     <div class="review-item" id="reviewTLSItem" style="display: none;">
                         <span class="review-label">TLS/HTTPS:</span>
                         <span class="review-value" id="reviewTLS">No</span>
+                    </div>
+                    <div class="review-item" id="reviewDomainItem" style="display: none;">
+                        <span class="review-label">Create Subdomain:</span>
+                        <span class="review-value" id="reviewDomain">No</span>
                     </div>
                 </div>
 

@@ -50,6 +50,7 @@ type InstanceReport struct {
 	Port             int      `json:"port,omitempty"`    // Optional: port for client connections
 	TLS              bool     `json:"tls,omitempty"`     // Optional: whether TLS is required for connections
 	UseMyIP          bool     `json:"use_myip"`          // Automatically use public IP for public access
+	CreateDomain     bool     `json:"create_domain"`     // Request automatic DNS subdomain creation
 	CWSkimmer        bool     `json:"cw_skimmer"`        // Whether CW Skimmer is enabled
 	DigitalDecodes   bool     `json:"digital_decodes"`   // Whether digital decoding is enabled
 	NoiseFloor       bool     `json:"noise_floor"`       // Whether noise floor monitoring is enabled
@@ -357,6 +358,7 @@ func (ir *InstanceReporter) sendReport() error {
 		Port:             ir.config.InstanceReporting.Instance.Port,
 		TLS:              ir.config.InstanceReporting.Instance.TLS,
 		UseMyIP:          ir.config.InstanceReporting.UseMyIP,
+		CreateDomain:     ir.config.InstanceReporting.CreateDomain,
 		CWSkimmer:        cwSkimmerEnabled,
 		DigitalDecodes:   ir.config.Decoder.Enabled,
 		NoiseFloor:       ir.config.NoiseFloor.Enabled,
@@ -594,6 +596,11 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		instanceUUID = val
 	}
 
+	createDomain := ir.config.InstanceReporting.CreateDomain
+	if val, ok := testParams["create_domain"].(bool); ok {
+		createDomain = val
+	}
+
 	// This is a test report
 	isTest := true
 
@@ -659,6 +666,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		Port:             instancePort,
 		TLS:              instanceTLS,
 		UseMyIP:          useMyIP,
+		CreateDomain:     createDomain,
 		CWSkimmer:        cwSkimmerEnabled,
 		DigitalDecodes:   ir.config.Decoder.Enabled,
 		NoiseFloor:       ir.config.NoiseFloor.Enabled,

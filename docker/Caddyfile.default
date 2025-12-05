@@ -1,0 +1,13 @@
+# Default Caddyfile - used until ubersdr generates the dynamic configuration
+# This file provides a fallback configuration for Caddy startup
+
+:80 {
+    reverse_proxy ubersdr:8080
+    encode gzip
+    
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+    }
+}

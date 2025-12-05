@@ -200,6 +200,13 @@ func main() {
 			"The default password 'mypassword' is insecure and must be changed.")
 	}
 
+	// Generate Caddyfile based on instance configuration
+	// This runs on every startup to ensure Caddy config is always in sync with config.yaml
+	if err := GenerateCaddyfile(config); err != nil {
+		log.Printf("Warning: Failed to generate Caddyfile: %v", err)
+		log.Printf("Caddy may not function correctly. Check configuration and file permissions.")
+	}
+
 	// Load bookmarks from bookmarks.yaml if it exists
 	bookmarksPath := "bookmarks.yaml"
 	if *configDir != "." {

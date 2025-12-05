@@ -1,4 +1,11 @@
 {
   "listen": ":8443",
-  "database_path": "instances.db"
+  "database_path": "instances.db",
+  "powerdns": {
+    "enabled": false,
+    "api_key": "your-powerdns-api-key-here",
+    "api_url": "http://localhost:8081",
+    "server_id": "localhost",
+    "zone_name": "instance.ubersdr.org"
+  }
 }

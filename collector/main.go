@@ -49,6 +49,7 @@ type Instance struct {
 	AvailableClients    int                `json:"available_clients"`               // Current number of available client slots
 	MaxSessionTime      int                `json:"max_session_time"`                // Maximum session time in seconds (0 = unlimited)
 	PublicIQModes       []string           `json:"public_iq_modes"`                 // List of IQ modes accessible without authentication
+	HasSubdomain        bool               `json:"-"`                               // Whether this instance has a DNS subdomain (not exposed in API)
 	ReporterIP          string             `json:"-"`                               // IP address that last reported this instance (not exposed in API)
 	SuccessfulCallbacks int                `json:"successful_callbacks"`            // Number of successful verification callbacks
 	BandConditions      map[string]float64 `json:"band_conditions,omitempty"`       // Band name to FT8 SNR mapping (only included with conditions=true)
@@ -82,6 +83,7 @@ type InstanceUpdate struct {
 	AvailableClients int      `json:"available_clients"` // Current number of available client slots
 	MaxSessionTime   int      `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
 	PublicIQModes    []string `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
+	CreateDomain     bool     `json:"create_domain"`     // If true, create a DNS subdomain for this instance
 	Test             bool     `json:"test"`              // If true, this is a test report - verify /api/description instead of full callback
 }
 
@@ -99,8 +101,9 @@ type InstanceVerificationResponse struct {
 
 // Config represents the collector configuration
 type Config struct {
-	Listen       string `json:"listen"`
-	DatabasePath string `json:"database_path"`
+	Listen       string         `json:"listen"`
+	DatabasePath string         `json:"database_path"`
+	PowerDNS     PowerDNSConfig `json:"powerdns"`
 }
 
 // Collector manages the instance collection service
@@ -246,6 +249,7 @@ func initDatabase(path string) (*sql.DB, error) {
 		available_clients INTEGER DEFAULT 0,
 		max_session_time INTEGER DEFAULT 0,
 		public_iq_modes TEXT DEFAULT '[]',
+		has_subdomain BOOLEAN DEFAULT 0,
 		reporter_ip TEXT,
 		successful_callbacks INTEGER DEFAULT 0,
 		first_seen DATETIME NOT NULL,
@@ -267,6 +271,26 @@ func initDatabase(path string) (*sql.DB, error) {
 
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("failed to create schema: %w", err)
+	}
+
+	// Migration: Add has_subdomain column if it doesn't exist (for existing databases)
+	// Check if column exists
+	var columnExists bool
+	migErr := db.QueryRow(`
+		SELECT COUNT(*) > 0
+		FROM pragma_table_info('instances')
+		WHERE name='has_subdomain'
+	`).Scan(&columnExists)
+	
+	if migErr != nil {
+		log.Printf("Warning: Failed to check for has_subdomain column: %v", migErr)
+	} else if !columnExists {
+		log.Println("Migrating database: Adding has_subdomain column...")
+		_, migErr = db.Exec(`ALTER TABLE instances ADD COLUMN has_subdomain BOOLEAN DEFAULT 0`)
+		if migErr != nil {
+			return nil, fmt.Errorf("failed to add has_subdomain column: %w", migErr)
+		}
+		log.Println("Database migration completed: has_subdomain column added")
 	}
 
 	log.Println("Database initialized successfully")
@@ -617,9 +641,34 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Verify instance is publicly accessible
+	// If create_domain=true, use the source IP for verification (DNS not set up yet)
+	// Otherwise use the host field from the JSON
+	verifyHost := update.Host
+	verifyTLS := update.TLS
+	if update.CreateDomain {
+		// Validate that the host field matches the expected format: <callsign>.<zone_name>
+		if c.config.PowerDNS.Enabled {
+			expectedHost := fmt.Sprintf("%s.%s", strings.ToLower(update.Callsign), c.config.PowerDNS.ZoneName)
+			if strings.ToLower(update.Host) != expectedHost {
+				log.Printf("Host validation failed for %s: expected %s, got %s", secretUUID, expectedHost, update.Host)
+				sendError(http.StatusBadRequest, fmt.Sprintf("When create_domain is true, host must be %s", expectedHost))
+				return
+			}
+		}
+		
+		// Extract IP from clientIP (remove port if present)
+		verifyHost = clientIP
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			verifyHost = host
+		}
+		// Ignore TLS errors when create_domain is true (no certificate yet)
+		verifyTLS = false
+	}
+	
 	// If test=true, check /api/description endpoint instead of full callback
-	if !c.verifyInstanceAccessibility(secretUUID, update.Host, update.Port, update.TLS, update.Test) {
-		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v, test: %v) from IP: %s", secretUUID, update.Host, update.Port, update.TLS, update.Test, clientIP)
+	if !c.verifyInstanceAccessibility(secretUUID, verifyHost, update.Port, verifyTLS, update.Test, update.CreateDomain) {
+		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v, test: %v, create_domain: %v) from IP: %s",
+			secretUUID, verifyHost, update.Port, verifyTLS, update.Test, update.CreateDomain, clientIP)
 		sendError(http.StatusBadRequest, "Instance verification failed - not publicly accessible")
 		return
 	}
@@ -695,14 +744,14 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				latitude, longitude, altitude, public_url, version, cpu_model, cpu_cores,
 				host, port, tls,
 				cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
-				public_iq_modes, reporter_ip,
+				public_iq_modes, has_subdomain, reporter_ip,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version, update.CPUModel, update.CPUCores,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
-			string(publicIQModesJSON), clientIP,
+			string(publicIQModesJSON), update.CreateDomain, clientIP,
 			now, now,
 		)
 
@@ -734,7 +783,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				public_url = ?, version = ?, cpu_model = ?, cpu_cores = ?,
 				host = ?, port = ?, tls = ?,
 				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?, available_clients = ?, max_session_time = ?,
-				public_iq_modes = ?, reporter_ip = ?,
+				public_iq_modes = ?, has_subdomain = ?, reporter_ip = ?,
 				last_seen = ?
 			WHERE secret_uuid = ?`,
 			update.Callsign, update.Name, update.Location,
@@ -742,7 +791,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			update.PublicURL, update.Version, update.CPUModel, update.CPUCores,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
-			string(publicIQModesJSON), clientIP,
+			string(publicIQModesJSON), update.CreateDomain, clientIP,
 			now,
 			secretUUID,
 		)
@@ -754,6 +803,41 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		}
 
 		log.Printf("Instance updated: %s (public: %s, callsign: %s) from IP: %s", secretUUID, publicUUID, update.Callsign, clientIP)
+	}
+
+	// Handle PowerDNS domain creation/update/deletion
+	// Check if instance previously had a subdomain
+	var hadSubdomain bool
+	err = c.db.QueryRow("SELECT has_subdomain FROM instances WHERE secret_uuid = ?", secretUUID).Scan(&hadSubdomain)
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("Failed to check subdomain status for %s: %v", secretUUID, err)
+	}
+	
+	if update.CreateDomain {
+		// Create or update DNS record
+		// Use the source IP address of the request for the DNS record
+		// This is the same IP we store in reporter_ip field in the database
+		// The instance will have host set to <callsign>.instance.ubersdr.org
+		sourceIP := clientIP
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			sourceIP = host
+		}
+		
+		if err := c.createOrUpdateDNSRecord(update.Callsign, sourceIP); err != nil {
+			log.Printf("Failed to create/update DNS record for %s to IP %s: %v", update.Callsign, sourceIP, err)
+			// Don't fail the entire request if DNS update fails, just log it
+		} else {
+			log.Printf("DNS record created/updated: %s.%s -> %s", strings.ToLower(update.Callsign), c.config.PowerDNS.ZoneName, sourceIP)
+		}
+	} else if hadSubdomain {
+		// Instance previously had a subdomain but create_domain is now false/missing
+		// Delete the DNS record
+		if err := c.deleteDNSRecord(update.Callsign); err != nil {
+			log.Printf("Failed to delete DNS record for %s: %v", update.Callsign, err)
+			// Don't fail the entire request if DNS deletion fails, just log it
+		} else {
+			log.Printf("DNS record deleted: %s.%s (create_domain disabled)", strings.ToLower(update.Callsign), c.config.PowerDNS.ZoneName)
+		}
 	}
 
 	// If noise floor is enabled, fetch and store the latest data
@@ -1037,8 +1121,9 @@ func handleMyIP(w http.ResponseWriter, r *http.Request) {
 
 // verifyInstanceAccessibility makes a callback to the instance to verify it's publicly accessible
 // If isTest is true, performs a simple GET to /api/description instead of full callback
+// If ignoreTLS is true, skips TLS certificate verification (for instances without certs yet)
 // Retries up to 3 times with 10 second delays between attempts
-func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port int, useTLS bool, isTest bool) bool {
+func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port int, useTLS bool, isTest bool, ignoreTLS bool) bool {
 	// Skip verification if host or port is invalid
 	if host == "" || port == 0 {
 		log.Printf("Skipping verification for instance %s: invalid host/port", secretUUID)
@@ -1092,7 +1177,7 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: false, // Verify TLS certificates
+				InsecureSkipVerify: ignoreTLS, // Skip verification if ignoreTLS is true (for new domains without certs)
 				MinVersion:         tls.VersionTLS12,
 			},
 		},
@@ -1438,11 +1523,53 @@ func (c *Collector) cleanupGetRateLimitMap() {
 }
 
 // cleanupStaleInstances periodically removes instances that haven't been seen in 24 hours
+// Also removes DNS records for instances with subdomains
 func (c *Collector) cleanupStaleInstances() {
 	ticker := time.NewTicker(1 * time.Hour) // Run cleanup every hour
 	defer ticker.Stop()
 
 	for range ticker.C {
+		// First, get instances that will be deleted and have subdomains
+		rows, err := c.db.Query(`
+			SELECT callsign, has_subdomain
+			FROM instances
+			WHERE datetime(last_seen) < datetime('now', '-24 hours')
+		`)
+		
+		if err != nil {
+			log.Printf("Failed to query stale instances: %v", err)
+			continue
+		}
+		
+		// Collect instances to clean up
+		type staleInstance struct {
+			callsign     string
+			hasSubdomain bool
+		}
+		var staleInstances []staleInstance
+		
+		for rows.Next() {
+			var inst staleInstance
+			if err := rows.Scan(&inst.callsign, &inst.hasSubdomain); err != nil {
+				log.Printf("Failed to scan stale instance: %v", err)
+				continue
+			}
+			staleInstances = append(staleInstances, inst)
+		}
+		rows.Close()
+		
+		// Delete DNS records for instances with subdomains
+		for _, inst := range staleInstances {
+			if inst.hasSubdomain {
+				if err := c.deleteDNSRecord(inst.callsign); err != nil {
+					log.Printf("Failed to delete DNS record for stale instance %s: %v", inst.callsign, err)
+					// Continue anyway - we'll still delete from database
+				} else {
+					log.Printf("Deleted DNS record for stale instance: %s", inst.callsign)
+				}
+			}
+		}
+		
 		// Delete instances not seen in the last 24 hours
 		result, err := c.db.Exec(`
 			DELETE FROM instances

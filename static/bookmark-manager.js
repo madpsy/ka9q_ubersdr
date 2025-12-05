@@ -288,9 +288,9 @@ function handleBookmarkClick(bookmarkOrFrequency, mode) {
     const toggleExtension = window.toggleExtension;
     const radioAPI = window.radioAPI;
 
-    // Set frequency
+    // Set frequency (only if user is not currently editing it)
     const freqInput = document.getElementById('frequency');
-    if (freqInput) {
+    if (freqInput && document.activeElement !== freqInput) {
         freqInput.value = frequency;
     }
     

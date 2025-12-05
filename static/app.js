@@ -1550,8 +1550,11 @@ function displayActiveChannels(channels) {
 
 // Tune to a channel from the active channels list
 function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
-    // Update frequency input
-    document.getElementById('frequency').value = frequency;
+    // Update frequency input (only if not currently being edited)
+    const freqInput = document.getElementById('frequency');
+    if (freqInput && document.activeElement !== freqInput) {
+        freqInput.value = frequency;
+    }
     updateBandButtons(frequency);
     updateBandSelector();
 
@@ -2495,8 +2498,11 @@ function setBand(bandName) {
     // Calculate band width
     const bandWidth = range.max - range.min;
 
-    // Set frequency to band center
-    document.getElementById('frequency').value = centerFreq;
+    // Set frequency to band center (only if not currently being edited)
+    const freqInput = document.getElementById('frequency');
+    if (freqInput && document.activeElement !== freqInput) {
+        freqInput.value = centerFreq;
+    }
     updateBandButtons(centerFreq);
     updateBandSelector();
 
@@ -2601,7 +2607,10 @@ function loadSettingsFromURL() {
     if (params.has('freq')) {
         const freq = parseInt(params.get('freq'));
         if (!isNaN(freq) && freq >= 100000 && freq <= 30000000) {
-            document.getElementById('frequency').value = freq;
+            const freqInput = document.getElementById('frequency');
+            if (freqInput && document.activeElement !== freqInput) {
+                freqInput.value = freq;
+            }
             updateBandButtons(freq);
         }
     }
@@ -5867,7 +5876,10 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             onFrequencyClick: (freq) => {
                 // When user clicks on spectrum, tune to that frequency
-                document.getElementById('frequency').value = Math.round(freq);
+                const freqInput = document.getElementById('frequency');
+                if (freqInput && document.activeElement !== freqInput) {
+                    freqInput.value = Math.round(freq);
+                }
 
                 // Update cursor immediately
                 updateSpectrumCursor();
@@ -6557,8 +6569,11 @@ function selectBandFromDropdown(value) {
         // Calculate band width
         const bandWidth = bandData.end - bandData.start;
 
-        // Set frequency to band center
-        document.getElementById('frequency').value = centerFreq;
+        // Set frequency to band center (only if not currently being edited)
+        const freqInput = document.getElementById('frequency');
+        if (freqInput && document.activeElement !== freqInput) {
+            freqInput.value = centerFreq;
+        }
         updateBandButtons(centerFreq);
 
         // Check if band has a mode field in window.amateurBands

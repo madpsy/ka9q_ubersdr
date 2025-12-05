@@ -5921,10 +5921,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update cursor and band selector when frequency input changes
         const freqInput = document.getElementById('frequency');
         if (freqInput) {
-            freqInput.addEventListener('input', () => {
-                updateSpectrumCursor();
-                updateBandSelector();
-            });
+            // Only update on 'change' event (when editing is complete)
+            // Removed 'input' event to prevent cursor jumping while typing
             freqInput.addEventListener('change', () => {
                 updateSpectrumCursor();
                 updateBandSelector();

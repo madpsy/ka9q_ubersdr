@@ -572,6 +572,9 @@ class DigitalSpotsMap {
             const zoom = this.map.getZoom();
             this.savePreference('mapLat', center.lat);
             this.savePreference('mapLon', center.lng);
+            this.savePreference('mapZoom', zoom);
+        });
+    }
 
     setupTextZoom() {
         // Load saved zoom level or default to 100%
@@ -666,9 +669,6 @@ class DigitalSpotsMap {
                 zoomOutBtn.style.cursor = 'pointer';
             }
         }
-    }
-            this.savePreference('mapZoom', zoom);
-        });
     }
 
     initializePanelVisibility() {

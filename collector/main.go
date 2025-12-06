@@ -1497,10 +1497,22 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 
 			log.Printf("Instance %s verified successfully at %s (attempt %d)", secretUUID, url, attempt)
 
+			// Get current successful_callbacks count before incrementing
+			var currentCallbacks int
+			err = c.db.QueryRow("SELECT successful_callbacks FROM instances WHERE secret_uuid = ?", secretUUID).Scan(&currentCallbacks)
+			if err != nil {
+				log.Printf("Failed to get successful_callbacks for %s: %v", secretUUID, err)
+			}
+
 			// Increment successful_callbacks counter in database
 			_, err = c.db.Exec("UPDATE instances SET successful_callbacks = successful_callbacks + 1 WHERE secret_uuid = ?", secretUUID)
 			if err != nil {
 				log.Printf("Failed to increment successful_callbacks for %s: %v", secretUUID, err)
+			}
+
+			// If this is the 2nd successful callback (was 1, now will be 2), send registration email
+			if currentCallbacks == 1 {
+				go c.sendRegistrationEmail(secretUUID)
 			}
 
 			return true
@@ -1721,9 +1733,9 @@ func (c *Collector) cleanupStaleInstances() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// First, get instances that will be deleted and have subdomains
+		// First, get instances that will be deleted (with email addresses for notifications)
 		rows, err := c.db.Query(`
-			SELECT callsign, has_subdomain
+			SELECT callsign, has_subdomain, email, name, last_seen
 			FROM instances
 			WHERE datetime(last_seen) < datetime('now', '-24 hours')
 		`)
@@ -1737,18 +1749,28 @@ func (c *Collector) cleanupStaleInstances() {
 		type staleInstance struct {
 			callsign     string
 			hasSubdomain bool
+			email        string
+			name         string
+			lastSeen     time.Time
 		}
 		var staleInstances []staleInstance
 		
 		for rows.Next() {
 			var inst staleInstance
-			if err := rows.Scan(&inst.callsign, &inst.hasSubdomain); err != nil {
+			if err := rows.Scan(&inst.callsign, &inst.hasSubdomain, &inst.email, &inst.name, &inst.lastSeen); err != nil {
 				log.Printf("Failed to scan stale instance: %v", err)
 				continue
 			}
 			staleInstances = append(staleInstances, inst)
 		}
 		rows.Close()
+		
+		// Send removal notification emails
+		for _, inst := range staleInstances {
+			if inst.email != "" {
+				go c.sendRemovalEmail(inst.email, inst.callsign, inst.name, inst.lastSeen)
+			}
+		}
 		
 		// Delete DNS records for instances with subdomains
 		for _, inst := range staleInstances {
@@ -1951,4 +1973,161 @@ func testSMTPConnection(config *SMTPConfig) error {
 	}
 
 	return nil
+}
+
+// sendRegistrationEmail sends a registration confirmation email to the instance owner
+func (c *Collector) sendRegistrationEmail(secretUUID string) {
+	// Check if SMTP is enabled
+	if !c.config.SMTP.Enabled {
+		return
+	}
+
+	// Get instance details from database
+	var email, callsign, name, location, version, publicUUID string
+	var latitude, longitude float64
+	var altitude int
+	err := c.db.QueryRow(`
+		SELECT email, callsign, name, location, latitude, longitude, altitude, version, public_uuid
+		FROM instances
+		WHERE secret_uuid = ?
+	`, secretUUID).Scan(&email, &callsign, &name, &location, &latitude, &longitude, &altitude, &version, &publicUUID)
+
+	if err != nil {
+		log.Printf("Failed to get instance details for registration email: %v", err)
+		return
+	}
+
+	// Skip if no email address
+	if email == "" {
+		log.Printf("No email address for instance %s, skipping registration email", secretUUID)
+		return
+	}
+
+	// Build email content
+	subject := fmt.Sprintf("UberSDR Instance Registration Confirmed - %s", callsign)
+	
+	maidenhead := latLonToMaidenhead(latitude, longitude)
+	
+	body := fmt.Sprintf(`Hello,
+
+Your UberSDR instance has been successfully registered in the public instance registry!
+
+Instance Details:
+-----------------
+Callsign:     %s
+Name:         %s
+Location:     %s
+Coordinates:  %.6f, %.6f
+Maidenhead:   %s
+Altitude:     %d meters
+Version:      %s
+
+Your instance is now publicly visible at:
+https://instances.ubersdr.org/
+
+Public UUID: %s
+
+You can view your instance details at:
+https://instances.ubersdr.org/api/instances/%s
+
+Thank you for contributing to the UberSDR network!
+
+---
+This is an automated message from the UberSDR Instance Registry.
+`, callsign, name, location, latitude, longitude, maidenhead, altitude, version, publicUUID, publicUUID)
+
+	// Send email
+	if err := c.sendEmail(email, subject, body); err != nil {
+		log.Printf("Failed to send registration email to %s: %v", email, err)
+	} else {
+		log.Printf("Registration email sent to %s for instance %s (%s)", email, callsign, secretUUID)
+	}
+}
+
+// sendEmail sends an email using the configured SMTP server
+func (c *Collector) sendEmail(to, subject, body string) error {
+	if !c.config.SMTP.Enabled {
+		return fmt.Errorf("SMTP is not enabled")
+	}
+
+	// Build email message
+	from := c.config.SMTP.From
+	msg := []byte(fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s", from, to, subject, body))
+
+	// Setup authentication
+	var auth smtp.Auth
+	if c.config.SMTP.Username != "" && c.config.SMTP.Password != "" {
+		auth = smtp.PlainAuth("", c.config.SMTP.Username, c.config.SMTP.Password, c.config.SMTP.Host)
+	}
+
+	// Build server address
+	serverAddr := fmt.Sprintf("%s:%d", c.config.SMTP.Host, c.config.SMTP.Port)
+
+	// Send email
+	if c.config.SMTP.UseTLS {
+		// Use STARTTLS
+		return smtp.SendMail(serverAddr, auth, from, []string{to}, msg)
+	} else {
+		// Direct connection
+		return smtp.SendMail(serverAddr, auth, from, []string{to}, msg)
+	}
+}
+
+// sendRemovalEmail sends a notification email when an instance is removed due to inactivity
+func (c *Collector) sendRemovalEmail(email, callsign, name string, lastSeen time.Time) {
+	// Check if SMTP is enabled
+	if !c.config.SMTP.Enabled {
+		return
+	}
+
+	// Skip if no email address
+	if email == "" {
+		return
+	}
+
+	// Calculate how long ago the instance was last seen
+	timeSinceLastSeen := time.Since(lastSeen)
+	hoursSince := int(timeSinceLastSeen.Hours())
+
+	// Build email content
+	subject := fmt.Sprintf("UberSDR Instance Removed from Registry - %s", callsign)
+	
+	body := fmt.Sprintf(`Hello,
+
+Your UberSDR instance has been removed from the public instance registry due to inactivity.
+
+Instance Details:
+-----------------
+Callsign:     %s
+Name:         %s
+Last Seen:    %s (approximately %d hours ago)
+
+IMPORTANT: This is NOT permanent!
+---------------------------------
+Your instance will be AUTOMATICALLY re-added to the registry as soon as it starts
+reporting again. No action is required on your part.
+
+If your instance is currently offline or experiencing connectivity issues:
+- Simply restart your UberSDR instance when ready
+- Ensure instance reporting is enabled in your configuration
+- Your instance will automatically re-register with the same UUID
+
+If you believe this is an error or need assistance:
+- Check your instance's network connectivity
+- Verify instance reporting is enabled in config.yaml
+- Review logs for any error messages
+
+Your instance configuration and UUID are preserved and will be restored automatically
+when reporting resumes.
+
+---
+This is an automated message from the UberSDR Instance Registry.
+`, callsign, name, lastSeen.Format("2006-01-02 15:04:05 UTC"), hoursSince)
+
+	// Send email
+	if err := c.sendEmail(email, subject, body); err != nil {
+		log.Printf("Failed to send removal email to %s: %v", email, err)
+	} else {
+		log.Printf("Removal notification email sent to %s for instance %s", email, callsign)
+	}
 }

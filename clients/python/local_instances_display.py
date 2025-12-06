@@ -211,15 +211,15 @@ class LocalInstancesDisplay:
                 # Update tree view (run in main thread)
                 self.window.after(0, lambda: self._update_tree_view())
             except Exception as e:
-                # If fetch fails, still show basic info
-                info['description'] = None
+                # If fetch fails, remove the instance
+                if service_name in self.instances:
+                    del self.instances[service_name]
                 self.window.after(0, lambda: self._update_tree_view())
         
         # Start fetch in background
         threading.Thread(target=fetch_description, daemon=True).start()
         
-        # Update tree view immediately with basic info
-        self.window.after(0, lambda: self._update_tree_view())
+        # Don't update tree view immediately - wait for description fetch
     
     def remove_instance(self, service_name: str):
         """Remove an instance from the list.
@@ -237,61 +237,51 @@ class LocalInstancesDisplay:
         # Clear existing items
         self.tree.delete(*self.tree.get_children())
         
-        # Add instances
+        # Add instances (only those with valid description)
         for service_name, info in sorted(self.instances.items(), key=lambda x: x[1]['name']):
             description = info.get('description')
             
-            if description:
-                # Extract data from description
-                receiver = description.get('receiver', {})
-                name = receiver.get('name', info['name'])
-                callsign = receiver.get('callsign', '')
-                location = receiver.get('location', '')
-                version = description.get('version', info.get('version', 'Unknown'))
-                
-                # Users available
-                available_clients = description.get('available_clients', 0)
-                max_clients = description.get('max_clients', 0)
-                users_text = f"{available_clients}/{max_clients}"
-                
-                # Max session time in minutes
-                max_session_time = description.get('max_session_time', 0)
-                session_text = f"{max_session_time // 60}m" if max_session_time > 0 else ''
-                
-                # Capability checkboxes
-                cw_text = '✓' if description.get('cw_skimmer', False) else '✗'
-                digi_text = '✓' if description.get('digital_decodes', False) else '✗'
-                noise_text = '✓' if description.get('noise_floor', False) else '✗'
-                
-                # IQ modes - extract numbers from mode names
-                public_iq_modes = description.get('public_iq_modes', [])
-                if public_iq_modes:
-                    iq_numbers = []
-                    for mode in public_iq_modes:
-                        digits = ''.join(filter(str.isdigit, mode))
-                        if digits:
-                            iq_numbers.append(int(digits))
-                    iq_numbers.sort()
-                    iq_text = ', '.join(str(n) for n in iq_numbers) if iq_numbers else 'None'
-                else:
-                    iq_text = 'None'
-                
-                # Public URL
-                public_url = receiver.get('public_url', '')
-                url_text = '🔗 Open' if public_url else ''
+            # Only show instances that have successfully fetched their description
+            if not description:
+                continue
+            
+            # Extract data from description
+            receiver = description.get('receiver', {})
+            name = receiver.get('name', info['name'])
+            callsign = receiver.get('callsign', '')
+            location = receiver.get('location', '')
+            version = description.get('version', info.get('version', 'Unknown'))
+            
+            # Users available
+            available_clients = description.get('available_clients', 0)
+            max_clients = description.get('max_clients', 0)
+            users_text = f"{available_clients}/{max_clients}"
+            
+            # Max session time in minutes
+            max_session_time = description.get('max_session_time', 0)
+            session_text = f"{max_session_time // 60}m" if max_session_time > 0 else ''
+            
+            # Capability checkboxes
+            cw_text = '✓' if description.get('cw_skimmer', False) else '✗'
+            digi_text = '✓' if description.get('digital_decodes', False) else '✗'
+            noise_text = '✓' if description.get('noise_floor', False) else '✗'
+            
+            # IQ modes - extract numbers from mode names
+            public_iq_modes = description.get('public_iq_modes', [])
+            if public_iq_modes:
+                iq_numbers = []
+                for mode in public_iq_modes:
+                    digits = ''.join(filter(str.isdigit, mode))
+                    if digits:
+                        iq_numbers.append(int(digits))
+                iq_numbers.sort()
+                iq_text = ', '.join(str(n) for n in iq_numbers) if iq_numbers else 'None'
             else:
-                # Use basic info from mDNS
-                name = info['name']
-                callsign = ''
-                location = ''
-                version = info.get('version', 'Loading...')
-                users_text = ''
-                session_text = ''
-                cw_text = ''
-                digi_text = ''
-                noise_text = ''
-                iq_text = ''
-                url_text = ''
+                iq_text = 'None'
+            
+            # Public URL
+            public_url = receiver.get('public_url', '')
+            url_text = '🔗 Open' if public_url else ''
             
             # Local URL - always show Open link
             local_url_text = '🔗 Open'

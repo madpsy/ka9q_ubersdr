@@ -68,7 +68,12 @@ function populateFormFields() {
     // Default create_domain to true for new setups (when instance_reporting is not enabled)
     // If instance_reporting is already enabled, use the configured value
     const defaultCreateDomain = !ir.enabled; // true if not enabled yet
-    document.getElementById('createDomain').checked = ir.create_domain !== undefined ? ir.create_domain : defaultCreateDomain;
+    const createDomainValue = ir.create_domain !== undefined ? ir.create_domain : defaultCreateDomain;
+    document.getElementById('createDomain').checked = createDomainValue;
+    
+    console.log('Instance reporting enabled:', ir.enabled);
+    console.log('Default create_domain:', defaultCreateDomain);
+    console.log('Final create_domain value:', createDomainValue);
 
     // Update domain preview with callsign from config
     // This must happen BEFORE toggleManualConnectionFields which might trigger handleCreateDomainToggle

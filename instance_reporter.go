@@ -801,7 +801,22 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", fmt.Sprintf("UberSDR/%s", Version))
 
-	resp, err := ir.httpClient.Do(req)
+	// Create a custom HTTP client with longer timeout for test requests
+	// The collector may take up to 30+ seconds to verify the instance (3 retries × 10s each)
+	// so we need a 60-second timeout to allow it to complete and return the error message
+	testClient := &http.Client{
+		Timeout: 60 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			},
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := testClient.Do(req)
 	if err != nil {
 		lastErr := fmt.Errorf("failed to send test request to %s: %w", url, err)
 		ir.mu.Lock()

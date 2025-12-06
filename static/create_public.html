@@ -244,10 +244,27 @@
 
     <!-- Restart Countdown Overlay -->
     <div id="restartOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.9); z-index: 10000; align-items: center; justify-content: center;">
-        <div style="text-align: center; color: white;">
+        <div style="text-align: center; color: white; max-width: 600px; padding: 20px;">
             <div style="font-size: 72px; font-weight: bold; margin-bottom: 20px;" id="countdownNumber">15</div>
             <h2 style="margin-bottom: 10px;">Server is restarting...</h2>
             <p style="font-size: 18px; color: #ccc;">You will be redirected to the admin panel</p>
+            
+            <!-- DNS Propagation Info Box -->
+            <div style="margin-top: 30px; padding: 20px; background: rgba(102, 126, 234, 0.2); border: 2px solid #667eea; border-radius: 8px; text-align: left;">
+                <h3 style="margin-top: 0; color: #667eea; font-size: 18px;">⏱️ DNS Propagation & Certificate Setup</h3>
+                <p style="margin: 10px 0; font-size: 14px; line-height: 1.6;">
+                    <strong>Please note:</strong> It may take several minutes for DNS records to propagate globally and for the TLS certificate to be validated and issued by Let's Encrypt.
+                </p>
+                <p style="margin: 10px 0; font-size: 14px; line-height: 1.6;">
+                    Your instance will appear in the public registry once the setup is complete. You can view your instance at:
+                </p>
+                <p style="margin: 10px 0; text-align: center;">
+                    <a href="https://instances.ubersdr.org/" target="_blank" rel="noopener noreferrer" style="color: #667eea; font-weight: bold; font-size: 16px; text-decoration: underline;">
+                        https://instances.ubersdr.org/
+                    </a>
+                </p>
+            </div>
+            
             <div style="margin-top: 30px;">
                 <div style="border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto;"></div>
             </div>

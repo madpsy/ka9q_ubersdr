@@ -192,12 +192,15 @@ func main() {
 
 	// Test SMTP connectivity if enabled
 	if config.SMTP.Enabled {
+		log.Printf("SMTP is enabled - testing connection to %s:%d", config.SMTP.Host, config.SMTP.Port)
 		if err := testSMTPConnection(&config.SMTP); err != nil {
 			log.Printf("WARNING: SMTP connectivity test failed: %v", err)
 			log.Printf("SMTP is enabled but not accessible - email operations will fail")
 		} else {
 			log.Printf("SMTP connection test successful")
 		}
+	} else {
+		log.Printf("SMTP is disabled")
 	}
 
 	// Start background cleanup for rate limit maps

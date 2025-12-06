@@ -671,6 +671,17 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		createDomain = val
 	}
 
+	// Extract admin overrides if provided
+	adminCallsign := ir.config.Admin.Callsign
+	if val, ok := testParams["admin_callsign"].(string); ok && val != "" {
+		adminCallsign = val
+	}
+
+	adminEmail := ir.config.Admin.Email
+	if val, ok := testParams["admin_email"].(string); ok && val != "" {
+		adminEmail = val
+	}
+
 	// This is a test report
 	isTest := true
 
@@ -726,9 +737,9 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 
 	report := InstanceReport{
 		UUID:             instanceUUID,
-		Callsign:         ir.config.Admin.Callsign,
+		Callsign:         adminCallsign,
 		Name:             ir.config.Admin.Name,
-		Email:            ir.config.Admin.Email,
+		Email:            adminEmail,
 		Location:         ir.config.Admin.Location,
 		Latitude:         ir.config.Admin.GPS.Lat,
 		Longitude:        ir.config.Admin.GPS.Lon,

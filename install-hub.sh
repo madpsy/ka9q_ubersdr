@@ -32,26 +32,53 @@ echo "Fetching caddy-entrypoint.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/caddy-entrypoint.sh -o ~/ubersdr/caddy-entrypoint.sh
 chmod +x ~/ubersdr/caddy-entrypoint.sh
 
-# Generate a random 16-character alphanumeric password
-password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
+# Check if this is a fresh installation
+INSTALLED_MARKER="$HOME/ubersdr/installed"
+if [ -f "$INSTALLED_MARKER" ]; then
+    # Re-installation - don't set new password
+    echo
+    echo "Existing installation detected. Preserving current admin password."
+    
+    # Clean up any existing containers and network (allow failures)
+    echo
+    echo "Cleaning up any existing containers..."
+    cd ~/ubersdr
+    docker compose -f docker-compose.yml down 2>/dev/null || true
+    
+    # Start Docker containers without setting password
+    echo "Starting UberSDR containers..."
+    docker compose -f docker-compose.yml up -d
+    
+    echo
+    echo "=== Installation Complete ==="
+    echo
+    echo "Access the web interface at: http://ubersdr.local:8080/admin.html"
+    echo
+else
+    # Fresh installation - generate and set password
+    password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
+    
+    # Clean up any existing containers and network (allow failures)
+    echo
+    echo "Cleaning up any existing containers..."
+    cd ~/ubersdr
+    docker compose -f docker-compose.yml down 2>/dev/null || true
+    
+    # Start Docker containers with the generated password
+    echo "Starting UberSDR containers..."
+    ADMIN_PASSWORD="$password" docker compose -f docker-compose.yml up -d
+    
+    echo
+    echo "=== Installation Complete ==="
+    echo
+    echo "Your admin password is: $password"
+    echo
+    echo "Access the web interface at: http://ubersdr.local:8080/admin.html"
+    echo
+fi
 
-# Clean up any existing containers and network (allow failures)
-echo
-echo "Cleaning up any existing containers..."
-cd ~/ubersdr
-docker compose -f docker-compose.yml down 2>/dev/null || true
-
-# Start Docker containers with the generated password
-echo "Starting UberSDR containers..."
-ADMIN_PASSWORD="$password" docker compose -f docker-compose.yml up -d
-
-echo
-echo "=== Installation Complete ==="
-echo
-echo "Your admin password is: $password"
-echo
-echo "Access the web interface at: http://ubersdr.local:8080/admin.html"
-echo
+# Create installed marker file
+touch ~/ubersdr/installed
 
 # Ask if user wants to create FFTW Wisdom (only if it doesn't exist)
 WISDOM_FILE="/var/lib/docker/volumes/docker_radiod-data/_data/wisdom"

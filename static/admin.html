@@ -4191,8 +4191,9 @@
         // Monitor health management
         async function loadMonitorHealth() {
             try {
-                // Fetch instance reporter, noise floor, space weather, decoder, and CW Skimmer health
-                const [instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all([
+                // Fetch system load, instance reporter, noise floor, space weather, decoder, and CW Skimmer health
+                const [systemLoadResponse, instanceReporterResponse, nfResponse, swResponse, decoderResponse, cwSkimmerResponse] = await Promise.all([
+                    authenticatedFetch('/admin/system-load'),
                     authenticatedFetch('/admin/instance-reporter-health'),
                     authenticatedFetch('/admin/noisefloor-health'),
                     authenticatedFetch('/admin/spaceweather-health'),
@@ -4200,19 +4201,20 @@
                     authenticatedFetch('/admin/cwskimmer-health')
                 ]);
                 
-                if (!instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) {
+                if (!systemLoadResponse || !instanceReporterResponse || !nfResponse || !swResponse || !decoderResponse || !cwSkimmerResponse) {
                     // Auth failed, stop auto-refresh
                     stopMonitorAutoRefresh();
                     return;
                 }
 
+                const systemLoad = systemLoadResponse.ok ? await systemLoadResponse.json() : null;
                 const instanceReporterHealth = (instanceReporterResponse.ok || instanceReporterResponse.status === 503) ? await instanceReporterResponse.json() : null;
                 const nfHealth = (nfResponse.ok || nfResponse.status === 503) ? await nfResponse.json() : null;
                 const swHealth = (swResponse.ok || swResponse.status === 503) ? await swResponse.json() : null;
                 const decoderHealth = (decoderResponse.ok || decoderResponse.status === 503) ? await decoderResponse.json() : null;
                 const cwSkimmerHealth = (cwSkimmerResponse.ok || cwSkimmerResponse.status === 503) ? await cwSkimmerResponse.json() : null;
 
-                renderMonitorHealth({ instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth }, false);
+                renderMonitorHealth({ system_load: systemLoad, instanceReporter: instanceReporterHealth, noiseFloor: nfHealth, spaceWeather: swHealth, decoder: decoderHealth, cwSkimmer: cwSkimmerHealth }, false);
                 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!monitorRefreshInterval) {
@@ -4461,6 +4463,66 @@
                 if (data.cwSkimmer) {
                     renderCWSkimmerHealth(container, data.cwSkimmer);
                 }
+        function renderSystemLoadHealth(container, systemLoad) {
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+            
+            // Determine status color and icon based on backend status field
+            const status = systemLoad.status || 'ok';
+            let statusColor = '#28a745'; // Green for ok
+            let statusIcon = '✓';
+            let statusText = 'OK';
+            
+            if (status === 'critical') {
+                statusColor = '#dc3545'; // Red
+                statusIcon = '✗';
+                statusText = 'CRITICAL';
+            } else if (status === 'warning') {
+                statusColor = '#ff8c00'; // Orange
+                statusIcon = '⚠';
+                statusText = 'WARNING';
+            }
+            
+            statusSection.innerHTML = `<h3 style="color: ${statusColor};">💻 System Load</h3>`;
+
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = '#f8f9fa';
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+
+            statusDiv.innerHTML = `
+                <div style="margin-bottom: 15px;">
+                    <strong style="font-size: 16px; color: ${statusColor};">Status: ${statusIcon} ${statusText}</strong>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; font-weight: bold; color: #667eea;">${systemLoad.load_1min}</div>
+                        <div style="font-size: 12px; color: #666;">1 min</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; font-weight: bold; color: #667eea;">${systemLoad.load_5min}</div>
+                        <div style="font-size: 12px; color: #666;">5 min</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; font-weight: bold; color: #667eea;">${systemLoad.load_15min}</div>
+                        <div style="font-size: 12px; color: #666;">15 min</div>
+                    </div>
+                </div>
+                <div style="text-align: center; color: #666; font-size: 14px; margin-bottom: 10px;">
+                    ${systemLoad.cpu_cores > 0 ? `<strong>${systemLoad.cpu_cores}</strong> CPU core${systemLoad.cpu_cores !== 1 ? 's' : ''} available` : 'CPU core count unavailable'}
+                </div>
+                <div style="text-align: center; color: #999; font-size: 12px;">
+                    <strong>Legend:</strong><br>
+                    <span style="color: #28a745;">●</span> OK (avg load &lt; cores)<br>
+                    <span style="color: #ff8c00;">●</span> WARNING (avg load ≥ cores)<br>
+                    <span style="color: #dc3545;">●</span> CRITICAL (avg load ≥ 2× cores)
+                </div>
+            `;
+            statusSection.appendChild(statusDiv);
+            container.appendChild(statusSection);
+        }
+
             }
         }
 

@@ -34,6 +34,21 @@ function formatSNR(snr) {
     return `${snr.toFixed(1)} dB`;
 }
 
+// Get color for load status
+function getLoadStatusColor(status) {
+    if (!status) return 'inherit'; // No color if status not available
+    switch (status.toLowerCase()) {
+        case 'ok':
+            return '#22c55e'; // green
+        case 'warning':
+            return '#ff9800'; // orange
+        case 'critical':
+            return '#ef4444'; // red
+        default:
+            return 'inherit';
+    }
+}
+
 // Calculate distance between two coordinates using Haversine formula
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Earth's radius in kilometers
@@ -193,7 +208,7 @@ function createInstanceCard(instance, isClosest = false) {
                 ${instance.cpu_model && instance.cpu_model !== '' ? `
                 <div class="instance-info-row">
                     <span class="instance-info-label">🖥️ CPU:</span>
-                    <span class="instance-info-value">${instance.cpu_model}</span>
+                    <span class="instance-info-value" style="color: ${getLoadStatusColor(instance.load_status)}">${instance.cpu_model}</span>
                 </div>
                 ` : ''}
                 ${features.length > 0 ? `

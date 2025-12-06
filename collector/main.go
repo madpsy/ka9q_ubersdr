@@ -39,8 +39,12 @@ type Instance struct {
 	Maidenhead          string             `json:"maidenhead"` // 6-character Maidenhead locator
 	PublicURL           string             `json:"public_url"`
 	Version             string             `json:"version"`
-	CPUModel            string             `json:"cpu_model"` // CPU model name
-	CPUCores            int                `json:"cpu_cores"` // Number of CPU cores
+	CPUModel            string             `json:"cpu_model"`                       // CPU model name
+	CPUCores            int                `json:"cpu_cores"`                       // Number of CPU cores
+	Load1Min            string             `json:"-"`                               // 1-minute load average (stored but not exposed in API)
+	Load5Min            string             `json:"-"`                               // 5-minute load average (stored but not exposed in API)
+	Load15Min           string             `json:"-"`                               // 15-minute load average (stored but not exposed in API)
+	LoadStatus          string             `json:"load_status,omitempty"`           // Load status: ok, warning, critical
 	Host                string             `json:"host,omitempty"`
 	Port                int                `json:"port,omitempty"`
 	TLS                 bool               `json:"tls,omitempty"`
@@ -63,31 +67,32 @@ type Instance struct {
 
 // InstanceUpdate represents the data received from an instance
 type InstanceUpdate struct {
-	UUID             string   `json:"uuid"`
-	Callsign         string   `json:"callsign"`
-	Name             string   `json:"name"`
-	Email            string   `json:"email"`             // Admin email address (private, for Let's Encrypt)
-	Location         string   `json:"location"`
-	Latitude         float64  `json:"latitude"`
-	Longitude        float64  `json:"longitude"`
-	Altitude         int      `json:"altitude"`
-	PublicURL        string   `json:"public_url"`
-	Version          string   `json:"version"`
-	CPUModel         string   `json:"cpu_model"` // CPU model name
-	CPUCores         int      `json:"cpu_cores"` // Number of CPU cores
-	Timestamp        int64    `json:"timestamp"`
-	Host             string   `json:"host"`
-	Port             int      `json:"port"`
-	TLS              bool     `json:"tls"`
-	CWSkimmer        bool     `json:"cw_skimmer"`
-	DigitalDecodes   bool     `json:"digital_decodes"`
-	NoiseFloor       bool     `json:"noise_floor"`
-	MaxClients       int      `json:"max_clients"`
-	AvailableClients int      `json:"available_clients"` // Current number of available client slots
-	MaxSessionTime   int      `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes    []string `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
-	CreateDomain     bool     `json:"create_domain"`     // If true, create a DNS subdomain for this instance
-	Test             bool     `json:"test"`              // If true, this is a test report - verify /api/description instead of full callback
+	UUID             string                 `json:"uuid"`
+	Callsign         string                 `json:"callsign"`
+	Name             string                 `json:"name"`
+	Email            string                 `json:"email"`             // Admin email address (private, for Let's Encrypt)
+	Location         string                 `json:"location"`
+	Latitude         float64                `json:"latitude"`
+	Longitude        float64                `json:"longitude"`
+	Altitude         int                    `json:"altitude"`
+	PublicURL        string                 `json:"public_url"`
+	Version          string                 `json:"version"`
+	CPUModel         string                 `json:"cpu_model"`         // CPU model name
+	CPUCores         int                    `json:"cpu_cores"`         // Number of CPU cores (deprecated, use Load.CPUCores)
+	Load             map[string]interface{} `json:"load,omitempty"`    // System load data (load_1min, load_5min, load_15min, cpu_cores, status)
+	Timestamp        int64                  `json:"timestamp"`
+	Host             string                 `json:"host"`
+	Port             int                    `json:"port"`
+	TLS              bool                   `json:"tls"`
+	CWSkimmer        bool                   `json:"cw_skimmer"`
+	DigitalDecodes   bool                   `json:"digital_decodes"`
+	NoiseFloor       bool                   `json:"noise_floor"`
+	MaxClients       int                    `json:"max_clients"`
+	AvailableClients int                    `json:"available_clients"` // Current number of available client slots
+	MaxSessionTime   int                    `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes    []string               `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
+	CreateDomain     bool                   `json:"create_domain"`     // If true, create a DNS subdomain for this instance
+	Test             bool                   `json:"test"`              // If true, this is a test report - verify /api/description instead of full callback
 }
 
 // InstanceVerificationRequest represents the request to verify an instance
@@ -276,6 +281,10 @@ func initDatabase(path string) (*sql.DB, error) {
 		version TEXT NOT NULL,
 		cpu_model TEXT DEFAULT '',
 		cpu_cores INTEGER DEFAULT 0,
+		load_1min TEXT DEFAULT '',
+		load_5min TEXT DEFAULT '',
+		load_15min TEXT DEFAULT '',
+		load_status TEXT DEFAULT '',
 		host TEXT,
 		port INTEGER,
 		tls BOOLEAN,
@@ -348,6 +357,28 @@ func initDatabase(path string) (*sql.DB, error) {
 			return nil, fmt.Errorf("failed to add email column: %w", emailMigErr)
 		}
 		log.Println("Database migration completed: email column added")
+	}
+
+	// Migration: Add load columns if they don't exist (for existing databases)
+	loadColumns := []string{"load_1min", "load_5min", "load_15min", "load_status"}
+	for _, colName := range loadColumns {
+		var colExists bool
+		err := db.QueryRow(`
+			SELECT COUNT(*) > 0
+			FROM pragma_table_info('instances')
+			WHERE name=?
+		`, colName).Scan(&colExists)
+		
+		if err != nil {
+			log.Printf("Warning: Failed to check for %s column: %v", colName, err)
+		} else if !colExists {
+			log.Printf("Migrating database: Adding %s column...", colName)
+			_, err = db.Exec(fmt.Sprintf(`ALTER TABLE instances ADD COLUMN %s TEXT DEFAULT ''`, colName))
+			if err != nil {
+				return nil, fmt.Errorf("failed to add %s column: %w", colName, err)
+			}
+			log.Printf("Database migration completed: %s column added", colName)
+		}
 	}
 
 	log.Println("Database initialized successfully")
@@ -843,17 +874,44 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
+		// Extract load data from the Load map if present
+		cpuCores := update.CPUCores // Use top-level field as fallback
+		load1Min := ""
+		load5Min := ""
+		load15Min := ""
+		loadStatus := ""
+		
+		if update.Load != nil {
+			if val, ok := update.Load["cpu_cores"].(float64); ok {
+				cpuCores = int(val)
+			}
+			if val, ok := update.Load["load_1min"].(string); ok {
+				load1Min = val
+			}
+			if val, ok := update.Load["load_5min"].(string); ok {
+				load5Min = val
+			}
+			if val, ok := update.Load["load_15min"].(string); ok {
+				load15Min = val
+			}
+			if val, ok := update.Load["status"].(string); ok {
+				loadStatus = val
+			}
+		}
+
 		_, err = c.db.Exec(`
 			INSERT INTO instances (
 				secret_uuid, public_uuid, callsign, name, location,
 				latitude, longitude, altitude, public_url, version, cpu_model, cpu_cores,
+				load_1min, load_5min, load_15min, load_status,
 				host, port, tls,
 				cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
 				public_iq_modes, has_subdomain, reporter_ip, email,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
-			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version, update.CPUModel, update.CPUCores,
+			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version, update.CPUModel, cpuCores,
+			load1Min, load5Min, load15Min, loadStatus,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
 			string(publicIQModesJSON), update.CreateDomain, clientIP, update.Email,
@@ -881,11 +939,37 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
+		// Extract load data from the Load map if present
+		cpuCores := update.CPUCores // Use top-level field as fallback
+		load1Min := ""
+		load5Min := ""
+		load15Min := ""
+		loadStatus := ""
+		
+		if update.Load != nil {
+			if val, ok := update.Load["cpu_cores"].(float64); ok {
+				cpuCores = int(val)
+			}
+			if val, ok := update.Load["load_1min"].(string); ok {
+				load1Min = val
+			}
+			if val, ok := update.Load["load_5min"].(string); ok {
+				load5Min = val
+			}
+			if val, ok := update.Load["load_15min"].(string); ok {
+				load15Min = val
+			}
+			if val, ok := update.Load["status"].(string); ok {
+				loadStatus = val
+			}
+		}
+
 		_, err = c.db.Exec(`
 			UPDATE instances SET
 				callsign = ?, name = ?, location = ?,
 				latitude = ?, longitude = ?, altitude = ?,
 				public_url = ?, version = ?, cpu_model = ?, cpu_cores = ?,
+				load_1min = ?, load_5min = ?, load_15min = ?, load_status = ?,
 				host = ?, port = ?, tls = ?,
 				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?, available_clients = ?, max_session_time = ?,
 				public_iq_modes = ?, has_subdomain = ?, reporter_ip = ?, email = ?,
@@ -893,7 +977,8 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			WHERE secret_uuid = ?`,
 			update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude,
-			update.PublicURL, update.Version, update.CPUModel, update.CPUCores,
+			update.PublicURL, update.Version, update.CPUModel, cpuCores,
+			load1Min, load5Min, load15Min, loadStatus,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
 			string(publicIQModesJSON), update.CreateDomain, clientIP, update.Email,
@@ -999,7 +1084,9 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 	// Query only instances seen in the last 30 minutes with at least 2 successful callbacks
 	query := `
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
-		       altitude, public_url, version, cpu_model, cpu_cores, host, port, tls,
+		       altitude, public_url, version, cpu_model, cpu_cores,
+		       load_1min, load_5min, load_15min, load_status,
+		       host, port, tls,
 		       cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
 		       public_iq_modes, reporter_ip, successful_callbacks,
 		       first_seen, last_seen
@@ -1029,7 +1116,9 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 		err := rows.Scan(
 			&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 			&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
-			&inst.Version, &inst.CPUModel, &inst.CPUCores, &inst.Host, &inst.Port, &inst.TLS,
+			&inst.Version, &inst.CPUModel, &inst.CPUCores,
+			&inst.Load1Min, &inst.Load5Min, &inst.Load15Min, &inst.LoadStatus,
+			&inst.Host, &inst.Port, &inst.TLS,
 			&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.AvailableClients, &inst.MaxSessionTime,
 			&publicIQModesJSON, &inst.ReporterIP, &inst.SuccessfulCallbacks,
 			&inst.FirstSeen, &inst.LastSeen,
@@ -1110,7 +1199,9 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	var publicIQModesJSON string
 	err := c.db.QueryRow(`
 		SELECT public_uuid, callsign, name, location, latitude, longitude,
-		       altitude, public_url, version, cpu_model, cpu_cores, host, port, tls,
+		       altitude, public_url, version, cpu_model, cpu_cores,
+		       load_1min, load_5min, load_15min, load_status,
+		       host, port, tls,
 		       cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
 		       public_iq_modes, reporter_ip,
 		       first_seen, last_seen
@@ -1119,7 +1210,9 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	`, publicUUID).Scan(
 		&inst.PublicUUID, &inst.Callsign, &inst.Name, &inst.Location,
 		&inst.Latitude, &inst.Longitude, &inst.Altitude, &inst.PublicURL,
-		&inst.Version, &inst.CPUModel, &inst.CPUCores, &inst.Host, &inst.Port, &inst.TLS,
+		&inst.Version, &inst.CPUModel, &inst.CPUCores,
+		&inst.Load1Min, &inst.Load5Min, &inst.Load15Min, &inst.LoadStatus,
+		&inst.Host, &inst.Port, &inst.TLS,
 		&inst.CWSkimmer, &inst.DigitalDecodes, &inst.NoiseFloor, &inst.MaxClients, &inst.AvailableClients, &inst.MaxSessionTime,
 		&publicIQModesJSON, &inst.ReporterIP,
 		&inst.FirstSeen, &inst.LastSeen,

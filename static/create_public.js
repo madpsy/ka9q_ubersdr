@@ -112,7 +112,7 @@ function setupEventListeners() {
     document.getElementById('createDomain').addEventListener('change', handleCreateDomainToggle);
     
     // Update review when fields change
-    const fields = ['useMyIP', 'instanceHost', 'instancePort', 'instanceTLS', 'createDomain'];
+    const fields = ['adminEmail', 'adminCallsign', 'useMyIP', 'instanceHost', 'instancePort', 'instanceTLS', 'createDomain'];
     fields.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -638,13 +638,22 @@ async function finishWizard() {
     try {
         showAlert('Saving configuration...', 'info');
 
+        // Get the updated email and callsign from the form
+        const adminEmail = document.getElementById('adminEmail').value.trim();
+        const adminCallsign = document.getElementById('adminCallsign').value.trim().toUpperCase();
+
         // Build the configuration update with default values
         const createDomain = document.getElementById('createDomain').checked;
         const useMyIP = document.getElementById('useMyIP').checked;
 
-        // Update instance_reporting section with defaults
+        // Update both admin section and instance_reporting section
         const updatedConfig = {
             ...currentConfig,
+            admin: {
+                ...currentConfig.admin,
+                email: adminEmail,
+                callsign: adminCallsign
+            },
             instance_reporting: {
                 ...currentConfig.instance_reporting,
                 enabled: true,
@@ -744,12 +753,16 @@ async function testInstanceReporter() {
         }
 
         // Get form values for the test
+        const adminEmail = document.getElementById('adminEmail').value.trim();
+        const adminCallsign = document.getElementById('adminCallsign').value.trim().toUpperCase();
         const createDomain = document.getElementById('createDomain').checked;
         const useMyIP = document.getElementById('useMyIP').checked;
         const instancePort = parseInt(document.getElementById('instancePort').value);
 
         // Build test parameters to send to the endpoint
         const testParams = {
+            admin_email: adminEmail,
+            admin_callsign: adminCallsign,
             use_myip: createDomain ? false : useMyIP,
             // When create_domain is true, collector makes HTTP request, so use port 80 for test
             instance_port: createDomain ? 80 : instancePort,

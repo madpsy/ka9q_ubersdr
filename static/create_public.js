@@ -52,6 +52,13 @@ function populateFormFields() {
     // Validate email on load
     validateAdminEmail();
 
+    // Step 2: Callsign (always second)
+    const adminCallsign = currentConfig.admin?.callsign || '';
+    document.getElementById('adminCallsign').value = adminCallsign.toUpperCase();
+    
+    // Validate callsign on load
+    validateAdminCallsign();
+
     // Step 2: Connection settings
     document.getElementById('useMyIP').checked = ir.use_myip !== false;
     document.getElementById('instanceHost').value = ir.instance?.host || '';
@@ -105,6 +112,10 @@ function setupEventListeners() {
     // Admin email validation
     document.getElementById('adminEmail').addEventListener('input', validateAdminEmail);
     document.getElementById('adminEmail').addEventListener('blur', validateAdminEmail);
+    
+    // Admin callsign validation
+    document.getElementById('adminCallsign').addEventListener('input', validateAdminCallsign);
+    document.getElementById('adminCallsign').addEventListener('blur', validateAdminCallsign);
     
     // Use My IP checkbox
     document.getElementById('useMyIP').addEventListener('change', toggleManualConnectionFields);
@@ -195,25 +206,17 @@ function handleCreateDomainToggle() {
 
 // Update domain preview with callsign from config
 function updateDomainPreview() {
-    // Get callsign from admin section of config (not instance_reporting)
-    const callsign = (currentConfig.admin?.callsign || currentConfig.callsign || 'yourcallsign').toLowerCase();
+    // Get callsign from input field if available, otherwise from config
+    const callsignInput = document.getElementById('adminCallsign');
+    let callsign;
     
-    // Update all domain preview spans (including intro page)
-    const introCallsign = document.getElementById('introCallsign');
-    const preview1 = document.getElementById('domainPreview');
-    const preview2 = document.getElementById('domainPreview2');
-    const preview3 = document.getElementById('domainPreview3');
-    
-    if (introCallsign) introCallsign.textContent = callsign;
-    if (preview1) preview1.textContent = callsign;
-    if (preview2) preview2.textContent = callsign;
-    if (preview3) preview3.textContent = callsign;
-    
-    // Update hostname internally if create domain is checked
-    const createDomain = document.getElementById('createDomain').checked;
-    if (createDomain) {
-        document.getElementById('instanceHost').value = callsign + '.instance.ubersdr.org';
+    if (callsignInput && callsignInput.value.trim()) {
+        callsign = callsignInput.value.trim().toLowerCase();
+    } else {
+        callsign = (currentConfig.admin?.callsign || currentConfig.callsign || 'yourcallsign').toLowerCase();
     }
+    
+    updateDomainPreviewWithCallsign(callsign);
 }
 
 // Toggle hostname and TLS field visibility
@@ -273,6 +276,10 @@ function updateReviewSection() {
     // Admin Email
     const adminEmail = document.getElementById('adminEmail').value || '(not set)';
     document.getElementById('reviewEmail').textContent = adminEmail;
+    
+    // Callsign
+    const adminCallsign = document.getElementById('adminCallsign').value || '(not set)';
+    document.getElementById('reviewCallsign').textContent = adminCallsign;
     
     // Public UUID - show existing, generated, or placeholder
     let uuid;
@@ -417,12 +424,84 @@ function validateAdminEmail() {
     return true;
 }
 
+// Callsign validation function
+function validateAdminCallsign() {
+    const callsignInput = document.getElementById('adminCallsign');
+    const callsign = callsignInput.value.trim().toUpperCase();
+    const errorDiv = document.getElementById('callsignValidationError');
+    const errorMessage = document.getElementById('callsignErrorMessage');
+    
+    // Update input to uppercase
+    callsignInput.value = callsign;
+    
+    // Callsign regex pattern: alphanumeric and hyphens only, no spaces
+    const callsignPattern = /^[A-Z0-9\-]+$/;
+    
+    // Check if callsign is empty
+    if (!callsign) {
+        errorDiv.style.display = 'block';
+        errorMessage.textContent = 'Callsign is required.';
+        callsignInput.style.borderColor = '#dc3545';
+        return false;
+    }
+    
+    // Check length (max 10 characters)
+    if (callsign.length > 10) {
+        errorDiv.style.display = 'block';
+        errorMessage.textContent = 'Callsign must be 10 characters or less.';
+        callsignInput.style.borderColor = '#dc3545';
+        return false;
+    }
+    
+    // Check if callsign matches pattern (alphanumeric and hyphens only)
+    if (!callsignPattern.test(callsign)) {
+        errorDiv.style.display = 'block';
+        errorMessage.textContent = 'Callsign can only contain letters, numbers, and hyphens (no spaces).';
+        callsignInput.style.borderColor = '#dc3545';
+        return false;
+    }
+    
+    // Callsign is valid
+    errorDiv.style.display = 'none';
+    callsignInput.style.borderColor = '#28a745';
+    
+    // Update domain previews with the new callsign
+    updateDomainPreviewWithCallsign(callsign.toLowerCase());
+    
+    return true;
+}
+
+// Update domain preview with specific callsign
+function updateDomainPreviewWithCallsign(callsign) {
+    const introCallsign = document.getElementById('introCallsign');
+    const preview1 = document.getElementById('domainPreview');
+    const preview2 = document.getElementById('domainPreview2');
+    const preview3 = document.getElementById('domainPreview3');
+    
+    if (introCallsign) introCallsign.textContent = callsign;
+    if (preview1) preview1.textContent = callsign;
+    if (preview2) preview2.textContent = callsign;
+    if (preview3) preview3.textContent = callsign;
+    
+    // Update hostname internally if create domain is checked
+    const createDomain = document.getElementById('createDomain').checked;
+    if (createDomain) {
+        document.getElementById('instanceHost').value = callsign + '.instance.ubersdr.org';
+    }
+}
+
 // Validation
 function validateCurrentStep() {
     if (currentStep === 2) {
         // Always validate admin email first
         if (!validateAdminEmail()) {
             showAlert('Please enter a valid email address that does not use example.com', 'error');
+            return false;
+        }
+        
+        // Validate callsign second
+        if (!validateAdminCallsign()) {
+            showAlert('Please enter a valid callsign (max 10 characters, alphanumeric and hyphens only)', 'error');
             return false;
         }
         

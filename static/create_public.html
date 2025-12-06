@@ -86,6 +86,17 @@
                     </div>
                 </div>
 
+                <!-- Callsign Field - Always Second -->
+                <div class="form-group" style="background: #f8f9fa; padding: 15px; border-radius: 5px; border-left: 4px solid #667eea; margin-bottom: 20px;">
+                    <label for="adminCallsign" style="font-weight: bold; color: #667eea;">Callsign *</label>
+                    <input type="text" id="adminCallsign" placeholder="W1ABC" maxlength="10" style="margin-top: 5px; text-transform: uppercase;">
+                    <small>Your amateur radio callsign (max 10 characters, alphanumeric and hyphens only, no spaces)</small>
+                    <div id="callsignValidationError" style="display: none; margin-top: 10px; padding: 10px; background: #f8d7da; border-left: 4px solid #dc3545; border-radius: 5px; color: #721c24;">
+                        <strong>⚠️ Invalid Callsign</strong>
+                        <p id="callsignErrorMessage" style="margin: 5px 0 0 0;"></p>
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label class="checkbox-label">
                         <input type="checkbox" id="createDomain">
@@ -192,6 +203,10 @@
                     <div class="review-item">
                         <span class="review-label">Admin Email:</span>
                         <span class="review-value" id="reviewEmail">Loading...</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Callsign:</span>
+                        <span class="review-value" id="reviewCallsign">Loading...</span>
                     </div>
                     <div class="review-item">
                         <span class="review-label">Instance UUID:</span>

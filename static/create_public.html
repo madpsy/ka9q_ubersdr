@@ -59,8 +59,8 @@
                         </div>
                         <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6;">
                             <h4 style="margin-top: 0; color: #667eea;">🔌 Port Forwarding with Your Own Domain</h4>
-                            <p style="margin: 0; font-size: 14px; margin-bottom: 10px;">Use your own domain name. Forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host. Caddy (included in Docker setup) acts as a reverse proxy.</p>
-                            <p style="margin: 0; font-size: 13px; color: #666;">💡 <strong>Automatic HTTPS:</strong> When TLS is enabled in config.yaml with a valid domain and email, Caddy automatically obtains and renews Let's Encrypt certificates.</p>
+                            <p style="margin: 0; font-size: 14px; margin-bottom: 10px;">Use your own domain name. Forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host.</p>
+                            <p style="margin: 0; font-size: 13px; color: #666;">💡 <strong>Automatic HTTPS:</strong> When TLS is enabled and a valid domain and email is specificed, UberSDR automatically obtains and renews Let's Encrypt certificates.</p>
                         </div>
                         <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6;">
                             <h4 style="margin-top: 0; color: #667eea;">☁️ Cloudflare Tunnel</h4>
@@ -106,7 +106,7 @@
                         <li>Forward port <strong>443</strong> (HTTPS) to your UberSDR host IP address</li>
                         <li>Configure these in your router's port forwarding settings</li>
                     </ul>
-                    <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">💡 Caddy will automatically obtain and renew Let's Encrypt certificates for your subdomain.</p>
+                    <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">💡 UberSDR will automatically obtain and renew Let's Encrypt certificates for your subdomain.</p>
                 </div>
 
                 <div class="form-group" id="manualConfigSection">
@@ -164,7 +164,7 @@
                         <li>Enter your domain name (e.g., sdr.example.com) in the hostname field</li>
                         <li>Enable "Use TLS/HTTPS for public connections"</li>
                         <li>Forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host IP address</li>
-                        <li>Caddy will automatically obtain and renew Let's Encrypt certificates</li>
+                        <li>UberSDR will automatically obtain and renew Let's Encrypt certificates</li>
                     </ul>
                     
                     <p style="margin: 10px 0 0 0;"><strong>Important:</strong> For Option 2, your domain must point to your public IP address for certificate generation to work.</p>

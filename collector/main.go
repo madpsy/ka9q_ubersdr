@@ -587,6 +587,12 @@ func validateInstanceUpdate(update *InstanceUpdate) error {
 	if len(update.Callsign) > 10 {
 		return fmt.Errorf("callsign too long (max 10 characters)")
 	}
+	
+	// Validate callsign format: alphanumeric and hyphens only, no spaces
+	callsignRegex := regexp.MustCompile(`^[A-Za-z0-9\-]+$`)
+	if !callsignRegex.MatchString(update.Callsign) {
+		return fmt.Errorf("callsign can only contain letters, numbers, and hyphens (no spaces or special characters)")
+	}
 	if len(update.Name) > 100 {
 		return fmt.Errorf("name too long (max 100 characters)")
 	}

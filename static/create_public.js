@@ -362,6 +362,12 @@ function showStep(step) {
         document.querySelector(`.progress-step[data-step="${i}"]`).classList.add('completed');
     }
     
+    // Clear any alert messages when changing steps
+    const alertBox = document.getElementById('alertBox');
+    if (alertBox) {
+        alertBox.style.display = 'none';
+    }
+    
     // Update navigation buttons (this will handle the finish button state)
     updateNavigationButtons();
     
@@ -568,6 +574,7 @@ function showCallsignStatus(type, message) {
     const errorDiv = document.getElementById('callsignValidationError');
     const errorMessage = document.getElementById('callsignErrorMessage');
     const callsignInput = document.getElementById('adminCallsign');
+    const alertBox = document.getElementById('alertBox');
     
     if (type === 'error') {
         errorDiv.style.display = 'block';
@@ -578,6 +585,10 @@ function showCallsignStatus(type, message) {
     } else if (type === 'success') {
         errorDiv.style.display = 'none';
         callsignInput.style.borderColor = '#28a745';
+        // Clear any alert messages when validation succeeds
+        if (alertBox) {
+            alertBox.style.display = 'none';
+        }
     } else if (type === 'warning') {
         errorDiv.style.display = 'block';
         errorDiv.style.background = '#fff3cd';

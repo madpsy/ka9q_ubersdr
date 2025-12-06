@@ -827,7 +827,23 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		lastErr := fmt.Errorf("server returned status %d for %s", resp.StatusCode, url)
+		// Try to parse error response from collector
+		var responseData map[string]interface{}
+		collectorMessage := ""
+		if err := json.NewDecoder(resp.Body).Decode(&responseData); err == nil {
+			if message, ok := responseData["message"].(string); ok {
+				collectorMessage = message
+			}
+		}
+		
+		// Build error message with collector's response if available
+		var lastErr error
+		if collectorMessage != "" {
+			lastErr = fmt.Errorf("server returned status %d: %s", resp.StatusCode, collectorMessage)
+		} else {
+			lastErr = fmt.Errorf("server returned status %d for %s", resp.StatusCode, url)
+		}
+		
 		ir.mu.Lock()
 		ir.lastResponseCode = resp.StatusCode
 		ir.lastResponseStatus = ""

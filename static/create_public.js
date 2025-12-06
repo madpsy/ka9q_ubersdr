@@ -270,6 +270,10 @@ function updateReviewSection() {
     const instancePort = document.getElementById('instancePort').value;
     const instanceTLS = document.getElementById('instanceTLS').checked;
     
+    // Admin Email
+    const adminEmail = document.getElementById('adminEmail').value || '(not set)';
+    document.getElementById('reviewEmail').textContent = adminEmail;
+    
     // Public UUID - show existing, generated, or placeholder
     let uuid;
     if (generatedUUID) {

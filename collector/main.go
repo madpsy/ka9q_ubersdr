@@ -64,6 +64,7 @@ type InstanceUpdate struct {
 	UUID             string   `json:"uuid"`
 	Callsign         string   `json:"callsign"`
 	Name             string   `json:"name"`
+	Email            string   `json:"email"`             // Admin email address (private, for Let's Encrypt)
 	Location         string   `json:"location"`
 	Latitude         float64  `json:"latitude"`
 	Longitude        float64  `json:"longitude"`
@@ -259,6 +260,7 @@ func initDatabase(path string) (*sql.DB, error) {
 		public_iq_modes TEXT DEFAULT '[]',
 		has_subdomain BOOLEAN DEFAULT 0,
 		reporter_ip TEXT,
+		email TEXT DEFAULT '',
 		successful_callbacks INTEGER DEFAULT 0,
 		first_seen DATETIME NOT NULL,
 		last_seen DATETIME NOT NULL
@@ -299,6 +301,25 @@ func initDatabase(path string) (*sql.DB, error) {
 			return nil, fmt.Errorf("failed to add has_subdomain column: %w", migErr)
 		}
 		log.Println("Database migration completed: has_subdomain column added")
+	}
+
+	// Migration: Add email column if it doesn't exist (for existing databases)
+	var emailColumnExists bool
+	emailMigErr := db.QueryRow(`
+		SELECT COUNT(*) > 0
+		FROM pragma_table_info('instances')
+		WHERE name='email'
+	`).Scan(&emailColumnExists)
+	
+	if emailMigErr != nil {
+		log.Printf("Warning: Failed to check for email column: %v", emailMigErr)
+	} else if !emailColumnExists {
+		log.Println("Migrating database: Adding email column...")
+		_, emailMigErr = db.Exec(`ALTER TABLE instances ADD COLUMN email TEXT DEFAULT ''`)
+		if emailMigErr != nil {
+			return nil, fmt.Errorf("failed to add email column: %w", emailMigErr)
+		}
+		log.Println("Database migration completed: email column added")
 	}
 
 	log.Println("Database initialized successfully")
@@ -757,14 +778,14 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				latitude, longitude, altitude, public_url, version, cpu_model, cpu_cores,
 				host, port, tls,
 				cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
-				public_iq_modes, has_subdomain, reporter_ip,
+				public_iq_modes, has_subdomain, reporter_ip, email,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version, update.CPUModel, update.CPUCores,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
-			string(publicIQModesJSON), update.CreateDomain, clientIP,
+			string(publicIQModesJSON), update.CreateDomain, clientIP, update.Email,
 			now, now,
 		)
 
@@ -796,7 +817,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				public_url = ?, version = ?, cpu_model = ?, cpu_cores = ?,
 				host = ?, port = ?, tls = ?,
 				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?, available_clients = ?, max_session_time = ?,
-				public_iq_modes = ?, has_subdomain = ?, reporter_ip = ?,
+				public_iq_modes = ?, has_subdomain = ?, reporter_ip = ?, email = ?,
 				last_seen = ?
 			WHERE secret_uuid = ?`,
 			update.Callsign, update.Name, update.Location,
@@ -804,7 +825,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 			update.PublicURL, update.Version, update.CPUModel, update.CPUCores,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
-			string(publicIQModesJSON), update.CreateDomain, clientIP,
+			string(publicIQModesJSON), update.CreateDomain, clientIP, update.Email,
 			now,
 			secretUUID,
 		)

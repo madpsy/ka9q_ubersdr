@@ -1356,7 +1356,6 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 		"description": config.Admin.Description,
 		"receiver": map[string]interface{}{
 			"name":       config.Admin.Name,
-			"admin":      config.Admin.Email,
 			"callsign":   config.Admin.Callsign,
 			"public_url": publicURL,
 			"gps": map[string]interface{}{

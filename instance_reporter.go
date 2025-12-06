@@ -39,6 +39,7 @@ type InstanceReport struct {
 	UUID             string   `json:"uuid"`
 	Callsign         string   `json:"callsign"`
 	Name             string   `json:"name"`
+	Email            string   `json:"email"`             // Admin email address (private, for Let's Encrypt)
 	Location         string   `json:"location"`
 	Latitude         float64  `json:"latitude"`
 	Longitude        float64  `json:"longitude"`
@@ -347,6 +348,7 @@ func (ir *InstanceReporter) sendReport() error {
 		UUID:             ir.config.InstanceReporting.InstanceUUID,
 		Callsign:         ir.config.Admin.Callsign,
 		Name:             ir.config.Admin.Name,
+		Email:            ir.config.Admin.Email,
 		Location:         ir.config.Admin.Location,
 		Latitude:         ir.config.Admin.GPS.Lat,
 		Longitude:        ir.config.Admin.GPS.Lon,
@@ -655,6 +657,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		UUID:             instanceUUID,
 		Callsign:         ir.config.Admin.Callsign,
 		Name:             ir.config.Admin.Name,
+		Email:            ir.config.Admin.Email,
 		Location:         ir.config.Admin.Location,
 		Latitude:         ir.config.Admin.GPS.Lat,
 		Longitude:        ir.config.Admin.GPS.Lon,

@@ -326,8 +326,8 @@ function updateReviewSection() {
 }
 
 // Navigation functions
-function nextStep() {
-    if (validateCurrentStep()) {
+async function nextStep() {
+    if (await validateCurrentStep()) {
         if (currentStep < 3) {
             currentStep++;
             showStep(currentStep);
@@ -490,8 +490,99 @@ function updateDomainPreviewWithCallsign(callsign) {
     }
 }
 
+// Check if callsign is available in the registry
+async function validateCallsignAvailability() {
+    const callsign = document.getElementById('adminCallsign').value.trim().toUpperCase();
+    
+    if (!callsign) {
+        return false;
+    }
+    
+    try {
+        // Step 1: Check if callsign exists in registry
+        const response = await fetch(`https://instances.ubersdr.org/api/callsign/${callsign}`);
+        
+        if (response.status === 404) {
+            // Callsign not found - it's available!
+            showCallsignStatus('success', 'Callsign is available');
+            return true;
+        }
+        
+        if (response.status === 200) {
+            // Callsign exists - need to check if it's ours
+            const registryData = await response.json();
+            
+            // Step 2: Get our SECRET UUID from config (this is the private instance_uuid)
+            const ourSecretUUID = currentConfig.instance_reporting?.instance_uuid;
+            
+            if (!ourSecretUUID) {
+                // We don't have a UUID yet (new instance) but callsign is taken
+                showCallsignStatus('error', `Callsign ${callsign} is already registered to another instance`);
+                return false;
+            }
+            
+            // Step 3: Look up our public UUID using our SECRET UUID
+            const lookupResponse = await fetch(`https://instances.ubersdr.org/api/lookup/${ourSecretUUID}`);
+            
+            if (lookupResponse.status === 200) {
+                const ourData = await lookupResponse.json();
+                
+                // Step 4: Compare public UUIDs
+                // ourData.public_uuid is OUR public UUID (looked up from our secret UUID)
+                // registryData.public_uuid is the public UUID of whoever owns this callsign
+                if (ourData.public_uuid === registryData.public_uuid) {
+                    // It's OUR instance - allow it!
+                    showCallsignStatus('success', 'This is your registered callsign');
+                    return true;
+                } else {
+                    // Different instance owns this callsign
+                    showCallsignStatus('error', `Callsign ${callsign} is already registered to another instance`);
+                    return false;
+                }
+            } else {
+                // Our secret UUID not found in registry yet (first time setup)
+                // But callsign is already taken by someone else
+                showCallsignStatus('error', `Callsign ${callsign} is already registered to another instance`);
+                return false;
+            }
+        }
+        
+        // Other status codes - allow to proceed
+        return true;
+        
+    } catch (error) {
+        console.error('Error checking callsign availability:', error);
+        // Network error - don't block the wizard
+        showCallsignStatus('warning', 'Unable to check callsign availability (network error)');
+        return true;
+    }
+}
+
+function showCallsignStatus(type, message) {
+    const errorDiv = document.getElementById('callsignValidationError');
+    const errorMessage = document.getElementById('callsignErrorMessage');
+    const callsignInput = document.getElementById('adminCallsign');
+    
+    if (type === 'error') {
+        errorDiv.style.display = 'block';
+        errorDiv.style.background = '#f8d7da';
+        errorDiv.style.borderLeft = '4px solid #dc3545';
+        errorMessage.textContent = message;
+        callsignInput.style.borderColor = '#dc3545';
+    } else if (type === 'success') {
+        errorDiv.style.display = 'none';
+        callsignInput.style.borderColor = '#28a745';
+    } else if (type === 'warning') {
+        errorDiv.style.display = 'block';
+        errorDiv.style.background = '#fff3cd';
+        errorDiv.style.borderLeft = '4px solid #ffc107';
+        errorMessage.textContent = message;
+        callsignInput.style.borderColor = '#ffc107';
+    }
+}
+
 // Validation
-function validateCurrentStep() {
+async function validateCurrentStep() {
     if (currentStep === 2) {
         // Always validate admin email first
         if (!validateAdminEmail()) {
@@ -499,9 +590,15 @@ function validateCurrentStep() {
             return false;
         }
         
-        // Validate callsign second
+        // Validate callsign format second
         if (!validateAdminCallsign()) {
             showAlert('Please enter a valid callsign (max 10 characters, alphanumeric and hyphens only)', 'error');
+            return false;
+        }
+        
+        // Validate callsign availability third (async)
+        if (!await validateCallsignAvailability()) {
+            showAlert('This callsign is already registered to another instance. Please use a different callsign.', 'error');
             return false;
         }
         

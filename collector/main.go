@@ -215,6 +215,7 @@ func main() {
 	http.HandleFunc("/api/instances", loggingMiddleware(collector.handleListInstances))
 	http.HandleFunc("/api/instances/", loggingMiddleware(collector.handleGetInstance))
 	http.HandleFunc("/api/lookup/", loggingMiddleware(collector.handleLookupPublicUUID))
+	http.HandleFunc("/api/callsign/", loggingMiddleware(collector.handleLookupByCallsign))
 	http.HandleFunc("/api/noisefloor/", loggingMiddleware(collector.handleGetNoiseFloor))
 	http.HandleFunc("/api/myip", loggingMiddleware(handleMyIP))
 	http.HandleFunc("/health", loggingMiddleware(handleHealth))
@@ -1169,6 +1170,44 @@ func (c *Collector) handleLookupPublicUUID(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"secret_uuid": secretUUID,
+		"public_uuid": publicUUID,
+	})
+}
+
+// handleLookupByCallsign handles GET requests to lookup public UUID from callsign
+func (c *Collector) handleLookupByCallsign(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract callsign from URL path
+	// URL format: /api/callsign/{callsign}
+	callsign := r.URL.Path[len("/api/callsign/"):]
+	if callsign == "" {
+		http.Error(w, "Missing callsign", http.StatusBadRequest)
+		return
+	}
+
+	// Normalize callsign to uppercase for case-insensitive lookup
+	callsign = strings.ToUpper(strings.TrimSpace(callsign))
+
+	var publicUUID string
+	err := c.db.QueryRow("SELECT public_uuid FROM instances WHERE UPPER(callsign) = ?", callsign).Scan(&publicUUID)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Callsign not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		log.Printf("Failed to lookup callsign: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"callsign":    callsign,
 		"public_uuid": publicUUID,
 	})
 }

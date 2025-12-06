@@ -802,6 +802,20 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 		if host, _, err := net.SplitHostPort(clientIP); err == nil {
 			verifyHost = host
 		}
+		
+		// Validate that the source IP is publicly routable
+		sourceIP := net.ParseIP(verifyHost)
+		if sourceIP == nil {
+			log.Printf("Source IP validation failed for %s: invalid IP format: %s", secretUUID, verifyHost)
+			sendError(http.StatusBadRequest, "Source IP address is invalid")
+			return
+		}
+		if !isPublicIP(sourceIP) {
+			log.Printf("Source IP validation failed for %s: non-public IP address: %s", secretUUID, verifyHost)
+			sendError(http.StatusBadRequest, fmt.Sprintf("Source IP address is not publicly routable: %s", verifyHost))
+			return
+		}
+		
 		// When create_domain is true, always verify on port 80 (HTTP)
 		// DNS doesn't exist yet, so no certificate can be obtained for port 443
 		verifyPort = 80

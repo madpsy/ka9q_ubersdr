@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,32 +38,32 @@ type InstanceReporter struct {
 
 // InstanceReport represents the data sent to the central server
 type InstanceReport struct {
-	UUID             string   `json:"uuid"`
-	Callsign         string   `json:"callsign"`
-	Name             string   `json:"name"`
-	Email            string   `json:"email"`             // Admin email address (private, for Let's Encrypt)
-	Location         string   `json:"location"`
-	Latitude         float64  `json:"latitude"`
-	Longitude        float64  `json:"longitude"`
-	Altitude         int      `json:"altitude"`
-	PublicURL        string   `json:"public_url"`
-	Version          string   `json:"version"`
-	Timestamp        int64    `json:"timestamp"`
-	Host             string   `json:"host,omitempty"`    // Optional: tells clients how to connect to this instance
-	Port             int      `json:"port,omitempty"`    // Optional: port for client connections
-	TLS              bool     `json:"tls,omitempty"`     // Optional: whether TLS is required for connections
-	UseMyIP          bool     `json:"use_myip"`          // Automatically use public IP for public access
-	CreateDomain     bool     `json:"create_domain"`     // Request automatic DNS subdomain creation
-	CWSkimmer        bool     `json:"cw_skimmer"`        // Whether CW Skimmer is enabled
-	DigitalDecodes   bool     `json:"digital_decodes"`   // Whether digital decoding is enabled
-	NoiseFloor       bool     `json:"noise_floor"`       // Whether noise floor monitoring is enabled
-	MaxClients       int      `json:"max_clients"`       // Maximum number of clients allowed
-	AvailableClients int      `json:"available_clients"` // Current number of available client slots
-	MaxSessionTime   int      `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
-	PublicIQModes    []string `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
-	CPUModel         string   `json:"cpu_model"`         // CPU model name
-	CPUCores         int      `json:"cpu_cores"`         // Number of CPU cores
-	Test             bool     `json:"test,omitempty"`    // If true, this is a test report - collector will verify /api/description instead of full callback
+	UUID             string                 `json:"uuid"`
+	Callsign         string                 `json:"callsign"`
+	Name             string                 `json:"name"`
+	Email            string                 `json:"email"`             // Admin email address (private, for Let's Encrypt)
+	Location         string                 `json:"location"`
+	Latitude         float64                `json:"latitude"`
+	Longitude        float64                `json:"longitude"`
+	Altitude         int                    `json:"altitude"`
+	PublicURL        string                 `json:"public_url"`
+	Version          string                 `json:"version"`
+	Timestamp        int64                  `json:"timestamp"`
+	Host             string                 `json:"host,omitempty"`    // Optional: tells clients how to connect to this instance
+	Port             int                    `json:"port,omitempty"`    // Optional: port for client connections
+	TLS              bool                   `json:"tls,omitempty"`     // Optional: whether TLS is required for connections
+	UseMyIP          bool                   `json:"use_myip"`          // Automatically use public IP for public access
+	CreateDomain     bool                   `json:"create_domain"`     // Request automatic DNS subdomain creation
+	CWSkimmer        bool                   `json:"cw_skimmer"`        // Whether CW Skimmer is enabled
+	DigitalDecodes   bool                   `json:"digital_decodes"`   // Whether digital decoding is enabled
+	NoiseFloor       bool                   `json:"noise_floor"`       // Whether noise floor monitoring is enabled
+	MaxClients       int                    `json:"max_clients"`       // Maximum number of clients allowed
+	AvailableClients int                    `json:"available_clients"` // Current number of available client slots
+	MaxSessionTime   int                    `json:"max_session_time"`  // Maximum session time in seconds (0 = unlimited)
+	PublicIQModes    []string               `json:"public_iq_modes"`   // List of IQ modes accessible without authentication
+	CPUModel         string                 `json:"cpu_model"`         // CPU model name
+	Load             map[string]interface{} `json:"load,omitempty"`    // System load averages, CPU cores, and status
+	Test             bool                   `json:"test,omitempty"`    // If true, this is a test report - collector will verify /api/description instead of full callback
 }
 
 // NewInstanceReporter creates a new instance reporter
@@ -231,6 +233,69 @@ func (ir *InstanceReporter) getCPUInfo() (string, int) {
 	return "Unknown", 0
 }
 
+// getSystemLoad retrieves system load averages and calculates status
+func (ir *InstanceReporter) getSystemLoad() map[string]interface{} {
+	loadData := map[string]interface{}{
+		"load_1min":  "",
+		"load_5min":  "",
+		"load_15min": "",
+		"cpu_cores":  0,
+		"status":     "unknown",
+	}
+
+	// Read /proc/loadavg
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		log.Printf("Failed to read /proc/loadavg: %v", err)
+		return loadData
+	}
+
+	// Parse the load averages
+	// Format: "0.52 0.58 0.59 1/1234 12345"
+	fields := strings.Split(strings.TrimSpace(string(data)), " ")
+	if len(fields) < 3 {
+		log.Printf("Invalid /proc/loadavg format")
+		return loadData
+	}
+
+	loadData["load_1min"] = fields[0]
+	loadData["load_5min"] = fields[1]
+	loadData["load_15min"] = fields[2]
+
+	// Get CPU core count
+	cpuCores := 0
+	info, err := cpu.Info()
+	if err == nil && len(info) > 0 {
+		for _, cpuInfo := range info {
+			cpuCores += int(cpuInfo.Cores)
+		}
+	}
+	loadData["cpu_cores"] = cpuCores
+
+	// Parse load values for status calculation
+	load1, err1 := strconv.ParseFloat(fields[0], 64)
+	load5, err2 := strconv.ParseFloat(fields[1], 64)
+	load15, err3 := strconv.ParseFloat(fields[2], 64)
+
+	if err1 == nil && err2 == nil && err3 == nil {
+		// Calculate average load across all three periods
+		avgLoad := (load1 + load5 + load15) / 3.0
+
+		// Determine status based on average load vs CPU cores
+		status := "ok"
+		if cpuCores > 0 {
+			if avgLoad >= float64(cpuCores)*2.0 {
+				status = "critical"
+			} else if avgLoad >= float64(cpuCores) {
+				status = "warning"
+			}
+		}
+		loadData["status"] = status
+	}
+
+	return loadData
+}
+
 // getPublicIP fetches the public IP address from the collector's /api/myip endpoint
 func (ir *InstanceReporter) getPublicIP() (string, error) {
 	// Build URL with http or https based on config
@@ -342,7 +407,10 @@ func (ir *InstanceReporter) sendReport() error {
 	publicURL := ir.config.InstanceReporting.ConstructPublicURL(ir.GetEffectiveHost())
 
 	// Get CPU information
-	cpuModel, cpuCores := ir.getCPUInfo()
+	cpuModel, _ := ir.getCPUInfo()
+
+	// Get system load information (includes CPU cores)
+	systemLoad := ir.getSystemLoad()
 
 	report := InstanceReport{
 		UUID:             ir.config.InstanceReporting.InstanceUUID,
@@ -369,7 +437,7 @@ func (ir *InstanceReporter) sendReport() error {
 		MaxSessionTime:   ir.config.Server.MaxSessionTime,
 		PublicIQModes:    publicIQModes,
 		CPUModel:         cpuModel,
-		CPUCores:         cpuCores,
+		Load:             systemLoad,
 	}
 
 	jsonData, err := json.Marshal(report)
@@ -651,7 +719,10 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 	publicURL := fmt.Sprintf("%s://%s:%d", protocol, host, instancePort)
 
 	// Get CPU information
-	cpuModel, cpuCores := ir.getCPUInfo()
+	cpuModel, _ := ir.getCPUInfo()
+
+	// Get system load information (includes CPU cores)
+	systemLoad := ir.getSystemLoad()
 
 	report := InstanceReport{
 		UUID:             instanceUUID,
@@ -678,7 +749,7 @@ func (ir *InstanceReporter) sendReportWithParams(testParams map[string]interface
 		MaxSessionTime:   ir.config.Server.MaxSessionTime,
 		PublicIQModes:    publicIQModes,
 		CPUModel:         cpuModel,
-		CPUCores:         cpuCores,
+		Load:             systemLoad,
 		Test:             isTest,
 	}
 

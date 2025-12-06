@@ -2549,7 +2549,15 @@
             
             // Add system load line if available
             if (systemLoad && systemLoad.load_1min && systemLoad.load_5min && systemLoad.load_15min) {
-                summaryHTML += `<span style="margin-left: 20px;">• System Load: <strong>${systemLoad.load_1min}</strong>, <strong>${systemLoad.load_5min}</strong>, <strong>${systemLoad.load_15min}</strong> <em style="color: #666;">(1, 5, 15 min averages)</em></span><br>`;
+                let loadLine = `<span style="margin-left: 20px;">• System Load: <strong>${systemLoad.load_1min}</strong>, <strong>${systemLoad.load_5min}</strong>, <strong>${systemLoad.load_15min}</strong> <em style="color: #666;">(1, 5, 15 min averages)</em>`;
+                
+                // Add CPU core count if available
+                if (systemLoad.cpu_cores && systemLoad.cpu_cores > 0) {
+                    loadLine += ` on <strong>${systemLoad.cpu_cores}</strong> core${systemLoad.cpu_cores !== 1 ? 's' : ''}`;
+                }
+                
+                loadLine += `</span><br>`;
+                summaryHTML += loadLine;
             }
             
             summaryHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${nonBypassedCount}</strong> of <strong>${maxSessions}</strong> maximum</span><br>`;
@@ -4271,10 +4279,23 @@
             }
         }
 
-        function renderMonitorHealth(data, isDetailed) {
+        async function renderMonitorHealth(data, isDetailed) {
             const container = document.getElementById('monitorHealth');
             container.innerHTML = '';
             container.classList.remove('loading');
+
+            // Fetch and display system load as the first section (only in non-detailed view)
+            if (!isDetailed) {
+                try {
+                    const loadResponse = await authenticatedFetch('/admin/system-load');
+                    if (loadResponse && loadResponse.ok) {
+                        const systemLoad = await loadResponse.json();
+                        renderSystemLoad(container, systemLoad);
+                    }
+                } catch (error) {
+                    console.error('Error loading system load:', error);
+                }
+            }
 
             // Add summary warning banner at the top if any system has issues
             if (!isDetailed) {
@@ -4449,6 +4470,64 @@
                     renderCWSkimmerHealth(container, data.cwSkimmer);
                 }
             }
+        }
+
+        function renderSystemLoad(container, systemLoad) {
+            const statusSection = document.createElement('div');
+            statusSection.className = 'config-section';
+            statusSection.innerHTML = '<h3>💻 System Load</h3>';
+
+            const statusDiv = document.createElement('div');
+            statusDiv.style.padding = '15px';
+            statusDiv.style.background = '#f8f9fa';
+            statusDiv.style.borderRadius = '5px';
+            statusDiv.style.marginBottom = '20px';
+
+            // Parse load averages and CPU cores
+            const load1 = parseFloat(systemLoad.load_1min) || 0;
+            const load5 = parseFloat(systemLoad.load_5min) || 0;
+            const load15 = parseFloat(systemLoad.load_15min) || 0;
+            const cpuCores = systemLoad.cpu_cores || 0;
+
+            // Helper function to get color based on load vs cores
+            const getLoadColor = (load, cores) => {
+                if (cores === 0) return '#666'; // Gray if no core info
+                if (load >= cores * 2) return '#dc3545'; // Red if >= 2x cores
+                if (load >= cores) return '#ff8c00'; // Orange if >= cores
+                return '#28a745'; // Green otherwise
+            };
+
+            // Get colors for each load average
+            const color1 = getLoadColor(load1, cpuCores);
+            const color5 = getLoadColor(load5, cpuCores);
+            const color15 = getLoadColor(load15, cpuCores);
+
+            statusDiv.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; font-weight: bold; color: ${color1};">${systemLoad.load_1min}</div>
+                        <div style="font-size: 12px; color: #666;">1 min</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; font-weight: bold; color: ${color5};">${systemLoad.load_5min}</div>
+                        <div style="font-size: 12px; color: #666;">5 min</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; font-weight: bold; color: ${color15};">${systemLoad.load_15min}</div>
+                        <div style="font-size: 12px; color: #666;">15 min</div>
+                    </div>
+                </div>
+                <div style="text-align: center; color: #666; font-size: 14px;">
+                    ${cpuCores > 0 ? `<strong>${cpuCores}</strong> CPU core${cpuCores !== 1 ? 's' : ''} available` : 'CPU core count unavailable'}
+                </div>
+                <div style="text-align: center; color: #999; font-size: 12px; margin-top: 10px;">
+                    <span style="color: #28a745;">●</span> Normal
+                    <span style="margin-left: 10px; color: #ff8c00;">●</span> High (≥ cores)
+                    <span style="margin-left: 10px; color: #dc3545;">●</span> Critical (≥ 2× cores)
+                </div>
+            `;
+            statusSection.appendChild(statusDiv);
+            container.appendChild(statusSection);
         }
 
         function renderNoiseFloorHealth(container, data) {

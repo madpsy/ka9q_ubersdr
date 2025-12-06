@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shirou/gopsutil/v3/cpu"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1518,7 +1519,7 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleSystemLoad returns system load averages from /proc/loadavg
+// HandleSystemLoad returns system load averages from /proc/loadavg and CPU core count
 func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1543,10 +1544,21 @@ func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Get CPU core count using gopsutil
+	cpuCores := 0
+	info, err := cpu.Info()
+	if err == nil && len(info) > 0 {
+		// Sum cores across all CPUs (for multi-socket systems)
+		for _, cpuInfo := range info {
+			cpuCores += int(cpuInfo.Cores)
+		}
+	}
+
 	response := map[string]interface{}{
 		"load_1min":  fields[0],
 		"load_5min":  fields[1],
 		"load_15min": fields[2],
+		"cpu_cores":  cpuCores,
 	}
 
 	w.WriteHeader(http.StatusOK)

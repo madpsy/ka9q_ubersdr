@@ -45,6 +45,13 @@ async function loadCurrentConfig() {
 function populateFormFields() {
     const ir = currentConfig.instance_reporting || {};
 
+    // Step 2: Admin email (always first)
+    const adminEmail = currentConfig.admin?.email || '';
+    document.getElementById('adminEmail').value = adminEmail;
+    
+    // Validate email on load
+    validateAdminEmail();
+
     // Step 2: Connection settings
     document.getElementById('useMyIP').checked = ir.use_myip !== false;
     document.getElementById('instanceHost').value = ir.instance?.host || '';
@@ -96,6 +103,10 @@ function populateFormFields() {
 
 // Setup event listeners
 function setupEventListeners() {
+    // Admin email validation
+    document.getElementById('adminEmail').addEventListener('input', validateAdminEmail);
+    document.getElementById('adminEmail').addEventListener('blur', validateAdminEmail);
+    
     // Use My IP checkbox
     document.getElementById('useMyIP').addEventListener('change', toggleManualConnectionFields);
     
@@ -362,9 +373,56 @@ function updateNavigationButtons() {
     }
 }
 
+// Email validation function
+function validateAdminEmail() {
+    const emailInput = document.getElementById('adminEmail');
+    const email = emailInput.value.trim();
+    const errorDiv = document.getElementById('emailValidationError');
+    const errorMessage = document.getElementById('emailErrorMessage');
+    
+    // Email regex pattern
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    
+    // Check if email is empty
+    if (!email) {
+        errorDiv.style.display = 'block';
+        errorMessage.textContent = 'Email address is required.';
+        emailInput.style.borderColor = '#dc3545';
+        return false;
+    }
+    
+    // Check if email is valid format
+    if (!emailPattern.test(email)) {
+        errorDiv.style.display = 'block';
+        errorMessage.textContent = 'Please enter a valid email address.';
+        emailInput.style.borderColor = '#dc3545';
+        return false;
+    }
+    
+    // Check if domain is example.com
+    const domain = email.split('@')[1].toLowerCase();
+    if (domain === 'example.com') {
+        errorDiv.style.display = 'block';
+        errorMessage.textContent = 'Please use a real email address. The domain "example.com" is not allowed.';
+        emailInput.style.borderColor = '#dc3545';
+        return false;
+    }
+    
+    // Email is valid
+    errorDiv.style.display = 'none';
+    emailInput.style.borderColor = '#28a745';
+    return true;
+}
+
 // Validation
 function validateCurrentStep() {
     if (currentStep === 2) {
+        // Always validate admin email first
+        if (!validateAdminEmail()) {
+            showAlert('Please enter a valid email address that does not use example.com', 'error');
+            return false;
+        }
+        
         const useMyIP = document.getElementById('useMyIP').checked;
         
         if (!useMyIP) {

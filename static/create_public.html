@@ -75,6 +75,17 @@
                 <h2>Public Connection Settings</h2>
                 <p class="step-description">Configure how users will connect to your UberSDR instance</p>
 
+                <!-- Admin Email Field - Always First -->
+                <div class="form-group" style="background: #f8f9fa; padding: 15px; border-radius: 5px; border-left: 4px solid #667eea; margin-bottom: 20px;">
+                    <label for="adminEmail" style="font-weight: bold; color: #667eea;">Admin Email Address *</label>
+                    <input type="email" id="adminEmail" placeholder="your.email@example.com" style="margin-top: 5px;">
+                    <small>This email is required for the instance registry and for Let's Encrypt certificate generation. It remains private and is not available to the public.</small>
+                    <div id="emailValidationError" style="display: none; margin-top: 10px; padding: 10px; background: #f8d7da; border-left: 4px solid #dc3545; border-radius: 5px; color: #721c24;">
+                        <strong>⚠️ Invalid Email Address</strong>
+                        <p id="emailErrorMessage" style="margin: 5px 0 0 0;"></p>
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label class="checkbox-label">
                         <input type="checkbox" id="createDomain">
@@ -130,7 +141,7 @@
                     <div class="form-group">
                         <label for="instancePort">Public Port *</label>
                         <input type="number" id="instancePort" value="8080" min="1" max="65535">
-                        <small>The port number users will connect to (typically 8080 for HTTP or 443 for HTTPS)</small>
+                        <small>The port number users will connect to (typically 80 for HTTP or 443 for HTTPS)</small>
                         <div id="portWarning" style="display: none; margin-top: 10px; padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 5px;">
                             <strong>⚠️ Non-standard port detected</strong>
                             <p style="margin: 5px 0 0 0;">Port 443 is recommended for DNS subdomain mode. Other ports will work but may require users to specify the port in the URL.</p>

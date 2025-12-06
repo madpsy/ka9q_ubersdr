@@ -1476,9 +1476,13 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 		},
 	}
 
-	// Retry up to 3 times with 10 second delays
-	maxRetries := 3
+	// In test mode, only attempt once for faster feedback
+	// In normal mode, retry up to 3 times with 10 second delays
+	maxRetries := 1
 	retryDelay := 10 * time.Second
+	if !isTest {
+		maxRetries = 3
+	}
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// Create request

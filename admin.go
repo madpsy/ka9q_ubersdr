@@ -3052,18 +3052,6 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Check if instance reporter exists
-	if ah.instanceReporter == nil {
-		http.Error(w, "Instance reporter not initialized", http.StatusServiceUnavailable)
-		if err := json.NewEncoder(w).Encode(map[string]string{
-			"status":  "error",
-			"message": "Instance reporter not initialized",
-		}); err != nil {
-			log.Printf("Error encoding response: %v", err)
-		}
-		return
-	}
-
 	// Check if request body contains test parameters
 	var testParams map[string]interface{}
 	if r.Body != nil && r.ContentLength > 0 {
@@ -3074,9 +3062,29 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 		}
 	}
 
-	// If test parameters provided, use them; otherwise check if enabled
-	if testParams == nil {
-		// No test parameters - using actual config, so check if enabled
+	// Determine which instance reporter to use
+	var reporter *InstanceReporter
+	var tempReporter *InstanceReporter
+	
+	if testParams != nil {
+		// Test mode: create a temporary instance reporter with test parameters
+		// This allows testing before instance reporting is enabled
+		tempReporter = NewInstanceReporter(ah.config, ah.cwSkimmerConfig, ah.sessions, ah.configFile)
+		reporter = tempReporter
+	} else {
+		// Normal mode: use the existing instance reporter
+		if ah.instanceReporter == nil {
+			http.Error(w, "Instance reporter not initialized", http.StatusServiceUnavailable)
+			if err := json.NewEncoder(w).Encode(map[string]string{
+				"status":  "error",
+				"message": "Instance reporter not initialized",
+			}); err != nil {
+				log.Printf("Error encoding response: %v", err)
+			}
+			return
+		}
+		
+		// Check if enabled when not in test mode
 		if !ah.config.InstanceReporting.Enabled {
 			http.Error(w, "Instance reporting is not enabled", http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(map[string]string{
@@ -3087,12 +3095,14 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 			}
 			return
 		}
+		
+		reporter = ah.instanceReporter
 	}
 
 	// Trigger an immediate report (with optional test parameters)
-	if err := ah.instanceReporter.TriggerReportWithParams(testParams); err != nil {
+	if err := reporter.TriggerReportWithParams(testParams); err != nil {
 		// Get the report status to include collector response details
-		reportStatus := ah.instanceReporter.GetReportStatus()
+		reportStatus := reporter.GetReportStatus()
 
 		response := map[string]interface{}{
 			"status":  "error",
@@ -3118,7 +3128,7 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 	}
 
 	// Get the report status to include collector response details
-	reportStatus := ah.instanceReporter.GetReportStatus()
+	reportStatus := reporter.GetReportStatus()
 
 	response := map[string]interface{}{
 		"status":  "success",

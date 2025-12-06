@@ -160,8 +160,11 @@ function handleCreateDomainToggle() {
         // Show DNS info box
         domainInfo.style.display = 'block';
         
-        // Set hostname internally (not visible to user)
-        const callsign = (currentConfig.admin?.callsign || currentConfig.callsign || 'yourcallsign').toLowerCase();
+        // Set hostname internally (not visible to user) - use form input value
+        const callsignInput = document.getElementById('adminCallsign');
+        const callsign = (callsignInput && callsignInput.value.trim())
+            ? callsignInput.value.trim().toLowerCase()
+            : (currentConfig.admin?.callsign || currentConfig.callsign || 'yourcallsign').toLowerCase();
         instanceHostInput.value = callsign + '.instance.ubersdr.org';
         
         // Auto-set port to 443 and enable TLS

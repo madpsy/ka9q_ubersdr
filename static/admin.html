@@ -2236,20 +2236,32 @@
 
         async function loadSessions() {
             try {
-                const response = await authenticatedFetch('/admin/sessions');
-                if (!response) {
+                // Fetch both sessions and system load in parallel
+                const [sessionsResponse, loadResponse] = await Promise.all([
+                    authenticatedFetch('/admin/sessions'),
+                    authenticatedFetch('/admin/system-load')
+                ]);
+                
+                if (!sessionsResponse || !loadResponse) {
                     // Auth failed, stop auto-refresh
                     stopSessionsAutoRefresh();
                     return;
                 }
 
-                if (!response.ok) {
+                if (!sessionsResponse.ok) {
                     throw new Error('Failed to load sessions');
                 }
 
-                const data = await response.json();
+                const data = await sessionsResponse.json();
                 currentSessions = data.sessions || [];
-                renderSessions();
+                
+                // Get system load data
+                let systemLoad = null;
+                if (loadResponse.ok) {
+                    systemLoad = await loadResponse.json();
+                }
+                
+                renderSessions(currentSessionFilter, systemLoad);
 
                 // Only show alert on manual refresh, not on auto-refresh
                 if (!sessionsRefreshInterval) {
@@ -2285,7 +2297,7 @@
             }
         }
 
-        function renderSessions(filterType = currentSessionFilter) {
+        function renderSessions(filterType = currentSessionFilter, systemLoad = null) {
             // Update the current filter state
             currentSessionFilter = filterType;
             
@@ -2320,7 +2332,7 @@
             // Add event listener to filter dropdown
             document.getElementById('sessionFilter').addEventListener('change', (e) => {
                 currentSessionFilter = e.target.value;
-                renderSessions(currentSessionFilter);
+                renderSessions(currentSessionFilter, systemLoad);
             });
 
             // Separate internal sessions from user sessions
@@ -2532,13 +2544,20 @@
             const internalAudio = internalSessions.filter(s => !s.is_spectrum).length;
             const internalSpectrum = internalSessions.filter(s => s.is_spectrum).length;
             
-            summary.innerHTML = `
-                <strong>Summary:</strong><br>
-                <span style="margin-left: 20px;">• Regular users: <strong>${nonBypassedCount}</strong> of <strong>${maxSessions}</strong> maximum</span><br>
-                <span style="margin-left: 20px;">• Bypassed users: <strong>${bypassedCount}</strong> <em style="color: #666;">(not counted towards limit)</em></span><br>
-                <span style="margin-left: 20px;">• Internal sessions: <strong>${internalSessions.length}</strong> <em style="color: #666;">(${internalAudio} audio, ${internalSpectrum} spectrum - system use only)</em></span><br>
-                <span style="margin-left: 20px;">• User connections: ${userAudio} audio, ${userSpectrum} spectrum</span>
-            `;
+            // Build summary HTML with system load if available
+            let summaryHTML = `<strong>Summary:</strong><br>`;
+            
+            // Add system load line if available
+            if (systemLoad && systemLoad.load_1min && systemLoad.load_5min && systemLoad.load_15min) {
+                summaryHTML += `<span style="margin-left: 20px;">• System Load: <strong>${systemLoad.load_1min}</strong>, <strong>${systemLoad.load_5min}</strong>, <strong>${systemLoad.load_15min}</strong> <em style="color: #666;">(1, 5, 15 min averages)</em></span><br>`;
+            }
+            
+            summaryHTML += `<span style="margin-left: 20px;">• Regular users: <strong>${nonBypassedCount}</strong> of <strong>${maxSessions}</strong> maximum</span><br>`;
+            summaryHTML += `<span style="margin-left: 20px;">• Bypassed users: <strong>${bypassedCount}</strong> <em style="color: #666;">(not counted towards limit)</em></span><br>`;
+            summaryHTML += `<span style="margin-left: 20px;">• Internal sessions: <strong>${internalSessions.length}</strong> <em style="color: #666;">(${internalAudio} audio, ${internalSpectrum} spectrum - system use only)</em></span><br>`;
+            summaryHTML += `<span style="margin-left: 20px;">• User connections: ${userAudio} audio, ${userSpectrum} spectrum</span>`;
+            
+            summary.innerHTML = summaryHTML;
             container.appendChild(summary);
         }
 

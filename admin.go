@@ -1518,6 +1518,43 @@ func (ah *AdminHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleSystemLoad returns system load averages from /proc/loadavg
+func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Read /proc/loadavg
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read /proc/loadavg: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the load averages
+	// Format: "0.52 0.58 0.59 1/1234 12345"
+	// We want the first three numbers (1, 5, 15 minute averages)
+	fields := strings.Fields(string(data))
+	if len(fields) < 3 {
+		http.Error(w, "Invalid /proc/loadavg format", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"load_1min":  fields[0],
+		"load_5min":  fields[1],
+		"load_15min": fields[2],
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding system load: %v", err)
+	}
+}
+
 // HandleKickUser kicks a user by invalidating their user_session_id
 func (ah *AdminHandler) HandleKickUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

@@ -1554,11 +1554,30 @@ func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Parse load values as floats for status calculation
+	load1, _ := strconv.ParseFloat(fields[0], 64)
+	load5, _ := strconv.ParseFloat(fields[1], 64)
+	load15, _ := strconv.ParseFloat(fields[2], 64)
+
+	// Calculate average load across all three periods
+	avgLoad := (load1 + load5 + load15) / 3.0
+
+	// Determine status based on average load vs CPU cores
+	status := "ok"
+	if cpuCores > 0 {
+		if avgLoad >= float64(cpuCores)*2.0 {
+			status = "critical"
+		} else if avgLoad >= float64(cpuCores) {
+			status = "warning"
+		}
+	}
+
 	response := map[string]interface{}{
 		"load_1min":  fields[0],
 		"load_5min":  fields[1],
 		"load_15min": fields[2],
 		"cpu_cores":  cpuCores,
+		"status":     status,
 	}
 
 	w.WriteHeader(http.StatusOK)

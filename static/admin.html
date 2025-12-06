@@ -4284,17 +4284,9 @@
             container.innerHTML = '';
             container.classList.remove('loading');
 
-            // Fetch and display system load as the first section (only in non-detailed view)
-            if (!isDetailed) {
-                try {
-                    const loadResponse = await authenticatedFetch('/admin/system-load');
-                    if (loadResponse && loadResponse.ok) {
-                        const systemLoad = await loadResponse.json();
-                        renderSystemLoad(container, systemLoad);
-                    }
-                } catch (error) {
-                    console.error('Error loading system load:', error);
-                }
+            // Display system load as the first section (only in non-detailed view)
+            if (!isDetailed && data.system_load) {
+                renderSystemLoadHealth(container, data.system_load);
             }
 
             // Add summary warning banner at the top if any system has issues

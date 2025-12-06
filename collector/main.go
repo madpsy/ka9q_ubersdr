@@ -963,6 +963,17 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 
 // handleListInstances handles GET requests for listing all instances
 func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers to allow cross-origin requests
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1056,6 +1067,17 @@ func (c *Collector) handleListInstances(w http.ResponseWriter, r *http.Request) 
 
 // handleGetInstance handles GET requests for a specific instance by public UUID
 func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers to allow cross-origin requests
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1135,6 +1157,17 @@ func (c *Collector) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 
 // handleLookupPublicUUID handles GET requests to lookup public UUID from secret UUID
 func (c *Collector) handleLookupPublicUUID(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers to allow cross-origin requests
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1176,6 +1209,17 @@ func (c *Collector) handleLookupPublicUUID(w http.ResponseWriter, r *http.Reques
 
 // handleLookupByCallsign handles GET requests to lookup public UUID from callsign
 func (c *Collector) handleLookupByCallsign(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers to allow cross-origin requests
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1737,6 +1781,17 @@ func (c *Collector) cleanupStaleInstances() {
 
 // handleGetNoiseFloor handles GET requests for noise floor data by public UUID
 func (c *Collector) handleGetNoiseFloor(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers to allow cross-origin requests
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return

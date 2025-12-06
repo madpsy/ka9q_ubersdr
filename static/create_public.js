@@ -115,7 +115,13 @@ function setupEventListeners() {
     
     // Admin callsign validation
     document.getElementById('adminCallsign').addEventListener('input', validateAdminCallsign);
-    document.getElementById('adminCallsign').addEventListener('blur', validateAdminCallsign);
+    document.getElementById('adminCallsign').addEventListener('blur', async function() {
+        // First validate format
+        if (validateAdminCallsign()) {
+            // Then check availability
+            await validateCallsignAvailability();
+        }
+    });
     
     // Use My IP checkbox
     document.getElementById('useMyIP').addEventListener('change', toggleManualConnectionFields);

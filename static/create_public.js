@@ -846,7 +846,7 @@ async function testInstanceReporter() {
             finishButton.disabled = true;
             // Hide the success info box
             document.getElementById('successInfo').style.display = 'none';
-            showAlert('⚠️ Test failed. Please check your settings and try again.', 'error');
+            // Don't show alert - the test result box already shows the error details
         }
     } catch (error) {
         testResult.innerHTML = `<strong>❌ Test Failed:</strong><br>${error.message}`;
@@ -858,7 +858,7 @@ async function testInstanceReporter() {
         finishButton.disabled = true;
         // Hide the success info box
         document.getElementById('successInfo').style.display = 'none';
-        showAlert('Error testing instance reporter: ' + error.message, 'error');
+        // Don't show alert - the test result box already shows the error
     } finally {
         button.disabled = false;
         button.textContent = originalText;

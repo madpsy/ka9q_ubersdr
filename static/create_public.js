@@ -806,12 +806,15 @@ async function testInstanceReporter() {
             body: JSON.stringify(testParams)
         });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || 'Failed to trigger instance reporter');
-        }
-
+        // Always parse as JSON since the endpoint always returns JSON now
         const result = await response.json();
+
+        // Check if the request failed
+        if (!response.ok || result.status === 'error') {
+            // Extract error details from JSON response
+            const errorMsg = result.message || 'Failed to trigger instance reporter';
+            throw new Error(errorMsg);
+        }
 
         // Format the response for display
         let message = '<strong>Instance Reporter Test Results:</strong><br><br>';

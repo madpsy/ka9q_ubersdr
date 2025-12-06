@@ -473,6 +473,14 @@ function validateAdminCallsign() {
         return false;
     }
     
+    // Check if callsign is N0CALL (placeholder callsign)
+    if (callsign === 'N0CALL') {
+        errorDiv.style.display = 'block';
+        errorMessage.textContent = 'Please use a real callsign. "N0CALL" is a placeholder and not allowed.';
+        callsignInput.style.borderColor = '#dc3545';
+        return false;
+    }
+    
     // Callsign is valid
     errorDiv.style.display = 'none';
     callsignInput.style.borderColor = '#28a745';

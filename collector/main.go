@@ -624,6 +624,12 @@ func validateInstanceUpdate(update *InstanceUpdate) error {
 	if !callsignRegex.MatchString(update.Callsign) {
 		return fmt.Errorf("callsign can only contain letters, numbers, and hyphens (no spaces or special characters)")
 	}
+	
+	// Reject N0CALL placeholder callsign
+	if strings.ToUpper(update.Callsign) == "N0CALL" {
+		return fmt.Errorf("N0CALL is a placeholder callsign and not allowed")
+	}
+	
 	if len(update.Name) > 100 {
 		return fmt.Errorf("name too long (max 100 characters)")
 	}

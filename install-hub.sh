@@ -45,6 +45,10 @@ if [ -f "$INSTALLED_MARKER" ]; then
     cd ~/ubersdr
     docker compose -f docker-compose.yml down 2>/dev/null || true
     
+    # Pull latest images
+    echo "Pulling latest Docker images..."
+    docker compose -f docker-compose.yml pull
+    
     # Start Docker containers without setting password
     echo "Starting UberSDR containers..."
     docker compose -f docker-compose.yml up -d
@@ -63,6 +67,10 @@ else
     echo "Cleaning up any existing containers..."
     cd ~/ubersdr
     docker compose -f docker-compose.yml down 2>/dev/null || true
+    
+    # Pull latest images
+    echo "Pulling latest Docker images..."
+    docker compose -f docker-compose.yml pull
     
     # Start Docker containers with the generated password
     echo "Starting UberSDR containers..."

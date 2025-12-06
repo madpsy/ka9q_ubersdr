@@ -28,6 +28,9 @@ echo "Creating ~/ubersdr directory..."
 mkdir -p ~/ubersdr
 echo "Fetching docker-compose configuration..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml -o ~/ubersdr/docker-compose.yml
+echo "Fetching caddy-entrypoint.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/caddy-entrypoint.sh -o ~/ubersdr/caddy-entrypoint.sh
+chmod +x ~/ubersdr/caddy-entrypoint.sh
 
 # Generate a random 16-character alphanumeric password
 password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)

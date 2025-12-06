@@ -4309,21 +4309,40 @@
             statusDiv.style.borderRadius = '5px';
             statusDiv.style.marginBottom = '20px';
 
+            // Parse load values and CPU cores
+            const load1 = parseFloat(systemLoad.load_1min) || 0;
+            const load5 = parseFloat(systemLoad.load_5min) || 0;
+            const load15 = parseFloat(systemLoad.load_15min) || 0;
+            const cpuCores = systemLoad.cpu_cores || 0;
+
+            // Helper function to get color based on load vs cores
+            const getLoadColor = (load, cores) => {
+                if (cores === 0) return '#666'; // Gray if no core info
+                if (load >= cores * 2) return '#dc3545'; // Red if >= 2x cores
+                if (load >= cores) return '#ff8c00'; // Orange if >= cores
+                return '#28a745'; // Green otherwise
+            };
+
+            // Get colors for each load average
+            const color1 = getLoadColor(load1, cpuCores);
+            const color5 = getLoadColor(load5, cpuCores);
+            const color15 = getLoadColor(load15, cpuCores);
+
             statusDiv.innerHTML = `
                 <div style="margin-bottom: 15px;">
                     <strong style="font-size: 16px; color: ${statusColor};">Status: ${statusIcon} ${statusText}</strong>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
                     <div style="text-align: center;">
-                        <div style="font-size: 32px; font-weight: bold; color: #667eea;">${systemLoad.load_1min}</div>
+                        <div style="font-size: 32px; font-weight: bold; color: ${color1};">${systemLoad.load_1min}</div>
                         <div style="font-size: 12px; color: #666;">1 min</div>
                     </div>
                     <div style="text-align: center;">
-                        <div style="font-size: 32px; font-weight: bold; color: #667eea;">${systemLoad.load_5min}</div>
+                        <div style="font-size: 32px; font-weight: bold; color: ${color5};">${systemLoad.load_5min}</div>
                         <div style="font-size: 12px; color: #666;">5 min</div>
                     </div>
                     <div style="text-align: center;">
-                        <div style="font-size: 32px; font-weight: bold; color: #667eea;">${systemLoad.load_15min}</div>
+                        <div style="font-size: 32px; font-weight: bold; color: ${color15};">${systemLoad.load_15min}</div>
                         <div style="font-size: 12px; color: #666;">15 min</div>
                     </div>
                 </div>
@@ -4332,9 +4351,9 @@
                 </div>
                 <div style="text-align: center; color: #999; font-size: 12px;">
                     <strong>Legend:</strong><br>
-                    <span style="color: #28a745;">●</span> OK (avg load &lt; cores)<br>
-                    <span style="color: #ff8c00;">●</span> WARNING (avg load ≥ cores)<br>
-                    <span style="color: #dc3545;">●</span> CRITICAL (avg load ≥ 2× cores)
+                    <span style="color: #28a745;">●</span> OK (load &lt; cores)<br>
+                    <span style="color: #ff8c00;">●</span> WARNING (load ≥ cores)<br>
+                    <span style="color: #dc3545;">●</span> CRITICAL (load ≥ 2× cores)
                 </div>
             `;
             statusSection.appendChild(statusDiv);

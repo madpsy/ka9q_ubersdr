@@ -7,5 +7,14 @@
     "api_url": "http://localhost:8081",
     "server_id": "localhost",
     "zone_name": "instance.ubersdr.org"
+  },
+  "smtp": {
+    "enabled": false,
+    "host": "smtp.example.com",
+    "port": 587,
+    "username": "your-smtp-username",
+    "password": "your-smtp-password",
+    "from": "noreply@ubersdr.org",
+    "use_tls": true
   }
 }

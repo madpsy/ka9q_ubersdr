@@ -10,9 +10,11 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/smtp"
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -100,11 +102,23 @@ type InstanceVerificationResponse struct {
 	TLS  bool   `json:"tls"`
 }
 
+// SMTPConfig represents SMTP configuration
+type SMTPConfig struct {
+	Enabled  bool   `json:"enabled"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	From     string `json:"from"`
+	UseTLS   bool   `json:"use_tls"`
+}
+
 // Config represents the collector configuration
 type Config struct {
 	Listen       string         `json:"listen"`
 	DatabasePath string         `json:"database_path"`
 	PowerDNS     PowerDNSConfig `json:"powerdns"`
+	SMTP         SMTPConfig     `json:"smtp"`
 }
 
 // Collector manages the instance collection service
@@ -173,6 +187,16 @@ func main() {
 		if err := collector.testPowerDNSConnection(); err != nil {
 			log.Printf("WARNING: PowerDNS connectivity test failed: %v", err)
 			log.Printf("PowerDNS is enabled but not accessible - DNS operations will fail")
+		}
+	}
+
+	// Test SMTP connectivity if enabled
+	if config.SMTP.Enabled {
+		if err := testSMTPConnection(&config.SMTP); err != nil {
+			log.Printf("WARNING: SMTP connectivity test failed: %v", err)
+			log.Printf("SMTP is enabled but not accessible - email operations will fail")
+		} else {
+			log.Printf("SMTP connection test successful")
 		}
 	}
 
@@ -597,6 +621,43 @@ func validateInstanceUpdate(update *InstanceUpdate) error {
 		if len(update.PublicURL) > 100 {
 			return fmt.Errorf("public_url too long (max 100 characters)")
 		}
+	}
+
+	// Validate email if provided (optional field, but must be valid if present)
+	if update.Email != "" {
+		if err := validateEmail(update.Email); err != nil {
+			return fmt.Errorf("invalid email: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// validateEmail validates an email address
+// Returns error if email is invalid, from example.com domain, or too long
+func validateEmail(email string) error {
+	// Check length
+	if len(email) > 100 {
+		return fmt.Errorf("email too long (max 100 characters)")
+	}
+
+	// Basic email format validation using regex
+	// This regex checks for: local-part@domain
+	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	if !emailRegex.MatchString(email) {
+		return fmt.Errorf("invalid email format")
+	}
+
+	// Extract domain from email
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid email format")
+	}
+	domain := strings.ToLower(parts[1])
+
+	// Reject example.com domain
+	if domain == "example.com" || strings.HasSuffix(domain, ".example.com") {
+		return fmt.Errorf("example.com domain is not allowed")
 	}
 
 	return nil
@@ -1718,4 +1779,73 @@ func (c *Collector) getBandConditions(publicUUID string) (map[string]float64, st
 	}
 
 	return conditions, updatedAt.Format(time.RFC3339)
+}
+
+
+// testSMTPConnection tests the SMTP connection and authentication
+func testSMTPConnection(config *SMTPConfig) error {
+	if config.Host == "" {
+		return fmt.Errorf("SMTP host is empty")
+	}
+	if config.Port == 0 {
+		return fmt.Errorf("SMTP port is not set")
+	}
+
+	// Build server address
+	serverAddr := fmt.Sprintf("%s:%d", config.Host, config.Port)
+
+	// Create TLS config
+	tlsConfig := &tls.Config{
+		ServerName:         config.Host,
+		InsecureSkipVerify: false,
+		MinVersion:         tls.VersionTLS12,
+	}
+
+	var client *smtp.Client
+	var err error
+
+	if config.UseTLS {
+		// Connect with STARTTLS (port 587 typically)
+		conn, err := net.DialTimeout("tcp", serverAddr, 10*time.Second)
+		if err != nil {
+			return fmt.Errorf("failed to connect to SMTP server: %w", err)
+		}
+		defer conn.Close()
+
+		client, err = smtp.NewClient(conn, config.Host)
+		if err != nil {
+			return fmt.Errorf("failed to create SMTP client: %w", err)
+		}
+		defer client.Close()
+
+		// Start TLS
+		if err = client.StartTLS(tlsConfig); err != nil {
+			return fmt.Errorf("failed to start TLS: %w", err)
+		}
+	} else {
+		// Direct connection (port 25 or 465 typically)
+		client, err = smtp.Dial(serverAddr)
+		if err != nil {
+			return fmt.Errorf("failed to connect to SMTP server: %w", err)
+		}
+		defer client.Close()
+	}
+
+	// Test authentication if credentials are provided
+	if config.Username != "" && config.Password != "" {
+		auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
+		if err = client.Auth(auth); err != nil {
+			return fmt.Errorf("SMTP authentication failed: %w", err)
+		}
+		log.Printf("SMTP authentication successful for user: %s", config.Username)
+	} else {
+		log.Printf("SMTP connection successful (no authentication configured)")
+	}
+
+	// Send QUIT command
+	if err = client.Quit(); err != nil {
+		return fmt.Errorf("failed to close SMTP connection gracefully: %w", err)
+	}
+
+	return nil
 }

@@ -1181,12 +1181,17 @@ class RadioGUI:
         # Load initial device list
         self.refresh_devices()
 
-        # FIFO path (to the right of device selector)
-        ttk.Label(audio_frame, text="FIFO:").grid(row=0, column=4, sticky=tk.W, padx=(20, 5))
+        # FIFO path (to the right of device selector) - only show on non-Windows platforms
+        if platform.system() != 'Windows':
+            ttk.Label(audio_frame, text="FIFO:").grid(row=0, column=4, sticky=tk.W, padx=(20, 5))
 
-        self.fifo_var = tk.StringVar(value=find_next_fifo_path())
-        self.fifo_entry = ttk.Entry(audio_frame, textvariable=self.fifo_var, width=25)
-        self.fifo_entry.grid(row=0, column=5, sticky=(tk.W, tk.E), padx=(0, 5))
+            self.fifo_var = tk.StringVar(value=find_next_fifo_path())
+            self.fifo_entry = ttk.Entry(audio_frame, textvariable=self.fifo_var, width=25)
+            self.fifo_entry.grid(row=0, column=5, sticky=(tk.W, tk.E), padx=(0, 5))
+        else:
+            # On Windows, FIFO is not supported - don't show the UI elements
+            self.fifo_var = tk.StringVar(value="")
+            self.fifo_entry = None
 
         # Volume control
         ttk.Label(audio_frame, text="Volume:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
@@ -4678,7 +4683,8 @@ class RadioGUI:
             # Disable device selection and FIFO path while connecting/connected
             self.device_combo.config(state='disabled')
             self.refresh_devices_btn.config(state='disabled')
-            self.fifo_entry.config(state='disabled')
+            if self.fifo_entry:
+                self.fifo_entry.config(state='disabled')
 
             # Note: Spectrum connection is now handled in check_status_updates()
             # after connection is confirmed to be allowed
@@ -4847,7 +4853,8 @@ class RadioGUI:
         # Re-enable device selection and FIFO path
         self.device_combo.config(state='readonly')
         self.refresh_devices_btn.config(state='normal')
-        self.fifo_entry.config(state='normal')
+        if self.fifo_entry:
+            self.fifo_entry.config(state='normal')
 
     def run_client(self):
         """Run the client in a separate thread with its own event loop."""

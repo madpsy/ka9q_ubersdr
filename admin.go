@@ -3120,7 +3120,7 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 			response["collector_response_message"] = lastMessage
 		}
 
-		http.Error(w, fmt.Sprintf("Failed to trigger report: %v", err), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
 		if err := json.NewEncoder(w).Encode(response); err != nil {
 			log.Printf("Error encoding response: %v", err)
 		}

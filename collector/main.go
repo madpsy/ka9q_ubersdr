@@ -714,6 +714,9 @@ func validateEmail(email string) error {
 func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request) {
 	// Helper function to send JSON error responses
 	sendError := func(statusCode int, message string) {
+		// Log the error with details
+		log.Printf("Error handling instance update: status=%d, message=%s, path=%s, ip=%s",
+			statusCode, message, r.URL.Path, getClientIP(r))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
 		json.NewEncoder(w).Encode(map[string]string{

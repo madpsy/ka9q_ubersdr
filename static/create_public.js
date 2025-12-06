@@ -59,7 +59,6 @@ function populateFormFields() {
     document.getElementById('instanceTLS').checked = ir.instance?.tls || false;
     
     // Check if admin email ends with @example.com
-    const adminEmail = currentConfig.admin?.email || '';
     const isExampleEmail = adminEmail.toLowerCase().endsWith('@example.com');
     
     // Default create_domain to true for new setups (when instance_reporting is not enabled)

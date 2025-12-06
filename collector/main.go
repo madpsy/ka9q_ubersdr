@@ -810,10 +810,11 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 	}
 	
 	// If test=true, check /api/description endpoint instead of full callback
-	if !c.verifyInstanceAccessibility(secretUUID, verifyHost, verifyPort, verifyTLS, update.Test, update.CreateDomain) {
-		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v, test: %v, create_domain: %v) from IP: %s",
-			secretUUID, verifyHost, update.Port, verifyTLS, update.Test, update.CreateDomain, clientIP)
-		sendError(http.StatusBadRequest, "Instance verification failed - not publicly accessible")
+	verified, verifyErr := c.verifyInstanceAccessibility(secretUUID, verifyHost, verifyPort, verifyTLS, update.Test, update.CreateDomain)
+	if !verified {
+		log.Printf("Instance verification failed: %s (host: %s, port: %d, tls: %v, test: %v, create_domain: %v) from IP: %s - %s",
+			secretUUID, verifyHost, update.Port, verifyTLS, update.Test, update.CreateDomain, clientIP, verifyErr)
+		sendError(http.StatusBadRequest, fmt.Sprintf("Instance verification failed: %s", verifyErr))
 		return
 	}
 
@@ -1412,11 +1413,13 @@ func handleMyIP(w http.ResponseWriter, r *http.Request) {
 // If isTest is true, performs a simple GET to /api/description instead of full callback
 // If ignoreTLS is true, skips TLS certificate verification (for instances without certs yet)
 // Retries up to 3 times with 10 second delays between attempts
-func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port int, useTLS bool, isTest bool, ignoreTLS bool) bool {
+// Returns (success bool, error message string)
+func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port int, useTLS bool, isTest bool, ignoreTLS bool) (bool, string) {
 	// Skip verification if host or port is invalid
 	if host == "" || port == 0 {
-		log.Printf("Skipping verification for instance %s: invalid host/port", secretUUID)
-		return false
+		errMsg := "invalid host/port configuration"
+		log.Printf("Skipping verification for instance %s: %s", secretUUID, errMsg)
+		return false, errMsg
 	}
 
 	// Build the URL
@@ -1456,8 +1459,9 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 		var err error
 		jsonData, err = json.Marshal(reqBody)
 		if err != nil {
+			errMsg := fmt.Sprintf("failed to marshal verification request: %v", err)
 			log.Printf("Failed to marshal verification request: %v", err)
-			return false
+			return false, errMsg
 		}
 	}
 
@@ -1487,12 +1491,13 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 		}
 
 		if err != nil {
+			errMsg := fmt.Sprintf("failed to create verification request: %v", err)
 			log.Printf("Failed to create verification request (attempt %d/%d): %v", attempt, maxRetries, err)
 			if attempt < maxRetries {
 				time.Sleep(retryDelay)
 				continue
 			}
-			return false
+			return false, errMsg
 		}
 
 		if !isTest {
@@ -1502,83 +1507,90 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 
 		resp, err := client.Do(req)
 		if err != nil {
+			errMsg := fmt.Sprintf("failed to connect to instance at %s: %v", url, err)
 			log.Printf("Failed to verify instance %s at %s (attempt %d/%d): %v", secretUUID, url, attempt, maxRetries, err)
 			if attempt < maxRetries {
 				time.Sleep(retryDelay)
 				continue
 			}
-			return false
+			return false, errMsg
 		}
 		defer resp.Body.Close()
 
 		// Check response status
 		if resp.StatusCode != http.StatusOK {
+			errMsg := fmt.Sprintf("instance returned HTTP status %d (expected 200)", resp.StatusCode)
 			log.Printf("Instance verification returned status %d for %s (attempt %d/%d)", resp.StatusCode, secretUUID, attempt, maxRetries)
 			if attempt < maxRetries {
 				time.Sleep(retryDelay)
 				continue
 			}
-			return false
+			return false, errMsg
 		}
 
 		if isTest {
 			// Test mode: verify /api/description response has required fields
 			var descResp map[string]interface{}
 			if err := json.NewDecoder(resp.Body).Decode(&descResp); err != nil {
+				errMsg := fmt.Sprintf("failed to decode /api/description response: %v", err)
 				log.Printf("Failed to decode /api/description response (attempt %d/%d): %v", attempt, maxRetries, err)
 				if attempt < maxRetries {
 					time.Sleep(retryDelay)
 					continue
 				}
-				return false
+				return false, errMsg
 			}
 
 			// Check for required fields in receiver section
 			receiver, ok := descResp["receiver"].(map[string]interface{})
 			if !ok {
+				errMsg := "instance /api/description response missing 'receiver' section"
 				log.Printf("Test verification failed: no receiver section in /api/description (attempt %d/%d)", attempt, maxRetries)
 				if attempt < maxRetries {
 					time.Sleep(retryDelay)
 					continue
 				}
-				return false
+				return false, errMsg
 			}
 
 			// Verify required fields exist
 			requiredFields := []string{"callsign", "name"}
 			for _, field := range requiredFields {
 				if _, ok := receiver[field]; !ok {
+					errMsg := fmt.Sprintf("instance /api/description missing required field '%s' in receiver section", field)
 					log.Printf("Test verification failed: missing required field '%s' in receiver section (attempt %d/%d)", field, attempt, maxRetries)
 					if attempt < maxRetries {
 						time.Sleep(retryDelay)
 						continue
 					}
-					return false
+					return false, errMsg
 				}
 			}
 
 			// Check for version field at top level
 			if _, ok := descResp["version"]; !ok {
+				errMsg := "instance /api/description missing 'version' field"
 				log.Printf("Test verification failed: missing version field (attempt %d/%d)", attempt, maxRetries)
 				if attempt < maxRetries {
 					time.Sleep(retryDelay)
 					continue
 				}
-				return false
+				return false, errMsg
 			}
 
 			log.Printf("Test verification successful for %s at %s (attempt %d)", secretUUID, url, attempt)
-			return true
+			return true, ""
 		} else {
 			// Normal mode: verify callback response
 			var verifyResp InstanceVerificationResponse
 			if err := json.NewDecoder(resp.Body).Decode(&verifyResp); err != nil {
+				errMsg := fmt.Sprintf("failed to decode verification response: %v", err)
 				log.Printf("Failed to decode verification response (attempt %d/%d): %v", attempt, maxRetries, err)
 				if attempt < maxRetries {
 					time.Sleep(retryDelay)
 					continue
 				}
-				return false
+				return false, errMsg
 			}
 
 			// When ignoreTLS is true (create_domain mode), skip response validation
@@ -1587,13 +1599,15 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 			if !ignoreTLS {
 				// Verify the response matches what we expect
 				if verifyResp.Host != host || verifyResp.Port != port || verifyResp.TLS != useTLS {
-					log.Printf("Instance verification mismatch for %s (attempt %d/%d): expected host=%s port=%d tls=%v, got host=%s port=%d tls=%v",
-						secretUUID, attempt, maxRetries, host, port, useTLS, verifyResp.Host, verifyResp.Port, verifyResp.TLS)
+					errMsg := fmt.Sprintf("instance configuration mismatch: expected host=%s port=%d tls=%v, got host=%s port=%d tls=%v",
+						host, port, useTLS, verifyResp.Host, verifyResp.Port, verifyResp.TLS)
+					log.Printf("Instance verification mismatch for %s (attempt %d/%d): %s",
+						secretUUID, attempt, maxRetries, errMsg)
 					if attempt < maxRetries {
 						time.Sleep(retryDelay)
 						continue
 					}
-					return false
+					return false, errMsg
 				}
 			}
 
@@ -1617,11 +1631,11 @@ func (c *Collector) verifyInstanceAccessibility(secretUUID, host string, port in
 				go c.sendRegistrationEmail(secretUUID)
 			}
 
-			return true
+			return true, ""
 		}
 	}
 
-	return false
+	return false, "verification failed after all retry attempts"
 }
 
 // fetchAndStoreNoiseFloor fetches noise floor data from an instance and stores it

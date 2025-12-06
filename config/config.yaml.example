@@ -600,7 +600,7 @@ instance_reporting:
   # Enable or disable instance reporting (enabled by default)
   # When enabled, this instance will periodically send information to the central server
   # including: UUID, callsign, location, public URL, and basic statistics
-  enabled: true
+  enabled: false
 
   # Create DNS subdomain for this instance (optional)
   # When enabled, the collector will create a DNS A record pointing

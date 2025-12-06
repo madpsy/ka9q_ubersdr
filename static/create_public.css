@@ -162,6 +162,7 @@ body {
 }
 
 .form-group input[type="text"],
+.form-group input[type="email"],
 .form-group input[type="number"] {
     width: 100%;
     padding: 12px;
@@ -172,6 +173,7 @@ body {
 }
 
 .form-group input[type="text"]:focus,
+.form-group input[type="email"]:focus,
 .form-group input[type="number"]:focus {
     outline: none;
     border-color: #667eea;

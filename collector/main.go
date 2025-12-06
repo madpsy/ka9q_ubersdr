@@ -1983,14 +1983,14 @@ func (c *Collector) sendRegistrationEmail(secretUUID string) {
 	}
 
 	// Get instance details from database
-	var email, callsign, name, location, version, publicUUID string
+	var email, callsign, name, location, version, publicUUID, publicURL string
 	var latitude, longitude float64
 	var altitude int
 	err := c.db.QueryRow(`
-		SELECT email, callsign, name, location, latitude, longitude, altitude, version, public_uuid
+		SELECT email, callsign, name, location, latitude, longitude, altitude, version, public_uuid, public_url
 		FROM instances
 		WHERE secret_uuid = ?
-	`, secretUUID).Scan(&email, &callsign, &name, &location, &latitude, &longitude, &altitude, &version, &publicUUID)
+	`, secretUUID).Scan(&email, &callsign, &name, &location, &latitude, &longitude, &altitude, &version, &publicUUID, &publicURL)
 
 	if err != nil {
 		log.Printf("Failed to get instance details for registration email: %v", err)
@@ -2012,6 +2012,8 @@ func (c *Collector) sendRegistrationEmail(secretUUID string) {
 
 Your UberSDR instance has been successfully registered in the public instance registry!
 
+Access your instance at: %s
+
 Instance Details:
 -----------------
 Callsign:     %s
@@ -2028,13 +2030,13 @@ https://instances.ubersdr.org/
 Public UUID: %s
 
 You can view your instance details at:
-https://instances.ubersdr.org/api/instances/%s
+https://instances.ubersdr.org/?uuid=%s&conditions=true
 
 Thank you for contributing to the UberSDR network!
 
 ---
 This is an automated message from the UberSDR Instance Registry.
-`, callsign, name, location, latitude, longitude, maidenhead, altitude, version, publicUUID, publicUUID)
+`, publicURL, callsign, name, location, latitude, longitude, maidenhead, altitude, version, publicUUID, publicUUID)
 
 	// Send email
 	if err := c.sendEmail(email, subject, body); err != nil {

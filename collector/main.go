@@ -212,8 +212,9 @@ func main() {
 	go collector.cleanupRateLimitMap()
 	go collector.cleanupGetRateLimitMap()
 
-	// Start background cleanup goroutine
+	// Start background cleanup goroutines
 	go collector.cleanupStaleInstances()
+	go collector.checkInactiveInstances()
 
 	// Setup HTTP routes with logging middleware
 	http.HandleFunc("/api/instance/", loggingMiddleware(collector.handleInstanceUpdate))
@@ -299,6 +300,7 @@ func initDatabase(path string) (*sql.DB, error) {
 		reporter_ip TEXT,
 		email TEXT DEFAULT '',
 		successful_callbacks INTEGER DEFAULT 0,
+		notified_30min BOOLEAN DEFAULT 0,
 		first_seen DATETIME NOT NULL,
 		last_seen DATETIME NOT NULL
 	);
@@ -379,6 +381,25 @@ func initDatabase(path string) (*sql.DB, error) {
 			}
 			log.Printf("Database migration completed: %s column added", colName)
 		}
+	}
+
+	// Migration: Add notified_30min column if it doesn't exist (for existing databases)
+	var notified30minColumnExists bool
+	notified30minMigErr := db.QueryRow(`
+		SELECT COUNT(*) > 0
+		FROM pragma_table_info('instances')
+		WHERE name='notified_30min'
+	`).Scan(&notified30minColumnExists)
+	
+	if notified30minMigErr != nil {
+		log.Printf("Warning: Failed to check for notified_30min column: %v", notified30minMigErr)
+	} else if !notified30minColumnExists {
+		log.Println("Migrating database: Adding notified_30min column...")
+		_, notified30minMigErr = db.Exec(`ALTER TABLE instances ADD COLUMN notified_30min BOOLEAN DEFAULT 0`)
+		if notified30minMigErr != nil {
+			return nil, fmt.Errorf("failed to add notified_30min column: %w", notified30minMigErr)
+		}
+		log.Println("Database migration completed: notified_30min column added")
 	}
 
 	log.Println("Database initialized successfully")
@@ -939,15 +960,15 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				load_1min, load_5min, load_15min, load_status,
 				host, port, tls,
 				cw_skimmer, digital_decodes, noise_floor, max_clients, available_clients, max_session_time,
-				public_iq_modes, has_subdomain, reporter_ip, email,
+				public_iq_modes, has_subdomain, reporter_ip, email, notified_30min,
 				first_seen, last_seen
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			secretUUID, publicUUID, update.Callsign, update.Name, update.Location,
 			update.Latitude, update.Longitude, update.Altitude, update.PublicURL, update.Version, update.CPUModel, cpuCores,
 			load1Min, load5Min, load15Min, loadStatus,
 			update.Host, update.Port, update.TLS,
 			update.CWSkimmer, update.DigitalDecodes, update.NoiseFloor, update.MaxClients, update.AvailableClients, update.MaxSessionTime,
-			string(publicIQModesJSON), update.CreateDomain, clientIP, update.Email,
+			string(publicIQModesJSON), update.CreateDomain, clientIP, update.Email, false,
 			now, now,
 		)
 
@@ -1006,6 +1027,7 @@ func (c *Collector) handleInstanceUpdate(w http.ResponseWriter, r *http.Request)
 				host = ?, port = ?, tls = ?,
 				cw_skimmer = ?, digital_decodes = ?, noise_floor = ?, max_clients = ?, available_clients = ?, max_session_time = ?,
 				public_iq_modes = ?, has_subdomain = ?, reporter_ip = ?, email = ?,
+				notified_30min = 0,
 				last_seen = ?
 			WHERE secret_uuid = ?`,
 			update.Callsign, update.Name, update.Location,
@@ -2274,5 +2296,150 @@ This is an automated message from the UberSDR Instance Registry.
 		log.Printf("Failed to send removal email to %s: %v", email, err)
 	} else {
 		log.Printf("Removal notification email sent to %s for instance %s", email, callsign)
+	}
+}
+
+// checkInactiveInstances periodically checks for instances that have been inactive for 30+ minutes
+// and sends notification emails if they haven't been notified yet
+func (c *Collector) checkInactiveInstances() {
+	ticker := time.NewTicker(5 * time.Minute) // Check every 5 minutes
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// Query instances that are inactive for 30+ minutes but less than 24 hours
+		// and haven't been notified yet
+		rows, err := c.db.Query(`
+			SELECT callsign, email, name, last_seen, public_url
+			FROM instances
+			WHERE datetime(last_seen) < datetime('now', '-30 minutes')
+			  AND datetime(last_seen) >= datetime('now', '-24 hours')
+			  AND notified_30min = 0
+			  AND email != ''
+		`)
+		
+		if err != nil {
+			log.Printf("Failed to query inactive instances: %v", err)
+			continue
+		}
+		
+		// Collect instances to notify
+		type inactiveInstance struct {
+			callsign  string
+			email     string
+			name      string
+			lastSeen  time.Time
+			publicURL string
+		}
+		var inactiveInstances []inactiveInstance
+		
+		for rows.Next() {
+			var inst inactiveInstance
+			if err := rows.Scan(&inst.callsign, &inst.email, &inst.name, &inst.lastSeen, &inst.publicURL); err != nil {
+				log.Printf("Failed to scan inactive instance: %v", err)
+				continue
+			}
+			inactiveInstances = append(inactiveInstances, inst)
+		}
+		rows.Close()
+		
+		// Send notification emails and mark as notified
+		for _, inst := range inactiveInstances {
+			// Send email notification
+			go c.sendInactivityEmail(inst.email, inst.callsign, inst.name, inst.lastSeen, inst.publicURL)
+			
+			// Mark as notified in database
+			_, err := c.db.Exec(`
+				UPDATE instances
+				SET notified_30min = 1
+				WHERE callsign = ?
+			`, inst.callsign)
+			
+			if err != nil {
+				log.Printf("Failed to mark instance %s as notified: %v", inst.callsign, err)
+			} else {
+				log.Printf("Marked instance %s as notified for 30-minute inactivity", inst.callsign)
+			}
+		}
+	}
+}
+
+// sendInactivityEmail sends a notification email when an instance becomes temporarily hidden after 30 minutes
+func (c *Collector) sendInactivityEmail(email, callsign, name string, lastSeen time.Time, publicURL string) {
+	// Check if SMTP is enabled
+	if !c.config.SMTP.Enabled {
+		return
+	}
+
+	// Skip if no email address
+	if email == "" {
+		return
+	}
+
+	// Calculate how long ago the instance was last seen
+	timeSinceLastSeen := time.Since(lastSeen)
+	minutesSince := int(timeSinceLastSeen.Minutes())
+
+	// Build email content
+	subject := fmt.Sprintf("UberSDR Instance Temporarily Hidden - %s", callsign)
+	
+	body := fmt.Sprintf(`Hello,
+
+Your UberSDR instance has been temporarily removed from the public instance listing due to inactivity.
+
+Instance Details:
+-----------------
+Callsign:     %s
+Name:         %s
+Last Seen:    %s (approximately %d minutes ago)
+Instance URL: %s
+
+What This Means:
+----------------
+Your instance is no longer visible in the public instance directory at:
+https://instances.ubersdr.org/
+
+This is because we haven't received a status update from your instance in over 30 minutes.
+
+This is TEMPORARY - No Action Required!
+----------------------------------------
+Your instance will AUTOMATICALLY reappear in the directory as soon as it starts
+reporting again. The system will restore your listing immediately upon receiving
+the next status update.
+
+Possible Causes:
+----------------
+- Network connectivity issues
+- Instance is offline or stopped
+- Firewall blocking outbound connections
+- System resource constraints preventing reporting
+
+Recommended Actions:
+--------------------
+1. Check if your instance is running and accessible at: %s
+2. Verify network connectivity and firewall rules
+3. Review instance logs for any error messages
+4. Ensure instance reporting is enabled in config.yaml
+5. Check system resources (CPU, memory, disk space)
+
+If your instance is intentionally offline, you can safely ignore this message.
+It will automatically re-register when you bring it back online.
+
+If you need assistance, please check:
+- Instance logs for error messages
+- Network connectivity to instances.ubersdr.org
+- System health and resource availability
+
+Your instance configuration is preserved and will be automatically restored
+when reporting resumes.
+
+---
+This is an automated message from the UberSDR Instance Registry.
+`, callsign, name, lastSeen.Format("2006-01-02 15:04:05 UTC"), minutesSince, publicURL, publicURL)
+
+	// Send email
+	if err := c.sendEmail(email, subject, body); err != nil {
+		log.Printf("Failed to send inactivity email to %s: %v", email, err)
+	} else {
+		log.Printf("Inactivity notification email sent to %s for instance %s", email, callsign)
 	}
 }

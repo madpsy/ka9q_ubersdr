@@ -22,7 +22,7 @@ admin:
   # Height above sea level (meters)
   asl: 30
   # Location description
-  location: "Dalgety Bay, Scotland, UK"
+  location: "London, England, UK"
 
 # Radiod connection settings
 radiod:

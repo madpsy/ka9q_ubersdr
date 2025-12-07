@@ -30,6 +30,10 @@
             document.getElementById('receiverCallsign').value = callsign;
         });
 
+        // Auto-calculate Maidenhead locator when lat/lon changes
+        document.getElementById('latitude').addEventListener('input', updateMaidenheadLocator);
+        document.getElementById('longitude').addEventListener('input', updateMaidenheadLocator);
+
         // Toggle conditional sections
         document.getElementById('dxclusterEnabled').addEventListener('change', function(e) {
             document.getElementById('dxclusterSettings').style.display = e.target.checked ? 'block' : 'none';
@@ -38,6 +42,14 @@
         document.getElementById('decoderEnabled').addEventListener('change', function(e) {
             document.getElementById('decoderSettings').style.display = e.target.checked ? 'block' : 'none';
         });
+
+        // Ensure conditional sections are visible on load for checkboxes that are checked by default
+        if (document.getElementById('dxclusterEnabled').checked) {
+            document.getElementById('dxclusterSettings').style.display = 'block';
+        }
+        if (document.getElementById('decoderEnabled').checked) {
+            document.getElementById('decoderSettings').style.display = 'block';
+        }
 
         // Password generator
         document.getElementById('generatePassword').addEventListener('click', generatePassword);
@@ -207,6 +219,7 @@
                         marker.setLatLng([lat, lon]);
                         map.setView([lat, lon], 10);
                         updateMarkerTooltip();
+                        updateMaidenheadLocator();
                     }
                 }
 
@@ -417,6 +430,34 @@
 
         // Initialize map
         map = L.map('location-map').setView([initialLat, initialLon], 10);
+        
+        // Request user's location via browser geolocation API
+        if (navigator.geolocation && !latInput.value && !lonInput.value) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    // Success - update map and inputs with user's location
+                    const userLat = position.coords.latitude;
+                    const userLon = position.coords.longitude;
+                    
+                    latInput.value = userLat.toFixed(6);
+                    lonInput.value = userLon.toFixed(6);
+                    
+                    marker.setLatLng([userLat, userLon]);
+                    map.setView([userLat, userLon], 10);
+                    updateMarkerTooltip();
+                    updateMaidenheadLocator();
+                },
+                function(error) {
+                    // Error or user denied - silently continue with default location
+                    console.log('Geolocation not available or denied:', error.message);
+                },
+                {
+                    enableHighAccuracy: false,
+                    timeout: 5000,
+                    maximumAge: 0
+                }
+            );
+        }
 
         // Add OpenStreetMap tiles
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -435,6 +476,7 @@
             latInput.value = position.lat.toFixed(6);
             lonInput.value = position.lng.toFixed(6);
             updateMarkerTooltip();
+            updateMaidenheadLocator();
         });
 
         // Update marker when inputs change
@@ -452,6 +494,7 @@
             latInput.value = e.latlng.lat.toFixed(6);
             lonInput.value = e.latlng.lng.toFixed(6);
             updateMarkerTooltip();
+            updateMaidenheadLocator();
         });
 
         // Initial tooltip update (after event listeners are set up)
@@ -492,6 +535,26 @@
             direction: 'top',
             className: 'receiver-tooltip'
         }).openTooltip();
+    }
+
+    function updateMaidenheadLocator() {
+        const latInput = document.getElementById('latitude');
+        const lonInput = document.getElementById('longitude');
+        const locatorInput = document.getElementById('receiverLocator');
+        
+        const lat = parseFloat(latInput.value);
+        const lon = parseFloat(lonInput.value);
+        
+        // Only update if we have valid coordinates
+        if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+            try {
+                // Calculate 4-character Maidenhead locator (field + square)
+                const locator = latLonToMaidenhead(lat, lon, 2);
+                locatorInput.value = locator;
+            } catch (error) {
+                console.error('Error calculating Maidenhead locator:', error);
+            }
+        }
     }
 
     // Helper functions

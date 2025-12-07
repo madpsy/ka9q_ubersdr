@@ -24,8 +24,9 @@ func isExampleEmail(email string) bool {
 // and writes it to the shared volume for Caddy to use.
 //
 // Logic:
-// - If host is empty OR host is an IP address OR tls is false OR admin.email is empty OR email ends with @example.com: Generate HTTP-only config
-// - If host is a valid domain AND tls is true AND admin.email is set AND email is not @example.com: Generate HTTPS config with Let's Encrypt
+// - If generate_tls is false: Generate HTTP-only config (regardless of other settings)
+// - If generate_tls is true AND host is empty OR host is an IP address OR tls is false OR admin.email is empty OR email ends with @example.com: Generate HTTP-only config
+// - If generate_tls is true AND host is a valid domain AND tls is true AND admin.email is set AND email is not @example.com: Generate HTTPS config with Let's Encrypt
 //
 // The function writes to /etc/caddy-shared/Caddyfile which is mounted as a shared volume
 // between the ubersdr and caddy containers.
@@ -45,15 +46,16 @@ func GenerateCaddyfile(config *Config) error {
 	// Determine which template to use
 	host := strings.TrimSpace(config.InstanceReporting.Instance.Host)
 	tls := config.InstanceReporting.Instance.TLS
+	generateTLS := config.InstanceReporting.GenerateTLS
 	email := strings.TrimSpace(config.Admin.Email)
 
 	var caddyfileContent string
 	var mode string
 
-	// Decision logic: Only enable HTTPS if ALL conditions are met
+	// Decision logic: Only enable HTTPS if generate_tls is true AND ALL other conditions are met
 	// AND host is not an IP address (Let's Encrypt requires a domain name)
 	// AND email is not a placeholder @example.com address
-	if host != "" && !isIPAddress(host) && tls && email != "" && !isExampleEmail(email) {
+	if generateTLS && host != "" && !isIPAddress(host) && tls && email != "" && !isExampleEmail(email) {
 		// HTTPS mode with Let's Encrypt
 		mode = "HTTPS with Let's Encrypt"
 		caddyfileContent = generateHTTPSCaddyfile(host, email)
@@ -64,7 +66,9 @@ func GenerateCaddyfile(config *Config) error {
 		caddyfileContent = generateHTTPCaddyfile()
 
 		// Log why we're using HTTP-only mode
-		if host == "" {
+		if !generateTLS {
+			log.Printf("Generating Caddyfile for HTTP-only mode: generate_tls is false")
+		} else if host == "" {
 			log.Printf("Generating Caddyfile for HTTP-only mode: host is empty")
 		} else if isIPAddress(host) {
 			log.Printf("Generating Caddyfile for HTTP-only mode: host is an IP address (%s), Let's Encrypt requires a domain name", host)
@@ -114,7 +118,7 @@ func GenerateCaddyfile(config *Config) error {
 func generateHTTPCaddyfile() string {
 	return `# HTTP-only configuration - no certificate requests
 # Generated automatically by UberSDR based on config.yaml
-# To enable HTTPS: set instance_reporting.instance.host, tls=true, and admin.email
+# To enable HTTPS: set instance_reporting.generate_tls=true, instance.host, instance.tls=true, and admin.email
 
 :80 {
     reverse_proxy ubersdr:8080

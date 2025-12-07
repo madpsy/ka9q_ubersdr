@@ -10,7 +10,7 @@ admin:
   # This can include HTML tags like links
   description: 'Welcome! This SDR is running <a href="https://ubersdr.org" target="_blank">UberSDR</a>'
   # Name - similar to description without any HTML
-  name: 'My SDR operated by myself!'
+  name: 'Experimental SDR in London using an Active Loop'
   # Admin email address
   email: "me@example.com"
   # Callsign (optional)
@@ -612,6 +612,16 @@ instance_reporting:
   # Example: If callsign is "W1ABC", set host to "w1abc.instance.ubersdr.org"
   # Default: false
   create_domain: false
+
+  # Generate TLS certificate with Caddy (default: false)
+  # When true, Caddy will automatically generate a Let's Encrypt certificate
+  # When false, Caddy will not attempt to generate certificates (HTTP-only mode)
+  # Requirements for certificate generation:
+  #   - instance.host must be a valid domain name (not an IP address)
+  #   - instance.tls must be true
+  #   - admin.email must be set to a valid email (not @example.com)
+  # Default: false
+  generate_tls: false
 
   # Use HTTPS (true) or HTTP (false) for connections to the central server
   # Default: true (HTTPS)

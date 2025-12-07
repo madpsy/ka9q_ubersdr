@@ -132,6 +132,76 @@
         const stepElement = document.querySelector(`.wizard-step[data-step="${step}"]`);
         const requiredFields = stepElement.querySelectorAll('[required]');
         
+        // Step 1 specific validation
+        if (step === 1) {
+            // Validate callsign
+            const callsignField = document.getElementById('callsign');
+            if (callsignField) {
+                const callsign = callsignField.value.trim().toUpperCase();
+                
+                if (!callsign) {
+                    showError('Callsign is required');
+                    callsignField.focus();
+                    return false;
+                }
+                
+                // Check length (max 10 characters)
+                if (callsign.length > 10) {
+                    showError('Callsign must be 10 characters or less');
+                    callsignField.focus();
+                    return false;
+                }
+                
+                // Callsign pattern: alphanumeric and hyphens only, no spaces
+                if (!/^[A-Z0-9\-]+$/.test(callsign)) {
+                    showError('Callsign can only contain letters, numbers, and hyphens (no spaces)');
+                    callsignField.focus();
+                    return false;
+                }
+                
+                // Check if callsign starts or ends with a hyphen
+                if (callsign.startsWith('-') || callsign.endsWith('-')) {
+                    showError('Callsign cannot start or end with a hyphen');
+                    callsignField.focus();
+                    return false;
+                }
+                
+                // Check if callsign is N0CALL (placeholder)
+                if (callsign === 'N0CALL') {
+                    showError('Please use a real callsign. "N0CALL" is a placeholder and not allowed');
+                    callsignField.focus();
+                    return false;
+                }
+            }
+            
+            // Validate email
+            const emailField = document.getElementById('email');
+            if (emailField) {
+                const email = emailField.value.trim();
+                
+                if (!email) {
+                    showError('Email address is required');
+                    emailField.focus();
+                    return false;
+                }
+                
+                // Email pattern
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    showError('Please enter a valid email address');
+                    emailField.focus();
+                    return false;
+                }
+                
+                // Check if domain is example.com
+                const domain = email.split('@')[1].toLowerCase();
+                if (domain === 'example.com') {
+                    showError('Please use a real email address. The domain "example.com" is not allowed');
+                    emailField.focus();
+                    return false;
+                }
+            }
+        }
+        
         for (const field of requiredFields) {
             // Skip validation if field is in a hidden conditional section
             const conditionalParent = field.closest('.conditional-section');
@@ -143,22 +213,6 @@
                 showError(`Please fill in all required fields: ${field.previousElementSibling.textContent}`);
                 field.focus();
                 return false;
-            }
-
-            // Email validation
-            if (field.type === 'email' && !isValidEmail(field.value)) {
-                showError('Please enter a valid email address');
-                field.focus();
-                return false;
-            }
-
-            // Callsign validation (basic)
-            if (field.id.toLowerCase().includes('callsign') && field.value.trim()) {
-                if (!/^[A-Z0-9\/]+$/i.test(field.value)) {
-                    showError('Callsign should only contain letters, numbers, and forward slashes');
-                    field.focus();
-                    return false;
-                }
             }
 
             // Locator validation (basic)
@@ -432,7 +486,15 @@
         map = L.map('location-map').setView([initialLat, initialLon], 10);
         
         // Request user's location via browser geolocation API
-        if (navigator.geolocation && !latInput.value && !lonInput.value) {
+        // Trigger if no coordinates OR if coordinates are the default London values
+        const currentLat = parseFloat(latInput.value);
+        const currentLon = parseFloat(lonInput.value);
+        const isDefaultLocation = (
+            (!latInput.value && !lonInput.value) ||
+            (Math.abs(currentLat - 51.5074) < 0.001 && Math.abs(currentLon - (-0.1278)) < 0.001)
+        );
+        
+        if (navigator.geolocation && isDefaultLocation) {
             navigator.geolocation.getCurrentPosition(
                 function(position) {
                     // Success - update map and inputs with user's location
@@ -548,8 +610,8 @@
         // Only update if we have valid coordinates
         if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
             try {
-                // Calculate 4-character Maidenhead locator (field + square)
-                const locator = latLonToMaidenhead(lat, lon, 2);
+                // Calculate 6-character Maidenhead locator (field + square + subsquare)
+                const locator = latLonToMaidenhead(lat, lon, 3);
                 locatorInput.value = locator;
             } catch (error) {
                 console.error('Error calculating Maidenhead locator:', error);

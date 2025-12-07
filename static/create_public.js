@@ -462,6 +462,14 @@ function validateAdminCallsign() {
         return false;
     }
     
+    // Check if callsign starts or ends with a hyphen
+    if (callsign.startsWith('-') || callsign.endsWith('-')) {
+        errorDiv.style.display = 'block';
+        errorMessage.textContent = 'Callsign cannot start or end with a hyphen.';
+        callsignInput.style.borderColor = '#dc3545';
+        return false;
+    }
+    
     // Check if callsign is N0CALL (placeholder callsign)
     if (callsign === 'N0CALL') {
         errorDiv.style.display = 'block';
@@ -688,6 +696,8 @@ async function finishWizard() {
                 port: instancePort,
                 tls: true
             };
+            // Enable TLS certificate generation when using create domain
+            updatedConfig.instance_reporting.generate_tls = true;
         } else if (!useMyIP) {
             const instanceHost = document.getElementById('instanceHost').value.trim();
             const instanceTLS = document.getElementById('instanceTLS').checked;
@@ -697,6 +707,8 @@ async function finishWizard() {
                 port: instancePort,
                 tls: instanceTLS
             };
+            // Enable TLS certificate generation when TLS is enabled with custom domain
+            updatedConfig.instance_reporting.generate_tls = instanceTLS;
         } else {
             // When using myip, clear hostname and force TLS to false
             updatedConfig.instance_reporting.instance = {
@@ -704,6 +716,8 @@ async function finishWizard() {
                 port: instancePort,
                 tls: false
             };
+            // Disable TLS certificate generation when using IP address
+            updatedConfig.instance_reporting.generate_tls = false;
         }
         
         // Save configuration with restart to apply instance_reporting changes

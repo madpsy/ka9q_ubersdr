@@ -500,9 +500,12 @@ func validatePublicHost(host string) error {
 func isPublicIP(ip net.IP) bool {
 	// Check for IPv4 private/reserved ranges
 	if ip.To4() != nil {
+		// Convert to 4-byte representation for easier checking
+		ipv4 := ip.To4()
+		
 		// AMPR network (44.0.0.0/8) - Amateur Packet Radio Network
 		// This is routable and should be allowed
-		if ip[0] == 44 {
+		if ipv4[0] == 44 {
 			return true
 		}
 		// Loopback (127.0.0.0/8)

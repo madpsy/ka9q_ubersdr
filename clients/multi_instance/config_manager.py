@@ -26,14 +26,40 @@ class ConfigManager:
         else:
             return os.path.expanduser("~/.ubersdr_multi_spectrum.json")
     
-    def save_config(self, instances: List[SpectrumInstance], sync_enabled: bool = True, throttle_enabled: bool = True) -> bool:
+    def save_config(self, instances: List[SpectrumInstance], sync_enabled: bool = True,
+                   throttle_enabled: bool = True, frequency: float = 14100000,
+                   mode: str = "USB", bandwidth: int = 2700,
+                   audio_left_instance: str = "None", audio_right_instance: str = "None",
+                   audio_left_volume: float = 1.0, audio_right_volume: float = 1.0,
+                   audio_left_mono: bool = False, audio_right_mono: bool = False,
+                   compare_instance_a: str = "None", compare_instance_b: str = "None",
+                   spectrum_center_freq: float = None, spectrum_bandwidth: float = None) -> bool:
         """Save instances and settings to configuration file."""
         try:
             config = {
                 'instances': [inst.to_dict() for inst in instances],
                 'settings': {
                     'sync_enabled': sync_enabled,
-                    'throttle_enabled': throttle_enabled
+                    'throttle_enabled': throttle_enabled,
+                    'frequency': frequency,
+                    'mode': mode,
+                    'bandwidth': bandwidth,
+                    'audio_preview': {
+                        'left_instance': audio_left_instance,
+                        'right_instance': audio_right_instance,
+                        'left_volume': audio_left_volume,
+                        'right_volume': audio_right_volume,
+                        'left_mono': audio_left_mono,
+                        'right_mono': audio_right_mono
+                    },
+                    'comparison': {
+                        'instance_a': compare_instance_a,
+                        'instance_b': compare_instance_b
+                    },
+                    'spectrum_display': {
+                        'center_freq': spectrum_center_freq,
+                        'bandwidth': spectrum_bandwidth
+                    }
                 }
             }
 
@@ -56,8 +82,32 @@ class ConfigManager:
         Returns:
             Tuple of (instances, settings_dict)
         """
+        default_settings = {
+            'sync_enabled': True,
+            'throttle_enabled': True,
+            'frequency': 14100000,
+            'mode': 'USB',
+            'bandwidth': 2700,
+            'audio_preview': {
+                'left_instance': 'None',
+                'right_instance': 'None',
+                'left_volume': 1.0,
+                'right_volume': 1.0,
+                'left_mono': False,
+                'right_mono': False
+            },
+            'comparison': {
+                'instance_a': 'None',
+                'instance_b': 'None'
+            },
+            'spectrum_display': {
+                'center_freq': None,
+                'bandwidth': None
+            }
+        }
+        
         if not os.path.exists(self.config_file):
-            return [], {'sync_enabled': True, 'throttle_enabled': True}
+            return [], default_settings
 
         try:
             with open(self.config_file, 'r') as f:
@@ -75,12 +125,43 @@ class ConfigManager:
             settings = config.get('settings', {})
             settings.setdefault('sync_enabled', True)
             settings.setdefault('throttle_enabled', True)
+            settings.setdefault('frequency', 14100000)
+            settings.setdefault('mode', 'USB')
+            settings.setdefault('bandwidth', 2700)
+            
+            # Load audio preview settings with defaults
+            if 'audio_preview' not in settings:
+                settings['audio_preview'] = default_settings['audio_preview']
+            else:
+                audio_preview = settings['audio_preview']
+                audio_preview.setdefault('left_instance', 'None')
+                audio_preview.setdefault('right_instance', 'None')
+                audio_preview.setdefault('left_volume', 1.0)
+                audio_preview.setdefault('right_volume', 1.0)
+                audio_preview.setdefault('left_mono', False)
+                audio_preview.setdefault('right_mono', False)
+            
+            # Load comparison settings with defaults
+            if 'comparison' not in settings:
+                settings['comparison'] = default_settings['comparison']
+            else:
+                comparison = settings['comparison']
+                comparison.setdefault('instance_a', 'None')
+                comparison.setdefault('instance_b', 'None')
+            
+            # Load spectrum display settings with defaults
+            if 'spectrum_display' not in settings:
+                settings['spectrum_display'] = default_settings['spectrum_display']
+            else:
+                spectrum_display = settings['spectrum_display']
+                spectrum_display.setdefault('center_freq', None)
+                spectrum_display.setdefault('bandwidth', None)
 
             return instances, settings
 
         except Exception as e:
             print(f"Failed to load config: {e}")
-            return [], {'sync_enabled': True, 'throttle_enabled': True}
+            return [], default_settings
 
     def load_instances(self, max_instances: int = 10) -> List[SpectrumInstance]:
         """Load instances from configuration file (legacy method for compatibility)."""

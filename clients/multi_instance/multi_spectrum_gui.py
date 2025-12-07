@@ -14,6 +14,7 @@ from spectrum_instance import SpectrumInstance
 from instance_manager import InstanceManager
 from config_manager import ConfigManager
 from instance_dialogs import AddInstanceDialog, EditInstanceDialog
+from audio_preview import AudioPreviewManager, SOUNDDEVICE_AVAILABLE, WEBSOCKETS_AVAILABLE
 
 # Import local public_instances_display and local_instances_display (before adding parent to path)
 try:
@@ -69,10 +70,15 @@ class MultiSpectrumGUI:
         self.sync_enabled = tk.BooleanVar(value=True)
         self.throttle_enabled = tk.BooleanVar(value=True)  # Throttle to slowest by default on
         self._syncing = False  # Flag to prevent sync loops
+        
+        # Config save throttling
+        self._save_config_pending = False
+        self._last_config_save = 0
+        self._config_save_delay = 1000  # ms - wait 1 second after last change before saving
 
         # Scroll mode state
         self.scroll_mode = tk.StringVar(value="pan")  # Default to pan mode
-        self.step_size = tk.StringVar(value="1 kHz")  # Default step size
+        self.step_size = tk.StringVar(value="500 Hz")  # Default step size
         self.center_tune = tk.BooleanVar(value=True)  # Center tune enabled by default
 
         # Frequency input state
@@ -105,6 +111,16 @@ class MultiSpectrumGUI:
         # Update rate tracking for throttling (using server-reported rates)
         self.update_times = {}  # instance_id -> list of recent update timestamps (for frame skipping)
         self.target_update_rate = None  # Slowest rate to throttle to (from server-reported rates)
+        
+        # Audio preview manager
+        self.audio_preview = AudioPreviewManager() if (SOUNDDEVICE_AVAILABLE and WEBSOCKETS_AVAILABLE) else None
+        self.audio_left_instance = tk.StringVar(value="None")
+        self.audio_right_instance = tk.StringVar(value="None")
+        self.audio_left_volume = tk.DoubleVar(value=1.0)  # 0.0 to 1.0
+        self.audio_right_volume = tk.DoubleVar(value=1.0)  # 0.0 to 1.0
+        self.audio_left_mono = tk.BooleanVar(value=False)  # Mono mode for left channel
+        self.audio_right_mono = tk.BooleanVar(value=False)  # Mono mode for right channel
+        self.audio_preview_active = False
         
         # Create UI
         self.create_widgets()
@@ -223,7 +239,7 @@ class MultiSpectrumGUI:
 
         # Mode selection
         ttk.Label(modes_frame, text="Mode:").pack(side=tk.LEFT, padx=(0, 5))
-        modes = ["USB", "LSB", "CW", "AM", "FM"]
+        modes = ["USB", "LSB", "CWU", "CWL", "AM", "FM"]
         mode_combo = ttk.Combobox(modes_frame, textvariable=self.current_mode,
                                   values=modes, state="readonly", width=8)
         mode_combo.pack(side=tk.LEFT, padx=(0, 20))
@@ -246,11 +262,60 @@ class MultiSpectrumGUI:
         ttk.Button(modes_frame, text="SSB (2.7kHz)", width=15,
                   command=lambda: self._set_bandwidth(2700)).pack(side=tk.LEFT, padx=2)
         ttk.Button(modes_frame, text="Wide (6kHz)", width=15,
-                  command=lambda: self._set_bandwidth(6000)).pack(side=tk.LEFT, padx=2)
+                   command=lambda: self._set_bandwidth(6000)).pack(side=tk.LEFT, padx=2)
+
+        # Audio Preview section (between modes and spectrum displays)
+        if self.audio_preview:
+            audio_frame = ttk.LabelFrame(main_frame, text="Audio Preview", padding="10")
+            audio_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+            
+            # Left channel controls
+            ttk.Label(audio_frame, text="Left Channel:").pack(side=tk.LEFT, padx=(0, 5))
+            self.audio_left_combo = ttk.Combobox(audio_frame, textvariable=self.audio_left_instance,
+                                                 values=["None"], state='readonly', width=18)
+            self.audio_left_combo.pack(side=tk.LEFT, padx=(0, 5))
+            
+            ttk.Checkbutton(audio_frame, text="Mono", variable=self.audio_left_mono,
+                           command=self._on_left_mono_change).pack(side=tk.LEFT, padx=(0, 5))
+            
+            ttk.Label(audio_frame, text="Vol:").pack(side=tk.LEFT, padx=(0, 5))
+            self.left_volume_label = ttk.Label(audio_frame, text="100%", width=5)
+            self.left_volume_label.pack(side=tk.LEFT, padx=(0, 5))
+            left_volume_slider = ttk.Scale(audio_frame, from_=0, to=1.0,
+                                          variable=self.audio_left_volume,
+                                          orient=tk.HORIZONTAL, length=100,
+                                          command=self._on_left_volume_change)
+            left_volume_slider.pack(side=tk.LEFT, padx=(0, 15))
+            
+            # Right channel controls
+            ttk.Label(audio_frame, text="Right Channel:").pack(side=tk.LEFT, padx=(0, 5))
+            self.audio_right_combo = ttk.Combobox(audio_frame, textvariable=self.audio_right_instance,
+                                                  values=["None"], state='readonly', width=18)
+            self.audio_right_combo.pack(side=tk.LEFT, padx=(0, 5))
+            
+            ttk.Checkbutton(audio_frame, text="Mono", variable=self.audio_right_mono,
+                           command=self._on_right_mono_change).pack(side=tk.LEFT, padx=(0, 5))
+            
+            ttk.Label(audio_frame, text="Vol:").pack(side=tk.LEFT, padx=(0, 5))
+            self.right_volume_label = ttk.Label(audio_frame, text="100%", width=5)
+            self.right_volume_label.pack(side=tk.LEFT, padx=(0, 5))
+            right_volume_slider = ttk.Scale(audio_frame, from_=0, to=1.0,
+                                           variable=self.audio_right_volume,
+                                           orient=tk.HORIZONTAL, length=100,
+                                           command=self._on_right_volume_change)
+            right_volume_slider.pack(side=tk.LEFT, padx=(0, 15))
+            
+            # Start/Stop button
+            self.audio_start_btn = ttk.Button(audio_frame, text="Start Preview", width=12,
+                                             command=self._toggle_audio_preview)
+            self.audio_start_btn.pack(side=tk.LEFT, padx=5)
+            
+            ttk.Label(audio_frame, text="(Mono: output to both speakers)",
+                     font=('TkDefaultFont', 9, 'italic')).pack(side=tk.LEFT, padx=(10, 0))
 
         # Spectrum display area (bottom)
         spectrum_frame = ttk.LabelFrame(main_frame, text="Spectrum Displays", padding="10")
-        spectrum_frame.grid(row=3, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        spectrum_frame.grid(row=4, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # Scrollable spectrum container
         spectrum_canvas = tk.Canvas(spectrum_frame)
@@ -272,7 +337,8 @@ class MultiSpectrumGUI:
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(1, weight=0)  # Instance list fixed height
         main_frame.rowconfigure(2, weight=0)  # Modes section fixed height
-        main_frame.rowconfigure(3, weight=1)  # Spectrum area expands
+        main_frame.rowconfigure(3, weight=0)  # Audio preview section fixed height
+        main_frame.rowconfigure(4, weight=1)  # Spectrum area expands
     
     def add_instance(self):
         """Add a new instance manually."""
@@ -286,6 +352,7 @@ class MultiSpectrumGUI:
             self.create_instance_ui(instance)
             self._add_instance_to_signal_levels(instance)
             self._update_comparison_dropdowns()
+            self._update_audio_preview_dropdowns()
             self.save_config()
         
         AddInstanceDialog(self.root, len(self.instance_manager.instances), on_ok)
@@ -316,6 +383,7 @@ class MultiSpectrumGUI:
             self.create_instance_ui(instance)
             self._add_instance_to_signal_levels(instance)
             self._update_comparison_dropdowns()
+            self._update_audio_preview_dropdowns()
             self.save_config()
         
         # Collect UUIDs from local instances if available
@@ -421,6 +489,7 @@ class MultiSpectrumGUI:
             self.create_instance_ui(instance)
             self._add_instance_to_signal_levels(instance)
             self._update_comparison_dropdowns()
+            self._update_audio_preview_dropdowns()
             self.save_config()
         
         local_window, self.local_instances_display = create_local_instances_window(self.root, on_select)
@@ -548,10 +617,23 @@ class MultiSpectrumGUI:
         # Connect using manager
         if self.instance_manager.connect_instance(instance, instance.spectrum):
             instance.status_var.set("Connected")
-            # Initialize bandwidth filter on newly connected spectrum
+            
+            # Apply saved frequency, mode, and bandwidth to newly connected instance
+            try:
+                saved_freq = self._get_frequency_hz()
+                self.root.after(800, lambda: instance.spectrum.update_center_frequency(saved_freq))
+            except:
+                pass  # If frequency conversion fails, skip
+            
+            # Initialize bandwidth filter on newly connected spectrum with saved settings
             self.root.after(500, self._update_all_bandwidths)
+            
+            # Apply saved spectrum zoom settings (if this is the first instance or sync is disabled)
+            if not self.sync_enabled.get() or len(self.instance_manager.active_instances) == 1:
+                self.root.after(1000, lambda: self._apply_saved_spectrum_zoom(instance))
+            
             # Sync zoom level and frequency with existing instances if sync is enabled
-            if self.sync_enabled.get():
+            if self.sync_enabled.get() and len(self.instance_manager.active_instances) > 1:
                 self.root.after(1000, lambda: self._sync_new_instance_zoom(instance))
                 self.root.after(1200, lambda: self._sync_new_instance_frequency(instance))
             # Recalculate target throttle rate after connection (give it time to get server rate)
@@ -640,6 +722,7 @@ class MultiSpectrumGUI:
         # Remove from signal levels window
         self._remove_instance_from_signal_levels(instance)
         self._update_comparison_dropdowns()
+        self._update_audio_preview_dropdowns()
         
         self.save_config()
     
@@ -654,12 +737,61 @@ class MultiSpectrumGUI:
         for instance in self.instance_manager.instances:
             self.create_instance_ui(instance)
     
-    def save_config(self):
-        """Save configuration to file."""
+    def save_config(self, throttled=False):
+        """Save configuration to file.
+        
+        Args:
+            throttled: If True, use throttled saving (waits 1 second after last change)
+        """
+        if throttled:
+            # Cancel any pending save
+            if self._save_config_pending:
+                self.root.after_cancel(self._save_config_pending)
+            
+            # Schedule a new save after delay
+            self._save_config_pending = self.root.after(self._config_save_delay, self._do_save_config)
+        else:
+            # Immediate save
+            self._do_save_config()
+    
+    def _do_save_config(self):
+        """Actually perform the config save."""
+        import time
+        self._last_config_save = time.time()
+        self._save_config_pending = False
+        
+        # Get current frequency in Hz
+        try:
+            freq_hz = self._get_frequency_hz()
+        except:
+            freq_hz = 14100000  # Default if conversion fails
+        
+        # Get spectrum display zoom settings from first connected instance
+        spectrum_center_freq = None
+        spectrum_bandwidth = None
+        for instance in self.instance_manager.active_instances:
+            if instance.spectrum and instance.connected:
+                spectrum_center_freq = instance.spectrum.center_freq
+                spectrum_bandwidth = instance.spectrum.total_bandwidth
+                break
+        
         self.config_manager.save_config(
             self.instance_manager.instances,
             self.sync_enabled.get(),
-            self.throttle_enabled.get()
+            self.throttle_enabled.get(),
+            freq_hz,
+            self.current_mode.get(),
+            self.current_bandwidth.get(),
+            self.audio_left_instance.get(),
+            self.audio_right_instance.get(),
+            self.audio_left_volume.get(),
+            self.audio_right_volume.get(),
+            self.audio_left_mono.get(),
+            self.audio_right_mono.get(),
+            self.compare_instance_a.get(),
+            self.compare_instance_b.get(),
+            spectrum_center_freq,
+            spectrum_bandwidth
         )
     
     def load_config(self):
@@ -669,17 +801,93 @@ class MultiSpectrumGUI:
         # Load synchronization settings
         self.sync_enabled.set(settings.get('sync_enabled', True))
         self.throttle_enabled.set(settings.get('throttle_enabled', True))
+        
+        # Load frequency, mode, and bandwidth settings
+        freq_hz = settings.get('frequency', 14100000)
+        self._update_frequency_display(freq_hz)
+        
+        mode = settings.get('mode', 'USB')
+        self.current_mode.set(mode)
+        
+        bandwidth = settings.get('bandwidth', 2700)
+        self.current_bandwidth.set(bandwidth)
+        self.bandwidth_label.config(text=f"{bandwidth/1000:.1f} kHz")
+        
+        # Load audio preview settings
+        audio_preview = settings.get('audio_preview', {})
+        self.audio_left_instance.set(audio_preview.get('left_instance', 'None'))
+        self.audio_right_instance.set(audio_preview.get('right_instance', 'None'))
+        self.audio_left_volume.set(audio_preview.get('left_volume', 1.0))
+        self.audio_right_volume.set(audio_preview.get('right_volume', 1.0))
+        self.audio_left_mono.set(audio_preview.get('left_mono', False))
+        self.audio_right_mono.set(audio_preview.get('right_mono', False))
+        
+        # Update volume labels
+        self.left_volume_label.config(text=f"{int(self.audio_left_volume.get() * 100)}%")
+        self.right_volume_label.config(text=f"{int(self.audio_right_volume.get() * 100)}%")
+        
+        # Load comparison settings
+        comparison = settings.get('comparison', {})
+        self.compare_instance_a.set(comparison.get('instance_a', 'None'))
+        self.compare_instance_b.set(comparison.get('instance_b', 'None'))
+        
+        # Load spectrum display zoom settings
+        spectrum_display = settings.get('spectrum_display', {})
+        self._saved_spectrum_center_freq = spectrum_display.get('center_freq')
+        self._saved_spectrum_bandwidth = spectrum_display.get('bandwidth')
 
         for instance in instances:
             self.instance_manager.add_instance(instance)
             self.create_instance_ui(instance)
+        
+        # Update audio preview dropdowns after loading all instances
+        self._update_audio_preview_dropdowns()
+    
+    def _apply_saved_spectrum_zoom(self, instance: SpectrumInstance):
+        """Apply saved spectrum display zoom settings to a newly connected instance.
+        
+        Args:
+            instance: The instance to apply saved zoom settings to
+        """
+        import asyncio
+        
+        # Only apply if we have saved settings and the instance is connected
+        if (not hasattr(self, '_saved_spectrum_center_freq') or 
+            not hasattr(self, '_saved_spectrum_bandwidth') or
+            self._saved_spectrum_center_freq is None or
+            self._saved_spectrum_bandwidth is None):
+            return
+        
+        if not instance.spectrum or not instance.spectrum.connected or not instance.spectrum.event_loop:
+            return
+        
+        # Apply the saved zoom settings
+        asyncio.run_coroutine_threadsafe(
+            instance.spectrum._send_zoom_command(
+                self._saved_spectrum_center_freq,
+                self._saved_spectrum_bandwidth
+            ),
+            instance.spectrum.event_loop
+        )
+        print(f"Applied saved spectrum zoom to {instance.name}: "
+              f"{self._saved_spectrum_center_freq/1e6:.6f} MHz, "
+              f"{self._saved_spectrum_bandwidth/1e3:.1f} kHz")
     
     def on_closing(self):
         """Handle window close event."""
+        # Stop audio preview
+        if self.audio_preview and self.audio_preview_active:
+            self.audio_preview.stop_all()
+        
         # Disconnect all instances
         self.disconnect_all()
         
-        # Save configuration
+        # Cancel any pending throttled save and do immediate save
+        if self._save_config_pending:
+            self.root.after_cancel(self._save_config_pending)
+            self._save_config_pending = False
+        
+        # Save configuration immediately
         self.save_config()
         
         # Close window
@@ -822,6 +1030,9 @@ class MultiSpectrumGUI:
                     )
         
         self._syncing = False
+        
+        # Save config after zoom change (throttled)
+        self.save_config(throttled=True)
     
     def _on_frequency_change(self, frequency: float, source_spectrum: SpectrumDisplay):
         """Handle frequency change from click-to-tune.
@@ -843,6 +1054,15 @@ class MultiSpectrumGUI:
 
         self._syncing = False
         print(f"Synchronized frequency to {frequency/1e6:.6f} MHz across all instances")
+        
+        # Update the frequency input box
+        self._update_frequency_display(frequency)
+        
+        # Update audio preview if active
+        self._update_audio_preview_frequency(int(frequency))
+        
+        # Save config after frequency change (throttled)
+        self.save_config(throttled=True)
     
     def _on_frequency_step(self, direction: int, source_spectrum: SpectrumDisplay):
         """Handle frequency step from mouse wheel in pan mode.
@@ -862,6 +1082,7 @@ class MultiSpectrumGUI:
         frequency_change = direction * step_size
         
         # Update frequency for all connected instances (or just source if sync disabled)
+        new_freq = None
         if self.sync_enabled.get():
             # Sync to all instances
             for instance in self.instance_manager.active_instances:
@@ -879,6 +1100,20 @@ class MultiSpectrumGUI:
                 source_spectrum.update_center_frequency(new_freq)
         
         self._syncing = False
+        
+        # Update the frequency input box if we have a new frequency
+        if new_freq is not None:
+            self._update_frequency_display(new_freq)
+        
+        # Update audio preview if active (use the new frequency from the source or first instance)
+        if self.sync_enabled.get():
+            # Get frequency from first connected instance
+            for instance in self.instance_manager.active_instances:
+                if instance.spectrum and instance.spectrum.connected:
+                    self._update_audio_preview_frequency(int(instance.spectrum.tuned_freq))
+                    break
+        elif source_spectrum and source_spectrum.connected:
+            self._update_audio_preview_frequency(int(source_spectrum.tuned_freq))
     
     def _sync_pan_from_source(self, source_spectrum: SpectrumDisplay):
         """Synchronize pan state from source to all other displays.
@@ -906,6 +1141,9 @@ class MultiSpectrumGUI:
                     )
         
         self._syncing = False
+        
+        # Save config after pan change (throttled)
+        self.save_config(throttled=True)
     
     def _sync_new_instance_zoom(self, new_instance: SpectrumInstance):
         """Synchronize a newly connected instance to match existing instances' zoom level."""
@@ -982,13 +1220,20 @@ class MultiSpectrumGUI:
         mode_bandwidths = {
             "USB": 2700,
             "LSB": 2700,
-            "CW": 500,
+            "CWU": 500,
+            "CWL": 500,
             "AM": 6000,
             "FM": 10000
         }
 
         if mode in mode_bandwidths:
             self._set_bandwidth(mode_bandwidths[mode])
+        
+        # Update audio preview if active
+        self._update_audio_preview_mode()
+        
+        # Save config after mode change
+        self.save_config(throttled=True)
 
     def _on_bandwidth_change(self, value):
         """Handle bandwidth slider change."""
@@ -996,6 +1241,10 @@ class MultiSpectrumGUI:
         self.current_bandwidth.set(bandwidth)
         self.bandwidth_label.config(text=f"{bandwidth/1000:.1f} kHz")
         self._update_all_bandwidths()
+        # Update audio preview bandwidth
+        self._update_audio_preview_bandwidth()
+        # Save config after bandwidth change
+        self.save_config(throttled=True)
 
     def _set_bandwidth(self, bandwidth: int):
         """Set bandwidth to a specific value."""
@@ -1089,6 +1338,24 @@ class MultiSpectrumGUI:
             # If conversion fails, just update the previous unit
             self.prev_frequency_unit = self.frequency_unit.get()
 
+    def _update_frequency_display(self, freq_hz: float):
+        """Update the frequency input box to show the current frequency.
+        
+        Args:
+            freq_hz: Frequency in Hz
+        """
+        # Convert to the current unit
+        unit = self.frequency_unit.get()
+        
+        if unit == "MHz":
+            freq_value = freq_hz / 1e6
+            self.frequency_input.set(f"{freq_value:.6f}")
+        elif unit == "kHz":
+            freq_value = freq_hz / 1e3
+            self.frequency_input.set(f"{freq_value:.3f}")
+        else:  # Hz
+            self.frequency_input.set(str(int(freq_hz)))
+    
     def _apply_frequency(self):
         """Apply the frequency from the input field to all connected instances."""
         try:
@@ -1110,6 +1377,9 @@ class MultiSpectrumGUI:
                     instance.spectrum.update_center_frequency(freq_hz)
 
             print(f"Applied frequency: {freq_hz/1e6:.6f} MHz to all instances")
+            
+            # Update audio preview if active
+            self._update_audio_preview_frequency(freq_hz)
         except ValueError as e:
             messagebox.showerror("Invalid Frequency", str(e))
 
@@ -1127,10 +1397,14 @@ class MultiSpectrumGUI:
             # Lower sideband: -bandwidth to 0
             low = -bandwidth
             high = 0
-        elif mode == "CW":
-            # CW: centered around tuned frequency
-            low = -bandwidth // 2
-            high = bandwidth // 2
+        elif mode == "CWU":
+            # CW upper: 0 to +bandwidth
+            low = 0
+            high = bandwidth
+        elif mode == "CWL":
+            # CW lower: -bandwidth to 0
+            low = -bandwidth
+            high = 0
         elif mode == "AM":
             # AM: symmetric around carrier
             low = -bandwidth // 2
@@ -1806,6 +2080,279 @@ class MultiSpectrumGUI:
                 labels['diff_peak'].config(text="---", foreground='black')
                 labels['diff_floor'].config(text="---", foreground='black')
                 labels['diff_snr'].config(text="---", foreground='black')
+    
+    def _update_audio_preview_dropdowns(self):
+        """Update the audio preview dropdown values."""
+        if not self.audio_preview:
+            return
+        
+        # Get instance names for dropdown
+        instance_names = ["None"] + [inst.get_display_name() for inst in self.instance_manager.instances]
+        
+        # Update dropdown values
+        self.audio_left_combo['values'] = instance_names
+        self.audio_right_combo['values'] = instance_names
+    
+    def _toggle_audio_preview(self):
+        """Toggle audio preview on/off."""
+        if not self.audio_preview:
+            messagebox.showerror("Error", "Audio preview not available (missing sounddevice or websockets)")
+            return
+        
+        if self.audio_preview_active:
+            # Stop preview
+            self._stop_audio_preview()
+        else:
+            # Start preview
+            self._start_audio_preview()
+    
+    def _start_audio_preview(self):
+        """Start audio preview."""
+        left_name = self.audio_left_instance.get()
+        right_name = self.audio_right_instance.get()
+        
+        if left_name == "None" and right_name == "None":
+            messagebox.showwarning("No Selection", "Please select at least one instance for audio preview")
+            return
+        
+        # Find selected instances
+        left_instance = None
+        right_instance = None
+        
+        for instance in self.instance_manager.instances:
+            if instance.get_display_name() == left_name:
+                left_instance = instance
+            if instance.get_display_name() == right_name:
+                right_instance = instance
+        
+        # Get current frequency, mode, and bandwidth
+        freq_hz = 14100000  # Default
+        mode = self.current_mode.get().lower()
+        bandwidth = self.current_bandwidth.get()
+        
+        # Try to get frequency from first connected instance
+        for instance in self.instance_manager.active_instances:
+            if instance.spectrum and instance.connected:
+                freq_hz = int(instance.spectrum.tuned_freq)
+                break
+        
+        # Start left channel if selected
+        if left_instance:
+            if not left_instance.connected:
+                messagebox.showwarning("Not Connected",
+                                     f"{left_instance.get_display_name()} is not connected.\nPlease connect it first.")
+                return
+            
+            # Get the user_session_id from the spectrum instance
+            if not left_instance.user_session_id:
+                messagebox.showerror("Error", f"No session ID available for {left_instance.get_display_name()}")
+                return
+            
+            success = self.audio_preview.start_preview(
+                'left',
+                left_instance.instance_id,
+                left_instance.host,
+                left_instance.port,
+                left_instance.tls,
+                freq_hz,
+                mode,
+                left_instance.user_session_id,
+                bandwidth
+            )
+            
+            if not success:
+                messagebox.showerror("Error", f"Failed to start audio preview for left channel")
+                return
+        
+        # Start right channel if selected
+        if right_instance:
+            if not right_instance.connected:
+                messagebox.showwarning("Not Connected",
+                                     f"{right_instance.get_display_name()} is not connected.\nPlease connect it first.")
+                if left_instance:
+                    self.audio_preview.stop_preview('left')
+                return
+            
+            # Get the user_session_id from the spectrum instance
+            if not right_instance.user_session_id:
+                messagebox.showerror("Error", f"No session ID available for {right_instance.get_display_name()}")
+                if left_instance:
+                    self.audio_preview.stop_preview('left')
+                return
+            
+            success = self.audio_preview.start_preview(
+                'right',
+                right_instance.instance_id,
+                right_instance.host,
+                right_instance.port,
+                right_instance.tls,
+                freq_hz,
+                mode,
+                right_instance.user_session_id,
+                bandwidth
+            )
+            
+            if not success:
+                messagebox.showerror("Error", f"Failed to start audio preview for right channel")
+                if left_instance:
+                    self.audio_preview.stop_preview('left')
+                return
+        
+        # Update state
+        self.audio_preview_active = True
+        self.audio_start_btn.config(text="Stop Preview")
+        
+        # Disable dropdowns while active
+        self.audio_left_combo.config(state='disabled')
+        self.audio_right_combo.config(state='disabled')
+        
+        # Update spectrum frame labels to show audio channel assignments
+        self._update_spectrum_labels()
+        
+        print(f"Audio preview started: Left={left_name}, Right={right_name}, Freq={freq_hz/1e6:.6f} MHz, Mode={mode}")
+    
+    def _stop_audio_preview(self):
+        """Stop audio preview."""
+        if self.audio_preview:
+            self.audio_preview.stop_all()
+        
+        # Update state
+        self.audio_preview_active = False
+        self.audio_start_btn.config(text="Start Preview")
+        
+        # Re-enable dropdowns
+        self.audio_left_combo.config(state='readonly')
+        self.audio_right_combo.config(state='readonly')
+        
+        # Update spectrum frame labels to remove audio channel assignments
+        self._update_spectrum_labels()
+        
+        print("Audio preview stopped")
+    
+    def _update_audio_preview_frequency(self, freq_hz: int):
+        """Update audio preview frequency when user changes it."""
+        if not self.audio_preview or not self.audio_preview_active:
+            return
+        
+        # Update left channel if active
+        if self.audio_preview.left_channel.is_active():
+            self.audio_preview.update_frequency('left', freq_hz)
+        
+        # Update right channel if active
+        if self.audio_preview.right_channel.is_active():
+            self.audio_preview.update_frequency('right', freq_hz)
+        
+        print(f"Updated audio preview frequency to {freq_hz/1e6:.6f} MHz")
+    
+    def _update_audio_preview_mode(self):
+        """Update audio preview mode when user changes it."""
+        if not self.audio_preview or not self.audio_preview_active:
+            return
+        
+        mode = self.current_mode.get().lower()
+        
+        # Update left channel if active
+        if self.audio_preview.left_channel.is_active():
+            self.audio_preview.update_mode('left', mode)
+        
+        # Update right channel if active
+        if self.audio_preview.right_channel.is_active():
+            self.audio_preview.update_mode('right', mode)
+        
+        print(f"Updated audio preview mode to {mode}")
+    
+    def _update_audio_preview_bandwidth(self):
+        """Update audio preview bandwidth when user changes it."""
+        if not self.audio_preview or not self.audio_preview_active:
+            return
+        
+        bandwidth = self.current_bandwidth.get()
+        
+        # Update left channel if active
+        if self.audio_preview.left_channel.is_active():
+            self.audio_preview.update_bandwidth('left', bandwidth)
+        
+        # Update right channel if active
+        if self.audio_preview.right_channel.is_active():
+            self.audio_preview.update_bandwidth('right', bandwidth)
+        
+        print(f"Updated audio preview bandwidth to {bandwidth} Hz")
+    
+    def _update_spectrum_labels(self):
+        """Update spectrum frame labels to show audio channel assignments."""
+        if not self.audio_preview:
+            return
+        
+        # Get current audio assignments
+        left_name = self.audio_left_instance.get()
+        right_name = self.audio_right_instance.get()
+        
+        # Update each instance's spectrum frame label
+        for instance in self.instance_manager.instances:
+            if hasattr(instance, 'spectrum_frame') and instance.spectrum_frame:
+                # Build the label text
+                base_text = instance.get_display_name()
+                audio_text = ""
+                
+                if self.audio_preview_active:
+                    if instance.get_display_name() == left_name:
+                        audio_text = " [Audio: LEFT Channel]"
+                    elif instance.get_display_name() == right_name:
+                        audio_text = " [Audio: RIGHT Channel]"
+                
+                # Update the frame label
+                if audio_text:
+                    instance.spectrum_frame.config(text=base_text + audio_text)
+                else:
+                    instance.spectrum_frame.config(text=base_text)
+    
+    def _on_left_volume_change(self, value):
+        """Handle left channel volume change."""
+        volume = float(value)
+        self.audio_left_volume.set(volume)
+        self.left_volume_label.config(text=f"{int(volume * 100)}%")
+        
+        # Update audio preview if active
+        if self.audio_preview and self.audio_preview_active:
+            self.audio_preview.set_volume('left', volume)
+        
+        # Save config after volume change
+        self.save_config(throttled=True)
+    
+    def _on_right_volume_change(self, value):
+        """Handle right channel volume change."""
+        volume = float(value)
+        self.audio_right_volume.set(volume)
+        self.right_volume_label.config(text=f"{int(volume * 100)}%")
+        
+        # Update audio preview if active
+        if self.audio_preview and self.audio_preview_active:
+            self.audio_preview.set_volume('right', volume)
+        
+        # Save config after volume change
+        self.save_config(throttled=True)
+    
+    def _on_left_mono_change(self):
+        """Handle left channel mono toggle."""
+        mono = self.audio_left_mono.get()
+        
+        # Update audio preview if active
+        if self.audio_preview and self.audio_preview_active:
+            self.audio_preview.set_mono('left', mono)
+        
+        # Save config after mono change
+        self.save_config(throttled=True)
+    
+    def _on_right_mono_change(self):
+        """Handle right channel mono toggle."""
+        mono = self.audio_right_mono.get()
+        
+        # Update audio preview if active
+        if self.audio_preview and self.audio_preview_active:
+            self.audio_preview.set_mono('right', mono)
+        
+        # Save config after mono change
+        self.save_config(throttled=True)
 
 
 def main():

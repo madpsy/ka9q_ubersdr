@@ -10,7 +10,7 @@ admin:
   # This can include HTML tags like links
   description: 'Welcome! This SDR is running <a href="https://ubersdr.org" target="_blank">UberSDR</a>'
   # Name - similar to description without any HTML
-  name: 'SDR in London with Active Loop'
+  name: 'SDR with Active Loop'
   # Admin email address
   email: "me@example.com"
   # Callsign (optional)

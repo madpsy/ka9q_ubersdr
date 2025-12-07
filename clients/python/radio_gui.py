@@ -330,6 +330,7 @@ class RadioGUI:
 
         # Local instances display (separate window)
         self.local_instances_window = None
+        self.local_instances_display = None
 
         # EQ display (separate window)
         self.eq_window = None
@@ -581,12 +582,88 @@ class RadioGUI:
             if self.local_instances_window and self.local_instances_window.winfo_exists():
                 self.local_instances_window.destroy()
                 self.local_instances_window = None
+                self.local_instances_display = None
 
             # Connect automatically
             self.log_status(f"Connecting to public instance: {name}")
             self.connect()
 
-        self.public_instances_window = create_public_instances_window(self.root, on_connect)
+        # Collect UUIDs from local instances
+        local_uuids = self._get_local_uuids()
+
+        self.public_instances_window = create_public_instances_window(self.root, on_connect, local_uuids)
+    
+    def _get_local_uuids(self):
+        """Get UUIDs from discovered local instances.
+        
+        Returns:
+            Set of public UUIDs from local instances
+        """
+        local_uuids = set()
+        
+        # If we already have a local instances display, use it
+        if self.local_instances_display:
+            for service_name, info in self.local_instances_display.instances.items():
+                public_uuid = info.get('public_uuid', '')
+                if public_uuid:
+                    local_uuids.add(public_uuid)
+        # Otherwise, try to discover local instances quickly
+        elif LOCAL_INSTANCES_AVAILABLE:
+            try:
+                from zeroconf import Zeroconf, ServiceBrowser
+                import threading
+                import time
+                
+                discovered_uuids = []
+                
+                class QuickUUIDListener:
+                    def __init__(self):
+                        self.zc = None
+                    
+                    def add_service(self, zc, type_, name):
+                        self.zc = zc
+                        info = zc.get_service_info(type_, name)
+                        if info:
+                            host = info.parsed_addresses()[0] if info.parsed_addresses() else None
+                            port = info.port
+                            if host and port:
+                                # Fetch description to get public_uuid
+                                try:
+                                    import requests
+                                    url = f"http://{host}:{port}/api/description"
+                                    response = requests.get(url, timeout=2)
+                                    response.raise_for_status()
+                                    description = response.json()
+                                    public_uuid = description.get('public_uuid', '')
+                                    if public_uuid:
+                                        discovered_uuids.append(public_uuid)
+                                except:
+                                    pass
+                    
+                    def remove_service(self, zc, type_, name):
+                        pass
+                    
+                    def update_service(self, zc, type_, name):
+                        pass
+                
+                # Quick discovery (2 second timeout)
+                zc = Zeroconf()
+                listener = QuickUUIDListener()
+                browser = ServiceBrowser(zc, "_ubersdr._tcp.local.", listener)
+                
+                # Wait up to 2 seconds for discovery
+                time.sleep(2.0)
+                
+                # Cleanup
+                browser.cancel()
+                zc.close()
+                
+                # Add discovered UUIDs
+                local_uuids.update(discovered_uuids)
+            except Exception as e:
+                pass  # Silently fail if discovery doesn't work
+        
+        return local_uuids
 
     def open_local_instances_window(self):
         """Open a window showing local UberSDR instances discovered via mDNS."""
@@ -618,12 +695,13 @@ class RadioGUI:
             if self.local_instances_window and self.local_instances_window.winfo_exists():
                 self.local_instances_window.destroy()
                 self.local_instances_window = None
+                self.local_instances_display = None
 
             # Connect automatically
             self.log_status(f"Connecting to local instance: {name}")
             self.connect()
 
-        self.local_instances_window = create_local_instances_window(self.root, on_connect)
+        self.local_instances_window, self.local_instances_display = create_local_instances_window(self.root, on_connect)
 
     def check_and_open_instances_window(self):
         """Check for local instances and open appropriate windows."""
@@ -4792,6 +4870,7 @@ class RadioGUI:
         if self.local_instances_window and self.local_instances_window.winfo_exists():
             self.local_instances_window.destroy()
             self.local_instances_window = None
+            self.local_instances_display = None
             self.log_status("Local instances window closed")
 
         # Close users window
@@ -5461,6 +5540,7 @@ class RadioGUI:
         # Close local instances window if open
         if self.local_instances_window and self.local_instances_window.winfo_exists():
             self.local_instances_window.destroy()
+            self.local_instances_display = None
 
         # Close users window if open
         if self.users_window and self.users_window.winfo_exists():

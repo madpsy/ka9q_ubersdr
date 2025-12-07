@@ -8,6 +8,7 @@ websocket-client>=1.6.0
 aiohttp>=3.9.0
 numpy>=1.24.0
 matplotlib>=3.7.0
+zeroconf>=0.132.0
 
-# Optional: For public instances display
+# Optional: For public instances display and local discovery
 # (same as main client, but audio libraries not needed)

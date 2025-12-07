@@ -11,16 +11,22 @@ import threading
 import webbrowser
 
 
-def create_public_instances_window(parent, on_connect_callback):
+def create_public_instances_window(parent, on_connect_callback, local_uuids=None):
     """Create a window showing public UberSDR instances.
     
     Args:
         parent: Parent tkinter window
         on_connect_callback: Callback function(host, port, tls, name, callsign) to call when connecting
+        local_uuids: Optional set of UUIDs from local instances to highlight
     
     Returns:
         The created window
     """
+    # Convert to set if provided as list, or use empty set
+    if local_uuids is None:
+        local_uuids = set()
+    elif not isinstance(local_uuids, set):
+        local_uuids = set(local_uuids)
     # Create new window
     window = tk.Toplevel(parent)
     window.title("Public UberSDR Instances")
@@ -164,6 +170,7 @@ def create_public_instances_window(parent, on_connect_callback):
 
     # Configure tags for link-like appearance
     tree.tag_configure('link', foreground='blue')
+    tree.tag_configure('local_link', foreground='blue', background='lightgreen')
 
     # Fetch instances in background
     def fetch_instances():
@@ -193,6 +200,7 @@ def create_public_instances_window(parent, on_connect_callback):
                     callsign = instance.get('callsign', '')
                     location = instance.get('location', '')
                     version = instance.get('version', '')
+                    uuid = instance.get('id', '')  # Get UUID from 'id' field
 
                     # Users available
                     available_clients = instance.get('available_clients', 0)
@@ -232,8 +240,12 @@ def create_public_instances_window(parent, on_connect_callback):
                     lon = instance.get('longitude')
                     map_text = '🗺️ Map' if (lat and lon) else ''
 
-                    # Insert into tree
-                    item_id = tree.insert('', tk.END, values=(name, callsign, location, users_text, session_text, cw_text, digi_text, noise_text, iq_text, version, url_text, map_text), tags=('link',))
+                    # Determine tags based on whether this is a local instance
+                    is_local = uuid in local_uuids
+                    tags = ('local_link',) if is_local else ('link',)
+
+                    # Insert into tree with appropriate tags
+                    item_id = tree.insert('', tk.END, values=(name, callsign, location, users_text, session_text, cw_text, digi_text, noise_text, iq_text, version, url_text, map_text), tags=tags)
 
                     # Store full instance data with connection info
                     # The API returns host, port, tls at the top level

@@ -5,12 +5,11 @@ Discovers and displays UberSDR instances on the local network via mDNS/DNS-SD
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import threading
-import time
 import requests
 import webbrowser
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict
 
 try:
     from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
@@ -27,7 +26,7 @@ class LocalInstancesDisplay:
         
         Args:
             parent: Parent Tkinter window
-            on_connect: Callback function(host, port, tls, name) when user selects an instance
+            on_connect: Callback function(host, port, tls, name, callsign) when user selects an instance
         """
         self.parent = parent
         self.on_connect = on_connect
@@ -125,8 +124,8 @@ class LocalInstancesDisplay:
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
         
-        self.connect_btn = ttk.Button(button_frame, text="Connect", command=self.on_connect_clicked)
-        self.connect_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.add_btn = ttk.Button(button_frame, text="Add", command=self.on_connect_clicked)
+        self.add_btn.pack(side=tk.LEFT, padx=(0, 5))
         
         self.refresh_btn = ttk.Button(button_frame, text="Refresh", command=self.refresh_discovery)
         self.refresh_btn.pack(side=tk.LEFT, padx=(0, 5))
@@ -142,7 +141,7 @@ class LocalInstancesDisplay:
     def show_error(self, message: str):
         """Show error message in the window."""
         self.status_label.config(text=message, foreground='red')
-        self.connect_btn.config(state='disabled')
+        self.add_btn.config(state='disabled')
         self.refresh_btn.config(state='disabled')
     
     def start_discovery(self):
@@ -210,7 +209,7 @@ class LocalInstancesDisplay:
                 
                 # Update tree view (run in main thread)
                 self.window.after(0, lambda: self._update_tree_view())
-            except Exception as e:
+            except Exception:
                 # If fetch fails, remove the instance
                 if service_name in self.instances:
                     del self.instances[service_name]
@@ -347,6 +346,7 @@ class LocalInstancesDisplay:
         """Handle connect button click."""
         selection = self.tree.selection()
         if not selection:
+            messagebox.showinfo("Info", "Please select an instance to add")
             return
         
         # Get selected instance
@@ -362,8 +362,17 @@ class LocalInstancesDisplay:
         if not info:
             return
         
+        # Get callsign from description
+        description = info.get('description', {})
+        receiver = description.get('receiver', {})
+        callsign = receiver.get('callsign', '')
+        
+        # Ensure callsign is a string, not None
+        if callsign is None:
+            callsign = ''
+        
         # Call connect callback (TLS is always False for local instances)
-        self.on_connect(info['host'], info['port'], False, info['name'])
+        self.on_connect(info['host'], info['port'], False, info['name'], callsign)
         
         # Close window after connecting
         self.window.destroy()
@@ -432,7 +441,7 @@ def create_local_instances_window(parent: tk.Tk, on_connect: Callable) -> tuple:
     
     Args:
         parent: Parent Tkinter window
-        on_connect: Callback function(host, port, tls, name) when user selects an instance
+        on_connect: Callback function(host, port, tls, name, callsign) when user selects an instance
     
     Returns:
         Tuple of (window, display) where display is the LocalInstancesDisplay object

@@ -15,13 +15,20 @@ from instance_manager import InstanceManager
 from config_manager import ConfigManager
 from instance_dialogs import AddInstanceDialog, EditInstanceDialog
 
-# Import local public_instances_display (before adding parent to path)
+# Import local public_instances_display and local_instances_display (before adding parent to path)
 try:
     from public_instances_display import create_public_instances_window
     PUBLIC_INSTANCES_AVAILABLE = True
 except ImportError:
     PUBLIC_INSTANCES_AVAILABLE = False
     print("Warning: Public instances display not available")
+
+try:
+    from local_instances_display import create_local_instances_window
+    LOCAL_INSTANCES_AVAILABLE = True
+except ImportError:
+    LOCAL_INSTANCES_AVAILABLE = False
+    print("Warning: Local instances display not available")
 
 # NOW add parent directory to path to import spectrum_display from clients/python
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
@@ -43,7 +50,7 @@ class MultiSpectrumGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Multi-Instance Spectrum Client")
-        self.root.geometry("1400x900")
+        self.root.geometry("1500x900")
         
         # Managers
         self.instance_manager = InstanceManager(self.MAX_INSTANCES)
@@ -54,6 +61,9 @@ class MultiSpectrumGUI:
         self.spectrum_displays = {}
         self.spectrum_container = None
         self.instance_list_frame = None
+        
+        # Local instances display reference
+        self.local_instances_display = None
         
         # Synchronization state
         self.sync_enabled = tk.BooleanVar(value=True)
@@ -90,6 +100,7 @@ class MultiSpectrumGUI:
         self.comparison_window = 0.5  # 500ms averaging window
         self.comparison_last_update = 0  # Last time we updated the comparison display
         self.comparison_update_interval = 0.2  # Update comparison display every 200ms
+        self.comparison_last_valid_values = {}  # Store last valid comparison values: 'a_id:b_id' -> (diff_peak, diff_floor, diff_snr)
         
         # Update rate tracking for throttling (using server-reported rates)
         self.update_times = {}  # instance_id -> list of recent update timestamps (for frame skipping)
@@ -130,7 +141,11 @@ class MultiSpectrumGUI:
             ttk.Button(control_frame, text="Add from Public",
                       command=self.add_from_public).pack(side=tk.LEFT, padx=(0, 5))
         
-        ttk.Button(control_frame, text="Connect All Enabled",
+        if LOCAL_INSTANCES_AVAILABLE:
+            ttk.Button(control_frame, text="Add from Local",
+                      command=self.add_from_local).pack(side=tk.LEFT, padx=(0, 5))
+        
+        ttk.Button(control_frame, text="Connect All",
                   command=self.connect_all_enabled).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(control_frame, text="Disconnect All",
                   command=self.disconnect_all).pack(side=tk.LEFT, padx=(0, 5))
@@ -282,7 +297,7 @@ class MultiSpectrumGUI:
             return
         
         if not self.instance_manager.can_add_instance():
-            messagebox.showwarning("Limit Reached", 
+            messagebox.showwarning("Limit Reached",
                                   f"Maximum {self.MAX_INSTANCES} instances allowed")
             return
         
@@ -303,7 +318,112 @@ class MultiSpectrumGUI:
             self._update_comparison_dropdowns()
             self.save_config()
         
-        create_public_instances_window(self.root, on_select)
+        # Collect UUIDs from local instances if available
+        local_uuids = self._get_local_uuids()
+        
+        create_public_instances_window(self.root, on_select, local_uuids)
+    
+    def _get_local_uuids(self) -> set:
+        """Get UUIDs from discovered local instances.
+        
+        Returns:
+            Set of public UUIDs from local instances
+        """
+        local_uuids = set()
+        
+        # If we already have a local instances display, use it
+        if self.local_instances_display:
+            for service_name, info in self.local_instances_display.instances.items():
+                public_uuid = info.get('public_uuid', '')
+                if public_uuid:
+                    local_uuids.add(public_uuid)
+        # Otherwise, try to discover local instances quickly
+        elif LOCAL_INSTANCES_AVAILABLE:
+            try:
+                from zeroconf import Zeroconf, ServiceBrowser
+                import threading
+                import time
+                
+                discovered_uuids = []
+                
+                class QuickUUIDListener:
+                    def __init__(self):
+                        self.zc = None
+                    
+                    def add_service(self, zc, type_, name):
+                        self.zc = zc
+                        info = zc.get_service_info(type_, name)
+                        if info:
+                            host = info.parsed_addresses()[0] if info.parsed_addresses() else None
+                            port = info.port
+                            if host and port:
+                                # Fetch description to get public_uuid
+                                try:
+                                    import requests
+                                    url = f"http://{host}:{port}/api/description"
+                                    response = requests.get(url, timeout=2)
+                                    response.raise_for_status()
+                                    description = response.json()
+                                    public_uuid = description.get('public_uuid', '')
+                                    if public_uuid:
+                                        discovered_uuids.append(public_uuid)
+                                except:
+                                    pass
+                    
+                    def remove_service(self, zc, type_, name):
+                        pass
+                    
+                    def update_service(self, zc, type_, name):
+                        pass
+                
+                # Quick discovery (2 second timeout)
+                zc = Zeroconf()
+                listener = QuickUUIDListener()
+                browser = ServiceBrowser(zc, "_ubersdr._tcp.local.", listener)
+                
+                # Wait up to 2 seconds for discovery
+                time.sleep(2.0)
+                
+                # Cleanup
+                browser.cancel()
+                zc.close()
+                
+                # Add discovered UUIDs
+                local_uuids.update(discovered_uuids)
+            except Exception as e:
+                pass  # Silently fail if discovery doesn't work
+        
+        return local_uuids
+    
+    def add_from_local(self):
+        """Add instance from local instances discovered via mDNS."""
+        if not LOCAL_INSTANCES_AVAILABLE:
+            messagebox.showerror("Error", "Local instances feature not available")
+            return
+        
+        if not self.instance_manager.can_add_instance():
+            messagebox.showwarning("Limit Reached",
+                                  f"Maximum {self.MAX_INSTANCES} instances allowed")
+            return
+        
+        def on_select(host, port, tls, name, callsign=None):
+            """Callback when user selects a local instance."""
+            instance = SpectrumInstance(len(self.instance_manager.instances))
+            instance.name = name
+            # Handle None, empty string, or the string 'None'
+            instance.callsign = callsign if (callsign and callsign != 'None') else ""
+            instance.host = host
+            instance.port = port
+            instance.tls = tls
+            instance.frequency = 14100000  # Default frequency
+            
+            self.instance_manager.add_instance(instance)
+            self.create_instance_ui(instance)
+            self._add_instance_to_signal_levels(instance)
+            self._update_comparison_dropdowns()
+            self.save_config()
+        
+        local_window, self.local_instances_display = create_local_instances_window(self.root, on_select)
     
     def create_instance_ui(self, instance: SpectrumInstance):
         """Create UI elements for an instance."""
@@ -1526,6 +1646,7 @@ class MultiSpectrumGUI:
         # Clear comparison history when selection changes
         self.comparison_history.clear()
         self.comparison_diff_history.clear()
+        self.comparison_last_valid_values.clear()
         self.comparison_last_update = 0
         # Update will happen on next _update_signal_levels cycle
 
@@ -1616,19 +1737,25 @@ class MultiSpectrumGUI:
         # Calculate smoothed differences by averaging over the window
         smoothed_history = self.comparison_diff_history[diff_key]
         
-        # Require at least 3 samples before displaying (ensures we have some averaging)
-        if len(smoothed_history) < 3:
-            # Not enough data yet
+        # Calculate averaged differences if we have samples
+        if len(smoothed_history) >= 1:
+            # Average the differences over the window
+            diff_peak = sum(entry[1] for entry in smoothed_history) / len(smoothed_history)
+            diff_floor = sum(entry[2] for entry in smoothed_history) / len(smoothed_history)
+            diff_snr = sum(entry[3] for entry in smoothed_history) / len(smoothed_history)
+            
+            # Store as last valid values
+            self.comparison_last_valid_values[diff_key] = (diff_peak, diff_floor, diff_snr)
+        elif diff_key in self.comparison_last_valid_values:
+            # Use last valid values if we don't have enough samples
+            diff_peak, diff_floor, diff_snr = self.comparison_last_valid_values[diff_key]
+        else:
+            # No data at all yet
             for labels in self.signal_level_labels.values():
                 labels['diff_peak'].config(text="---", foreground='black')
                 labels['diff_floor'].config(text="---", foreground='black')
                 labels['diff_snr'].config(text="---", foreground='black')
             return
-        
-        # Average the differences over the window
-        diff_peak = sum(entry[1] for entry in smoothed_history) / len(smoothed_history)
-        diff_floor = sum(entry[2] for entry in smoothed_history) / len(smoothed_history)
-        diff_snr = sum(entry[3] for entry in smoothed_history) / len(smoothed_history)
         
         # Update displays for both instances
         for instance_id, labels in self.signal_level_labels.items():

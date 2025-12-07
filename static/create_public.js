@@ -655,13 +655,20 @@ async function validateCurrentStep() {
         }
         
         const useMyIP = document.getElementById('useMyIP').checked;
+        const createDomain = document.getElementById('createDomain').checked;
         
-        if (!useMyIP) {
+        if (!useMyIP && !createDomain) {
             const host = document.getElementById('instanceHost').value.trim();
             const port = parseInt(document.getElementById('instancePort').value);
             
             if (!host) {
                 showAlert('Please enter a fully qualified domain name', 'error');
+                return false;
+            }
+            
+            // Validate that host is a domain name, not an IP address
+            if (!validateDomainName(host)) {
+                showAlert('Please enter a valid domain name (not an IP address). Use "Automatically use my public IP address" if you want to use an IP address.', 'error');
                 return false;
             }
             
@@ -673,6 +680,33 @@ async function validateCurrentStep() {
     }
     
     return true;
+}
+
+// Validate that a string is a domain name and not an IP address
+function validateDomainName(host) {
+    // Check if it's an IPv4 address
+    const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (ipv4Pattern.test(host)) {
+        return false; // It's an IP address
+    }
+    
+    // Check if it's an IPv6 address (simplified check)
+    if (host.includes(':') && /^[0-9a-fA-F:]+$/.test(host)) {
+        return false; // It's likely an IPv6 address
+    }
+    
+    // Check if it looks like a domain name (contains at least one dot and valid characters)
+    const domainPattern = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+    if (!domainPattern.test(host)) {
+        return false; // Invalid domain format
+    }
+    
+    // Must contain at least one dot (e.g., example.com)
+    if (!host.includes('.')) {
+        return false;
+    }
+    
+    return true; // It's a valid domain name
 }
 
 // Finish wizard and save configuration

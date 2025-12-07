@@ -496,9 +496,15 @@ func validatePublicHost(host string) error {
 
 // isPublicIP checks if an IP address is publicly routable
 // Returns false for private, loopback, link-local, multicast, and other reserved addresses
+// Note: 44.0.0.0/8 (AMPR - Amateur Packet Radio Network) is considered routable
 func isPublicIP(ip net.IP) bool {
 	// Check for IPv4 private/reserved ranges
 	if ip.To4() != nil {
+		// AMPR network (44.0.0.0/8) - Amateur Packet Radio Network
+		// This is routable and should be allowed
+		if ip[0] == 44 {
+			return true
+		}
 		// Loopback (127.0.0.0/8)
 		if ip.IsLoopback() {
 			return false

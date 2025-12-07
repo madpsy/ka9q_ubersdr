@@ -635,7 +635,7 @@
 
     function setCheckboxValue(fieldId, value) {
         const field = document.getElementById(fieldId);
-        if (field && value !== undefined) {
+        if (field && value !== undefined && value !== null) {
             field.checked = value;
         }
     }

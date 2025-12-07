@@ -309,8 +309,14 @@
                     setFieldValue('receiverCallsign', decoderConfig.decoder.receiver_callsign);
                     setFieldValue('receiverLocator', decoderConfig.decoder.receiver_locator);
                     setFieldValue('receiverAntenna', decoderConfig.decoder.receiver_antenna);
-                    setCheckboxValue('pskreporterEnabled', decoderConfig.decoder.pskreporter_enabled);
-                    setCheckboxValue('wsprnetEnabled', decoderConfig.decoder.wsprnet_enabled);
+                    
+                    // Only load PSKReporter/WSPRNet values if decoder is already enabled
+                    // If decoder is disabled (default), keep the HTML default (checked)
+                    if (decoderConfig.decoder.enabled) {
+                        setCheckboxValue('pskreporterEnabled', decoderConfig.decoder.pskreporter_enabled);
+                        setCheckboxValue('wsprnetEnabled', decoderConfig.decoder.wsprnet_enabled);
+                    }
+                    
                     toggleConditionalSection('decoderEnabled', 'decoderSettings');
                 }
             }

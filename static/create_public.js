@@ -142,6 +142,7 @@ function handleTLSToggle() {
         portField.value = 80;
     }
     
+    updatePortForwardingInstructions();
     updateReviewSection();
 }
 
@@ -239,7 +240,36 @@ async function toggleManualConnectionFields() {
         detectedIPDiv.style.display = 'none';
     }
 
+    updatePortForwardingInstructions();
     updateReviewSection();
+}
+
+// Update port forwarding instructions based on current state
+function updatePortForwardingInstructions() {
+    const useMyIP = document.getElementById('useMyIP').checked;
+    const instanceTLS = document.getElementById('instanceTLS').checked;
+    const portForwardingUseMyIP = document.getElementById('portForwardingUseMyIP');
+    const portForwardingNoTLS = document.getElementById('portForwardingNoTLS');
+    const portForwardingWithTLS = document.getElementById('portForwardingWithTLS');
+
+    // Hide all sections first
+    if (portForwardingUseMyIP) portForwardingUseMyIP.style.display = 'none';
+    if (portForwardingNoTLS) portForwardingNoTLS.style.display = 'none';
+    if (portForwardingWithTLS) portForwardingWithTLS.style.display = 'none';
+
+    if (useMyIP) {
+        // Show simplified instructions for auto IP
+        if (portForwardingUseMyIP) portForwardingUseMyIP.style.display = 'block';
+    } else {
+        // Manual configuration
+        if (instanceTLS) {
+            // Show TLS/domain instructions
+            if (portForwardingWithTLS) portForwardingWithTLS.style.display = 'block';
+        } else {
+            // Show non-TLS instructions
+            if (portForwardingNoTLS) portForwardingNoTLS.style.display = 'block';
+        }
+    }
 }
 
 // Fetch public IP address
@@ -631,7 +661,7 @@ async function validateCurrentStep() {
             const port = parseInt(document.getElementById('instancePort').value);
             
             if (!host) {
-                showAlert('Please enter a hostname or IP address', 'error');
+                showAlert('Please enter a fully qualified domain name', 'error');
                 return false;
             }
             

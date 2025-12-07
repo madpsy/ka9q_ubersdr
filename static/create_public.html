@@ -133,9 +133,9 @@
                     </div>
 
                     <div class="form-group" id="hostnameField" style="display: none;">
-                        <label for="instanceHost">Public Hostname or IP Address *</label>
-                        <input type="text" id="instanceHost" placeholder="e.g., sdr.example.com or 203.0.113.42">
-                        <small>The hostname or IP address that users will use to connect to your SDR</small>
+                        <label for="instanceHost">Public fully qualified domain name *</label>
+                        <input type="text" id="instanceHost" placeholder="e.g., ubersdr.mydomain.com">
+                        <small>The hostname that users will use to connect to your SDR</small>
                     </div>
 
                     <div class="form-group">
@@ -159,26 +159,27 @@
 
                 <div class="info-box" id="portForwardingInfo">
                     <strong>💡 Port Forwarding Setup</strong>
-                    <p style="margin: 10px 0;">If not using Cloudflare Tunnel, you need to configure port forwarding on your router.</p>
-                    
-                    <strong>Option 1: Using Your Public IP Address (HTTP only)</strong>
-                    <ul style="margin: 10px 0 15px 20px; padding: 0;">
-                        <li>Keep "Automatically use my public IP address" checked</li>
-                        <li>Forward port <strong>80</strong> to your UberSDR host IP address in your router</li>
-                        <li>Users will connect via <code>http://your-public-ip</code></li>
-                        <li>Note: HTTPS/certificates are not available with IP addresses</li>
-                    </ul>
-                    
-                    <strong>Option 2: Using a Domain Name (HTTPS with automatic certificates)</strong>
-                    <ul style="margin: 10px 0 15px 20px; padding: 0;">
-                        <li>Uncheck "Automatically use my public IP address"</li>
-                        <li>Enter your domain name (e.g., sdr.example.com) in the hostname field</li>
-                        <li>Enable "Use TLS/HTTPS for public connections"</li>
-                        <li>Forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host IP address</li>
-                        <li>UberSDR will automatically obtain and renew Let's Encrypt certificates</li>
-                    </ul>
-                    
-                    <p style="margin: 10px 0 0 0;"><strong>Important:</strong> For Option 2, your domain must point to your public IP address for certificate generation to work.</p>
+                    <div id="portForwardingUseMyIP" style="display: none;">
+                        <ul style="margin: 10px 0 0 20px; padding: 0;">
+                            <li>Forward port <strong>80</strong> to your UberSDR host IP address in your router</li>
+                            <li>Users will connect via <code>http://your-public-ip</code></li>
+                            <li>Note: HTTPS/certificates are not available with IP addresses</li>
+                        </ul>
+                    </div>
+                    <div id="portForwardingNoTLS" style="display: none;">
+                        <ul style="margin: 10px 0 0 20px; padding: 0;">
+                            <li>Forward port <strong>80</strong> to your UberSDR host IP address in your router</li>
+                            <li>Users will connect via <code>http://your-domain-name</code></li>
+                        </ul>
+                    </div>
+                    <div id="portForwardingWithTLS" style="display: none;">
+                        <ul style="margin: 10px 0 0 20px; padding: 0;">
+                            <li>Enter your domain name (e.g., sdr.example.com) in the hostname field</li>
+                            <li>Enable "Use TLS/HTTPS for public connections"</li>
+                            <li>Forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host IP address</li>
+                            <li>UberSDR will automatically obtain and renew Let's Encrypt certificates</li>
+                        </ul>
+                    </div>
                 </div>
             </div>
 

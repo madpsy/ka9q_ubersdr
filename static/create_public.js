@@ -65,6 +65,10 @@ function populateFormFields() {
     document.getElementById('instancePort').value = ir.instance?.port || 8080;
     document.getElementById('instanceTLS').checked = ir.instance?.tls || false;
     
+    // Custom ingress - if generate_tls is explicitly false and TLS is enabled, assume custom ingress
+    const hasCustomIngress = ir.instance?.tls && ir.generate_tls === false;
+    document.getElementById('customIngress').checked = hasCustomIngress || false;
+    
     // Default create_domain to true for new setups (when instance_reporting is not enabled)
     // If instance_reporting is already enabled, use the configured value
     let createDomainValue;
@@ -88,6 +92,9 @@ function populateFormFields() {
 
     // Update manual connection fields visibility
     toggleManualConnectionFields();
+    
+    // Update custom ingress visibility based on loaded state
+    updateCustomIngressVisibility();
 
     // Update review section with loaded config
     updateReviewSection();
@@ -118,8 +125,14 @@ function setupEventListeners() {
     // Create domain checkbox
     document.getElementById('createDomain').addEventListener('change', handleCreateDomainToggle);
     
+    // Custom ingress checkbox
+    document.getElementById('customIngress').addEventListener('change', function() {
+        updatePortForwardingInstructions();
+        updateReviewSection();
+    });
+    
     // Update review when fields change
-    const fields = ['adminEmail', 'adminCallsign', 'useMyIP', 'instanceHost', 'instancePort', 'instanceTLS', 'createDomain'];
+    const fields = ['adminEmail', 'adminCallsign', 'useMyIP', 'instanceHost', 'instancePort', 'instanceTLS', 'createDomain', 'customIngress'];
     fields.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -140,8 +153,11 @@ function handleTLSToggle() {
     } else {
         // Set to HTTP port
         portField.value = 80;
+        // Uncheck custom ingress when TLS is disabled
+        document.getElementById('customIngress').checked = false;
     }
     
+    updateCustomIngressVisibility();
     updatePortForwardingInstructions();
     updateReviewSection();
 }
@@ -178,6 +194,9 @@ function handleCreateDomainToggle() {
         // Auto-set port to 443 and enable TLS
         portField.value = '443';
         tlsCheckbox.checked = true;
+        
+        // Uncheck custom ingress when using create domain
+        document.getElementById('customIngress').checked = false;
     } else {
         // Show manual configuration section
         manualConfigSection.style.display = 'block';
@@ -197,6 +216,7 @@ function handleCreateDomainToggle() {
         toggleManualConnectionFields();
     }
     
+    updateCustomIngressVisibility();
     updateReviewSection();
 }
 
@@ -228,6 +248,8 @@ async function toggleManualConnectionFields() {
         tlsField.style.display = 'none';
         // Uncheck TLS when using auto IP
         document.getElementById('instanceTLS').checked = false;
+        // Uncheck custom ingress when using auto IP
+        document.getElementById('customIngress').checked = false;
         // Set port to 80 for Caddy HTTP
         portField.value = 80;
         // Show and fetch IP address
@@ -240,29 +262,51 @@ async function toggleManualConnectionFields() {
         detectedIPDiv.style.display = 'none';
     }
 
+    updateCustomIngressVisibility();
     updatePortForwardingInstructions();
     updateReviewSection();
+}
+
+// Update custom ingress field visibility
+function updateCustomIngressVisibility() {
+    const instanceTLS = document.getElementById('instanceTLS').checked;
+    const customIngressField = document.getElementById('customIngressField');
+    
+    // Show custom ingress checkbox only if TLS is checked
+    if (instanceTLS) {
+        customIngressField.style.display = 'block';
+    } else {
+        customIngressField.style.display = 'none';
+        // Uncheck it when hiding
+        document.getElementById('customIngress').checked = false;
+    }
 }
 
 // Update port forwarding instructions based on current state
 function updatePortForwardingInstructions() {
     const useMyIP = document.getElementById('useMyIP').checked;
     const instanceTLS = document.getElementById('instanceTLS').checked;
+    const customIngress = document.getElementById('customIngress').checked;
     const portForwardingUseMyIP = document.getElementById('portForwardingUseMyIP');
     const portForwardingNoTLS = document.getElementById('portForwardingNoTLS');
     const portForwardingWithTLS = document.getElementById('portForwardingWithTLS');
+    const portForwardingCustomIngress = document.getElementById('portForwardingCustomIngress');
 
     // Hide all sections first
     if (portForwardingUseMyIP) portForwardingUseMyIP.style.display = 'none';
     if (portForwardingNoTLS) portForwardingNoTLS.style.display = 'none';
     if (portForwardingWithTLS) portForwardingWithTLS.style.display = 'none';
+    if (portForwardingCustomIngress) portForwardingCustomIngress.style.display = 'none';
 
     if (useMyIP) {
         // Show simplified instructions for auto IP
         if (portForwardingUseMyIP) portForwardingUseMyIP.style.display = 'block';
     } else {
         // Manual configuration
-        if (instanceTLS) {
+        if (instanceTLS && customIngress) {
+            // Show custom ingress instructions
+            if (portForwardingCustomIngress) portForwardingCustomIngress.style.display = 'block';
+        } else if (instanceTLS) {
             // Show TLS/domain instructions
             if (portForwardingWithTLS) portForwardingWithTLS.style.display = 'block';
         } else {
@@ -751,6 +795,7 @@ async function finishWizard() {
 
         // Add instance connection details
         const instancePort = parseInt(document.getElementById('instancePort').value);
+        const customIngress = document.getElementById('customIngress').checked;
 
         if (createDomain) {
             // When using create domain, hostname is set internally
@@ -760,8 +805,8 @@ async function finishWizard() {
                 port: instancePort,
                 tls: true
             };
-            // Enable TLS certificate generation when using create domain
-            updatedConfig.instance_reporting.generate_tls = true;
+            // Enable TLS certificate generation when using create domain (unless custom ingress)
+            updatedConfig.instance_reporting.generate_tls = !customIngress;
         } else if (!useMyIP) {
             const instanceHost = document.getElementById('instanceHost').value.trim();
             const instanceTLS = document.getElementById('instanceTLS').checked;
@@ -771,8 +816,8 @@ async function finishWizard() {
                 port: instancePort,
                 tls: instanceTLS
             };
-            // Enable TLS certificate generation when TLS is enabled with custom domain
-            updatedConfig.instance_reporting.generate_tls = instanceTLS;
+            // Enable TLS certificate generation when TLS is enabled with custom domain (unless custom ingress)
+            updatedConfig.instance_reporting.generate_tls = instanceTLS && !customIngress;
         } else {
             // When using myip, clear hostname and force TLS to false
             updatedConfig.instance_reporting.instance = {

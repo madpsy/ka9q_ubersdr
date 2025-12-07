@@ -155,6 +155,14 @@
                         </label>
                         <small>Enable if your public connection uses HTTPS/WSS (recommended for security)</small>
                     </div>
+
+                    <div class="form-group" id="customIngressField" style="display: none;">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="customIngress">
+                            <span>Use Cloudflare Tunnel or my own ingress server (e.g. Nginx)</span>
+                        </label>
+                        <small>Enable if you're using Cloudflare Tunnel or managing TLS certificates yourself (e.g., with Nginx). UberSDR will not attempt to generate Let's Encrypt certificates.</small>
+                    </div>
                 </div>
 
                 <div class="info-box" id="portForwardingInfo">
@@ -178,6 +186,12 @@
                             <li>Enable "Use TLS/HTTPS for public connections"</li>
                             <li>Forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host IP address</li>
                             <li>UberSDR will automatically obtain and renew Let's Encrypt certificates</li>
+                        </ul>
+                    </div>
+                    <div id="portForwardingCustomIngress" style="display: none;">
+                        <ul style="margin: 10px 0 0 20px; padding: 0;">
+                            <li>Users will connect via <code>https://your-domain-name</code></li>
+                            <li>Ensure your ingress controller (Cloudflare Tunnel, Nginx, etc.) is proxying to the UberSDR host on port <strong>8080</strong></li>
                         </ul>
                     </div>
                 </div>

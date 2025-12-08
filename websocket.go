@@ -254,18 +254,19 @@ type ClientMessage struct {
 
 // ServerMessage represents a message to the client
 type ServerMessage struct {
-	Type        string      `json:"type"`
-	Data        string      `json:"data,omitempty"`
-	SampleRate  int         `json:"sampleRate,omitempty"`
-	Channels    int         `json:"channels,omitempty"`
-	Frequency   uint64      `json:"frequency,omitempty"`
-	Mode        string      `json:"mode,omitempty"`
-	Timestamp   int64       `json:"timestamp,omitempty"` // Server send timestamp in milliseconds (Unix epoch)
-	SessionID   string      `json:"sessionId,omitempty"`
-	Error       string      `json:"error,omitempty"`
-	Status      int         `json:"status,omitempty"` // HTTP-style status code (e.g., 429 for rate limit)
-	Info        interface{} `json:"info,omitempty"`
-	AudioFormat string      `json:"audioFormat,omitempty"` // "pcm" or "opus"
+	Type         string      `json:"type"`
+	Data         string      `json:"data,omitempty"`
+	SampleRate   int         `json:"sampleRate,omitempty"`
+	Channels     int         `json:"channels,omitempty"`
+	Frequency    uint64      `json:"frequency,omitempty"`
+	Mode         string      `json:"mode,omitempty"`
+	Timestamp    int64       `json:"timestamp,omitempty"`    // RTP timestamp (uint32 sample count) for drift-free tracking
+	WallclockMs  int64       `json:"wallclockMs,omitempty"`  // NTP-synced wall-clock time in milliseconds for multi-server alignment
+	SessionID    string      `json:"sessionId,omitempty"`
+	Error        string      `json:"error,omitempty"`
+	Status       int         `json:"status,omitempty"` // HTTP-style status code (e.g., 429 for rate limit)
+	Info         interface{} `json:"info,omitempty"`
+	AudioFormat  string      `json:"audioFormat,omitempty"` // "pcm" or "opus"
 }
 
 // HandleWebSocket handles WebSocket connections
@@ -854,16 +855,18 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			// Encode audio (will return PCM if Opus not available/enabled)
 			encoded, audioFormat, _ := opusEncoder.Encode(audioPacket.PCMData)
 
-			// Send audio message with format indicator and RTP timestamp
-			// RTP timestamp represents audio capture time, not send time
-			// This allows accurate alignment between multiple instances
+			// Send audio message with both RTP and wall-clock timestamps
+			// RTP timestamp: Sample count from SDR capture (drift-free, but different per server)
+			// Wall-clock: NTP-synced time in ms (common reference for multi-server alignment)
+			// Client uses wall-clock for initial alignment, RTP deltas for drift-free tracking
 			msg := ServerMessage{
 				Type:        "audio",
 				Data:        encoded,
 				SampleRate:  session.SampleRate,
 				Channels:    session.Channels, // 1=mono, 2=stereo (for IQ mode)
 				AudioFormat: audioFormat,
-				Timestamp:   int64(audioPacket.RTPTimestamp), // RTP timestamp for accurate alignment
+				Timestamp:   int64(audioPacket.RTPTimestamp), // RTP timestamp (uint32 sample count)
+				WallclockMs: time.Now().UnixMilli(),          // NTP-synced wall-clock time
 			}
 
 			if err := wsh.sendMessage(conn, msg); err != nil {

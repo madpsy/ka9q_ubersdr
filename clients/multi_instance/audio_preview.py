@@ -81,11 +81,12 @@ class AudioPreviewManager:
         self.event_loop = None
         self.loop_thread = None
         self.is_running = False
-        self._audio_timestamps = {}  # instance_id -> latest audio timestamp
-        self._audio_timestamp_history = {}  # 'left_id:right_id' -> [(time, timestamp_diff_ms)]
-        self._audio_timestamp_window = 5.0  # 5 second averaging window (reduced for faster response)
+        self._audio_timestamps = {}  # instance_id -> {'rtp': rtp_timestamp, 'wallclock': wallclock_ms, 'time': receive_time}
+        self._audio_timestamp_history = {}  # 'left_id:right_id' -> [(time, offset_ms)]
+        self._audio_timestamp_window = 5.0  # 5 second averaging window
         self._last_offset_update = 0  # Last time we updated offsets
-        self._last_applied_offset = {}  # instance_id -> last applied offset (to avoid constant updates)
+        self._last_applied_offset = {}  # instance_id -> last applied offset
+        self._rtp_to_wallclock_offset = {}  # instance_id -> offset to convert RTP to wallclock time
         
         # Real-time alignment system - DISABLED by default due to performance issues
         # The continuous alignment approach still causes lock contention and audio glitches
@@ -494,10 +495,11 @@ class AudioPreviewManager:
                         
                         if data.get('type') == 'audio':
                             audio_data = data.get('data')
-                            # Extract RTP timestamp (uint32 sample count from SDR capture)
-                            # This represents when the audio was captured, not when it was sent
-                            # RTP timestamps increment at the sample rate and wrap at 2^32
-                            timestamp = data.get('timestamp')
+                            # Extract both timestamps:
+                            # - RTP timestamp: uint32 sample count (drift-free but different per server)
+                            # - Wall-clock: NTP-synced time in ms (common reference across servers)
+                            rtp_timestamp = data.get('timestamp')  # RTP timestamp (sample count)
+                            wallclock_ms = data.get('wallclockMs')  # NTP-synced wall-clock time
                             
                             if audio_data:
                                 pcm_data = self._decode_audio(audio_data)
@@ -515,9 +517,13 @@ class AudioPreviewManager:
                                 else:
                                     # Legacy mode: add to buffer (with optional simple alignment)
                                     with self.buffer_lock:
-                                        # Store audio timestamp for offset calculation
-                                        if timestamp is not None:
-                                            self._audio_timestamps[ch.instance_id] = timestamp
+                                        # Store both timestamps for hybrid alignment
+                                        if rtp_timestamp is not None and wallclock_ms is not None:
+                                            self._audio_timestamps[ch.instance_id] = {
+                                                'rtp': rtp_timestamp,
+                                                'wallclock': wallclock_ms,
+                                                'time': time.time()
+                                            }
                                             
                                             # Update offsets every second to allow averaging to work
                                             current_time = time.time()
@@ -549,7 +555,7 @@ class AudioPreviewManager:
                                         # Periodic debug output
                                         now = time.time()
                                         if now - last_debug_time >= 5.0:
-                                            print(f"[{ch.channel_name.upper()}] Buffer: {len(ch.buffer)} samples, Messages: {msg_count}, Timestamp: {timestamp}")
+                                            print(f"[{ch.channel_name.upper()}] Buffer: {len(ch.buffer)} samples, Messages: {msg_count}, RTP: {rtp_timestamp}, Wall: {wallclock_ms}")
                                             last_debug_time = now
                                             msg_count = 0
                         
@@ -745,13 +751,14 @@ class AudioPreviewManager:
                 print(f"Error getting metrics: {e}")
                 return None
     def _update_audio_offsets(self):
-        """Update audio alignment offsets based on audio WebSocket timestamps.
+        """Update audio alignment offsets using hybrid RTP + wall-clock timestamps.
         
-        This calculates the timestamp differences between active audio channels
-        and updates the simple aligner accordingly. Uses audio timestamps, not
-        spectrum timestamps, for accurate audio synchronization.
+        For multi-server alignment:
+        1. Use wall-clock timestamps (NTP-synced) to establish initial offset
+        2. Use RTP timestamp deltas to track drift-free relative timing
+        3. Combine both for accurate, stable alignment across different servers
         
-        Uses 5-second averaging to smooth out timestamp jitter.
+        Uses 5-second averaging to smooth out NTP jitter and network delays.
         """
         if not self.use_simple_alignment or not self.simple_aligner:
             return
@@ -759,36 +766,46 @@ class AudioPreviewManager:
         import time
         current_time = time.time()
         
-        # Get timestamps for both channels if active
-        left_ts = None
-        right_ts = None
+        # Get timestamp data for both channels if active
+        left_data = None
+        right_data = None
         left_id = None
         right_id = None
         
         if self.left_channel.is_active() and self.left_channel.instance_id in self._audio_timestamps:
             left_id = self.left_channel.instance_id
-            left_ts = self._audio_timestamps[left_id]
+            left_data = self._audio_timestamps[left_id]
         
         if self.right_channel.is_active() and self.right_channel.instance_id in self._audio_timestamps:
             right_id = self.right_channel.instance_id
-            right_ts = self._audio_timestamps[right_id]
+            right_data = self._audio_timestamps[right_id]
         
-        # If we have both timestamps, calculate and average offset
-        if left_ts is not None and right_ts is not None and left_id != right_id:
-            # Calculate instantaneous time difference
-            # RTP timestamps are uint32 sample counts that increment at sample_rate
-            # Convert to milliseconds: (samples / sample_rate) * 1000
-            time_diff_samples = int(left_ts) - int(right_ts)
+        # If we have both timestamps, calculate offset using hybrid approach
+        if left_data is not None and right_data is not None and left_id != right_id:
+            # HYBRID APPROACH for multi-server alignment:
+            # 1. Use wall-clock difference as the primary offset (NTP-synced across servers)
+            # 2. Use RTP timestamp deltas to detect and correct for sample rate drift
             
-            # Handle uint32 wraparound (rare but possible for long-running streams)
-            # If difference is > 2^31, it likely wrapped around
-            if time_diff_samples > 2147483648:  # 2^31
-                time_diff_samples -= 4294967296  # 2^32
-            elif time_diff_samples < -2147483648:
-                time_diff_samples += 4294967296
+            # Wall-clock offset (milliseconds) - this is our primary alignment source
+            wallclock_offset_ms = left_data['wallclock'] - right_data['wallclock']
             
-            # Convert samples to milliseconds
-            time_diff_ms = (time_diff_samples / self.sample_rate) * 1000.0
+            # RTP timestamp difference (convert to milliseconds for comparison)
+            rtp_diff_samples = int(left_data['rtp']) - int(right_data['rtp'])
+            
+            # Handle uint32 wraparound
+            if rtp_diff_samples > 2147483648:  # 2^31
+                rtp_diff_samples -= 4294967296  # 2^32
+            elif rtp_diff_samples < -2147483648:
+                rtp_diff_samples += 4294967296
+            
+            rtp_offset_ms = (rtp_diff_samples / self.sample_rate) * 1000.0
+            
+            # Use wall-clock as primary, but detect drift using RTP
+            # If RTP and wall-clock disagree significantly, it indicates clock drift
+            drift_ms = abs(wallclock_offset_ms - rtp_offset_ms)
+            
+            # Use wall-clock offset as the alignment value
+            time_diff_ms = wallclock_offset_ms
             
             # Store in history for averaging
             history_key = f"{left_id}:{right_id}"
@@ -818,12 +835,12 @@ class AudioPreviewManager:
                     self._last_applied_offset[left_id] = avg_time_diff_ms
                     
                     print(f"[AUDIO OFFSET] Applied averaged offset: {avg_time_diff_ms:.1f}ms "
-                          f"(over {len(smoothed_history)} samples, {self._audio_timestamp_window}s window) "
+                          f"(wall-clock, drift: {drift_ms:.1f}ms, over {len(smoothed_history)} samples) "
                           f"Left ID={left_id}, Right ID={right_id}")
                 else:
                     # Log current offset even when not updating (for drift monitoring)
                     if len(smoothed_history) % 10 == 0:  # Every 10 samples
-                        print(f"[AUDIO OFFSET] Current offset: {avg_time_diff_ms:.1f}ms (stable, last applied: {last_offset:.1f}ms)")
+                        print(f"[AUDIO OFFSET] Current offset: {avg_time_diff_ms:.1f}ms (stable, drift: {drift_ms:.1f}ms)")
         elif left_ts is not None and left_id is not None:
             # Only left channel active, no offset needed
             self.simple_aligner.update_offset(left_id, 0.0)

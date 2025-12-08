@@ -14,13 +14,20 @@ import uuid
 from typing import Optional
 import numpy as np
 
-# Import timestamp synchronization
+# Import real-time alignment system
+try:
+    from realtime_alignment import ContinuousAlignmentThread, RealtimeAlignmentMetrics
+    REALTIME_ALIGNMENT_AVAILABLE = True
+except ImportError:
+    REALTIME_ALIGNMENT_AVAILABLE = False
+    print("Warning: realtime_alignment module not available, using legacy mode")
+
+# Import timestamp synchronization (for metrics only)
 try:
     from timestamp_sync import AudioAligner, SyncQualityMetrics
     TIMESTAMP_SYNC_AVAILABLE = True
 except ImportError:
     TIMESTAMP_SYNC_AVAILABLE = False
-    print("Warning: timestamp_sync module not available, synchronization disabled")
 
 try:
     import sounddevice as sd
@@ -54,6 +61,7 @@ class AudioChannel:
         self.user_session_id = None  # Will be set from instance's session ID
         self.volume = 1.0  # Volume multiplier (0.0 to 1.0)
         self.mono = False  # If True, output to both speakers
+        self.prebuffering = True  # Start in prebuffering mode
         
     def is_active(self) -> bool:
         """Check if channel is actively streaming."""
@@ -63,7 +71,7 @@ class AudioChannel:
 class AudioPreviewManager:
     """Manages audio preview from up to 2 instances with left/right routing."""
     
-    def __init__(self, sample_rate=12000):
+    def __init__(self, sample_rate=12000, use_realtime_alignment=False):
         self.sample_rate = sample_rate
         self.output_stream = None
         self.left_channel = AudioChannel("left")
@@ -73,18 +81,22 @@ class AudioPreviewManager:
         self.loop_thread = None
         self.is_running = False
         
-        # Timestamp synchronization - DISABLED for audio playback, enabled for metrics only
-        # The periodic alignment approach doesn't work well with continuous audio streaming
-        self.use_timestamp_sync = False
-        if TIMESTAMP_SYNC_AVAILABLE:
-            self.audio_aligner = AudioAligner(
-                buffer_size_ms=1000,
-                alignment_tolerance_ms=100,
-                interpolation_enabled=True
+        # Real-time alignment system - DISABLED by default due to performance issues
+        # The continuous alignment approach still causes lock contention and audio glitches
+        # To enable: AudioPreviewManager(use_realtime_alignment=True)
+        self.use_realtime_alignment = use_realtime_alignment and REALTIME_ALIGNMENT_AVAILABLE
+        if self.use_realtime_alignment:
+            self.alignment_thread = ContinuousAlignmentThread(
+                sample_rate=sample_rate,
+                target_buffer_ms=150  # 150ms buffer
             )
-            print("Audio timestamp synchronization enabled (metrics only)")
+            print("Real-time audio alignment enabled")
         else:
-            self.audio_aligner = None
+            self.alignment_thread = None
+            print("Using legacy audio mode (no alignment)")
+        
+        # Legacy timestamp sync (DISABLED - causes performance issues)
+        self.audio_aligner = None
         
     def start_output_stream(self) -> bool:
         """Start the audio output stream."""
@@ -94,6 +106,11 @@ class AudioPreviewManager:
         
         if self.output_stream is not None:
             return True  # Already running
+        
+        # Start alignment thread if using real-time alignment
+        if self.use_realtime_alignment and self.alignment_thread and not self.alignment_thread.running:
+            self.alignment_thread.start()
+            print("Alignment thread started")
         
         try:
             self.output_stream = sd.OutputStream(
@@ -113,6 +130,11 @@ class AudioPreviewManager:
     
     def stop_output_stream(self):
         """Stop the audio output stream."""
+        # Stop alignment thread first
+        if self.use_realtime_alignment and self.alignment_thread and self.alignment_thread.running:
+            self.alignment_thread.stop()
+            print("Alignment thread stopped")
+        
         if self.output_stream:
             try:
                 self.output_stream.stop()
@@ -126,9 +148,86 @@ class AudioPreviewManager:
     def _audio_callback(self, outdata, frames, time_info, status):
         """Sounddevice callback - mix left and right channels."""
         if status:
+            print(f"[AUDIO_CALLBACK] Status: {status}")
+        
+        if self.use_realtime_alignment and self.alignment_thread:
+            # Real-time alignment mode: read from playback buffer (lock-free)
+            samples = self.alignment_thread.output_buffer.read_samples(frames)
+            
+            # Convert mono to stereo
+            outdata[:, 0] = samples
+            outdata[:, 1] = samples
+        else:
+            # Legacy mode: use direct buffer access with prebuffering
+            MIN_BUFFER_SIZE = self.sample_rate // 2  # 500ms minimum buffer
+            
+            with self.buffer_lock:
+                left_buf_size = len(self.left_channel.buffer)
+                right_buf_size = len(self.right_channel.buffer)
+                
+                # Check if we need to prebuffer
+                left_active = self.left_channel.is_active()
+                right_active = self.right_channel.is_active()
+                
+                # Prebuffer logic for left channel
+                if left_active and self.left_channel.prebuffering:
+                    if left_buf_size >= MIN_BUFFER_SIZE:
+                        self.left_channel.prebuffering = False
+                        print(f"[LEFT] Prebuffering complete, starting playback ({left_buf_size} samples)")
+                
+                # Prebuffer logic for right channel
+                if right_active and self.right_channel.prebuffering:
+                    if right_buf_size >= MIN_BUFFER_SIZE:
+                        self.right_channel.prebuffering = False
+                        print(f"[RIGHT] Prebuffering complete, starting playback ({right_buf_size} samples)")
+                
+                # Get samples (or silence if prebuffering)
+                if left_active and not self.left_channel.prebuffering:
+                    left_samples = self._get_samples(self.left_channel.buffer, frames)
+                    # Re-enter prebuffering if buffer gets too low
+                    if left_buf_size < frames and left_buf_size < MIN_BUFFER_SIZE // 4:
+                        self.left_channel.prebuffering = True
+                        print(f"[LEFT] Buffer underrun, re-entering prebuffer mode ({left_buf_size} samples)")
+                else:
+                    left_samples = np.zeros(frames, dtype=np.int16)
+                
+                if right_active and not self.right_channel.prebuffering:
+                    right_samples = self._get_samples(self.right_channel.buffer, frames)
+                    # Re-enter prebuffering if buffer gets too low
+                    if right_buf_size < frames and right_buf_size < MIN_BUFFER_SIZE // 4:
+                        self.right_channel.prebuffering = True
+                        print(f"[RIGHT] Buffer underrun, re-entering prebuffer mode ({right_buf_size} samples)")
+                else:
+                    right_samples = np.zeros(frames, dtype=np.int16)
+            
+            # Apply volume control
+            left_samples = (left_samples * self.left_channel.volume).astype(np.int16)
+            right_samples = (right_samples * self.right_channel.volume).astype(np.int16)
+            
+            # Handle mono mode independently for each channel
+            # Start with normal stereo routing
+            left_output = left_samples
+            right_output = right_samples
+            
+            # If left channel is in mono, add it to right output
+            if self.left_channel.mono:
+                right_output = ((right_output.astype(np.int32) + left_samples.astype(np.int32)) // 2).astype(np.int16)
+            
+            # If right channel is in mono, add it to left output
+            if self.right_channel.mono:
+                left_output = ((left_output.astype(np.int32) + right_samples.astype(np.int32)) // 2).astype(np.int16)
+            
+            # Output final mixed audio
+            outdata[:, 0] = left_output
+            outdata[:, 1] = right_output
+        
+        return
+
+    def _audio_callback_legacy(self, outdata, frames, time_info, status):
+        """Legacy audio callback implementation."""
+        if status:
             print(f"Audio callback status: {status}")
         
-        # Use legacy buffer mode for continuous audio
         with self.buffer_lock:
             left_samples = self._get_samples(self.left_channel.buffer, frames)
             right_samples = self._get_samples(self.right_channel.buffer, frames)
@@ -242,9 +341,10 @@ class AudioPreviewManager:
                     self.event_loop
                 )
         
-        # Clear buffer
+        # Clear buffer and reset prebuffering
         with self.buffer_lock:
             ch.buffer.clear()
+            ch.prebuffering = True
         
         # Stop output stream if both channels are inactive
         if not self.left_channel.is_active() and not self.right_channel.is_active():
@@ -344,6 +444,9 @@ class AudioPreviewManager:
                 print(f"{ch.channel_name.capitalize()} channel connected")
                 
                 # Receive and process audio messages
+                msg_count = 0
+                last_debug_time = time.time()
+                
                 while ch.running:
                     try:
                         message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
@@ -358,30 +461,64 @@ class AudioPreviewManager:
                                 # Convert to int16 array
                                 audio_array = np.frombuffer(pcm_data, dtype=np.int16)
                                 
-                                # Always add to legacy buffer
-                                with self.buffer_lock:
-                                    ch.buffer.extend(audio_array.tolist())
-                                    # Limit buffer size to prevent memory issues
-                                    if len(ch.buffer) > self.sample_rate * 2:  # 2 seconds max
-                                        ch.buffer = ch.buffer[-self.sample_rate:]
+                                msg_count += 1
                                 
-                                # Also add to timestamp aligner for metrics (not used for playback)
-                                if self.audio_aligner and timestamp:
+                                if self.use_realtime_alignment and self.alignment_thread:
+                                    # Real-time alignment mode: feed alignment thread
+                                    try:
+                                        self.alignment_thread.add_data(ch.instance_id, timestamp, audio_array)
+                                    except Exception as e:
+                                        print(f"[{ch.channel_name.upper()}] Error adding data to alignment thread: {e}")
+                                else:
+                                    # Legacy mode: add to buffer
+                                    with self.buffer_lock:
+                                        old_size = len(ch.buffer)
+                                        ch.buffer.extend(audio_array.tolist())
+                                        new_size = len(ch.buffer)
+                                        
+                                        # Limit buffer size to prevent memory issues
+                                        # Use a more generous limit and gradual trimming
+                                        max_buffer_size = self.sample_rate * 5  # 5 seconds max
+                                        if new_size > max_buffer_size:
+                                            # Trim to 3 seconds instead of aggressive truncation
+                                            trim_to = self.sample_rate * 3
+                                            ch.buffer = ch.buffer[-trim_to:]
+                                            print(f"[{ch.channel_name.upper()}] Buffer trimmed: {new_size} -> {len(ch.buffer)} samples")
+                                        
+                                        # Periodic debug output
+                                        now = time.time()
+                                        if now - last_debug_time >= 5.0:
+                                            print(f"[{ch.channel_name.upper()}] Buffer: {len(ch.buffer)} samples, Messages: {msg_count}, Timestamp: {timestamp}")
+                                            last_debug_time = now
+                                            msg_count = 0
+                                
+                                # Also add to legacy aligner for metrics (only if not using realtime alignment)
+                                if not self.use_realtime_alignment and self.audio_aligner and timestamp:
                                     try:
                                         self.audio_aligner.add_data(ch.instance_id, timestamp, audio_array)
                                     except Exception as e:
-                                        # Don't let sync errors stop audio
                                         pass
                         
                         elif data.get('type') == 'error':
                             error = data.get('error', 'Unknown error')
-                            print(f"{ch.channel_name.capitalize()} channel error: {error}")
+                            print(f"[{ch.channel_name.upper()}] Error from server: {error}")
                             break
                     
                     except asyncio.TimeoutError:
+                        # Debug: Log timeout if we haven't received data in a while
+                        now = time.time()
+                        if now - last_debug_time >= 5.0:
+                            with self.buffer_lock:
+                                print(f"[{ch.channel_name.upper()}] Timeout - Buffer: {len(ch.buffer)} samples")
+                            last_debug_time = now
                         continue
-                    except websockets.exceptions.ConnectionClosed:
-                        print(f"{ch.channel_name.capitalize()} channel connection closed")
+                    except websockets.exceptions.ConnectionClosed as e:
+                        print(f"[{ch.channel_name.upper()}] Connection closed: {e}")
+                        break
+                    except Exception as e:
+                        print(f"[{ch.channel_name.upper()}] Unexpected error: {e}")
+                        import traceback
+                        traceback.print_exc()
                         break
         
         except Exception as e:
@@ -532,13 +669,35 @@ class AudioPreviewManager:
         ch = self.left_channel if channel == 'left' else self.right_channel
         ch.mono = mono
     
-    def get_sync_metrics(self) -> Optional[SyncQualityMetrics]:
+    def get_sync_metrics(self) -> Optional[dict]:
         """
         Get synchronization quality metrics.
         
         Returns:
-            SyncQualityMetrics object or None if sync not available
+            Dict of metrics or None if sync not available
         """
-        if self.use_timestamp_sync and self.audio_aligner:
-            return self.audio_aligner.get_metrics()
+        if self.use_realtime_alignment and self.alignment_thread:
+            try:
+                metrics = self.alignment_thread.get_metrics()
+                return {
+                    'jitter_ms': metrics.timestamp_jitter_ms,
+                    'success_rate': metrics.alignment_success_rate,
+                    'drift_rate': metrics.clock_drift_rate,
+                    'buffer_util': metrics.playback_buffer_utilization,
+                    'underruns': metrics.underrun_count,
+                    'alignment_fps': metrics.alignment_thread_fps
+                }
+            except Exception as e:
+                print(f"Error getting metrics: {e}")
+                return None
+        elif self.audio_aligner:
+            try:
+                metrics = self.audio_aligner.get_metrics()
+                return {
+                    'jitter_ms': metrics.timestamp_jitter_ms,
+                    'success_rate': metrics.alignment_success_rate,
+                    'drift_rate': metrics.clock_drift_rate
+                }
+            except:
+                return None
         return None

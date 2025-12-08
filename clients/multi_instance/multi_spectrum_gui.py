@@ -147,6 +147,8 @@ class MultiSpectrumGUI:
         self.audio_left_volume = tk.DoubleVar(value=1.0)  # 0.0 to 1.0
         self.audio_right_volume = tk.DoubleVar(value=1.0)  # 0.0 to 1.0
         self.audio_left_mono = tk.BooleanVar(value=False)  # Mono mode for left channel
+        self.audio_left_mute = tk.BooleanVar(value=False)  # Mute left channel
+        self.audio_right_mute = tk.BooleanVar(value=False)  # Mute right channel
         self.audio_right_mono = tk.BooleanVar(value=False)  # Mono mode for right channel
         self.audio_preview_active = False
         
@@ -303,6 +305,9 @@ class MultiSpectrumGUI:
                                                  values=["None"], state='readonly', width=18)
             self.audio_left_combo.pack(side=tk.LEFT, padx=(0, 5))
             
+            ttk.Checkbutton(audio_frame, text="Mute", variable=self.audio_left_mute,
+                           command=self._on_left_mute_change).pack(side=tk.LEFT, padx=(0, 5))
+            
             ttk.Checkbutton(audio_frame, text="Mono", variable=self.audio_left_mono,
                            command=self._on_left_mono_change).pack(side=tk.LEFT, padx=(0, 5))
             
@@ -320,6 +325,9 @@ class MultiSpectrumGUI:
             self.audio_right_combo = ttk.Combobox(audio_frame, textvariable=self.audio_right_instance,
                                                   values=["None"], state='readonly', width=18)
             self.audio_right_combo.pack(side=tk.LEFT, padx=(0, 5))
+            
+            ttk.Checkbutton(audio_frame, text="Mute", variable=self.audio_right_mute,
+                           command=self._on_right_mute_change).pack(side=tk.LEFT, padx=(0, 5))
             
             ttk.Checkbutton(audio_frame, text="Mono", variable=self.audio_right_mono,
                            command=self._on_right_mono_change).pack(side=tk.LEFT, padx=(0, 5))
@@ -674,6 +682,28 @@ class MultiSpectrumGUI:
             instance.status_var.set("Error")
     
     def disconnect_instance(self, instance: SpectrumInstance):
+        # Check if this instance is being used for audio preview
+        if self.audio_preview and self.audio_preview_active:
+            instance_name = instance.get_display_name()
+            left_name = self.audio_left_instance.get()
+            right_name = self.audio_right_instance.get()
+            
+            # Stop audio channels using this instance
+            if instance_name == left_name:
+                self.audio_preview.stop_preview('left')
+                print(f"Stopped left audio channel (instance disconnected)")
+            if instance_name == right_name:
+                self.audio_preview.stop_preview('right')
+                print(f"Stopped right audio channel (instance disconnected)")
+            
+            # If both channels stopped, update UI state
+            if not self.audio_preview.left_channel.is_active() and not self.audio_preview.right_channel.is_active():
+                self.audio_preview_active = False
+                self.audio_start_btn.config(text="Start Preview")
+                self.audio_left_combo.config(state='readonly')
+                self.audio_right_combo.config(state='readonly')
+                self._update_spectrum_labels()
+        
         """Disconnect a single instance."""
         if self.instance_manager.disconnect_instance(instance):
             instance.status_var.set("Enabled" if instance.enabled else "Disabled")
@@ -694,6 +724,10 @@ class MultiSpectrumGUI:
         
         if count > 0:
             messagebox.showinfo("Connected", f"Connected {count} instance(s)")
+        # Stop audio preview if active
+        if self.audio_preview and self.audio_preview_active:
+            self._stop_audio_preview()
+        
     
     def disconnect_all(self):
         """Disconnect all instances."""
@@ -792,11 +826,24 @@ class MultiSpectrumGUI:
         self._last_config_save = time.time()
         self._save_config_pending = False
         
-        # Get current frequency in Hz
-        try:
-            freq_hz = self._get_frequency_hz()
-        except:
-            freq_hz = 14100000  # Default if conversion fails
+        # Get current frequency in Hz from first connected instance (most reliable)
+        freq_hz = 14100000  # Default
+        for instance in self.instance_manager.active_instances:
+            if instance.spectrum and instance.connected:
+                freq_hz = int(instance.spectrum.tuned_freq)
+                print(f"[CONFIG SAVE] Got frequency from spectrum: {freq_hz} Hz ({freq_hz/1e6:.6f} MHz)")
+                break
+        
+        # If no connected instances, try to get from input box
+        if freq_hz == 14100000:
+            try:
+                freq_hz = self._get_frequency_hz()
+                print(f"[CONFIG SAVE] Got frequency from input box: {freq_hz} Hz ({freq_hz/1e6:.6f} MHz)")
+            except Exception as e:
+                print(f"[CONFIG SAVE] Failed to get frequency from input box: {e}")
+                pass  # Keep default
+        
+        print(f"[CONFIG SAVE] Saving config with frequency: {freq_hz} Hz ({freq_hz/1e6:.6f} MHz)")
         
         # Get spectrum display zoom settings from first connected instance
         spectrum_center_freq = None
@@ -911,16 +958,16 @@ class MultiSpectrumGUI:
         if self.audio_preview and self.audio_preview_active:
             self.audio_preview.stop_all()
         
-        # Disconnect all instances
-        self.disconnect_all()
-        
-        # Cancel any pending throttled save and do immediate save
+        # Cancel any pending throttled save and do immediate save BEFORE disconnecting
         if self._save_config_pending:
             self.root.after_cancel(self._save_config_pending)
             self._save_config_pending = False
         
-        # Save configuration immediately
+        # Save configuration immediately (while instances are still connected)
         self.save_config()
+        
+        # Disconnect all instances
+        self.disconnect_all()
         
         # Close window
         self.root.destroy()
@@ -1076,8 +1123,8 @@ class MultiSpectrumGUI:
         
         self._syncing = False
         
-        # Save config after zoom change (throttled)
-        self.save_config(throttled=True)
+        # Save config after zoom change (immediate, not throttled)
+        self.save_config(throttled=False)
     
     def _on_frequency_change(self, frequency: float, source_spectrum: SpectrumDisplay):
         """Handle frequency change from click-to-tune.
@@ -1106,8 +1153,9 @@ class MultiSpectrumGUI:
         # Update audio preview if active
         self._update_audio_preview_frequency(int(frequency))
         
-        # Save config after frequency change (throttled)
-        self.save_config(throttled=True)
+        # Save config after frequency change (immediate, not throttled)
+        print(f"[FREQ CHANGE] Frequency changed to {frequency/1e6:.6f} MHz, saving config...")
+        self.save_config(throttled=False)
     
     def _on_frequency_step(self, direction: int, source_spectrum: SpectrumDisplay):
         """Handle frequency step from mouse wheel in pan mode.
@@ -1159,6 +1207,11 @@ class MultiSpectrumGUI:
                     break
         elif source_spectrum and source_spectrum.connected:
             self._update_audio_preview_frequency(int(source_spectrum.tuned_freq))
+        
+        # Save config after frequency step
+        if new_freq is not None:
+            print(f"[FREQ STEP] Saving config after stepping to {new_freq/1e6:.6f} MHz...")
+            self.save_config(throttled=False)
     
     def _sync_pan_from_source(self, source_spectrum: SpectrumDisplay):
         """Synchronize pan state from source to all other displays.
@@ -1187,8 +1240,8 @@ class MultiSpectrumGUI:
         
         self._syncing = False
         
-        # Save config after pan change (throttled)
-        self.save_config(throttled=True)
+        # Save config after pan change (immediate, not throttled)
+        self.save_config(throttled=False)
     
     def _sync_new_instance_zoom(self, new_instance: SpectrumInstance):
         """Synchronize a newly connected instance to match existing instances' zoom level."""
@@ -1425,6 +1478,10 @@ class MultiSpectrumGUI:
             
             # Update audio preview if active
             self._update_audio_preview_frequency(freq_hz)
+            
+            # Save config after applying frequency
+            print(f"[APPLY FREQ] Saving config after applying {freq_hz/1e6:.6f} MHz...")
+            self.save_config(throttled=False)
         except ValueError as e:
             messagebox.showerror("Invalid Frequency", str(e))
 
@@ -1625,6 +1682,12 @@ class MultiSpectrumGUI:
                                       font=('TkDefaultFont', 9, 'bold'))
             diff_snr_label.grid(row=3, column=5, sticky=tk.E, padx=2)
 
+            # Timestamp difference (only shown when comparing)
+            ttk.Label(metrics_frame, text="Time Δ:", width=10, anchor=tk.W).grid(row=4, column=4, sticky=tk.W, padx=(10, 2))
+            diff_timestamp_label = ttk.Label(metrics_frame, text="---", width=10, anchor=tk.E,
+                                            font=('TkDefaultFont', 9))
+            diff_timestamp_label.grid(row=4, column=5, sticky=tk.E, padx=2)
+
             # Store all labels for this instance
             self.signal_level_labels[instance.instance_id] = {
                 'frame': frame,
@@ -1634,7 +1697,8 @@ class MultiSpectrumGUI:
                 'bw_snr': bw_snr_label,
                 'diff_peak': diff_peak_label,
                 'diff_floor': diff_floor_label,
-                'diff_snr': diff_snr_label
+                'diff_snr': diff_snr_label,
+                'diff_timestamp': diff_timestamp_label
             }
 
         # Store the scrollable frame for dynamic updates
@@ -1712,6 +1776,12 @@ class MultiSpectrumGUI:
                                   font=('TkDefaultFont', 9, 'bold'))
         diff_snr_label.grid(row=3, column=5, sticky=tk.E, padx=2)
         
+        # Timestamp difference (only shown when comparing)
+        ttk.Label(metrics_frame, text="Time Δ:", width=10, anchor=tk.W).grid(row=4, column=4, sticky=tk.W, padx=(10, 2))
+        diff_timestamp_label = ttk.Label(metrics_frame, text="---", width=10, anchor=tk.E,
+                                        font=('TkDefaultFont', 9))
+        diff_timestamp_label.grid(row=4, column=5, sticky=tk.E, padx=2)
+        
         # Store all labels for this instance
         self.signal_level_labels[instance.instance_id] = {
             'frame': frame,
@@ -1721,7 +1791,8 @@ class MultiSpectrumGUI:
             'bw_snr': bw_snr_label,
             'diff_peak': diff_peak_label,
             'diff_floor': diff_floor_label,
-            'diff_snr': diff_snr_label
+            'diff_snr': diff_snr_label,
+            'diff_timestamp': diff_timestamp_label
         }
     
     def _remove_instance_from_signal_levels(self, instance: SpectrumInstance):
@@ -2153,6 +2224,45 @@ class MultiSpectrumGUI:
                 labels['diff_peak'].config(text="---", foreground='black')
                 labels['diff_floor'].config(text="---", foreground='black')
                 labels['diff_snr'].config(text="---", foreground='black')
+                labels['diff_timestamp'].config(text="---", foreground='black')
+        
+        # Update timestamp difference for compared instances
+        instance_a = self.instance_manager.get_instance_by_id(instance_a_id)
+        instance_b = self.instance_manager.get_instance_by_id(instance_b_id)
+        
+        if instance_a and instance_b and instance_a.spectrum and instance_b.spectrum:
+            ts_a = instance_a.spectrum.last_spectrum_timestamp
+            ts_b = instance_b.spectrum.last_spectrum_timestamp
+            
+            if ts_a is not None and ts_b is not None:
+                # Calculate time difference in milliseconds
+                time_diff_ms = abs(ts_a - ts_b)
+                
+                # Determine which is ahead
+                if ts_a > ts_b:
+                    # A is ahead (newer)
+                    self.signal_level_labels[instance_a_id]['diff_timestamp'].config(
+                        text=f"+{time_diff_ms:.1f} ms",
+                        foreground='blue'
+                    )
+                    self.signal_level_labels[instance_b_id]['diff_timestamp'].config(
+                        text=f"-{time_diff_ms:.1f} ms",
+                        foreground='orange'
+                    )
+                else:
+                    # B is ahead (newer)
+                    self.signal_level_labels[instance_a_id]['diff_timestamp'].config(
+                        text=f"-{time_diff_ms:.1f} ms",
+                        foreground='orange'
+                    )
+                    self.signal_level_labels[instance_b_id]['diff_timestamp'].config(
+                        text=f"+{time_diff_ms:.1f} ms",
+                        foreground='blue'
+                    )
+            else:
+                # No timestamp data
+                self.signal_level_labels[instance_a_id]['diff_timestamp'].config(text="---", foreground='gray')
+                self.signal_level_labels[instance_b_id]['diff_timestamp'].config(text="---", foreground='gray')
     
     def _update_audio_preview_dropdowns(self):
         """Update the audio preview dropdown values."""
@@ -2381,7 +2491,63 @@ class MultiSpectrumGUI:
     
     def _on_left_volume_change(self, value):
         """Handle left channel volume change."""
+        self.audio_left_volume.set(volume)
+        self.left_volume_label.config(text=f"{int(volume * 100)}%")
+        
+        # Update audio preview if active (only if not muted)
+        if self.audio_preview and self.audio_preview_active:
+            if not self.audio_left_mute.get():
+                self.audio_preview.set_volume('left', volume)
+        
+        # Save config after volume change
+        self.save_config(throttled=True)
+    
+    def _on_right_volume_change(self, value):
+        """Handle right channel volume change."""
         volume = float(value)
+        self.audio_right_volume.set(volume)
+        self.right_volume_label.config(text=f"{int(volume * 100)}%")
+        
+        # Update audio preview if active (only if not muted)
+        if self.audio_preview and self.audio_preview_active:
+            if not self.audio_right_mute.get():
+                self.audio_preview.set_volume('right', volume)
+        
+        # Save config after volume change
+        self.save_config(throttled=True)
+        volume = float(value)
+    
+    def _on_left_mute_change(self):
+        """Handle left channel mute toggle."""
+        muted = self.audio_left_mute.get()
+        
+        # Update audio preview if active
+        if self.audio_preview and self.audio_preview_active:
+            if muted:
+                # Set volume to 0 when muted
+                self.audio_preview.set_volume('left', 0.0)
+            else:
+                # Restore volume when unmuted
+                self.audio_preview.set_volume('left', self.audio_left_volume.get())
+        
+        # Save config after mute change
+        self.save_config(throttled=True)
+    
+    def _on_right_mute_change(self):
+        """Handle right channel mute toggle."""
+        muted = self.audio_right_mute.get()
+        
+        # Update audio preview if active
+        if self.audio_preview and self.audio_preview_active:
+            if muted:
+                # Set volume to 0 when muted
+                self.audio_preview.set_volume('right', 0.0)
+            else:
+                # Restore volume when unmuted
+                self.audio_preview.set_volume('right', self.audio_right_volume.get())
+        
+        # Save config after mute change
+        self.save_config(throttled=True)
         self.audio_left_volume.set(volume)
         self.left_volume_label.config(text=f"{int(volume * 100)}%")
         
@@ -2448,13 +2614,34 @@ class MultiSpectrumGUI:
             if self.audio_preview and self.audio_preview_active:
                 audio_metrics = self.audio_preview.get_sync_metrics()
             
-            if audio_metrics and audio_metrics.total_alignments > 0:
-                status = "✓" if audio_metrics.is_healthy() else "⚠"
-                text = (f"{status} jitter={audio_metrics.timestamp_jitter_ms:.1f}ms, "
-                       f"success={audio_metrics.alignment_success_rate:.0%}, "
-                       f"drift={audio_metrics.clock_drift_rate:.2f}ms/s")
-                color = 'green' if audio_metrics.is_healthy() else 'orange'
-                self.audio_sync_metrics_label.config(text=text, foreground=color)
+            if audio_metrics and isinstance(audio_metrics, dict):
+                # Check if we have meaningful data
+                success_rate = audio_metrics.get('success_rate', 0)
+                if success_rate > 0:
+                    jitter = audio_metrics.get('jitter_ms', 0)
+                    drift = audio_metrics.get('drift_rate', {})
+                    drift_val = list(drift.values())[0] if drift else 0
+                    
+                    # Determine health status
+                    is_healthy = (jitter < 100 and success_rate > 0.90)
+                    status = "✓" if is_healthy else "⚠"
+                    
+                    # Build text with available metrics
+                    text_parts = [f"{status} jitter={jitter:.1f}ms", f"success={success_rate:.0%}"]
+                    if drift_val != 0:
+                        text_parts.append(f"drift={drift_val:.2f}ms/s")
+                    
+                    # Add real-time specific metrics if available
+                    if 'buffer_util' in audio_metrics:
+                        text_parts.append(f"buf={audio_metrics['buffer_util']:.0%}")
+                    if 'alignment_fps' in audio_metrics:
+                        text_parts.append(f"fps={audio_metrics['alignment_fps']:.1f}")
+                    
+                    text = ", ".join(text_parts)
+                    color = 'green' if is_healthy else 'orange'
+                    self.audio_sync_metrics_label.config(text=text, foreground=color)
+                else:
+                    self.audio_sync_metrics_label.config(text="Waiting for data...", foreground='gray')
             else:
                 self.audio_sync_metrics_label.config(text="Waiting for data...", foreground='gray')
         

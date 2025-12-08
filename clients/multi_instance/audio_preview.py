@@ -81,13 +81,18 @@ class AudioPreviewManager:
         self.event_loop = None
         self.loop_thread = None
         self.is_running = False
-        self._audio_timestamps = {}  # instance_id -> {'rtp': rtp_timestamp, 'wallclock': wallclock_ms, 'time': receive_time}
-        self._audio_timestamp_history = {}  # 'left_id:right_id' -> [(time, offset_ms)]
-        self._audio_timestamp_window = 5.0  # 5 second averaging window
+        # Professional RTP-based audio sync system
+        self._audio_timestamps = {}  # instance_id -> {'rtp': rtp_ts, 'wallclock': wc_ms, 'local_time': our_time}
+        self._rtp_reference = {}  # instance_id -> {'initial_rtp': rtp, 'initial_wallclock': wc_ms, 'initial_local': our_time}
+        self._offset_history = {}  # 'left_id:right_id' -> [(time, offset_ms)] for smoothing
         self._last_offset_update = 0  # Last time we updated offsets
-        self._last_applied_offset = {}  # instance_id -> last applied offset
-        self._rtp_to_wallclock_offset = {}  # instance_id -> offset to convert RTP to wallclock time
-        self.manual_offset_ms = 0.0  # Manual offset adjustment for right channel (-100 to +100 ms)
+        self._last_applied_offset = {}  # 'left_id:right_id' -> last applied offset
+        self.manual_offset_ms = 0.0  # Manual offset adjustment for right channel (-500 to +500 ms)
+
+        # Sync quality parameters - tuned to prevent oscillation
+        self._offset_window_sec = 10.0  # 10 second window for heavy smoothing
+        self._min_samples_for_sync = 10  # Minimum samples before applying sync
+        self._offset_change_threshold_ms = 20.0  # Apply changes > 20ms (large dead zone to prevent flip-flopping)
         
         # Real-time alignment system - DISABLED by default due to performance issues
         # The continuous alignment approach still causes lock contention and audio glitches
@@ -363,24 +368,24 @@ class AudioPreviewManager:
             
             # Clear alignment data for this instance
             if ch.instance_id is not None:
-                # Clear timestamp history
+                # Clear timestamp and RTP reference
                 if ch.instance_id in self._audio_timestamps:
                     del self._audio_timestamps[ch.instance_id]
-                
+                if ch.instance_id in self._rtp_reference:
+                    del self._rtp_reference[ch.instance_id]
+
                 # Clear delay buffer in aligner
                 if self.use_simple_alignment and self.simple_aligner:
                     self.simple_aligner.clear_offset(ch.instance_id)
-                
-                # Clear last applied offset
-                if ch.instance_id in self._last_applied_offset:
-                    del self._last_applied_offset[ch.instance_id]
-        
-        # Clear timestamp history for any pair involving this instance
+
+        # Clear offset history for any pair involving this instance
         if ch.instance_id is not None:
-            keys_to_remove = [k for k in self._audio_timestamp_history.keys()
+            keys_to_remove = [k for k in self._offset_history.keys()
                             if str(ch.instance_id) in k.split(':')]
             for key in keys_to_remove:
-                del self._audio_timestamp_history[key]
+                del self._offset_history[key]
+                if key in self._last_applied_offset:
+                    del self._last_applied_offset[key]
         
         # Stop output stream if both channels are inactive
         if not self.left_channel.is_active() and not self.right_channel.is_active():
@@ -394,7 +399,8 @@ class AudioPreviewManager:
         # Clear all alignment state
         with self.buffer_lock:
             self._audio_timestamps.clear()
-            self._audio_timestamp_history.clear()
+            self._rtp_reference.clear()
+            self._offset_history.clear()
             self._last_applied_offset.clear()
             self._last_offset_update = 0
         
@@ -518,17 +524,30 @@ class AudioPreviewManager:
                                     except Exception as e:
                                         print(f"[{ch.channel_name.upper()}] Error adding data to alignment thread: {e}")
                                 else:
-                                    # Legacy mode: add to buffer (with optional simple alignment)
+                                    # Legacy mode: add to buffer (with RTP-based alignment)
                                     with self.buffer_lock:
-                                        # Store both timestamps for hybrid alignment
+                                        # RTP-based sync: use RTP timestamps for drift-free tracking
                                         if rtp_timestamp is not None and wallclock_ms is not None:
+                                            local_time = time.time()
+
+                                            # Store current timestamps
                                             self._audio_timestamps[ch.instance_id] = {
                                                 'rtp': rtp_timestamp,
                                                 'wallclock': wallclock_ms,
-                                                'time': time.time()
+                                                'local_time': local_time
                                             }
-                                            
-                                            # Update offsets frequently (every 200ms) for faster tracking
+
+                                            # Initialize RTP reference point on first packet
+                                            if ch.instance_id not in self._rtp_reference:
+                                                self._rtp_reference[ch.instance_id] = {
+                                                    'initial_rtp': rtp_timestamp,
+                                                    'initial_wallclock': wallclock_ms,
+                                                    'initial_local': local_time
+                                                }
+                                                print(f"[RTP SYNC] Instance {ch.instance_id} reference: RTP={rtp_timestamp}, "
+                                                      f"wallclock={wallclock_ms:.1f}ms")
+
+                                            # Update offsets frequently (every 200ms) for responsive tracking
                                             current_time = time.time()
                                             if current_time - self._last_offset_update >= 0.2:
                                                 self._update_audio_offsets()
@@ -779,105 +798,132 @@ class AudioPreviewManager:
                 print(f"Error getting metrics: {e}")
                 return None
     def _update_audio_offsets(self):
-        """Update audio alignment offsets using hybrid RTP + wall-clock timestamps.
-        
-        For multi-server alignment:
-        1. Use wall-clock timestamps (NTP-synced) to establish initial offset
+        """RTP-based audio synchronization for drift-free alignment.
+
+        Algorithm:
+        1. Use wall-clock timestamps for initial alignment (find starting offset)
         2. Use RTP timestamp deltas to track drift-free relative timing
-        3. Combine both for accurate, stable alignment across different servers
-        
-        Uses 5-second averaging to smooth out NTP jitter and network delays.
+        3. RTP timestamps increment at exact sample rate (12000 Hz) - no clock drift
+        4. Convert RTP delta to time using: time_ms = (rtp_delta / sample_rate) * 1000
+
+        This provides:
+        - Drift-free tracking (RTP counters are sample-accurate)
+        - Initial alignment from wall-clock (handles different RTP starting points)
+        - Continuous adjustment as streams drift apart
         """
         if not self.use_simple_alignment or not self.simple_aligner:
             return
-        
+
         import time
         current_time = time.time()
-        
-        # Get timestamp data for both channels if active
-        left_data = None
-        right_data = None
+
+        # Get data for both channels
         left_id = None
         right_id = None
-        
+        left_data = None
+        right_data = None
+        left_ref = None
+        right_ref = None
+
         if self.left_channel.is_active() and self.left_channel.instance_id in self._audio_timestamps:
             left_id = self.left_channel.instance_id
             left_data = self._audio_timestamps[left_id]
-        
+            left_ref = self._rtp_reference.get(left_id)
+
         if self.right_channel.is_active() and self.right_channel.instance_id in self._audio_timestamps:
             right_id = self.right_channel.instance_id
             right_data = self._audio_timestamps[right_id]
-        
-        # If we have both timestamps, calculate offset using hybrid approach
-        if left_data is not None and right_data is not None and left_id != right_id:
-            # MULTI-SERVER ALIGNMENT using NTP-synced wall-clock timestamps
-            # Note: RTP timestamps cannot be compared across different servers as they
-            # have independent counters that start at different times. Only wall-clock
-            # timestamps (NTP-synced) provide a common time reference.
-            
-            # Only compare timestamps if they were received within 500ms of each other
-            # This prevents comparing very stale data while allowing for network jitter
-            time_diff_receive = abs(left_data['time'] - right_data['time'])
-            if time_diff_receive > 0.5:  # 500ms threshold
-                # Timestamps too far apart, skip this update
-                return
-            
-            # Wall-clock offset (milliseconds) - this is our alignment source
-            # Positive offset means RIGHT is ahead of LEFT, so RIGHT needs to be delayed
-            wallclock_offset_ms = right_data['wallclock'] - left_data['wallclock']
-            
-            # Use wall-clock offset as the alignment value
-            time_diff_ms = wallclock_offset_ms
-            
-            # Store in history for averaging
+            right_ref = self._rtp_reference.get(right_id)
+
+        # Calculate offset using RTP timestamps
+        if (left_data and right_data and left_ref and right_ref and
+            left_id is not None and right_id is not None and left_id != right_id):
+
+            # Calculate elapsed time for each stream using RTP timestamps (drift-free)
+            # RTP is uint32, handle wraparound
+            left_rtp_delta = (left_data['rtp'] - left_ref['initial_rtp']) & 0xFFFFFFFF
+            right_rtp_delta = (right_data['rtp'] - right_ref['initial_rtp']) & 0xFFFFFFFF
+
+            # Convert RTP samples to milliseconds
+            left_elapsed_ms = (left_rtp_delta / self.sample_rate) * 1000.0
+            right_elapsed_ms = (right_rtp_delta / self.sample_rate) * 1000.0
+
+            # Initial offset from wall-clock timestamps (accounts for different RTP starting points)
+            initial_offset_ms = right_ref['initial_wallclock'] - left_ref['initial_wallclock']
+
+            # Current offset = initial offset + RTP drift
+            # If right has played more samples than left, right is ahead
+            rtp_drift_ms = right_elapsed_ms - left_elapsed_ms
+            auto_offset_ms = initial_offset_ms + rtp_drift_ms
+
+            # Store in history for smoothing
             history_key = f"{left_id}:{right_id}"
-            if history_key not in self._audio_timestamp_history:
-                self._audio_timestamp_history[history_key] = []
-            
-            history = self._audio_timestamp_history[history_key]
-            history.append((current_time, time_diff_ms))
-            
-            # Remove old entries outside the 2 second window (faster response)
-            cutoff_time = current_time - 2.0
-            self._audio_timestamp_history[history_key] = [
-                entry for entry in history if entry[0] >= cutoff_time
+            if history_key not in self._offset_history:
+                self._offset_history[history_key] = []
+
+            self._offset_history[history_key].append((current_time, auto_offset_ms))
+
+            # Remove old samples outside window
+            cutoff = current_time - self._offset_window_sec
+            self._offset_history[history_key] = [
+                (t, off) for t, off in self._offset_history[history_key]
+                if t >= cutoff
             ]
-            
-            # Calculate averaged offset if we have enough samples
-            smoothed_history = self._audio_timestamp_history[history_key]
-            if len(smoothed_history) >= 2:  # Need at least 2 samples for stability
-                avg_time_diff_ms = sum(entry[1] for entry in smoothed_history) / len(smoothed_history)
 
-                # Calculate total offset including manual adjustment
-                total_offset = avg_time_diff_ms + self.manual_offset_ms
+            # Calculate smoothed offset using weighted average (heavily favor recent, but smooth)
+            offset_history = self._offset_history[history_key]
+            if len(offset_history) >= self._min_samples_for_sync:
+                # Use weighted average with heavy smoothing to prevent oscillation
+                total_weight = 0.0
+                weighted_sum = 0.0
+                oldest_time = offset_history[0][0]
+                newest_time = offset_history[-1][0]
+                time_range = max(newest_time - oldest_time, 0.001)
 
-                # Apply offset intelligently:
-                # - If total_offset is positive: delay RIGHT (RIGHT is ahead)
-                # - If total_offset is negative: delay LEFT (RIGHT should play earlier)
-                # This allows the manual offset slider to work in both directions
-                if total_offset >= 0:
-                    # Delay RIGHT channel
-                    self.simple_aligner.update_offset(left_id, 0.0)
-                    self.simple_aligner.update_offset(right_id, total_offset)
-                    delayed_channel = "Right"
-                else:
-                    # Delay LEFT channel (advance RIGHT relative to LEFT)
-                    self.simple_aligner.update_offset(left_id, abs(total_offset))
-                    self.simple_aligner.update_offset(right_id, 0.0)
-                    delayed_channel = "Left"
+                for t, off in offset_history:
+                    # Moderate weighting: 0.6 (oldest) to 1.0 (newest)
+                    # This provides smoothing while still tracking drift
+                    age_ratio = (t - oldest_time) / time_range
+                    weight = 0.6 + (0.4 * age_ratio)
+                    weighted_sum += off * weight
+                    total_weight += weight
 
-                # Only log when offset changes significantly
-                last_offset = self._last_applied_offset.get(f"{left_id}:{right_id}", 0.0)
-                if abs(total_offset - last_offset) > 5.0 or last_offset == 0.0:
-                    self._last_applied_offset[f"{left_id}:{right_id}"] = total_offset
-                    manual_str = f" + {self.manual_offset_ms:.1f}ms manual" if self.manual_offset_ms != 0 else ""
-                    print(f"[AUDIO OFFSET] Applied offset: {avg_time_diff_ms:.1f}ms auto{manual_str} = {total_offset:.1f}ms total "
-                          f"(over {len(smoothed_history)} samples) "
-                          f"Delaying {delayed_channel} channel (Left ID={left_id}, Right ID={right_id})")
-        elif left_data is not None and left_id is not None:
+                smoothed_auto_offset_ms = weighted_sum / total_weight if total_weight > 0 else offset_history[-1][1]
+
+                # Add manual offset adjustment
+                total_offset_ms = smoothed_auto_offset_ms + self.manual_offset_ms
+
+                # Apply dead zone: only update if change is significant
+                last_offset = self._last_applied_offset.get(history_key, None)
+                if last_offset is None or abs(total_offset_ms - last_offset) > self._offset_change_threshold_ms:
+
+                    # Apply offset: positive = right ahead, delay right; negative = left ahead, delay left
+                    if total_offset_ms >= 0:
+                        # Right is ahead, delay right
+                        self.simple_aligner.update_offset(left_id, 0.0)
+                        self.simple_aligner.update_offset(right_id, abs(total_offset_ms))
+                        delayed_channel = "Right"
+                    else:
+                        # Left is ahead, delay left
+                        self.simple_aligner.update_offset(left_id, abs(total_offset_ms))
+                        self.simple_aligner.update_offset(right_id, 0.0)
+                        delayed_channel = "Left"
+
+                    # Log the sync adjustment
+                    self._last_applied_offset[history_key] = total_offset_ms
+                    manual_str = f" + {self.manual_offset_ms:+.1f}ms manual" if self.manual_offset_ms != 0 else ""
+
+                    print(f"[RTP SYNC] Left: RTP Δ={left_rtp_delta} ({left_elapsed_ms:.1f}ms), "
+                          f"Right: RTP Δ={right_rtp_delta} ({right_elapsed_ms:.1f}ms)")
+                    print(f"[RTP SYNC] Initial offset: {initial_offset_ms:+.1f}ms, RTP drift: {rtp_drift_ms:+.1f}ms")
+                    print(f"[RTP SYNC] Auto offset: {smoothed_auto_offset_ms:+.1f}ms{manual_str} = "
+                          f"{total_offset_ms:+.1f}ms total -> Delaying {delayed_channel} channel "
+                          f"({len(offset_history)} samples)")
+
+        elif left_id is not None:
             # Only left channel active, no offset needed
             self.simple_aligner.update_offset(left_id, 0.0)
-        elif right_data is not None and right_id is not None:
+        elif right_id is not None:
             # Only right channel active, no offset needed
             self.simple_aligner.update_offset(right_id, 0.0)
     

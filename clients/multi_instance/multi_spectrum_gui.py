@@ -2365,9 +2365,11 @@ class MultiSpectrumGUI:
             self.spectrum_aligner.update_offset(instance_b_id, 0.0)
         
         # Update audio aligner if available
-        if self.audio_preview and hasattr(self.audio_preview, 'simple_aligner'):
-            self.audio_preview.simple_aligner.update_offset(instance_a_id, avg_time_diff_ms)
-            self.audio_preview.simple_aligner.update_offset(instance_b_id, 0.0)
+        # NOTE: Disabled - audio system calculates its own offsets from audio stream timestamps
+        # which are more accurate than spectrum timestamps. Let the audio system handle alignment.
+        # if self.audio_preview and hasattr(self.audio_preview, 'simple_aligner'):
+        #     self.audio_preview.simple_aligner.update_offset(instance_a_id, avg_time_diff_ms)
+        #     self.audio_preview.simple_aligner.update_offset(instance_b_id, 0.0)
     
     def _update_audio_preview_dropdowns(self):
         """Update the audio preview dropdown values."""

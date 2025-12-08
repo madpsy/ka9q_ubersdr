@@ -22,12 +22,13 @@ except ImportError:
     REALTIME_ALIGNMENT_AVAILABLE = False
     print("Warning: realtime_alignment module not available, using legacy mode")
 
-# Import timestamp synchronization (for metrics only)
+# Import simple alignment system
 try:
-    from timestamp_sync import AudioAligner, SyncQualityMetrics
-    TIMESTAMP_SYNC_AVAILABLE = True
+    from simple_alignment import SimpleAudioAligner
+    SIMPLE_ALIGNMENT_AVAILABLE = True
 except ImportError:
-    TIMESTAMP_SYNC_AVAILABLE = False
+    SIMPLE_ALIGNMENT_AVAILABLE = False
+    print("Warning: simple_alignment module not available")
 
 try:
     import sounddevice as sd
@@ -71,7 +72,7 @@ class AudioChannel:
 class AudioPreviewManager:
     """Manages audio preview from up to 2 instances with left/right routing."""
     
-    def __init__(self, sample_rate=12000, use_realtime_alignment=False):
+    def __init__(self, sample_rate=12000, use_realtime_alignment=False, use_simple_alignment=True):
         self.sample_rate = sample_rate
         self.output_stream = None
         self.left_channel = AudioChannel("left")
@@ -80,6 +81,11 @@ class AudioPreviewManager:
         self.event_loop = None
         self.loop_thread = None
         self.is_running = False
+        self._audio_timestamps = {}  # instance_id -> latest audio timestamp
+        self._audio_timestamp_history = {}  # 'left_id:right_id' -> [(time, timestamp_diff_ms)]
+        self._audio_timestamp_window = 10.0  # 10 second averaging window for stability
+        self._last_offset_update = 0  # Last time we updated offsets
+        self._last_applied_offset = {}  # instance_id -> last applied offset (to avoid constant updates)
         
         # Real-time alignment system - DISABLED by default due to performance issues
         # The continuous alignment approach still causes lock contention and audio glitches
@@ -95,8 +101,13 @@ class AudioPreviewManager:
             self.alignment_thread = None
             print("Using legacy audio mode (no alignment)")
         
-        # Legacy timestamp sync (DISABLED - causes performance issues)
-        self.audio_aligner = None
+        # Simple alignment system (uses averaged timestamp offsets from GUI)
+        self.use_simple_alignment = use_simple_alignment and SIMPLE_ALIGNMENT_AVAILABLE and not use_realtime_alignment
+        if self.use_simple_alignment:
+            self.simple_aligner = SimpleAudioAligner(sample_rate=sample_rate)
+            print("Simple audio alignment enabled")
+        else:
+            self.simple_aligner = None
         
     def start_output_stream(self) -> bool:
         """Start the audio output stream."""
@@ -345,6 +356,27 @@ class AudioPreviewManager:
         with self.buffer_lock:
             ch.buffer.clear()
             ch.prebuffering = True
+            
+            # Clear alignment data for this instance
+            if ch.instance_id is not None:
+                # Clear timestamp history
+                if ch.instance_id in self._audio_timestamps:
+                    del self._audio_timestamps[ch.instance_id]
+                
+                # Clear delay buffer in aligner
+                if self.use_simple_alignment and self.simple_aligner:
+                    self.simple_aligner.clear_offset(ch.instance_id)
+                
+                # Clear last applied offset
+                if ch.instance_id in self._last_applied_offset:
+                    del self._last_applied_offset[ch.instance_id]
+        
+        # Clear timestamp history for any pair involving this instance
+        if ch.instance_id is not None:
+            keys_to_remove = [k for k in self._audio_timestamp_history.keys()
+                            if str(ch.instance_id) in k.split(':')]
+            for key in keys_to_remove:
+                del self._audio_timestamp_history[key]
         
         # Stop output stream if both channels are inactive
         if not self.left_channel.is_active() and not self.right_channel.is_active():
@@ -354,6 +386,14 @@ class AudioPreviewManager:
         """Stop all audio preview."""
         self.stop_preview('left')
         self.stop_preview('right')
+        
+        # Clear all alignment state
+        with self.buffer_lock:
+            self._audio_timestamps.clear()
+            self._audio_timestamp_history.clear()
+            self._last_applied_offset.clear()
+            self._last_offset_update = 0
+        
         self._stop_event_loop()
     
     def _start_event_loop(self):
@@ -470,20 +510,36 @@ class AudioPreviewManager:
                                     except Exception as e:
                                         print(f"[{ch.channel_name.upper()}] Error adding data to alignment thread: {e}")
                                 else:
-                                    # Legacy mode: add to buffer
+                                    # Legacy mode: add to buffer (with optional simple alignment)
                                     with self.buffer_lock:
-                                        old_size = len(ch.buffer)
+                                        # Store audio timestamp for offset calculation
+                                        if timestamp is not None:
+                                            self._audio_timestamps[ch.instance_id] = timestamp
+                                            
+                                            # Update offsets less frequently (every 2 seconds) to allow averaging to work
+                                            current_time = time.time()
+                                            if current_time - self._last_offset_update >= 2.0:
+                                                self._update_audio_offsets()
+                                                self._last_offset_update = current_time
+                                        
+                                        # Apply simple alignment if enabled
+                                        if self.use_simple_alignment and self.simple_aligner:
+                                            try:
+                                                audio_array = self.simple_aligner.apply_alignment(ch.instance_id, audio_array)
+                                            except Exception as e:
+                                                print(f"[{ch.channel_name.upper()}] Error applying alignment: {e}")
+                                        
                                         ch.buffer.extend(audio_array.tolist())
                                         new_size = len(ch.buffer)
                                         
-                                        # Limit buffer size to prevent memory issues
-                                        # Use a more generous limit and gradual trimming
-                                        max_buffer_size = self.sample_rate * 5  # 5 seconds max
+                                        # Only limit buffer to prevent memory issues (very generous limit)
+                                        # Don't try to "fix" timing issues with buffer trimming - that causes choppiness
+                                        # Timing alignment should be handled by the alignment system, not buffer management
+                                        max_buffer_size = self.sample_rate * 30  # 30 seconds absolute max (memory safety only)
                                         if new_size > max_buffer_size:
-                                            # Trim to 3 seconds instead of aggressive truncation
-                                            trim_to = self.sample_rate * 3
-                                            ch.buffer = ch.buffer[-trim_to:]
-                                            print(f"[{ch.channel_name.upper()}] Buffer trimmed: {new_size} -> {len(ch.buffer)} samples")
+                                            # Only trim if we hit the absolute memory limit
+                                            ch.buffer = ch.buffer[-max_buffer_size:]
+                                            print(f"[{ch.channel_name.upper()}] Memory safety trim: {new_size} -> {len(ch.buffer)} samples")
                                         
                                         # Periodic debug output
                                         now = time.time()
@@ -491,13 +547,6 @@ class AudioPreviewManager:
                                             print(f"[{ch.channel_name.upper()}] Buffer: {len(ch.buffer)} samples, Messages: {msg_count}, Timestamp: {timestamp}")
                                             last_debug_time = now
                                             msg_count = 0
-                                
-                                # Also add to legacy aligner for metrics (only if not using realtime alignment)
-                                if not self.use_realtime_alignment and self.audio_aligner and timestamp:
-                                    try:
-                                        self.audio_aligner.add_data(ch.instance_id, timestamp, audio_array)
-                                    except Exception as e:
-                                        pass
                         
                         elif data.get('type') == 'error':
                             error = data.get('error', 'Unknown error')
@@ -690,14 +739,87 @@ class AudioPreviewManager:
             except Exception as e:
                 print(f"Error getting metrics: {e}")
                 return None
-        elif self.audio_aligner:
+    def _update_audio_offsets(self):
+        """Update audio alignment offsets based on audio WebSocket timestamps.
+        
+        This calculates the timestamp differences between active audio channels
+        and updates the simple aligner accordingly. Uses audio timestamps, not
+        spectrum timestamps, for accurate audio synchronization.
+        
+        Uses 5-second averaging to smooth out timestamp jitter.
+        """
+        if not self.use_simple_alignment or not self.simple_aligner:
+            return
+        
+        import time
+        current_time = time.time()
+        
+        # Get timestamps for both channels if active
+        left_ts = None
+        right_ts = None
+        left_id = None
+        right_id = None
+        
+        if self.left_channel.is_active() and self.left_channel.instance_id in self._audio_timestamps:
+            left_id = self.left_channel.instance_id
+            left_ts = self._audio_timestamps[left_id]
+        
+        if self.right_channel.is_active() and self.right_channel.instance_id in self._audio_timestamps:
+            right_id = self.right_channel.instance_id
+            right_ts = self._audio_timestamps[right_id]
+        
+        # If we have both timestamps, calculate and average offset
+        if left_ts is not None and right_ts is not None and left_id != right_id:
+            # Calculate instantaneous time difference in milliseconds (left - right)
+            time_diff_ms = left_ts - right_ts
+            
+            # Store in history for averaging
+            history_key = f"{left_id}:{right_id}"
+            if history_key not in self._audio_timestamp_history:
+                self._audio_timestamp_history[history_key] = []
+            
+            history = self._audio_timestamp_history[history_key]
+            history.append((current_time, time_diff_ms))
+            
+            # Remove old entries outside the 10 second window
+            cutoff_time = current_time - self._audio_timestamp_window
+            self._audio_timestamp_history[history_key] = [
+                entry for entry in history if entry[0] >= cutoff_time
+            ]
+            
+            # Calculate averaged offset if we have enough samples
+            smoothed_history = self._audio_timestamp_history[history_key]
+            if len(smoothed_history) >= 10:  # Need at least 10 samples for stability
+                avg_time_diff_ms = sum(entry[1] for entry in smoothed_history) / len(smoothed_history)
+                
+                # Only update if the offset has changed significantly (>10ms) to avoid constant adjustments
+                last_offset = self._last_applied_offset.get(left_id, 0.0)
+                if abs(avg_time_diff_ms - last_offset) > 10.0 or last_offset == 0.0:
+                    # Use right as reference (offset = 0), left gets the averaged difference
+                    self.simple_aligner.update_offset(right_id, 0.0)
+                    self.simple_aligner.update_offset(left_id, avg_time_diff_ms)
+                    self._last_applied_offset[left_id] = avg_time_diff_ms
+                    
+                    print(f"[AUDIO OFFSET] Applied averaged offset: {avg_time_diff_ms:.1f}ms "
+                          f"(over {len(smoothed_history)} samples, {self._audio_timestamp_window}s window) "
+                          f"Left ID={left_id}, Right ID={right_id}")
+        elif left_ts is not None and left_id is not None:
+            # Only left channel active, no offset needed
+            self.simple_aligner.update_offset(left_id, 0.0)
+        elif right_ts is not None and right_id is not None:
+            # Only right channel active, no offset needed
+            self.simple_aligner.update_offset(right_id, 0.0)
+    
+        elif self.use_simple_alignment and self.simple_aligner:
             try:
-                metrics = self.audio_aligner.get_metrics()
+                metrics = self.simple_aligner.get_metrics()
                 return {
-                    'jitter_ms': metrics.timestamp_jitter_ms,
-                    'success_rate': metrics.alignment_success_rate,
-                    'drift_rate': metrics.clock_drift_rate
+                    'offset_updates': metrics.offset_updates,
+                    'active_offsets': len(metrics.active_offsets),
+                    'success_rate': 1.0 if metrics.offset_updates > 0 else 0.0,
+                    'jitter_ms': 0.0  # Simple alignment doesn't track jitter
                 }
-            except:
+            except Exception as e:
+                print(f"Error getting simple alignment metrics: {e}")
                 return None
         return None

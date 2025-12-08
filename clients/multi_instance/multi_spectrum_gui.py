@@ -16,13 +16,13 @@ from config_manager import ConfigManager
 from instance_dialogs import AddInstanceDialog, EditInstanceDialog
 from audio_preview import AudioPreviewManager, SOUNDDEVICE_AVAILABLE, WEBSOCKETS_AVAILABLE
 
-# Import timestamp synchronization
+# Import simple alignment system
 try:
-    from timestamp_sync import SpectrumAligner, SyncQualityMetrics
-    TIMESTAMP_SYNC_AVAILABLE = True
+    from simple_alignment import SimpleSpectrumAligner, SimpleAudioAligner, SimpleAlignmentMetrics
+    SIMPLE_ALIGNMENT_AVAILABLE = True
 except ImportError:
-    TIMESTAMP_SYNC_AVAILABLE = False
-    print("Warning: timestamp_sync module not available")
+    SIMPLE_ALIGNMENT_AVAILABLE = False
+    print("Warning: simple_alignment module not available")
 
 # Import local public_instances_display and local_instances_display (before adding parent to path)
 try:
@@ -125,20 +125,14 @@ class MultiSpectrumGUI:
         self.update_times = {}  # instance_id -> list of recent update timestamps (for frame skipping)
         self.target_update_rate = None  # Slowest rate to throttle to (from server-reported rates)
         
-        # Timestamp synchronization
-        self.use_timestamp_sync = TIMESTAMP_SYNC_AVAILABLE
+        # Simple alignment system (uses averaged timestamp offsets)
+        self.use_simple_alignment = SIMPLE_ALIGNMENT_AVAILABLE
         
-        # Spectrum sync disabled due to performance issues, but audio sync still works
-        self.spectrum_aligner = None
-        
-        # Original spectrum aligner code (disabled):
-        # if self.use_timestamp_sync:
-        #     self.spectrum_aligner = SpectrumAligner(
-        #         buffer_size=20,
-        #         alignment_tolerance_ms=100,
-        #         interpolation_method='linear'
-        #     )
-        #     print("Spectrum timestamp synchronization enabled")
+        if self.use_simple_alignment:
+            self.spectrum_aligner = SimpleSpectrumAligner()
+            print("Simple spectrum alignment enabled")
+        else:
+            self.spectrum_aligner = None
         
         # Sync metrics display
         self.sync_metrics_label = None
@@ -1584,8 +1578,8 @@ class MultiSpectrumGUI:
 
         ttk.Label(compare_frame, text="(A - B, 500ms avg; Time Δ: 5s avg)", font=('TkDefaultFont', 9, 'italic')).pack(side=tk.LEFT, padx=(10, 0))
 
-        # Sync metrics display (if timestamp sync is available)
-        if self.use_timestamp_sync and (self.audio_preview or self.spectrum_aligner):
+        # Sync metrics display (if simple alignment is available)
+        if self.use_simple_alignment and (self.audio_preview or self.spectrum_aligner):
             sync_frame = ttk.Frame(self.signal_levels_window, padding="10")
             sync_frame.pack(fill=tk.X)
             
@@ -2233,6 +2227,9 @@ class MultiSpectrumGUI:
                 labels['diff_snr'].config(text="---", foreground='black')
                 labels['diff_timestamp'].config(text="---", foreground='black')
         
+        # Update alignment system with averaged offsets
+        self._update_alignment_offsets(instance_a_id, instance_b_id)
+        
         # Update timestamp difference for compared instances with averaging
         instance_a = self.instance_manager.get_instance_by_id(instance_a_id)
         instance_b = self.instance_manager.get_instance_by_id(instance_b_id)
@@ -2313,6 +2310,45 @@ class MultiSpectrumGUI:
                 # No timestamp data
                 self.signal_level_labels[instance_a_id]['diff_timestamp'].config(text="---", foreground='gray')
                 self.signal_level_labels[instance_b_id]['diff_timestamp'].config(text="---", foreground='gray')
+    
+    def _update_alignment_offsets(self, instance_a_id: int, instance_b_id: int):
+        """Update the simple alignment system with averaged timestamp offsets.
+        
+        Args:
+            instance_a_id: First instance ID
+            instance_b_id: Second instance ID
+        """
+        if not self.use_simple_alignment:
+            return
+        
+        import time
+        current_time = time.time()
+        
+        # Get the averaged timestamp difference from history
+        ts_diff_key = f"{instance_a_id}:{instance_b_id}"
+        
+        if ts_diff_key not in self.comparison_timestamp_history:
+            return
+        
+        ts_history = self.comparison_timestamp_history[ts_diff_key]
+        
+        if len(ts_history) < 3:  # Need at least 3 samples for stability
+            return
+        
+        # Calculate averaged timestamp difference over the 5 second window
+        avg_time_diff_ms = sum(entry[1] for entry in ts_history) / len(ts_history)
+        
+        # Update spectrum aligner if available
+        if self.spectrum_aligner:
+            # Use instance B as reference (offset = 0)
+            # Instance A's offset is the difference
+            self.spectrum_aligner.update_offset(instance_a_id, avg_time_diff_ms)
+            self.spectrum_aligner.update_offset(instance_b_id, 0.0)
+        
+        # Update audio aligner if available
+        if self.audio_preview and hasattr(self.audio_preview, 'simple_aligner'):
+            self.audio_preview.simple_aligner.update_offset(instance_a_id, avg_time_diff_ms)
+            self.audio_preview.simple_aligner.update_offset(instance_b_id, 0.0)
     
     def _update_audio_preview_dropdowns(self):
         """Update the audio preview dropdown values."""
@@ -2695,34 +2731,22 @@ class MultiSpectrumGUI:
             else:
                 self.audio_sync_metrics_label.config(text="Waiting for data...", foreground='gray')
         
-        # Update spectrum sync metrics
+        # Update spectrum sync metrics (simple alignment)
         if self.spectrum_sync_metrics_label:
-            spectrum_metrics = None
             if self.spectrum_aligner:
                 try:
-                    # Trigger an alignment to generate metrics (if we have multiple instances)
-                    active_instance_ids = [inst.instance_id for inst in self.instance_manager.active_instances
-                                          if inst.spectrum and inst.connected]
-                    if len(active_instance_ids) >= 2:
-                        # Try to get aligned spectra to generate metrics
-                        target_ts = current_time * 1000  # Current time in ms
-                        self.spectrum_aligner.get_aligned_spectra(target_ts, active_instance_ids)
-                    
                     spectrum_metrics = self.spectrum_aligner.get_metrics()
+                    if spectrum_metrics.offset_updates > 0:
+                        text = str(spectrum_metrics)
+                        color = 'green'
+                        self.spectrum_sync_metrics_label.config(text=text, foreground=color)
+                    else:
+                        self.spectrum_sync_metrics_label.config(text="Waiting for data...", foreground='gray')
                 except Exception as e:
-                    # Don't let sync errors block metrics display
                     print(f"Spectrum sync error: {e}")
-                    spectrum_metrics = None
-            
-            if spectrum_metrics and spectrum_metrics.total_alignments > 0:
-                status = "✓" if spectrum_metrics.is_healthy() else "⚠"
-                text = (f"{status} jitter={spectrum_metrics.timestamp_jitter_ms:.1f}ms, "
-                       f"success={spectrum_metrics.alignment_success_rate:.0%}, "
-                       f"drift={spectrum_metrics.clock_drift_rate:.2f}ms/s")
-                color = 'green' if spectrum_metrics.is_healthy() else 'orange'
-                self.spectrum_sync_metrics_label.config(text=text, foreground=color)
+                    self.spectrum_sync_metrics_label.config(text="Error", foreground='red')
             else:
-                self.spectrum_sync_metrics_label.config(text="Waiting for data...", foreground='gray')
+                self.spectrum_sync_metrics_label.config(text="Not available", foreground='gray')
         
         # Schedule next update
         self.root.after(100, self._update_sync_metrics)

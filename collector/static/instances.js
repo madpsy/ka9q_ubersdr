@@ -442,7 +442,7 @@ function updateMap(instances) {
             : `${Math.floor(instance.max_session_time / 60)} minute limit`;
         
         const popupContent = `
-            <div style="font-family: sans-serif; min-width: 300px;">
+            <div style="font-family: sans-serif; min-width: 300px; padding: 0;">
                 <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">${instance.callsign}</h3>
                 <div style="display: flex; gap: 15px; align-items: flex-start;">
                     <div style="flex: 1;">

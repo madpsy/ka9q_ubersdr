@@ -73,21 +73,18 @@ class AudioPreviewManager:
         self.loop_thread = None
         self.is_running = False
         
-        # Timestamp synchronization - DISABLED due to audio quality issues
+        # Timestamp synchronization - DISABLED for audio playback, enabled for metrics only
+        # The periodic alignment approach doesn't work well with continuous audio streaming
         self.use_timestamp_sync = False
-        self.audio_aligner = None
-        
-        # Original code (disabled):
-        # self.use_timestamp_sync = TIMESTAMP_SYNC_AVAILABLE
-        # if self.use_timestamp_sync:
-        #     self.audio_aligner = AudioAligner(
-        #         buffer_size_ms=150,
-        #         alignment_tolerance_ms=50,
-        #         interpolation_enabled=True
-        #     )
-        #     print("Audio timestamp synchronization enabled")
-        # else:
-        #     self.audio_aligner = None
+        if TIMESTAMP_SYNC_AVAILABLE:
+            self.audio_aligner = AudioAligner(
+                buffer_size_ms=1000,
+                alignment_tolerance_ms=100,
+                interpolation_enabled=True
+            )
+            print("Audio timestamp synchronization enabled (metrics only)")
+        else:
+            self.audio_aligner = None
         
     def start_output_stream(self) -> bool:
         """Start the audio output stream."""
@@ -131,43 +128,10 @@ class AudioPreviewManager:
         if status:
             print(f"Audio callback status: {status}")
         
-        # Use timestamp-based alignment if available
-        if self.use_timestamp_sync and self.audio_aligner:
-            try:
-                # Calculate target timestamp (current time - buffer delay)
-                target_ts = time.time() * 1000 - 100  # 100ms buffer delay
-                
-                # Get aligned samples from both channels
-                instance_ids = []
-                if self.left_channel.is_active():
-                    instance_ids.append(self.left_channel.instance_id)
-                if self.right_channel.is_active():
-                    instance_ids.append(self.right_channel.instance_id)
-                
-                if instance_ids:
-                    aligned = self.audio_aligner.get_aligned_samples(target_ts, frames, instance_ids)
-                    
-                    if aligned:
-                        left_samples = aligned.get(self.left_channel.instance_id, np.zeros(frames, dtype=np.int16))
-                        right_samples = aligned.get(self.right_channel.instance_id, np.zeros(frames, dtype=np.int16))
-                    else:
-                        # No aligned data available, fall back to legacy mode
-                        with self.buffer_lock:
-                            left_samples = self._get_samples(self.left_channel.buffer, frames)
-                            right_samples = self._get_samples(self.right_channel.buffer, frames)
-                else:
-                    left_samples = np.zeros(frames, dtype=np.int16)
-                    right_samples = np.zeros(frames, dtype=np.int16)
-            except Exception as e:
-                # If sync fails, fall back to legacy mode
-                with self.buffer_lock:
-                    left_samples = self._get_samples(self.left_channel.buffer, frames)
-                    right_samples = self._get_samples(self.right_channel.buffer, frames)
-        else:
-            # Legacy mode: use direct buffer access (no timestamp sync)
-            with self.buffer_lock:
-                left_samples = self._get_samples(self.left_channel.buffer, frames)
-                right_samples = self._get_samples(self.right_channel.buffer, frames)
+        # Use legacy buffer mode for continuous audio
+        with self.buffer_lock:
+            left_samples = self._get_samples(self.left_channel.buffer, frames)
+            right_samples = self._get_samples(self.right_channel.buffer, frames)
         
         # Apply volume control
         left_samples = (left_samples * self.left_channel.volume).astype(np.int16)
@@ -189,6 +153,7 @@ class AudioPreviewManager:
         # Output final mixed audio
         outdata[:, 0] = left_output
         outdata[:, 1] = right_output
+    
     
     def _get_samples(self, buffer, frames) -> np.ndarray:
         """Extract samples from buffer, pad with zeros if needed."""
@@ -393,15 +358,15 @@ class AudioPreviewManager:
                                 # Convert to int16 array
                                 audio_array = np.frombuffer(pcm_data, dtype=np.int16)
                                 
-                                # Always add to legacy buffer as fallback
+                                # Always add to legacy buffer
                                 with self.buffer_lock:
                                     ch.buffer.extend(audio_array.tolist())
                                     # Limit buffer size to prevent memory issues
                                     if len(ch.buffer) > self.sample_rate * 2:  # 2 seconds max
                                         ch.buffer = ch.buffer[-self.sample_rate:]
                                 
-                                # Also add to timestamp sync if available
-                                if self.use_timestamp_sync and self.audio_aligner and timestamp:
+                                # Also add to timestamp aligner for metrics (not used for playback)
+                                if self.audio_aligner and timestamp:
                                     try:
                                         self.audio_aligner.add_data(ch.instance_id, timestamp, audio_array)
                                     except Exception as e:

@@ -481,16 +481,27 @@ function updateMap(instances) {
                     </div>
                 </div>
                 
-                <a href="${instance.public_url}" target="_blank" style="
-                    display: inline-block;
-                    margin-top: 8px;
-                    padding: 6px 12px;
-                    background: #3b82f6;
-                    color: white;
-                    text-decoration: none;
-                    border-radius: 4px;
-                    font-size: 0.85em;
-                ">Connect</a>
+                <div style="display: flex; gap: 8px; margin-top: 8px;">
+                    <a href="${instance.public_url}" target="_blank" style="
+                        display: inline-block;
+                        padding: 6px 12px;
+                        background: #3b82f6;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 4px;
+                        font-size: 0.85em;
+                    ">Connect</a>
+                    <button onclick="navigator.clipboard.writeText('${instance.id || ''}').then(() => { this.textContent = '✓ Copied!'; setTimeout(() => { this.textContent = 'UUID'; }, 2000); }).catch(() => { this.textContent = '✗ Failed'; setTimeout(() => { this.textContent = 'UUID'; }, 2000); }); event.stopPropagation();" style="
+                        padding: 6px 12px;
+                        background: #8b5cf6;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        font-size: 0.85em;
+                        cursor: pointer;
+                        font-weight: 500;
+                    ">UUID</button>
+                </div>
             </div>
         `;
         

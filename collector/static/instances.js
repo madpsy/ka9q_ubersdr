@@ -427,15 +427,54 @@ function updateMap(instances) {
         
         const marker = L.marker([lat, lon], { icon: customIcon }).addTo(map);
         
-        // Create popup content
+        // Create popup content with two columns
+        const features = [];
+        if (instance.cw_skimmer) features.push('CW Skimmer');
+        if (instance.digital_decodes) features.push('Digital');
+        if (instance.noise_floor) features.push('Noise Floor');
+        
+        const bandwidths = instance.public_iq_modes && instance.public_iq_modes.length > 0
+            ? instance.public_iq_modes.map(mode => mode.replace('iq', '') + ' kHz').join(', ')
+            : 'None';
+        
+        const sessionLimit = instance.max_session_time === 0
+            ? 'Unlimited'
+            : `${Math.floor(instance.max_session_time / 60)} minute limit`;
+        
         const popupContent = `
-            <div style="font-family: sans-serif; min-width: 200px;">
+            <div style="font-family: sans-serif; min-width: 300px;">
                 <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">${instance.callsign}</h3>
                 <p style="margin: 0 0 4px 0; font-size: 0.9em;">${instance.name}</p>
-                <p style="margin: 0; font-size: 0.85em; color: #666;">${instance.location}</p>
-                <p style="margin: 8px 0 0 0; font-size: 0.85em;">
-                    <strong>Status:</strong> <span style="color: ${isOnline ? 'green' : 'red'};">${isOnline ? 'Online' : 'Offline'}</span>
-                </p>
+                <p style="margin: 0 0 8px 0; font-size: 0.85em; color: #666;">${instance.location}</p>
+                
+                <div style="display: flex; gap: 15px; margin-bottom: 8px;">
+                    <div style="flex: 1;">
+                        <p style="margin: 0 0 4px 0; font-size: 0.85em;">
+                            <strong>Status:</strong> <span style="color: ${isOnline ? 'green' : 'red'};">${isOnline ? 'Online' : 'Offline'}</span>
+                        </p>
+                        <p style="margin: 0 0 4px 0; font-size: 0.85em;">
+                            <strong>Clients:</strong> ${instance.available_clients}/${instance.max_clients}
+                        </p>
+                    </div>
+                    <div style="flex: 1; border-left: 1px solid #ddd; padding-left: 10px;">
+                        ${features.length > 0 ? features.map(f =>
+                            `<span style="display: inline-block; padding: 2px 6px; background: #3b82f6; color: white; border-radius: 3px; font-size: 0.7em; margin: 2px;">${f}</span>`
+                        ).join('') : '<span style="font-size: 0.75em; color: #999;">No features</span>'}
+                        <div style="margin-top: 4px;">
+                            ${instance.public_iq_modes && instance.public_iq_modes.length > 0
+                                ? instance.public_iq_modes.map(mode => {
+                                    const bandwidth = mode.replace('iq', '');
+                                    return `<span style="display: inline-block; padding: 2px 6px; background: #10b981; color: white; border-radius: 3px; font-size: 0.7em; margin: 2px;">${bandwidth} kHz</span>`;
+                                }).join('')
+                                : '<span style="font-size: 0.75em; color: #999;">No bandwidths</span>'
+                            }
+                        </div>
+                        <div style="margin-top: 4px; font-size: 0.75em; color: #666;">
+                            ${sessionLimit}
+                        </div>
+                    </div>
+                </div>
+                
                 <a href="${instance.public_url}" target="_blank" style="
                     display: inline-block;
                     margin-top: 8px;

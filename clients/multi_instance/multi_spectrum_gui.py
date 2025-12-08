@@ -340,6 +340,18 @@ class MultiSpectrumGUI:
                                            command=self._on_right_volume_change)
             right_volume_slider.pack(side=tk.LEFT, padx=(0, 15))
             
+            # Manual offset control
+            ttk.Separator(audio_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
+            ttk.Label(audio_frame, text="Right Delay:").pack(side=tk.LEFT, padx=(0, 5))
+            self.manual_offset_var = tk.IntVar(value=0)
+            self.manual_offset_label = ttk.Label(audio_frame, text="0 ms", width=6)
+            self.manual_offset_label.pack(side=tk.LEFT, padx=(0, 5))
+            manual_offset_slider = ttk.Scale(audio_frame, from_=-100, to=100,
+                                            variable=self.manual_offset_var,
+                                            orient=tk.HORIZONTAL, length=150,
+                                            command=self._on_manual_offset_change)
+            manual_offset_slider.pack(side=tk.LEFT, padx=(0, 15))
+            
             # Start/Stop button
             self.audio_start_btn = ttk.Button(audio_frame, text="Start Preview", width=12,
                                              command=self._toggle_audio_preview)
@@ -869,7 +881,8 @@ class MultiSpectrumGUI:
             self.compare_instance_a.get(),
             self.compare_instance_b.get(),
             spectrum_center_freq,
-            spectrum_bandwidth
+            spectrum_bandwidth,
+            self.manual_offset_var.get() if hasattr(self, 'manual_offset_var') else 0
         )
     
     def load_config(self):
@@ -899,6 +912,12 @@ class MultiSpectrumGUI:
         self.audio_right_volume.set(audio_preview.get('right_volume', 1.0))
         self.audio_left_mono.set(audio_preview.get('left_mono', False))
         self.audio_right_mono.set(audio_preview.get('right_mono', False))
+        
+        # Load manual offset if available
+        manual_offset = audio_preview.get('manual_offset', 0)
+        if hasattr(self, 'manual_offset_var'):
+            self.manual_offset_var.set(manual_offset)
+            self.manual_offset_label.config(text=f"{manual_offset:+d} ms")
         
         # Update volume labels
         self.left_volume_label.config(text=f"{int(self.audio_left_volume.get() * 100)}%")
@@ -2677,6 +2696,20 @@ class MultiSpectrumGUI:
             self.audio_preview.set_mono('right', mono)
         
         # Save config after mono change
+        self.save_config(throttled=True)
+    
+    def _on_manual_offset_change(self, value):
+        """Handle manual offset slider change."""
+        offset_ms = int(float(value))
+        self.manual_offset_var.set(offset_ms)
+        self.manual_offset_label.config(text=f"{offset_ms:+d} ms")
+        
+        # Update audio preview if active
+        if self.audio_preview and self.audio_preview_active:
+            self.audio_preview.set_manual_offset(offset_ms)
+            print(f"Manual offset set to {offset_ms:+d} ms")
+        
+        # Save config after offset change
         self.save_config(throttled=True)
     
     def _update_sync_metrics(self):

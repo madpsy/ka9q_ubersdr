@@ -87,6 +87,7 @@ class AudioPreviewManager:
         self._last_offset_update = 0  # Last time we updated offsets
         self._last_applied_offset = {}  # instance_id -> last applied offset
         self._rtp_to_wallclock_offset = {}  # instance_id -> offset to convert RTP to wallclock time
+        self.manual_offset_ms = 0.0  # Manual offset adjustment for right channel (-100 to +100 ms)
         
         # Real-time alignment system - DISABLED by default due to performance issues
         # The continuous alignment approach still causes lock contention and audio glitches
@@ -525,9 +526,9 @@ class AudioPreviewManager:
                                                 'time': time.time()
                                             }
                                             
-                                            # Update offsets every second to allow averaging to work
+                                            # Update offsets frequently (every 200ms) for faster tracking
                                             current_time = time.time()
-                                            if current_time - self._last_offset_update >= 1.0:
+                                            if current_time - self._last_offset_update >= 0.2:
                                                 self._update_audio_offsets()
                                                 self._last_offset_update = current_time
                                         
@@ -729,6 +730,31 @@ class AudioPreviewManager:
         ch = self.left_channel if channel == 'left' else self.right_channel
         ch.mono = mono
     
+    def set_manual_offset(self, offset_ms: float):
+        """Set manual offset adjustment for right channel.
+        
+        Args:
+            offset_ms: Offset in milliseconds (-100 to +100)
+                      Positive = delay right channel
+                      Negative = delay left channel (advance right)
+        """
+        # Clamp to valid range
+        self.manual_offset_ms = max(-100.0, min(100.0, offset_ms))
+        
+        # Force immediate offset update
+        if self.use_simple_alignment and self.simple_aligner:
+            self._update_audio_offsets()
+        
+        print(f"[MANUAL OFFSET] Set to {self.manual_offset_ms:.1f}ms")
+    
+    def get_manual_offset(self) -> float:
+        """Get current manual offset setting.
+        
+        Returns:
+            Current manual offset in milliseconds
+        """
+        return self.manual_offset_ms
+    
     def get_sync_metrics(self) -> Optional[dict]:
         """
         Get synchronization quality metrics.
@@ -782,27 +808,21 @@ class AudioPreviewManager:
         
         # If we have both timestamps, calculate offset using hybrid approach
         if left_data is not None and right_data is not None and left_id != right_id:
-            # HYBRID APPROACH for multi-server alignment:
-            # 1. Use wall-clock difference as the primary offset (NTP-synced across servers)
-            # 2. Use RTP timestamp deltas to detect and correct for sample rate drift
+            # MULTI-SERVER ALIGNMENT using NTP-synced wall-clock timestamps
+            # Note: RTP timestamps cannot be compared across different servers as they
+            # have independent counters that start at different times. Only wall-clock
+            # timestamps (NTP-synced) provide a common time reference.
             
-            # Wall-clock offset (milliseconds) - this is our primary alignment source
-            wallclock_offset_ms = left_data['wallclock'] - right_data['wallclock']
+            # Only compare timestamps if they were received within 500ms of each other
+            # This prevents comparing very stale data while allowing for network jitter
+            time_diff_receive = abs(left_data['time'] - right_data['time'])
+            if time_diff_receive > 0.5:  # 500ms threshold
+                # Timestamps too far apart, skip this update
+                return
             
-            # RTP timestamp difference (convert to milliseconds for comparison)
-            rtp_diff_samples = int(left_data['rtp']) - int(right_data['rtp'])
-            
-            # Handle uint32 wraparound
-            if rtp_diff_samples > 2147483648:  # 2^31
-                rtp_diff_samples -= 4294967296  # 2^32
-            elif rtp_diff_samples < -2147483648:
-                rtp_diff_samples += 4294967296
-            
-            rtp_offset_ms = (rtp_diff_samples / self.sample_rate) * 1000.0
-            
-            # Use wall-clock as primary, but detect drift using RTP
-            # If RTP and wall-clock disagree significantly, it indicates clock drift
-            drift_ms = abs(wallclock_offset_ms - rtp_offset_ms)
+            # Wall-clock offset (milliseconds) - this is our alignment source
+            # Positive offset means RIGHT is ahead of LEFT, so RIGHT needs to be delayed
+            wallclock_offset_ms = right_data['wallclock'] - left_data['wallclock']
             
             # Use wall-clock offset as the alignment value
             time_diff_ms = wallclock_offset_ms
@@ -815,32 +835,32 @@ class AudioPreviewManager:
             history = self._audio_timestamp_history[history_key]
             history.append((current_time, time_diff_ms))
             
-            # Remove old entries outside the 10 second window
-            cutoff_time = current_time - self._audio_timestamp_window
+            # Remove old entries outside the 2 second window (faster response)
+            cutoff_time = current_time - 2.0
             self._audio_timestamp_history[history_key] = [
                 entry for entry in history if entry[0] >= cutoff_time
             ]
             
             # Calculate averaged offset if we have enough samples
             smoothed_history = self._audio_timestamp_history[history_key]
-            if len(smoothed_history) >= 3:  # Need at least 3 samples for stability
+            if len(smoothed_history) >= 2:  # Need at least 2 samples for stability
                 avg_time_diff_ms = sum(entry[1] for entry in smoothed_history) / len(smoothed_history)
                 
-                # Update offset continuously to track drift (reduced threshold from 20ms to 10ms)
-                last_offset = self._last_applied_offset.get(left_id, 0.0)
-                if abs(avg_time_diff_ms - last_offset) > 10.0 or last_offset == 0.0:
-                    # Use right as reference (offset = 0), left gets the averaged difference
-                    self.simple_aligner.update_offset(right_id, 0.0)
-                    self.simple_aligner.update_offset(left_id, avg_time_diff_ms)
-                    self._last_applied_offset[left_id] = avg_time_diff_ms
-                    
-                    print(f"[AUDIO OFFSET] Applied averaged offset: {avg_time_diff_ms:.1f}ms "
-                          f"(wall-clock, drift: {drift_ms:.1f}ms, over {len(smoothed_history)} samples) "
-                          f"Left ID={left_id}, Right ID={right_id}")
-                else:
-                    # Log current offset even when not updating (for drift monitoring)
-                    if len(smoothed_history) % 10 == 0:  # Every 10 samples
-                        print(f"[AUDIO OFFSET] Current offset: {avg_time_diff_ms:.1f}ms (stable, drift: {drift_ms:.1f}ms)")
+                # Always update both offsets to prevent stale state
+                # Use LEFT as reference (offset = 0), RIGHT gets the averaged difference + manual offset
+                # Positive offset means RIGHT is ahead and needs to be delayed
+                total_right_offset = avg_time_diff_ms + self.manual_offset_ms
+                self.simple_aligner.update_offset(left_id, 0.0)
+                self.simple_aligner.update_offset(right_id, total_right_offset)
+                
+                # Only log when offset changes significantly
+                last_offset = self._last_applied_offset.get(right_id, 0.0)
+                if abs(total_right_offset - last_offset) > 5.0 or last_offset == 0.0:
+                    self._last_applied_offset[right_id] = total_right_offset
+                    manual_str = f" + {self.manual_offset_ms:.1f}ms manual" if self.manual_offset_ms != 0 else ""
+                    print(f"[AUDIO OFFSET] Applied offset: {avg_time_diff_ms:.1f}ms auto{manual_str} = {total_right_offset:.1f}ms total "
+                          f"(over {len(smoothed_history)} samples) "
+                          f"Left ID={left_id} (ref), Right ID={right_id} (delayed)")
         elif left_data is not None and left_id is not None:
             # Only left channel active, no offset needed
             self.simple_aligner.update_offset(left_id, 0.0)

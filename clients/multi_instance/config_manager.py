@@ -33,7 +33,8 @@ class ConfigManager:
                    audio_left_volume: float = 1.0, audio_right_volume: float = 1.0,
                    audio_left_mono: bool = False, audio_right_mono: bool = False,
                    compare_instance_a: str = "None", compare_instance_b: str = "None",
-                   spectrum_center_freq: float = None, spectrum_bandwidth: float = None) -> bool:
+                   spectrum_center_freq: float = None, spectrum_bandwidth: float = None,
+                   manual_offset: int = 0) -> bool:
         """Save instances and settings to configuration file."""
         try:
             config = {
@@ -50,7 +51,8 @@ class ConfigManager:
                         'left_volume': audio_left_volume,
                         'right_volume': audio_right_volume,
                         'left_mono': audio_left_mono,
-                        'right_mono': audio_right_mono
+                        'right_mono': audio_right_mono,
+                        'manual_offset': manual_offset
                     },
                     'comparison': {
                         'instance_a': compare_instance_a,
@@ -94,7 +96,8 @@ class ConfigManager:
                 'left_volume': 1.0,
                 'right_volume': 1.0,
                 'left_mono': False,
-                'right_mono': False
+                'right_mono': False,
+                'manual_offset': 0
             },
             'comparison': {
                 'instance_a': 'None',
@@ -140,6 +143,7 @@ class ConfigManager:
                 audio_preview.setdefault('right_volume', 1.0)
                 audio_preview.setdefault('left_mono', False)
                 audio_preview.setdefault('right_mono', False)
+                audio_preview.setdefault('manual_offset', 0)
             
             # Load comparison settings with defaults
             if 'comparison' not in settings:

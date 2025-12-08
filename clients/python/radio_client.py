@@ -268,7 +268,7 @@ class RadioClient:
                  audio_filter_enabled: bool = False, audio_filter_low: float = 300.0,
                  audio_filter_high: float = 2700.0, pyaudio_device_index: Optional[int] = None,
                  sounddevice_device_index: Optional[int] = None, udp_host: Optional[str] = None,
-                 udp_port: Optional[int] = None):
+                 udp_port: Optional[int] = None, output_channels: Optional[int] = None):
         self.url = url
         self.host = host
         self.port = port
@@ -312,6 +312,18 @@ class RadioClient:
             self.channels = 2
         else:
             self.channels = 1
+
+        # Output channels: number of channels to output (can differ from input channels)
+        # Default: 1 for stdout/udp (for compatibility), 2 for other outputs (for left/right control)
+        # Can be overridden with output_channels parameter
+        if output_channels is not None:
+            self.output_channels = output_channels
+        elif output_mode in ('stdout', 'udp'):
+            # Default to 1 channel for stdout/udp for better compatibility
+            self.output_channels = 1
+        else:
+            # Default to 2 channels for audio devices to support left/right channel control
+            self.output_channels = 2
 
         self.wav_writer = None
         self.pipewire_process = None
@@ -612,8 +624,8 @@ class RadioClient:
     async def setup_pipewire(self):
         """Start PipeWire playback process."""
         try:
-            # Always output as stereo to support left/right channel control
-            output_channels = 2
+            # Use configured output channels
+            output_channels = self.output_channels
 
             # Use pw-play for PipeWire audio output
             self.pipewire_process = await asyncio.create_subprocess_exec(
@@ -641,8 +653,8 @@ class RadioClient:
             sys.exit(1)
 
         try:
-            # Always output as stereo to support left/right channel control
-            output_channels = 2
+            # Use configured output channels
+            output_channels = self.output_channels
 
             self.pyaudio_instance = pyaudio.PyAudio()
 
@@ -691,8 +703,8 @@ class RadioClient:
             sys.exit(1)
 
         try:
-            # Always output as stereo to support left/right channel control
-            output_channels = 2
+            # Use configured output channels
+            output_channels = self.output_channels
 
             # Use 48 kHz for better hardware compatibility across all platforms
             # Most audio hardware doesn't support 12 kHz natively
@@ -938,16 +950,17 @@ class RadioClient:
         if self.volume != 1.0:
             audio_float = audio_float * self.volume
         
-        # Convert mono to stereo for output (PipeWire always expects stereo)
-        if self.channels == 1:
+        # Convert mono to stereo if needed for output
+        if self.channels == 1 and self.output_channels == 2:
             # Duplicate mono to both channels
             audio_float = np.column_stack((audio_float, audio_float))
         
-        # Apply channel selection (now always stereo)
-        if not self.channel_left:
-            audio_float[:, 0] = 0  # Mute left channel
-        if not self.channel_right:
-            audio_float[:, 1] = 0  # Mute right channel
+        # Apply channel selection (only if stereo output)
+        if self.output_channels == 2:
+            if not self.channel_left:
+                audio_float[:, 0] = 0  # Mute left channel
+            if not self.channel_right:
+                audio_float[:, 1] = 0  # Mute right channel
 
         # Resample for sounddevice if needed (12 kHz -> 48 kHz)
         # This avoids hardware rejection of unsupported sample rates
@@ -1006,7 +1019,7 @@ class RadioClient:
             if not is_iq_mode and self.sounddevice_stream:
                 try:
                     # sounddevice expects numpy array, not bytes
-                    audio_array_for_sd = np.frombuffer(pcm_data, dtype=np.int16).reshape(-1, 2)
+                    audio_array_for_sd = np.frombuffer(pcm_data, dtype=np.int16).reshape(-1, self.output_channels)
                     self.sounddevice_stream.write(audio_array_for_sd)
                 except Exception as e:
                     print(f"sounddevice error: {e}", file=sys.stderr)
@@ -1347,6 +1360,11 @@ class RadioClient:
                     await self.setup_sounddevice()
                 elif self.output_mode == 'wav':
                     self.setup_wav_writer()
+                elif self.output_mode == 'stdout':
+                    print(f"stdout output: {self.sample_rate} Hz, {self.output_channels} channel(s)", file=sys.stderr)
+                elif self.output_mode == 'udp':
+                    print(f"UDP output to {self.udp_host}:{self.udp_port}: {self.sample_rate} Hz, {self.output_channels} channel(s)", file=sys.stderr)
+                    print(f"VLC command: vlc --demux=rawaud \"udp://@:{self.udp_port}\" --rawaud-channels={self.output_channels} --rawaud-samplerate={self.sample_rate}", file=sys.stderr)
                 
                 # Start keepalive task
                 keepalive_task = asyncio.create_task(self.send_keepalive(websocket))
@@ -1863,6 +1881,9 @@ Examples:
     parser.add_argument('--audio-filter-high', type=float, default=2700.0, metavar='HZ',
                         help='Audio filter high cutoff frequency in Hz (default: 2700)')
 
+    parser.add_argument('--channels', type=int, choices=[1, 2], metavar='N',
+                        help='Number of output channels: 1 (mono) or 2 (stereo). Default: 1 for stdout/udp, 2 for audio devices. IQ modes always use 2 channels.')
+
     args = parser.parse_args()
     
     # List devices mode
@@ -2106,6 +2127,11 @@ Examples:
         except Exception as e:
             parser.error(f"Invalid URL: {e}")
     
+    # Determine output channels
+    output_channels = None
+    if hasattr(args, 'channels') and args.channels is not None:
+        output_channels = args.channels
+
     # Create client
     client = RadioClient(
         url=args.url,
@@ -2131,7 +2157,8 @@ Examples:
         audio_filter_high=args.audio_filter_high,
         sounddevice_device_index=None,  # TODO: Add command-line argument for device selection
         udp_host=udp_host,
-        udp_port=udp_port
+        udp_port=udp_port,
+        output_channels=output_channels
     )
     
     # Setup signal handler for graceful shutdown

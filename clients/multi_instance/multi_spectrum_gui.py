@@ -344,9 +344,9 @@ class MultiSpectrumGUI:
             ttk.Separator(audio_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
             ttk.Label(audio_frame, text="Right Delay:").pack(side=tk.LEFT, padx=(0, 5))
             self.manual_offset_var = tk.IntVar(value=0)
-            self.manual_offset_label = ttk.Label(audio_frame, text="0 ms", width=6)
+            self.manual_offset_label = ttk.Label(audio_frame, text="0 ms", width=8)
             self.manual_offset_label.pack(side=tk.LEFT, padx=(0, 5))
-            manual_offset_slider = ttk.Scale(audio_frame, from_=-100, to=100,
+            manual_offset_slider = ttk.Scale(audio_frame, from_=-500, to=500,
                                             variable=self.manual_offset_var,
                                             orient=tk.HORIZONTAL, length=150,
                                             command=self._on_manual_offset_change)

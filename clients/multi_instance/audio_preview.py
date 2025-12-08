@@ -172,7 +172,9 @@ class AudioPreviewManager:
             outdata[:, 1] = samples
         else:
             # Legacy mode: use direct buffer access with prebuffering
-            MIN_BUFFER_SIZE = self.sample_rate // 2  # 500ms minimum buffer
+            # Use 4 second buffer to accommodate manual offsets (±500ms), automatic alignment (±50ms),
+            # network jitter (±50-100ms), and provide safety margin for smooth playback
+            MIN_BUFFER_SIZE = self.sample_rate * 4  # 4 seconds minimum buffer
             
             with self.buffer_lock:
                 left_buf_size = len(self.left_channel.buffer)
@@ -734,12 +736,12 @@ class AudioPreviewManager:
         """Set manual offset adjustment for right channel.
         
         Args:
-            offset_ms: Offset in milliseconds (-100 to +100)
+            offset_ms: Offset in milliseconds (-500 to +500)
                       Positive = delay right channel
                       Negative = delay left channel (advance right)
         """
         # Clamp to valid range
-        self.manual_offset_ms = max(-100.0, min(100.0, offset_ms))
+        self.manual_offset_ms = max(-500.0, min(500.0, offset_ms))
         
         # Force immediate offset update
         if self.use_simple_alignment and self.simple_aligner:
@@ -845,22 +847,33 @@ class AudioPreviewManager:
             smoothed_history = self._audio_timestamp_history[history_key]
             if len(smoothed_history) >= 2:  # Need at least 2 samples for stability
                 avg_time_diff_ms = sum(entry[1] for entry in smoothed_history) / len(smoothed_history)
-                
-                # Always update both offsets to prevent stale state
-                # Use LEFT as reference (offset = 0), RIGHT gets the averaged difference + manual offset
-                # Positive offset means RIGHT is ahead and needs to be delayed
-                total_right_offset = avg_time_diff_ms + self.manual_offset_ms
-                self.simple_aligner.update_offset(left_id, 0.0)
-                self.simple_aligner.update_offset(right_id, total_right_offset)
-                
+
+                # Calculate total offset including manual adjustment
+                total_offset = avg_time_diff_ms + self.manual_offset_ms
+
+                # Apply offset intelligently:
+                # - If total_offset is positive: delay RIGHT (RIGHT is ahead)
+                # - If total_offset is negative: delay LEFT (RIGHT should play earlier)
+                # This allows the manual offset slider to work in both directions
+                if total_offset >= 0:
+                    # Delay RIGHT channel
+                    self.simple_aligner.update_offset(left_id, 0.0)
+                    self.simple_aligner.update_offset(right_id, total_offset)
+                    delayed_channel = "Right"
+                else:
+                    # Delay LEFT channel (advance RIGHT relative to LEFT)
+                    self.simple_aligner.update_offset(left_id, abs(total_offset))
+                    self.simple_aligner.update_offset(right_id, 0.0)
+                    delayed_channel = "Left"
+
                 # Only log when offset changes significantly
-                last_offset = self._last_applied_offset.get(right_id, 0.0)
-                if abs(total_right_offset - last_offset) > 5.0 or last_offset == 0.0:
-                    self._last_applied_offset[right_id] = total_right_offset
+                last_offset = self._last_applied_offset.get(f"{left_id}:{right_id}", 0.0)
+                if abs(total_offset - last_offset) > 5.0 or last_offset == 0.0:
+                    self._last_applied_offset[f"{left_id}:{right_id}"] = total_offset
                     manual_str = f" + {self.manual_offset_ms:.1f}ms manual" if self.manual_offset_ms != 0 else ""
-                    print(f"[AUDIO OFFSET] Applied offset: {avg_time_diff_ms:.1f}ms auto{manual_str} = {total_right_offset:.1f}ms total "
+                    print(f"[AUDIO OFFSET] Applied offset: {avg_time_diff_ms:.1f}ms auto{manual_str} = {total_offset:.1f}ms total "
                           f"(over {len(smoothed_history)} samples) "
-                          f"Left ID={left_id} (ref), Right ID={right_id} (delayed)")
+                          f"Delaying {delayed_channel} channel (Left ID={left_id}, Right ID={right_id})")
         elif left_data is not None and left_id is not None:
             # Only left channel active, no offset needed
             self.simple_aligner.update_offset(left_id, 0.0)

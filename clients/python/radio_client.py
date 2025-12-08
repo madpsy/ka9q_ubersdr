@@ -18,10 +18,11 @@ import sys
 import time
 import uuid
 import wave
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 
 import aiohttp
 import websockets
+import requests
 from urllib.parse import urlparse, parse_qs, urlencode
 import numpy as np
 import subprocess
@@ -1491,6 +1492,238 @@ def parse_bandwidth(value: str) -> tuple[int, int]:
             "Bandwidth must be in format 'low:high' (e.g., '-5000:5000')"
         )
 
+def list_local_instances():
+    """List local UberSDR instances discovered via mDNS."""
+    try:
+        from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
+    except ImportError:
+        print("Error: zeroconf library not available. Install with: pip install zeroconf", file=sys.stderr)
+        sys.exit(1)
+    
+    print("Discovering local UberSDR instances via mDNS...")
+    print()
+    
+    instances = {}
+    
+    class InstanceListener(ServiceListener):
+        def add_service(self, zc: 'Zeroconf', type_: str, name: str) -> None:
+            info = zc.get_service_info(type_, name)
+            if info:
+                host = info.parsed_addresses()[0] if info.parsed_addresses() else None
+                port = info.port
+                
+                if host and port:
+                    # Parse TXT records
+                    txt_records = {}
+                    if info.properties:
+                        for key, value in info.properties.items():
+                            try:
+                                txt_records[key.decode('utf-8')] = value.decode('utf-8')
+                            except:
+                                pass
+                    
+                    version = txt_records.get('version', 'Unknown')
+                    display_name = name.replace('._ubersdr._tcp.local.', '')
+                    
+                    # Fetch detailed info from /api/description
+                    try:
+                        protocol = 'http'  # Local instances typically don't use TLS
+                        url = f"{protocol}://{host}:{port}/api/description"
+                        response = requests.get(url, timeout=5)
+                        response.raise_for_status()
+                        description = response.json()
+                        
+                        instances[name] = {
+                            'name': display_name,
+                            'host': host,
+                            'port': port,
+                            'version': version,
+                            'description': description
+                        }
+                    except Exception:
+                        # If fetch fails, skip this instance
+                        pass
+        
+        def remove_service(self, zc: 'Zeroconf', type_: str, name: str) -> None:
+            pass
+        
+        def update_service(self, zc: 'Zeroconf', type_: str, name: str) -> None:
+            pass
+    
+    # Start discovery
+    zeroconf = Zeroconf()
+    listener = InstanceListener()
+    browser = ServiceBrowser(zeroconf, "_ubersdr._tcp.local.", listener)
+    
+    # Wait for discovery
+    print("Searching for 5 seconds...")
+    time.sleep(5)
+    
+    # Stop discovery
+    browser.cancel()
+    zeroconf.close()
+    
+    # Display results
+    print()
+    if not instances:
+        print("No local instances found")
+        return
+    
+    print(f"Found {len(instances)} local instance(s):")
+    print()
+    
+    for service_name, info in sorted(instances.items(), key=lambda x: x[1]['name']):
+        description = info.get('description', {})
+        receiver = description.get('receiver', {})
+        
+        name = receiver.get('name', info['name'])
+        callsign = receiver.get('callsign', '')
+        location = receiver.get('location', '')
+        version = description.get('version', info.get('version', 'Unknown'))
+        public_uuid = description.get('public_uuid', '')
+        
+        # Connection info
+        host = info['host']
+        port = info['port']
+        url = f"http://{host}:{port}/"
+        
+        # Capabilities
+        available_clients = description.get('available_clients', 0)
+        max_clients = description.get('max_clients', 0)
+        max_session_time = description.get('max_session_time', 0)
+        cw_skimmer = description.get('cw_skimmer', False)
+        digital_decodes = description.get('digital_decodes', False)
+        noise_floor = description.get('noise_floor', False)
+        public_iq_modes = description.get('public_iq_modes', [])
+        
+        print(f"  Name:     {name}")
+        if callsign:
+            print(f"  Callsign: {callsign}")
+        if location:
+            print(f"  Location: {location}")
+        if public_uuid:
+            print(f"  UUID:     {public_uuid}")
+        print(f"  URL:      {url}")
+        print(f"  Host:     {host}")
+        print(f"  Port:     {port}")
+        print(f"  Version:  {version}")
+        print(f"  Users:    {available_clients}/{max_clients}")
+        if max_session_time > 0:
+            print(f"  Session:  {max_session_time // 60}m")
+        
+        # Capabilities
+        capabilities = []
+        if cw_skimmer:
+            capabilities.append("CW Skimmer")
+        if digital_decodes:
+            capabilities.append("Digital Decodes")
+        if noise_floor:
+            capabilities.append("Noise Floor")
+        if public_iq_modes:
+            iq_numbers = []
+            for mode in public_iq_modes:
+                digits = ''.join(filter(str.isdigit, mode))
+                if digits:
+                    iq_numbers.append(digits)
+            if iq_numbers:
+                capabilities.append(f"IQ: {', '.join(iq_numbers)} kHz")
+        
+        if capabilities:
+            print(f"  Features: {', '.join(capabilities)}")
+        
+        print()
+
+
+def list_public_instances():
+    """List public UberSDR instances from the central registry."""
+    print("Fetching public UberSDR instances...")
+    print()
+    
+    try:
+        response = requests.get('https://instances.ubersdr.org/api/instances', timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Extract instances array from response
+        instances = data.get('instances', []) if isinstance(data, dict) else data
+        
+        if not instances:
+            print("No public instances found")
+            return
+        
+        print(f"Found {len(instances)} public instance(s):")
+        print()
+        
+        for instance in sorted(instances, key=lambda x: x.get('name', '')):
+            name = instance.get('name', 'Unknown')
+            callsign = instance.get('callsign', '')
+            location = instance.get('location', '')
+            version = instance.get('version', '')
+            public_url = instance.get('public_url', '')
+            uuid = instance.get('id', '')
+            
+            # Connection info
+            host = instance.get('host', '')
+            port = instance.get('port', 0)
+            tls = instance.get('tls', False)
+            
+            # Capabilities
+            available_clients = instance.get('available_clients', 0)
+            max_clients = instance.get('max_clients', 0)
+            max_session_time = instance.get('max_session_time', 0)
+            cw_skimmer = instance.get('cw_skimmer', False)
+            digital_decodes = instance.get('digital_decodes', False)
+            noise_floor = instance.get('noise_floor', False)
+            public_iq_modes = instance.get('public_iq_modes', [])
+            
+            print(f"  Name:     {name}")
+            if callsign:
+                print(f"  Callsign: {callsign}")
+            if location:
+                print(f"  Location: {location}")
+            if uuid:
+                print(f"  UUID:     {uuid}")
+            if public_url:
+                print(f"  URL:      {public_url}")
+            if host and port:
+                protocol = 'wss' if tls else 'ws'
+                print(f"  Connect:  {protocol}://{host}:{port}/ws")
+            if version:
+                print(f"  Version:  {version}")
+            print(f"  Users:    {available_clients}/{max_clients}")
+            if max_session_time > 0:
+                print(f"  Session:  {max_session_time // 60}m")
+            
+            # Capabilities
+            capabilities = []
+            if cw_skimmer:
+                capabilities.append("CW Skimmer")
+            if digital_decodes:
+                capabilities.append("Digital Decodes")
+            if noise_floor:
+                capabilities.append("Noise Floor")
+            if public_iq_modes:
+                iq_numbers = []
+                for mode in public_iq_modes:
+                    digits = ''.join(filter(str.isdigit, mode))
+                    if digits:
+                        iq_numbers.append(digits)
+                if iq_numbers:
+                    capabilities.append(f"IQ: {', '.join(iq_numbers)} kHz")
+            
+            if capabilities:
+                print(f"  Features: {', '.join(capabilities)}")
+            
+            print()
+    
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching instances: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1500,6 +1733,24 @@ def main():
 Examples:
   # Launch GUI interface (default)
   %(prog)s
+
+  # List public instances
+  %(prog)s --list-public
+
+  # List local instances on your network
+  %(prog)s --list-local
+
+  # Connect to instance by UUID (GUI mode)
+  %(prog)s --uuid 3a44a51b-f87f-4c6e-8e2f-5dc31c0c265a
+
+  # Connect to instance by callsign (GUI mode)
+  %(prog)s --callsign M9PSY-1
+
+  # Connect to instance by UUID (CLI mode)
+  %(prog)s --no-gui --uuid 3a44a51b-f87f-4c6e-8e2f-5dc31c0c265a -f 14074000 -m usb
+
+  # Connect to instance by callsign (CLI mode)
+  %(prog)s --no-gui --callsign M9PSY-1 -f 14074000 -m usb
 
   # Listen to 14.074 MHz USB via PipeWire (CLI mode)
   %(prog)s --no-gui -f 14074000 -m usb
@@ -1517,6 +1768,14 @@ Examples:
     
     parser.add_argument('--no-gui', action='store_true',
                         help='Disable GUI and use command-line interface (requires --frequency and --mode)')
+    
+    # Create mutually exclusive group for UUID and callsign
+    instance_group = parser.add_mutually_exclusive_group()
+    instance_group.add_argument('--uuid', type=str,
+                        help='Connect to instance by UUID (fetches connection details from central registry)')
+    instance_group.add_argument('--callsign', type=str,
+                        help='Connect to instance by callsign (resolves to UUID via central registry)')
+    
     parser.add_argument('-u', '--url',
                         help='Full WebSocket URL (e.g., ws://host:port/ws or wss://host/ws)')
     parser.add_argument('-H', '--host', default='localhost',
@@ -1556,6 +1815,10 @@ Examples:
                         help='PipeWire target device (node name). Use --list-devices to see available devices.')
     parser.add_argument('--list-devices', action='store_true',
                         help='List available audio output devices and exit (PyAudio or PipeWire depending on --output)')
+    parser.add_argument('--list-local', action='store_true',
+                        help='List local UberSDR instances discovered via mDNS and exit')
+    parser.add_argument('--list-public', action='store_true',
+                        help='List public UberSDR instances from the central registry and exit')
     parser.add_argument('--fifo-path', type=str, metavar='PATH',
                         help='Also write audio to named pipe (FIFO) at this path (non-blocking, works with any output mode)')
 
@@ -1605,6 +1868,84 @@ Examples:
                 print("  No devices found or pw-cli not available")
         sys.exit(0)
     
+    # List local instances mode
+    if args.list_local:
+        list_local_instances()
+        sys.exit(0)
+    
+    # List public instances mode
+    if args.list_public:
+        list_public_instances()
+        sys.exit(0)
+    
+    # Handle callsign-based connection (resolve to UUID first)
+    if args.callsign:
+        print(f"Resolving callsign: {args.callsign}")
+        try:
+            response = requests.get(f'https://instances.ubersdr.org/api/callsign/{args.callsign}', timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Extract UUID from callsign response
+            uuid = data.get('public_uuid')
+            if not uuid:
+                print(f"Error: Could not resolve callsign {args.callsign} to UUID", file=sys.stderr)
+                sys.exit(1)
+            
+            print(f"Resolved to UUID: {uuid}")
+            # Set args.uuid so the UUID handling code below will process it
+            args.uuid = uuid
+            
+        except requests.exceptions.RequestException as e:
+            print(f"Error resolving callsign: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Unexpected error: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Handle UUID-based connection
+    if args.uuid:
+        print(f"Fetching instance details for UUID: {args.uuid}")
+        try:
+            response = requests.get(f'https://instances.ubersdr.org/api/instances/{args.uuid}', timeout=10)
+            response.raise_for_status()
+            instance = response.json()
+            
+            # Extract connection details
+            host = instance.get('host')
+            port = instance.get('port')
+            tls = instance.get('tls', False)
+            name = instance.get('name', 'Unknown')
+            
+            if not host or not port:
+                print(f"Error: Instance {args.uuid} does not provide connection information", file=sys.stderr)
+                sys.exit(1)
+            
+            # Override connection parameters with instance details
+            # Don't set args.url - let the client build it properly with host/port/ssl
+            args.host = host
+            args.port = port
+            args.ssl = tls
+            # Clear any existing URL to ensure host/port/ssl are used
+            args.url = None
+            
+            print(f"Connecting to: {name}")
+            print(f"  Host: {host}")
+            print(f"  Port: {port}")
+            print(f"  TLS:  {tls}")
+            print()
+            
+            # Mark that we should auto-connect in GUI mode
+            # This is checked later when determining auto_connect flag
+            args._uuid_or_callsign_provided = True
+            
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching instance details: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Unexpected error: {e}", file=sys.stderr)
+            sys.exit(1)
+    
     # Parse bandwidth early for GUI
     bandwidth_low = None
     bandwidth_high = None
@@ -1642,9 +1983,13 @@ Examples:
             from radio_gui import main as gui_main
             # Determine if we should auto-connect
             # Auto-connect if --url is provided, or if --host/--port were explicitly set (not defaults)
+            # Also auto-connect if --uuid or --callsign was used
             auto_connect = False
             if args.url:
                 # URL was explicitly provided
+                auto_connect = True
+            elif hasattr(args, '_uuid_or_callsign_provided') and args._uuid_or_callsign_provided:
+                # UUID or callsign was provided, so we should auto-connect
                 auto_connect = True
             else:
                 # Check if host or port were explicitly provided (not using defaults)

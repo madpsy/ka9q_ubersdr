@@ -7,6 +7,7 @@ Displays RF spectrum as a line chart with 200 KHz bandwidth centered on current 
 import asyncio
 import gzip
 import json
+import time
 import tkinter as tk
 from tkinter import Canvas
 import websockets
@@ -15,6 +16,20 @@ from typing import Optional, Callable
 import threading
 import queue
 from urllib.parse import urlencode
+
+# Import timestamp synchronization (optional)
+try:
+    import sys
+    import os
+    # Add multi_instance directory to path if needed
+    multi_instance_path = os.path.join(os.path.dirname(__file__), '..', 'multi_instance')
+    if os.path.exists(multi_instance_path) and multi_instance_path not in sys.path:
+        sys.path.insert(0, multi_instance_path)
+    
+    from timestamp_sync import SpectrumAligner, SyncQualityMetrics
+    TIMESTAMP_SYNC_AVAILABLE = True
+except ImportError:
+    TIMESTAMP_SYNC_AVAILABLE = False
 
 
 class SpectrumDisplay:
@@ -61,6 +76,8 @@ class SpectrumDisplay:
         self.bin_bandwidth: float = 0
         self.total_bandwidth: float = 0
         self.initial_bin_bandwidth: float = 0  # Store initial for zoom calculations
+        self.last_spectrum_timestamp: Optional[float] = None  # Track last timestamp
+        self.instance_id: Optional[int] = None  # Instance ID for multi-instance sync
         
         # Current tuned frequency and bandwidth (for filter visualization)
         self.tuned_freq: float = 0
@@ -281,6 +298,8 @@ class SpectrumDisplay:
             elif msg_type == 'spectrum':
                 # Spectrum data update
                 raw_data = data.get('data', [])
+                timestamp = data.get('timestamp')  # Extract timestamp
+                
                 if raw_data:
                     # Unwrap FFT bin ordering (same as JavaScript implementation)
                     N = len(raw_data)
@@ -289,8 +308,15 @@ class SpectrumDisplay:
                     # Rearrange: [negative freqs, positive freqs]
                     unwrapped = np.array(raw_data[half_bins:] + raw_data[:half_bins])
                     
-                    # Queue data for display update
-                    self.data_queue.put(unwrapped)
+                    # Store timestamp
+                    if timestamp:
+                        self.last_spectrum_timestamp = timestamp
+                    
+                    # Queue data for display update (with timestamp if available)
+                    if timestamp:
+                        self.data_queue.put((timestamp, unwrapped))
+                    else:
+                        self.data_queue.put(unwrapped)
                     
         except json.JSONDecodeError as e:
             print(f"Failed to parse spectrum message: {e}")
@@ -413,7 +439,16 @@ class SpectrumDisplay:
         # Process queued spectrum data - draw immediately when data arrives
         try:
             while True:
-                self.spectrum_data = self.data_queue.get_nowait()
+                queued_item = self.data_queue.get_nowait()
+                
+                # Handle both old format (just data) and new format (timestamp, data)
+                if isinstance(queued_item, tuple) and len(queued_item) == 2:
+                    timestamp, spectrum_data = queued_item
+                    self.last_spectrum_timestamp = timestamp
+                    self.spectrum_data = spectrum_data
+                else:
+                    self.spectrum_data = queued_item
+                
                 self._draw_spectrum()
         except queue.Empty:
             pass

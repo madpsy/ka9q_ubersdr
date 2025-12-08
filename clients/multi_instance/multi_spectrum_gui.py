@@ -16,6 +16,14 @@ from config_manager import ConfigManager
 from instance_dialogs import AddInstanceDialog, EditInstanceDialog
 from audio_preview import AudioPreviewManager, SOUNDDEVICE_AVAILABLE, WEBSOCKETS_AVAILABLE
 
+# Import timestamp synchronization
+try:
+    from timestamp_sync import SpectrumAligner, SyncQualityMetrics
+    TIMESTAMP_SYNC_AVAILABLE = True
+except ImportError:
+    TIMESTAMP_SYNC_AVAILABLE = False
+    print("Warning: timestamp_sync module not available")
+
 # Import local public_instances_display and local_instances_display (before adding parent to path)
 try:
     from public_instances_display import create_public_instances_window
@@ -111,6 +119,26 @@ class MultiSpectrumGUI:
         # Update rate tracking for throttling (using server-reported rates)
         self.update_times = {}  # instance_id -> list of recent update timestamps (for frame skipping)
         self.target_update_rate = None  # Slowest rate to throttle to (from server-reported rates)
+        
+        # Timestamp synchronization
+        self.use_timestamp_sync = TIMESTAMP_SYNC_AVAILABLE
+        
+        # Spectrum sync disabled due to performance issues, but audio sync still works
+        self.spectrum_aligner = None
+        
+        # Original spectrum aligner code (disabled):
+        # if self.use_timestamp_sync:
+        #     self.spectrum_aligner = SpectrumAligner(
+        #         buffer_size=20,
+        #         alignment_tolerance_ms=100,
+        #         interpolation_method='linear'
+        #     )
+        #     print("Spectrum timestamp synchronization enabled")
+        
+        # Sync metrics display
+        self.sync_metrics_label = None
+        self.last_metrics_update = 0
+        self.metrics_update_interval = 1.0  # Update metrics every 1 second
         
         # Audio preview manager
         self.audio_preview = AudioPreviewManager() if (SOUNDDEVICE_AVAILABLE and WEBSOCKETS_AVAILABLE) else None
@@ -612,6 +640,10 @@ class MultiSpectrumGUI:
             # Calculate target throttle rate from all connected instances
             self._update_target_rate()
             
+            # Set instance_id on spectrum display for timestamp sync (disabled)
+            # if self.use_timestamp_sync and self.spectrum_aligner:
+            #     instance.spectrum.instance_id = instance.instance_id
+            
             self.spectrum_displays[instance.instance_id] = instance.spectrum
         
         # Connect using manager
@@ -952,7 +984,7 @@ class MultiSpectrumGUI:
                 self._syncing = True
                 self.root.after(100, lambda: self._sync_zoom_from_source(spectrum))
         
-        # Wrap _draw_spectrum to throttle based on server-reported rates
+        # Wrap _draw_spectrum to throttle based on server-reported rates and feed to spectrum aligner
         def throttled_draw_spectrum():
             current_time = time.time()
             
@@ -978,6 +1010,19 @@ class MultiSpectrumGUI:
             
             # Draw the spectrum if not throttled
             if should_draw:
+                # Spectrum sync disabled due to performance issues
+                # Original code kept for reference:
+                # if self.use_timestamp_sync and self.spectrum_aligner and spectrum.last_spectrum_timestamp:
+                #     if spectrum.spectrum_data is not None and len(spectrum.spectrum_data) > 0:
+                #         try:
+                #             self.spectrum_aligner.add_data(
+                #                 instance_id,
+                #                 spectrum.last_spectrum_timestamp,
+                #                 spectrum.spectrum_data.copy()
+                #             )
+                #         except Exception as e:
+                #             pass
+                
                 original_draw_spectrum()
                 
                 # Track this SUCCESSFUL draw for frame skipping
@@ -1476,6 +1521,34 @@ class MultiSpectrumGUI:
         compare_b_combo.bind('<<ComboboxSelected>>', lambda e: self._on_comparison_changed())
 
         ttk.Label(compare_frame, text="(A - B, 500ms avg)", font=('TkDefaultFont', 9, 'italic')).pack(side=tk.LEFT, padx=(10, 0))
+
+        # Sync metrics display (if timestamp sync is available)
+        if self.use_timestamp_sync and (self.audio_preview or self.spectrum_aligner):
+            sync_frame = ttk.Frame(self.signal_levels_window, padding="10")
+            sync_frame.pack(fill=tk.X)
+            
+            # Audio sync metrics
+            if self.audio_preview:
+                audio_sync_frame = ttk.Frame(sync_frame)
+                audio_sync_frame.pack(fill=tk.X, pady=2)
+                ttk.Label(audio_sync_frame, text="Audio Sync:", font=('TkDefaultFont', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
+                self.audio_sync_metrics_label = ttk.Label(audio_sync_frame, text="Waiting for data...", font=('TkDefaultFont', 9))
+                self.audio_sync_metrics_label.pack(side=tk.LEFT, padx=(5, 0))
+            else:
+                self.audio_sync_metrics_label = None
+            
+            # Spectrum sync metrics
+            if self.spectrum_aligner:
+                spectrum_sync_frame = ttk.Frame(sync_frame)
+                spectrum_sync_frame.pack(fill=tk.X, pady=2)
+                ttk.Label(spectrum_sync_frame, text="Spectrum Sync:", font=('TkDefaultFont', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 5))
+                self.spectrum_sync_metrics_label = ttk.Label(spectrum_sync_frame, text="Waiting for data...", font=('TkDefaultFont', 9))
+                self.spectrum_sync_metrics_label.pack(side=tk.LEFT, padx=(5, 0))
+            else:
+                self.spectrum_sync_metrics_label = None
+            
+            # Start periodic metrics update
+            self._update_sync_metrics()
 
         # Separator
         ttk.Separator(self.signal_levels_window, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=10)
@@ -2353,6 +2426,69 @@ class MultiSpectrumGUI:
         
         # Save config after mono change
         self.save_config(throttled=True)
+    
+    def _update_sync_metrics(self):
+        """Update timestamp synchronization metrics display."""
+        if not self.signal_levels_window or not tk.Toplevel.winfo_exists(self.signal_levels_window):
+            return
+        
+        import time
+        current_time = time.time()
+        
+        # Only update every second
+        if current_time - self.last_metrics_update < self.metrics_update_interval:
+            self.root.after(100, self._update_sync_metrics)
+            return
+        
+        self.last_metrics_update = current_time
+        
+        # Update audio sync metrics
+        if self.audio_sync_metrics_label:
+            audio_metrics = None
+            if self.audio_preview and self.audio_preview_active:
+                audio_metrics = self.audio_preview.get_sync_metrics()
+            
+            if audio_metrics and audio_metrics.total_alignments > 0:
+                status = "✓" if audio_metrics.is_healthy() else "⚠"
+                text = (f"{status} jitter={audio_metrics.timestamp_jitter_ms:.1f}ms, "
+                       f"success={audio_metrics.alignment_success_rate:.0%}, "
+                       f"drift={audio_metrics.clock_drift_rate:.2f}ms/s")
+                color = 'green' if audio_metrics.is_healthy() else 'orange'
+                self.audio_sync_metrics_label.config(text=text, foreground=color)
+            else:
+                self.audio_sync_metrics_label.config(text="Waiting for data...", foreground='gray')
+        
+        # Update spectrum sync metrics
+        if self.spectrum_sync_metrics_label:
+            spectrum_metrics = None
+            if self.spectrum_aligner:
+                try:
+                    # Trigger an alignment to generate metrics (if we have multiple instances)
+                    active_instance_ids = [inst.instance_id for inst in self.instance_manager.active_instances
+                                          if inst.spectrum and inst.connected]
+                    if len(active_instance_ids) >= 2:
+                        # Try to get aligned spectra to generate metrics
+                        target_ts = current_time * 1000  # Current time in ms
+                        self.spectrum_aligner.get_aligned_spectra(target_ts, active_instance_ids)
+                    
+                    spectrum_metrics = self.spectrum_aligner.get_metrics()
+                except Exception as e:
+                    # Don't let sync errors block metrics display
+                    print(f"Spectrum sync error: {e}")
+                    spectrum_metrics = None
+            
+            if spectrum_metrics and spectrum_metrics.total_alignments > 0:
+                status = "✓" if spectrum_metrics.is_healthy() else "⚠"
+                text = (f"{status} jitter={spectrum_metrics.timestamp_jitter_ms:.1f}ms, "
+                       f"success={spectrum_metrics.alignment_success_rate:.0%}, "
+                       f"drift={spectrum_metrics.clock_drift_rate:.2f}ms/s")
+                color = 'green' if spectrum_metrics.is_healthy() else 'orange'
+                self.spectrum_sync_metrics_label.config(text=text, foreground=color)
+            else:
+                self.spectrum_sync_metrics_label.config(text="Waiting for data...", foreground='gray')
+        
+        # Schedule next update
+        self.root.after(100, self._update_sync_metrics)
 
 
 def main():

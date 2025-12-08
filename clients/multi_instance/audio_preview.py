@@ -9,9 +9,18 @@ import base64
 import json
 import struct
 import threading
+import time
 import uuid
 from typing import Optional
 import numpy as np
+
+# Import timestamp synchronization
+try:
+    from timestamp_sync import AudioAligner, SyncQualityMetrics
+    TIMESTAMP_SYNC_AVAILABLE = True
+except ImportError:
+    TIMESTAMP_SYNC_AVAILABLE = False
+    print("Warning: timestamp_sync module not available, synchronization disabled")
 
 try:
     import sounddevice as sd
@@ -64,6 +73,22 @@ class AudioPreviewManager:
         self.loop_thread = None
         self.is_running = False
         
+        # Timestamp synchronization - DISABLED due to audio quality issues
+        self.use_timestamp_sync = False
+        self.audio_aligner = None
+        
+        # Original code (disabled):
+        # self.use_timestamp_sync = TIMESTAMP_SYNC_AVAILABLE
+        # if self.use_timestamp_sync:
+        #     self.audio_aligner = AudioAligner(
+        #         buffer_size_ms=150,
+        #         alignment_tolerance_ms=50,
+        #         interpolation_enabled=True
+        #     )
+        #     print("Audio timestamp synchronization enabled")
+        # else:
+        #     self.audio_aligner = None
+        
     def start_output_stream(self) -> bool:
         """Start the audio output stream."""
         if not SOUNDDEVICE_AVAILABLE:
@@ -106,9 +131,43 @@ class AudioPreviewManager:
         if status:
             print(f"Audio callback status: {status}")
         
-        with self.buffer_lock:
-            left_samples = self._get_samples(self.left_channel.buffer, frames)
-            right_samples = self._get_samples(self.right_channel.buffer, frames)
+        # Use timestamp-based alignment if available
+        if self.use_timestamp_sync and self.audio_aligner:
+            try:
+                # Calculate target timestamp (current time - buffer delay)
+                target_ts = time.time() * 1000 - 100  # 100ms buffer delay
+                
+                # Get aligned samples from both channels
+                instance_ids = []
+                if self.left_channel.is_active():
+                    instance_ids.append(self.left_channel.instance_id)
+                if self.right_channel.is_active():
+                    instance_ids.append(self.right_channel.instance_id)
+                
+                if instance_ids:
+                    aligned = self.audio_aligner.get_aligned_samples(target_ts, frames, instance_ids)
+                    
+                    if aligned:
+                        left_samples = aligned.get(self.left_channel.instance_id, np.zeros(frames, dtype=np.int16))
+                        right_samples = aligned.get(self.right_channel.instance_id, np.zeros(frames, dtype=np.int16))
+                    else:
+                        # No aligned data available, fall back to legacy mode
+                        with self.buffer_lock:
+                            left_samples = self._get_samples(self.left_channel.buffer, frames)
+                            right_samples = self._get_samples(self.right_channel.buffer, frames)
+                else:
+                    left_samples = np.zeros(frames, dtype=np.int16)
+                    right_samples = np.zeros(frames, dtype=np.int16)
+            except Exception as e:
+                # If sync fails, fall back to legacy mode
+                with self.buffer_lock:
+                    left_samples = self._get_samples(self.left_channel.buffer, frames)
+                    right_samples = self._get_samples(self.right_channel.buffer, frames)
+        else:
+            # Legacy mode: use direct buffer access (no timestamp sync)
+            with self.buffer_lock:
+                left_samples = self._get_samples(self.left_channel.buffer, frames)
+                right_samples = self._get_samples(self.right_channel.buffer, frames)
         
         # Apply volume control
         left_samples = (left_samples * self.left_channel.volume).astype(np.int16)
@@ -327,17 +386,27 @@ class AudioPreviewManager:
                         
                         if data.get('type') == 'audio':
                             audio_data = data.get('data')
+                            timestamp = data.get('timestamp')  # Extract timestamp
+                            
                             if audio_data:
                                 pcm_data = self._decode_audio(audio_data)
                                 # Convert to int16 array
                                 audio_array = np.frombuffer(pcm_data, dtype=np.int16)
                                 
-                                # Add to buffer
+                                # Always add to legacy buffer as fallback
                                 with self.buffer_lock:
                                     ch.buffer.extend(audio_array.tolist())
                                     # Limit buffer size to prevent memory issues
                                     if len(ch.buffer) > self.sample_rate * 2:  # 2 seconds max
                                         ch.buffer = ch.buffer[-self.sample_rate:]
+                                
+                                # Also add to timestamp sync if available
+                                if self.use_timestamp_sync and self.audio_aligner and timestamp:
+                                    try:
+                                        self.audio_aligner.add_data(ch.instance_id, timestamp, audio_array)
+                                    except Exception as e:
+                                        # Don't let sync errors stop audio
+                                        pass
                         
                         elif data.get('type') == 'error':
                             error = data.get('error', 'Unknown error')
@@ -497,3 +566,14 @@ class AudioPreviewManager:
         """
         ch = self.left_channel if channel == 'left' else self.right_channel
         ch.mono = mono
+    
+    def get_sync_metrics(self) -> Optional[SyncQualityMetrics]:
+        """
+        Get synchronization quality metrics.
+        
+        Returns:
+            SyncQualityMetrics object or None if sync not available
+        """
+        if self.use_timestamp_sync and self.audio_aligner:
+            return self.audio_aligner.get_metrics()
+        return None

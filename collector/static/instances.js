@@ -187,7 +187,7 @@ function createInstanceCard(instance, isClosest = false) {
         // Band conditions are now a simple map of band name to FT8 SNR value
         bandBadges = BANDS.map(band => {
             const snr = instance.band_conditions[band];
-            return createBandBadge(band, snr);
+            return createBandBadge(band, snr, instance.public_url);
         }).join('');
     } else if (instance.noise_floor) {
         // Show "Loading..." badges if noise floor is enabled but data not yet available

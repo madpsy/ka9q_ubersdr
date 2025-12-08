@@ -152,8 +152,8 @@ function createBandBadge(band, snr, instanceUrl) {
         bwh = -50;
     }
 
-    // Build URL with query parameters (including zoom_bw for spectrum zoom)
-    const url = `${instanceUrl}?freq=${centerFreq}&mode=${mode}&bwl=${bwl}&bwh=${bwh}&zoom_bw=300.0`;
+    // Build URL with query parameters (including zoom parameters for spectrum zoom)
+    const url = `${instanceUrl}?freq=${centerFreq}&mode=${mode}&bwl=${bwl}&bwh=${bwh}&zoom_freq=${centerFreq}&zoom_bw=300.0`;
 
     return `
         <a href="${url}" target="_blank" class="band-badge ${condition}" title="${band}: ${snrText} (${label}) - Click to tune" style="text-decoration: none; cursor: pointer;">

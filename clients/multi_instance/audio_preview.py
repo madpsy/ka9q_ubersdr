@@ -841,10 +841,10 @@ class AudioPreviewManager:
                     # Log current offset even when not updating (for drift monitoring)
                     if len(smoothed_history) % 10 == 0:  # Every 10 samples
                         print(f"[AUDIO OFFSET] Current offset: {avg_time_diff_ms:.1f}ms (stable, drift: {drift_ms:.1f}ms)")
-        elif left_ts is not None and left_id is not None:
+        elif left_data is not None and left_id is not None:
             # Only left channel active, no offset needed
             self.simple_aligner.update_offset(left_id, 0.0)
-        elif right_ts is not None and right_id is not None:
+        elif right_data is not None and right_id is not None:
             # Only right channel active, no offset needed
             self.simple_aligner.update_offset(right_id, 0.0)
     

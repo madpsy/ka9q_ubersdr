@@ -15,6 +15,7 @@
     "username": "your-smtp-username",
     "password": "your-smtp-password",
     "from": "noreply@ubersdr.org",
-    "use_tls": true
+    "use_tls": true,
+    "admin_email": "admin@example.com"
   }
 }

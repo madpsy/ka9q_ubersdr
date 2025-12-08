@@ -109,13 +109,14 @@ type InstanceVerificationResponse struct {
 
 // SMTPConfig represents SMTP configuration
 type SMTPConfig struct {
-	Enabled  bool   `json:"enabled"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	From     string `json:"from"`
-	UseTLS   bool   `json:"use_tls"`
+	Enabled    bool   `json:"enabled"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	From       string `json:"from"`
+	UseTLS     bool   `json:"use_tls"`
+	AdminEmail string `json:"admin_email"` // Admin email to receive copies of all user emails
 }
 
 // Config represents the collector configuration
@@ -2212,14 +2213,28 @@ This is an automated message from the UberSDR Instance Registry.
 }
 
 // sendEmail sends an email using the configured SMTP server
+// If admin_email is configured, it will be CC'd on all emails
 func (c *Collector) sendEmail(to, subject, body string) error {
 	if !c.config.SMTP.Enabled {
 		return fmt.Errorf("SMTP is not enabled")
 	}
 
-	// Build email message
+	// Build recipient list
+	recipients := []string{to}
+	
+	// Add admin email to CC if configured and not a placeholder/example address
+	var ccHeader string
+	if c.config.SMTP.AdminEmail != "" &&
+	   c.config.SMTP.AdminEmail != to &&
+	   c.config.SMTP.AdminEmail != "admin@example.com" &&
+	   !strings.HasSuffix(c.config.SMTP.AdminEmail, "@example.com") {
+		recipients = append(recipients, c.config.SMTP.AdminEmail)
+		ccHeader = fmt.Sprintf("Cc: %s\r\n", c.config.SMTP.AdminEmail)
+	}
+
+	// Build email message with CC header if admin email is set
 	from := c.config.SMTP.From
-	msg := []byte(fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s", from, to, subject, body))
+	msg := []byte(fmt.Sprintf("From: %s\r\nTo: %s\r\n%sSubject: %s\r\n\r\n%s", from, to, ccHeader, subject, body))
 
 	// Setup authentication
 	var auth smtp.Auth
@@ -2230,13 +2245,13 @@ func (c *Collector) sendEmail(to, subject, body string) error {
 	// Build server address
 	serverAddr := fmt.Sprintf("%s:%d", c.config.SMTP.Host, c.config.SMTP.Port)
 
-	// Send email
+	// Send email to all recipients (user + admin if configured)
 	if c.config.SMTP.UseTLS {
 		// Use STARTTLS
-		return smtp.SendMail(serverAddr, auth, from, []string{to}, msg)
+		return smtp.SendMail(serverAddr, auth, from, recipients, msg)
 	} else {
 		// Direct connection
-		return smtp.SendMail(serverAddr, auth, from, []string{to}, msg)
+		return smtp.SendMail(serverAddr, auth, from, recipients, msg)
 	}
 }
 

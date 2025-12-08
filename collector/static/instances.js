@@ -447,7 +447,7 @@ function updateMap(instances) {
                 <p style="margin: 0 0 4px 0; font-size: 0.9em;">${instance.name}</p>
                 <p style="margin: 0 0 8px 0; font-size: 0.85em; color: #666;">${instance.location}</p>
                 
-                <div style="display: flex; gap: 15px; margin-bottom: 8px;">
+                <div style="display: flex; gap: 15px; margin-bottom: 8px; align-items: flex-start;">
                     <div style="flex: 1;">
                         <p style="margin: 0 0 4px 0; font-size: 0.85em;">
                             <strong>Status:</strong> <span style="color: ${isOnline ? 'green' : 'red'};">${isOnline ? 'Online' : 'Offline'}</span>

@@ -844,7 +844,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			time.Sleep(10 * time.Millisecond)
 			continue
 
-		case pcmData, ok := <-session.AudioChan:
+		case audioPacket, ok := <-session.AudioChan:
 			if !ok {
 				// Channel closed, wait for new session
 				time.Sleep(10 * time.Millisecond)
@@ -852,16 +852,18 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			}
 
 			// Encode audio (will return PCM if Opus not available/enabled)
-			encoded, audioFormat, _ := opusEncoder.Encode(pcmData)
+			encoded, audioFormat, _ := opusEncoder.Encode(audioPacket.PCMData)
 
-			// Send audio message with format indicator and server timestamp
+			// Send audio message with format indicator and RTP timestamp
+			// RTP timestamp represents audio capture time, not send time
+			// This allows accurate alignment between multiple instances
 			msg := ServerMessage{
 				Type:        "audio",
 				Data:        encoded,
 				SampleRate:  session.SampleRate,
 				Channels:    session.Channels, // 1=mono, 2=stereo (for IQ mode)
 				AudioFormat: audioFormat,
-				Timestamp:   time.Now().UnixMilli(), // Send time in milliseconds for latency tracking
+				Timestamp:   int64(audioPacket.RTPTimestamp), // RTP timestamp for accurate alignment
 			}
 
 			if err := wsh.sendMessage(conn, msg); err != nil {

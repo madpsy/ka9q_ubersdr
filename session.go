@@ -24,7 +24,7 @@ type Session struct {
 	Channels      int // Number of audio channels (1=mono, 2=stereo for IQ)
 	CreatedAt     time.Time
 	LastActive    time.Time
-	AudioChan     chan []byte
+	AudioChan     chan AudioPacket
 	Done          chan struct{}
 	mu            sync.RWMutex
 
@@ -262,7 +262,7 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		Channels:       channels,
 		CreatedAt:      time.Now(),
 		LastActive:     time.Now(),
-		AudioChan:      make(chan []byte, 100), // Buffer 100 audio packets
+		AudioChan:      make(chan AudioPacket, 100), // Buffer 100 audio packets
 		Done:           make(chan struct{}),
 		SourceIP:       sourceIP,
 		ClientIP:       clientIP,

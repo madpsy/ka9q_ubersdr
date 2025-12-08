@@ -251,7 +251,7 @@ func (md *MultiDecoder) createBandSession(bandConfig DecoderBandConfig) error {
 	sessionID := fmt.Sprintf("decoder-%s-%08x", bandConfig.Name, ssrc)
 
 	// Create audio channel for receiving data
-	audioChan := make(chan []byte, 100)
+	audioChan := make(chan AudioPacket, 100)
 
 	// Register session with session manager BEFORE updating bandwidth
 	session := &Session{
@@ -337,9 +337,10 @@ func (md *MultiDecoder) bandMonitorLoop(band *DecoderBand) {
 			}
 			return
 
-		case audioData := <-band.AudioChan:
+		case audioPacket := <-band.AudioChan:
 			// Process audio packet (LastDataTime will be updated when decoder completes)
-			md.processAudioPacket(band, audioData, time.Now())
+			// Extract PCM data from the audio packet (RTP timestamp not needed for decoders)
+			md.processAudioPacket(band, audioPacket.PCMData, time.Now())
 		}
 	}
 }

@@ -13,6 +13,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// AudioPacket represents an audio packet with PCM data and RTP timestamp
+type AudioPacket struct {
+	PCMData      []byte
+	RTPTimestamp uint32 // RTP timestamp representing audio capture time
+}
+
 // AudioReceiver receives PCM audio from radiod multicast streams
 type AudioReceiver struct {
 	dataAddr         *net.UDPAddr
@@ -177,11 +183,12 @@ func (ar *AudioReceiver) receiveLoop() {
 			}
 			continue
 		}
-
+	
 		packetCount++
 		
 		// Route to appropriate session using SSRC from RTP header
-		ar.routeAudio(packet.SSRC, packet.Payload)
+		// Pass both payload and RTP timestamp for accurate audio alignment
+		ar.routeAudio(packet.SSRC, packet.Payload, packet.Timestamp)
 	}
 	
 	if DebugMode {
@@ -190,7 +197,8 @@ func (ar *AudioReceiver) receiveLoop() {
 }
 
 // routeAudio routes audio data to the appropriate session based on RTP SSRC
-func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte) {
+// The RTP timestamp represents when the audio was captured and is used for alignment
+func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp uint32) {
 	// Look up session by SSRC
 	session, ok := ar.sessions.GetSessionBySSRC(ssrc)
 	if !ok {
@@ -203,9 +211,15 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte) {
 	dataCopy := make([]byte, len(pcmData))
 	copy(dataCopy, pcmData)
 
-	// Send audio to session's channel
+	// Create audio packet with PCM data and RTP timestamp
+	audioPacket := AudioPacket{
+		PCMData:      dataCopy,
+		RTPTimestamp: rtpTimestamp,
+	}
+
+	// Send audio packet to session's channel
 	select {
-	case session.AudioChan <- dataCopy:
+	case session.AudioChan <- audioPacket:
 		// Successfully sent
 	default:
 		// Channel full, skip this packet silently
@@ -214,7 +228,7 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte) {
 
 // GetChannelAudio returns a channel for receiving audio for a specific session
 // Audio routing is automatic via SSRC matching, no subscription needed
-func (ar *AudioReceiver) GetChannelAudio(session *Session) <-chan []byte {
+func (ar *AudioReceiver) GetChannelAudio(session *Session) <-chan AudioPacket {
 	return session.AudioChan
 }
 

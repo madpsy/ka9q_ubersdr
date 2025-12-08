@@ -189,9 +189,8 @@ class SimpleAudioAligner:
         """
         Apply alignment using a ring buffer delay for ahead instances.
         
-        This is the correct approach: delay the ahead instance by buffering its audio,
-        while the behind instance plays immediately. Includes overflow protection to
-        prevent buffer growth if offset changes or there's drift.
+        Handles dynamic offset changes including sign changes (ahead <-> behind).
+        Uses gradual buffer adjustment to avoid audio glitches.
         
         Args:
             instance_id: Instance identifier
@@ -203,12 +202,18 @@ class SimpleAudioAligner:
         with self.lock:
             target_offset_samples = self.sample_offsets.get(instance_id, 0)
             
-            if target_offset_samples == 0:
-                # No offset, return immediately
-                return audio_samples
+            # Initialize delay buffer if it doesn't exist
+            if instance_id not in self.delay_buffers:
+                self.delay_buffers[instance_id] = []
             
             # Get delay buffer for this instance
             delay_buffer = self.delay_buffers[instance_id]
+            
+            if target_offset_samples == 0:
+                # No offset - clear buffer and play immediately
+                if delay_buffer:
+                    delay_buffer.clear()
+                return audio_samples
             
             if target_offset_samples > 0:
                 # Instance is AHEAD - need to delay it
@@ -216,26 +221,38 @@ class SimpleAudioAligner:
                 delay_buffer.extend(audio_samples.tolist())
                 
                 # Prevent buffer overflow: limit to 2 seconds total
-                # This gives plenty of room for latency changes where instances can switch
-                # which is ahead/behind, while preventing unbounded growth
                 max_buffer_size = self.sample_rate * 2  # 2 seconds absolute max
+                
+                # Handle buffer size adjustment
                 if len(delay_buffer) > max_buffer_size:
-                    # Drop oldest samples to bring buffer back to target size
+                    # Emergency: buffer way too large, drop to target immediately
                     excess = len(delay_buffer) - target_offset_samples
                     del delay_buffer[:excess]
                     
-                    # Log overflow events (throttled to once per 5 seconds per instance)
                     current_time = time.time()
                     last_log = self.last_overflow_log.get(instance_id, 0)
                     if current_time - last_log > 5.0:
-                        print(f"[ALIGNMENT] Instance {instance_id}: Dropped {excess} samples to prevent overflow "
-                              f"(buffer was {len(delay_buffer) + excess}, target {target_offset_samples}, max {max_buffer_size})")
+                        print(f"[ALIGNMENT] Instance {instance_id}: Emergency buffer trim - dropped {excess} samples "
+                              f"(was {len(delay_buffer) + excess}, target {target_offset_samples})")
                         self.last_overflow_log[instance_id] = current_time
+                
+                elif len(delay_buffer) > target_offset_samples + (self.sample_rate // 2):
+                    # Buffer is more than 500ms over target - gradually reduce
+                    # Drop a small amount each cycle to smoothly converge
+                    drop_amount = min(len(audio_samples) // 4, len(delay_buffer) - target_offset_samples)
+                    if drop_amount > 0:
+                        del delay_buffer[:drop_amount]
+                        
+                        current_time = time.time()
+                        last_log = self.last_overflow_log.get(f"adjust_{instance_id}", 0)
+                        if current_time - last_log > 5.0:
+                            print(f"[ALIGNMENT] Instance {instance_id}: Gradually reducing buffer "
+                                  f"(dropped {drop_amount}, now {len(delay_buffer)}, target {target_offset_samples})")
+                            self.last_overflow_log[f"adjust_{instance_id}"] = current_time
                 
                 # Only output samples if we have enough buffered to maintain the delay
                 if len(delay_buffer) >= target_offset_samples:
                     # Output the oldest samples (maintaining the delay)
-                    # Make sure we don't output more than what's available beyond the target delay
                     output_count = min(len(audio_samples), len(delay_buffer) - target_offset_samples)
                     if output_count > 0:
                         output_samples = np.array(delay_buffer[:output_count], dtype=audio_samples.dtype)
@@ -250,7 +267,6 @@ class SimpleAudioAligner:
                         return np.zeros(len(audio_samples), dtype=audio_samples.dtype)
                 else:
                     # Still building up the delay buffer, return silence
-                    # Log when we're building the buffer (throttled)
                     current_time = time.time()
                     last_log = self.last_overflow_log.get(f"build_{instance_id}", 0)
                     if current_time - last_log > 2.0:
@@ -259,9 +275,23 @@ class SimpleAudioAligner:
                         self.last_overflow_log[f"build_{instance_id}"] = current_time
                     return np.zeros(len(audio_samples), dtype=audio_samples.dtype)
             else:
-                # Instance is BEHIND or equal - play immediately, no delay needed
-                # Clear any existing delay buffer
-                delay_buffer.clear()
+                # Instance is BEHIND (negative offset) - play immediately
+                # Gradually drain any existing delay buffer to avoid glitches
+                if delay_buffer:
+                    # If there's still audio in the buffer, output it first before new audio
+                    # This provides smooth transition when switching from ahead to behind
+                    if len(delay_buffer) > 0:
+                        output_count = min(len(audio_samples), len(delay_buffer))
+                        output_samples = np.array(delay_buffer[:output_count], dtype=audio_samples.dtype)
+                        del delay_buffer[:output_count]
+                        
+                        # If we output less than requested, fill the rest with new audio
+                        if output_count < len(audio_samples):
+                            remaining = audio_samples[:len(audio_samples) - output_count]
+                            return np.concatenate([output_samples, remaining])
+                        return output_samples
+                
+                # No buffer or buffer empty - play new audio immediately
                 return audio_samples
     
     def get_sample_offset(self, instance_id: int) -> int:
@@ -279,7 +309,7 @@ class SimpleAudioAligner:
     
     def clear_offset(self, instance_id: int):
         """
-        Clear the offset for an instance.
+        Clear the offset for an instance and clean up all associated state.
         
         Args:
             instance_id: Instance identifier
@@ -289,13 +319,21 @@ class SimpleAudioAligner:
                 del self.offsets[instance_id]
             if instance_id in self.sample_offsets:
                 del self.sample_offsets[instance_id]
+            if instance_id in self.delay_buffers:
+                self.delay_buffers[instance_id].clear()  # Clear the delay buffer!
             if instance_id in self.metrics.active_offsets:
                 del self.metrics.active_offsets[instance_id]
+            
+            # Clear log throttling state for this instance
+            keys_to_remove = [k for k in list(self.last_overflow_log.keys())
+                            if str(instance_id) in str(k)]
+            for key in keys_to_remove:
+                del self.last_overflow_log[key]
             
             # Update reference if needed
             if self.reference_instance == instance_id:
                 if self.offsets:
-                    self.reference_instance = min(self.offsets.keys(), 
+                    self.reference_instance = min(self.offsets.keys(),
                                                  key=lambda k: abs(self.offsets[k]))
                 else:
                     self.reference_instance = None

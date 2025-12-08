@@ -83,7 +83,7 @@ class AudioPreviewManager:
         self.is_running = False
         self._audio_timestamps = {}  # instance_id -> latest audio timestamp
         self._audio_timestamp_history = {}  # 'left_id:right_id' -> [(time, timestamp_diff_ms)]
-        self._audio_timestamp_window = 10.0  # 10 second averaging window for stability
+        self._audio_timestamp_window = 5.0  # 5 second averaging window (reduced for faster response)
         self._last_offset_update = 0  # Last time we updated offsets
         self._last_applied_offset = {}  # instance_id -> last applied offset (to avoid constant updates)
         
@@ -494,7 +494,10 @@ class AudioPreviewManager:
                         
                         if data.get('type') == 'audio':
                             audio_data = data.get('data')
-                            timestamp = data.get('timestamp')  # Extract timestamp
+                            # Extract RTP timestamp (uint32 sample count from SDR capture)
+                            # This represents when the audio was captured, not when it was sent
+                            # RTP timestamps increment at the sample rate and wrap at 2^32
+                            timestamp = data.get('timestamp')
                             
                             if audio_data:
                                 pcm_data = self._decode_audio(audio_data)
@@ -516,9 +519,9 @@ class AudioPreviewManager:
                                         if timestamp is not None:
                                             self._audio_timestamps[ch.instance_id] = timestamp
                                             
-                                            # Update offsets less frequently (every 2 seconds) to allow averaging to work
+                                            # Update offsets every second to allow averaging to work
                                             current_time = time.time()
-                                            if current_time - self._last_offset_update >= 2.0:
+                                            if current_time - self._last_offset_update >= 1.0:
                                                 self._update_audio_offsets()
                                                 self._last_offset_update = current_time
                                         
@@ -527,7 +530,9 @@ class AudioPreviewManager:
                                             try:
                                                 audio_array = self.simple_aligner.apply_alignment(ch.instance_id, audio_array)
                                             except Exception as e:
+                                                import traceback
                                                 print(f"[{ch.channel_name.upper()}] Error applying alignment: {e}")
+                                                print(f"[{ch.channel_name.upper()}] Traceback: {traceback.format_exc()}")
                                         
                                         ch.buffer.extend(audio_array.tolist())
                                         new_size = len(ch.buffer)
@@ -770,8 +775,20 @@ class AudioPreviewManager:
         
         # If we have both timestamps, calculate and average offset
         if left_ts is not None and right_ts is not None and left_id != right_id:
-            # Calculate instantaneous time difference in milliseconds (left - right)
-            time_diff_ms = left_ts - right_ts
+            # Calculate instantaneous time difference
+            # RTP timestamps are uint32 sample counts that increment at sample_rate
+            # Convert to milliseconds: (samples / sample_rate) * 1000
+            time_diff_samples = int(left_ts) - int(right_ts)
+            
+            # Handle uint32 wraparound (rare but possible for long-running streams)
+            # If difference is > 2^31, it likely wrapped around
+            if time_diff_samples > 2147483648:  # 2^31
+                time_diff_samples -= 4294967296  # 2^32
+            elif time_diff_samples < -2147483648:
+                time_diff_samples += 4294967296
+            
+            # Convert samples to milliseconds
+            time_diff_ms = (time_diff_samples / self.sample_rate) * 1000.0
             
             # Store in history for averaging
             history_key = f"{left_id}:{right_id}"
@@ -789,10 +806,10 @@ class AudioPreviewManager:
             
             # Calculate averaged offset if we have enough samples
             smoothed_history = self._audio_timestamp_history[history_key]
-            if len(smoothed_history) >= 10:  # Need at least 10 samples for stability
+            if len(smoothed_history) >= 3:  # Need at least 3 samples for stability
                 avg_time_diff_ms = sum(entry[1] for entry in smoothed_history) / len(smoothed_history)
                 
-                # Only update if the offset has changed significantly (>10ms) to avoid constant adjustments
+                # Update offset continuously to track drift (reduced threshold from 20ms to 10ms)
                 last_offset = self._last_applied_offset.get(left_id, 0.0)
                 if abs(avg_time_diff_ms - last_offset) > 10.0 or last_offset == 0.0:
                     # Use right as reference (offset = 0), left gets the averaged difference
@@ -803,6 +820,10 @@ class AudioPreviewManager:
                     print(f"[AUDIO OFFSET] Applied averaged offset: {avg_time_diff_ms:.1f}ms "
                           f"(over {len(smoothed_history)} samples, {self._audio_timestamp_window}s window) "
                           f"Left ID={left_id}, Right ID={right_id}")
+                else:
+                    # Log current offset even when not updating (for drift monitoring)
+                    if len(smoothed_history) % 10 == 0:  # Every 10 samples
+                        print(f"[AUDIO OFFSET] Current offset: {avg_time_diff_ms:.1f}ms (stable, last applied: {last_offset:.1f}ms)")
         elif left_ts is not None and left_id is not None:
             # Only left channel active, no offset needed
             self.simple_aligner.update_offset(left_id, 0.0)

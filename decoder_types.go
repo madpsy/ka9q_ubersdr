@@ -43,7 +43,7 @@ type DecoderBand struct {
 	Config       DecoderBandConfig
 	SSRC         uint32
 	SessionID    string
-	AudioChan    chan []byte
+	AudioChan    chan AudioPacket
 	LastDataTime time.Time
 	mu           sync.Mutex
 

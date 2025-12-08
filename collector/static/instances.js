@@ -447,14 +447,17 @@ function updateMap(instances) {
                 <div style="display: flex; gap: 15px; align-items: flex-start;">
                     <div style="flex: 1;">
                         <p style="margin: 0 0 4px 0; font-size: 0.9em;">${instance.name}</p>
-                        <p style="margin: 0 0 8px 0; font-size: 0.85em; color: #666;">${instance.location}</p>
+                        <p style="margin: 0 0 2px 0; font-size: 0.85em; color: #666;">${instance.location}</p>
+                        ${instance.maidenhead ? `<p style="margin: 0 0 8px 0; font-size: 0.8em; color: #999;">${instance.maidenhead}</p>` : '<p style="margin: 0 0 8px 0;"></p>'}
                         
                         <p style="margin: 0 0 4px 0; font-size: 0.85em;">
                             <strong>Status:</strong> <span style="color: ${isOnline ? 'green' : 'red'};">${isOnline ? 'Online' : 'Offline'}</span>
                         </p>
+                        ${instance.distance !== undefined ? `
                         <p style="margin: 0 0 4px 0; font-size: 0.85em;">
-                            <strong>Clients:</strong> ${instance.available_clients}/${instance.max_clients}
+                            <strong>Distance:</strong> ${instance.distance.toFixed(0)} km
                         </p>
+                        ` : ''}
                     </div>
                     <div style="flex: 1; border-left: 1px solid #ddd; padding-left: 10px;">
                         ${features.length > 0 ? features.map(f =>

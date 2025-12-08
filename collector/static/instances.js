@@ -443,9 +443,9 @@ function updateMap(instances) {
         
         const popupContent = `
             <div style="font-family: sans-serif; min-width: 300px;">
+                <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">${instance.callsign}</h3>
                 <div style="display: flex; gap: 15px; align-items: flex-start;">
                     <div style="flex: 1;">
-                        <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">${instance.callsign}</h3>
                         <p style="margin: 0 0 4px 0; font-size: 0.9em;">${instance.name}</p>
                         <p style="margin: 0 0 8px 0; font-size: 0.85em; color: #666;">${instance.location}</p>
                         
@@ -468,6 +468,9 @@ function updateMap(instances) {
                                 }).join('')
                                 : '<span style="font-size: 0.75em; color: #999;">No bandwidths</span>'
                             }
+                        </div>
+                        <div style="margin-top: 4px;">
+                            <span style="display: inline-block; padding: 2px 6px; background: #6366f1; color: white; border-radius: 3px; font-size: 0.7em; margin: 2px;">${instance.available_clients}/${instance.max_clients}</span>
                         </div>
                         <div style="margin-top: 4px; font-size: 0.75em; color: #666;">
                             ${sessionLimit}

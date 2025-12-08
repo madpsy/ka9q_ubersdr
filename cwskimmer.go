@@ -42,6 +42,7 @@ type CWSkimmerClient struct {
 	mu                   sync.RWMutex
 	connected            bool
 	stopChan             chan struct{}
+	restartChan          chan struct{}      // Signal to restart worker goroutine
 	ctx                  context.Context    // Context for cancellation
 	cancel               context.CancelFunc // Cancel function to stop operations
 	keepaliveDone        chan struct{}      // Signal to stop keepalive goroutine
@@ -65,6 +66,7 @@ func NewCWSkimmerClient(config *CWSkimmerConfig, ctyDatabase *CTYDatabase, recei
 	return &CWSkimmerClient{
 		config:          config,
 		stopChan:        make(chan struct{}),
+		restartChan:     make(chan struct{}, 1), // Buffered to prevent blocking
 		spotHandlers:    make([]func(CWSkimmerSpot), 0),
 		messageHandlers: make([]func(string), 0),
 		ctyDatabase:     ctyDatabase,
@@ -93,7 +95,7 @@ func (c *CWSkimmerClient) SetMetrics(m *CWSkimmerMetrics) {
 	c.metrics = m
 }
 
-// Start begins the CW Skimmer client connection and reconnection loop
+// Start begins the CW Skimmer client with supervisor pattern
 func (c *CWSkimmerClient) Start() error {
 	if !c.config.Enabled {
 		log.Println("CW Skimmer: Disabled in configuration")
@@ -110,8 +112,8 @@ func (c *CWSkimmerClient) Start() error {
 
 	log.Printf("CW Skimmer: Starting client for %s:%d", c.config.Host, c.config.Port)
 
-	// Start connection in background
-	go c.connectionLoop()
+	// Start supervisor goroutine that manages worker lifecycle
+	go c.supervisorLoop()
 
 	return nil
 }
@@ -149,27 +151,50 @@ func (c *CWSkimmerClient) OnMessage(handler func(string)) {
 	c.messageHandlers = append(c.messageHandlers, handler)
 }
 
-// connectionLoop manages the connection lifecycle with automatic reconnection
-func (c *CWSkimmerClient) connectionLoop() {
+// supervisorLoop manages worker goroutine lifecycle with automatic restart
+func (c *CWSkimmerClient) supervisorLoop() {
+	log.Println("CW Skimmer: Supervisor started")
+
+	// Start initial worker
+	go c.connectionWorker()
+
 	for {
 		select {
 		case <-c.stopChan:
-			log.Println("CW Skimmer: Connection loop stopped")
+			log.Println("CW Skimmer: Supervisor stopped")
 			return
-		default:
-			log.Println("CW Skimmer: Attempting connection...")
-			if err := c.connect(); err != nil {
-				log.Printf("CW Skimmer: Connection failed: %v", err)
-				c.waitBeforeReconnect()
-			} else {
-				// Connection succeeded, handle it
-				log.Println("CW Skimmer: Connection successful, entering message handler")
-				c.handleConnection()
-				log.Println("CW Skimmer: Message handler exited, will reconnect")
-				c.waitBeforeReconnect()
-			}
+		case <-c.restartChan:
+			// Worker exited, restart immediately
+			log.Println("CW Skimmer: Worker exited, restarting immediately")
+			go c.connectionWorker()
 		}
 	}
+}
+
+// connectionWorker handles a single connection session
+func (c *CWSkimmerClient) connectionWorker() {
+	// Signal supervisor when this worker exits
+	defer func() {
+		log.Println("CW Skimmer: Worker goroutine exiting")
+		select {
+		case c.restartChan <- struct{}{}:
+			// Successfully signaled restart
+		default:
+			// Channel full, restart already pending
+		}
+	}()
+
+	log.Println("CW Skimmer: Worker attempting connection...")
+	if err := c.connect(); err != nil {
+		log.Printf("CW Skimmer: Connection failed: %v", err)
+		return // Exit worker, supervisor will restart
+	}
+
+	// Connection succeeded, handle it until disconnect
+	log.Println("CW Skimmer: Connection successful, entering message handler")
+	c.handleConnection()
+	log.Println("CW Skimmer: Message handler exited")
+	// Worker exits here, supervisor will restart
 }
 
 // connect establishes a connection to the CW Skimmer server
@@ -700,17 +725,4 @@ func (c *CWSkimmerClient) submitToPSKReporter(spot *CWSkimmerSpot) error {
 	}
 
 	return c.pskReporter.Submit(decode)
-}
-
-// waitBeforeReconnect waits before attempting reconnection
-func (c *CWSkimmerClient) waitBeforeReconnect() {
-	delay := time.Duration(c.config.ReconnectDelay) * time.Second
-	log.Printf("CW Skimmer: Scheduling reconnection in %v", delay)
-
-	select {
-	case <-c.stopChan:
-		log.Println("CW Skimmer: Reconnection cancelled (stop requested)")
-	case <-time.After(delay):
-		log.Printf("CW Skimmer: Reconnection delay elapsed, will retry connection")
-	}
 }

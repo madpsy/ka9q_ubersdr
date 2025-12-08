@@ -12,6 +12,7 @@ import json
 import os
 import platform
 import signal
+import socket
 import stat
 import struct
 import sys
@@ -266,7 +267,8 @@ class RadioClient:
                  audio_level_callback=None, recording_callback=None, fifo_path: Optional[str] = None,
                  audio_filter_enabled: bool = False, audio_filter_low: float = 300.0,
                  audio_filter_high: float = 2700.0, pyaudio_device_index: Optional[int] = None,
-                 sounddevice_device_index: Optional[int] = None):
+                 sounddevice_device_index: Optional[int] = None, udp_host: Optional[str] = None,
+                 udp_port: Optional[int] = None):
         self.url = url
         self.host = host
         self.port = port
@@ -386,6 +388,14 @@ class RadioClient:
         self.eq_band_gains = {}  # Dictionary of {frequency: gain_db}
         self.eq_sos = None       # Combined second-order sections for all EQ bands
         self.eq_zi = None        # Filter state for EQ
+        
+        # UDP output
+        self.udp_socket = None
+        self.udp_host = udp_host
+        self.udp_port = udp_port
+        if self.output_mode == 'udp' and udp_host and udp_port:
+            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            print(f"UDP output configured: {udp_host}:{udp_port}", file=sys.stderr)
     
     def _init_audio_filter(self):
         """Initialize audio bandpass filter using FIR design."""
@@ -1002,6 +1012,15 @@ class RadioClient:
                     print(f"sounddevice error: {e}", file=sys.stderr)
                     self.running = False
 
+        elif self.output_mode == 'udp':
+            # Send to UDP socket
+            if self.udp_socket and self.udp_host and self.udp_port:
+                try:
+                    self.udp_socket.sendto(pcm_data, (self.udp_host, self.udp_port))
+                except Exception as e:
+                    print(f"UDP send error: {e}", file=sys.stderr)
+                    self.running = False
+        
         elif self.output_mode == 'wav':
             # Write to WAV file
             if self.wav_writer:
@@ -1475,6 +1494,15 @@ class RadioClient:
                 print(f"Error closing sounddevice stream: {e}", file=sys.stderr)
             self.sounddevice_stream = None
 
+        # Close UDP socket
+        if self.udp_socket:
+            try:
+                self.udp_socket.close()
+                print("UDP socket closed", file=sys.stderr)
+            except Exception as e:
+                print(f"Error closing UDP socket: {e}", file=sys.stderr)
+            self.udp_socket = None
+        
         # Clean up resamplers
         if self.resampler_left is not None:
             self.resampler_left = None
@@ -1763,6 +1791,12 @@ Examples:
 
   # Output raw PCM to stdout with custom bandwidth (CLI mode)
   %(prog)s --no-gui -f 7100000 -m lsb -b -2700:-50 -o stdout > audio.pcm
+
+  # Stream audio to UDP endpoint with default (127.0.0.1:8888)
+  %(prog)s --no-gui -f 14074000 -m usb -o udp
+
+  # Stream audio to custom UDP endpoint
+  %(prog)s --no-gui -f 14074000 -m usb -o udp:192.168.1.100:9999
         """
     )
     
@@ -1789,9 +1823,9 @@ Examples:
                         help='Demodulation mode (iq48/iq96/iq192/iq384 require bypassed IP)')
     parser.add_argument('-b', '--bandwidth', type=parse_bandwidth,
                         help='Bandwidth in format low:high (e.g., -5000:5000)')
-    parser.add_argument('-o', '--output', choices=['pipewire', 'pyaudio', 'sounddevice', 'stdout', 'wav'],
+    parser.add_argument('-o', '--output',
                         default='sounddevice',
-                        help='Output mode (default: sounddevice)')
+                        help='Output mode: pipewire, pyaudio, sounddevice, stdout, wav, udp (defaults to 127.0.0.1:8888), or udp:host:port (default: sounddevice)')
     parser.add_argument('-w', '--wav-file', metavar='FILE',
                         help='WAV file path (required when output=wav)')
     parser.add_argument('-t', '--time', type=float, metavar='SECONDS',
@@ -1946,6 +1980,30 @@ Examples:
             print(f"Unexpected error: {e}", file=sys.stderr)
             sys.exit(1)
     
+    # Parse output mode and UDP parameters
+    output_mode = args.output
+    udp_host = None
+    udp_port = None
+    
+    # Check if output is UDP format: udp or udp:host:port
+    if output_mode == 'udp':
+        # Default to localhost:8888
+        udp_host = '127.0.0.1'
+        udp_port = 8888
+        output_mode = 'udp'
+    elif output_mode.startswith('udp:'):
+        parts = output_mode.split(':')
+        if len(parts) != 3:
+            parser.error("UDP output must be in format: udp:host:port (e.g., udp:127.0.0.1:8888) or just 'udp' for default (127.0.0.1:8888)")
+        try:
+            udp_host = parts[1]
+            udp_port = int(parts[2])
+            output_mode = 'udp'
+        except ValueError:
+            parser.error("UDP port must be a valid integer")
+    elif output_mode not in ['pipewire', 'pyaudio', 'sounddevice', 'stdout', 'wav']:
+        parser.error(f"Invalid output mode: {output_mode}. Must be one of: pipewire, pyaudio, sounddevice, stdout, wav, udp, or udp:host:port")
+    
     # Parse bandwidth early for GUI
     bandwidth_low = None
     bandwidth_high = None
@@ -2009,7 +2067,7 @@ Examples:
                 'bandwidth_low': bandwidth_low,
                 'bandwidth_high': bandwidth_high,
                 'auto_connect': auto_connect,
-                'output_mode': args.output
+                'output_mode': output_mode
             }
             gui_main(config)
             return
@@ -2057,7 +2115,7 @@ Examples:
         mode=args.mode,
         bandwidth_low=bandwidth_low,
         bandwidth_high=bandwidth_high,
-        output_mode=args.output,
+        output_mode=output_mode,
         wav_file=args.wav_file,
         duration=args.time,
         ssl=args.ssl,
@@ -2071,7 +2129,9 @@ Examples:
         audio_filter_enabled=args.audio_filter,
         audio_filter_low=args.audio_filter_low,
         audio_filter_high=args.audio_filter_high,
-        sounddevice_device_index=None  # TODO: Add command-line argument for device selection
+        sounddevice_device_index=None,  # TODO: Add command-line argument for device selection
+        udp_host=udp_host,
+        udp_port=udp_port
     )
     
     # Setup signal handler for graceful shutdown

@@ -111,10 +111,15 @@ class MultiSpectrumGUI:
         self.compare_instance_b = tk.StringVar(value="None")
         self.comparison_history = {}  # instance_id -> list of recent (timestamp, peak, floor, snr) tuples
         self.comparison_diff_history = {}  # Store difference history for smoothing: 'a_id:b_id' -> list of (timestamp, diff_peak, diff_floor, diff_snr)
-        self.comparison_window = 0.5  # 500ms averaging window
+        self.comparison_timestamp_history = {}  # Store timestamp difference history: 'a_id:b_id' -> list of (time, timestamp_diff_ms)
+        self.comparison_window = 0.5  # 500ms averaging window for signal levels
+        self.comparison_timestamp_window = 5.0  # 5 second averaging window for timestamp differences (longer for stability)
         self.comparison_last_update = 0  # Last time we updated the comparison display
         self.comparison_update_interval = 0.2  # Update comparison display every 200ms
+        self.comparison_timestamp_last_update = 0  # Last time we updated timestamp difference display
+        self.comparison_timestamp_update_interval = 1.0  # Update timestamp difference every 1 second (less frequent for stability)
         self.comparison_last_valid_values = {}  # Store last valid comparison values: 'a_id:b_id' -> (diff_peak, diff_floor, diff_snr)
+        self.comparison_last_valid_timestamp_diff = {}  # Store last valid timestamp difference: 'a_id:b_id' -> timestamp_diff_ms
         
         # Update rate tracking for throttling (using server-reported rates)
         self.update_times = {}  # instance_id -> list of recent update timestamps (for frame skipping)
@@ -1577,7 +1582,7 @@ class MultiSpectrumGUI:
         compare_b_combo.pack(side=tk.LEFT, padx=(0, 5))
         compare_b_combo.bind('<<ComboboxSelected>>', lambda e: self._on_comparison_changed())
 
-        ttk.Label(compare_frame, text="(A - B, 500ms avg)", font=('TkDefaultFont', 9, 'italic')).pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Label(compare_frame, text="(A - B, 500ms avg; Time Δ: 5s avg)", font=('TkDefaultFont', 9, 'italic')).pack(side=tk.LEFT, padx=(10, 0))
 
         # Sync metrics display (if timestamp sync is available)
         if self.use_timestamp_sync and (self.audio_preview or self.spectrum_aligner):
@@ -2064,7 +2069,9 @@ class MultiSpectrumGUI:
         # Clear comparison history when selection changes
         self.comparison_history.clear()
         self.comparison_diff_history.clear()
+        self.comparison_timestamp_history.clear()
         self.comparison_last_valid_values.clear()
+        self.comparison_last_valid_timestamp_diff.clear()
         self.comparison_last_update = 0
         # Update will happen on next _update_signal_levels cycle
 
@@ -2226,7 +2233,7 @@ class MultiSpectrumGUI:
                 labels['diff_snr'].config(text="---", foreground='black')
                 labels['diff_timestamp'].config(text="---", foreground='black')
         
-        # Update timestamp difference for compared instances
+        # Update timestamp difference for compared instances with averaging
         instance_a = self.instance_manager.get_instance_by_id(instance_a_id)
         instance_b = self.instance_manager.get_instance_by_id(instance_b_id)
         
@@ -2235,28 +2242,71 @@ class MultiSpectrumGUI:
             ts_b = instance_b.spectrum.last_spectrum_timestamp
             
             if ts_a is not None and ts_b is not None:
-                # Calculate time difference in milliseconds
-                time_diff_ms = abs(ts_a - ts_b)
+                # Calculate instantaneous time difference in milliseconds (signed: A - B)
+                time_diff_ms = ts_a - ts_b
                 
-                # Determine which is ahead
-                if ts_a > ts_b:
-                    # A is ahead (newer)
+                # Store in history for averaging (always collect data)
+                ts_diff_key = f"{instance_a_id}:{instance_b_id}"
+                
+                if ts_diff_key not in self.comparison_timestamp_history:
+                    self.comparison_timestamp_history[ts_diff_key] = []
+                
+                ts_history = self.comparison_timestamp_history[ts_diff_key]
+                ts_history.append((current_time, time_diff_ms))
+                
+                # Remove old entries outside the 5 second window
+                cutoff_time = current_time - self.comparison_timestamp_window
+                self.comparison_timestamp_history[ts_diff_key] = [
+                    entry for entry in ts_history if entry[0] >= cutoff_time
+                ]
+                
+                # Only update display every 1 second (throttle display updates)
+                if current_time - self.comparison_timestamp_last_update < self.comparison_timestamp_update_interval:
+                    # Don't update display yet, but keep collecting data
+                    return
+                
+                self.comparison_timestamp_last_update = current_time
+                
+                # Calculate averaged timestamp difference over the 5 second window
+                smoothed_ts_history = self.comparison_timestamp_history[ts_diff_key]
+                
+                if len(smoothed_ts_history) >= 3:  # Require at least 3 samples for stability
+                    # Average the timestamp differences over the window
+                    avg_time_diff_ms = sum(entry[1] for entry in smoothed_ts_history) / len(smoothed_ts_history)
+                    
+                    # Store as last valid value
+                    self.comparison_last_valid_timestamp_diff[ts_diff_key] = avg_time_diff_ms
+                elif ts_diff_key in self.comparison_last_valid_timestamp_diff:
+                    # Use last valid value if we don't have enough samples yet
+                    avg_time_diff_ms = self.comparison_last_valid_timestamp_diff[ts_diff_key]
+                else:
+                    # Not enough data yet
+                    self.signal_level_labels[instance_a_id]['diff_timestamp'].config(text="---", foreground='gray')
+                    self.signal_level_labels[instance_b_id]['diff_timestamp'].config(text="---", foreground='gray')
+                    return
+                
+                # Display the averaged timestamp difference (only updates once per second)
+                abs_diff = abs(avg_time_diff_ms)
+                
+                # Determine which is ahead based on averaged value
+                if avg_time_diff_ms > 0:
+                    # A is ahead (newer) on average
                     self.signal_level_labels[instance_a_id]['diff_timestamp'].config(
-                        text=f"+{time_diff_ms:.1f} ms",
+                        text=f"+{abs_diff:.1f} ms",
                         foreground='blue'
                     )
                     self.signal_level_labels[instance_b_id]['diff_timestamp'].config(
-                        text=f"-{time_diff_ms:.1f} ms",
+                        text=f"-{abs_diff:.1f} ms",
                         foreground='orange'
                     )
                 else:
-                    # B is ahead (newer)
+                    # B is ahead (newer) on average
                     self.signal_level_labels[instance_a_id]['diff_timestamp'].config(
-                        text=f"-{time_diff_ms:.1f} ms",
+                        text=f"-{abs_diff:.1f} ms",
                         foreground='orange'
                     )
                     self.signal_level_labels[instance_b_id]['diff_timestamp'].config(
-                        text=f"+{time_diff_ms:.1f} ms",
+                        text=f"+{abs_diff:.1f} ms",
                         foreground='blue'
                     )
             else:

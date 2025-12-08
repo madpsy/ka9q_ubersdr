@@ -108,15 +108,57 @@ function formatTimestamp(timestamp) {
     return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
 }
 
-function createBandBadge(band, snr) {
+function createBandBadge(band, snr, instanceUrl) {
     const condition = getConditionClass(snr);
     const label = getConditionLabel(snr);
     const snrText = formatSNR(snr);
-    
+
+    // Calculate band center frequency and determine mode/bandwidth
+    const bandRanges = {
+        '160m': { min: 1810000, max: 2000000 },
+        '80m': { min: 3500000, max: 3800000 },
+        '60m': { min: 5258500, max: 5406500 },
+        '40m': { min: 7000000, max: 7200000 },
+        '30m': { min: 10100000, max: 10150000 },
+        '20m': { min: 14000000, max: 14350000 },
+        '17m': { min: 18068000, max: 18168000 },
+        '15m': { min: 21000000, max: 21450000 },
+        '12m': { min: 24890000, max: 24990000 },
+        '10m': { min: 28000000, max: 29700000 }
+    };
+
+    const range = bandRanges[band];
+    if (!range) {
+        return `
+            <div class="band-badge ${condition}" title="${band}: ${snrText} (${label})">
+                <span>${band}</span>
+            </div>
+        `;
+    }
+
+    // Calculate band center frequency
+    const centerFreq = Math.round((range.min + range.max) / 2);
+
+    // Determine mode based on frequency (LSB below 10 MHz, USB at 10 MHz and above)
+    const mode = centerFreq < 10000000 ? 'lsb' : 'usb';
+
+    // Set bandwidth based on mode
+    let bwl, bwh;
+    if (mode === 'usb') {
+        bwl = 50;
+        bwh = 2700;
+    } else { // lsb
+        bwl = -2700;
+        bwh = -50;
+    }
+
+    // Build URL with query parameters
+    const url = `${instanceUrl}?freq=${centerFreq}&mode=${mode}&bwl=${bwl}&bwh=${bwh}`;
+
     return `
-        <div class="band-badge ${condition}" title="${band}: ${snrText} (${label})">
+        <a href="${url}" target="_blank" class="band-badge ${condition}" title="${band}: ${snrText} (${label}) - Click to tune" style="text-decoration: none; cursor: pointer;">
             <span>${band}</span>
-        </div>
+        </a>
     `;
 }
 

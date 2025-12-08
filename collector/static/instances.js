@@ -443,12 +443,12 @@ function updateMap(instances) {
         
         const popupContent = `
             <div style="font-family: sans-serif; min-width: 300px;">
-                <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">${instance.callsign}</h3>
-                <p style="margin: 0 0 4px 0; font-size: 0.9em;">${instance.name}</p>
-                <p style="margin: 0 0 8px 0; font-size: 0.85em; color: #666;">${instance.location}</p>
-                
-                <div style="display: flex; gap: 15px; margin-bottom: 8px; align-items: flex-start;">
+                <div style="display: flex; gap: 15px; align-items: flex-start;">
                     <div style="flex: 1;">
+                        <h3 style="margin: 0 0 8px 0; font-size: 1.1em;">${instance.callsign}</h3>
+                        <p style="margin: 0 0 4px 0; font-size: 0.9em;">${instance.name}</p>
+                        <p style="margin: 0 0 8px 0; font-size: 0.85em; color: #666;">${instance.location}</p>
+                        
                         <p style="margin: 0 0 4px 0; font-size: 0.85em;">
                             <strong>Status:</strong> <span style="color: ${isOnline ? 'green' : 'red'};">${isOnline ? 'Online' : 'Offline'}</span>
                         </p>

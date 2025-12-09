@@ -2,9 +2,9 @@
 
 Web interface for ka9q-radio SDR software.
 
-## 📖 Getting Started
+## Getting Started
 
-**👉 Most users should start here: [https://ubersdr.org/](https://ubersdr.org/)**
+**Most users should start here: [https://ubersdr.org/](https://ubersdr.org/)**
 
 The UberSDR website provides comprehensive installation instructions, setup guides, and documentation to help you get started quickly and easily.
 

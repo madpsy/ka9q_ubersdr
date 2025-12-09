@@ -66,15 +66,16 @@ class CWSpotsDisplay:
         # Setup UI
         self._setup_ui()
 
-        # Register callbacks
-        self.websocket_manager.on_cw_spot(self._handle_spot)
-        self.websocket_manager.on_status(self._handle_status)
+        # Handle window close
+        self.window.protocol("WM_DELETE_WINDOW", self._on_closing)
 
         # Start update checking
         self.window.after(100, self.check_updates)
 
-        # Handle window close
-        self.window.protocol("WM_DELETE_WINDOW", self._on_closing)
+        # Register callbacks AFTER starting update checker
+        # This ensures the initial status notification is properly queued and processed
+        self.websocket_manager.on_cw_spot(self._handle_spot)
+        self.websocket_manager.on_status(self._handle_status)
 
         # Auto-open graph window
         self.window.after(500, self.open_graph_window)
@@ -263,6 +264,10 @@ class CWSpotsDisplay:
         # Limit spots
         if len(self.spots) > self.max_spots:
             self.spots = self.spots[:self.max_spots]
+
+        # If receiving spots, we must be connected - update status if currently disconnected
+        if self.status_label.cget('text') == 'Disconnected':
+            self.status_label.config(text="Connected", foreground="green")
 
         # Schedule batched update instead of immediate update
         # This prevents UI stalls when many spots arrive quickly

@@ -60,10 +60,6 @@ class DigitalSpotsDisplay:
         # Create UI
         self.create_widgets()
         
-        # Register callbacks with shared WebSocket manager
-        self.websocket_manager.on_digital_spot(self._handle_spot)
-        self.websocket_manager.on_status(self._handle_status)
-        
         # Handle window close
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -71,6 +67,11 @@ class DigitalSpotsDisplay:
         # Use after() to ensure the window event loop is running
         self.window.after(100, self.check_updates)
         self.window.after(1000, self.update_ages)
+
+        # Register callbacks with shared WebSocket manager AFTER starting update checker
+        # This ensures the initial status notification is properly queued and processed
+        self.websocket_manager.on_digital_spot(self._handle_spot)
+        self.websocket_manager.on_status(self._handle_status)
     
     def _handle_spot(self, spot_data: Dict):
         """Handle incoming digital spot from WebSocket."""
@@ -233,7 +234,11 @@ class DigitalSpotsDisplay:
 
         # Update last update time
         self.last_update_label.config(text=f"Last: {datetime.now().strftime('%H:%M:%S')}")
-        
+
+        # If receiving spots, we must be connected - update status if currently disconnected
+        if self.status_label.cget('text') == 'Disconnected':
+            self.status_label.config(text="Connected", foreground='green')
+
         # Apply filters and update display
         self.apply_filters()
     

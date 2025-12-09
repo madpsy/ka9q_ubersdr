@@ -1727,8 +1727,13 @@ class RadioGUI:
         # Update band button highlighting
         self.update_band_buttons(freq_hz)
 
-        # Set mode based on frequency (LSB below 10 MHz, USB at/above 10 MHz) only if not locked
-        if not self.mode_lock_var.get():
+        # Set mode based on frequency (LSB below 10 MHz, USB at/above 10 MHz) only if:
+        # 1. Mode is not locked, AND
+        # 2. Rig control is not active with Rig→SDR direction (external software controls mode)
+        rig_controls_mode = (self.radio_control_connected and
+                            self.radio_sync_direction_var.get() == "Rig→SDR")
+
+        if not self.mode_lock_var.get() and not rig_controls_mode:
             if freq_hz < 10000000:  # Below 10 MHz
                 mode = 'LSB'
             else:  # 10 MHz and above
@@ -2635,7 +2640,11 @@ class RadioGUI:
             # Auto-select appropriate mode based on frequency (LSB < 10 MHz, USB >= 10 MHz)
             # Only auto-switch for SSB modes (USB/LSB) and if mode is not locked
             # Skip auto-switching when tuning from bookmarks (they have their own mode)
-            if not skip_auto_mode and not self.mode_lock_var.get():
+            # Also skip if rig control is active with Rig→SDR direction (external software controls mode)
+            rig_controls_mode = (self.radio_control_connected and
+                                self.radio_sync_direction_var.get() == "Rig→SDR")
+
+            if not skip_auto_mode and not self.mode_lock_var.get() and not rig_controls_mode:
                 current_mode = self.mode_var.get().upper()
                 if current_mode in ['USB', 'LSB']:
                     if freq_hz < 10000000 and current_mode != 'LSB':

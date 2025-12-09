@@ -36,6 +36,7 @@ class LocalInstancesDisplay:
         self.zeroconf = None
         self.browser = None
         self.listener = None
+        self.is_closing = False  # Flag to prevent updates after window closure
         
         # Create window
         self.create_window()
@@ -209,12 +210,14 @@ class LocalInstancesDisplay:
                 info['description'] = description
                 
                 # Update tree view (run in main thread)
-                self.window.after(0, lambda: self._update_tree_view())
+                if not self.is_closing and self.window:
+                    self.window.after(0, lambda: self._update_tree_view())
             except Exception as e:
                 # If fetch fails, remove the instance
                 if service_name in self.instances:
                     del self.instances[service_name]
-                self.window.after(0, lambda: self._update_tree_view())
+                if not self.is_closing and self.window:
+                    self.window.after(0, lambda: self._update_tree_view())
         
         # Start fetch in background
         threading.Thread(target=fetch_description, daemon=True).start()
@@ -230,12 +233,21 @@ class LocalInstancesDisplay:
         if service_name in self.instances:
             del self.instances[service_name]
             # Update tree view (run in main thread)
-            self.window.after(0, lambda: self._update_tree_view())
+            if not self.is_closing and self.window:
+                self.window.after(0, lambda: self._update_tree_view())
     
     def _update_tree_view(self):
         """Update the tree view with current instances."""
-        # Clear existing items
-        self.tree.delete(*self.tree.get_children())
+        # Guard against destroyed widget
+        if self.is_closing or not self.window or not self.window.winfo_exists():
+            return
+
+        try:
+            # Clear existing items
+            self.tree.delete(*self.tree.get_children())
+        except tk.TclError:
+            # Widget was destroyed between check and access
+            return
         
         # Add instances (only those with valid description)
         for service_name, info in sorted(self.instances.items(), key=lambda x: x[1]['name']):
@@ -370,6 +382,7 @@ class LocalInstancesDisplay:
     
     def on_close(self):
         """Handle window close."""
+        self.is_closing = True
         self.stop_discovery()
         self.window.destroy()
 

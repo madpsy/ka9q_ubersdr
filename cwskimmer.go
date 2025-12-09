@@ -272,34 +272,44 @@ func (c *CWSkimmerClient) disconnect() {
 		return
 	}
 
-	// Step 1: Close the socket FIRST to unblock any pending reads
-	// This is critical - closing the socket will cause ReadLine to return an error
+	// Step 1: Mark as disconnected immediately to stop new operations
+	c.mu.Lock()
+	c.connected = false
+	c.mu.Unlock()
+
+	// Step 2: Set immediate read deadline to unblock any pending reads
 	if conn != nil {
-		log.Println("CW Skimmer: Closing connection socket to unblock reads")
-		conn.Close()
+		log.Println("CW Skimmer: Setting immediate read deadline to unblock pending reads")
+		conn.SetReadDeadline(time.Now()) // Immediate timeout
 	}
 
-	// Step 2: Cancel the context to signal goroutines to stop
+	// Step 3: Cancel the context to signal goroutines to stop
 	if cancel != nil {
 		log.Println("CW Skimmer: Cancelling context")
 		cancel()
 	}
 
-	// Step 3: Wait for handleConnection to exit (with timeout)
+	// Step 4: Close the socket
+	if conn != nil {
+		log.Println("CW Skimmer: Closing connection socket")
+		conn.Close()
+	}
+
+	// Step 5: Wait briefly for handleConnection to exit
+	// Don't wait too long - if it's stuck, we'll just abandon it and let the supervisor restart
 	if handlerDone != nil {
 		log.Println("CW Skimmer: Waiting for handleConnection to exit...")
 		select {
 		case <-handlerDone:
 			log.Println("CW Skimmer: handleConnection exited cleanly")
-		case <-time.After(5 * time.Second):
-			log.Println("CW Skimmer: WARNING: handleConnection did not exit within timeout")
+		case <-time.After(500 * time.Millisecond):
+			log.Println("CW Skimmer: handleConnection did not exit quickly - abandoning and forcing restart")
+			// Don't wait forever - the supervisor will restart anyway
 		}
 	}
 
-	// Step 4: Clean up state
+	// Step 6: Clean up state
 	c.mu.Lock()
-	c.connected = false
-
 	// Signal keepalive goroutine to stop
 	if c.keepaliveDone != nil {
 		close(c.keepaliveDone)
@@ -730,7 +740,18 @@ func (c *CWSkimmerClient) keepaliveLoop() {
 			// If we sent a ping but never got response, force reconnect
 			if !lastPing.IsZero() && (lastResponse.IsZero() || lastResponse.Before(lastPing)) {
 				log.Printf("CW Skimmer: Previous ping sent at %v never received response, forcing reconnection", lastPing)
+
+				// Disconnect and force immediate restart by signaling supervisor directly
 				c.disconnect()
+
+				// Force restart signal even if worker is stuck
+				log.Println("CW Skimmer: Forcing restart signal to supervisor")
+				select {
+				case c.restartChan <- struct{}{}:
+					log.Println("CW Skimmer: Restart signal sent successfully")
+				case <-time.After(100 * time.Millisecond):
+					log.Println("CW Skimmer: WARNING: Could not send restart signal (channel full)")
+				}
 				return
 			}
 

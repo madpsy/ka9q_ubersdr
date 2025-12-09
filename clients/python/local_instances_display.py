@@ -242,6 +242,10 @@ class LocalInstancesDisplay:
         if self.is_closing or not self.window or not self.window.winfo_exists():
             return
 
+        # Also check if tree widget still exists
+        if not self.tree or not self.tree.winfo_exists():
+            return
+
         try:
             # Clear existing items
             self.tree.delete(*self.tree.get_children())
@@ -331,14 +335,12 @@ class LocalInstancesDisplay:
             if not info:
                 return
             
-            # Column #11 is Public URL
+            # Column #11 is Public URL (opens instances.ubersdr.org with UUID)
             if column == '#11':
-                description = info.get('description')
-                if description:
-                    receiver = description.get('receiver', {})
-                    url = receiver.get('public_url', '')
-                    if url:
-                        webbrowser.open(url)
+                public_uuid = info.get('public_uuid', '')
+                if public_uuid:
+                    url = f"https://instances.ubersdr.org/?uuid={public_uuid}"
+                    webbrowser.open(url)
             
             # Column #12 is Local URL
             elif column == '#12':

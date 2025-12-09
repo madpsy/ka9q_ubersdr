@@ -5773,25 +5773,23 @@ class RadioGUI:
             self.log_status(f"ERROR: Failed to open URL - {e}")
 
     def open_receiver_map(self, event=None):
-        """Open Google Maps with receiver GPS coordinates."""
+        """Open UberSDR instances map with receiver UUID."""
         if not self.client or not hasattr(self.client, 'server_description'):
             return
 
         desc = self.client.server_description
-        gps = desc.get('receiver', {}).get('gps', {})
-        lat = gps.get('lat')
-        lon = gps.get('lon')
+        public_uuid = desc.get('public_uuid', '')
 
-        if lat is None or lon is None:
-            messagebox.showinfo("No GPS Data", "GPS coordinates not available for this receiver")
+        if not public_uuid:
+            messagebox.showinfo("No UUID", "Public UUID not available for this receiver")
             return
 
-        # Open Google Maps in default browser
+        # Open UberSDR instances map in default browser
         import webbrowser
-        maps_url = f"https://www.google.com/maps?q={lat},{lon}"
+        map_url = f"https://instances.ubersdr.org/?uuid={public_uuid}"
         try:
-            webbrowser.open(maps_url)
-            self.log_status(f"Opened map at {lat}, {lon}")
+            webbrowser.open(map_url)
+            self.log_status(f"Opened instance map: {public_uuid}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open map: {e}")
             self.log_status(f"ERROR: Failed to open map - {e}")

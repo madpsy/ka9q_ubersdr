@@ -211,35 +211,46 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
         on_connect_callback(host, port, tls, name)
 
     def open_instance_conditions(uuid):
-        """Open instance conditions page in browser."""
-        url = f"https://instances.ubersdr.org/?uuid={uuid}&conditions=true"
+        """Open instance map page in browser."""
+        url = f"https://instances.ubersdr.org/?uuid={uuid}"
+        print(f"DEBUG: Opening URL: {url}")
         webbrowser.open(url)
 
     def on_tree_click(event):
         """Handle single-click on tree items to open links."""
         region = tree.identify_region(event.x, event.y)
+        print(f"DEBUG on_tree_click: region={region}")
         if region == "cell":
             column = tree.identify_column(event.x)
             item = tree.identify_row(event.y)
+            print(f"DEBUG on_tree_click: column={column}, item={item}")
 
             if not item:
+                print(f"DEBUG on_tree_click: no item, returning")
                 return
 
             instance = instances_data.get(item)
             if not instance:
+                print(f"DEBUG on_tree_click: no instance data, returning")
                 return
+
+            print(f"DEBUG on_tree_click: instance keys={list(instance.keys())}")
 
             # Column #11 is Public URL
             if column == '#11':
                 url = instance.get('public_url', '')
+                print(f"DEBUG on_tree_click: Column #11 clicked, url={url}")
                 if url:
                     webbrowser.open(url)
 
             # Column #12 is Map/Conditions
             elif column == '#12':
                 uuid = instance.get('id', '')
+                print(f"DEBUG on_tree_click: Column #12 clicked, uuid={uuid}")
                 if uuid:
                     open_instance_conditions(uuid)
+            else:
+                print(f"DEBUG on_tree_click: Other column clicked: {column}")
 
     def on_tree_double_click(event):
         """Handle double-click on tree items to connect."""

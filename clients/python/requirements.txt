@@ -12,6 +12,7 @@ sounddevice>=0.4.6
 samplerate>=0.1.0
 pyinstaller>=6.17.0
 zeroconf>=0.132.0
+pyserial>=3.5
 
 # Windows-only: OmniRig support
 pywin32>=306; platform_system=="Windows"

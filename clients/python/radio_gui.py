@@ -191,6 +191,14 @@ if platform.system() == 'Windows':
         print(f"Warning: OmniRig module not available: {e}")
         OMNIRIG_AVAILABLE = False
 
+# Import Serial CAT server
+try:
+    from serial_cat_server import SerialCATServer, list_serial_ports
+    SERIAL_CAT_AVAILABLE = True
+except ImportError:
+    SERIAL_CAT_AVAILABLE = False
+    print("Warning: Serial CAT module not available (install pyserial)")
+
 
 class RadioGUI:
     """Tkinter-based GUI for the radio client."""
@@ -444,6 +452,7 @@ class RadioGUI:
                 'port': self.radio_port_var.get(),
                 'vfo': self.radio_vfo_var.get(),
                 'omnirig_rig': self.omnirig_rig_var.get(),
+                'serial_port': self.serial_port_var.get(),
                 'sync_direction': self.radio_sync_direction_var.get(),
                 'mute_tx': self.radio_mute_tx_var.get()
             }
@@ -529,6 +538,10 @@ class RadioGUI:
         # Apply OmniRig rig number (silently)
         if 'omnirig_rig' in settings:
             self.omnirig_rig_var.set(settings['omnirig_rig'])
+
+        # Apply serial port (silently)
+        if 'serial_port' in settings:
+            self.serial_port_var.set(settings['serial_port'])
 
         # Apply sync direction (silently)
         if 'sync_direction' in settings:
@@ -994,7 +1007,7 @@ class RadioGUI:
         radio_controls = ttk.Frame(conn_frame)
         radio_controls.grid(row=3, column=1, columnspan=6, sticky=tk.W)
 
-        # Radio control type selector (rigctl, flrig, or OmniRig)
+        # Radio control type selector (rigctl, flrig, OmniRig, or Serial)
         available_types = ['None']
         if RIGCTL_AVAILABLE:
             available_types.append('rigctl')
@@ -1002,7 +1015,9 @@ class RadioGUI:
             available_types.append('flrig')
         if OMNIRIG_AVAILABLE:
             available_types.append('OmniRig')
-        
+        if SERIAL_CAT_AVAILABLE:
+            available_types.append('Serial')
+
         # Set default based on platform
         default_type = 'None'
         if platform.system() == 'Windows' and OMNIRIG_AVAILABLE:
@@ -1059,7 +1074,18 @@ class RadioGUI:
         self.omnirig_rig_combo = ttk.Combobox(radio_controls, textvariable=self.omnirig_rig_var,
                                              values=['1', '2'], state='readonly', width=5)
         
-        # Hide VFO and OmniRig controls initially
+        # Serial port selector (for Serial only)
+        self.serial_port_label = ttk.Label(radio_controls, text="Port:")
+        self.serial_port_var = tk.StringVar(value='')
+        self.serial_port_combo = ttk.Combobox(radio_controls, textvariable=self.serial_port_var,
+                                             width=15)
+        # Auto-save when serial port changes
+        self.serial_port_var.trace_add('write', lambda *args: self.save_servers())
+        # Refresh button for serial ports
+        self.serial_refresh_btn = ttk.Button(radio_controls, text="↻", width=3,
+                                            command=self.refresh_serial_ports)
+
+        # Hide VFO, OmniRig, and Serial controls initially
         # (will be shown when appropriate type is selected)
 
         self.radio_connect_btn = ttk.Button(radio_controls, text="Connect", command=self.toggle_radio_control_connection)
@@ -1716,20 +1742,6 @@ class RadioGUI:
         if self.connected:
             self.apply_frequency()
 
-    def get_frequency_hz(self) -> int:
-        """Convert frequency from current unit to Hz."""
-        try:
-            freq_value = float(self.freq_var.get())
-            unit = self.freq_unit_var.get()
-
-            if unit == "MHz":
-                return int(freq_value * 1e6)
-            elif unit == "kHz":
-                return int(freq_value * 1e3)
-            else:  # Hz
-                return int(freq_value)
-        except ValueError:
-            raise ValueError("Invalid frequency value")
 
     def on_freq_unit_changed(self):
         """Handle frequency unit change - convert current value to new unit."""
@@ -1940,6 +1952,21 @@ class RadioGUI:
 
         # Update bookmark dropdown selection
         self.update_bookmark_selector(freq_hz)
+
+    def get_frequency_hz(self) -> int:
+        """Convert frequency from current unit to Hz."""
+        try:
+            freq_value = float(self.freq_var.get())
+            unit = self.freq_unit_var.get()
+
+            if unit == "MHz":
+                return int(freq_value * 1e6)
+            elif unit == "kHz":
+                return int(freq_value * 1e3)
+            else:  # Hz
+                return int(freq_value)
+        except ValueError:
+            raise ValueError("Invalid frequency value")
 
     def update_band_buttons(self, freq_hz: int):
         """Update band button highlighting based on current frequency.
@@ -2845,7 +2872,7 @@ class RadioGUI:
     def on_radio_control_type_changed(self):
         """Handle radio control type change - show/hide appropriate controls."""
         control_type = self.radio_control_type_var.get()
-        
+
         if control_type == 'rigctl':
             # Show rigctl controls (host, port)
             self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
@@ -2855,11 +2882,14 @@ class RadioGUI:
             # Update default port for rigctl
             if not self.radio_port_var.get() or self.radio_port_var.get() == '12345':
                 self.radio_port_var.set('4532')
-            # Hide VFO and OmniRig controls
+            # Hide VFO, OmniRig, and Serial controls
             self.radio_vfo_label.pack_forget()
             self.radio_vfo_combo.pack_forget()
             self.omnirig_rig_label.pack_forget()
             self.omnirig_rig_combo.pack_forget()
+            self.serial_port_label.pack_forget()
+            self.serial_port_combo.pack_forget()
+            self.serial_refresh_btn.pack_forget()
         elif control_type == 'flrig':
             # Show flrig controls (host, port, VFO)
             self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
@@ -2871,9 +2901,16 @@ class RadioGUI:
             # Update default port for flrig
             if not self.radio_port_var.get() or self.radio_port_var.get() == '4532':
                 self.radio_port_var.set('12345')
-            # Hide OmniRig rig selector
+            # Hide OmniRig and Serial controls
             self.omnirig_rig_label.pack_forget()
             self.omnirig_rig_combo.pack_forget()
+            self.serial_port_label.pack_forget()
+            self.serial_port_combo.pack_forget()
+            self.serial_refresh_btn.pack_forget()
+            # Show sync direction radio buttons for flrig
+            self.radio_sdr_to_rig_radio.pack(side=tk.LEFT, padx=(0, 5))
+            self.radio_rig_to_sdr_radio.pack(side=tk.LEFT, padx=(0, 10))
+            self.radio_mute_tx_check.pack(side=tk.LEFT)  # Show Mute TX for flrig
         elif control_type == 'OmniRig':
             # Hide host/port controls
             self.radio_host_label.pack_forget()
@@ -2885,6 +2922,39 @@ class RadioGUI:
             self.omnirig_rig_combo.pack(side=tk.LEFT, padx=(0, 5))
             self.radio_vfo_label.pack(side=tk.LEFT, padx=(5, 5))
             self.radio_vfo_combo.pack(side=tk.LEFT, padx=(0, 5))
+            # Hide Serial controls
+            self.serial_port_label.pack_forget()
+            self.serial_port_combo.pack_forget()
+            self.serial_refresh_btn.pack_forget()
+            # Show sync direction radio buttons for OmniRig
+            self.radio_sdr_to_rig_radio.pack(side=tk.LEFT, padx=(0, 5))
+            self.radio_rig_to_sdr_radio.pack(side=tk.LEFT, padx=(0, 10))
+            self.radio_mute_tx_check.pack(side=tk.LEFT)  # Show Mute TX for OmniRig
+        elif control_type == 'Serial':
+            # Hide host/port controls
+            self.radio_host_label.pack_forget()
+            self.radio_host_entry.pack_forget()
+            self.radio_port_label.pack_forget()
+            self.radio_port_entry.pack_forget()
+            # Hide OmniRig controls
+            self.omnirig_rig_label.pack_forget()
+            self.omnirig_rig_combo.pack_forget()
+            # Hide VFO selector (CAT server doesn't need it)
+            self.radio_vfo_label.pack_forget()
+            self.radio_vfo_combo.pack_forget()
+            # Show Serial controls (port selector only)
+            self.serial_port_label.pack(side=tk.LEFT, padx=(5, 5))
+            self.serial_port_combo.pack(side=tk.LEFT, padx=(0, 5))
+            self.serial_refresh_btn.pack(side=tk.LEFT, padx=(0, 5))
+            # Hide Mute TX checkbox (Serial CAT server acts as the radio itself)
+            self.radio_mute_tx_check.pack_forget()
+            # Hide sync direction radio buttons (Serial is always Rig→SDR)
+            self.radio_sdr_to_rig_radio.pack_forget()
+            self.radio_rig_to_sdr_radio.pack_forget()
+            # Set sync direction to Rig→SDR for Serial mode
+            self.radio_sync_direction_var.set("Rig→SDR")
+            # Refresh serial ports list
+            self.refresh_serial_ports()
         else:  # None
             # Hide all controls
             self.radio_host_label.pack_forget()
@@ -2895,18 +2965,43 @@ class RadioGUI:
             self.radio_vfo_combo.pack_forget()
             self.omnirig_rig_label.pack_forget()
             self.omnirig_rig_combo.pack_forget()
+            self.serial_port_label.pack_forget()
+            self.serial_port_combo.pack_forget()
+            self.serial_refresh_btn.pack_forget()
     
     def on_radio_vfo_changed(self):
-        """Handle VFO selection change for flrig or OmniRig."""
+        """Handle VFO selection change for flrig, OmniRig, or Serial."""
         if self.radio_control_connected and self.radio_control:
             vfo = self.radio_vfo_var.get()
             if hasattr(self.radio_control, 'set_vfo'):
                 self.radio_control.set_vfo(vfo)
                 self.log_status(f"Switched to VFO-{vfo}")
-    
+
     def on_omnirig_vfo_changed(self):
         """Handle VFO selection change for OmniRig (legacy wrapper)."""
         self.on_radio_vfo_changed()
+
+    def refresh_serial_ports(self):
+        """Refresh the list of available serial ports."""
+        if not SERIAL_CAT_AVAILABLE:
+            self.serial_port_combo['values'] = []
+            return
+
+        try:
+            ports = list_serial_ports()
+            self.serial_port_combo['values'] = ports
+
+            # Keep current selection if it's still valid
+            current = self.serial_port_var.get()
+            if current not in ports and ports:
+                self.serial_port_var.set(ports[0])
+            elif not ports:
+                self.serial_port_var.set('')
+
+            self.log_status(f"Found {len(ports)} serial port(s)")
+        except Exception as e:
+            self.log_status(f"Error refreshing serial ports: {e}")
+            self.serial_port_combo['values'] = []
     
     def toggle_radio_control_connection(self):
         """Connect or disconnect from radio control (rigctl or OmniRig)."""
@@ -2991,15 +3086,15 @@ class RadioGUI:
                 # Connect to OmniRig
                 rig_num = int(self.omnirig_rig_var.get())
                 vfo = self.radio_vfo_var.get()
-                
+
                 self.log_status(f"DEBUG: Creating OmniRig client Rig{rig_num} VFO-{vfo}")
-                
+
                 # Create and connect OmniRig client with VFO selection
                 self.radio_control = ThreadedOmniRigClient(rig_num, vfo)
                 self.radio_control_type = 'omnirig'
-                
+
                 self.log_status(f"DEBUG: Setting up callbacks")
-                
+
                 # Set up callbacks
                 self.radio_control.set_callbacks(
                     frequency_callback=self.on_radio_control_frequency_changed,
@@ -3007,48 +3102,95 @@ class RadioGUI:
                     ptt_callback=self.on_radio_control_ptt_changed,
                     error_callback=lambda err: self.log_status(f"OmniRig: {err}")
                 )
-                
+
                 self.log_status(f"DEBUG: Calling connect()")
                 success = self.radio_control.connect()
                 self.log_status(f"DEBUG: connect() returned {success}")
-                
+
                 if not success:
                     self.log_status("ERROR: OmniRig connection failed")
                     return
-                
+
                 self.log_status(f"✓ Connected to OmniRig Rig{rig_num} VFO-{vfo}")
+
+            elif control_type == 'Serial':
+                # Start Serial CAT Server
+                port = self.serial_port_var.get().strip()
+
+                if not port:
+                    messagebox.showerror("Error", "Please select a serial port")
+                    return
+
+                # Create and start Serial CAT server
+                self.radio_control = SerialCATServer(port, self)
+                self.radio_control_type = 'serial_cat'
+
+                try:
+                    self.radio_control.start()
+                    self.log_status(f"✓ Serial CAT server started on {port} (emulating Kenwood TS-480)")
+                    # Show success dialog
+                    messagebox.showinfo("Serial CAT Server Started",
+                                      f"UberSDR is now acting as a Kenwood TS-480 on {port}\n\n"
+                                      f"Configure your external software (e.g., WSJT-X) to use:\n"
+                                      f"• Rig: Kenwood TS-480\n"
+                                      f"• Serial Port: {port}\n"
+                                      f"• Baud Rate: 57600")
+                except ConnectionError as e:
+                    messagebox.showerror("Error", str(e))
+                    self.log_status(f"ERROR: Failed to start Serial CAT server - {e}")
+                    self.radio_control = None
+                    return
             
             # Update state
             self.radio_control_connected = True
             self.radio_connect_btn.config(text="Disconnect")
             
+            # Disable serial port dropdown and refresh button when connected (for Serial type)
+            if control_type == 'Serial':
+                self.serial_port_combo.config(state='disabled')
+                self.serial_refresh_btn.config(state='disabled')
+
             # Update legacy aliases
             self.rigctl = self.radio_control
             self.rigctl_connected = self.radio_control_connected
             
-            # Initialize PTT state
-            self.radio_control_last_ptt = False
-            self.radio_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
-            
-            # CRITICAL: Start polling FIRST (required for OmniRig to process events)
-            if not self.radio_control_poll_job:
-                self.log_status("DEBUG: Starting radio control polling...")
-                self.poll_radio_control_frequency()
-            
-            # Then enable sync with selected direction
-            self.log_status("DEBUG: Enabling radio control sync...")
-            self.start_radio_control_sync()
+            # Serial CAT server is passive - it doesn't need polling or sync
+            # External software polls the CAT server, which reads current state from radio_gui
+            if control_type != 'Serial':
+                # Initialize PTT state for non-Serial modes
+                self.radio_control_last_ptt = False
+                self.radio_mute_tx_check.configure(style='MuteTX.Green.TCheckbutton')
+
+                # CRITICAL: Start polling FIRST (required for OmniRig to process events)
+                if not self.radio_control_poll_job:
+                    self.log_status("DEBUG: Starting radio control polling...")
+                    self.poll_radio_control_frequency()
+
+                # Then enable sync with selected direction
+                self.log_status("DEBUG: Enabling radio control sync...")
+                self.start_radio_control_sync()
                 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to connect to radio control: {e}")
             self.log_status(f"ERROR: Failed to connect to radio control - {e}")
             if self.radio_control:
-                self.radio_control.disconnect()
+                # Serial CAT server uses stop() instead of disconnect()
+                if self.radio_control_type == 'serial_cat':
+                    self.radio_control.stop()
+                else:
+                    self.radio_control.disconnect()
     
     def disconnect_radio_control(self):
         """Disconnect from radio control."""
         if self.radio_control:
-            self.radio_control.disconnect()
+            # Serial CAT server uses stop() instead of disconnect()
+            if self.radio_control_type == 'serial_cat':
+                self.radio_control.stop()
+                # Re-enable serial port dropdown and refresh button
+                self.serial_port_combo.config(state='readonly')
+                self.serial_refresh_btn.config(state='normal')
+            else:
+                self.radio_control.disconnect()
             self.radio_control = None
         
         self.radio_control_connected = False

@@ -1885,6 +1885,9 @@ Examples:
 
   # CLI mode with OmniRig radio control (bidirectional sync)
   %(prog)s --no-gui -f 14074000 -m usb --radio-control-type omnirig --radio-rig 1 --radio-vfo A
+
+  # CLI mode with Serial CAT control (bidirectional sync)
+  %(prog)s --no-gui -f 14074000 -m usb --radio-control-type serial --radio-serial-port /dev/ttyUSB0 --radio-vfo A
         """
     )
     
@@ -1955,18 +1958,22 @@ Examples:
                         help='Number of output channels: 1 (mono) or 2 (stereo). Default: 1 for stdout/udp, 2 for audio devices. IQ modes always use 2 channels.')
 
     # Radio control arguments
-    parser.add_argument('--radio-control-type', type=str, choices=['rigctl', 'flrig', 'omnirig', 'none'], default='none',
-                        help='Radio control type: rigctl, flrig, omnirig, or none (default: none)')
+    parser.add_argument('--radio-control-type', type=str, choices=['rigctl', 'flrig', 'omnirig', 'serial', 'none'], default='none',
+                        help='Radio control type: rigctl, flrig, omnirig, serial, or none (default: none)')
     parser.add_argument('--radio-host', type=str, default='localhost',
                         help='Radio control host (for rigctl/flrig, default: localhost)')
     parser.add_argument('--radio-port', type=int,
                         help='Radio control port (default: 4532 for rigctl, 12345 for flrig)')
+    parser.add_argument('--radio-serial-port', type=str,
+                        help='Serial port for CAT control (e.g., /dev/ttyUSB0, COM3) - required for serial control type')
     parser.add_argument('--radio-vfo', type=str, choices=['A', 'B'], default='A',
-                        help='Radio VFO (for flrig/omnirig, default: A)')
+                        help='Radio VFO (for flrig/omnirig/serial, default: A)')
     parser.add_argument('--radio-rig', type=int, choices=[1, 2], default=1,
                         help='Radio rig number (for omnirig, default: 1)')
     parser.add_argument('--radio-sync-direction', type=str, choices=['sdr-to-rig', 'rig-to-sdr'], default='sdr-to-rig',
                         help='Radio sync direction: sdr-to-rig or rig-to-sdr (default: sdr-to-rig)')
+    parser.add_argument('--list-serial-ports', action='store_true',
+                        help='List available serial ports and exit')
 
     args = parser.parse_args()
     
@@ -2007,6 +2014,28 @@ Examples:
                 print("  No devices found or pw-cli not available")
         sys.exit(0)
     
+    # List serial ports mode
+    if args.list_serial_ports:
+        try:
+            from serial_cat import list_serial_ports
+            print("Available serial ports:")
+            print()
+            ports = list_serial_ports()
+            if ports:
+                for port, desc, hwid in ports:
+                    print(f"  {port}")
+                    if desc and desc != 'n/a':
+                        print(f"    Description: {desc}")
+                    if hwid and hwid != 'n/a':
+                        print(f"    Hardware ID: {hwid}")
+                    print()
+            else:
+                print("  No serial ports found")
+        except ImportError:
+            print("Error: pyserial not available. Install with: pip install pyserial", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
+
     # List local instances mode
     if args.list_local:
         list_local_instances()
@@ -2252,9 +2281,26 @@ Examples:
                     print("ERROR: Failed to connect to OmniRig", file=sys.stderr)
                     sys.exit(1)
                 print("✓ Connected to OmniRig", file=sys.stderr)
-        
+
+            elif args.radio_control_type == 'serial':
+                if not args.radio_serial_port:
+                    print("ERROR: --radio-serial-port is required for serial control type", file=sys.stderr)
+                    print("Use --list-serial-ports to see available ports", file=sys.stderr)
+                    sys.exit(1)
+
+                from serial_cat import ThreadedSerialCATClient
+                print(f"Connecting to Serial CAT on {args.radio_serial_port} (VFO {args.radio_vfo})...", file=sys.stderr)
+                radio_control = ThreadedSerialCATClient(args.radio_serial_port, args.radio_vfo)
+                if not radio_control.connect():
+                    print(f"ERROR: Failed to connect to serial port {args.radio_serial_port}", file=sys.stderr)
+                    print("Check that the port exists and you have permission to access it", file=sys.stderr)
+                    sys.exit(1)
+                print(f"✓ Connected to Serial CAT on {args.radio_serial_port} VFO-{args.radio_vfo} (Kenwood TS-480 protocol)", file=sys.stderr)
+
         except ImportError as e:
             print(f"ERROR: Failed to import radio control module: {e}", file=sys.stderr)
+            if args.radio_control_type == 'serial':
+                print("Install pyserial with: pip install pyserial", file=sys.stderr)
             sys.exit(1)
         except Exception as e:
             print(f"ERROR: Failed to connect to radio control: {e}", file=sys.stderr)

@@ -1278,51 +1278,58 @@ class RadioGUI:
             ttk.Label(audio_frame, text="FIFO:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
 
             self.fifo_var = tk.StringVar(value=find_next_fifo_path())
-            self.fifo_entry = ttk.Entry(audio_frame, textvariable=self.fifo_var, width=25)
-            self.fifo_entry.grid(row=1, column=1, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 5), pady=(5, 0))
+            self.fifo_entry = ttk.Entry(audio_frame, textvariable=self.fifo_var, width=20)
+            self.fifo_entry.grid(row=1, column=1, sticky=tk.W, padx=(0, 5), pady=(5, 0))
         else:
             # On Windows, FIFO is not supported - don't show the UI elements
             self.fifo_var = tk.StringVar(value="")
             self.fifo_entry = None
 
         # UDP output (additional output option) - row 1 (or same row as FIFO on non-Windows)
+        # Use a frame to keep controls together without gaps
         if platform.system() != 'Windows':
             # On non-Windows, UDP is on same row as FIFO, to the right
             udp_row = 1
-            udp_col_start = 3
+            udp_col_start = 2
             udp_pady = (5, 0)
+            udp_padx = (10, 5)
         else:
             # On Windows, UDP is on row 1 by itself
             udp_row = 1
             udp_col_start = 0
             udp_pady = (5, 0)
+            udp_padx = (0, 5)
 
-        ttk.Label(audio_frame, text="UDP:").grid(row=udp_row, column=udp_col_start, sticky=tk.W, padx=(0, 5) if platform.system() == 'Windows' else (20, 5), pady=udp_pady)
+        # Create a frame to hold UDP controls together
+        udp_frame = ttk.Frame(audio_frame)
+        udp_frame.grid(row=udp_row, column=udp_col_start, columnspan=4, sticky=tk.W, padx=udp_padx, pady=udp_pady)
+
+        ttk.Label(udp_frame, text="UDP:").pack(side=tk.LEFT, padx=(0, 5))
 
         self.udp_enabled_var = tk.BooleanVar(value=False)
-        self.udp_check = ttk.Checkbutton(audio_frame, text="Enable", variable=self.udp_enabled_var,
+        self.udp_check = ttk.Checkbutton(udp_frame, text="Enable", variable=self.udp_enabled_var,
                                          command=self.toggle_udp_output)
-        self.udp_check.grid(row=udp_row, column=udp_col_start+1, sticky=tk.W, padx=(0, 5), pady=udp_pady)
+        self.udp_check.pack(side=tk.LEFT, padx=(0, 5))
 
-        ttk.Label(audio_frame, text="Host:").grid(row=udp_row, column=udp_col_start+2, sticky=tk.W, padx=(5, 5), pady=udp_pady)
+        ttk.Label(udp_frame, text="Host:").pack(side=tk.LEFT, padx=(5, 5))
         self.udp_host_var = tk.StringVar(value="127.0.0.1")
-        self.udp_host_entry = ttk.Entry(audio_frame, textvariable=self.udp_host_var, width=12)
-        self.udp_host_entry.grid(row=udp_row, column=udp_col_start+3, sticky=tk.W, padx=(0, 5), pady=udp_pady)
+        self.udp_host_entry = ttk.Entry(udp_frame, textvariable=self.udp_host_var, width=12)
+        self.udp_host_entry.pack(side=tk.LEFT, padx=(0, 5))
         # Auto-save when UDP host changes
         self.udp_host_var.trace_add('write', lambda *args: self.save_audio_settings())
 
-        ttk.Label(audio_frame, text="Port:").grid(row=udp_row, column=udp_col_start+4, sticky=tk.W, padx=(5, 5), pady=udp_pady)
+        ttk.Label(udp_frame, text="Port:").pack(side=tk.LEFT, padx=(5, 5))
         self.udp_port_var = tk.StringVar(value="8888")
-        self.udp_port_entry = ttk.Entry(audio_frame, textvariable=self.udp_port_var, width=6)
-        self.udp_port_entry.grid(row=udp_row, column=udp_col_start+5, sticky=tk.W, pady=udp_pady)
+        self.udp_port_entry = ttk.Entry(udp_frame, textvariable=self.udp_port_var, width=6)
+        self.udp_port_entry.pack(side=tk.LEFT, padx=(0, 5))
         # Auto-save when UDP port changes
         self.udp_port_var.trace_add('write', lambda *args: self.save_audio_settings())
 
         # UDP stereo checkbox
         self.udp_stereo_var = tk.BooleanVar(value=False)
-        self.udp_stereo_check = ttk.Checkbutton(audio_frame, text="Stereo", variable=self.udp_stereo_var,
+        self.udp_stereo_check = ttk.Checkbutton(udp_frame, text="Stereo", variable=self.udp_stereo_var,
                                                 command=self.on_udp_stereo_changed)
-        self.udp_stereo_check.grid(row=udp_row, column=udp_col_start+6, sticky=tk.W, padx=(5, 0), pady=udp_pady)
+        self.udp_stereo_check.pack(side=tk.LEFT, padx=(5, 0))
 
         # Volume control (row 2)
         ttk.Label(audio_frame, text="Volume:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))

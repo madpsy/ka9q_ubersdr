@@ -46,6 +46,7 @@ type CWSkimmerClient struct {
 	ctx                  context.Context    // Context for cancellation
 	cancel               context.CancelFunc // Cancel function to stop operations
 	keepaliveDone        chan struct{}      // Signal to stop keepalive goroutine
+	handlerDone          chan struct{}      // Signal when handleConnection exits
 	lastActivityTime     time.Time          // For monitoring only
 	lastSpotTime         time.Time          // Time when last actual CW spot was received
 	lastPingTime         time.Time          // Time when last ping was sent
@@ -176,18 +177,29 @@ func (c *CWSkimmerClient) connectionWorker() {
 	// Signal supervisor when this worker exits
 	defer func() {
 		log.Println("CW Skimmer: Worker goroutine exiting")
+
+		// Ensure we're fully disconnected
+		c.mu.Lock()
+		if c.connected {
+			log.Println("CW Skimmer: Worker exit with connection still marked as connected, forcing cleanup")
+			c.connected = false
+		}
+		c.mu.Unlock()
+
+		// Signal restart with timeout protection
 		select {
 		case c.restartChan <- struct{}{}:
-			// Successfully signaled restart
-		default:
-			// Channel full, restart already pending
+			log.Println("CW Skimmer: Successfully signaled supervisor for restart")
+		case <-time.After(1 * time.Second):
+			log.Println("CW Skimmer: WARNING: Failed to signal restart (timeout)")
 		}
 	}()
 
 	log.Println("CW Skimmer: Worker attempting connection...")
 	if err := c.connect(); err != nil {
 		log.Printf("CW Skimmer: Connection failed: %v", err)
-		return // Exit worker, supervisor will restart
+		time.Sleep(5 * time.Second) // Back off before restart
+		return                      // Exit worker, supervisor will restart
 	}
 
 	// Connection succeeded, handle it until disconnect
@@ -246,24 +258,45 @@ func (c *CWSkimmerClient) connect() error {
 func (c *CWSkimmerClient) disconnect() {
 	log.Println("CW Skimmer: disconnect() called")
 
-	// Cancel the context first - this signals all goroutines to stop immediately
+	// Get references we need
 	c.mu.RLock()
 	cancel := c.cancel
 	conn := c.conn
+	handlerDone := c.handlerDone
+	alreadyDisconnected := !c.connected
 	c.mu.RUnlock()
 
-	if cancel != nil {
-		log.Println("CW Skimmer: Cancelling context to unblock operations")
-		cancel()
+	// If already disconnected, nothing to do
+	if alreadyDisconnected {
+		log.Println("CW Skimmer: Already disconnected, skipping")
+		return
 	}
 
-	// Close the connection
+	// Step 1: Close the socket FIRST to unblock any pending reads
+	// This is critical - closing the socket will cause ReadLine to return an error
 	if conn != nil {
-		log.Println("CW Skimmer: Closing connection socket")
+		log.Println("CW Skimmer: Closing connection socket to unblock reads")
 		conn.Close()
 	}
 
-	// Now acquire the write lock and clean up state
+	// Step 2: Cancel the context to signal goroutines to stop
+	if cancel != nil {
+		log.Println("CW Skimmer: Cancelling context")
+		cancel()
+	}
+
+	// Step 3: Wait for handleConnection to exit (with timeout)
+	if handlerDone != nil {
+		log.Println("CW Skimmer: Waiting for handleConnection to exit...")
+		select {
+		case <-handlerDone:
+			log.Println("CW Skimmer: handleConnection exited cleanly")
+		case <-time.After(5 * time.Second):
+			log.Println("CW Skimmer: WARNING: handleConnection did not exit within timeout")
+		}
+	}
+
+	// Step 4: Clean up state
 	c.mu.Lock()
 	c.connected = false
 
@@ -278,6 +311,7 @@ func (c *CWSkimmerClient) disconnect() {
 	c.reader = nil
 	c.ctx = nil
 	c.cancel = nil
+	c.handlerDone = nil
 	c.mu.Unlock()
 
 	log.Println("CW Skimmer: Disconnected")
@@ -341,10 +375,11 @@ func (c *CWSkimmerClient) login() error {
 
 	log.Println("CW Skimmer: Login completed")
 
-	// Update last activity time
+	// Update last activity time and create channels
 	c.mu.Lock()
 	c.lastActivityTime = time.Now()
 	c.keepaliveDone = make(chan struct{})
+	c.handlerDone = make(chan struct{})
 	c.mu.Unlock()
 
 	// Start keepalive goroutine
@@ -355,6 +390,17 @@ func (c *CWSkimmerClient) login() error {
 
 // handleConnection reads and processes messages from the skimmer
 func (c *CWSkimmerClient) handleConnection() {
+	// Signal when we exit
+	defer func() {
+		log.Println("CW Skimmer: handleConnection() exiting")
+		c.mu.Lock()
+		if c.handlerDone != nil {
+			close(c.handlerDone)
+			c.handlerDone = nil
+		}
+		c.mu.Unlock()
+	}()
+
 	c.mu.RLock()
 	keepaliveDelay := c.config.KeepAliveDelay
 	ctx := c.ctx

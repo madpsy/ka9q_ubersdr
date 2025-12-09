@@ -1876,6 +1876,15 @@ Examples:
 
   # Stream audio to custom UDP endpoint
   %(prog)s --no-gui -f 14074000 -m usb -o udp:192.168.1.100:9999
+
+  # CLI mode with rigctl radio control (SDR to rig sync)
+  %(prog)s --no-gui -f 14074000 -m usb --radio-control-type rigctl --radio-host localhost --radio-port 4532 --radio-sync-direction sdr-to-rig
+
+  # CLI mode with flrig radio control (rig to SDR sync)
+  %(prog)s --no-gui -f 14074000 -m usb --radio-control-type flrig --radio-host localhost --radio-port 12345 --radio-vfo A --radio-sync-direction rig-to-sdr
+
+  # CLI mode with OmniRig radio control (bidirectional sync)
+  %(prog)s --no-gui -f 14074000 -m usb --radio-control-type omnirig --radio-rig 1 --radio-vfo A
         """
     )
     
@@ -1944,6 +1953,20 @@ Examples:
 
     parser.add_argument('--channels', type=int, choices=[1, 2], metavar='N',
                         help='Number of output channels: 1 (mono) or 2 (stereo). Default: 1 for stdout/udp, 2 for audio devices. IQ modes always use 2 channels.')
+
+    # Radio control arguments
+    parser.add_argument('--radio-control-type', type=str, choices=['rigctl', 'flrig', 'omnirig', 'none'], default='none',
+                        help='Radio control type: rigctl, flrig, omnirig, or none (default: none)')
+    parser.add_argument('--radio-host', type=str, default='localhost',
+                        help='Radio control host (for rigctl/flrig, default: localhost)')
+    parser.add_argument('--radio-port', type=int,
+                        help='Radio control port (default: 4532 for rigctl, 12345 for flrig)')
+    parser.add_argument('--radio-vfo', type=str, choices=['A', 'B'], default='A',
+                        help='Radio VFO (for flrig/omnirig, default: A)')
+    parser.add_argument('--radio-rig', type=int, choices=[1, 2], default=1,
+                        help='Radio rig number (for omnirig, default: 1)')
+    parser.add_argument('--radio-sync-direction', type=str, choices=['sdr-to-rig', 'rig-to-sdr'], default='sdr-to-rig',
+                        help='Radio sync direction: sdr-to-rig or rig-to-sdr (default: sdr-to-rig)')
 
     args = parser.parse_args()
     
@@ -2193,6 +2216,50 @@ Examples:
     if hasattr(args, 'channels') and args.channels is not None:
         output_channels = args.channels
 
+    # Initialize radio control if requested
+    radio_control = None
+    if args.radio_control_type != 'none':
+        # Determine default port based on control type
+        radio_port = args.radio_port
+        if radio_port is None:
+            if args.radio_control_type == 'rigctl':
+                radio_port = 4532
+            elif args.radio_control_type == 'flrig':
+                radio_port = 12345
+            else:  # omnirig doesn't use port
+                radio_port = 0
+        
+        try:
+            if args.radio_control_type == 'rigctl':
+                from rigctl import ThreadedRigctlClient
+                print(f"Connecting to rigctl at {args.radio_host}:{radio_port}...", file=sys.stderr)
+                radio_control = ThreadedRigctlClient(args.radio_host, radio_port)
+                radio_control.connect()
+                print("✓ Connected to rigctl", file=sys.stderr)
+            
+            elif args.radio_control_type == 'flrig':
+                from flrig_control import ThreadedFlrigClient
+                print(f"Connecting to flrig at {args.radio_host}:{radio_port} (VFO {args.radio_vfo})...", file=sys.stderr)
+                radio_control = ThreadedFlrigClient(args.radio_host, radio_port, args.radio_vfo)
+                radio_control.connect()
+                print("✓ Connected to flrig", file=sys.stderr)
+            
+            elif args.radio_control_type == 'omnirig':
+                from omnirig_control import ThreadedOmniRigClient
+                print(f"Connecting to OmniRig (Rig {args.radio_rig}, VFO {args.radio_vfo})...", file=sys.stderr)
+                radio_control = ThreadedOmniRigClient(args.radio_rig, args.radio_vfo)
+                if not radio_control.connect():
+                    print("ERROR: Failed to connect to OmniRig", file=sys.stderr)
+                    sys.exit(1)
+                print("✓ Connected to OmniRig", file=sys.stderr)
+        
+        except ImportError as e:
+            print(f"ERROR: Failed to import radio control module: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"ERROR: Failed to connect to radio control: {e}", file=sys.stderr)
+            sys.exit(1)
+
     # Create client
     client = RadioClient(
         url=args.url,
@@ -2223,10 +2290,141 @@ Examples:
         udp_stereo=False  # CLI default: mono (can be added as argument if needed)
     )
     
+    # Setup radio control callbacks if enabled
+    if radio_control:
+        sync_direction = args.radio_sync_direction
+        
+        # Track last values to avoid feedback loops
+        last_sdr_freq = args.frequency
+        last_sdr_mode = args.mode
+        last_rig_freq = None
+        last_rig_mode = None
+        
+        # Mode mapping: SDR modes to radio modes
+        sdr_to_radio_mode = {
+            'usb': 'USB',
+            'lsb': 'LSB',
+            'am': 'AM',
+            'sam': 'AM',
+            'fm': 'FM',
+            'nfm': 'FM',
+            'cwu': 'CW',
+            'cwl': 'CW'
+        }
+        
+        # Mode mapping: radio modes to SDR modes
+        radio_to_sdr_mode = {
+            'USB': 'usb',
+            'LSB': 'lsb',
+            'AM': 'am',
+            'FM': 'fm',
+            'CW': 'cwu'
+        }
+        
+        def on_rig_frequency_change(freq_hz: int):
+            """Called when rig frequency changes."""
+            nonlocal last_rig_freq, last_sdr_freq
+            if sync_direction in ('rig-to-sdr', 'bidirectional'):
+                # Avoid feedback loop
+                if last_rig_freq != freq_hz and abs(freq_hz - last_sdr_freq) > 100:
+                    last_rig_freq = freq_hz
+                    last_sdr_freq = freq_hz
+                    # Update SDR frequency via WebSocket
+                    if client.ws:
+                        asyncio.create_task(client.ws.send(json.dumps({
+                            'type': 'set_frequency',
+                            'frequency': freq_hz
+                        })))
+                        print(f"Radio → SDR: {freq_hz} Hz", file=sys.stderr)
+        
+        def on_rig_mode_change(mode: str):
+            """Called when rig mode changes."""
+            nonlocal last_rig_mode, last_sdr_mode
+            if sync_direction in ('rig-to-sdr', 'bidirectional'):
+                # Avoid feedback loop
+                if last_rig_mode != mode:
+                    last_rig_mode = mode
+                    sdr_mode = radio_to_sdr_mode.get(mode.upper(), 'usb')
+                    if sdr_mode != last_sdr_mode:
+                        last_sdr_mode = sdr_mode
+                        # Update SDR mode via WebSocket
+                        if client.ws:
+                            asyncio.create_task(client.ws.send(json.dumps({
+                                'type': 'set_mode',
+                                'mode': sdr_mode
+                            })))
+                            print(f"Radio → SDR: {mode} → {sdr_mode}", file=sys.stderr)
+        
+        def on_rig_error(error: str):
+            """Called when radio control error occurs."""
+            print(f"Radio control error: {error}", file=sys.stderr)
+        
+        # Set up callbacks for rig-to-SDR sync
+        if sync_direction in ('rig-to-sdr', 'bidirectional'):
+            radio_control.set_callbacks(
+                frequency_callback=on_rig_frequency_change,
+                mode_callback=on_rig_mode_change,
+                error_callback=on_rig_error
+            )
+            print(f"Radio sync: {sync_direction}", file=sys.stderr)
+        
+        # Set up SDR-to-rig sync by modifying client's handle_message
+        if sync_direction in ('sdr-to-rig', 'bidirectional'):
+            original_handle_message = client.handle_message
+            
+            async def handle_message_with_sync(message: dict):
+                """Wrapper to sync SDR changes to rig."""
+                nonlocal last_sdr_freq, last_sdr_mode, last_rig_freq, last_rig_mode
+                
+                # Call original handler
+                await original_handle_message(message)
+                
+                # Check for frequency/mode changes in status messages
+                msg_type = message.get('type')
+                if msg_type == 'status':
+                    freq = message.get('frequency')
+                    mode = message.get('mode', '').lower()
+                    
+                    # Sync frequency to rig
+                    if freq and freq != last_sdr_freq:
+                        # Avoid feedback loop
+                        if last_rig_freq is None or abs(freq - last_rig_freq) > 100:
+                            last_sdr_freq = freq
+                            radio_control.set_frequency(freq)
+                            print(f"SDR → Radio: {freq} Hz", file=sys.stderr)
+                    
+                    # Sync mode to rig
+                    if mode and mode != last_sdr_mode:
+                        radio_mode = sdr_to_radio_mode.get(mode, 'USB')
+                        # Avoid feedback loop
+                        if last_rig_mode is None or radio_mode.upper() != last_rig_mode.upper():
+                            last_sdr_mode = mode
+                            radio_control.set_mode(radio_mode)
+                            print(f"SDR → Radio: {mode} → {radio_mode}", file=sys.stderr)
+            
+            client.handle_message = handle_message_with_sync
+        
+        # Start polling for rig changes (for rig-to-SDR sync)
+        if sync_direction in ('rig-to-sdr', 'bidirectional'):
+            async def poll_radio():
+                """Poll radio for changes."""
+                while client.running:
+                    try:
+                        radio_control.poll()
+                        await asyncio.sleep(0.1)  # Poll every 100ms
+                    except Exception as e:
+                        print(f"Radio poll error: {e}", file=sys.stderr)
+                        break
+            
+            # Start polling task
+            asyncio.create_task(poll_radio())
+    
     # Setup signal handler for graceful shutdown
     def signal_handler(sig, frame):
         print("\nInterrupted, shutting down...", file=sys.stderr)
         client.running = False
+        if radio_control:
+            radio_control.disconnect()
     
     signal.signal(signal.SIGINT, signal_handler)
     # SIGTERM not available on Windows
@@ -2236,9 +2434,13 @@ Examples:
     # Run client
     try:
         exit_code = asyncio.run(client.run())
+        if radio_control:
+            radio_control.disconnect()
         sys.exit(exit_code)
     except KeyboardInterrupt:
         print("\nInterrupted", file=sys.stderr)
+        if radio_control:
+            radio_control.disconnect()
         sys.exit(0)
 
 

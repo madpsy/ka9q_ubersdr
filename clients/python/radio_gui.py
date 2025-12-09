@@ -172,6 +172,14 @@ except ImportError:
     RIGCTL_AVAILABLE = False
     print("Warning: rigctl module not available")
 
+# Import flrig client
+try:
+    from flrig_control import ThreadedFlrigClient
+    FLRIG_AVAILABLE = True
+except ImportError:
+    FLRIG_AVAILABLE = False
+    print("Warning: flrig module not available")
+
 # Import OmniRig client (Windows only)
 OMNIRIG_AVAILABLE = False
 if platform.system() == 'Windows':
@@ -221,7 +229,7 @@ class RadioGUI:
     def __init__(self, root: tk.Tk, initial_config: dict):
         self.root = root
         self.root.title("Radio Client")
-        self.root.geometry("800x920")  # Increased height for mode buttons and band buttons
+        self.root.geometry("900x920")  # Increased width for radio control VFO dropdown
         self.root.resizable(True, True)
 
         # Configuration
@@ -362,6 +370,9 @@ class RadioGUI:
         # Apply saved audio settings after UI is ready
         self.root.after(50, self.apply_saved_audio_settings)
 
+        # Apply saved radio control settings after UI is ready
+        self.root.after(60, self.apply_saved_radio_control_settings)
+
         # Auto-connect if requested (after UI is ready)
         if self.config.get('auto_connect', False):
             self.root.after(100, self.connect)  # Delay slightly to ensure UI is fully initialized
@@ -381,7 +392,7 @@ class RadioGUI:
             return os.path.expanduser("~/.ubersdr_servers.json")
     
     def load_servers(self):
-        """Load saved server configurations and audio settings from file."""
+        """Load saved server configurations, audio settings, and radio control settings from file."""
         if not os.path.exists(self.config_file):
             return
         
@@ -396,6 +407,12 @@ class RadioGUI:
                     # Store for later use (after UI is created)
                     self._saved_audio_settings = audio_settings
                 
+                # Load radio control settings if they exist
+                radio_control_settings = data.get('radio_control_settings', {})
+                if radio_control_settings:
+                    # Store for later use (after UI is created)
+                    self._saved_radio_control_settings = radio_control_settings
+                
                 # Only log if status_text exists (after UI is created)
                 if hasattr(self, 'status_text'):
                     self.log_status(f"Loaded {len(self.servers)} saved server(s)")
@@ -403,9 +420,10 @@ class RadioGUI:
             print(f"Failed to load server configurations: {e}")
             self.servers = []
             self._saved_audio_settings = {}
+            self._saved_radio_control_settings = {}
     
     def save_servers(self):
-        """Save server configurations and audio settings to file."""
+        """Save server configurations, audio settings, and radio control settings to file."""
         try:
             # Get current audio settings
             audio_settings = {
@@ -419,9 +437,21 @@ class RadioGUI:
                 'udp_stereo': self.udp_stereo_var.get()
             }
             
+            # Get current radio control settings
+            radio_control_settings = {
+                'type': self.radio_control_type_var.get(),
+                'host': self.radio_host_var.get(),
+                'port': self.radio_port_var.get(),
+                'vfo': self.radio_vfo_var.get(),
+                'omnirig_rig': self.omnirig_rig_var.get(),
+                'sync_direction': self.radio_sync_direction_var.get(),
+                'mute_tx': self.radio_mute_tx_var.get()
+            }
+            
             data = {
                 'servers': self.servers,
-                'audio_settings': audio_settings
+                'audio_settings': audio_settings,
+                'radio_control_settings': radio_control_settings
             }
             
             with open(self.config_file, 'w') as f:
@@ -438,22 +468,22 @@ class RadioGUI:
         """Apply saved audio settings to UI after it's created."""
         if not hasattr(self, '_saved_audio_settings'):
             return
-        
+
         settings = self._saved_audio_settings
-        
+
         # Apply device selection (silently)
         if 'device' in settings:
             device = settings['device']
             # Check if device exists in current device list
             if device in self.device_combo['values']:
                 self.device_var.set(device)
-        
+
         # Apply volume (silently)
         if 'volume' in settings:
             volume = settings['volume']
             self.volume_var.set(volume)
             self.volume_label.config(text=f"{volume}%")
-        
+
         # Apply channel selection (silently)
         if 'channel_left' in settings:
             self.channel_left_var.set(settings['channel_left'])
@@ -469,6 +499,44 @@ class RadioGUI:
             self.udp_port_var.set(settings['udp_port'])
         if 'udp_stereo' in settings:
             self.udp_stereo_var.set(settings['udp_stereo'])
+
+    def apply_saved_radio_control_settings(self):
+        """Apply saved radio control settings to UI after it's created."""
+        if not hasattr(self, '_saved_radio_control_settings'):
+            return
+
+        settings = self._saved_radio_control_settings
+
+        # Apply radio control type (silently)
+        if 'type' in settings:
+            control_type = settings['type']
+            # Check if type is valid
+            if control_type in self.radio_type_combo['values']:
+                self.radio_control_type_var.set(control_type)
+                # Update UI to show/hide appropriate controls
+                self.on_radio_control_type_changed()
+
+        # Apply host/port (silently)
+        if 'host' in settings:
+            self.radio_host_var.set(settings['host'])
+        if 'port' in settings:
+            self.radio_port_var.set(settings['port'])
+
+        # Apply VFO selection (silently)
+        if 'vfo' in settings:
+            self.radio_vfo_var.set(settings['vfo'])
+
+        # Apply OmniRig rig number (silently)
+        if 'omnirig_rig' in settings:
+            self.omnirig_rig_var.set(settings['omnirig_rig'])
+
+        # Apply sync direction (silently)
+        if 'sync_direction' in settings:
+            self.radio_sync_direction_var.set(settings['sync_direction'])
+
+        # Apply mute TX setting (silently)
+        if 'mute_tx' in settings:
+            self.radio_mute_tx_var.set(settings['mute_tx'])
     
     def save_audio_settings(self):
         """Save audio settings automatically (called when settings change)."""
@@ -926,10 +994,12 @@ class RadioGUI:
         radio_controls = ttk.Frame(conn_frame)
         radio_controls.grid(row=3, column=1, columnspan=6, sticky=tk.W)
 
-        # Radio control type selector (rigctl or OmniRig)
+        # Radio control type selector (rigctl, flrig, or OmniRig)
         available_types = ['None']
         if RIGCTL_AVAILABLE:
             available_types.append('rigctl')
+        if FLRIG_AVAILABLE:
+            available_types.append('flrig')
         if OMNIRIG_AVAILABLE:
             available_types.append('OmniRig')
         
@@ -937,6 +1007,8 @@ class RadioGUI:
         default_type = 'None'
         if platform.system() == 'Windows' and OMNIRIG_AVAILABLE:
             default_type = 'OmniRig'
+        elif FLRIG_AVAILABLE:
+            default_type = 'flrig'
         elif RIGCTL_AVAILABLE:
             default_type = 'rigctl'
         
@@ -949,38 +1021,46 @@ class RadioGUI:
         # Store reference for later use
         self.radio_type_combo = radio_type_combo
 
-        # Host/Port fields (for rigctl)
+        # Host/Port fields (for rigctl and flrig)
         self.radio_host_label = ttk.Label(radio_controls, text="Host:")
         self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
         
-        self.radio_host_var = tk.StringVar(value=self.config.get('rigctl_host', 'localhost'))
+        # Default to rigctl port, but will be updated when type changes
+        default_host = self.config.get('rigctl_host', self.config.get('flrig_host', '127.0.0.1'))
+        self.radio_host_var = tk.StringVar(value=default_host)
         self.radio_host_entry = ttk.Entry(radio_controls, textvariable=self.radio_host_var, width=15)
         self.radio_host_entry.pack(side=tk.LEFT, padx=(0, 5))
         self.radio_host_entry.bind('<Return>', lambda e: self.toggle_radio_control_connection())
+        # Auto-save when host changes
+        self.radio_host_var.trace_add('write', lambda *args: self.save_servers())
 
         self.radio_port_label = ttk.Label(radio_controls, text="Port:")
         self.radio_port_label.pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.radio_port_var = tk.StringVar(value=str(self.config.get('rigctl_port', 4532)))
+
+        # Default to rigctl port, but will be updated when type changes
+        default_port = self.config.get('rigctl_port', self.config.get('flrig_port', 4532))
+        self.radio_port_var = tk.StringVar(value=str(default_port))
         self.radio_port_entry = ttk.Entry(radio_controls, textvariable=self.radio_port_var, width=6)
         self.radio_port_entry.pack(side=tk.LEFT, padx=(0, 5))
         self.radio_port_entry.bind('<Return>', lambda e: self.toggle_radio_control_connection())
+        # Auto-save when port changes
+        self.radio_port_var.trace_add('write', lambda *args: self.save_servers())
 
-        # Rig number selector (for OmniRig)
+        # VFO selector (for flrig and OmniRig)
+        self.radio_vfo_label = ttk.Label(radio_controls, text="VFO:")
+        self.radio_vfo_var = tk.StringVar(value='A')
+        self.radio_vfo_combo = ttk.Combobox(radio_controls, textvariable=self.radio_vfo_var,
+                                           values=['A', 'B'], state='readonly', width=5)
+        self.radio_vfo_combo.bind('<<ComboboxSelected>>', lambda e: self.on_radio_vfo_changed())
+
+        # Rig number selector (for OmniRig only)
         self.omnirig_rig_label = ttk.Label(radio_controls, text="Rig:")
         self.omnirig_rig_var = tk.StringVar(value='1')
         self.omnirig_rig_combo = ttk.Combobox(radio_controls, textvariable=self.omnirig_rig_var,
                                              values=['1', '2'], state='readonly', width=5)
         
-        # VFO selector (for OmniRig)
-        self.omnirig_vfo_label = ttk.Label(radio_controls, text="VFO:")
-        self.omnirig_vfo_var = tk.StringVar(value='A')
-        self.omnirig_vfo_combo = ttk.Combobox(radio_controls, textvariable=self.omnirig_vfo_var,
-                                             values=['A', 'B'], state='readonly', width=5)
-        self.omnirig_vfo_combo.bind('<<ComboboxSelected>>', lambda e: self.on_omnirig_vfo_changed())
-        
-        # Hide OmniRig controls initially
-        # (will be shown when OmniRig is selected)
+        # Hide VFO and OmniRig controls initially
+        # (will be shown when appropriate type is selected)
 
         self.radio_connect_btn = ttk.Button(radio_controls, text="Connect", command=self.toggle_radio_control_connection)
         self.radio_connect_btn.pack(side=tk.LEFT, padx=(0, 5))
@@ -2767,45 +2847,66 @@ class RadioGUI:
         control_type = self.radio_control_type_var.get()
         
         if control_type == 'rigctl':
-            # Show rigctl controls
+            # Show rigctl controls (host, port)
             self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
             self.radio_host_entry.pack(side=tk.LEFT, padx=(0, 5))
             self.radio_port_label.pack(side=tk.LEFT, padx=(0, 5))
             self.radio_port_entry.pack(side=tk.LEFT, padx=(0, 5))
-            # Hide OmniRig controls
+            # Update default port for rigctl
+            if not self.radio_port_var.get() or self.radio_port_var.get() == '12345':
+                self.radio_port_var.set('4532')
+            # Hide VFO and OmniRig controls
+            self.radio_vfo_label.pack_forget()
+            self.radio_vfo_combo.pack_forget()
             self.omnirig_rig_label.pack_forget()
             self.omnirig_rig_combo.pack_forget()
-            self.omnirig_vfo_label.pack_forget()
-            self.omnirig_vfo_combo.pack_forget()
+        elif control_type == 'flrig':
+            # Show flrig controls (host, port, VFO)
+            self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
+            self.radio_host_entry.pack(side=tk.LEFT, padx=(0, 5))
+            self.radio_port_label.pack(side=tk.LEFT, padx=(0, 5))
+            self.radio_port_entry.pack(side=tk.LEFT, padx=(0, 5))
+            self.radio_vfo_label.pack(side=tk.LEFT, padx=(5, 5))
+            self.radio_vfo_combo.pack(side=tk.LEFT, padx=(0, 5))
+            # Update default port for flrig
+            if not self.radio_port_var.get() or self.radio_port_var.get() == '4532':
+                self.radio_port_var.set('12345')
+            # Hide OmniRig rig selector
+            self.omnirig_rig_label.pack_forget()
+            self.omnirig_rig_combo.pack_forget()
         elif control_type == 'OmniRig':
-            # Hide rigctl controls
+            # Hide host/port controls
             self.radio_host_label.pack_forget()
             self.radio_host_entry.pack_forget()
             self.radio_port_label.pack_forget()
             self.radio_port_entry.pack_forget()
-            # Show OmniRig controls
+            # Show OmniRig controls (rig number, VFO)
             self.omnirig_rig_label.pack(side=tk.LEFT, padx=(5, 5))
             self.omnirig_rig_combo.pack(side=tk.LEFT, padx=(0, 5))
-            self.omnirig_vfo_label.pack(side=tk.LEFT, padx=(5, 5))
-            self.omnirig_vfo_combo.pack(side=tk.LEFT, padx=(0, 5))
+            self.radio_vfo_label.pack(side=tk.LEFT, padx=(5, 5))
+            self.radio_vfo_combo.pack(side=tk.LEFT, padx=(0, 5))
         else:  # None
             # Hide all controls
             self.radio_host_label.pack_forget()
             self.radio_host_entry.pack_forget()
             self.radio_port_label.pack_forget()
             self.radio_port_entry.pack_forget()
+            self.radio_vfo_label.pack_forget()
+            self.radio_vfo_combo.pack_forget()
             self.omnirig_rig_label.pack_forget()
             self.omnirig_rig_combo.pack_forget()
-            self.omnirig_vfo_label.pack_forget()
-            self.omnirig_vfo_combo.pack_forget()
     
-    def on_omnirig_vfo_changed(self):
-        """Handle VFO selection change for OmniRig."""
-        if self.radio_control_connected and self.radio_control_type == 'omnirig':
-            vfo = self.omnirig_vfo_var.get()
-            if self.radio_control and hasattr(self.radio_control, 'set_vfo'):
+    def on_radio_vfo_changed(self):
+        """Handle VFO selection change for flrig or OmniRig."""
+        if self.radio_control_connected and self.radio_control:
+            vfo = self.radio_vfo_var.get()
+            if hasattr(self.radio_control, 'set_vfo'):
                 self.radio_control.set_vfo(vfo)
                 self.log_status(f"Switched to VFO-{vfo}")
+    
+    def on_omnirig_vfo_changed(self):
+        """Handle VFO selection change for OmniRig (legacy wrapper)."""
+        self.on_radio_vfo_changed()
     
     def toggle_radio_control_connection(self):
         """Connect or disconnect from radio control (rigctl or OmniRig)."""
@@ -2855,10 +2956,41 @@ class RadioGUI:
                 self.radio_control.connect()
                 self.log_status(f"✓ Connected to rigctld at {host}:{port}")
                 
+            elif control_type == 'flrig':
+                # Connect to flrig
+                host = self.radio_host_var.get().strip()
+                port_str = self.radio_port_var.get().strip()
+                vfo = self.radio_vfo_var.get()
+                
+                if not host or not port_str:
+                    messagebox.showerror("Error", "Please enter flrig host and port")
+                    return
+                
+                try:
+                    port = int(port_str)
+                except ValueError:
+                    messagebox.showerror("Error", "Invalid port number")
+                    return
+                
+                # Create and connect threaded flrig client
+                self.radio_control = ThreadedFlrigClient(host, port, vfo)
+                self.radio_control_type = 'flrig'
+                
+                # Set up callbacks
+                self.radio_control.set_callbacks(
+                    frequency_callback=self.on_radio_control_frequency_changed,
+                    mode_callback=self.on_radio_control_mode_changed,
+                    ptt_callback=self.on_radio_control_ptt_changed,
+                    error_callback=lambda err: self.log_status(f"flrig: {err}")
+                )
+                
+                self.radio_control.connect()
+                self.log_status(f"✓ Connected to flrig at {host}:{port} VFO-{vfo}")
+                
             elif control_type == 'OmniRig':
                 # Connect to OmniRig
                 rig_num = int(self.omnirig_rig_var.get())
-                vfo = self.omnirig_vfo_var.get()
+                vfo = self.radio_vfo_var.get()
                 
                 self.log_status(f"DEBUG: Creating OmniRig client Rig{rig_num} VFO-{vfo}")
                 
@@ -3036,6 +3168,9 @@ class RadioGUI:
     
     def on_radio_sync_direction_changed(self):
         """Handle sync direction change - restart sync if active."""
+        # Auto-save radio control settings when sync direction changes
+        self.save_servers()
+
         if self.radio_control_sync_enabled:
             # Don't stop polling - just change direction
             direction = self.radio_sync_direction_var.get()

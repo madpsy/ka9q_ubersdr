@@ -19,6 +19,16 @@ else
     curl -sSL https://get.docker.com/ | sh
 fi
 
+# Add current user to docker group
+if groups $USER | grep -q '\bdocker\b'; then
+    echo "User $USER is already in the docker group."
+else
+    echo "Adding user $USER to the docker group..."
+    sudo usermod -aG docker $USER
+    echo "User added to docker group. You may need to log out and back in for this to take effect."
+    echo "Alternatively, you can run: newgrp docker"
+fi
+
 # Fetch and run the mDNS installation script
 echo "Running UberSDR mDNS installation script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/install-ubersdr-mdns.sh | sudo bash

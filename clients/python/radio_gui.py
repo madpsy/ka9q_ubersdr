@@ -412,7 +412,11 @@ class RadioGUI:
                 'device': self.device_var.get(),
                 'volume': self.volume_var.get(),
                 'channel_left': self.channel_left_var.get(),
-                'channel_right': self.channel_right_var.get()
+                'channel_right': self.channel_right_var.get(),
+                'udp_enabled': self.udp_enabled_var.get(),
+                'udp_host': self.udp_host_var.get(),
+                'udp_port': self.udp_port_var.get(),
+                'udp_stereo': self.udp_stereo_var.get()
             }
             
             data = {
@@ -455,6 +459,16 @@ class RadioGUI:
             self.channel_left_var.set(settings['channel_left'])
         if 'channel_right' in settings:
             self.channel_right_var.set(settings['channel_right'])
+
+        # Apply UDP settings (silently)
+        if 'udp_enabled' in settings:
+            self.udp_enabled_var.set(settings['udp_enabled'])
+        if 'udp_host' in settings:
+            self.udp_host_var.set(settings['udp_host'])
+        if 'udp_port' in settings:
+            self.udp_port_var.set(settings['udp_port'])
+        if 'udp_stereo' in settings:
+            self.udp_stereo_var.set(settings['udp_stereo'])
     
     def save_audio_settings(self):
         """Save audio settings automatically (called when settings change)."""
@@ -563,7 +577,7 @@ class RadioGUI:
             messagebox.showerror("Error", "Public instances display not available")
             return
 
-        def on_connect(host, port, tls, name):
+        def on_connect(host, port, tls, name, callsign=None):
             """Callback when user selects an instance to connect to."""
             # Disconnect from current server if connected
             if self.connected:
@@ -676,7 +690,7 @@ class RadioGUI:
             messagebox.showerror("Error", "Local instances discovery not available. Install zeroconf:\npip install zeroconf")
             return
 
-        def on_connect(host, port, tls, name):
+        def on_connect(host, port, tls, name, callsign=None):
             """Callback when user selects an instance to connect to."""
             # Disconnect from current server if connected
             if self.connected:
@@ -1228,7 +1242,7 @@ class RadioGUI:
         audio_frame = ttk.LabelFrame(main_frame, text="Audio", padding="10")
         audio_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
 
-        # Output device selector
+        # Output device selector (row 0)
         ttk.Label(audio_frame, text="Output Device:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
 
         self.device_var = tk.StringVar(value="(default)")
@@ -1259,32 +1273,71 @@ class RadioGUI:
         # Load initial device list
         self.refresh_devices()
 
-        # FIFO path (to the right of device selector) - only show on non-Windows platforms
+        # FIFO path (row 1) - only show on non-Windows platforms
         if platform.system() != 'Windows':
-            ttk.Label(audio_frame, text="FIFO:").grid(row=0, column=4, sticky=tk.W, padx=(20, 5))
+            ttk.Label(audio_frame, text="FIFO:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
 
             self.fifo_var = tk.StringVar(value=find_next_fifo_path())
             self.fifo_entry = ttk.Entry(audio_frame, textvariable=self.fifo_var, width=25)
-            self.fifo_entry.grid(row=0, column=5, sticky=(tk.W, tk.E), padx=(0, 5))
+            self.fifo_entry.grid(row=1, column=1, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 5), pady=(5, 0))
         else:
             # On Windows, FIFO is not supported - don't show the UI elements
             self.fifo_var = tk.StringVar(value="")
             self.fifo_entry = None
 
-        # Volume control
-        ttk.Label(audio_frame, text="Volume:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
+        # UDP output (additional output option) - row 1 (or same row as FIFO on non-Windows)
+        if platform.system() != 'Windows':
+            # On non-Windows, UDP is on same row as FIFO, to the right
+            udp_row = 1
+            udp_col_start = 3
+            udp_pady = (5, 0)
+        else:
+            # On Windows, UDP is on row 1 by itself
+            udp_row = 1
+            udp_col_start = 0
+            udp_pady = (5, 0)
+
+        ttk.Label(audio_frame, text="UDP:").grid(row=udp_row, column=udp_col_start, sticky=tk.W, padx=(0, 5) if platform.system() == 'Windows' else (20, 5), pady=udp_pady)
+
+        self.udp_enabled_var = tk.BooleanVar(value=False)
+        self.udp_check = ttk.Checkbutton(audio_frame, text="Enable", variable=self.udp_enabled_var,
+                                         command=self.toggle_udp_output)
+        self.udp_check.grid(row=udp_row, column=udp_col_start+1, sticky=tk.W, padx=(0, 5), pady=udp_pady)
+
+        ttk.Label(audio_frame, text="Host:").grid(row=udp_row, column=udp_col_start+2, sticky=tk.W, padx=(5, 5), pady=udp_pady)
+        self.udp_host_var = tk.StringVar(value="127.0.0.1")
+        self.udp_host_entry = ttk.Entry(audio_frame, textvariable=self.udp_host_var, width=12)
+        self.udp_host_entry.grid(row=udp_row, column=udp_col_start+3, sticky=tk.W, padx=(0, 5), pady=udp_pady)
+        # Auto-save when UDP host changes
+        self.udp_host_var.trace_add('write', lambda *args: self.save_audio_settings())
+
+        ttk.Label(audio_frame, text="Port:").grid(row=udp_row, column=udp_col_start+4, sticky=tk.W, padx=(5, 5), pady=udp_pady)
+        self.udp_port_var = tk.StringVar(value="8888")
+        self.udp_port_entry = ttk.Entry(audio_frame, textvariable=self.udp_port_var, width=6)
+        self.udp_port_entry.grid(row=udp_row, column=udp_col_start+5, sticky=tk.W, pady=udp_pady)
+        # Auto-save when UDP port changes
+        self.udp_port_var.trace_add('write', lambda *args: self.save_audio_settings())
+
+        # UDP stereo checkbox
+        self.udp_stereo_var = tk.BooleanVar(value=False)
+        self.udp_stereo_check = ttk.Checkbutton(audio_frame, text="Stereo", variable=self.udp_stereo_var,
+                                                command=self.on_udp_stereo_changed)
+        self.udp_stereo_check.grid(row=udp_row, column=udp_col_start+6, sticky=tk.W, padx=(5, 0), pady=udp_pady)
+
+        # Volume control (row 2)
+        ttk.Label(audio_frame, text="Volume:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
         self.volume_var = tk.IntVar(value=70)
         self.volume_scale = ttk.Scale(audio_frame, from_=0, to=100, orient=tk.HORIZONTAL,
                                 variable=self.volume_var, command=self.update_volume,
                                 length=200)
-        self.volume_scale.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        self.volume_scale.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
 
         self.volume_label = ttk.Label(audio_frame, text="70%", width=5)
-        self.volume_label.grid(row=1, column=2, sticky=tk.W, padx=(0, 10))
+        self.volume_label.grid(row=2, column=2, sticky=tk.W, padx=(0, 10), pady=(5, 0))
 
         # Audio level meter - put label and meter in a container frame to eliminate gap
         level_container = ttk.Frame(audio_frame)
-        level_container.grid(row=1, column=3, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 5))
+        level_container.grid(row=2, column=3, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 5), pady=(5, 0))
         
         ttk.Label(level_container, text="Level:").pack(side=tk.LEFT, padx=(0, 5))
         
@@ -1302,31 +1355,31 @@ class RadioGUI:
         self.level_label = ttk.Label(level_container, text="-∞ dB", width=8)
         self.level_label.pack(side=tk.LEFT)
 
-        # Channel selection (Left/Right)
-        ttk.Label(audio_frame, text="Channels:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+        # Channel selection (Left/Right) (row 3)
+        ttk.Label(audio_frame, text="Channels:").grid(row=3, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
 
         self.channel_left_var = tk.BooleanVar(value=True)
         self.channel_right_var = tk.BooleanVar(value=True)
 
         self.left_check = ttk.Checkbutton(audio_frame, text="Left", variable=self.channel_left_var,
                                      command=self.update_channels)
-        self.left_check.grid(row=2, column=1, sticky=tk.W, pady=(5, 0))
+        self.left_check.grid(row=3, column=1, sticky=tk.W, pady=(5, 0))
 
         self.right_check = ttk.Checkbutton(audio_frame, text="Right", variable=self.channel_right_var,
                                       command=self.update_channels)
-        self.right_check.grid(row=2, column=2, sticky=tk.W, pady=(5, 0))
+        self.right_check.grid(row=3, column=2, sticky=tk.W, pady=(5, 0))
 
         # EQ button (same row as channels)
         if EQ_AVAILABLE:
             self.eq_btn = ttk.Button(audio_frame, text="EQ", width=8,
                                      command=self.open_eq_window)
-            self.eq_btn.grid(row=2, column=3, sticky=tk.W, padx=(20, 0), pady=(5, 0))
+            self.eq_btn.grid(row=3, column=3, sticky=tk.W, padx=(20, 0), pady=(5, 0))
         else:
             self.eq_btn = None
 
-        # NR2 Noise Reduction (row 3) - use a frame to avoid column weight issues
+        # NR2 Noise Reduction (row 4) - use a frame to avoid column weight issues
         nr2_container = ttk.Frame(audio_frame)
-        nr2_container.grid(row=3, column=0, columnspan=7, sticky=tk.W, pady=(5, 0))
+        nr2_container.grid(row=4, column=0, columnspan=7, sticky=tk.W, pady=(5, 0))
 
         self.nr2_enabled_var = tk.BooleanVar(value=False)
         self.nr2_check = ttk.Checkbutton(nr2_container, text="Enable NR2", variable=self.nr2_enabled_var,
@@ -1354,9 +1407,9 @@ class RadioGUI:
         self.rec_status_label = ttk.Label(nr2_container, text="", foreground='red')
         self.rec_status_label.grid(row=0, column=8, sticky=tk.W)
 
-        # Audio bandpass filter (row 4) - use a frame to avoid column weight issues
+        # Audio bandpass filter (row 5) - use a frame to avoid column weight issues
         filter_container = ttk.Frame(audio_frame)
-        filter_container.grid(row=4, column=0, columnspan=7, sticky=(tk.W, tk.E), pady=(5, 0))
+        filter_container.grid(row=5, column=0, columnspan=7, sticky=(tk.W, tk.E), pady=(5, 0))
 
         self.audio_filter_enabled_var = tk.BooleanVar(value=False)
         self.filter_check = ttk.Checkbutton(filter_container, text="Enable Audio Filter", variable=self.audio_filter_enabled_var,
@@ -3645,6 +3698,77 @@ class RadioGUI:
         except ValueError:
             messagebox.showerror("Error", "Invalid audio filter parameter values")
 
+    def on_udp_stereo_changed(self):
+        """Handle UDP stereo checkbox change."""
+        if self.client:
+            self.client.udp_stereo = self.udp_stereo_var.get()
+            stereo_str = "stereo" if self.udp_stereo_var.get() else "mono"
+            self.log_status(f"UDP output: {stereo_str}")
+        # Auto-save setting
+        self.save_audio_settings()
+
+    def toggle_udp_output(self):
+        """Toggle UDP output on/off."""
+        # Always save settings when checkbox is toggled (even if not connected)
+        # This ensures settings persist for next connection
+        enabled = self.udp_enabled_var.get()
+
+        if not self.connected or not self.client:
+            # If not connected, just save the settings and return
+            self.save_audio_settings()
+            return
+
+        if enabled:
+            # Validate and enable UDP
+            try:
+                host = self.udp_host_var.get().strip()
+                port = self.udp_port_var.get().strip()
+
+                if not host:
+                    messagebox.showerror("Error", "Please enter UDP host")
+                    self.udp_enabled_var.set(False)
+                    return
+
+                if not port:
+                    messagebox.showerror("Error", "Please enter UDP port")
+                    self.udp_enabled_var.set(False)
+                    return
+
+                try:
+                    port_int = int(port)
+                except ValueError:
+                    messagebox.showerror("Error", "Invalid port number")
+                    self.udp_enabled_var.set(False)
+                    return
+
+                # Create UDP socket
+                import socket
+                self.client.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.client.udp_host = host
+                self.client.udp_port = port_int
+                self.client.udp_enabled = True
+                self.client.udp_stereo = self.udp_stereo_var.get()
+
+                stereo_str = "stereo" if self.udp_stereo_var.get() else "mono"
+                self.log_status(f"UDP output enabled: {host}:{port_int} ({stereo_str})")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to enable UDP: {e}")
+                self.udp_enabled_var.set(False)
+                self.log_status(f"ERROR: Failed to enable UDP - {e}")
+        else:
+            # Disable UDP
+            if self.client.udp_socket:
+                try:
+                    self.client.udp_socket.close()
+                except:
+                    pass
+                self.client.udp_socket = None
+            self.client.udp_enabled = False
+            self.log_status("UDP output disabled")
+
+        # Auto-save UDP settings
+        self.save_audio_settings()
+
     def toggle_spectrum(self):
         """Toggle spectrum display visibility and connection."""
         enabled = self.spectrum_enabled_var.get()
@@ -4704,6 +4828,18 @@ class RadioGUI:
             # Get selected device (device index or None for default)
             device_index = self.get_selected_device()
 
+            # Get UDP settings
+            udp_enabled = self.udp_enabled_var.get()
+            udp_host = self.udp_host_var.get().strip() if udp_enabled else None
+            udp_port = None
+            udp_stereo = self.udp_stereo_var.get()
+            if udp_enabled:
+                try:
+                    udp_port = int(self.udp_port_var.get().strip())
+                except ValueError:
+                    udp_enabled = False
+                    udp_host = None
+
             # Create client (disable auto_reconnect for GUI - we'll handle retries)
             # Start with audio muted (volume=0) - will be enabled after window opens
             client_kwargs = {
@@ -4725,6 +4861,10 @@ class RadioGUI:
                 'ssl': self.tls_var.get(),  # Use TLS if checkbox is checked
                 'fifo_path': fifo_path,  # Pass FIFO path to client
                 'password': self.config.get('password'),  # Pass password from config
+                'udp_enabled': udp_enabled,
+                'udp_host': udp_host,
+                'udp_port': udp_port,
+                'udp_stereo': udp_stereo,
             }
 
             # Add device index parameter based on output mode
@@ -4758,11 +4898,14 @@ class RadioGUI:
             self.connect_btn.config(text="Connecting...", state='disabled')
             self.cancel_btn.grid()  # Show cancel button
 
-            # Disable device selection and FIFO path while connecting/connected
+            # Disable device selection, FIFO path, and UDP host/port while connecting/connected
             self.device_combo.config(state='disabled')
             self.refresh_devices_btn.config(state='disabled')
             if self.fifo_entry:
                 self.fifo_entry.config(state='disabled')
+            # Disable UDP host/port fields (checkbox remains enabled for on/off toggle)
+            self.udp_host_entry.config(state='disabled')
+            self.udp_port_entry.config(state='disabled')
 
             # Note: Spectrum connection is now handled in check_status_updates()
             # after connection is confirmed to be allowed
@@ -4929,11 +5072,14 @@ class RadioGUI:
         if self.recording:
             self.stop_recording()
 
-        # Re-enable device selection and FIFO path
+        # Re-enable device selection, FIFO path, and UDP host/port
         self.device_combo.config(state='readonly')
         self.refresh_devices_btn.config(state='normal')
         if self.fifo_entry:
             self.fifo_entry.config(state='normal')
+        # Re-enable UDP host/port fields
+        self.udp_host_entry.config(state='normal')
+        self.udp_port_entry.config(state='normal')
 
     def run_client(self):
         """Run the client in a separate thread with its own event loop."""

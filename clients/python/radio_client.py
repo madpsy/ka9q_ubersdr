@@ -268,7 +268,8 @@ class RadioClient:
                  audio_filter_enabled: bool = False, audio_filter_low: float = 300.0,
                  audio_filter_high: float = 2700.0, pyaudio_device_index: Optional[int] = None,
                  sounddevice_device_index: Optional[int] = None, udp_host: Optional[str] = None,
-                 udp_port: Optional[int] = None, output_channels: Optional[int] = None):
+                 udp_port: Optional[int] = None, output_channels: Optional[int] = None,
+                 udp_enabled: bool = False, udp_stereo: bool = False):
         self.url = url
         self.host = host
         self.port = port
@@ -401,14 +402,55 @@ class RadioClient:
         self.eq_sos = None       # Combined second-order sections for all EQ bands
         self.eq_zi = None        # Filter state for EQ
         
-        # UDP output
+        # UDP output (can work as additional output alongside main output)
         self.udp_socket = None
-        self.udp_host = udp_host
-        self.udp_port = udp_port
-        if self.output_mode == 'udp' and udp_host and udp_port:
-            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            print(f"UDP output configured: {udp_host}:{udp_port}", file=sys.stderr)
+        self.udp_host = udp_host if udp_host else '127.0.0.1'
+        self.udp_port = udp_port if udp_port else 8888
+        self.udp_enabled = udp_enabled
+        self.udp_stereo = udp_stereo  # UDP stereo mode (default: mono)
+
+        # Initialize UDP socket if enabled (works with any output mode)
+        if self.udp_enabled or self.output_mode == 'udp':
+            try:
+                self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                stereo_str = "stereo" if self.udp_stereo else "mono"
+                print(f"UDP output configured: {self.udp_host}:{self.udp_port} ({stereo_str})", file=sys.stderr)
+            except Exception as e:
+                print(f"Warning: Failed to create UDP socket: {e}", file=sys.stderr)
+                self.udp_enabled = False
     
+    def _prepare_udp_audio(self, audio_float):
+        """Prepare audio for UDP output (mono by default, stereo if enabled).
+
+        This method processes audio independently of the main output channel selection.
+        UDP output is always mono unless udp_stereo is True.
+
+        Args:
+            audio_float: Audio data before channel selection (mono or stereo)
+
+        Returns:
+            Processed audio for UDP (mono or stereo based on udp_stereo setting)
+        """
+        # audio_float at this point is after volume/NR2/filter/EQ but before channel selection
+        # It's mono for non-IQ modes, stereo for IQ modes or if converted from mono
+
+        if self.udp_stereo:
+            # Stereo mode: ensure we have 2 channels
+            if audio_float.ndim == 1:
+                # Mono input - duplicate to stereo
+                return np.column_stack((audio_float, audio_float))
+            else:
+                # Already stereo
+                return audio_float
+        else:
+            # Mono mode (default): convert to mono if needed
+            if audio_float.ndim == 2:
+                # Stereo input - mix to mono
+                return np.mean(audio_float, axis=1)
+            else:
+                # Already mono
+                return audio_float
+
     def _init_audio_filter(self):
         """Initialize audio bandpass filter using FIR design."""
         if not SCIPY_AVAILABLE:
@@ -949,6 +991,10 @@ class RadioClient:
         # Apply volume control
         if self.volume != 1.0:
             audio_float = audio_float * self.volume
+        # Save audio before channel selection for UDP output
+        # UDP needs audio before L/R channel muting is applied
+        audio_before_channel_selection = audio_float.copy()
+
         
         # Convert mono to stereo if needed for output
         if self.channels == 1 and self.output_channels == 2:
@@ -1026,13 +1072,28 @@ class RadioClient:
                     self.running = False
 
         elif self.output_mode == 'udp':
-            # Send to UDP socket
+            # Send to UDP socket (main output mode)
             if self.udp_socket and self.udp_host and self.udp_port:
                 try:
-                    self.udp_socket.sendto(pcm_data, (self.udp_host, self.udp_port))
+                    # Prepare UDP-specific audio (mono by default, stereo if enabled)
+                    # Use audio BEFORE channel selection was applied
+                    udp_audio = self._prepare_udp_audio(audio_before_channel_selection)
+                    udp_pcm = np.clip(udp_audio * 32768.0, -32768, 32767).astype(np.int16).tobytes()
+                    self.udp_socket.sendto(udp_pcm, (self.udp_host, self.udp_port))
                 except Exception as e:
                     print(f"UDP send error: {e}", file=sys.stderr)
                     self.running = False
+
+        # Send UDP output if enabled as additional output (works alongside any output mode)
+        if self.udp_enabled and self.udp_socket and self.output_mode != 'udp':
+            try:
+                # Prepare UDP-specific audio (mono by default, stereo if enabled)
+                # Use audio BEFORE channel selection was applied
+                udp_audio = self._prepare_udp_audio(audio_before_channel_selection)
+                udp_pcm = np.clip(udp_audio * 32768.0, -32768, 32767).astype(np.int16).tobytes()
+                self.udp_socket.sendto(udp_pcm, (self.udp_host, self.udp_port))
+            except Exception as e:
+                print(f"UDP send error: {e}", file=sys.stderr)
         
         elif self.output_mode == 'wav':
             # Write to WAV file
@@ -2158,7 +2219,8 @@ Examples:
         sounddevice_device_index=None,  # TODO: Add command-line argument for device selection
         udp_host=udp_host,
         udp_port=udp_port,
-        output_channels=output_channels
+        output_channels=output_channels,
+        udp_stereo=False  # CLI default: mono (can be added as argument if needed)
     )
     
     # Setup signal handler for graceful shutdown

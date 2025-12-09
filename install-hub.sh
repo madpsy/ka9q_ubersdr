@@ -99,6 +99,20 @@ else
     fi
 fi
 
+# Setup auto-update cron job
+echo
+echo "Setting up auto-update cron job..."
+CRON_JOB="* * * * * [ -f \$HOME/ubersdr/updater/version ] && [ -s \$HOME/ubersdr/updater/version ] && rm -f \$HOME/ubersdr/updater/version && curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hub.sh | bash >> \$HOME/ubersdr/update.log 2>&1"
+
+# Check if cron job already exists
+if crontab -l 2>/dev/null | grep -q "ubersdr/updater/version"; then
+    echo "Auto-update cron job already exists."
+else
+    # Add cron job to existing crontab (or create new one if none exists)
+    (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+    echo "Auto-update cron job installed. Updates will be checked every minute."
+fi
+
 echo
 echo "=== Installation Complete ==="
 echo

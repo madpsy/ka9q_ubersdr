@@ -76,6 +76,8 @@ services:
       - restart-trigger:/var/run/restart-trigger
       # Shared volume for Caddy configuration
       - caddy-shared:/etc/caddy-shared
+      # Version updater directory (accessible from host)
+      - ./updater:/var/run/updater
 
     # Healthcheck
     healthcheck:
@@ -159,3 +161,4 @@ volumes:
   caddy-data:
   caddy-config:
   caddy-shared:
+  # Note: updater directory is bind-mounted from host (./updater)

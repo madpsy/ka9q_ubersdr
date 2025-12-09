@@ -23,6 +23,14 @@ admin:
   asl: 30
   # Location description
   location: "London, England, UK"
+  
+  # Automatic version checking from GitHub
+  # When enabled, checks for new versions periodically and writes to /var/run/updater/latest
+  version_check_enabled: true
+  # Version check interval in minutes (default: 60)
+  # How often to check GitHub for new versions
+  # Minimum: 60 minutes
+  version_check_interval: 60
 
 # Radiod connection settings
 radiod:

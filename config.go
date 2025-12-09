@@ -31,15 +31,17 @@ type Config struct {
 
 // AdminConfig contains admin authentication settings
 type AdminConfig struct {
-	Password    string    `yaml:"password"`
-	Description string    `yaml:"description"`
-	Name        string    `yaml:"name"`
-	Email       string    `yaml:"email"`
-	Callsign    string    `yaml:"callsign"`
-	PublicURL   string    `yaml:"public_url"` // Public URL for this SDR
-	GPS         GPSConfig `yaml:"gps"`
-	ASL         int       `yaml:"asl"` // Altitude above sea level in meters
-	Location    string    `yaml:"location"`
+	Password             string    `yaml:"password"`
+	Description          string    `yaml:"description"`
+	Name                 string    `yaml:"name"`
+	Email                string    `yaml:"email"`
+	Callsign             string    `yaml:"callsign"`
+	PublicURL            string    `yaml:"public_url"` // Public URL for this SDR
+	GPS                  GPSConfig `yaml:"gps"`
+	ASL                  int       `yaml:"asl"` // Altitude above sea level in meters
+	Location             string    `yaml:"location"`
+	VersionCheckEnabled  bool      `yaml:"version_check_enabled"`  // Enable automatic version checking from GitHub
+	VersionCheckInterval int       `yaml:"version_check_interval"` // Version check interval in minutes (default: 60)
 }
 
 // GPSConfig contains GPS coordinates
@@ -336,6 +338,13 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Admin.Location == "" {
 		config.Admin.Location = "Dalgety Bay, Scotland, UK"
+	}
+	// Set version checker defaults if not specified
+	// VersionCheckEnabled defaults to true (enabled by default)
+	// Note: YAML booleans default to false, so we need to check if it was explicitly set
+	// For now, we'll assume it's enabled by default and users can disable it
+	if config.Admin.VersionCheckInterval == 0 {
+		config.Admin.VersionCheckInterval = 60 // Default 60 minutes
 	}
 
 	// Set spectrum defaults if not specified

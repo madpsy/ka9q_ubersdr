@@ -53,19 +53,103 @@ def create_public_instances_window(parent, on_connect_callback, local_uuids=None
     columns = ('name', 'callsign', 'location', 'users', 'session', 'cw', 'digi', 'noise', 'iq', 'version', 'url', 'map')
     tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=15)
 
-    # Define headings
-    tree.heading('name', text='Name')
-    tree.heading('callsign', text='Callsign')
-    tree.heading('location', text='Location')
-    tree.heading('users', text='Users')
-    tree.heading('session', text='Session')
-    tree.heading('cw', text='CW')
-    tree.heading('digi', text='Digi')
-    tree.heading('noise', text='Noise')
-    tree.heading('iq', text='IQ (kHz)')
-    tree.heading('version', text='Version')
-    tree.heading('url', text='Public URL')
-    tree.heading('map', text='Map')
+    # Track sort state for each column (column_name: reverse_bool)
+    sort_state = {col: False for col in columns}
+
+    def sort_column(col):
+        """Sort tree contents when a column header is clicked."""
+        # Get all items with their values
+        items = [(tree.set(item, col), item) for item in tree.get_children('')]
+
+        # Determine sort key based on column type
+        def get_sort_key(value_item_tuple):
+            value, item = value_item_tuple
+
+            # Handle empty values
+            if not value or value in ('', 'None'):
+                return (1, '')  # Sort empty values to end
+
+            # Users column: extract numbers from "X/Y" format
+            if col == 'users':
+                try:
+                    available = int(value.split('/')[0])
+                    return (0, available)
+                except (ValueError, IndexError):
+                    return (1, value)
+
+            # Session column: extract minutes from "Xm" format
+            elif col == 'session':
+                try:
+                    minutes = int(value.rstrip('m'))
+                    return (0, minutes)
+                except (ValueError, AttributeError):
+                    return (1, value)
+
+            # Checkmark columns (CW, Digi, Noise): sort ✓ before ✗
+            elif col in ('cw', 'digi', 'noise'):
+                return (0, 0 if value == '✓' else 1)
+
+            # IQ column: parse comma-separated numbers
+            elif col == 'iq':
+                if value == 'None':
+                    return (1, [])
+                try:
+                    # Parse all numbers from comma-separated list
+                    numbers = [int(n.strip()) for n in value.split(',')]
+                    # Sort by the list of numbers (compares element by element)
+                    return (0, numbers)
+                except (ValueError, AttributeError):
+                    return (1, value)
+
+            # Version column: try to parse as version number
+            elif col == 'version':
+                try:
+                    # Split version into parts and convert to tuple of ints
+                    parts = value.split('.')
+                    version_tuple = tuple(int(p) for p in parts if p.isdigit())
+                    return (0, version_tuple)
+                except (ValueError, AttributeError):
+                    return (1, value)
+
+            # Text columns: case-insensitive sort
+            else:
+                return (0, value.lower())
+
+        # Sort items
+        items.sort(key=get_sort_key, reverse=sort_state[col])
+
+        # Rearrange items in sorted order
+        for index, (val, item) in enumerate(items):
+            tree.move(item, '', index)
+
+        # Toggle sort direction for next click
+        sort_state[col] = not sort_state[col]
+
+        # Update heading to show sort direction
+        direction = '▼' if sort_state[col] else '▲'
+        tree.heading(col, text=f"{tree.heading(col)['text'].split()[0]} {direction}")
+
+        # Remove direction indicators from other columns
+        for other_col in columns:
+            if other_col != col:
+                heading_text = tree.heading(other_col)['text']
+                # Remove any existing direction indicators
+                clean_text = heading_text.replace(' ▲', '').replace(' ▼', '')
+                tree.heading(other_col, text=clean_text)
+
+    # Define headings with sort command (except for action columns)
+    tree.heading('name', text='Name', command=lambda: sort_column('name'))
+    tree.heading('callsign', text='Callsign', command=lambda: sort_column('callsign'))
+    tree.heading('location', text='Location', command=lambda: sort_column('location'))
+    tree.heading('users', text='Users', command=lambda: sort_column('users'))
+    tree.heading('session', text='Session', command=lambda: sort_column('session'))
+    tree.heading('cw', text='CW', command=lambda: sort_column('cw'))
+    tree.heading('digi', text='Digi', command=lambda: sort_column('digi'))
+    tree.heading('noise', text='Noise', command=lambda: sort_column('noise'))
+    tree.heading('iq', text='IQ (kHz)', command=lambda: sort_column('iq'))
+    tree.heading('version', text='Version', command=lambda: sort_column('version'))
+    tree.heading('url', text='Public URL')  # No sorting for action column
+    tree.heading('map', text='Map')  # No sorting for action column
 
     # Define column widths
     tree.column('name', width=180)

@@ -386,11 +386,16 @@ func (c *CWSkimmerClient) login() error {
 	log.Println("CW Skimmer: Login completed")
 
 	// Update last activity time and create channels
+	// CRITICAL: Reset ping timestamps for new connection
 	c.mu.Lock()
 	c.lastActivityTime = time.Now()
+	c.lastPingTime = time.Time{}         // Reset to zero - no ping sent yet
+	c.lastPingResponseTime = time.Time{} // Reset to zero - no response yet
 	c.keepaliveDone = make(chan struct{})
 	c.handlerDone = make(chan struct{})
 	c.mu.Unlock()
+
+	log.Println("CW Skimmer: Reset ping timestamps for new connection")
 
 	// Start keepalive goroutine
 	go c.keepaliveLoop()

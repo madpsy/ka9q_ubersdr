@@ -2,6 +2,14 @@
 
 Web interface for ka9q-radio SDR software.
 
+## 📖 Getting Started
+
+**👉 Most users should start here: [https://ubersdr.org/](https://ubersdr.org/)**
+
+The UberSDR website provides comprehensive installation instructions, setup guides, and documentation to help you get started quickly and easily.
+
+---
+
 > **Note:** This is currently designed for RX888 MKII SDR hardware to provide 0-30 MHz (full HF) coverage.
 
 **Important:** Ensure NTP (Network Time Protocol) is installed and running on your host system to maintain accurate time synchronization. This is critical for proper SDR operation and time-stamped data as well as digital mode decoders.

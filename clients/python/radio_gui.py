@@ -5331,10 +5331,25 @@ class RadioGUI:
                         if self.client and hasattr(self.client, 'server_description'):
                             desc = self.client.server_description
                             
-                            # Get receiver name and truncate to 50 chars
+                            # Get receiver callsign, name, and location
+                            callsign = desc.get('receiver', {}).get('callsign', '')
                             receiver_name = desc.get('receiver', {}).get('name', '')
-                            if receiver_name and len(receiver_name) > 50:
-                                receiver_name = receiver_name[:47] + '...'
+                            location = desc.get('receiver', {}).get('location', '')
+
+                            # Build display string: callsign - name - location
+                            display_parts = []
+                            if callsign:
+                                display_parts.append(callsign)
+                            if receiver_name:
+                                display_parts.append(receiver_name)
+                            if location:
+                                display_parts.append(location)
+
+                            receiver_display = ' - '.join(display_parts)
+
+                            # Truncate to 80 chars if needed
+                            if receiver_display and len(receiver_display) > 80:
+                                receiver_display = receiver_display[:77] + '...'
                             
                             # Get version from root of JSON
                             version = desc.get('version', '')
@@ -5347,9 +5362,9 @@ class RadioGUI:
                             has_gps = gps.get('lat') is not None and gps.get('lon') is not None
                             
                             # Update display if we have any info
-                            if receiver_name or version or has_gps:
-                                if receiver_name:
-                                    self.receiver_name_var.set(receiver_name)
+                            if receiver_display or version or has_gps:
+                                if receiver_display:
+                                    self.receiver_name_var.set(receiver_display)
                                     
                                     # Make receiver name clickable if public_url is not default
                                     if public_url and public_url != 'https://example.com':

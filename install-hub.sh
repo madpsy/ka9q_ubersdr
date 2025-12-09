@@ -20,7 +20,7 @@ else
     curl -sSL https://get.docker.com/ | sh
 fi
 
-# Add current user to docker group
+# Add current user to docker and sudo groups
 if groups $USER | grep -q '\bdocker\b'; then
     echo "User $USER is already in the docker group."
 else
@@ -28,6 +28,25 @@ else
     sudo usermod -aG docker $USER
     echo "User added to docker group. You may need to log out and back in for this to take effect."
     echo "Alternatively, you can run: newgrp docker"
+fi
+
+if groups $USER | grep -q '\bsudo\b'; then
+    echo "User $USER is already in the sudo group."
+else
+    echo "Adding user $USER to the sudo group..."
+    sudo usermod -aG sudo $USER
+    echo "User added to sudo group."
+fi
+
+# Configure passwordless sudo for sudo group
+echo "Configuring passwordless sudo..."
+if sudo grep -q "^%sudo.*NOPASSWD:ALL" /etc/sudoers; then
+    echo "Passwordless sudo already configured for sudo group."
+else
+    # Replace existing %sudo line with NOPASSWD version
+    # Use sed to safely modify the sudoers file via visudo
+    sudo sed -i 's/^%sudo\s\+ALL=(ALL:ALL)\s\+ALL$/%sudo\tALL=(ALL:ALL) NOPASSWD:ALL/' /etc/sudoers
+    echo "Passwordless sudo configured for sudo group."
 fi
 
 # Fetch and run the mDNS installation script

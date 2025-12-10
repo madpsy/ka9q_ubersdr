@@ -896,8 +896,8 @@ class SpectrumDisplay {
         // Calculate new total bandwidth
         const newTotalBandwidth = newBinBandwidth * this.binCount;
         
-        // Center on tuned frequency if center-tune is enabled, otherwise keep current center
-        const zoomCenter = this.centerTuneEnabled ? (this.tunedFreq || this.centerFreq) : this.centerFreq;
+        // Always center on tuned frequency when zooming, regardless of center-tune state
+        const zoomCenter = this.tunedFreq || this.centerFreq;
         
         // Constrain center frequency to keep view within 100 kHz - 30 MHz
         const halfBandwidth = newTotalBandwidth / 2;
@@ -931,8 +931,8 @@ class SpectrumDisplay {
         // Calculate new total bandwidth
         const newTotalBandwidth = newBinBandwidth * this.binCount;
         
-        // Center on tuned frequency if center-tune is enabled, otherwise keep current center
-        const zoomCenter = this.centerTuneEnabled ? (this.tunedFreq || this.centerFreq) : this.centerFreq;
+        // Always center on tuned frequency when zooming, regardless of center-tune state
+        const zoomCenter = this.tunedFreq || this.centerFreq;
         
         // Constrain center frequency to keep view within 100 kHz - 30 MHz
         const halfBandwidth = newTotalBandwidth / 2;

@@ -39,6 +39,23 @@ else
 fi
 echo ""
 
+# Check for libsamplerate (optional, for high-quality resampling)
+echo -e "${YELLOW}Checking for libsamplerate...${NC}"
+LIBSAMPLERATE_AVAILABLE=false
+if pkg-config --exists samplerate 2>/dev/null; then
+    echo -e "${GREEN}✓ libsamplerate found${NC}"
+    echo "  High-quality audio resampling will be available"
+    LIBSAMPLERATE_AVAILABLE=true
+else
+    echo -e "${YELLOW}⚠ libsamplerate not detected${NC}"
+    echo "  Will use simple resampler (lower quality)"
+    echo "  For better audio quality, install libsamplerate:"
+    echo "  - Linux: sudo apt install libsamplerate0-dev"
+    echo "  - macOS: brew install libsamplerate"
+    echo "  - Windows: pacman -S mingw-w64-x86_64-libsamplerate (MSYS2)"
+fi
+echo ""
+
 # Clean previous builds
 echo -e "${YELLOW}Cleaning previous builds...${NC}"
 rm -f radio_client radio_client.exe
@@ -56,8 +73,27 @@ echo ""
 
 # Build the binary
 echo -e "${YELLOW}Building binary...${NC}"
-if go build -o radio_client; then
+
+# Determine build flags
+BUILD_FLAGS=""
+if [ "$LIBSAMPLERATE_AVAILABLE" = true ]; then
+    echo "  Building with libsamplerate support (CGo enabled)..."
+    BUILD_FLAGS="-tags cgo"
+    export CGO_ENABLED=1
+else
+    echo "  Building without libsamplerate (CGo disabled)..."
+    export CGO_ENABLED=0
+fi
+
+if go build $BUILD_FLAGS -o radio_client; then
     echo -e "${GREEN}✓ Build successful!${NC}"
+    
+    # Show which resampler is available
+    if [ "$LIBSAMPLERATE_AVAILABLE" = true ]; then
+        echo -e "${GREEN}  Resampling: High-quality (libsamplerate)${NC}"
+    else
+        echo -e "${YELLOW}  Resampling: Simple (linear interpolation)${NC}"
+    fi
     echo ""
     
     # Make executable (Unix-like systems)
@@ -78,10 +114,15 @@ if go build -o radio_client; then
     echo "  CLI Mode:"
     echo "    ./radio_client -f 14074000 -m usb"
     echo ""
+    echo "  CLI Mode with resampling:"
+    echo "    ./radio_client -f 14074000 -m usb --resample --resample-rate 48000"
+    echo ""
     echo "  Help:"
     echo "    ./radio_client -h"
     echo ""
     echo -e "${GREEN}Web interface will be available at:${NC} http://localhost:8090"
+    echo ""
+    echo -e "${YELLOW}Note:${NC} See README_RESAMPLING.md for audio resampling details"
     
 else
     echo -e "${RED}✗ Build failed${NC}"

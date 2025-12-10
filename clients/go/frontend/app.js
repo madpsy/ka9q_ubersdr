@@ -46,6 +46,12 @@ class UberSDRClient {
         this.nr2FloorInput = document.getElementById('nr2-floor');
         this.nr2AdaptInput = document.getElementById('nr2-adapt');
         
+        // Resampling elements
+        this.resampleEnabledCheckbox = document.getElementById('resample-enabled');
+        this.resampleRateSelect = document.getElementById('resample-rate');
+        this.resampleQualitySelect = document.getElementById('resample-quality');
+        this.outputChannelsSelect = document.getElementById('output-channels');
+        
         // Status elements
         this.connectionStatus = document.getElementById('connection-status');
         this.uptimeSpan = document.getElementById('uptime');
@@ -165,7 +171,11 @@ class UberSDRClient {
             nr2Enabled: this.nr2EnabledCheckbox.checked,
             nr2Strength: parseFloat(this.nr2StrengthInput.value),
             nr2Floor: parseFloat(this.nr2FloorInput.value),
-            nr2AdaptRate: parseFloat(this.nr2AdaptInput.value)
+            nr2AdaptRate: parseFloat(this.nr2AdaptInput.value),
+            resampleEnabled: document.getElementById('resample-enabled').checked,
+            resampleOutputRate: parseInt(document.getElementById('resample-rate').value),
+            resampleQuality: document.getElementById('resample-quality').value,
+            outputChannels: parseInt(document.getElementById('output-channels').value)
         };
 
         try {
@@ -391,6 +401,10 @@ class UberSDRClient {
                 if (config.nr2Strength) this.nr2StrengthInput.value = config.nr2Strength;
                 if (config.nr2Floor) this.nr2FloorInput.value = config.nr2Floor;
                 if (config.nr2AdaptRate) this.nr2AdaptInput.value = config.nr2AdaptRate;
+                if (config.resampleEnabled !== undefined) this.resampleEnabledCheckbox.checked = config.resampleEnabled;
+                if (config.resampleOutputRate) this.resampleRateSelect.value = config.resampleOutputRate;
+                if (config.resampleQuality) this.resampleQualitySelect.value = config.resampleQuality;
+                if (config.outputChannels !== undefined) this.outputChannelsSelect.value = config.outputChannels;
                 
                 console.log('Loaded saved configuration');
             }

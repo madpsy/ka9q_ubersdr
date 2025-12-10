@@ -170,11 +170,24 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create new client
+	// Set resampling defaults if not provided
+	resampleEnabled := req.ResampleEnabled
+	resampleRate := req.ResampleOutputRate
+	if resampleRate == 0 {
+		resampleRate = 44100 // Default to 44.1 kHz (most widely supported)
+	}
+	resampleQuality := req.ResampleQuality
+	if resampleQuality == "" {
+		resampleQuality = "high" // Default to high quality
+	}
+
 	client := NewRadioClient(
 		"", req.Host, req.Port, req.Frequency, req.Mode,
 		req.BandwidthLow, req.BandwidthHigh, req.OutputMode, "",
 		nil, req.SSL, req.Password, req.AudioDevice, req.NR2Enabled,
 		req.NR2Strength, req.NR2Floor, req.NR2AdaptRate, false,
+		resampleEnabled, resampleRate, resampleQuality,
+		req.OutputChannels, // 0 = auto (2 when resampling, otherwise match input)
 	)
 
 	// Connect
@@ -325,19 +338,23 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// Get saved config from ConfigManager (not from current status)
 		savedConfig := s.configManager.Get()
 		config := ConfigResponse{
-			Host:          savedConfig.Host,
-			Port:          savedConfig.Port,
-			SSL:           savedConfig.SSL,
-			Frequency:     savedConfig.Frequency,
-			Mode:          savedConfig.Mode,
-			BandwidthLow:  savedConfig.BandwidthLow,
-			BandwidthHigh: savedConfig.BandwidthHigh,
-			OutputMode:    savedConfig.OutputMode,
-			AudioDevice:   savedConfig.AudioDevice,
-			NR2Enabled:    savedConfig.NR2Enabled,
-			NR2Strength:   savedConfig.NR2Strength,
-			NR2Floor:      savedConfig.NR2Floor,
-			NR2AdaptRate:  savedConfig.NR2AdaptRate,
+			Host:               savedConfig.Host,
+			Port:               savedConfig.Port,
+			SSL:                savedConfig.SSL,
+			Frequency:          savedConfig.Frequency,
+			Mode:               savedConfig.Mode,
+			BandwidthLow:       savedConfig.BandwidthLow,
+			BandwidthHigh:      savedConfig.BandwidthHigh,
+			OutputMode:         savedConfig.OutputMode,
+			AudioDevice:        savedConfig.AudioDevice,
+			NR2Enabled:         savedConfig.NR2Enabled,
+			NR2Strength:        savedConfig.NR2Strength,
+			NR2Floor:           savedConfig.NR2Floor,
+			NR2AdaptRate:       savedConfig.NR2AdaptRate,
+			ResampleEnabled:    savedConfig.ResampleEnabled,
+			ResampleOutputRate: savedConfig.ResampleOutputRate,
+			ResampleQuality:    savedConfig.ResampleQuality,
+			OutputChannels:     savedConfig.OutputChannels,
 		}
 		respondJSON(w, http.StatusOK, config)
 		return

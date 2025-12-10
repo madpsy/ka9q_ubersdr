@@ -132,6 +132,49 @@
                 </div>
             </section>
 
+            <!-- Resampling Settings Panel -->
+            <section class="panel">
+                <h2>Audio Resampling</h2>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="resample-enabled">
+                        <span>Enable Resampling</span>
+                    </label>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="resample-rate">Output Sample Rate:</label>
+                        <select id="resample-rate">
+                            <option value="8000">8 kHz</option>
+                            <option value="11025">11.025 kHz</option>
+                            <option value="16000">16 kHz</option>
+                            <option value="22050">22.05 kHz</option>
+                            <option value="44100" selected>44.1 kHz</option>
+                            <option value="48000">48 kHz</option>
+                            <option value="96000">96 kHz</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="resample-quality">Quality:</label>
+                        <select id="resample-quality">
+                            <option value="high" selected>High (Sinc)</option>
+                            <option value="fast">Fast (Linear)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="output-channels">Output Channels:</label>
+                        <select id="output-channels">
+                            <option value="0">Auto (Stereo when resampling)</option>
+                            <option value="1">Mono (1 channel)</option>
+                            <option value="2" selected>Stereo (2 channels)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="info-box">
+                    <p><strong>Note:</strong> Enable resampling if your audio device doesn't support the server's sample rate (typically 12 kHz). Most devices support 44.1 kHz or 48 kHz and require stereo (2 channels). Use --list-devices to see what your device supports. Resampling is automatically disabled for IQ modes.</p>
+                </div>
+            </section>
+
             <!-- NR2 Settings Panel -->
             <section class="panel">
                 <h2>NR2 Noise Reduction</h2>

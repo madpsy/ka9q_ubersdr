@@ -54,6 +54,13 @@ type RadioClient struct {
 	retryCount       int
 	maxBackoff       time.Duration
 	connCallback     func(*websocket.Conn) // Callback to notify when connection is established
+
+	// Resampling support
+	resampleEnabled    bool
+	resampleOutputRate int
+	resampler          interface{} // Either *Resampler or *SimpleResampler
+	resampleQuality    string      // "high" or "fast"
+	outputChannels     int         // Number of output channels (1=mono, 2=stereo)
 }
 
 // WAVWriter handles WAV file writing
@@ -96,7 +103,7 @@ type ConnectionCheckResponse struct {
 func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 	bandwidthLow, bandwidthHigh *int, outputMode, wavFile string,
 	duration *float64, ssl bool, password string, audioDeviceIndex int, nr2Enabled bool, nr2Strength, nr2Floor, nr2AdaptRate float64,
-	autoReconnect bool) *RadioClient {
+	autoReconnect bool, resampleEnabled bool, resampleOutputRate int, resampleQuality string, outputChannels int) *RadioClient {
 
 	// Determine default channels based on mode
 	// IQ modes are stereo (I and Q channels), others are mono
@@ -106,31 +113,46 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		defaultChannels = 2
 	}
 
+	// Determine output channels
+	// Default: 2 (stereo) when resampling is enabled for better device compatibility
+	// Otherwise use input channels (1 for most modes, 2 for IQ modes)
+	if outputChannels == 0 {
+		if resampleEnabled {
+			outputChannels = 2 // Default to stereo when resampling
+		} else {
+			outputChannels = defaultChannels // Match input channels
+		}
+	}
+
 	client := &RadioClient{
-		url:              urlStr,
-		host:             host,
-		port:             port,
-		frequency:        frequency,
-		mode:             modeStr,
-		bandwidthLow:     bandwidthLow,
-		bandwidthHigh:    bandwidthHigh,
-		outputMode:       outputMode,
-		wavFile:          wavFile,
-		duration:         duration,
-		ssl:              ssl,
-		password:         password,
-		userSessionID:    uuid.New().String(),
-		running:          true,
-		sampleRate:       12000,           // Default, will be updated from server
-		channels:         defaultChannels, // Default based on mode, will be updated from server
-		audioDeviceIndex: audioDeviceIndex,
-		nr2Enabled:       nr2Enabled,
-		nr2Strength:      nr2Strength,
-		nr2Floor:         nr2Floor,
-		nr2AdaptRate:     nr2AdaptRate,
-		autoReconnect:    autoReconnect,
-		retryCount:       0,
-		maxBackoff:       60 * time.Second,
+		url:                urlStr,
+		host:               host,
+		port:               port,
+		frequency:          frequency,
+		mode:               modeStr,
+		bandwidthLow:       bandwidthLow,
+		bandwidthHigh:      bandwidthHigh,
+		outputMode:         outputMode,
+		wavFile:            wavFile,
+		duration:           duration,
+		ssl:                ssl,
+		password:           password,
+		userSessionID:      uuid.New().String(),
+		running:            true,
+		sampleRate:         12000,           // Default, will be updated from server
+		channels:           defaultChannels, // Default based on mode, will be updated from server
+		audioDeviceIndex:   audioDeviceIndex,
+		nr2Enabled:         nr2Enabled,
+		nr2Strength:        nr2Strength,
+		nr2Floor:           nr2Floor,
+		nr2AdaptRate:       nr2AdaptRate,
+		autoReconnect:      autoReconnect,
+		retryCount:         0,
+		maxBackoff:         60 * time.Second,
+		resampleEnabled:    resampleEnabled,
+		resampleOutputRate: resampleOutputRate,
+		resampleQuality:    resampleQuality,
+		outputChannels:     outputChannels,
 	}
 
 	// Initialize NR2 processor if enabled
@@ -141,6 +163,9 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		fmt.Fprintf(os.Stderr, "NR2 noise reduction enabled (strength=%.1f%%, floor=%.1f%%, adapt=%.1f%%)\n",
 			nr2Strength, nr2Floor, nr2AdaptRate)
 	}
+
+	// Note: Resampler will be initialized later when we know the actual sample rate from the server
+	// (in HandleMessage when we receive the first audio packet)
 
 	return client
 }
@@ -230,10 +255,21 @@ func (c *RadioClient) SetupPortAudio() error {
 		return fmt.Errorf("failed to initialize PortAudio: %w", err)
 	}
 
+	// Determine output sample rate (may differ from input if resampling)
+	outputRate := c.sampleRate
+	if c.resampleEnabled && c.resampleOutputRate > 0 {
+		outputRate = c.resampleOutputRate
+	}
+
 	// Create buffered channel for audio samples
-	// Buffer size: enough for about 1 second of audio
-	bufferFrames := c.sampleRate * c.channels
-	c.audioBuffer = make(chan []int16, bufferFrames/256) // ~4 chunks per second
+	// Buffer size: enough for about 2 seconds of audio at output rate
+	// This needs to be larger when resampling to handle the increased data rate
+	bufferFrames := outputRate * c.outputChannels * 2
+	bufferChunks := bufferFrames / 256
+	if bufferChunks < 32 {
+		bufferChunks = 32 // Minimum buffer size
+	}
+	c.audioBuffer = make(chan []int16, bufferChunks)
 
 	// Current position in the current chunk
 	var currentChunk []int16
@@ -293,10 +329,10 @@ func (c *RadioClient) SetupPortAudio() error {
 		streamParams := portaudio.StreamParameters{
 			Output: portaudio.StreamDeviceParameters{
 				Device:   device,
-				Channels: c.channels,
+				Channels: c.outputChannels,
 				Latency:  device.DefaultLowOutputLatency,
 			},
-			SampleRate:      float64(c.sampleRate),
+			SampleRate:      float64(outputRate),
 			FramesPerBuffer: 256,
 		}
 
@@ -310,9 +346,9 @@ func (c *RadioClient) SetupPortAudio() error {
 	} else {
 		// Use default device
 		stream, err = portaudio.OpenDefaultStream(
-			0,          // no input channels
-			c.channels, // output channels
-			float64(c.sampleRate),
+			0,                // no input channels
+			c.outputChannels, // output channels
+			float64(outputRate),
 			256, // frames per buffer
 			callback,
 		)
@@ -330,8 +366,13 @@ func (c *RadioClient) SetupPortAudio() error {
 	}
 
 	c.audioStream = stream
-	fmt.Fprintf(os.Stderr, "PortAudio output started (sample rate: %d Hz, channels: %d)\n",
-		c.sampleRate, c.channels)
+	if c.resampleEnabled {
+		fmt.Fprintf(os.Stderr, "PortAudio output started (sample rate: %d Hz, channels: %d, resampled from %d Hz)\n",
+			outputRate, c.outputChannels, c.sampleRate)
+	} else {
+		fmt.Fprintf(os.Stderr, "PortAudio output started (sample rate: %d Hz, channels: %d)\n",
+			outputRate, c.outputChannels)
+	}
 	return nil
 }
 
@@ -362,15 +403,19 @@ func (c *RadioClient) DecodeAudio(base64Data string) ([]byte, error) {
 
 // OutputAudio outputs audio data based on selected mode
 func (c *RadioClient) OutputAudio(pcmData []byte) error {
+	// Convert PCM bytes to int16 samples for processing
+	numSamples := len(pcmData) / 2
+	samples := make([]int16, numSamples)
+	for i := 0; i < numSamples; i++ {
+		samples[i] = int16(binary.LittleEndian.Uint16(pcmData[i*2:]))
+	}
+
 	// Apply NR2 noise reduction if enabled
 	if c.nr2Processor != nil && c.nr2Enabled {
-		// Convert PCM bytes to float32 array
-		numSamples := len(pcmData) / 2
+		// Convert to float32 array
 		audioFloat := make([]float32, numSamples)
-
 		for i := 0; i < numSamples; i++ {
-			sample := int16(binary.LittleEndian.Uint16(pcmData[i*2:]))
-			audioFloat[i] = float32(sample) / 32768.0
+			audioFloat[i] = float32(samples[i]) / 32768.0
 		}
 
 		// Process through NR2
@@ -390,8 +435,36 @@ func (c *RadioClient) OutputAudio(pcmData []byte) error {
 			} else if sample < -32768 {
 				sample = -32768
 			}
-			binary.LittleEndian.PutUint16(pcmData[i*2:], uint16(int16(sample)))
+			samples[i] = int16(sample)
 		}
+	}
+
+	// Apply resampling if enabled
+	if c.resampleEnabled && c.resampler != nil {
+		switch resampler := c.resampler.(type) {
+		case *LibsamplerateResampler:
+			samples = resampler.Process(samples)
+		case *Resampler:
+			samples = resampler.Process(samples)
+		case *SimpleResampler:
+			samples = resampler.Process(samples)
+		}
+	}
+
+	// Convert mono to stereo if needed (after resampling)
+	if c.channels == 1 && c.outputChannels == 2 {
+		stereoSamples := make([]int16, len(samples)*2)
+		for i, sample := range samples {
+			stereoSamples[i*2] = sample   // Left channel
+			stereoSamples[i*2+1] = sample // Right channel (duplicate)
+		}
+		samples = stereoSamples
+	}
+
+	// Convert samples back to PCM bytes
+	pcmData = make([]byte, len(samples)*2)
+	for i, sample := range samples {
+		binary.LittleEndian.PutUint16(pcmData[i*2:], uint16(sample))
 	}
 
 	switch c.outputMode {
@@ -401,6 +474,11 @@ func (c *RadioClient) OutputAudio(pcmData []byte) error {
 		return err
 
 	case "portaudio":
+		// Skip if PortAudio not initialized yet
+		if c.audioBuffer == nil {
+			return nil
+		}
+
 		// Convert PCM bytes to int16 samples for PortAudio
 		numSamples := len(pcmData) / 2
 		samples := make([]int16, numSamples)
@@ -466,10 +544,51 @@ func (c *RadioClient) HandleMessage(msg WebSocketMessage) error {
 			channels = c.channels
 		}
 
-		// Update sample rate if changed
-		if sampleRate != c.sampleRate {
-			c.sampleRate = sampleRate
-			fmt.Fprintf(os.Stderr, "Sample rate updated: %d Hz\n", c.sampleRate)
+		// Update sample rate if changed OR if this is the first audio packet
+		if sampleRate != c.sampleRate || (c.outputMode == "portaudio" && c.audioStream == nil) {
+			if sampleRate != c.sampleRate {
+				c.sampleRate = sampleRate
+				fmt.Fprintf(os.Stderr, "Sample rate updated: %d Hz\n", c.sampleRate)
+			}
+
+			// Initialize resampler now that we know the actual sample rate
+			if c.resampleEnabled && c.resampler == nil {
+				// Don't resample IQ modes - they require exact sample rates
+				isIQMode := strings.HasPrefix(c.mode, "iq")
+				if isIQMode {
+					fmt.Fprintf(os.Stderr, "Resampling disabled for IQ mode (requires exact sample rate)\n")
+					c.resampleEnabled = false
+				} else {
+					if c.resampleQuality == "high" {
+						// Try libsamplerate first (if built with CGo), fall back to simple resampler
+						// Always use mono (1 channel) for resampling, we'll convert to stereo after if needed
+						libsrResampler, err := NewLibsamplerateResampler(c.sampleRate, c.resampleOutputRate, 1, 0)
+						if err == nil {
+							c.resampler = libsrResampler
+							fmt.Fprintf(os.Stderr, "libsamplerate resampler initialized (SRC_SINC_BEST_QUALITY): %d Hz -> %d Hz\n",
+								c.sampleRate, c.resampleOutputRate)
+						} else {
+							// Fall back to simple resampler
+							c.resampler = NewSimpleResampler(c.sampleRate, c.resampleOutputRate, 1)
+							fmt.Fprintf(os.Stderr, "Simple resampler initialized (libsamplerate not available): %d Hz -> %d Hz\n",
+								c.sampleRate, c.resampleOutputRate)
+						}
+					} else {
+						c.resampler = NewSimpleResampler(c.sampleRate, c.resampleOutputRate, 1)
+						fmt.Fprintf(os.Stderr, "Fast resampler initialized: %d Hz -> %d Hz\n",
+							c.sampleRate, c.resampleOutputRate)
+					}
+				}
+			}
+
+			// Setup PortAudio now that we have the actual sample rate (first time only)
+			if c.outputMode == "portaudio" && c.audioStream == nil {
+				if err := c.SetupPortAudio(); err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to setup PortAudio: %v\n", err)
+					c.running = false
+					return err
+				}
+			}
 		}
 
 		// Update channels if changed (requires restarting PortAudio)
@@ -708,14 +827,9 @@ func (c *RadioClient) runOnce() int {
 	// Reset retry count on successful connection
 	c.retryCount = 0
 
-	// Setup output based on mode
-	switch c.outputMode {
-	case "portaudio":
-		if err := c.SetupPortAudio(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return 1
-		}
-	case "wav":
+	// Don't setup PortAudio yet - wait for first audio packet to get actual sample rate
+	// (WAV setup can happen now since it doesn't depend on the actual rate)
+	if c.outputMode == "wav" {
 		if err := c.SetupWAVWriter(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return 1
@@ -937,6 +1051,11 @@ func main() {
 	autoReconnectFlag := flag.Bool("auto-reconnect", false, "Automatically reconnect on connection loss with exponential backoff (max 60s)")
 	passwordFlag := flag.String("password", "", "Bypass password for accessing wide IQ modes and bypassing session limits")
 
+	// Resampling flags
+	resampleFlag := flag.Bool("resample", false, "Enable audio resampling (useful for devices that don't support 12 kHz)")
+	resampleRateFlag := flag.Int("resample-rate", 48000, "Target sample rate for resampling (default: 48000 Hz)")
+	resampleQualityFlag := flag.String("resample-quality", "high", "Resampling quality: 'high' (sinc) or 'fast' (linear) (default: high)")
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "CLI Radio Client for ka9q_ubersdr\n\n")
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
@@ -953,6 +1072,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Listen using specific audio device\n")
 		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb --audio-device 2\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Listen with resampling to 48 kHz (for devices that don't support 12 kHz)\n")
+		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb --resample --resample-rate 48000\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Connect using full URL\n")
 		fmt.Fprintf(os.Stderr, "  %s -u ws://radio.example.com:8073/ws -f 14074000 -m usb\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Record 1000 kHz AM to WAV file for 60 seconds\n")
@@ -1066,6 +1187,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Validate resampling parameters
+	if *resampleFlag {
+		if *resampleRateFlag <= 0 {
+			fmt.Fprintf(os.Stderr, "Error: --resample-rate must be positive\n")
+			os.Exit(1)
+		}
+		if *resampleQualityFlag != "high" && *resampleQualityFlag != "fast" {
+			fmt.Fprintf(os.Stderr, "Error: --resample-quality must be 'high' or 'fast'\n")
+			os.Exit(1)
+		}
+		// Warn if resampling IQ modes
+		if strings.HasPrefix(*modeFlag, "iq") {
+			fmt.Fprintf(os.Stderr, "Warning: Resampling is disabled for IQ modes (they require exact sample rates)\n")
+		}
+	}
+
 	// Validate URL
 	if *urlFlag != "" {
 		parsedURL, err := url.Parse(*urlFlag)
@@ -1112,6 +1249,8 @@ func main() {
 		bandwidthLow, bandwidthHigh, *outputFlag, *wavFileFlag,
 		duration, *sslFlag, *passwordFlag, *audioDeviceFlag, *nr2Flag, *nr2StrengthFlag, *nr2FloorFlag, *nr2AdaptRateFlag,
 		*autoReconnectFlag,
+		*resampleFlag, *resampleRateFlag, *resampleQualityFlag,
+		0, // outputChannels: 0 = auto (2 when resampling, otherwise match input)
 	)
 
 	// Setup signal handler for graceful shutdown

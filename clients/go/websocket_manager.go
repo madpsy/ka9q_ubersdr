@@ -135,6 +135,10 @@ func (m *WebSocketManager) GetStatus() StatusResponse {
 		status.NR2Strength = m.client.nr2Strength
 		status.NR2Floor = m.client.nr2Floor
 		status.NR2AdaptRate = m.client.nr2AdaptRate
+		status.ResampleEnabled = m.client.resampleEnabled
+		status.ResampleOutputRate = m.client.resampleOutputRate
+		status.ResampleQuality = m.client.resampleQuality
+		status.OutputChannels = m.client.outputChannels
 		status.Host = m.client.host
 		status.Port = m.client.port
 		status.SSL = m.client.ssl

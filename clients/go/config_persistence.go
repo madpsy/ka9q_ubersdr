@@ -10,21 +10,25 @@ import (
 
 // ClientConfig represents the persistent configuration
 type ClientConfig struct {
-	Host          string  `json:"host"`
-	Port          int     `json:"port"`
-	SSL           bool    `json:"ssl"`
-	Frequency     int     `json:"frequency"`
-	Mode          string  `json:"mode"`
-	BandwidthLow  *int    `json:"bandwidthLow,omitempty"`
-	BandwidthHigh *int    `json:"bandwidthHigh,omitempty"`
-	Password      string  `json:"password,omitempty"`
-	OutputMode    string  `json:"outputMode"`
-	AudioDevice   int     `json:"audioDevice"`
-	NR2Enabled    bool    `json:"nr2Enabled"`
-	NR2Strength   float64 `json:"nr2Strength"`
-	NR2Floor      float64 `json:"nr2Floor"`
-	NR2AdaptRate  float64 `json:"nr2AdaptRate"`
-	APIPort       int     `json:"apiPort"`
+	Host               string  `json:"host"`
+	Port               int     `json:"port"`
+	SSL                bool    `json:"ssl"`
+	Frequency          int     `json:"frequency"`
+	Mode               string  `json:"mode"`
+	BandwidthLow       *int    `json:"bandwidthLow,omitempty"`
+	BandwidthHigh      *int    `json:"bandwidthHigh,omitempty"`
+	Password           string  `json:"password,omitempty"`
+	OutputMode         string  `json:"outputMode"`
+	AudioDevice        int     `json:"audioDevice"`
+	NR2Enabled         bool    `json:"nr2Enabled"`
+	NR2Strength        float64 `json:"nr2Strength"`
+	NR2Floor           float64 `json:"nr2Floor"`
+	NR2AdaptRate       float64 `json:"nr2AdaptRate"`
+	ResampleEnabled    bool    `json:"resampleEnabled"`
+	ResampleOutputRate int     `json:"resampleOutputRate"`
+	ResampleQuality    string  `json:"resampleQuality"`
+	OutputChannels     int     `json:"outputChannels"`
+	APIPort            int     `json:"apiPort"`
 }
 
 // ConfigManager handles loading and saving configuration
@@ -45,20 +49,24 @@ func NewConfigManager(configPath string) *ConfigManager {
 // getDefaultConfig returns default configuration values
 func getDefaultConfig() ClientConfig {
 	return ClientConfig{
-		Host:          "localhost",
-		Port:          8080,
-		SSL:           false,
-		Frequency:     14074000,
-		Mode:          "usb",
-		BandwidthLow:  intPtr(50),
-		BandwidthHigh: intPtr(2700),
-		OutputMode:    "portaudio",
-		AudioDevice:   -1,
-		NR2Enabled:    false,
-		NR2Strength:   40.0,
-		NR2Floor:      10.0,
-		NR2AdaptRate:  1.0,
-		APIPort:       8090,
+		Host:               "localhost",
+		Port:               8080,
+		SSL:                false,
+		Frequency:          14074000,
+		Mode:               "usb",
+		BandwidthLow:       intPtr(50),
+		BandwidthHigh:      intPtr(2700),
+		OutputMode:         "portaudio",
+		AudioDevice:        -1,
+		NR2Enabled:         false,
+		NR2Strength:        40.0,
+		NR2Floor:           10.0,
+		NR2AdaptRate:       1.0,
+		ResampleEnabled:    false,
+		ResampleOutputRate: 44100,
+		ResampleQuality:    "high",
+		OutputChannels:     2, // Default to stereo for better device compatibility
+		APIPort:            8090,
 	}
 }
 
@@ -150,6 +158,10 @@ func (cm *ConfigManager) UpdateFromConnectRequest(req ConnectRequest) error {
 		c.NR2Strength = req.NR2Strength
 		c.NR2Floor = req.NR2Floor
 		c.NR2AdaptRate = req.NR2AdaptRate
+		c.ResampleEnabled = req.ResampleEnabled
+		c.ResampleOutputRate = req.ResampleOutputRate
+		c.ResampleQuality = req.ResampleQuality
+		c.OutputChannels = req.OutputChannels
 	})
 }
 

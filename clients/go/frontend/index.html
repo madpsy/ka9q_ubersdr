@@ -228,6 +228,88 @@
                 </div>
             </section>
 
+            <!-- Radio Control Panel -->
+            <section class="panel">
+                <h2>Radio Control</h2>
+                <div class="info-box">
+                    <p><strong>Note:</strong> Connect to external radio control software (flrig) to synchronize frequency and mode between the SDR and your transceiver.</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="radio-control-type">Control Type:</label>
+                    <select id="radio-control-type">
+                        <option value="none">None</option>
+                        <option value="flrig">flrig</option>
+                    </select>
+                </div>
+
+                <div id="flrig-controls" style="display: none;">
+                    <h3 style="margin-top: 15px;">flrig Settings</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="flrig-host">Host:</label>
+                            <input type="text" id="flrig-host" value="localhost" placeholder="localhost">
+                        </div>
+                        <div class="form-group">
+                            <label for="flrig-port">Port:</label>
+                            <input type="number" id="flrig-port" value="12345" placeholder="12345">
+                        </div>
+                        <div class="form-group">
+                            <label for="flrig-vfo">VFO:</label>
+                            <select id="flrig-vfo">
+                                <option value="A">A</option>
+                                <option value="B">B</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <h4 style="margin-top: 15px;">Synchronization</h4>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="flrig-sync-to-rig" checked>
+                            <span>Sync SDR → Rig (SDR frequency changes update rig)</span>
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="flrig-sync-from-rig" checked>
+                            <span>Sync Rig → SDR (Rig frequency changes update SDR)</span>
+                        </label>
+                    </div>
+
+                    <div class="button-group" style="margin-top: 15px;">
+                        <button id="flrig-connect-btn" class="btn btn-primary">Connect to flrig</button>
+                        <button id="flrig-disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                    </div>
+
+                    <div id="flrig-status-display" style="display: none; margin-top: 15px;">
+                        <h4>flrig Status</h4>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="label">Connection:</span>
+                                <span id="flrig-connection-status" class="status-badge disconnected">Disconnected</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Rig Frequency:</span>
+                                <span id="flrig-frequency">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Rig Mode:</span>
+                                <span id="flrig-mode">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">VFO:</span>
+                                <span id="flrig-vfo-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">PTT:</span>
+                                <span id="flrig-ptt">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Resampling Settings Panel -->
             <section class="panel">
                 <h2>Audio Resampling</h2>

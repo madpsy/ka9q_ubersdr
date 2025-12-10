@@ -85,6 +85,14 @@ func (s *APIServer) setupRoutes() {
 	api.HandleFunc("/outputs/udp", s.handleUDPOutput).Methods("POST", "OPTIONS")
 	api.HandleFunc("/outputs/status", s.handleOutputStatus).Methods("GET", "OPTIONS")
 
+	// Radio control endpoints (flrig)
+	api.HandleFunc("/radio/flrig/connect", s.handleFlrigConnect).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/flrig/disconnect", s.handleFlrigDisconnect).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/flrig/status", s.handleFlrigStatus).Methods("GET", "OPTIONS")
+	api.HandleFunc("/radio/flrig/frequency", s.handleFlrigFrequency).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/flrig/mode", s.handleFlrigMode).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/flrig/vfo", s.handleFlrigVFO).Methods("POST", "OPTIONS")
+
 	// Saved instances management endpoints
 	api.HandleFunc("/instances/saved", s.handleSavedInstances).Methods("GET", "OPTIONS")
 	api.HandleFunc("/instances/saved", s.handleSaveInstance).Methods("POST", "OPTIONS")
@@ -888,6 +896,154 @@ func (s *APIServer) handleSpectrumCommand(conn *websocket.Conn, cmdType string, 
 		}
 		conn.WriteJSON(errorMsg)
 	}
+}
+
+// Radio Control Handlers (flrig)
+
+// handleFlrigConnect handles POST /api/radio/flrig/connect
+func (s *APIServer) handleFlrigConnect(w http.ResponseWriter, r *http.Request) {
+	var req FlrigConnectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	// Validate required fields
+	if req.Host == "" {
+		respondError(w, http.StatusBadRequest, "Host is required", "")
+		return
+	}
+	if req.Port == 0 {
+		req.Port = 12345 // Default flrig port
+	}
+	if req.VFO == "" {
+		req.VFO = "A" // Default to VFO A
+	}
+
+	// Connect to flrig
+	if err := s.manager.ConnectFlrig(req.Host, req.Port, req.VFO, req.SyncToRig, req.SyncFromRig); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to connect to flrig", err.Error())
+		return
+	}
+
+	// Save flrig config
+	if err := s.configManager.Update(func(c *ClientConfig) {
+		c.RadioControlType = "flrig"
+		c.FlrigEnabled = true
+		c.FlrigHost = req.Host
+		c.FlrigPort = req.Port
+		c.FlrigVFO = req.VFO
+		c.FlrigSyncToRig = req.SyncToRig
+		c.FlrigSyncFromRig = req.SyncFromRig
+	}); err != nil {
+		log.Printf("Warning: Failed to save flrig config: %v", err)
+	}
+
+	respondSuccess(w, fmt.Sprintf("Connected to flrig at %s:%d (sync: SDR->rig=%v, rig->SDR=%v)",
+		req.Host, req.Port, req.SyncToRig, req.SyncFromRig))
+}
+
+// handleFlrigDisconnect handles POST /api/radio/flrig/disconnect
+func (s *APIServer) handleFlrigDisconnect(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsFlrigConnected() {
+		respondError(w, http.StatusConflict, "flrig not connected", "")
+		return
+	}
+
+	if err := s.manager.DisconnectFlrig(); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to disconnect from flrig", err.Error())
+		return
+	}
+
+	// Update config
+	if err := s.configManager.Update(func(c *ClientConfig) {
+		c.FlrigEnabled = false
+	}); err != nil {
+		log.Printf("Warning: Failed to save flrig config: %v", err)
+	}
+
+	respondSuccess(w, "Disconnected from flrig")
+}
+
+// handleFlrigStatus handles GET /api/radio/flrig/status
+func (s *APIServer) handleFlrigStatus(w http.ResponseWriter, r *http.Request) {
+	status := s.manager.GetFlrigStatus()
+	respondJSON(w, http.StatusOK, status)
+}
+
+// handleFlrigFrequency handles POST /api/radio/flrig/frequency
+func (s *APIServer) handleFlrigFrequency(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsFlrigConnected() {
+		respondError(w, http.StatusConflict, "flrig not connected", "")
+		return
+	}
+
+	var req FrequencyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if err := s.manager.SetFlrigFrequency(req.Frequency); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to set flrig frequency", err.Error())
+		return
+	}
+
+	respondSuccess(w, "flrig frequency set successfully")
+}
+
+// handleFlrigMode handles POST /api/radio/flrig/mode
+func (s *APIServer) handleFlrigMode(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsFlrigConnected() {
+		respondError(w, http.StatusConflict, "flrig not connected", "")
+		return
+	}
+
+	var req ModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if err := s.manager.SetFlrigMode(req.Mode); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to set flrig mode", err.Error())
+		return
+	}
+
+	respondSuccess(w, "flrig mode set successfully")
+}
+
+// handleFlrigVFO handles POST /api/radio/flrig/vfo
+func (s *APIServer) handleFlrigVFO(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsFlrigConnected() {
+		respondError(w, http.StatusConflict, "flrig not connected", "")
+		return
+	}
+
+	var req FlrigVFORequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.VFO != "A" && req.VFO != "B" {
+		respondError(w, http.StatusBadRequest, "VFO must be 'A' or 'B'", "")
+		return
+	}
+
+	if err := s.manager.SetFlrigVFO(req.VFO); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to set flrig VFO", err.Error())
+		return
+	}
+
+	// Update config
+	if err := s.configManager.Update(func(c *ClientConfig) {
+		c.FlrigVFO = req.VFO
+	}); err != nil {
+		log.Printf("Warning: Failed to save flrig VFO config: %v", err)
+	}
+
+	respondSuccess(w, fmt.Sprintf("flrig VFO set to %s", req.VFO))
 }
 
 // Helper functions

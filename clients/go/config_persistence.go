@@ -53,6 +53,14 @@ type ClientConfig struct {
 	UDPEnabled          bool            `json:"udpEnabled"`
 	PortAudioEnabled    bool            `json:"portAudioEnabled"`
 	PortAudioDevice     int             `json:"portAudioDevice"`
+	// Radio control settings
+	RadioControlType string `json:"radioControlType,omitempty"` // "none", "flrig", "rigctl", "serial", "omnirig"
+	FlrigEnabled     bool   `json:"flrigEnabled"`
+	FlrigHost        string `json:"flrigHost,omitempty"`
+	FlrigPort        int    `json:"flrigPort,omitempty"`
+	FlrigVFO         string `json:"flrigVFO,omitempty"` // "A" or "B"
+	FlrigSyncToRig   bool   `json:"flrigSyncToRig"`     // Sync SDR frequency changes to rig
+	FlrigSyncFromRig bool   `json:"flrigSyncFromRig"`   // Sync rig frequency changes to SDR
 }
 
 // ConfigManager handles loading and saving configuration
@@ -100,6 +108,13 @@ func getDefaultConfig() ClientConfig {
 		UDPEnabled:          false,       // UDP disabled by default
 		PortAudioEnabled:    false,       // PortAudio disabled by default
 		PortAudioDevice:     -1,          // Auto-select device
+		RadioControlType:    "none",      // No radio control by default
+		FlrigEnabled:        false,       // flrig disabled by default
+		FlrigHost:           "localhost", // Default flrig host
+		FlrigPort:           12345,       // Default flrig port
+		FlrigVFO:            "A",         // Default to VFO A
+		FlrigSyncToRig:      true,        // Sync SDR->rig by default
+		FlrigSyncFromRig:    true,        // Sync rig->SDR by default
 	}
 }
 

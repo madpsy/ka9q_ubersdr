@@ -92,6 +92,23 @@ class UberSDRClient {
         this.statusSession = document.getElementById('status-session');
         this.statusAudioDevice = document.getElementById('status-audio-device');
 
+        // Radio control elements
+        this.radioControlType = document.getElementById('radio-control-type');
+        this.flrigControls = document.getElementById('flrig-controls');
+        this.flrigHost = document.getElementById('flrig-host');
+        this.flrigPort = document.getElementById('flrig-port');
+        this.flrigVFO = document.getElementById('flrig-vfo');
+        this.flrigSyncToRig = document.getElementById('flrig-sync-to-rig');
+        this.flrigSyncFromRig = document.getElementById('flrig-sync-from-rig');
+        this.flrigConnectBtn = document.getElementById('flrig-connect-btn');
+        this.flrigDisconnectBtn = document.getElementById('flrig-disconnect-btn');
+        this.flrigStatusDisplay = document.getElementById('flrig-status-display');
+        this.flrigConnectionStatus = document.getElementById('flrig-connection-status');
+        this.flrigFrequency = document.getElementById('flrig-frequency');
+        this.flrigMode = document.getElementById('flrig-mode');
+        this.flrigVFOStatus = document.getElementById('flrig-vfo-status');
+        this.flrigPTT = document.getElementById('flrig-ptt');
+
         // Audio streaming state
         this.audioStreamActive = false;
         this.audioQueue = [];
@@ -244,6 +261,11 @@ class UberSDRClient {
         this.portaudioOutputEnabled.addEventListener('change', () => this.togglePortAudioOutput());
         this.fifoOutputEnabled.addEventListener('change', () => this.toggleFIFOOutput());
         this.udpOutputEnabled.addEventListener('change', () => this.toggleUDPOutput());
+
+        // Radio control event listeners
+        this.radioControlType.addEventListener('change', () => this.onRadioControlTypeChanged());
+        this.flrigConnectBtn.addEventListener('click', () => this.connectFlrig());
+        this.flrigDisconnectBtn.addEventListener('click', () => this.disconnectFlrig());
     }
 
     connectWebSocket() {
@@ -743,21 +765,17 @@ class UberSDRClient {
             const data = await response.json();
 
             if (data.devices) {
-                // Update both device selects
-                this.audioDeviceSelect.innerHTML = '<option value="-1">Default Device</option>';
-                this.portaudioDeviceSelect.innerHTML = '<option value="-1">Default Device</option>';
+                // Update portaudio device select (audioDeviceSelect is not used in this client)
+                if (this.portaudioDeviceSelect) {
+                    this.portaudioDeviceSelect.innerHTML = '<option value="-1">Default Device</option>';
 
-                data.devices.forEach(device => {
-                    const option1 = document.createElement('option');
-                    option1.value = device.index;
-                    option1.textContent = `[${device.index}] ${device.name}${device.isDefault ? ' (default)' : ''}`;
-                    this.audioDeviceSelect.appendChild(option1);
-
-                    const option2 = document.createElement('option');
-                    option2.value = device.index;
-                    option2.textContent = `[${device.index}] ${device.name}${device.isDefault ? ' (default)' : ''}`;
-                    this.portaudioDeviceSelect.appendChild(option2);
-                });
+                    data.devices.forEach(device => {
+                        const option = document.createElement('option');
+                        option.value = device.index;
+                        option.textContent = `[${device.index}] ${device.name}${device.isDefault ? ' (default)' : ''}`;
+                        this.portaudioDeviceSelect.appendChild(option);
+                    });
+                }
             }
         } catch (error) {
             console.error('Failed to load audio devices:', error);
@@ -1602,6 +1620,139 @@ class UberSDRClient {
             }
         } catch (error) {
             this.showError('Error deleting instance', error.message);
+        }
+    }
+
+    // Radio Control Methods (flrig)
+
+    onRadioControlTypeChanged() {
+        const type = this.radioControlType.value;
+        
+        if (type === 'flrig') {
+            this.flrigControls.style.display = 'block';
+        } else {
+            this.flrigControls.style.display = 'none';
+        }
+    }
+
+    async connectFlrig() {
+        const config = {
+            host: this.flrigHost.value,
+            port: parseInt(this.flrigPort.value),
+            vfo: this.flrigVFO.value,
+            syncToRig: this.flrigSyncToRig.checked,
+            syncFromRig: this.flrigSyncFromRig.checked
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/flrig/connect`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.showSuccess(data.message || 'Connected to flrig');
+                this.flrigConnectBtn.disabled = true;
+                this.flrigDisconnectBtn.disabled = false;
+                this.flrigStatusDisplay.style.display = 'block';
+                this.updateFlrigStatus();
+                
+                // Start polling flrig status
+                this.startFlrigStatusPolling();
+            } else {
+                this.showError('Failed to connect to flrig', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error connecting to flrig', error.message);
+        }
+    }
+
+    async disconnectFlrig() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/flrig/disconnect`, {
+                method: 'POST'
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.showSuccess(data.message || 'Disconnected from flrig');
+                this.flrigConnectBtn.disabled = false;
+                this.flrigDisconnectBtn.disabled = true;
+                this.flrigStatusDisplay.style.display = 'none';
+                
+                // Stop polling flrig status
+                this.stopFlrigStatusPolling();
+            } else {
+                this.showError('Failed to disconnect from flrig', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error disconnecting from flrig', error.message);
+        }
+    }
+
+    async updateFlrigStatus() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/flrig/status`);
+            if (response.ok) {
+                const status = await response.json();
+                
+                // Update connection status
+                if (status.connected) {
+                    this.flrigConnectionStatus.textContent = 'Connected';
+                    this.flrigConnectionStatus.className = 'status-badge connected';
+                } else {
+                    this.flrigConnectionStatus.textContent = 'Disconnected';
+                    this.flrigConnectionStatus.className = 'status-badge disconnected';
+                }
+                
+                // Update frequency
+                if (status.frequency) {
+                    this.flrigFrequency.textContent = this.formatFrequency(status.frequency);
+                } else {
+                    this.flrigFrequency.textContent = '-';
+                }
+                
+                // Update mode
+                if (status.mode) {
+                    this.flrigMode.textContent = status.mode.toUpperCase();
+                } else {
+                    this.flrigMode.textContent = '-';
+                }
+                
+                // Update VFO
+                if (status.vfo) {
+                    this.flrigVFOStatus.textContent = status.vfo;
+                } else {
+                    this.flrigVFOStatus.textContent = '-';
+                }
+                
+                // Update PTT
+                if (status.ptt !== undefined) {
+                    this.flrigPTT.textContent = status.ptt ? 'ON' : 'OFF';
+                } else {
+                    this.flrigPTT.textContent = '-';
+                }
+            }
+        } catch (error) {
+            console.error('Failed to fetch flrig status:', error);
+        }
+    }
+
+    startFlrigStatusPolling() {
+        // Poll flrig status every 2 seconds
+        this.flrigStatusInterval = setInterval(() => {
+            this.updateFlrigStatus();
+        }, 2000);
+    }
+
+    stopFlrigStatusPolling() {
+        if (this.flrigStatusInterval) {
+            clearInterval(this.flrigStatusInterval);
+            this.flrigStatusInterval = null;
         }
     }
 }

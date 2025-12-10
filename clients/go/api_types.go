@@ -88,6 +88,20 @@ type OutputControlRequest struct {
 	Port        int    `json:"port,omitempty"`        // For UDP
 }
 
+// FlrigConnectRequest represents a request to connect to flrig
+type FlrigConnectRequest struct {
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	VFO         string `json:"vfo"`         // "A" or "B"
+	SyncToRig   bool   `json:"syncToRig"`   // Sync SDR frequency changes to rig
+	SyncFromRig bool   `json:"syncFromRig"` // Sync rig frequency changes to SDR
+}
+
+// FlrigVFORequest represents a request to change flrig VFO
+type FlrigVFORequest struct {
+	VFO string `json:"vfo"` // "A" or "B"
+}
+
 // API Response Types
 
 // StatusResponse represents the current client status

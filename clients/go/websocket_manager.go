@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 type WebSocketManager struct {
 	client            *RadioClient
 	conn              *websocket.Conn // WebSocket connection for sending tune messages
+	connMu            sync.Mutex      // Protects WebSocket writes
 	mu                sync.RWMutex
 	connected         bool
 	connectedAt       time.Time
@@ -30,6 +32,11 @@ type WebSocketManager struct {
 	spectrumClient    *SpectrumClient            // Spectrum WebSocket client
 	spectrumStreams   map[*websocket.Conn]string // Maps WebSocket connections to their spectrum room names
 	spectrumStreamsMu sync.RWMutex
+	flrigClient       *FlrigClient       // flrig radio control client
+	flrigPolling      bool               // Whether flrig polling is active
+	flrigPollCancel   context.CancelFunc // Cancel function for flrig polling
+	flrigSyncToRig    bool               // Sync SDR frequency changes to rig
+	flrigSyncFromRig  bool               // Sync rig frequency changes to SDR
 }
 
 // NewWebSocketManager creates a new WebSocket manager
@@ -174,19 +181,18 @@ func (m *WebSocketManager) GetStatusWithOutputs() StatusResponse {
 
 // Tune changes frequency/mode/bandwidth without reconnecting
 func (m *WebSocketManager) Tune(req TuneRequest) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	// Read state with RLock first
+	m.mu.RLock()
 	if !m.connected || m.client == nil {
+		m.mu.RUnlock()
 		return fmt.Errorf("not connected")
 	}
-
-	// Check if WebSocket connection is available
 	if m.conn == nil {
+		m.mu.RUnlock()
 		return fmt.Errorf("WebSocket connection not available")
 	}
 
-	// Build tune message
+	// Build tune message while holding RLock
 	tuneMsg := map[string]interface{}{
 		"type": "tune",
 	}
@@ -194,7 +200,6 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 	// Update frequency if provided
 	if req.Frequency != nil {
 		tuneMsg["frequency"] = *req.Frequency
-		m.client.frequency = *req.Frequency
 	} else {
 		tuneMsg["frequency"] = m.client.frequency
 	}
@@ -202,7 +207,6 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 	// Update mode if provided
 	if req.Mode != "" {
 		tuneMsg["mode"] = req.Mode
-		m.client.mode = req.Mode
 	} else {
 		tuneMsg["mode"] = m.client.mode
 	}
@@ -214,25 +218,66 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 	if !isIQMode {
 		if req.BandwidthLow != nil {
 			tuneMsg["bandwidthLow"] = *req.BandwidthLow
-			m.client.bandwidthLow = req.BandwidthLow
 		} else if m.client.bandwidthLow != nil {
 			tuneMsg["bandwidthLow"] = *m.client.bandwidthLow
 		}
 
 		if req.BandwidthHigh != nil {
 			tuneMsg["bandwidthHigh"] = *req.BandwidthHigh
-			m.client.bandwidthHigh = req.BandwidthHigh
 		} else if m.client.bandwidthHigh != nil {
 			tuneMsg["bandwidthHigh"] = *m.client.bandwidthHigh
 		}
 	}
 
-	// Send tune message directly via the captured WebSocket connection
-	if err := m.conn.WriteJSON(tuneMsg); err != nil {
+	conn := m.conn
+	flrigClient := m.flrigClient
+	flrigSyncToRig := m.flrigSyncToRig
+	m.mu.RUnlock()
+
+	// Send tune message with WebSocket write lock
+	m.connMu.Lock()
+	err := conn.WriteJSON(tuneMsg)
+	m.connMu.Unlock()
+
+	if err != nil {
 		return fmt.Errorf("failed to send tune message: %w", err)
 	}
 
 	log.Printf("Sent tune message: %+v", tuneMsg)
+
+	// Update client state with Lock
+	m.mu.Lock()
+	if req.Frequency != nil {
+		m.client.frequency = *req.Frequency
+	}
+	if req.Mode != "" {
+		m.client.mode = req.Mode
+	}
+	if req.BandwidthLow != nil {
+		m.client.bandwidthLow = req.BandwidthLow
+	}
+	if req.BandwidthHigh != nil {
+		m.client.bandwidthHigh = req.BandwidthHigh
+	}
+	m.mu.Unlock()
+
+	// Sync to flrig if enabled and connected (without holding lock)
+	if flrigClient != nil && flrigClient.IsConnected() && flrigSyncToRig {
+		if req.Frequency != nil {
+			if err := flrigClient.SetFrequency(*req.Frequency); err != nil {
+				log.Printf("Warning: Failed to sync frequency to flrig: %v", err)
+			} else {
+				log.Printf("Synced frequency %d Hz to flrig", *req.Frequency)
+			}
+		}
+		if req.Mode != "" {
+			if err := flrigClient.SetMode(req.Mode); err != nil {
+				log.Printf("Warning: Failed to sync mode to flrig: %v", err)
+			} else {
+				log.Printf("Synced mode %s to flrig", req.Mode)
+			}
+		}
+	}
 
 	// Broadcast status update
 	m.BroadcastStatus()
@@ -381,7 +426,9 @@ func (m *WebSocketManager) GetOutputStatus() map[string]interface{} {
 
 // BroadcastStatus sends a status update to all subscribers
 func (m *WebSocketManager) BroadcastStatus() {
+	m.mu.RLock()
 	if !m.connected || m.client == nil {
+		m.mu.RUnlock()
 		return
 	}
 
@@ -394,6 +441,7 @@ func (m *WebSocketManager) BroadcastStatus() {
 		Channels:   m.client.channels,
 		Timestamp:  time.Now(),
 	}
+	m.mu.RUnlock()
 
 	select {
 	case m.statusBroadcast <- update:
@@ -728,4 +776,288 @@ func (m *WebSocketManager) SendSpectrumCommand(cmdType string, params map[string
 	default:
 		return fmt.Errorf("unknown command type: %s", cmdType)
 	}
+}
+
+// Radio Control Methods (flrig)
+
+// ConnectFlrig connects to flrig server
+func (m *WebSocketManager) ConnectFlrig(host string, port int, vfo string, syncToRig bool, syncFromRig bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Disconnect existing flrig client if any
+	if m.flrigClient != nil {
+		m.stopFlrigPolling()
+		m.flrigClient.Disconnect()
+		m.flrigClient = nil
+	}
+
+	// Store sync direction settings
+	m.flrigSyncToRig = syncToRig
+	m.flrigSyncFromRig = syncFromRig
+
+	// Create new flrig client
+	m.flrigClient = NewFlrigClient(host, port, vfo)
+
+	// Set up callbacks
+	m.flrigClient.SetCallbacks(
+		func(freq int) {
+			// Run callback in goroutine to avoid blocking polling
+			go func() {
+				// Check sync setting with lock
+				m.mu.RLock()
+				syncFromRig := m.flrigSyncFromRig
+				m.mu.RUnlock()
+
+				if !syncFromRig {
+					log.Printf("flrig frequency changed to %d Hz (sync disabled)", freq)
+					return
+				}
+
+				// Check connection without holding lock for too long
+				m.mu.RLock()
+				connected := m.connected
+				client := m.client
+				m.mu.RUnlock()
+
+				if !connected || client == nil {
+					log.Printf("flrig frequency changed to %d Hz (not connected to SDR)", freq)
+					return
+				}
+
+				log.Printf("flrig frequency changed to %d Hz (syncing to SDR)", freq)
+
+				// Temporarily disable sync to rig to avoid feedback loop
+				m.mu.Lock()
+				oldSyncToRig := m.flrigSyncToRig
+				m.flrigSyncToRig = false
+				m.mu.Unlock()
+
+				if err := m.SetFrequency(freq); err != nil {
+					log.Printf("Failed to update SDR frequency from flrig: %v", err)
+				}
+
+				// Restore sync setting
+				m.mu.Lock()
+				m.flrigSyncToRig = oldSyncToRig
+				m.mu.Unlock()
+			}()
+		},
+		func(mode string) {
+			// Run callback in goroutine to avoid blocking polling
+			go func() {
+				// Check sync setting with lock
+				m.mu.RLock()
+				syncFromRig := m.flrigSyncFromRig
+				m.mu.RUnlock()
+
+				if !syncFromRig {
+					log.Printf("flrig mode changed to %s (sync disabled)", mode)
+					return
+				}
+
+				// Check connection without holding lock for too long
+				m.mu.RLock()
+				connected := m.connected
+				client := m.client
+				m.mu.RUnlock()
+
+				if !connected || client == nil {
+					log.Printf("flrig mode changed to %s (not connected to SDR)", mode)
+					return
+				}
+
+				// Convert mode to lowercase for SDR server
+				modeLower := strings.ToLower(mode)
+				log.Printf("flrig mode changed to %s (syncing to SDR as %s)", mode, modeLower)
+
+				// Temporarily disable sync to rig to avoid feedback loop
+				m.mu.Lock()
+				oldSyncToRig := m.flrigSyncToRig
+				m.flrigSyncToRig = false
+				m.mu.Unlock()
+
+				if err := m.SetMode(modeLower); err != nil {
+					log.Printf("Failed to update SDR mode from flrig: %v", err)
+				}
+
+				// Restore sync setting
+				m.mu.Lock()
+				m.flrigSyncToRig = oldSyncToRig
+				m.mu.Unlock()
+			}()
+		},
+		func(ptt bool) {
+			// PTT changed in flrig
+			log.Printf("flrig PTT changed to %v", ptt)
+			// PTT handling could be added here if needed
+		},
+		func(errMsg string) {
+			// Error from flrig
+			log.Printf("flrig error: %s", errMsg)
+		},
+	)
+
+	// Connect to flrig
+	if err := m.flrigClient.Connect(); err != nil {
+		m.flrigClient = nil
+		return fmt.Errorf("failed to connect to flrig: %w", err)
+	}
+
+	log.Printf("Connected to flrig at %s:%d (VFO %s, sync: SDR->rig=%v, rig->SDR=%v)",
+		host, port, vfo, syncToRig, syncFromRig)
+
+	// Start polling goroutine
+	m.startFlrigPolling()
+
+	return nil
+}
+
+// DisconnectFlrig disconnects from flrig server
+func (m *WebSocketManager) DisconnectFlrig() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.flrigClient == nil {
+		return fmt.Errorf("flrig not connected")
+	}
+
+	m.stopFlrigPolling()
+	m.flrigClient.Disconnect()
+	m.flrigClient = nil
+
+	log.Printf("Disconnected from flrig")
+	return nil
+}
+
+// IsFlrigConnected returns whether flrig is connected
+func (m *WebSocketManager) IsFlrigConnected() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.flrigClient != nil && m.flrigClient.IsConnected()
+}
+
+// SetFlrigFrequency sets the frequency in flrig
+func (m *WebSocketManager) SetFlrigFrequency(freq int) error {
+	m.mu.RLock()
+	client := m.flrigClient
+	m.mu.RUnlock()
+
+	if client == nil {
+		return fmt.Errorf("flrig not connected")
+	}
+
+	return client.SetFrequency(freq)
+}
+
+// SetFlrigMode sets the mode in flrig
+func (m *WebSocketManager) SetFlrigMode(mode string) error {
+	m.mu.RLock()
+	client := m.flrigClient
+	m.mu.RUnlock()
+
+	if client == nil {
+		return fmt.Errorf("flrig not connected")
+	}
+
+	return client.SetMode(mode)
+}
+
+// SetFlrigVFO sets the VFO in flrig
+func (m *WebSocketManager) SetFlrigVFO(vfo string) error {
+	m.mu.RLock()
+	client := m.flrigClient
+	m.mu.RUnlock()
+
+	if client == nil {
+		return fmt.Errorf("flrig not connected")
+	}
+
+	return client.SetVFO(vfo)
+}
+
+// GetFlrigStatus returns the current flrig status
+func (m *WebSocketManager) GetFlrigStatus() map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.flrigClient == nil {
+		return map[string]interface{}{
+			"connected": false,
+		}
+	}
+
+	return map[string]interface{}{
+		"connected": m.flrigClient.IsConnected(),
+		"frequency": m.flrigClient.GetCachedFrequency(),
+		"mode":      m.flrigClient.GetCachedMode(),
+		"ptt":       m.flrigClient.GetCachedPTT(),
+		"vfo":       m.flrigClient.GetVFO(),
+	}
+}
+
+// startFlrigPolling starts the flrig polling goroutine
+func (m *WebSocketManager) startFlrigPolling() {
+	if m.flrigPolling {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.flrigPollCancel = cancel
+	m.flrigPolling = true
+
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond) // Poll every 500ms
+		defer ticker.Stop()
+
+		log.Printf("flrig polling goroutine started")
+		pollCount := 0
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Printf("flrig polling goroutine stopped (context done)")
+				return
+			case <-ticker.C:
+				pollCount++
+				m.mu.RLock()
+				client := m.flrigClient
+				m.mu.RUnlock()
+
+				if client == nil {
+					if pollCount%20 == 0 {
+						log.Printf("flrig polling: client is nil (poll #%d)", pollCount)
+					}
+					continue
+				}
+
+				connected := client.IsConnected()
+				if !connected {
+					if pollCount%20 == 0 {
+						log.Printf("flrig polling: client not connected (poll #%d)", pollCount)
+					}
+					continue
+				}
+
+				client.Poll()
+			}
+		}
+	}()
+
+	log.Printf("Started flrig polling")
+}
+
+// stopFlrigPolling stops the flrig polling goroutine
+func (m *WebSocketManager) stopFlrigPolling() {
+	if !m.flrigPolling {
+		return
+	}
+
+	if m.flrigPollCancel != nil {
+		m.flrigPollCancel()
+		m.flrigPollCancel = nil
+	}
+
+	m.flrigPolling = false
+	log.Printf("Stopped flrig polling")
 }

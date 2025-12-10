@@ -266,6 +266,8 @@ class UberSDRClient {
         this.radioControlType.addEventListener('change', () => this.onRadioControlTypeChanged());
         this.flrigConnectBtn.addEventListener('click', () => this.connectFlrig());
         this.flrigDisconnectBtn.addEventListener('click', () => this.disconnectFlrig());
+        this.flrigSyncToRig.addEventListener('change', () => this.updateFlrigSync());
+        this.flrigSyncFromRig.addEventListener('change', () => this.updateFlrigSync());
     }
 
     connectWebSocket() {
@@ -1777,6 +1779,42 @@ class UberSDRClient {
         if (this.flrigStatusInterval) {
             clearInterval(this.flrigStatusInterval);
             this.flrigStatusInterval = null;
+        }
+    }
+
+    async updateFlrigSync() {
+        // Only update if flrig is connected
+        const response = await fetch(`${this.apiBase}/api/radio/flrig/status`);
+        if (!response.ok) return;
+
+        const status = await response.json();
+        if (!status.connected) {
+            console.log('flrig not connected, skipping sync update');
+            return;
+        }
+
+        const config = {
+            syncToRig: this.flrigSyncToRig.checked,
+            syncFromRig: this.flrigSyncFromRig.checked
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/flrig/sync`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                console.log('Updated flrig sync settings:', config);
+                this.showSuccess(data.message || 'Sync settings updated');
+            } else {
+                this.showError('Failed to update sync settings', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error updating sync settings', error.message);
         }
     }
 }

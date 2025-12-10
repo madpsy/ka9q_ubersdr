@@ -102,6 +102,12 @@ type FlrigVFORequest struct {
 	VFO string `json:"vfo"` // "A" or "B"
 }
 
+// FlrigSyncRequest represents a request to update flrig sync settings
+type FlrigSyncRequest struct {
+	SyncToRig   bool `json:"syncToRig"`   // Sync SDR frequency changes to rig
+	SyncFromRig bool `json:"syncFromRig"` // Sync rig frequency changes to SDR
+}
+
 // API Response Types
 
 // StatusResponse represents the current client status

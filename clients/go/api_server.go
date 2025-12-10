@@ -92,6 +92,7 @@ func (s *APIServer) setupRoutes() {
 	api.HandleFunc("/radio/flrig/frequency", s.handleFlrigFrequency).Methods("POST", "OPTIONS")
 	api.HandleFunc("/radio/flrig/mode", s.handleFlrigMode).Methods("POST", "OPTIONS")
 	api.HandleFunc("/radio/flrig/vfo", s.handleFlrigVFO).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/flrig/sync", s.handleFlrigSync).Methods("POST", "OPTIONS")
 
 	// Saved instances management endpoints
 	api.HandleFunc("/instances/saved", s.handleSavedInstances).Methods("GET", "OPTIONS")
@@ -1044,6 +1045,35 @@ func (s *APIServer) handleFlrigVFO(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondSuccess(w, fmt.Sprintf("flrig VFO set to %s", req.VFO))
+}
+
+// handleFlrigSync handles POST /api/radio/flrig/sync
+func (s *APIServer) handleFlrigSync(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsFlrigConnected() {
+		respondError(w, http.StatusConflict, "flrig not connected", "")
+		return
+	}
+
+	var req FlrigSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if err := s.manager.SetFlrigSync(req.SyncToRig, req.SyncFromRig); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to update flrig sync settings", err.Error())
+		return
+	}
+
+	// Update config
+	if err := s.configManager.Update(func(c *ClientConfig) {
+		c.FlrigSyncToRig = req.SyncToRig
+		c.FlrigSyncFromRig = req.SyncFromRig
+	}); err != nil {
+		log.Printf("Warning: Failed to save flrig sync config: %v", err)
+	}
+
+	respondSuccess(w, fmt.Sprintf("flrig sync updated (SDR->rig=%v, rig->SDR=%v)", req.SyncToRig, req.SyncFromRig))
 }
 
 // Helper functions

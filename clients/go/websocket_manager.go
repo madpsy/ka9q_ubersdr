@@ -976,6 +976,22 @@ func (m *WebSocketManager) SetFlrigVFO(vfo string) error {
 	return client.SetVFO(vfo)
 }
 
+// SetFlrigSync updates the flrig sync direction settings
+func (m *WebSocketManager) SetFlrigSync(syncToRig bool, syncFromRig bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.flrigClient == nil {
+		return fmt.Errorf("flrig not connected")
+	}
+
+	m.flrigSyncToRig = syncToRig
+	m.flrigSyncFromRig = syncFromRig
+
+	log.Printf("Updated flrig sync settings: SDR->rig=%v, rig->SDR=%v", syncToRig, syncFromRig)
+	return nil
+}
+
 // GetFlrigStatus returns the current flrig status
 func (m *WebSocketManager) GetFlrigStatus() map[string]interface{} {
 	m.mu.RLock()
@@ -1007,7 +1023,7 @@ func (m *WebSocketManager) startFlrigPolling() {
 	m.flrigPolling = true
 
 	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond) // Poll every 500ms
+		ticker := time.NewTicker(200 * time.Millisecond) // Poll every 200ms for faster response
 		defer ticker.Stop()
 
 		log.Printf("flrig polling goroutine started")

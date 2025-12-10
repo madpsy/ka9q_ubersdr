@@ -103,6 +103,16 @@ func (s *APIServer) setupRoutes() {
 	api.HandleFunc("/radio/rigctl/vfo", s.handleRigctlVFO).Methods("POST", "OPTIONS")
 	api.HandleFunc("/radio/rigctl/sync", s.handleRigctlSync).Methods("POST", "OPTIONS")
 
+	// Radio control endpoints (serial)
+	api.HandleFunc("/radio/serial/connect", s.handleSerialConnect).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/serial/disconnect", s.handleSerialDisconnect).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/serial/status", s.handleSerialStatus).Methods("GET", "OPTIONS")
+	api.HandleFunc("/radio/serial/frequency", s.handleSerialFrequency).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/serial/mode", s.handleSerialMode).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/serial/vfo", s.handleSerialVFO).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/serial/sync", s.handleSerialSync).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/serial/ports", s.handleSerialPorts).Methods("GET", "OPTIONS")
+
 	// Saved instances management endpoints
 	api.HandleFunc("/instances/saved", s.handleSavedInstances).Methods("GET", "OPTIONS")
 	api.HandleFunc("/instances/saved", s.handleSaveInstance).Methods("POST", "OPTIONS")
@@ -465,6 +475,12 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			RigctlVFO:           savedConfig.RigctlVFO,
 			RigctlSyncToRig:     savedConfig.RigctlSyncToRig,
 			RigctlSyncFromRig:   savedConfig.RigctlSyncFromRig,
+			SerialEnabled:       savedConfig.SerialEnabled,
+			SerialPort:          savedConfig.SerialPort,
+			SerialBaudrate:      savedConfig.SerialBaudrate,
+			SerialVFO:           savedConfig.SerialVFO,
+			SerialSyncToRig:     savedConfig.SerialSyncToRig,
+			SerialSyncFromRig:   savedConfig.SerialSyncFromRig,
 		}
 		respondJSON(w, http.StatusOK, config)
 		return
@@ -1274,6 +1290,112 @@ func (s *APIServer) handleRigctlSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondSuccess(w, fmt.Sprintf("rigctl sync updated (SDR->rig=%v, rig->SDR=%v)", req.SyncToRig, req.SyncFromRig))
+}
+
+// Radio Control Handlers (serial CAT server)
+
+// handleSerialConnect handles POST /api/radio/serial/connect
+// Starts a serial CAT server that emulates a Kenwood TS-480
+func (s *APIServer) handleSerialConnect(w http.ResponseWriter, r *http.Request) {
+	var req SerialConnectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.Port == "" {
+		respondError(w, http.StatusBadRequest, "Port is required", "")
+		return
+	}
+
+	if req.Baudrate == 0 {
+		req.Baudrate = 57600 // Default baudrate for TS-480
+	}
+
+	if req.VFO == "" {
+		req.VFO = "A" // Default to VFO A
+	}
+
+	// Start serial CAT server
+	if err := s.manager.StartSerialServer(req.Port, req.Baudrate, req.VFO); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to start serial CAT server", err.Error())
+		return
+	}
+
+	// Save serial config
+	if err := s.configManager.Update(func(c *ClientConfig) {
+		c.RadioControlType = "serial"
+		c.SerialEnabled = true
+		c.SerialPort = req.Port
+		c.SerialBaudrate = req.Baudrate
+		c.SerialVFO = req.VFO
+	}); err != nil {
+		log.Printf("Warning: Failed to save serial config: %v", err)
+	}
+
+	respondSuccess(w, fmt.Sprintf("Started serial CAT server on %s at %d baud (VFO %s)",
+		req.Port, req.Baudrate, req.VFO))
+}
+
+// handleSerialDisconnect handles POST /api/radio/serial/disconnect
+func (s *APIServer) handleSerialDisconnect(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsSerialServerRunning() {
+		respondError(w, http.StatusConflict, "serial CAT server not running", "")
+		return
+	}
+
+	if err := s.manager.StopSerialServer(); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to stop serial CAT server", err.Error())
+		return
+	}
+
+	// Update config
+	if err := s.configManager.Update(func(c *ClientConfig) {
+		c.SerialEnabled = false
+	}); err != nil {
+		log.Printf("Warning: Failed to save serial config: %v", err)
+	}
+
+	respondSuccess(w, "Stopped serial CAT server")
+}
+
+// handleSerialStatus handles GET /api/radio/serial/status
+func (s *APIServer) handleSerialStatus(w http.ResponseWriter, r *http.Request) {
+	status := s.manager.GetSerialServerStatus()
+	respondJSON(w, http.StatusOK, status)
+}
+
+// handleSerialFrequency - Not applicable for serial CAT server (server doesn't control external rig)
+func (s *APIServer) handleSerialFrequency(w http.ResponseWriter, r *http.Request) {
+	respondError(w, http.StatusNotImplemented, "Not applicable", "Serial CAT server emulates a rig, it doesn't control one")
+}
+
+// handleSerialMode - Not applicable for serial CAT server (server doesn't control external rig)
+func (s *APIServer) handleSerialMode(w http.ResponseWriter, r *http.Request) {
+	respondError(w, http.StatusNotImplemented, "Not applicable", "Serial CAT server emulates a rig, it doesn't control one")
+}
+
+// handleSerialVFO - Not applicable for serial CAT server (VFO is set at server start)
+func (s *APIServer) handleSerialVFO(w http.ResponseWriter, r *http.Request) {
+	respondError(w, http.StatusNotImplemented, "Not applicable", "VFO is set when starting the serial CAT server")
+}
+
+// handleSerialSync - Not applicable for serial CAT server (sync is always one-way: external software → SDR)
+func (s *APIServer) handleSerialSync(w http.ResponseWriter, r *http.Request) {
+	respondError(w, http.StatusNotImplemented, "Not applicable", "Serial CAT server always syncs from external software to SDR")
+}
+
+// handleSerialPorts handles GET /api/radio/serial/ports
+func (s *APIServer) handleSerialPorts(w http.ResponseWriter, r *http.Request) {
+	ports, err := ListSerialPorts()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to list serial ports", err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"ports": ports,
+	})
 }
 
 // Helper functions

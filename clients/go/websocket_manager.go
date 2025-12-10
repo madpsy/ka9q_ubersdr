@@ -43,6 +43,7 @@ type WebSocketManager struct {
 	rigctlPollCancel  context.CancelFunc              // Cancel function for rigctl polling
 	rigctlSyncToRig   bool                            // Sync SDR frequency changes to rig
 	rigctlSyncFromRig bool                            // Sync rig frequency changes to SDR
+	serialServer      *SerialCATServer                // serial CAT server
 }
 
 // NewWebSocketManager creates a new WebSocket manager
@@ -241,6 +242,7 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 	flrigSyncToRig := m.flrigSyncToRig
 	rigctlClient := m.rigctlClient
 	rigctlSyncToRig := m.rigctlSyncToRig
+	serialServer := m.serialServer
 	m.mu.RUnlock()
 
 	// Send tune message with WebSocket write lock
@@ -303,6 +305,16 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 			} else {
 				log.Printf("Synced mode %s to rigctl", req.Mode)
 			}
+		}
+	}
+
+	// Update serial server's cached frequency/mode if running (without holding lock)
+	if serialServer != nil && serialServer.IsRunning() {
+		if req.Frequency != nil {
+			serialServer.UpdateFrequency(*req.Frequency)
+		}
+		if req.Mode != "" {
+			serialServer.UpdateMode(req.Mode)
 		}
 	}
 
@@ -1443,4 +1455,129 @@ func (m *WebSocketManager) stopRigctlPolling() {
 
 	m.rigctlPolling = false
 	log.Printf("Stopped rigctl polling")
+}
+
+// Radio Control Methods (serial CAT server)
+
+// StartSerialServer starts the serial CAT server
+func (m *WebSocketManager) StartSerialServer(port string, baudrate int, vfo string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Stop existing serial server if any
+	if m.serialServer != nil {
+		m.serialServer.Stop()
+		m.serialServer = nil
+	}
+
+	// Create new serial CAT server
+	m.serialServer = NewSerialCATServer(port, baudrate, vfo)
+
+	// Set initial frequency from client if available
+	if m.client != nil {
+		m.serialServer.UpdateFrequency(m.client.frequency)
+		m.serialServer.UpdateMode(m.client.mode)
+	}
+
+	// Set up callbacks for when external software changes frequency/mode
+	m.serialServer.SetCallbacks(
+		func(freq int) {
+			// Frequency changed by external software via CAT
+			go func() {
+				log.Printf("Serial CAT: External software set frequency to %d Hz", freq)
+
+				// Check connection
+				m.mu.RLock()
+				connected := m.connected
+				m.mu.RUnlock()
+
+				if !connected {
+					log.Printf("Serial CAT: Not connected to SDR, ignoring frequency change")
+					return
+				}
+
+				// Update SDR frequency
+				if err := m.SetFrequency(freq); err != nil {
+					log.Printf("Serial CAT: Failed to update SDR frequency: %v", err)
+				}
+			}()
+		},
+		func(mode string) {
+			// Mode changed by external software via CAT
+			go func() {
+				log.Printf("Serial CAT: External software set mode to %s", mode)
+
+				// Check connection
+				m.mu.RLock()
+				connected := m.connected
+				m.mu.RUnlock()
+
+				if !connected {
+					log.Printf("Serial CAT: Not connected to SDR, ignoring mode change")
+					return
+				}
+
+				// Convert mode to lowercase for SDR
+				modeLower := strings.ToLower(mode)
+
+				// Update SDR mode
+				if err := m.SetMode(modeLower); err != nil {
+					log.Printf("Serial CAT: Failed to update SDR mode: %v", err)
+				}
+			}()
+		},
+	)
+
+	// Start the server
+	if err := m.serialServer.Start(); err != nil {
+		m.serialServer = nil
+		return fmt.Errorf("failed to start serial CAT server: %w", err)
+	}
+
+	log.Printf("Started serial CAT server on %s at %d baud (VFO %s)", port, baudrate, vfo)
+	return nil
+}
+
+// StopSerialServer stops the serial CAT server
+func (m *WebSocketManager) StopSerialServer() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.serialServer == nil {
+		return fmt.Errorf("serial CAT server not running")
+	}
+
+	m.serialServer.Stop()
+	m.serialServer = nil
+
+	log.Printf("Stopped serial CAT server")
+	return nil
+}
+
+// IsSerialServerRunning returns whether the serial CAT server is running
+func (m *WebSocketManager) IsSerialServerRunning() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.serialServer != nil && m.serialServer.IsRunning()
+}
+
+// GetSerialServerStatus returns the current serial CAT server status
+func (m *WebSocketManager) GetSerialServerStatus() map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.serialServer == nil {
+		return map[string]interface{}{
+			"running": false,
+		}
+	}
+
+	return map[string]interface{}{
+		"running":   m.serialServer.IsRunning(),
+		"port":      m.serialServer.GetPort(),
+		"baudrate":  m.serialServer.GetBaudrate(),
+		"vfo":       m.serialServer.GetVFO(),
+		"frequency": m.serialServer.GetCachedFrequency(),
+		"mode":      m.serialServer.GetCachedMode(),
+	}
 }

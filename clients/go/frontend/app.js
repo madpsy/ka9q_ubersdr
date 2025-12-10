@@ -125,6 +125,22 @@ class UberSDRClient {
         this.rigctlVFOStatus = document.getElementById('rigctl-vfo-status');
         this.rigctlPTT = document.getElementById('rigctl-ptt');
 
+        // Serial control elements
+        this.serialControls = document.getElementById('serial-controls');
+        this.serialPort = document.getElementById('serial-port');
+        this.serialBaudrate = document.getElementById('serial-baudrate');
+        this.serialVFO = document.getElementById('serial-vfo');
+        this.serialRefreshPortsBtn = document.getElementById('serial-refresh-ports-btn');
+        this.serialStartBtn = document.getElementById('serial-start-btn');
+        this.serialStopBtn = document.getElementById('serial-stop-btn');
+        this.serialStatusDisplay = document.getElementById('serial-status-display');
+        this.serialServerStatus = document.getElementById('serial-server-status');
+        this.serialPortStatus = document.getElementById('serial-port-status');
+        this.serialBaudrateStatus = document.getElementById('serial-baudrate-status');
+        this.serialVFOStatus = document.getElementById('serial-vfo-status');
+        this.serialFrequency = document.getElementById('serial-frequency');
+        this.serialMode = document.getElementById('serial-mode');
+
         // Audio streaming state
         this.audioStreamActive = false;
         this.audioQueue = [];
@@ -206,6 +222,10 @@ class UberSDRClient {
 
         // Mode change
         this.modeSelect.addEventListener('change', () => this.updateModeDefaults());
+
+        // Bandwidth changes - update visualizer in real-time
+        this.bandwidthLowInput.addEventListener('input', () => this.updateVisualizerBandwidth());
+        this.bandwidthHighInput.addEventListener('input', () => this.updateVisualizerBandwidth());
 
         // Apply settings button
         this.applySettingsBtn.addEventListener('click', () => this.applySettings());
@@ -290,6 +310,11 @@ class UberSDRClient {
         this.rigctlDisconnectBtn.addEventListener('click', () => this.disconnectRigctl());
         this.rigctlSyncToRig.addEventListener('change', () => this.updateRigctlSync());
         this.rigctlSyncFromRig.addEventListener('change', () => this.updateRigctlSync());
+
+        // Serial control event listeners
+        this.serialRefreshPortsBtn.addEventListener('click', () => this.loadSerialPorts());
+        this.serialStartBtn.addEventListener('click', () => this.startSerialServer());
+        this.serialStopBtn.addEventListener('click', () => this.stopSerialServer());
     }
 
     connectWebSocket() {
@@ -538,6 +563,11 @@ class UberSDRClient {
                 if (this.spectrumDisplay) {
                     this.spectrumDisplay.updateBandwidth(tuneRequest.bandwidthLow, tuneRequest.bandwidthHigh);
                 }
+
+                // Update audio visualizer with new bandwidth
+                if (this.audioVisualizer) {
+                    this.audioVisualizer.updateBandwidth(tuneRequest.bandwidthLow, tuneRequest.bandwidthHigh, tuneRequest.mode);
+                }
             } else {
                 this.showError('Failed to apply settings', data.message || data.error);
             }
@@ -618,6 +648,19 @@ class UberSDRClient {
         if (defaults[mode]) {
             this.bandwidthLowInput.value = defaults[mode][0];
             this.bandwidthHighInput.value = defaults[mode][1];
+
+            // Update audio visualizer with new bandwidth
+            this.updateVisualizerBandwidth();
+        }
+    }
+
+    updateVisualizerBandwidth() {
+        // Update audio visualizer with current bandwidth values
+        if (this.audioVisualizer) {
+            const bandwidthLow = parseInt(this.bandwidthLowInput.value) || 50;
+            const bandwidthHigh = parseInt(this.bandwidthHighInput.value) || 2700;
+            const mode = this.modeSelect.value || 'usb';
+            this.audioVisualizer.updateBandwidth(bandwidthLow, bandwidthHigh, mode);
         }
     }
 
@@ -739,6 +782,11 @@ class UberSDRClient {
                 if (config.rigctlSyncToRig !== undefined) this.rigctlSyncToRig.checked = config.rigctlSyncToRig;
                 if (config.rigctlSyncFromRig !== undefined) this.rigctlSyncFromRig.checked = config.rigctlSyncFromRig;
 
+                // Load serial settings
+                if (config.serialPort) this.serialPort.value = config.serialPort;
+                if (config.serialBaudrate) this.serialBaudrate.value = config.serialBaudrate;
+                if (config.serialVFO) this.serialVFO.value = config.serialVFO;
+
                 // Check if flrig is already connected (via auto-connect)
                 if (config.flrigEnabled && config.radioControlType === 'flrig') {
                     setTimeout(() => {
@@ -750,6 +798,13 @@ class UberSDRClient {
                 if (config.rigctlEnabled && config.radioControlType === 'rigctl') {
                     setTimeout(() => {
                         this.checkRigctlConnection();
+                    }, 1000); // Wait a bit for backend auto-connect to complete
+                }
+
+                // Check if serial is already running (via auto-connect)
+                if (config.serialEnabled && config.radioControlType === 'serial') {
+                    setTimeout(() => {
+                        this.checkSerialConnection();
                     }, 1000); // Wait a bit for backend auto-connect to complete
                 }
 
@@ -1288,9 +1343,14 @@ class UberSDRClient {
             this.audioMuteBtn.disabled = false;
             this.startAudioStream();
 
-            // Initialize audio visualizer
+            // Initialize audio visualizer with current bandwidth settings
             if (!this.audioVisualizer && this.spectrumCanvas && this.waterfallCanvas) {
                 this.audioVisualizer = new AudioVisualizer(this.spectrumCanvas, this.waterfallCanvas);
+                // Set initial bandwidth from current settings
+                const bandwidthLow = parseInt(this.bandwidthLowInput.value) || 50;
+                const bandwidthHigh = parseInt(this.bandwidthHighInput.value) || 2700;
+                const mode = this.modeSelect.value || 'usb';
+                this.audioVisualizer.updateBandwidth(bandwidthLow, bandwidthHigh, mode);
             }
         } else {
             this.audioPreviewControls.style.display = 'none';
@@ -1714,9 +1774,16 @@ class UberSDRClient {
         } else if (type === 'rigctl') {
             this.flrigControls.style.display = 'none';
             this.rigctlControls.style.display = 'block';
+        } else if (type === 'serial') {
+            this.flrigControls.style.display = 'none';
+            this.rigctlControls.style.display = 'none';
+            this.serialControls.style.display = 'block';
+            // Load serial ports when serial is selected
+            this.loadSerialPorts();
         } else {
             this.flrigControls.style.display = 'none';
             this.rigctlControls.style.display = 'none';
+            this.serialControls.style.display = 'none';
         }
 
         // Save the radio control type selection
@@ -2111,6 +2178,194 @@ class UberSDRClient {
             }
         } catch (error) {
             console.error('Failed to check rigctl connection:', error);
+        }
+    }
+
+    // Radio Control Methods (serial CAT server)
+
+    async loadSerialPorts() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/serial/ports`);
+            if (response.ok) {
+                const data = await response.json();
+
+                // Clear and populate serial port datalist
+                const portDatalist = document.getElementById('serial-port-list');
+                portDatalist.innerHTML = '';
+
+                if (data.ports && data.ports.length > 0) {
+                    data.ports.forEach(port => {
+                        const option = document.createElement('option');
+                        option.value = port;
+                        portDatalist.appendChild(option);
+                    });
+                    console.log(`Loaded ${data.ports.length} serial ports`);
+                } else {
+                    console.log('No serial ports found');
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load serial ports:', error);
+            this.showError('Error loading serial ports', error.message);
+        }
+    }
+
+    async startSerialServer() {
+        const port = this.serialPort.value;
+        if (!port) {
+            this.showError('Port required', 'Please select a serial port');
+            return;
+        }
+
+        const config = {
+            port: port,
+            baudrate: parseInt(this.serialBaudrate.value),
+            vfo: this.serialVFO.value
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/serial/connect`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.showSuccess(data.message || 'Serial CAT server started');
+                this.serialStartBtn.disabled = true;
+                this.serialStopBtn.disabled = false;
+                this.serialStatusDisplay.style.display = 'block';
+                this.updateSerialStatus();
+
+                // Start polling serial status
+                this.startSerialStatusPolling();
+            } else {
+                this.showError('Failed to start serial CAT server', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error starting serial CAT server', error.message);
+        }
+    }
+
+    async stopSerialServer() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/serial/disconnect`, {
+                method: 'POST'
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.showSuccess(data.message || 'Serial CAT server stopped');
+                this.serialStartBtn.disabled = false;
+                this.serialStopBtn.disabled = true;
+                this.serialStatusDisplay.style.display = 'none';
+
+                // Stop polling serial status
+                this.stopSerialStatusPolling();
+            } else {
+                this.showError('Failed to stop serial CAT server', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error stopping serial CAT server', error.message);
+        }
+    }
+
+    async updateSerialStatus() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/serial/status`);
+            if (response.ok) {
+                const status = await response.json();
+
+                // Update server status
+                if (status.running) {
+                    this.serialServerStatus.textContent = 'Running';
+                    this.serialServerStatus.className = 'status-badge connected';
+                } else {
+                    this.serialServerStatus.textContent = 'Stopped';
+                    this.serialServerStatus.className = 'status-badge disconnected';
+                }
+
+                // Update port
+                if (status.port) {
+                    this.serialPortStatus.textContent = status.port;
+                } else {
+                    this.serialPortStatus.textContent = '-';
+                }
+
+                // Update baud rate
+                if (status.baudrate) {
+                    this.serialBaudrateStatus.textContent = status.baudrate;
+                } else {
+                    this.serialBaudrateStatus.textContent = '-';
+                }
+
+                // Update VFO
+                if (status.vfo) {
+                    this.serialVFOStatus.textContent = status.vfo;
+                } else {
+                    this.serialVFOStatus.textContent = '-';
+                }
+
+                // Update frequency
+                if (status.frequency) {
+                    this.serialFrequency.textContent = this.formatFrequency(status.frequency);
+                } else {
+                    this.serialFrequency.textContent = '-';
+                }
+
+                // Update mode
+                if (status.mode) {
+                    this.serialMode.textContent = status.mode.toUpperCase();
+                } else {
+                    this.serialMode.textContent = '-';
+                }
+            }
+        } catch (error) {
+            console.error('Failed to fetch serial status:', error);
+        }
+    }
+
+    startSerialStatusPolling() {
+        // Poll serial status every 2 seconds
+        this.serialStatusInterval = setInterval(() => {
+            this.updateSerialStatus();
+        }, 2000);
+    }
+
+    stopSerialStatusPolling() {
+        if (this.serialStatusInterval) {
+            clearInterval(this.serialStatusInterval);
+            this.serialStatusInterval = null;
+        }
+    }
+
+    async checkSerialConnection() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/serial/status`);
+            if (response.ok) {
+                const status = await response.json();
+
+                if (status.running) {
+                    console.log('Serial CAT server is already running (auto-connect)');
+                    // Update UI to reflect running state
+                    this.serialStartBtn.disabled = true;
+                    this.serialStopBtn.disabled = false;
+                    this.serialStatusDisplay.style.display = 'block';
+
+                    // Update status display
+                    this.updateSerialStatus();
+
+                    // Start polling serial status
+                    this.startSerialStatusPolling();
+                } else {
+                    console.log('Serial CAT server not running');
+                }
+            }
+        } catch (error) {
+            console.error('Failed to check serial connection:', error);
         }
     }
 }

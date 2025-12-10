@@ -128,6 +128,26 @@ type RigctlSyncRequest struct {
 	SyncFromRig bool `json:"syncFromRig"` // Sync rig frequency changes to SDR
 }
 
+// SerialConnectRequest represents a request to connect to serial port
+type SerialConnectRequest struct {
+	Port        string `json:"port"`
+	Baudrate    int    `json:"baudrate"`
+	VFO         string `json:"vfo"`         // "A" or "B"
+	SyncToRig   bool   `json:"syncToRig"`   // Sync SDR frequency changes to rig
+	SyncFromRig bool   `json:"syncFromRig"` // Sync rig frequency changes to SDR
+}
+
+// SerialVFORequest represents a request to change serial VFO
+type SerialVFORequest struct {
+	VFO string `json:"vfo"` // "A" or "B"
+}
+
+// SerialSyncRequest represents a request to update serial sync settings
+type SerialSyncRequest struct {
+	SyncToRig   bool `json:"syncToRig"`   // Sync SDR frequency changes to rig
+	SyncFromRig bool `json:"syncFromRig"` // Sync rig frequency changes to SDR
+}
+
 // API Response Types
 
 // StatusResponse represents the current client status
@@ -222,6 +242,12 @@ type ConfigResponse struct {
 	RigctlVFO         string `json:"rigctlVFO,omitempty"`
 	RigctlSyncToRig   bool   `json:"rigctlSyncToRig"`
 	RigctlSyncFromRig bool   `json:"rigctlSyncFromRig"`
+	SerialEnabled     bool   `json:"serialEnabled"`
+	SerialPort        string `json:"serialPort,omitempty"`
+	SerialBaudrate    int    `json:"serialBaudrate,omitempty"`
+	SerialVFO         string `json:"serialVFO,omitempty"`
+	SerialSyncToRig   bool   `json:"serialSyncToRig"`
+	SerialSyncFromRig bool   `json:"serialSyncFromRig"`
 }
 
 // ErrorResponse represents an error response

@@ -67,6 +67,12 @@ type ClientConfig struct {
 	RigctlVFO         string `json:"rigctlVFO,omitempty"` // "VFOA" or "VFOB"
 	RigctlSyncToRig   bool   `json:"rigctlSyncToRig"`     // Sync SDR frequency changes to rig
 	RigctlSyncFromRig bool   `json:"rigctlSyncFromRig"`   // Sync rig frequency changes to SDR
+	SerialEnabled     bool   `json:"serialEnabled"`
+	SerialPort        string `json:"serialPort,omitempty"`
+	SerialBaudrate    int    `json:"serialBaudrate,omitempty"`
+	SerialVFO         string `json:"serialVFO,omitempty"` // "A" or "B"
+	SerialSyncToRig   bool   `json:"serialSyncToRig"`     // Sync SDR frequency changes to rig
+	SerialSyncFromRig bool   `json:"serialSyncFromRig"`   // Sync rig frequency changes to SDR
 }
 
 // ConfigManager handles loading and saving configuration
@@ -127,6 +133,12 @@ func getDefaultConfig() ClientConfig {
 		RigctlVFO:           "VFOA",      // Default to VFO A
 		RigctlSyncToRig:     true,        // Sync SDR->rig by default
 		RigctlSyncFromRig:   true,        // Sync rig->SDR by default
+		SerialEnabled:       false,       // serial disabled by default
+		SerialPort:          "",          // No default serial port
+		SerialBaudrate:      57600,       // Default baudrate for TS-480
+		SerialVFO:           "A",         // Default to VFO A
+		SerialSyncToRig:     true,        // Sync SDR->rig by default
+		SerialSyncFromRig:   true,        // Sync rig->SDR by default
 	}
 }
 

@@ -241,6 +241,7 @@
                         <option value="none">None</option>
                         <option value="flrig">flrig</option>
                         <option value="rigctl">rigctl (Hamlib)</option>
+                        <option value="serial">Serial CAT Server</option>
                     </select>
                 </div>
 
@@ -373,6 +374,76 @@
                             <div class="status-item">
                                 <span class="label">PTT:</span>
                                 <span id="rigctl-ptt">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="serial-controls" style="display: none;">
+                    <h3 style="margin-top: 15px;">Serial CAT Server Settings</h3>
+                    <div class="info-box">
+                        <p><strong>Note:</strong> Starts a serial CAT server that emulates a Kenwood TS-480. External software (like WSJT-X) can connect to this virtual serial port to control the SDR. This is one-way only: external software → SDR.</p>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="serial-port">Serial Port:</label>
+                            <input type="text" id="serial-port" list="serial-port-list" placeholder="/dev/ttyUSB0 or COM3">
+                            <datalist id="serial-port-list">
+                            </datalist>
+                            <button id="serial-refresh-ports-btn" class="btn btn-small" style="margin-top: 5px;">Refresh Ports</button>
+                            <small style="display: block; margin-top: 5px; color: #666;">Enter port manually or select from detected ports</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="serial-baudrate">Baud Rate:</label>
+                            <select id="serial-baudrate">
+                                <option value="4800">4800</option>
+                                <option value="9600">9600</option>
+                                <option value="19200">19200</option>
+                                <option value="38400">38400</option>
+                                <option value="57600" selected>57600 (TS-480 default)</option>
+                                <option value="115200">115200</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="serial-vfo">VFO:</label>
+                            <select id="serial-vfo">
+                                <option value="A">A</option>
+                                <option value="B">B</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="button-group" style="margin-top: 15px;">
+                        <button id="serial-start-btn" class="btn btn-primary">Start CAT Server</button>
+                        <button id="serial-stop-btn" class="btn btn-secondary" disabled>Stop Server</button>
+                    </div>
+
+                    <div id="serial-status-display" style="display: none; margin-top: 15px;">
+                        <h4>Serial CAT Server Status</h4>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="label">Server Status:</span>
+                                <span id="serial-server-status" class="status-badge disconnected">Stopped</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Port:</span>
+                                <span id="serial-port-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Baud Rate:</span>
+                                <span id="serial-baudrate-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">VFO:</span>
+                                <span id="serial-vfo-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Cached Frequency:</span>
+                                <span id="serial-frequency">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Cached Mode:</span>
+                                <span id="serial-mode">-</span>
                             </div>
                         </div>
                     </div>

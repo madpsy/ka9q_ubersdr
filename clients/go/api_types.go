@@ -180,6 +180,8 @@ type StatusResponse struct {
 	UDPHost            string                 `json:"udpHost,omitempty"`
 	UDPPort            int                    `json:"udpPort,omitempty"`
 	UDPEnabled         bool                   `json:"udpEnabled"`
+	Bypassed           bool                   `json:"bypassed"`
+	AllowedIQModes     []string               `json:"allowedIQModes,omitempty"`
 	OutputStatus       map[string]interface{} `json:"outputStatus,omitempty"`
 }
 

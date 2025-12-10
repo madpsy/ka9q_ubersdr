@@ -40,10 +40,12 @@ class UberSDRClient {
         this.bandSelect = document.getElementById('band-select');
 
         // Mode and bandwidth elements
-        this.modeSelect = document.getElementById('mode');
+        this.modeButtons = document.querySelectorAll('.btn-mode');
+        this.currentMode = 'usb'; // Default mode
         this.bandwidthLowInput = document.getElementById('bandwidth-low');
         this.bandwidthHighInput = document.getElementById('bandwidth-high');
-        this.applySettingsBtn = document.getElementById('apply-settings-btn');
+        this.bandwidthLowValue = document.getElementById('bandwidth-low-value');
+        this.bandwidthHighValue = document.getElementById('bandwidth-high-value');
 
         // Audio preview elements
         this.audioPreviewEnabled = document.getElementById('audio-preview-enabled');
@@ -231,27 +233,32 @@ class UberSDRClient {
         // Band selection
         this.bandSelect.addEventListener('change', () => this.onBandSelected());
 
-        // Mode change - but not when triggered by bookmark
-        this.modeSelect.addEventListener('change', () => {
-            // Only update defaults if not from bookmark (check if we're in a bookmark operation)
-            if (!this.bookmarkModeChange) {
-                this.updateModeDefaults();
-            }
-            // Set flag to indicate user is manually changing mode
-            this.userModeChange = true;
-            // Clear flag after a delay to allow user to apply settings
-            clearTimeout(this.userModeChangeTimeout);
-            this.userModeChangeTimeout = setTimeout(() => {
-                this.userModeChange = false;
-            }, 5000); // Give user 5 seconds to apply settings
+        // Mode buttons
+        this.modeButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.mode;
+                this.selectMode(mode);
+            });
         });
 
-        // Bandwidth changes - update visualizer in real-time
-        this.bandwidthLowInput.addEventListener('input', () => this.updateVisualizerBandwidth());
-        this.bandwidthHighInput.addEventListener('input', () => this.updateVisualizerBandwidth());
+        // Bandwidth sliders - update display and apply immediately
+        this.bandwidthLowInput.addEventListener('input', () => {
+            this.bandwidthLowValue.textContent = this.bandwidthLowInput.value;
+            this.updateVisualizerBandwidth();
+            if (this.connected) {
+                clearTimeout(this.bandwidthUpdateTimeout);
+                this.bandwidthUpdateTimeout = setTimeout(() => this.applyBandwidthOnly(), 500);
+            }
+        });
 
-        // Apply settings button
-        this.applySettingsBtn.addEventListener('click', () => this.applySettings());
+        this.bandwidthHighInput.addEventListener('input', () => {
+            this.bandwidthHighValue.textContent = this.bandwidthHighInput.value;
+            this.updateVisualizerBandwidth();
+            if (this.connected) {
+                clearTimeout(this.bandwidthUpdateTimeout);
+                this.bandwidthUpdateTimeout = setTimeout(() => this.applyBandwidthOnly(), 500);
+            }
+        });
 
         // NR2 settings
         this.nr2EnabledCheckbox.addEventListener('change', () => this.updateNR2Config());
@@ -419,7 +426,7 @@ class UberSDRClient {
             port: parseInt(this.portInput.value),
             ssl: this.sslCheckbox.checked,
             frequency: parseInt(this.frequencyInput.value),
-            mode: this.modeSelect.value,
+            mode: this.currentMode,
             bandwidthLow: parseInt(this.bandwidthLowInput.value),
             bandwidthHigh: parseInt(this.bandwidthHighInput.value),
             password: this.passwordInput.value,
@@ -550,15 +557,10 @@ class UberSDRClient {
         }
         if (status.mode) {
             this.statusMode.textContent = status.mode.toUpperCase();
-            // Also update the mode select for real-time sync, but not during bookmark operations or user changes
-            if (this.modeSelect.value != status.mode && !this.bookmarkModeChange && !this.userModeChange) {
-                // Set flag to prevent triggering updateModeDefaults
-                this.bookmarkModeChange = true;
-                this.modeSelect.value = status.mode;
-                // Clear flag after a short delay
-                setTimeout(() => {
-                    this.bookmarkModeChange = false;
-                }, 100);
+            // Also update the mode buttons for real-time sync
+            if (this.currentMode != status.mode && !this.bookmarkModeChange && !this.userModeChange) {
+                this.currentMode = status.mode;
+                this.updateModeButtons();
             }
         }
         if (status.sampleRate) {
@@ -579,6 +581,11 @@ class UberSDRClient {
         if (status.uptime) {
             this.uptimeSpan.textContent = `Uptime: ${status.uptime}`;
         }
+        
+        // Update IQ mode button visibility based on allowed modes
+        if (status.allowedIQModes !== undefined) {
+            this.updateIQModeButtons(status.allowedIQModes, status.bypassed);
+        }
     }
 
     async applySettings() {
@@ -593,7 +600,7 @@ class UberSDRClient {
 
         const tuneRequest = {
             frequency: parseInt(this.frequencyInput.value),
-            mode: this.modeSelect.value,
+            mode: this.currentMode,
             bandwidthLow: parseInt(this.bandwidthLowInput.value),
             bandwidthHigh: parseInt(this.bandwidthHighInput.value)
         };
@@ -625,6 +632,83 @@ class UberSDRClient {
         } catch (error) {
             this.showError('Error applying settings', error.message);
         }
+    }
+
+    async applyBandwidthOnly() {
+        if (!this.connected) return;
+
+        const tuneRequest = {
+            frequency: parseInt(this.frequencyInput.value),
+            mode: this.currentMode,
+            bandwidthLow: parseInt(this.bandwidthLowInput.value),
+            bandwidthHigh: parseInt(this.bandwidthHighInput.value)
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/tune`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(tuneRequest)
+            });
+
+            if (response.ok) {
+                // Update spectrum display with new bandwidth
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.updateBandwidth(tuneRequest.bandwidthLow, tuneRequest.bandwidthHigh);
+                }
+
+                // Update audio visualizer with new bandwidth
+                if (this.audioVisualizer) {
+                    this.audioVisualizer.updateBandwidth(tuneRequest.bandwidthLow, tuneRequest.bandwidthHigh, tuneRequest.mode);
+                }
+            }
+        } catch (error) {
+            console.error('Error applying bandwidth:', error);
+        }
+    }
+
+    selectMode(mode) {
+        this.currentMode = mode;
+        this.updateModeButtons();
+        this.updateModeDefaults();
+        
+        // Apply immediately if connected
+        if (this.connected) {
+            this.applySettings();
+        }
+    }
+
+    updateModeButtons() {
+        this.modeButtons.forEach(btn => {
+            if (btn.dataset.mode === this.currentMode) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+
+    updateIQModeButtons(allowedIQModes, bypassed) {
+        // IQ mode buttons to check: iq48, iq96, iq192, iq384
+        // Basic "iq" button should always be visible
+        const iqModeButtons = ['iq48', 'iq96', 'iq192', 'iq384'];
+
+        this.modeButtons.forEach(btn => {
+            const mode = btn.dataset.mode;
+
+            // Skip non-IQ modes and basic "iq" mode
+            if (!iqModeButtons.includes(mode)) {
+                return;
+            }
+
+            // If bypassed or allowedIQModes includes this mode, show it
+            // Otherwise hide it
+            if (bypassed || (allowedIQModes && allowedIQModes.includes(mode))) {
+                btn.style.display = '';
+            } else {
+                btn.style.display = 'none';
+            }
+        });
     }
 
     async updateFrequency() {
@@ -679,30 +763,41 @@ class UberSDRClient {
     }
 
     updateModeDefaults() {
-        const mode = this.modeSelect.value;
-        const defaults = {
-            'usb': [50, 2700],
-            'lsb': [-2700, -50],
-            'am': [-5000, 5000],
-            'sam': [-5000, 5000],
-            'cwu': [-200, 200],
-            'cwl': [-200, 200],
-            'fm': [-8000, 8000],
-            'nfm': [-5000, 5000],
-            'iq': [-5000, 5000],
-            'iq48': [-5000, 5000],
-            'iq96': [-5000, 5000],
-            'iq192': [-5000, 5000],
-            'iq384': [-5000, 5000]
+        const mode = this.currentMode;
+        
+        // Mode defaults and ranges from Python client
+        const modeConfig = {
+            'usb': { defaults: [50, 2700], range: [-10000, 10000] },
+            'lsb': { defaults: [-2700, -50], range: [-10000, 10000] },
+            'am': { defaults: [-5000, 5000], range: [-10000, 10000] },
+            'sam': { defaults: [-5000, 5000], range: [-10000, 10000] },
+            'cwu': { defaults: [-200, 200], range: [-1000, 1000] },
+            'cwl': { defaults: [-200, 200], range: [-1000, 1000] },
+            'fm': { defaults: [-8000, 8000], range: [-10000, 10000] },
+            'nfm': { defaults: [-8000, 8000], range: [-10000, 10000] },
+            'iq': { defaults: [0, 0], range: [-10000, 10000] },
+            'iq48': { defaults: [0, 0], range: [-24000, 24000] },
+            'iq96': { defaults: [0, 0], range: [-48000, 48000] },
+            'iq192': { defaults: [0, 0], range: [-96000, 96000] },
+            'iq384': { defaults: [0, 0], range: [-192000, 192000] }
         };
 
-        if (defaults[mode]) {
-            this.bandwidthLowInput.value = defaults[mode][0];
-            this.bandwidthHighInput.value = defaults[mode][1];
+        const config = modeConfig[mode] || modeConfig['usb'];
+        
+        // Update slider ranges
+        this.bandwidthLowInput.min = config.range[0];
+        this.bandwidthLowInput.max = config.range[1];
+        this.bandwidthHighInput.min = config.range[0];
+        this.bandwidthHighInput.max = config.range[1];
+        
+        // Update values
+        this.bandwidthLowInput.value = config.defaults[0];
+        this.bandwidthHighInput.value = config.defaults[1];
+        this.bandwidthLowValue.textContent = config.defaults[0];
+        this.bandwidthHighValue.textContent = config.defaults[1];
 
-            // Update audio visualizer with new bandwidth
-            this.updateVisualizerBandwidth();
-        }
+        // Update audio visualizer with new bandwidth
+        this.updateVisualizerBandwidth();
     }
 
     updateVisualizerBandwidth() {
@@ -710,8 +805,7 @@ class UberSDRClient {
         if (this.audioVisualizer) {
             const bandwidthLow = parseInt(this.bandwidthLowInput.value) || 50;
             const bandwidthHigh = parseInt(this.bandwidthHighInput.value) || 2700;
-            const mode = this.modeSelect.value || 'usb';
-            this.audioVisualizer.updateBandwidth(bandwidthLow, bandwidthHigh, mode);
+            this.audioVisualizer.updateBandwidth(bandwidthLow, bandwidthHigh, this.currentMode);
         }
     }
 
@@ -750,12 +844,16 @@ class UberSDRClient {
                 if (config.port) this.portInput.value = config.port;
                 if (config.ssl !== undefined) this.sslCheckbox.checked = config.ssl;
                 if (config.frequency) this.frequencyInput.value = config.frequency;
-                if (config.mode) this.modeSelect.value = config.mode;
+                if (config.mode) {
+                    this.currentMode = config.mode;
+                    this.updateModeButtons();
+                }
                 if (config.bandwidthLow !== null && config.bandwidthLow !== undefined) {
                     this.bandwidthLowInput.value = config.bandwidthLow;
                 }
                 if (config.bandwidthHigh !== null && config.bandwidthHigh !== undefined) {
                     this.bandwidthHighInput.value = config.bandwidthHigh;
+                    this.bandwidthHighValue.textContent = config.bandwidthHigh;
                 }
                 if (config.nr2Enabled !== undefined) this.nr2EnabledCheckbox.checked = config.nr2Enabled;
                 if (config.nr2Strength) this.nr2StrengthInput.value = config.nr2Strength;
@@ -1126,16 +1224,17 @@ class UberSDRClient {
             this.connectionStatus.className = 'status-badge connected';
             this.connectBtn.disabled = true;
             this.disconnectBtn.disabled = false;
-            this.applySettingsBtn.disabled = false;
 
             // Enable output controls
             this.updateOutputStatus();
+            
+            // Enable mode buttons
+            this.modeButtons.forEach(btn => btn.disabled = false);
         } else {
             this.connectionStatus.textContent = 'Disconnected';
             this.connectionStatus.className = 'status-badge disconnected';
             this.connectBtn.disabled = false;
             this.disconnectBtn.disabled = true;
-            this.applySettingsBtn.disabled = true;
             this.uptimeSpan.textContent = '';
 
             // Disable output controls
@@ -1145,6 +1244,9 @@ class UberSDRClient {
             this.fifoOutputEnabled.checked = false;
             this.udpOutputEnabled.disabled = true;
             this.udpOutputEnabled.checked = false;
+            
+            // Disable mode buttons
+            this.modeButtons.forEach(btn => btn.disabled = true);
         }
     }
 
@@ -1400,8 +1502,7 @@ class UberSDRClient {
                 // Set initial bandwidth from current settings
                 const bandwidthLow = parseInt(this.bandwidthLowInput.value) || 50;
                 const bandwidthHigh = parseInt(this.bandwidthHighInput.value) || 2700;
-                const mode = this.modeSelect.value || 'usb';
-                this.audioVisualizer.updateBandwidth(bandwidthLow, bandwidthHigh, mode);
+                this.audioVisualizer.updateBandwidth(bandwidthLow, bandwidthHigh, this.currentMode);
             }
         } else {
             this.audioPreviewControls.style.display = 'none';

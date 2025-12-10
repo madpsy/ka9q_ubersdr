@@ -58,6 +58,10 @@ type RadioClient struct {
 	connCallback     func(*websocket.Conn)  // Callback to notify when connection is established
 	audioCallback    func([]byte, int, int) // Callback for audio data streaming (data, sampleRate, channels)
 
+	// Connection response data
+	bypassed       bool     // Whether the connection is bypassed
+	allowedIQModes []string // Allowed IQ modes from server
+
 	// Resampling support
 	resampleEnabled    bool
 	resampleOutputRate int
@@ -274,12 +278,13 @@ type ConnectionCheckRequest struct {
 
 // ConnectionCheckResponse from /connection endpoint
 type ConnectionCheckResponse struct {
-	Allowed        bool   `json:"allowed"`
-	Reason         string `json:"reason,omitempty"`
-	ClientIP       string `json:"client_ip,omitempty"`
-	SessionTimeout int    `json:"session_timeout"`
-	MaxSessionTime int    `json:"max_session_time"`
-	Bypassed       bool   `json:"bypassed"`
+	Allowed        bool     `json:"allowed"`
+	Reason         string   `json:"reason,omitempty"`
+	ClientIP       string   `json:"client_ip,omitempty"`
+	SessionTimeout int      `json:"session_timeout"`
+	MaxSessionTime int      `json:"max_session_time"`
+	Bypassed       bool     `json:"bypassed"`
+	AllowedIQModes []string `json:"allowed_iq_modes,omitempty"`
 }
 
 // NewRadioClient creates a new radio client instance
@@ -1026,11 +1031,16 @@ func (c *RadioClient) CheckConnectionAllowed() (bool, error) {
 		return false, nil
 	}
 
+	// Store connection response data
+	c.bypassed = respData.Bypassed
+	c.allowedIQModes = respData.AllowedIQModes
+
 	clientIP := respData.ClientIP
 	if clientIP == "" {
 		clientIP = "unknown"
 	}
-	fmt.Fprintf(os.Stderr, "Connection allowed (client IP: %s)\n", clientIP)
+	fmt.Fprintf(os.Stderr, "Connection allowed (client IP: %s, bypassed: %v, allowed IQ modes: %v)\n",
+		clientIP, c.bypassed, c.allowedIQModes)
 	return true, nil
 }
 

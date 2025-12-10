@@ -23,6 +23,8 @@ type WebSocketManager struct {
 	mu                 sync.RWMutex
 	connected          bool
 	connectedAt        time.Time
+	bypassed           bool     // Whether the connection is bypassed (from /connection response)
+	allowedIQModes     []string // Allowed IQ modes (from /connection response)
 	ctx                context.Context
 	cancel             context.CancelFunc
 	statusBroadcast    chan WSStatusUpdate
@@ -76,6 +78,19 @@ func (m *WebSocketManager) Connect(client *RadioClient) error {
 		return fmt.Errorf("already connected")
 	}
 
+	// Check connection permission and get allowed IQ modes
+	allowed, err := client.CheckConnectionAllowed()
+	if err != nil {
+		log.Printf("Connection check error: %v", err)
+	}
+	if !allowed {
+		return fmt.Errorf("connection not allowed")
+	}
+
+	// Store connection data from client
+	m.bypassed = client.bypassed
+	m.allowedIQModes = client.allowedIQModes
+
 	m.client = client
 	m.connected = true
 	m.connectedAt = time.Now()
@@ -96,6 +111,8 @@ func (m *WebSocketManager) Connect(client *RadioClient) error {
 		m.mu.Lock()
 		m.connected = false
 		m.conn = nil
+		m.bypassed = false
+		m.allowedIQModes = nil
 		m.mu.Unlock()
 
 		// Broadcast disconnection
@@ -145,8 +162,10 @@ func (m *WebSocketManager) GetStatus() StatusResponse {
 	defer m.mu.RUnlock()
 
 	status := StatusResponse{
-		Connected:     m.connected,
-		UserSessionID: "",
+		Connected:      m.connected,
+		UserSessionID:  "",
+		Bypassed:       m.bypassed,
+		AllowedIQModes: m.allowedIQModes,
 	}
 
 	if m.client != nil {

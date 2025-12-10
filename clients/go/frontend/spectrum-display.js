@@ -230,7 +230,14 @@ class SpectrumDisplay {
             const scaleY = this.spectrumCanvas.height / rect.height;
             const canvasY = this.cursorY * scaleY;
 
-            if (this.cursorCanvas === this.spectrumCanvas) {
+            // Draw appropriate tooltip based on what we're hovering over
+            if (this.hoveringBookmark) {
+                // Redraw bookmark tooltip
+                const mode = (this.hoveringBookmark.mode || 'USB').toUpperCase();
+                const freqMhz = (this.cursorFreq / 1e6).toFixed(6);
+                const tooltipText = `${this.hoveringBookmark.name}\n${freqMhz} MHz\n${mode}`;
+                this.drawBookmarkTooltip(this.cursorCanvas, this.cursorX, this.cursorY, tooltipText);
+            } else if (this.cursorCanvas === this.spectrumCanvas) {
                 this.drawTooltip(this.spectrumCanvas, this.cursorX, canvasY, this.cursorFreq, this.cursorDbValue);
             } else {
                 this.drawTooltip(this.waterfallCanvas, this.cursorX, canvasY, this.cursorFreq, this.cursorDbValue);
@@ -872,48 +879,61 @@ class SpectrumDisplay {
             }
 
             // Handle tooltip/cursor (when not dragging)
-            if (!this.dragging && this.totalBandwidth !== 0) {
-                const x = canvasX - marginLeft;
+        if (!this.dragging && this.totalBandwidth !== 0) {
+            const x = canvasX - marginLeft;
 
-                // Check if hovering over a bookmark (only on spectrum canvas)
-                const bookmarkSectionBottom = marginTop - 10;
-                if (canvas === this.spectrumCanvas && canvasY < bookmarkSectionBottom && this.bookmarks && this.bookmarks.length > 0) {
-                    const startFreq = this.centerFreq - this.totalBandwidth / 2;
-                    const endFreq = this.centerFreq + this.totalBandwidth / 2;
+            // Check if hovering over a bookmark (only on spectrum canvas)
+            const bookmarkSectionBottom = marginTop - 10;
+            if (canvas === this.spectrumCanvas && canvasY < bookmarkSectionBottom && this.bookmarks && this.bookmarks.length > 0) {
+                const startFreq = this.centerFreq - this.totalBandwidth / 2;
+                const endFreq = this.centerFreq + this.totalBandwidth / 2;
 
-                    // Check which bookmark we're hovering over
-                    for (const bookmark of this.bookmarks) {
-                        const freq = bookmark.frequency || 0;
-                        if (freq < startFreq || freq > endFreq) continue;
+                // Check which bookmark we're hovering over
+                let foundBookmark = false;
+                for (const bookmark of this.bookmarks) {
+                    const freq = bookmark.frequency || 0;
+                    if (freq < startFreq || freq > endFreq) continue;
 
-                        const freqOffset = freq - startFreq;
-                        const bookmarkX = marginLeft + (freqOffset / this.totalBandwidth) * graphWidth;
-                        const name = bookmark.name || 'Unknown';
-                        const labelWidth = name.length * 7 + 8;
+                    const freqOffset = freq - startFreq;
+                    const bookmarkX = marginLeft + (freqOffset / this.totalBandwidth) * graphWidth;
+                    const name = bookmark.name || 'Unknown';
+                    const labelWidth = name.length * 7 + 8;
 
-                        // Check if mouse is over this bookmark
-                        if (Math.abs(canvasX - bookmarkX) < labelWidth / 2) {
-                            // Hovering over bookmark - show bookmark tooltip
-                            // Store cursor state to keep tooltip visible
-                            this.cursorX = canvasX;
-                            this.cursorY = canvasY;
-                            this.cursorCanvas = canvas;
-                            this.cursorFreq = freq;
-                            this.cursorDbValue = null;
+                    // Check if mouse is over this bookmark
+                    if (Math.abs(canvasX - bookmarkX) < labelWidth / 2) {
+                        // Hovering over bookmark - show bookmark tooltip
+                        foundBookmark = true;
+                        this.cursorX = canvasX;
+                        this.cursorY = canvasY;
+                        this.cursorCanvas = canvas;
+                        this.cursorFreq = freq;
+                        this.cursorDbValue = null;
+                        this.hoveringBookmark = bookmark;  // Store bookmark for redraw
 
-                            // Draw cursor line on both canvases
-                            this.drawCursorLine(this.spectrumCanvas, canvasX);
-                            this.drawCursorLine(this.waterfallCanvas, canvasX);
+                        // Draw cursor line on both canvases
+                        this.drawCursorLine(this.spectrumCanvas, canvasX);
+                        this.drawCursorLine(this.waterfallCanvas, canvasX);
 
-                            // Draw bookmark tooltip
-                            const mode = bookmark.mode || 'USB';
-                            const freqMhz = (freq / 1e6).toFixed(6);
-                            const tooltipText = `${name}\n${freqMhz} MHz\n${mode}`;
-                            this.drawBookmarkTooltip(canvas, canvasX, canvasY, tooltipText);
-                            return;
-                        }
+                        // Draw bookmark tooltip
+                        const mode = (bookmark.mode || 'USB').toUpperCase();
+                        const freqMhz = (freq / 1e6).toFixed(6);
+                        const tooltipText = `${name}\n${freqMhz} MHz\n${mode}`;
+                        this.drawBookmarkTooltip(canvas, canvasX, canvasY, tooltipText);
+                        return;
                     }
                 }
+
+                // If we're in bookmark section but not over a bookmark, clear and return
+                if (!foundBookmark) {
+                    this.hoveringBookmark = null;
+                    this.cursorX = -1;
+                    this.draw();
+                    return;
+                }
+            }
+
+                // Clear bookmark hover state when in normal tooltip area
+                this.hoveringBookmark = null;
 
                 // Clear tooltip and cursor if outside graph area
                 if (x < 0 || x > graphWidth) {
@@ -958,6 +978,7 @@ class SpectrumDisplay {
         const handleMouseLeave = () => {
             if (!this.dragging) {
                 this.cursorX = -1;
+                this.hoveringBookmark = null;
                 this.draw();
             }
         };

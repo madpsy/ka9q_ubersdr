@@ -114,35 +114,31 @@
             <!-- Mode and Bandwidth Panel -->
             <section class="panel">
                 <h2>Mode & Bandwidth</h2>
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="mode">Mode:</label>
-                        <select id="mode">
-                            <option value="usb">USB</option>
-                            <option value="lsb">LSB</option>
-                            <option value="am">AM</option>
-                            <option value="sam">SAM</option>
-                            <option value="fm">FM</option>
-                            <option value="nfm">NFM</option>
-                            <option value="cwu">CW-U</option>
-                            <option value="cwl">CW-L</option>
-                            <option value="iq">IQ</option>
-                            <option value="iq48">IQ-48</option>
-                            <option value="iq96">IQ-96</option>
-                            <option value="iq192">IQ-192</option>
-                            <option value="iq384">IQ-384</option>
-                        </select>
+                <div class="mode-buttons-container">
+                    <button class="btn-mode" data-mode="usb">USB</button>
+                    <button class="btn-mode" data-mode="lsb">LSB</button>
+                    <button class="btn-mode" data-mode="am">AM</button>
+                    <button class="btn-mode" data-mode="sam">SAM</button>
+                    <button class="btn-mode" data-mode="fm">FM</button>
+                    <button class="btn-mode" data-mode="nfm">NFM</button>
+                    <button class="btn-mode" data-mode="cwu">CW-U</button>
+                    <button class="btn-mode" data-mode="cwl">CW-L</button>
+                    <button class="btn-mode" data-mode="iq">IQ</button>
+                    <button class="btn-mode" data-mode="iq48">IQ-48</button>
+                    <button class="btn-mode" data-mode="iq96">IQ-96</button>
+                    <button class="btn-mode" data-mode="iq192">IQ-192</button>
+                    <button class="btn-mode" data-mode="iq384">IQ-384</button>
+                </div>
+                <div class="bandwidth-controls">
+                    <div class="bandwidth-group">
+                        <label for="bandwidth-low">Bandwidth Low: <span id="bandwidth-low-value">50</span> Hz</label>
+                        <input type="range" id="bandwidth-low" min="-10000" max="10000" value="50" step="10">
                     </div>
-                    <div class="form-group">
-                        <label for="bandwidth-low">Bandwidth Low (Hz):</label>
-                        <input type="number" id="bandwidth-low" value="50" placeholder="50">
-                    </div>
-                    <div class="form-group">
-                        <label for="bandwidth-high">Bandwidth High (Hz):</label>
-                        <input type="number" id="bandwidth-high" value="2700" placeholder="2700">
+                    <div class="bandwidth-group">
+                        <label for="bandwidth-high">Bandwidth High: <span id="bandwidth-high-value">2700</span> Hz</label>
+                        <input type="range" id="bandwidth-high" min="-10000" max="10000" value="2700" step="10">
                     </div>
                 </div>
-                <button id="apply-settings-btn" class="btn btn-primary" disabled>Apply Settings</button>
             </section>
 
             <!-- RF Spectrum Display Panel -->

@@ -886,15 +886,21 @@ func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Channel for incoming messages
 	done := make(chan struct{})
-	defer close(done)
+	var doneOnce sync.Once
+	closeDone := func() {
+		doneOnce.Do(func() {
+			close(done)
+		})
+	}
+	defer closeDone()
 
 	// Handle incoming messages from client
 	go func() {
+		defer closeDone()
 		for {
 			var msg map[string]interface{}
 			if err := conn.ReadJSON(&msg); err != nil {
 				log.Printf("WebSocket read error: %v", err)
-				close(done)
 				return
 			}
 

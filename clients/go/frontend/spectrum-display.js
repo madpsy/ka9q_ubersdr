@@ -21,6 +21,15 @@ class SpectrumDisplay {
         this.minDb = -100;
         this.maxDb = 0;
         
+        // Drag state for panning
+        this.dragging = false;
+        this.dragStartX = 0;
+        this.dragStartFreq = 0;
+        this.dragThreshold = 5;  // Pixels - movement less than this is considered a click
+        
+        // Frequency change callback
+        this.frequencyCallback = null;
+        
         // Waterfall
         this.waterfallImageData = null;
         this.waterfallHistory = [];
@@ -194,7 +203,7 @@ class SpectrumDisplay {
         const marginLeft = 50;
         const marginRight = 20;
         const marginTop = 30;
-        const marginBottom = 5;  // Reduced from 30 to 5 to eliminate gap
+        const marginBottom = 30;  // Increased to make room for frequency scale
         const graphWidth = width - marginLeft - marginRight;
         const graphHeight = height - marginTop - marginBottom;
         
@@ -217,7 +226,8 @@ class SpectrumDisplay {
             ctx.stroke();
         }
         
-        // Don't draw frequency scale on spectrum (waterfall will have it)
+        // Draw frequency scale at bottom
+        this.drawFrequencyScale(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight);
         
         // Draw spectrum line
         const dbRange = this.maxDb - this.minDb;
@@ -252,6 +262,34 @@ class SpectrumDisplay {
         ctx.lineTo(marginLeft, marginTop + graphHeight);
         ctx.closePath();
         ctx.fill();
+    }
+    
+    drawFrequencyScale(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
+        if (this.totalBandwidth === 0) return;
+        
+        const startFreq = this.centerFreq - this.totalBandwidth / 2;
+        const scaleY = this.spectrumCanvas.height - marginBottom + 10;
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        
+        // Draw 5 frequency markers
+        for (let i = 0; i < 5; i++) {
+            const freq = startFreq + (i / 4) * this.totalBandwidth;
+            const x = marginLeft + (i / 4) * graphWidth;
+            
+            // Draw tick
+            ctx.strokeStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.moveTo(x, scaleY - 5);
+            ctx.lineTo(x, scaleY);
+            ctx.stroke();
+            
+            // Draw label
+            const freqMhz = freq / 1e6;
+            ctx.fillText(freqMhz.toFixed(3), x, scaleY + 10);
+        }
     }
     
     drawWaterfall() {
@@ -360,8 +398,191 @@ class SpectrumDisplay {
     }
     
     setupMouseHandlers() {
-        // Add mouse interaction for click-to-tune, zoom, etc.
-        // This can be expanded based on requirements
+        // Mouse wheel for zoom
+        const handleWheel = (e) => {
+            e.preventDefault();
+            if (e.deltaY < 0) {
+                this.zoomIn();
+            } else {
+                this.zoomOut();
+            }
+        };
+        
+        this.spectrumCanvas.addEventListener('wheel', handleWheel);
+        this.waterfallCanvas.addEventListener('wheel', handleWheel);
+        
+        // Mouse down - start drag
+        const handleMouseDown = (e) => {
+            this.dragging = true;
+            this.dragStartX = e.offsetX;
+            this.dragStartFreq = this.centerFreq;
+        };
+        
+        this.spectrumCanvas.addEventListener('mousedown', handleMouseDown);
+        this.waterfallCanvas.addEventListener('mousedown', handleMouseDown);
+        
+        // Mouse up - end drag or process click
+        const handleMouseUp = (e) => {
+            if (this.dragging) {
+                const dragDistance = Math.abs(e.offsetX - this.dragStartX);
+                if (dragDistance < this.dragThreshold) {
+                    // Small movement - treat as click
+                    this.handleClick(e);
+                }
+            }
+            this.dragging = false;
+        };
+        
+        this.spectrumCanvas.addEventListener('mouseup', handleMouseUp);
+        this.waterfallCanvas.addEventListener('mouseup', handleMouseUp);
+        
+        // Mouse move - handle drag
+        const handleMouseMove = (e) => {
+            if (!this.dragging || this.totalBandwidth === 0) return;
+            
+            const canvas = e.target;
+            const marginLeft = 50;
+            const marginRight = 20;
+            const graphWidth = canvas.width - marginLeft - marginRight;
+            
+            // Calculate frequency change based on pixel movement
+            const dx = e.offsetX - this.dragStartX;
+            const freqPerPixel = this.totalBandwidth / graphWidth;
+            const freqChange = -dx * freqPerPixel;  // Negative for natural drag direction
+            
+            let newCenter = this.dragStartFreq + freqChange;
+            
+            // Constrain to valid range (keep view within 100 kHz - 30 MHz)
+            const halfBw = this.totalBandwidth / 2;
+            const minCenter = 100000 + halfBw;
+            const maxCenter = 30000000 - halfBw;
+            newCenter = Math.max(minCenter, Math.min(maxCenter, newCenter));
+            
+            // Check if tuned frequency will be off-screen after pan
+            if (this.tunedFreq !== 0) {
+                const startFreq = newCenter - halfBw;
+                const endFreq = newCenter + halfBw;
+                
+                // If tuned frequency is outside the new view, retune to keep it visible
+                if (this.tunedFreq < startFreq || this.tunedFreq > endFreq) {
+                    let newTunedFreq;
+                    if (this.tunedFreq < startFreq) {
+                        // Tuned freq is off the left edge - retune to left edge
+                        newTunedFreq = startFreq + (halfBw * 0.1);  // 10% from edge
+                    } else {
+                        // Tuned freq is off the right edge - retune to right edge
+                        newTunedFreq = endFreq - (halfBw * 0.1);  // 10% from edge
+                    }
+                    
+                    // Snap to 1 kHz boundary
+                    newTunedFreq = Math.round(newTunedFreq / 1000) * 1000;
+                    
+                    // Call frequency callback to update tuned frequency
+                    if (this.frequencyCallback) {
+                        this.frequencyCallback(newTunedFreq);
+                    }
+                }
+            }
+            
+            // Send pan command
+            this.sendPanCommand(newCenter);
+        };
+        
+        this.spectrumCanvas.addEventListener('mousemove', handleMouseMove);
+        this.waterfallCanvas.addEventListener('mousemove', handleMouseMove);
+    }
+    
+    handleClick(e) {
+        if (this.totalBandwidth === 0) return;
+        
+        const canvas = e.target;
+        const marginLeft = 50;
+        const marginRight = 20;
+        const graphWidth = canvas.width - marginLeft - marginRight;
+        
+        // Calculate clicked frequency
+        const x = e.offsetX - marginLeft;
+        if (x < 0 || x > graphWidth) return;
+        
+        const freqOffset = (x / graphWidth - 0.5) * this.totalBandwidth;
+        const clickedFreq = this.centerFreq + freqOffset;
+        
+        // Snap to nearest 1 kHz boundary
+        const newFreq = Math.round(clickedFreq / 1000) * 1000;
+        
+        // Call frequency callback
+        if (this.frequencyCallback) {
+            this.frequencyCallback(newFreq);
+        }
+    }
+    
+    zoomIn() {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        if (this.binCount === 0) return;
+        
+        // Halve the bin bandwidth = half the total bandwidth = 2x zoom
+        const newBinBandwidth = this.binBandwidth / 2;
+        
+        // Minimum practical limit
+        if (newBinBandwidth < 1) {
+            console.log('Maximum zoom reached (1 Hz/bin minimum)');
+            return;
+        }
+        
+        // Calculate new total bandwidth
+        const newTotalBandwidth = newBinBandwidth * this.binCount;
+        
+        // Always center on current tuned frequency
+        const zoomCenter = this.tunedFreq || this.centerFreq;
+        
+        // Constrain center frequency to keep view within 100 kHz - 30 MHz
+        const halfBandwidth = newTotalBandwidth / 2;
+        const minCenter = 100000 + halfBandwidth;
+        const maxCenter = 30000000 - halfBandwidth;
+        const constrainedCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
+        
+        console.log(`Zoom in: ${(this.totalBandwidth/1000).toFixed(1)} kHz -> ${(newTotalBandwidth/1000).toFixed(1)} kHz`);
+        
+        this.sendZoomCommand(constrainedCenter, newTotalBandwidth);
+    }
+    
+    zoomOut() {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        if (this.binCount === 0) return;
+        
+        // Don't zoom out past initial bandwidth
+        if (this.initialBinBandwidth > 0 && this.binBandwidth >= this.initialBinBandwidth) {
+            console.log('Already at full bandwidth');
+            return;
+        }
+        
+        // Double the bin bandwidth = double the total bandwidth = 0.5x zoom
+        let newBinBandwidth = this.binBandwidth * 2;
+        
+        // Don't zoom out past initial bandwidth
+        if (this.initialBinBandwidth > 0 && newBinBandwidth > this.initialBinBandwidth) {
+            newBinBandwidth = this.initialBinBandwidth;
+        }
+        
+        // Calculate new total bandwidth
+        const newTotalBandwidth = newBinBandwidth * this.binCount;
+        
+        // Always center on current tuned frequency
+        const zoomCenter = this.tunedFreq || this.centerFreq;
+        
+        // Constrain center frequency to keep view within 100 kHz - 30 MHz
+        const halfBandwidth = newTotalBandwidth / 2;
+        const minCenter = 100000 + halfBandwidth;
+        const maxCenter = 30000000 - halfBandwidth;
+        const constrainedCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
+        
+        console.log(`Zoom out: ${(this.totalBandwidth/1000).toFixed(1)} kHz -> ${(newTotalBandwidth/1000).toFixed(1)} kHz`);
+        
+        this.sendZoomCommand(constrainedCenter, newTotalBandwidth);
+    }
+    
+    setFrequencyCallback(callback) {
+        this.frequencyCallback = callback;
     }
     
     clear() {

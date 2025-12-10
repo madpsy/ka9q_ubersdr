@@ -1090,6 +1090,12 @@ class UberSDRClient {
         // Initialize spectrum display if not already created
         if (!this.spectrumDisplay && this.rfSpectrumCanvas && this.rfWaterfallCanvas) {
             this.spectrumDisplay = new SpectrumDisplay(this.rfSpectrumCanvas, this.rfWaterfallCanvas);
+            
+            // Set frequency callback for click-to-tune
+            this.spectrumDisplay.setFrequencyCallback((frequency) => {
+                console.log(`Spectrum clicked: tuning to ${frequency} Hz`);
+                this.setFrequency(frequency);
+            });
         }
 
         if (this.spectrumDisplay && this.ws && this.ws.readyState === WebSocket.OPEN) {

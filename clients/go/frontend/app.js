@@ -7,9 +7,10 @@ class UberSDRClient {
         this.connected = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
-        
+
         this.initializeElements();
         this.attachEventListeners();
+        this.loadSavedInstances();
         this.loadSavedConfig();
         this.loadAudioDevices();
         this.updateStatus();
@@ -25,22 +26,31 @@ class UberSDRClient {
         this.autoConnectCheckbox = document.getElementById('auto-connect');
         this.connectBtn = document.getElementById('connect-btn');
         this.disconnectBtn = document.getElementById('disconnect-btn');
-        
+
+        // Saved instances elements
+        this.savedInstancesSelect = document.getElementById('saved-instances');
+        this.saveInstanceBtn = document.getElementById('save-instance-btn');
+        this.deleteInstanceBtn = document.getElementById('delete-instance-btn');
+
         // Frequency elements
         this.frequencyInput = document.getElementById('frequency-input');
         this.frequencyButtons = document.querySelectorAll('.frequency-buttons .btn');
         this.bandButtons = document.querySelectorAll('.btn-band');
-        
+
         // Mode and bandwidth elements
         this.modeSelect = document.getElementById('mode');
         this.bandwidthLowInput = document.getElementById('bandwidth-low');
         this.bandwidthHighInput = document.getElementById('bandwidth-high');
         this.applySettingsBtn = document.getElementById('apply-settings-btn');
-        
+
         // Audio elements
         this.audioDeviceSelect = document.getElementById('audio-device');
         this.outputModeSelect = document.getElementById('output-mode');
-        
+        this.fifoPathInput = document.getElementById('fifo-path');
+        this.udpEnabledCheckbox = document.getElementById('udp-enabled');
+        this.udpHostInput = document.getElementById('udp-host');
+        this.udpPortInput = document.getElementById('udp-port');
+
         // Audio preview elements
         this.audioPreviewEnabled = document.getElementById('audio-preview-enabled');
         this.audioPreviewControls = document.getElementById('audio-preview-controls');
@@ -48,7 +58,7 @@ class UberSDRClient {
         this.audioMuteBtn = document.getElementById('audio-mute-btn');
         this.spectrumCanvas = document.getElementById('audio-spectrum-canvas');
         this.waterfallCanvas = document.getElementById('audio-waterfall-canvas');
-        
+
         // RF Spectrum elements
         this.spectrumEnabled = document.getElementById('spectrum-enabled');
         this.spectrumDisplayContainer = document.getElementById('spectrum-display-container');
@@ -59,18 +69,18 @@ class UberSDRClient {
         this.spectrumPanScrollCheckbox = document.getElementById('spectrum-pan-scroll');
         this.spectrumClickTuneCheckbox = document.getElementById('spectrum-click-tune');
         this.spectrumCenterTuneCheckbox = document.getElementById('spectrum-center-tune');
-        
+
         // NR2 elements
         this.nr2EnabledCheckbox = document.getElementById('nr2-enabled');
         this.nr2StrengthInput = document.getElementById('nr2-strength');
         this.nr2FloorInput = document.getElementById('nr2-floor');
         this.nr2AdaptInput = document.getElementById('nr2-adapt');
-        
+
         // Resampling elements
         this.resampleEnabledCheckbox = document.getElementById('resample-enabled');
         this.resampleRateSelect = document.getElementById('resample-rate');
         this.outputChannelsSelect = document.getElementById('output-channels');
-        
+
         // Status elements
         this.connectionStatus = document.getElementById('connection-status');
         this.uptimeSpan = document.getElementById('uptime');
@@ -80,24 +90,38 @@ class UberSDRClient {
         this.statusChannels = document.getElementById('status-channels');
         this.statusSession = document.getElementById('status-session');
         this.statusAudioDevice = document.getElementById('status-audio-device');
-        
+
         // Audio streaming state
         this.audioStreamActive = false;
         this.audioQueue = [];
         this.audioMuted = true; // Muted by default
-        
+
         // Audio visualizer
         this.audioVisualizer = null;
-        
+
         // RF Spectrum display
         this.spectrumDisplay = null;
+
+        // Saved instances
+        this.savedInstances = [];
     }
 
     attachEventListeners() {
         // Connection buttons
         this.connectBtn.addEventListener('click', () => this.connect());
         this.disconnectBtn.addEventListener('click', () => this.disconnect());
-        
+
+        // Saved instances buttons
+        if (this.saveInstanceBtn) {
+            this.saveInstanceBtn.addEventListener('click', () => this.saveCurrentInstance());
+        }
+        if (this.deleteInstanceBtn) {
+            this.deleteInstanceBtn.addEventListener('click', () => this.deleteSelectedInstance());
+        }
+        if (this.savedInstancesSelect) {
+            this.savedInstancesSelect.addEventListener('change', () => this.onInstanceSelected());
+        }
+
         // Instance discovery buttons
         const localInstancesBtn = document.getElementById('local-instances-btn');
         const publicInstancesBtn = document.getElementById('public-instances-btn');
@@ -107,7 +131,7 @@ class UberSDRClient {
         if (publicInstancesBtn) {
             publicInstancesBtn.addEventListener('click', () => this.showPublicInstances());
         }
-        
+
         // Modal close buttons
         document.querySelectorAll('.close, .modal-footer .btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -117,20 +141,20 @@ class UberSDRClient {
                 }
             });
         });
-        
+
         // Close modal when clicking outside
         window.addEventListener('click', (e) => {
             if (e.target.classList.contains('modal')) {
                 this.closeModal(e.target.id);
             }
         });
-        
+
         // Public instances filter
         const publicFilter = document.getElementById('public-filter');
         if (publicFilter) {
             publicFilter.addEventListener('input', (e) => this.filterPublicInstances(e.target.value));
         }
-        
+
         // Frequency controls
         this.frequencyInput.addEventListener('change', () => this.updateFrequency());
         this.frequencyButtons.forEach(btn => {
@@ -145,19 +169,19 @@ class UberSDRClient {
                 this.setFrequency(freq);
             });
         });
-        
+
         // Mode change
         this.modeSelect.addEventListener('change', () => this.updateModeDefaults());
-        
+
         // Apply settings button
         this.applySettingsBtn.addEventListener('click', () => this.applySettings());
-        
+
         // NR2 settings
         this.nr2EnabledCheckbox.addEventListener('change', () => this.updateNR2Config());
         this.nr2StrengthInput.addEventListener('change', () => this.updateNR2Config());
         this.nr2FloorInput.addEventListener('change', () => this.updateNR2Config());
         this.nr2AdaptInput.addEventListener('change', () => this.updateNR2Config());
-        
+
         // Audio preview settings
         this.audioPreviewEnabled.addEventListener('change', () => {
             this.toggleAudioPreview();
@@ -167,19 +191,19 @@ class UberSDRClient {
             this.toggleMute();
             this.saveAudioPreviewConfig();
         });
-        
+
         // Auto-connect setting
         this.autoConnectCheckbox.addEventListener('change', () => {
             console.log('Auto-connect changed to:', this.autoConnectCheckbox.checked);
             this.saveAutoConnectConfig();
         });
-        
+
         // RF Spectrum settings
         this.spectrumEnabled.addEventListener('change', () => {
             this.toggleSpectrumDisplay();
             this.saveSpectrumConfig();
         });
-        
+
         // Spectrum control checkboxes
         this.spectrumZoomScrollCheckbox.addEventListener('change', () => {
             if (this.spectrumZoomScrollCheckbox.checked) {
@@ -190,7 +214,7 @@ class UberSDRClient {
             }
             this.saveSpectrumConfig();
         });
-        
+
         this.spectrumPanScrollCheckbox.addEventListener('change', () => {
             if (this.spectrumPanScrollCheckbox.checked) {
                 this.spectrumZoomScrollCheckbox.checked = false;
@@ -200,14 +224,14 @@ class UberSDRClient {
             }
             this.saveSpectrumConfig();
         });
-        
+
         this.spectrumClickTuneCheckbox.addEventListener('change', () => {
             if (this.spectrumDisplay) {
                 this.spectrumDisplay.setClickTuneEnabled(this.spectrumClickTuneCheckbox.checked);
             }
             this.saveSpectrumConfig();
         });
-        
+
         this.spectrumCenterTuneCheckbox.addEventListener('change', () => {
             if (this.spectrumDisplay) {
                 this.spectrumDisplay.setCenterTuneEnabled(this.spectrumCenterTuneCheckbox.checked);
@@ -219,14 +243,14 @@ class UberSDRClient {
     connectWebSocket() {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
-        
+
         this.ws = new WebSocket(wsUrl);
-        
+
         this.ws.onopen = () => {
             console.log('WebSocket connected');
             this.reconnectAttempts = 0;
         };
-        
+
         this.ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
@@ -235,15 +259,15 @@ class UberSDRClient {
                 console.error('Failed to parse WebSocket message:', e);
             }
         };
-        
+
         this.ws.onerror = (error) => {
             console.error('WebSocket error:', error);
         };
-        
+
         this.ws.onclose = () => {
             console.log('WebSocket disconnected');
             this.ws = null;
-            
+
             // Attempt to reconnect
             if (this.reconnectAttempts < this.maxReconnectAttempts) {
                 this.reconnectAttempts++;
@@ -275,7 +299,7 @@ class UberSDRClient {
     handleConnectionUpdate(data) {
         this.connected = data.connected;
         this.updateConnectionUI();
-        
+
         if (data.connected) {
             this.showSuccess('Connected to SDR server');
         } else {
@@ -301,7 +325,11 @@ class UberSDRClient {
             nr2AdaptRate: parseFloat(this.nr2AdaptInput.value),
             resampleEnabled: this.resampleEnabledCheckbox.checked,
             resampleOutputRate: parseInt(this.resampleRateSelect.value),
-            outputChannels: parseInt(this.outputChannelsSelect.value)
+            outputChannels: parseInt(this.outputChannelsSelect.value),
+            fifoPath: this.fifoPathInput.value,
+            udpEnabled: this.udpEnabledCheckbox.checked,
+            udpHost: this.udpHostInput.value,
+            udpPort: parseInt(this.udpPortInput.value)
         };
 
         try {
@@ -312,7 +340,7 @@ class UberSDRClient {
             });
 
             const data = await response.json();
-            
+
             if (response.ok) {
                 this.connected = true;
                 this.updateConnectionUI();
@@ -338,7 +366,7 @@ class UberSDRClient {
             });
 
             const data = await response.json();
-            
+
             if (response.ok) {
                 this.connected = false;
                 this.updateConnectionUI();
@@ -360,14 +388,14 @@ class UberSDRClient {
         try {
             const response = await fetch(`${this.apiBase}/api/status`);
             const status = await response.json();
-            
+
             this.connected = status.connected;
             this.updateConnectionUI();
             this.updateStatusDisplay(status);
         } catch (error) {
             console.error('Failed to fetch status:', error);
         }
-        
+
         // Poll status every 2 seconds
         setTimeout(() => this.updateStatus(), 2000);
     }
@@ -420,10 +448,10 @@ class UberSDRClient {
             });
 
             const data = await response.json();
-            
+
             if (response.ok) {
                 this.showSuccess('Settings applied');
-                
+
                 // Update spectrum display with new bandwidth
                 if (this.spectrumDisplay) {
                     this.spectrumDisplay.updateBandwidth(tuneRequest.bandwidthLow, tuneRequest.bandwidthHigh);
@@ -438,9 +466,9 @@ class UberSDRClient {
 
     async updateFrequency() {
         if (!this.connected) return;
-        
+
         const frequency = parseInt(this.frequencyInput.value);
-        
+
         try {
             const response = await fetch(`${this.apiBase}/api/frequency`, {
                 method: 'POST',
@@ -455,13 +483,13 @@ class UberSDRClient {
                 // Update spectrum display with new tuned frequency
                 if (this.spectrumDisplay && this.spectrumDisplay.totalBandwidth > 0) {
                     this.spectrumDisplay.tunedFreq = frequency;
-                    
+
                     // Check if new frequency is outside the currently displayed bandwidth
                     const halfBw = this.spectrumDisplay.totalBandwidth / 2;
                     const startFreq = this.spectrumDisplay.centerFreq - halfBw;
                     const endFreq = this.spectrumDisplay.centerFreq + halfBw;
                     const isOutsideView = frequency < startFreq || frequency > endFreq;
-                    
+
                     // If center-tune is enabled, always re-center on the new frequency
                     // If center-tune is disabled but frequency is outside view, pan to show it
                     if (this.spectrumDisplay.centerTuneEnabled || isOutsideView) {
@@ -504,7 +532,7 @@ class UberSDRClient {
             'iq192': [-5000, 5000],
             'iq384': [-5000, 5000]
         };
-        
+
         if (defaults[mode]) {
             this.bandwidthLowInput.value = defaults[mode][0];
             this.bandwidthHighInput.value = defaults[mode][1];
@@ -540,7 +568,7 @@ class UberSDRClient {
             const response = await fetch(`${this.apiBase}/api/config`);
             if (response.ok) {
                 const config = await response.json();
-                
+
                 // Populate form fields with saved config
                 if (config.host) this.hostInput.value = config.host;
                 if (config.port) this.portInput.value = config.port;
@@ -563,6 +591,12 @@ class UberSDRClient {
                 if (config.resampleOutputRate) this.resampleRateSelect.value = config.resampleOutputRate;
                 if (config.outputChannels !== undefined) this.outputChannelsSelect.value = config.outputChannels;
                 
+                // Load FIFO and UDP settings
+                if (config.fifoPath) this.fifoPathInput.value = config.fifoPath;
+                if (config.udpEnabled !== undefined) this.udpEnabledCheckbox.checked = config.udpEnabled;
+                if (config.udpHost) this.udpHostInput.value = config.udpHost;
+                if (config.udpPort) this.udpPortInput.value = config.udpPort;
+
                 // Load audio preview settings
                 if (config.audioPreviewEnabled !== undefined) {
                     this.audioPreviewEnabled.checked = config.audioPreviewEnabled;
@@ -574,11 +608,11 @@ class UberSDRClient {
                     this.audioMuted = config.audioPreviewMuted;
                     this.updateMuteButton();
                 }
-                
+
                 // Load auto-connect setting
                 if (config.autoConnect !== undefined) {
                     this.autoConnectCheckbox.checked = config.autoConnect;
-                    
+
                     // Auto-connect if enabled and not already connected
                     // Check connection status first to avoid duplicate connection attempts
                     if (config.autoConnect) {
@@ -594,7 +628,7 @@ class UberSDRClient {
                         }, 1500); // Increased delay to allow status update
                     }
                 }
-                
+
                 // Load spectrum control settings with defaults
                 // Note: spectrumEnabled is always unchecked on page load to avoid timing issues
                 this.spectrumEnabled.checked = false;
@@ -612,7 +646,7 @@ class UberSDRClient {
                     clickTune: config.spectrumClickTune,
                     centerTune: config.spectrumCenterTune
                 });
-                
+
                 console.log('Loaded saved configuration');
             }
         } catch (error) {
@@ -703,7 +737,7 @@ class UberSDRClient {
         try {
             const response = await fetch(`${this.apiBase}/api/devices`);
             const data = await response.json();
-            
+
             if (data.devices) {
                 this.audioDeviceSelect.innerHTML = '<option value="-1">Default Device</option>';
                 data.devices.forEach(device => {
@@ -759,20 +793,20 @@ class UberSDRClient {
     }
 
     // Instance Discovery Methods
-    
+
     async showLocalInstances() {
         const modal = document.getElementById('local-instances-modal');
         const statusEl = document.getElementById('local-instances-status');
         const listEl = document.getElementById('local-instances-list');
-        
+
         this.openModal('local-instances-modal');
         statusEl.textContent = 'Searching for local instances...';
         listEl.innerHTML = '';
-        
+
         try {
             const response = await fetch(`${this.apiBase}/api/instances/local`);
             const data = await response.json();
-            
+
             if (data.instances && data.instances.length > 0) {
                 statusEl.textContent = `Found ${data.instances.length} local instance(s)`;
                 this.renderLocalInstances(data.instances, listEl);
@@ -784,7 +818,7 @@ class UberSDRClient {
             console.error('Failed to fetch local instances:', error);
         }
     }
-    
+
     renderLocalInstances(instances, container) {
         instances.forEach(instance => {
             const card = this.createInstanceCard(instance, true);
@@ -792,20 +826,20 @@ class UberSDRClient {
             container.appendChild(card);
         });
     }
-    
+
     async showPublicInstances() {
         const modal = document.getElementById('public-instances-modal');
         const statusEl = document.getElementById('public-instances-status');
         const listEl = document.getElementById('public-instances-list');
-        
+
         this.openModal('public-instances-modal');
         statusEl.textContent = 'Loading public instances...';
         listEl.innerHTML = '';
-        
+
         try {
             const response = await fetch(`${this.apiBase}/api/instances/public`);
             const data = await response.json();
-            
+
             if (data.instances && data.instances.length > 0) {
                 this.publicInstances = data.instances;
                 this.localUUIDs = new Set(data.localUUIDs || []);
@@ -819,7 +853,7 @@ class UberSDRClient {
             console.error('Failed to fetch public instances:', error);
         }
     }
-    
+
     renderPublicInstances(instances, container) {
         container.innerHTML = '';
         instances.forEach(instance => {
@@ -829,20 +863,20 @@ class UberSDRClient {
             container.appendChild(card);
         });
     }
-    
+
     filterPublicInstances(filterText) {
         if (!this.publicInstances) return;
-        
+
         const filtered = this.publicInstances.filter(instance => {
             const searchText = filterText.toLowerCase();
             return instance.name.toLowerCase().includes(searchText) ||
                    (instance.callsign && instance.callsign.toLowerCase().includes(searchText)) ||
                    (instance.location && instance.location.toLowerCase().includes(searchText));
         });
-        
+
         const listEl = document.getElementById('public-instances-list');
         const statusEl = document.getElementById('public-instances-status');
-        
+
         if (filtered.length > 0) {
             statusEl.textContent = `Showing ${filtered.length} of ${this.publicInstances.length} instance(s)`;
             this.renderPublicInstances(filtered, listEl);
@@ -851,56 +885,56 @@ class UberSDRClient {
             listEl.innerHTML = '';
         }
     }
-    
+
     createInstanceCard(instance, isLocal, highlightAsLocal = false) {
         const card = document.createElement('div');
         card.className = 'instance-card';
         if (isLocal || highlightAsLocal) {
             card.classList.add('local-instance');
         }
-        
+
         const desc = instance.description || instance;
-        
+
         // Header
         const header = document.createElement('div');
         header.className = 'instance-header';
-        
+
         const name = document.createElement('div');
         name.className = 'instance-name';
         name.textContent = instance.name || 'Unknown';
         header.appendChild(name);
-        
+
         const badges = document.createElement('div');
         badges.className = 'instance-badges';
-        
+
         if (isLocal || highlightAsLocal) {
             const localBadge = document.createElement('span');
             localBadge.className = 'badge badge-success';
             localBadge.textContent = 'LOCAL';
             badges.appendChild(localBadge);
         }
-        
+
         if (desc.cw_skimmer || desc.CWSkimmer) {
             const cwBadge = document.createElement('span');
             cwBadge.className = 'badge badge-info';
             cwBadge.textContent = 'CW';
             badges.appendChild(cwBadge);
         }
-        
+
         if (desc.digital_decodes || desc.DigitalDecodes) {
             const digiBadge = document.createElement('span');
             digiBadge.className = 'badge badge-info';
             digiBadge.textContent = 'Digital';
             badges.appendChild(digiBadge);
         }
-        
+
         header.appendChild(badges);
         card.appendChild(header);
-        
+
         // Details
         const details = document.createElement('div');
         details.className = 'instance-details';
-        
+
         const addDetail = (label, value) => {
             if (value) {
                 const detail = document.createElement('div');
@@ -909,7 +943,7 @@ class UberSDRClient {
                 details.appendChild(detail);
             }
         };
-        
+
         if (isLocal) {
             addDetail('Host', `${instance.host}:${instance.port}`);
             if (desc.receiver) {
@@ -924,9 +958,9 @@ class UberSDRClient {
                 addDetail('Session', `${Math.floor(instance.max_session_time / 60)}m`);
             }
         }
-        
+
         addDetail('Version', instance.version || desc.version);
-        
+
         if (desc.public_iq_modes && desc.public_iq_modes.length > 0) {
             const iqModes = desc.public_iq_modes.map(m => m.replace('iq', '')).join(', ');
             addDetail('IQ (kHz)', iqModes);
@@ -934,35 +968,35 @@ class UberSDRClient {
             const iqModes = instance.public_iq_modes.map(m => m.replace('iq', '')).join(', ');
             addDetail('IQ (kHz)', iqModes);
         }
-        
+
         card.appendChild(details);
-        
+
         return card;
     }
-    
+
     async connectToInstance(instance, isLocal) {
         // Close the modal
         this.closeModal(isLocal ? 'local-instances-modal' : 'public-instances-modal');
-        
+
         // Populate connection form
         this.hostInput.value = instance.host;
         this.portInput.value = instance.port;
         this.sslCheckbox.checked = instance.tls || instance.TLS || false;
-        
+
         // Show connecting message
         this.showSuccess(`Connecting to ${instance.name}...`);
-        
+
         // Auto-connect
         await this.connect();
     }
-    
+
     openModal(modalId) {
         const modal = document.getElementById(modalId);
         if (modal) {
             modal.classList.add('show');
         }
     }
-    
+
     closeModal(modalId) {
         const modal = document.getElementById(modalId);
         if (modal) {
@@ -980,7 +1014,7 @@ class UberSDRClient {
             this.audioMuteBtn.style.display = 'inline-block';
             this.audioMuteBtn.disabled = false;
             this.startAudioStream();
-            
+
             // Initialize audio visualizer
             if (!this.audioVisualizer && this.spectrumCanvas && this.waterfallCanvas) {
                 this.audioVisualizer = new AudioVisualizer(this.spectrumCanvas, this.waterfallCanvas);
@@ -990,7 +1024,7 @@ class UberSDRClient {
             this.audioMuteBtn.style.display = 'none';
             this.audioMuteBtn.disabled = true;
             this.stopAudioStream();
-            
+
             // Clear visualizer
             if (this.audioVisualizer) {
                 this.audioVisualizer.clear();
@@ -1095,7 +1129,7 @@ class UberSDRClient {
             if (this.audioContext) {
                 // Use Web Audio API for playback
                 this.playPCMData(bytes.buffer, sampleRate, channels);
-                
+
                 // Send to visualizer for FFT
                 if (this.audioVisualizer) {
                     this.audioVisualizer.addAudioData(bytes.buffer, sampleRate, channels);
@@ -1143,7 +1177,7 @@ class UberSDRClient {
                 }
 
                 source.start(this.nextPlayTime);
-                
+
                 // Update next play time
                 this.nextPlayTime += audioBuffer.duration;
             } else {
@@ -1200,13 +1234,13 @@ class UberSDRClient {
         // Initialize spectrum display if not already created
         if (!this.spectrumDisplay && this.rfSpectrumCanvas && this.rfWaterfallCanvas) {
             this.spectrumDisplay = new SpectrumDisplay(this.rfSpectrumCanvas, this.rfWaterfallCanvas);
-            
+
             // Set frequency callback for click-to-tune
             this.spectrumDisplay.setFrequencyCallback((frequency) => {
                 console.log(`Spectrum clicked: tuning to ${frequency} Hz`);
                 this.setFrequency(frequency);
             });
-            
+
             // Set initial control states
             const scrollMode = this.spectrumZoomScrollCheckbox.checked ? 'zoom' : 'pan';
             this.spectrumDisplay.setScrollMode(scrollMode);
@@ -1219,7 +1253,7 @@ class UberSDRClient {
             const tunedFreq = parseInt(this.frequencyInput.value) || 14074000;
             const bandwidthLow = parseInt(this.bandwidthLowInput.value) || 50;
             const bandwidthHigh = parseInt(this.bandwidthHighInput.value) || 2700;
-            
+
             this.spectrumDisplay.tunedFreq = tunedFreq;
             this.spectrumDisplay.updateBandwidth(bandwidthLow, bandwidthHigh);
             console.log(`Enabling spectrum display at ${tunedFreq} Hz with BW ${bandwidthLow} to ${bandwidthHigh} Hz`);
@@ -1237,6 +1271,162 @@ class UberSDRClient {
             this.spectrumStatus.className = 'status-badge error';
         } else {
             this.spectrumStatus.className = 'status-badge disconnected';
+        }
+    }
+
+    // Saved Instances Methods
+
+    async loadSavedInstances() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/instances/saved`);
+            if (response.ok) {
+                const data = await response.json();
+                this.savedInstances = data.instances || [];
+                this.populateInstancesDropdown();
+                console.log('Loaded saved instances:', this.savedInstances);
+            }
+        } catch (error) {
+            console.error('Failed to load saved instances:', error);
+        }
+    }
+
+    populateInstancesDropdown() {
+        if (!this.savedInstancesSelect) return;
+
+        // Clear existing options except the first one
+        this.savedInstancesSelect.innerHTML = '<option value="">-- Select Saved Instance --</option>';
+
+        // Add saved instances
+        this.savedInstances.forEach(instance => {
+            const option = document.createElement('option');
+            option.value = instance.name;
+            option.textContent = `${instance.name} (${instance.host}:${instance.port})`;
+            this.savedInstancesSelect.appendChild(option);
+        });
+
+        this.updateInstanceButtons();
+    }
+
+    updateInstanceButtons() {
+        const hasSelection = this.savedInstancesSelect && this.savedInstancesSelect.value !== '';
+
+        if (this.deleteInstanceBtn) {
+            this.deleteInstanceBtn.disabled = !hasSelection;
+        }
+    }
+
+    async onInstanceSelected() {
+        const selectedName = this.savedInstancesSelect.value;
+
+        // Update button states
+        this.updateInstanceButtons();
+
+        // If empty selection, just return
+        if (!selectedName) return;
+
+        // Load and connect to the selected instance
+        await this.loadAndConnectInstance(selectedName);
+    }
+
+    async loadAndConnectInstance(selectedName) {
+        try {
+            // Disconnect if currently connected
+            if (this.connected) {
+                await this.disconnect();
+                // Wait a bit for disconnect to complete
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+
+            const response = await fetch(`${this.apiBase}/api/instances/saved/${encodeURIComponent(selectedName)}/load`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+
+                // Populate connection form with loaded instance
+                // Backend returns config object with host, port, ssl, password
+                if (data.config) {
+                    this.hostInput.value = data.config.host;
+                    this.portInput.value = data.config.port;
+                    this.sslCheckbox.checked = data.config.ssl;
+                    // Load password if present
+                    if (data.config.password) {
+                        this.passwordInput.value = data.config.password;
+                    } else {
+                        this.passwordInput.value = '';
+                    }
+                }
+
+                this.showSuccess(`Connecting to ${selectedName}...`);
+
+                // Auto-connect after loading
+                await this.connect();
+            } else {
+                const data = await response.json();
+                this.showError('Failed to load instance', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error loading instance', error.message);
+        }
+    }
+
+    async saveCurrentInstance() {
+        // Prompt for instance name
+        const name = prompt('Enter a name for this instance:');
+        if (!name || name.trim() === '') {
+            return;
+        }
+
+        const instance = {
+            name: name.trim(),
+            host: this.hostInput.value,
+            port: parseInt(this.portInput.value),
+            ssl: this.sslCheckbox.checked,
+            password: this.passwordInput.value // Include password
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/instances/saved`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(instance)
+            });
+
+            if (response.ok) {
+                this.showSuccess(`Saved instance: ${name}`);
+                await this.loadSavedInstances(); // Reload the list
+            } else {
+                const data = await response.json();
+                this.showError('Failed to save instance', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error saving instance', error.message);
+        }
+    }
+
+    async deleteSelectedInstance() {
+        const selectedName = this.savedInstancesSelect.value;
+        if (!selectedName) return;
+
+        if (!confirm(`Delete saved instance "${selectedName}"?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/instances/saved/${encodeURIComponent(selectedName)}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                this.showSuccess(`Deleted instance: ${selectedName}`);
+                await this.loadSavedInstances(); // Reload the list
+            } else {
+                const data = await response.json();
+                this.showError('Failed to delete instance', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error deleting instance', error.message);
         }
     }
 }

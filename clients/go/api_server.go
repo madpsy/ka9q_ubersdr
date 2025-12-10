@@ -79,6 +79,12 @@ func (s *APIServer) setupRoutes() {
 	api.HandleFunc("/device", s.handleDevice).Methods("POST", "OPTIONS")
 	api.HandleFunc("/config", s.handleConfig).Methods("GET", "POST", "OPTIONS")
 
+	// Saved instances management endpoints
+	api.HandleFunc("/instances/saved", s.handleSavedInstances).Methods("GET", "OPTIONS")
+	api.HandleFunc("/instances/saved", s.handleSaveInstance).Methods("POST", "OPTIONS")
+	api.HandleFunc("/instances/saved/{name}", s.handleDeleteInstance).Methods("DELETE", "OPTIONS")
+	api.HandleFunc("/instances/saved/{name}/load", s.handleLoadInstance).Methods("POST", "OPTIONS")
+
 	// Instance discovery endpoints
 	api.HandleFunc("/instances/local", s.handleLocalInstances).Methods("GET", "OPTIONS")
 	api.HandleFunc("/instances/public", s.handlePublicInstances).Methods("GET", "OPTIONS")
@@ -199,6 +205,7 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 		req.NR2Strength, req.NR2Floor, req.NR2AdaptRate, false,
 		resampleEnabled, resampleRate,
 		req.OutputChannels, // 0 = auto (2 when resampling, otherwise match input)
+		req.FIFOPath, req.UDPHost, req.UDPPort, req.UDPEnabled,
 	)
 
 	// Connect
@@ -373,6 +380,10 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			SpectrumPanScroll:   savedConfig.SpectrumPanScroll,
 			SpectrumClickTune:   savedConfig.SpectrumClickTune,
 			SpectrumCenterTune:  savedConfig.SpectrumCenterTune,
+			FIFOPath:            savedConfig.FIFOPath,
+			UDPHost:             savedConfig.UDPHost,
+			UDPPort:             savedConfig.UDPPort,
+			UDPEnabled:          savedConfig.UDPEnabled,
 		}
 		respondJSON(w, http.StatusOK, config)
 		return
@@ -422,6 +433,94 @@ func (s *APIServer) handlePublicInstances(w http.ResponseWriter, r *http.Request
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"instances":  instances,
 		"localUUIDs": localUUIDs,
+	})
+}
+
+// handleSavedInstances handles GET /api/instances/saved
+func (s *APIServer) handleSavedInstances(w http.ResponseWriter, r *http.Request) {
+	instances := s.configManager.GetSavedInstances()
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"instances": instances,
+	})
+}
+
+// handleSaveInstance handles POST /api/instances/saved
+func (s *APIServer) handleSaveInstance(w http.ResponseWriter, r *http.Request) {
+	var instance SavedInstance
+	if err := json.NewDecoder(r.Body).Decode(&instance); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	// Validate required fields
+	if instance.Name == "" {
+		respondError(w, http.StatusBadRequest, "Instance name is required", "")
+		return
+	}
+	if instance.Host == "" {
+		respondError(w, http.StatusBadRequest, "Host is required", "")
+		return
+	}
+	if instance.Port == 0 {
+		respondError(w, http.StatusBadRequest, "Port is required", "")
+		return
+	}
+
+	// Save the instance
+	if err := s.configManager.SaveInstance(instance); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to save instance", err.Error())
+		return
+	}
+
+	respondSuccess(w, fmt.Sprintf("Instance '%s' saved successfully", instance.Name))
+}
+
+// handleDeleteInstance handles DELETE /api/instances/saved/{name}
+func (s *APIServer) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	name := vars["name"]
+
+	if name == "" {
+		respondError(w, http.StatusBadRequest, "Instance name is required", "")
+		return
+	}
+
+	// Delete the instance
+	if err := s.configManager.DeleteInstance(name); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to delete instance", err.Error())
+		return
+	}
+
+	respondSuccess(w, fmt.Sprintf("Instance '%s' deleted successfully", name))
+}
+
+// handleLoadInstance handles POST /api/instances/saved/{name}/load
+func (s *APIServer) handleLoadInstance(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	name := vars["name"]
+
+	if name == "" {
+		respondError(w, http.StatusBadRequest, "Instance name is required", "")
+		return
+	}
+
+	// Load the instance
+	if err := s.configManager.LoadInstance(name); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to load instance", err.Error())
+		return
+	}
+
+	// Return the updated config including password
+	config := s.configManager.Get()
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Instance '%s' loaded successfully", name),
+		"config": map[string]interface{}{
+			"host":     config.Host,
+			"port":     config.Port,
+			"ssl":      config.SSL,
+			"password": config.Password,
+		},
 	})
 }
 

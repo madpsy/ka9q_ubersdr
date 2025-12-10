@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -61,6 +62,17 @@ type RadioClient struct {
 	resampleOutputRate int
 	resampler          *LibsamplerateResampler
 	outputChannels     int // Number of output channels (1=mono, 2=stereo)
+
+	// FIFO output
+	fifoPath    string
+	fifoFile    *os.File
+	fifoCreated bool // Track if we created the FIFO
+
+	// UDP output
+	udpHost    string
+	udpPort    int
+	udpConn    *net.UDPConn
+	udpEnabled bool
 }
 
 // WAVWriter handles WAV file writing
@@ -103,7 +115,8 @@ type ConnectionCheckResponse struct {
 func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 	bandwidthLow, bandwidthHigh *int, outputMode, wavFile string,
 	duration *float64, ssl bool, password string, audioDeviceIndex int, nr2Enabled bool, nr2Strength, nr2Floor, nr2AdaptRate float64,
-	autoReconnect bool, resampleEnabled bool, resampleOutputRate int, outputChannels int) *RadioClient {
+	autoReconnect bool, resampleEnabled bool, resampleOutputRate int, outputChannels int,
+	fifoPath string, udpHost string, udpPort int, udpEnabled bool) *RadioClient {
 
 	// Determine default channels based on mode
 	// IQ modes are stereo (I and Q channels), others are mono
@@ -152,6 +165,10 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		resampleEnabled:    resampleEnabled,
 		resampleOutputRate: resampleOutputRate,
 		outputChannels:     outputChannels,
+		fifoPath:           fifoPath,
+		udpHost:            udpHost,
+		udpPort:            udpPort,
+		udpEnabled:         udpEnabled,
 	}
 
 	// Initialize NR2 processor if enabled
@@ -161,6 +178,22 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		client.nr2Processor.Enabled = true
 		fmt.Fprintf(os.Stderr, "NR2 noise reduction enabled (strength=%.1f%%, floor=%.1f%%, adapt=%.1f%%)\n",
 			nr2Strength, nr2Floor, nr2AdaptRate)
+	}
+
+	// Initialize UDP connection if enabled
+	if client.udpEnabled || client.outputMode == "udp" {
+		addr := &net.UDPAddr{
+			IP:   net.ParseIP(client.udpHost),
+			Port: client.udpPort,
+		}
+		conn, err := net.DialUDP("udp", nil, addr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to create UDP connection: %v\n", err)
+			client.udpEnabled = false
+		} else {
+			client.udpConn = conn
+			fmt.Fprintf(os.Stderr, "UDP output configured: %s:%d\n", client.udpHost, client.udpPort)
+		}
 	}
 
 	// Note: Resampler will be initialized later when we know the actual sample rate from the server
@@ -244,6 +277,35 @@ func (c *RadioClient) SetupWAVWriter() error {
 	// Write WAV header (will be updated on close)
 	c.wavWriter.WriteHeader()
 	fmt.Fprintf(os.Stderr, "Recording to WAV file: %s (%d channel(s))\n", c.wavFile, c.channels)
+	return nil
+}
+
+// SetupFIFO creates or opens the FIFO (named pipe)
+func (c *RadioClient) SetupFIFO() error {
+	if c.fifoPath == "" {
+		return nil
+	}
+
+	// Check if FIFO already exists
+	info, err := os.Stat(c.fifoPath)
+	if err == nil {
+		// File exists, check if it's a FIFO
+		if info.Mode()&os.ModeNamedPipe == 0 {
+			return fmt.Errorf("%s exists but is not a FIFO", c.fifoPath)
+		}
+		fmt.Fprintf(os.Stderr, "Using existing FIFO: %s\n", c.fifoPath)
+	} else if os.IsNotExist(err) {
+		// Create new FIFO
+		if err := syscall.Mkfifo(c.fifoPath, 0666); err != nil {
+			return fmt.Errorf("failed to create FIFO: %w", err)
+		}
+		c.fifoCreated = true
+		fmt.Fprintf(os.Stderr, "Created FIFO: %s\n", c.fifoPath)
+	} else {
+		return fmt.Errorf("failed to stat FIFO path: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "FIFO ready at: %s (will open when reader connects)\n", c.fifoPath)
 	return nil
 }
 
@@ -402,6 +464,32 @@ func (c *RadioClient) DecodeAudio(base64Data string) ([]byte, error) {
 
 // OutputAudio outputs audio data based on selected mode
 func (c *RadioClient) OutputAudio(pcmData []byte) error {
+	// Write raw PCM to FIFO FIRST (before any processing)
+	// This gives the FIFO the original audio straight from the source
+	if c.fifoPath != "" {
+		// Try to open FIFO if not already open
+		if c.fifoFile == nil {
+			// Open in non-blocking mode
+			file, err := os.OpenFile(c.fifoPath, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+			if err == nil {
+				c.fifoFile = file
+				fmt.Fprintf(os.Stderr, "FIFO reader connected!\n")
+			}
+			// If error, no reader yet, skip this write
+		}
+
+		// Write to FIFO if open
+		if c.fifoFile != nil {
+			_, err := c.fifoFile.Write(pcmData)
+			if err != nil {
+				// Reader disconnected or other error
+				fmt.Fprintf(os.Stderr, "FIFO reader disconnected\n")
+				c.fifoFile.Close()
+				c.fifoFile = nil
+			}
+		}
+	}
+
 	// Call audio callback if set (for browser streaming)
 	if c.audioCallback != nil {
 		c.audioCallback(pcmData, c.sampleRate, c.channels)
@@ -500,6 +588,23 @@ func (c *RadioClient) OutputAudio(pcmData []byte) error {
 				return err
 			}
 			c.wavWriter.dataSize += len(pcmData)
+		}
+
+	case "udp":
+		// Send to UDP socket (main output mode)
+		if c.udpConn != nil {
+			_, err := c.udpConn.Write(pcmData)
+			if err != nil {
+				return fmt.Errorf("UDP send error: %w", err)
+			}
+		}
+	}
+
+	// Send UDP output if enabled as additional output (works alongside any output mode)
+	if c.udpEnabled && c.udpConn != nil && c.outputMode != "udp" {
+		_, err := c.udpConn.Write(pcmData)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "UDP send error: %v\n", err)
 		}
 	}
 
@@ -816,6 +921,14 @@ func (c *RadioClient) runOnce() int {
 	// Reset retry count on successful connection
 	c.retryCount = 0
 
+	// Setup FIFO if configured (independent of output mode)
+	if c.fifoPath != "" {
+		if err := c.SetupFIFO(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to setup FIFO: %v\n", err)
+			c.fifoPath = "" // Disable FIFO on error
+		}
+	}
+
 	// Don't setup PortAudio yet - wait for first audio packet to get actual sample rate
 	// (WAV setup can happen now since it doesn't depend on the actual rate)
 	if c.outputMode == "wav" {
@@ -823,6 +936,9 @@ func (c *RadioClient) runOnce() int {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return 1
 		}
+	} else if c.outputMode == "udp" {
+		fmt.Fprintf(os.Stderr, "UDP output to %s:%d: %d Hz, %d channel(s)\n",
+			c.udpHost, c.udpPort, c.sampleRate, c.outputChannels)
 	}
 
 	// Start keepalive goroutine
@@ -899,6 +1015,20 @@ func (c *RadioClient) Run() int {
 func (c *RadioClient) Cleanup() {
 	fmt.Fprintf(os.Stderr, "\nCleaning up...\n")
 
+	// Close FIFO
+	if c.fifoFile != nil {
+		c.fifoFile.Close()
+		fmt.Fprintf(os.Stderr, "FIFO closed: %s\n", c.fifoPath)
+		c.fifoFile = nil
+	}
+
+	// Remove FIFO file only if we created it
+	if c.fifoPath != "" && c.fifoCreated {
+		if err := os.Remove(c.fifoPath); err == nil {
+			fmt.Fprintf(os.Stderr, "FIFO removed: %s\n", c.fifoPath)
+		}
+	}
+
 	// Close WAV file
 	if c.wavWriter != nil {
 		c.wavWriter.Close()
@@ -916,6 +1046,12 @@ func (c *RadioClient) Cleanup() {
 	// Close audio buffer channel
 	if c.audioBuffer != nil {
 		close(c.audioBuffer)
+	}
+
+	// Close UDP connection
+	if c.udpConn != nil {
+		c.udpConn.Close()
+		fmt.Fprintf(os.Stderr, "UDP connection closed\n")
 	}
 }
 
@@ -1033,8 +1169,12 @@ func main() {
 	frequencyFlag := flag.Int("f", 0, "Frequency in Hz (e.g., 14074000 for 14.074 MHz)")
 	modeFlag := flag.String("m", "", "Demodulation mode (am, sam, usb, lsb, fm, nfm, cwu, cwl, iq, iq48, iq96, iq192, iq384 - wide IQ modes require bypassed IP)")
 	bandwidthFlag := flag.String("b", "", "Bandwidth in format low:high (e.g., -5000:5000)")
-	outputFlag := flag.String("o", "portaudio", "Output mode (portaudio, stdout, wav)")
+	outputFlag := flag.String("o", "portaudio", "Output mode (portaudio, stdout, wav, udp)")
 	wavFileFlag := flag.String("w", "", "WAV file path (required when output=wav)")
+	fifoPathFlag := flag.String("fifo-path", "", "Also write audio to named pipe (FIFO) at this path (non-blocking, works with any output mode)")
+	udpHostFlag := flag.String("udp-host", "127.0.0.1", "UDP host for audio output (default: 127.0.0.1)")
+	udpPortFlag := flag.Int("udp-port", 8888, "UDP port for audio output (default: 8888)")
+	udpEnabledFlag := flag.Bool("udp-enabled", false, "Enable UDP output as additional output (works alongside main output mode)")
 	timeFlag := flag.Float64("t", 0, "Recording duration in seconds (for WAV output)")
 	sslFlag := flag.Bool("s", false, "Use WSS (WebSocket Secure, ignored if --url is provided)")
 	audioDeviceFlag := flag.Int("audio-device", -1, "PortAudio device index (-1 for default, use --list-devices to see available devices)")
@@ -1073,7 +1213,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  # Record 1000 kHz AM to WAV file for 60 seconds\n")
 		fmt.Fprintf(os.Stderr, "  %s -f 1000000 -m am -o wav -w recording.wav -t 60\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Output raw PCM to stdout with custom bandwidth\n")
-		fmt.Fprintf(os.Stderr, "  %s -f 7100000 -m lsb -b -2700:-50 -o stdout > audio.pcm\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -f 7100000 -m lsb -b -2700:-50 -o stdout > audio.pcm\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Stream audio to UDP endpoint\n")
+		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb -o udp --udp-host 192.168.1.100 --udp-port 9999\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Write audio to FIFO (named pipe) alongside PortAudio output\n")
+		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb --fifo-path /tmp/audio.fifo\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Enable UDP as additional output alongside PortAudio\n")
+		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb --udp-enabled --udp-host 127.0.0.1 --udp-port 8888\n", os.Args[0])
 	}
 
 	flag.Parse()
@@ -1131,6 +1277,7 @@ func main() {
 				config.NR2Strength, config.NR2Floor, config.NR2AdaptRate, false,
 				config.ResampleEnabled, config.ResampleOutputRate,
 				config.OutputChannels,
+				config.FIFOPath, config.UDPHost, config.UDPPort, config.UDPEnabled,
 			)
 
 			// Attempt to connect in background
@@ -1266,6 +1413,7 @@ func main() {
 		*autoReconnectFlag,
 		*resampleFlag, *resampleRateFlag,
 		0, // outputChannels: 0 = auto (2 when resampling, otherwise match input)
+		*fifoPathFlag, *udpHostFlag, *udpPortFlag, *udpEnabledFlag,
 	)
 
 	// Setup signal handler for graceful shutdown

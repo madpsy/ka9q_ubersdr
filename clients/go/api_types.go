@@ -23,6 +23,10 @@ type ConnectRequest struct {
 	ResampleEnabled    bool    `json:"resampleEnabled,omitempty"`
 	ResampleOutputRate int     `json:"resampleOutputRate,omitempty"`
 	OutputChannels     int     `json:"outputChannels,omitempty"`
+	FIFOPath           string  `json:"fifoPath,omitempty"`
+	UDPHost            string  `json:"udpHost,omitempty"`
+	UDPPort            int     `json:"udpPort,omitempty"`
+	UDPEnabled         bool    `json:"udpEnabled,omitempty"`
 }
 
 // TuneRequest represents a request to change frequency/mode/bandwidth without reconnecting
@@ -103,6 +107,10 @@ type StatusResponse struct {
 	SSL                bool      `json:"ssl"`
 	ConnectedAt        time.Time `json:"connectedAt,omitempty"`
 	Uptime             string    `json:"uptime,omitempty"`
+	FIFOPath           string    `json:"fifoPath,omitempty"`
+	UDPHost            string    `json:"udpHost,omitempty"`
+	UDPPort            int       `json:"udpPort,omitempty"`
+	UDPEnabled         bool      `json:"udpEnabled"`
 }
 
 // AudioDevice represents an audio output device
@@ -146,6 +154,10 @@ type ConfigResponse struct {
 	SpectrumPanScroll   bool    `json:"spectrumPanScroll"`
 	SpectrumClickTune   bool    `json:"spectrumClickTune"`
 	SpectrumCenterTune  bool    `json:"spectrumCenterTune"`
+	FIFOPath            string  `json:"fifoPath,omitempty"`
+	UDPHost             string  `json:"udpHost,omitempty"`
+	UDPPort             int     `json:"udpPort,omitempty"`
+	UDPEnabled          bool    `json:"udpEnabled"`
 }
 
 // ErrorResponse represents an error response

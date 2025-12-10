@@ -8,34 +8,48 @@ import (
 	"sync"
 )
 
+// SavedInstance represents a saved server instance configuration
+type SavedInstance struct {
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	SSL      bool   `json:"ssl"`
+	Password string `json:"password,omitempty"` // Optional password field
+}
+
 // ClientConfig represents the persistent configuration
 type ClientConfig struct {
-	Host                string  `json:"host"`
-	Port                int     `json:"port"`
-	SSL                 bool    `json:"ssl"`
-	Frequency           int     `json:"frequency"`
-	Mode                string  `json:"mode"`
-	BandwidthLow        *int    `json:"bandwidthLow,omitempty"`
-	BandwidthHigh       *int    `json:"bandwidthHigh,omitempty"`
-	Password            string  `json:"password,omitempty"`
-	OutputMode          string  `json:"outputMode"`
-	AudioDevice         int     `json:"audioDevice"`
-	NR2Enabled          bool    `json:"nr2Enabled"`
-	NR2Strength         float64 `json:"nr2Strength"`
-	NR2Floor            float64 `json:"nr2Floor"`
-	NR2AdaptRate        float64 `json:"nr2AdaptRate"`
-	ResampleEnabled     bool    `json:"resampleEnabled"`
-	ResampleOutputRate  int     `json:"resampleOutputRate"`
-	OutputChannels      int     `json:"outputChannels"`
-	AudioPreviewEnabled bool    `json:"audioPreviewEnabled"`
-	AudioPreviewMuted   bool    `json:"audioPreviewMuted"`
-	AutoConnect         bool    `json:"autoConnect"`
-	SpectrumEnabled     bool    `json:"spectrumEnabled"`
-	SpectrumZoomScroll  bool    `json:"spectrumZoomScroll"`
-	SpectrumPanScroll   bool    `json:"spectrumPanScroll"`
-	SpectrumClickTune   bool    `json:"spectrumClickTune"`
-	SpectrumCenterTune  bool    `json:"spectrumCenterTune"`
-	APIPort             int     `json:"apiPort"`
+	Host                string          `json:"host"`
+	Port                int             `json:"port"`
+	SSL                 bool            `json:"ssl"`
+	Frequency           int             `json:"frequency"`
+	Mode                string          `json:"mode"`
+	BandwidthLow        *int            `json:"bandwidthLow,omitempty"`
+	BandwidthHigh       *int            `json:"bandwidthHigh,omitempty"`
+	Password            string          `json:"password,omitempty"`
+	OutputMode          string          `json:"outputMode"`
+	AudioDevice         int             `json:"audioDevice"`
+	NR2Enabled          bool            `json:"nr2Enabled"`
+	NR2Strength         float64         `json:"nr2Strength"`
+	NR2Floor            float64         `json:"nr2Floor"`
+	NR2AdaptRate        float64         `json:"nr2AdaptRate"`
+	ResampleEnabled     bool            `json:"resampleEnabled"`
+	ResampleOutputRate  int             `json:"resampleOutputRate"`
+	OutputChannels      int             `json:"outputChannels"`
+	AudioPreviewEnabled bool            `json:"audioPreviewEnabled"`
+	AudioPreviewMuted   bool            `json:"audioPreviewMuted"`
+	AutoConnect         bool            `json:"autoConnect"`
+	SpectrumEnabled     bool            `json:"spectrumEnabled"`
+	SpectrumZoomScroll  bool            `json:"spectrumZoomScroll"`
+	SpectrumPanScroll   bool            `json:"spectrumPanScroll"`
+	SpectrumClickTune   bool            `json:"spectrumClickTune"`
+	SpectrumCenterTune  bool            `json:"spectrumCenterTune"`
+	APIPort             int             `json:"apiPort"`
+	SavedInstances      []SavedInstance `json:"savedInstances,omitempty"`
+	FIFOPath            string          `json:"fifoPath,omitempty"`
+	UDPHost             string          `json:"udpHost,omitempty"`
+	UDPPort             int             `json:"udpPort,omitempty"`
+	UDPEnabled          bool            `json:"udpEnabled"`
 }
 
 // ConfigManager handles loading and saving configuration
@@ -76,6 +90,10 @@ func getDefaultConfig() ClientConfig {
 		AudioPreviewMuted:   true,  // Muted by default
 		AutoConnect:         false, // Disabled by default
 		APIPort:             8090,
+		FIFOPath:            "",          // No FIFO by default
+		UDPHost:             "127.0.0.1", // Default UDP host
+		UDPPort:             8888,        // Default UDP port
+		UDPEnabled:          false,       // UDP disabled by default
 	}
 }
 
@@ -170,6 +188,10 @@ func (cm *ConfigManager) UpdateFromConnectRequest(req ConnectRequest) error {
 		c.ResampleEnabled = req.ResampleEnabled
 		c.ResampleOutputRate = req.ResampleOutputRate
 		c.OutputChannels = req.OutputChannels
+		c.FIFOPath = req.FIFOPath
+		c.UDPHost = req.UDPHost
+		c.UDPPort = req.UDPPort
+		c.UDPEnabled = req.UDPEnabled
 	})
 }
 
@@ -242,6 +264,83 @@ func GetConfigPath() string {
 
 	// Fallback to current directory
 	return "client_config.json"
+}
+
+// GetSavedInstances returns the list of saved instances
+func (cm *ConfigManager) GetSavedInstances() []SavedInstance {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	// Return a copy to prevent external modification
+	instances := make([]SavedInstance, len(cm.config.SavedInstances))
+	copy(instances, cm.config.SavedInstances)
+	return instances
+}
+
+// SaveInstance adds or updates a saved instance
+func (cm *ConfigManager) SaveInstance(instance SavedInstance) error {
+	return cm.Update(func(c *ClientConfig) {
+		// Check if instance with this name already exists
+		found := false
+		for i, existing := range c.SavedInstances {
+			if existing.Name == instance.Name {
+				// Update existing instance
+				c.SavedInstances[i] = instance
+				found = true
+				break
+			}
+		}
+
+		// Add new instance if not found
+		if !found {
+			c.SavedInstances = append(c.SavedInstances, instance)
+		}
+	})
+}
+
+// DeleteInstance removes a saved instance by name
+func (cm *ConfigManager) DeleteInstance(name string) error {
+	return cm.Update(func(c *ClientConfig) {
+		// Filter out the instance with the given name
+		filtered := make([]SavedInstance, 0, len(c.SavedInstances))
+		for _, instance := range c.SavedInstances {
+			if instance.Name != name {
+				filtered = append(filtered, instance)
+			}
+		}
+		c.SavedInstances = filtered
+	})
+}
+
+// LoadInstance loads a saved instance by name and updates current connection settings
+func (cm *ConfigManager) LoadInstance(name string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// Find the instance
+	var found *SavedInstance
+	for _, instance := range cm.config.SavedInstances {
+		if instance.Name == name {
+			found = &instance
+			break
+		}
+	}
+
+	if found == nil {
+		return fmt.Errorf("instance not found: %s", name)
+	}
+
+	// Update current connection settings
+	cm.config.Host = found.Host
+	cm.config.Port = found.Port
+	cm.config.SSL = found.SSL
+
+	// Save the updated config
+	cm.mu.Unlock()
+	err := cm.Save()
+	cm.mu.Lock()
+
+	return err
 }
 
 // Helper function to create int pointer

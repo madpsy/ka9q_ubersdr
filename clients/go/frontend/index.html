@@ -46,6 +46,18 @@
                         </label>
                     </div>
                 </div>
+                <div style="margin-top: 10px; display: flex; gap: 10px; align-items: flex-end;">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="saved-instances">Saved Instances:</label>
+                        <select id="saved-instances">
+                            <option value="">-- Select Saved Instance --</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button id="save-instance-btn" class="btn btn-small">Save</button>
+                        <button id="delete-instance-btn" class="btn btn-small" disabled>Delete</button>
+                    </div>
+                </div>
                 <div class="button-group">
                     <button id="connect-btn" class="btn btn-primary">Connect</button>
                     <button id="disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
@@ -177,8 +189,41 @@
                             <option value="portaudio">PortAudio</option>
                             <option value="stdout">Stdout</option>
                             <option value="wav">WAV File</option>
+                            <option value="udp">UDP</option>
                         </select>
                     </div>
+                </div>
+                
+                <!-- FIFO Output Settings -->
+                <h3 style="margin-top: 20px;">FIFO Output (Named Pipe)</h3>
+                <div class="form-group">
+                    <label for="fifo-path">FIFO Path:</label>
+                    <input type="text" id="fifo-path" placeholder="/tmp/audio.fifo (optional)">
+                </div>
+                <div class="info-box">
+                    <p><strong>Note:</strong> Write audio to a named pipe (FIFO) alongside the main output. Non-blocking, works with any output mode. Leave empty to disable.</p>
+                </div>
+                
+                <!-- UDP Output Settings -->
+                <h3 style="margin-top: 20px;">UDP Output</h3>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="udp-enabled">
+                        <span>Enable UDP as additional output</span>
+                    </label>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="udp-host">UDP Host:</label>
+                        <input type="text" id="udp-host" value="127.0.0.1" placeholder="127.0.0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="udp-port">UDP Port:</label>
+                        <input type="number" id="udp-port" value="8888" placeholder="8888">
+                    </div>
+                </div>
+                <div class="info-box">
+                    <p><strong>Note:</strong> UDP output can work as the main output mode or as an additional output alongside PortAudio/WAV. Useful for streaming audio to other applications.</p>
                 </div>
             </section>
 

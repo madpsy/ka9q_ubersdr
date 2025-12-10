@@ -32,6 +32,11 @@ class UberSDRClient {
         this.loadAudioDevices();
         this.updateStatus();
         this.connectWebSocket();
+        
+        // Initialize MIDI Control
+        if (typeof MIDIControl !== 'undefined') {
+            this.midiControl = new MIDIControl(this);
+        }
     }
 
     initializeElements() {
@@ -183,6 +188,9 @@ class UberSDRClient {
 
         // RF Spectrum display
         this.spectrumDisplay = null;
+
+        // MIDI Control
+        this.midiControl = null;
 
         // Bands (stored for later use when spectrum is enabled)
         this.loadedBands = [];
@@ -430,6 +438,11 @@ class UberSDRClient {
             if (this.spectrumDisplay) {
                 this.spectrumDisplay.handleMessage(data);
             }
+        } else if (data.type === 'midi_learn_captured' || data.type === 'midi_learn_completed') {
+            // Forward MIDI learn mode messages to MIDI control
+            if (this.midiControl) {
+                this.midiControl.handleLearnModeUpdate(data);
+            }
         } else if (data.connected !== undefined) {
             // Initial status message
             this.updateStatusDisplay(data);
@@ -650,9 +663,9 @@ class UberSDRClient {
             this.updateIQModeButtons(status.allowedIQModes, status.bypassed);
         }
 
-        // Update session timer if max_session_time is provided
-        console.log('Status update - maxSessionTime:', status.maxSessionTime, 'sessionStartTime:', status.sessionStartTime);
-        if (status.maxSessionTime !== undefined && status.sessionStartTime) {
+        // Update session timer only if both fields are present (not sent in all status updates)
+        if (status.maxSessionTime !== undefined && status.maxSessionTime !== null &&
+            status.sessionStartTime && status.sessionStartTime !== null) {
             console.log('Calling updateSessionTimer with:', status.maxSessionTime, status.sessionStartTime);
             this.updateSessionTimer(status.maxSessionTime, status.sessionStartTime);
         }

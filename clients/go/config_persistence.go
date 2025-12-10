@@ -73,6 +73,10 @@ type ClientConfig struct {
 	SerialVFO         string `json:"serialVFO,omitempty"` // "A" or "B"
 	SerialSyncToRig   bool   `json:"serialSyncToRig"`     // Sync SDR frequency changes to rig
 	SerialSyncFromRig bool   `json:"serialSyncFromRig"`   // Sync rig frequency changes to SDR
+	// MIDI control settings
+	MIDIEnabled    bool                   `json:"midiEnabled"`
+	MIDIDeviceName string                 `json:"midiDeviceName,omitempty"`
+	MIDIMappings   map[string]MIDIMapping `json:"midiMappings,omitempty"` // Stored as string keys for JSON compatibility
 }
 
 // ConfigManager handles loading and saving configuration
@@ -113,32 +117,35 @@ func getDefaultConfig() ClientConfig {
 		AudioPreviewMuted:   true,  // Muted by default
 		AutoConnect:         false, // Disabled by default
 		APIPort:             8090,
-		FIFOPath:            "",          // No FIFO by default
-		FIFOEnabled:         false,       // FIFO disabled by default
-		UDPHost:             "127.0.0.1", // Default UDP host
-		UDPPort:             8888,        // Default UDP port
-		UDPEnabled:          false,       // UDP disabled by default
-		PortAudioEnabled:    false,       // PortAudio disabled by default
-		PortAudioDevice:     -1,          // Auto-select device
-		RadioControlType:    "none",      // No radio control by default
-		FlrigEnabled:        false,       // flrig disabled by default
-		FlrigHost:           "localhost", // Default flrig host
-		FlrigPort:           12345,       // Default flrig port
-		FlrigVFO:            "A",         // Default to VFO A
-		FlrigSyncToRig:      true,        // Sync SDR->rig by default
-		FlrigSyncFromRig:    true,        // Sync rig->SDR by default
-		RigctlEnabled:       false,       // rigctl disabled by default
-		RigctlHost:          "localhost", // Default rigctld host
-		RigctlPort:          4532,        // Default rigctld port
-		RigctlVFO:           "VFOA",      // Default to VFO A
-		RigctlSyncToRig:     true,        // Sync SDR->rig by default
-		RigctlSyncFromRig:   true,        // Sync rig->SDR by default
-		SerialEnabled:       false,       // serial disabled by default
-		SerialPort:          "",          // No default serial port
-		SerialBaudrate:      57600,       // Default baudrate for TS-480
-		SerialVFO:           "A",         // Default to VFO A
-		SerialSyncToRig:     true,        // Sync SDR->rig by default
-		SerialSyncFromRig:   true,        // Sync rig->SDR by default
+		FIFOPath:            "",                           // No FIFO by default
+		FIFOEnabled:         false,                        // FIFO disabled by default
+		UDPHost:             "127.0.0.1",                  // Default UDP host
+		UDPPort:             8888,                         // Default UDP port
+		UDPEnabled:          false,                        // UDP disabled by default
+		PortAudioEnabled:    false,                        // PortAudio disabled by default
+		PortAudioDevice:     -1,                           // Auto-select device
+		RadioControlType:    "none",                       // No radio control by default
+		FlrigEnabled:        false,                        // flrig disabled by default
+		FlrigHost:           "localhost",                  // Default flrig host
+		FlrigPort:           12345,                        // Default flrig port
+		FlrigVFO:            "A",                          // Default to VFO A
+		FlrigSyncToRig:      true,                         // Sync SDR->rig by default
+		FlrigSyncFromRig:    true,                         // Sync rig->SDR by default
+		RigctlEnabled:       false,                        // rigctl disabled by default
+		RigctlHost:          "localhost",                  // Default rigctld host
+		RigctlPort:          4532,                         // Default rigctld port
+		RigctlVFO:           "VFOA",                       // Default to VFO A
+		RigctlSyncToRig:     true,                         // Sync SDR->rig by default
+		RigctlSyncFromRig:   true,                         // Sync rig->SDR by default
+		SerialEnabled:       false,                        // serial disabled by default
+		SerialPort:          "",                           // No default serial port
+		SerialBaudrate:      57600,                        // Default baudrate for TS-480
+		SerialVFO:           "A",                          // Default to VFO A
+		SerialSyncToRig:     true,                         // Sync SDR->rig by default
+		SerialSyncFromRig:   true,                         // Sync rig->SDR by default
+		MIDIEnabled:         false,                        // MIDI disabled by default
+		MIDIDeviceName:      "",                           // No default MIDI device
+		MIDIMappings:        make(map[string]MIDIMapping), // Empty mappings by default
 	}
 }
 
@@ -397,6 +404,41 @@ func (cm *ConfigManager) LoadInstance(name string) error {
 	cm.mu.Lock()
 
 	return err
+}
+
+// UpdateMIDIConfig updates MIDI configuration
+func (cm *ConfigManager) UpdateMIDIConfig(enabled bool, deviceName string, mappings map[MIDIKey]MIDIMapping) error {
+	return cm.Update(func(c *ClientConfig) {
+		c.MIDIEnabled = enabled
+		c.MIDIDeviceName = deviceName
+
+		// Convert MIDIKey map to string map for JSON compatibility
+		c.MIDIMappings = make(map[string]MIDIMapping, len(mappings))
+		for key, mapping := range mappings {
+			c.MIDIMappings[key.String()] = mapping
+		}
+	})
+}
+
+// GetMIDIConfig returns MIDI configuration
+func (cm *ConfigManager) GetMIDIConfig() (bool, string, map[MIDIKey]MIDIMapping) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	// Convert string map back to MIDIKey map
+	mappings := make(map[MIDIKey]MIDIMapping, len(cm.config.MIDIMappings))
+	for keyStr, mapping := range cm.config.MIDIMappings {
+		// Parse the key string (format: "CC 25 (Ch 1)" or similar)
+		// We need to extract type, channel, data1 from the stored mapping
+		// For now, we'll store the raw key string and parse it when needed
+		// This is a simplified approach - in production you'd want proper serialization
+		var key MIDIKey
+		// Parse format like "176:0:25" (type:channel:data1)
+		fmt.Sscanf(keyStr, "%d:%d:%d", &key.Type, &key.Channel, &key.Data1)
+		mappings[key] = mapping
+	}
+
+	return cm.config.MIDIEnabled, cm.config.MIDIDeviceName, mappings
 }
 
 // Helper function to create int pointer

@@ -33,6 +33,9 @@ type APIServer struct {
 func NewAPIServer(manager *WebSocketManager, configManager *ConfigManager, port int) *APIServer {
 	router := mux.NewRouter()
 
+	// Set the config manager on the WebSocket manager
+	manager.SetConfigManager(configManager)
+
 	// Initialize instance discovery
 	instanceDiscovery := NewInstanceDiscovery()
 	if err := instanceDiscovery.StartLocalDiscovery(); err != nil {
@@ -112,6 +115,19 @@ func (s *APIServer) setupRoutes() {
 	api.HandleFunc("/radio/serial/vfo", s.handleSerialVFO).Methods("POST", "OPTIONS")
 	api.HandleFunc("/radio/serial/sync", s.handleSerialSync).Methods("POST", "OPTIONS")
 	api.HandleFunc("/radio/serial/ports", s.handleSerialPorts).Methods("GET", "OPTIONS")
+
+	// MIDI control endpoints
+	api.HandleFunc("/midi/devices", s.handleMIDIDevices).Methods("GET", "OPTIONS")
+	api.HandleFunc("/midi/connect", s.handleMIDIConnect).Methods("POST", "OPTIONS")
+	api.HandleFunc("/midi/disconnect", s.handleMIDIDisconnect).Methods("POST", "OPTIONS")
+	api.HandleFunc("/midi/status", s.handleMIDIStatus).Methods("GET", "OPTIONS")
+	api.HandleFunc("/midi/mappings", s.handleMIDIMappings).Methods("GET", "OPTIONS")
+	api.HandleFunc("/midi/mappings", s.handleMIDIAddMapping).Methods("POST", "OPTIONS")
+	api.HandleFunc("/midi/mappings/{type}/{channel}/{data1}", s.handleMIDIDeleteMapping).Methods("DELETE", "OPTIONS")
+	api.HandleFunc("/midi/learn/start", s.handleMIDILearnStart).Methods("POST", "OPTIONS")
+	api.HandleFunc("/midi/learn/stop", s.handleMIDILearnStop).Methods("POST", "OPTIONS")
+	api.HandleFunc("/midi/config/save", s.handleMIDISaveConfig).Methods("POST", "OPTIONS")
+	api.HandleFunc("/midi/config/load", s.handleMIDILoadConfig).Methods("POST", "OPTIONS")
 
 	// Saved instances management endpoints
 	api.HandleFunc("/instances/saved", s.handleSavedInstances).Methods("GET", "OPTIONS")
@@ -1535,6 +1551,229 @@ func (s *APIServer) handleInstanceDescription(w http.ResponseWriter, r *http.Req
 	}
 
 	respondJSON(w, http.StatusOK, description)
+}
+
+// MIDI Control Handlers
+
+// handleMIDIDevices handles GET /api/midi/devices
+func (s *APIServer) handleMIDIDevices(w http.ResponseWriter, r *http.Request) {
+	devices, err := s.manager.GetMIDIDevices()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to get MIDI devices", err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"devices": devices,
+	})
+}
+
+// handleMIDIConnect handles POST /api/midi/connect
+func (s *APIServer) handleMIDIConnect(w http.ResponseWriter, r *http.Request) {
+	var req MIDIConnectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.DeviceName == "" {
+		respondError(w, http.StatusBadRequest, "Device name is required", "")
+		return
+	}
+
+	// Connect to MIDI device
+	if err := s.manager.ConnectMIDI(req.DeviceName); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to connect to MIDI device", err.Error())
+		return
+	}
+
+	respondSuccess(w, fmt.Sprintf("Connected to MIDI device: %s", req.DeviceName))
+}
+
+// handleMIDIDisconnect handles POST /api/midi/disconnect
+func (s *APIServer) handleMIDIDisconnect(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsMIDIConnected() {
+		respondError(w, http.StatusConflict, "MIDI not connected", "")
+		return
+	}
+
+	if err := s.manager.DisconnectMIDI(); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to disconnect from MIDI device", err.Error())
+		return
+	}
+
+	respondSuccess(w, "Disconnected from MIDI device")
+}
+
+// handleMIDIStatus handles GET /api/midi/status
+func (s *APIServer) handleMIDIStatus(w http.ResponseWriter, r *http.Request) {
+	status := s.manager.GetMIDIStatus()
+	respondJSON(w, http.StatusOK, status)
+}
+
+// handleMIDIMappings handles GET /api/midi/mappings
+func (s *APIServer) handleMIDIMappings(w http.ResponseWriter, r *http.Request) {
+	mappings := s.manager.GetMIDIMappings()
+
+	// Convert map to array for JSON response
+	mappingsList := make([]map[string]interface{}, 0, len(mappings))
+	for key, mapping := range mappings {
+		mappingsList = append(mappingsList, map[string]interface{}{
+			"key":        key,
+			"function":   mapping.Function,
+			"throttleMs": mapping.ThrottleMS,
+			"mode":       mapping.Mode,
+		})
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"mappings": mappingsList,
+	})
+}
+
+// handleMIDIAddMapping handles POST /api/midi/mappings
+func (s *APIServer) handleMIDIAddMapping(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsMIDIConnected() {
+		respondError(w, http.StatusConflict, "MIDI not connected", "")
+		return
+	}
+
+	var req MIDIAddMappingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	// Validate required fields
+	if req.Function == "" {
+		respondError(w, http.StatusBadRequest, "Function is required", "")
+		return
+	}
+
+	// Create MIDI key and mapping
+	key := MIDIKey{
+		Type:    req.Type,
+		Channel: req.Channel,
+		Data1:   req.Data1,
+	}
+
+	mapping := MIDIMapping{
+		Function:   req.Function,
+		ThrottleMS: req.ThrottleMS,
+		Mode:       req.Mode,
+	}
+
+	s.manager.AddMIDIMapping(key, mapping)
+
+	respondSuccess(w, fmt.Sprintf("Added MIDI mapping: %s → %s", key.String(), req.Function))
+}
+
+// handleMIDIDeleteMapping handles DELETE /api/midi/mappings/{type}/{channel}/{data1}
+func (s *APIServer) handleMIDIDeleteMapping(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsMIDIConnected() {
+		respondError(w, http.StatusConflict, "MIDI not connected", "")
+		return
+	}
+
+	vars := mux.Vars(r)
+
+	// Parse parameters
+	var midiType, channel, data1 uint8
+	fmt.Sscanf(vars["type"], "%d", &midiType)
+	fmt.Sscanf(vars["channel"], "%d", &channel)
+	fmt.Sscanf(vars["data1"], "%d", &data1)
+
+	key := MIDIKey{
+		Type:    midiType,
+		Channel: channel,
+		Data1:   data1,
+	}
+
+	s.manager.DeleteMIDIMapping(key)
+
+	respondSuccess(w, fmt.Sprintf("Deleted MIDI mapping: %s", key.String()))
+}
+
+// handleMIDILearnStart handles POST /api/midi/learn/start
+func (s *APIServer) handleMIDILearnStart(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsMIDIConnected() {
+		respondError(w, http.StatusConflict, "MIDI not connected", "")
+		return
+	}
+
+	var req MIDILearnRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.Function == "" {
+		respondError(w, http.StatusBadRequest, "Function is required", "")
+		return
+	}
+
+	// Create callback to broadcast learn mode updates via WebSocket
+	callback := func(response MIDILearnResponse) {
+		// Broadcast to all WebSocket subscribers
+		s.manager.broadcastToSubscribers(map[string]interface{}{
+			"type":    response.Type,
+			"control": response.Control,
+			"message": response.Message,
+		})
+	}
+
+	// Start learn mode with callback
+	if err := s.manager.StartMIDILearnMode(req.Function, req.MapBoth, callback); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to start learn mode", err.Error())
+		return
+	}
+
+	respondSuccess(w, fmt.Sprintf("Started learn mode for function: %s", req.Function))
+}
+
+// handleMIDILearnStop handles POST /api/midi/learn/stop
+func (s *APIServer) handleMIDILearnStop(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsMIDIConnected() {
+		respondError(w, http.StatusConflict, "MIDI not connected", "")
+		return
+	}
+
+	if err := s.manager.StopMIDILearnMode(); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to stop learn mode", err.Error())
+		return
+	}
+
+	respondSuccess(w, "Stopped learn mode")
+}
+
+// handleMIDISaveConfig handles POST /api/midi/config/save
+func (s *APIServer) handleMIDISaveConfig(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsMIDIConnected() {
+		respondError(w, http.StatusConflict, "MIDI not connected", "")
+		return
+	}
+
+	if err := s.manager.SaveMIDIConfig(); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to save MIDI config", err.Error())
+		return
+	}
+
+	respondSuccess(w, "MIDI configuration saved")
+}
+
+// handleMIDILoadConfig handles POST /api/midi/config/load
+func (s *APIServer) handleMIDILoadConfig(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsMIDIConnected() {
+		respondError(w, http.StatusConflict, "MIDI not connected", "")
+		return
+	}
+
+	if err := s.manager.LoadMIDIConfig(); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to load MIDI config", err.Error())
+		return
+	}
+
+	respondSuccess(w, "MIDI configuration loaded")
 }
 
 // Helper functions

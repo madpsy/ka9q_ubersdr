@@ -9,6 +9,7 @@ require (
 	github.com/gorilla/websocket v1.5.1
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12
+	gitlab.com/gomidi/midi/v2 v2.1.7
 	go.bug.st/serial v1.6.2
 )
 

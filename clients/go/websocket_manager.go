@@ -54,6 +54,10 @@ type WebSocketManager struct {
 	rigctlSyncToRig     bool                                 // Sync SDR frequency changes to rig
 	rigctlSyncFromRig   bool                                 // Sync rig frequency changes to SDR
 	serialServer        *SerialCATServer                     // serial CAT server
+	configManager       *ConfigManager                       // Configuration manager
+	midiController      *MIDIController                      // MIDI controller
+	midiPolling         bool                                 // Whether MIDI polling is active
+	midiPollCancel      context.CancelFunc                   // Cancel function for MIDI polling
 
 	// Auto-reconnect state
 	autoReconnect          bool
@@ -2264,4 +2268,227 @@ func (m *WebSocketManager) GetNoiseFloor() (map[string]interface{}, error) {
 
 	log.Printf("Fetched noise floor data from SDR server")
 	return noiseFloor, nil
+}
+
+// SetConfigManager sets the configuration manager for the WebSocketManager
+func (m *WebSocketManager) SetConfigManager(configManager *ConfigManager) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.configManager = configManager
+}
+
+// MIDI Control Methods
+
+// ConnectMIDI connects to a MIDI device
+func (m *WebSocketManager) ConnectMIDI(deviceName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Disconnect existing MIDI controller if any
+	if m.midiController != nil {
+		m.stopMIDIPolling()
+		m.midiController.Disconnect()
+		m.midiController = nil
+	}
+
+	// Create new MIDI controller
+	m.midiController = NewMIDIController(m, m.configManager)
+
+	// Connect to MIDI device
+	if err := m.midiController.Connect(deviceName); err != nil {
+		m.midiController = nil
+		return fmt.Errorf("failed to connect to MIDI device: %w", err)
+	}
+
+	log.Printf("Connected to MIDI device: %s", deviceName)
+
+	// Start polling goroutine
+	m.startMIDIPolling()
+
+	return nil
+}
+
+// DisconnectMIDI disconnects from the MIDI device
+func (m *WebSocketManager) DisconnectMIDI() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.midiController == nil {
+		return fmt.Errorf("MIDI not connected")
+	}
+
+	m.stopMIDIPolling()
+	m.midiController.Disconnect()
+	m.midiController = nil
+
+	log.Printf("Disconnected from MIDI device")
+	return nil
+}
+
+// IsMIDIConnected returns whether MIDI is connected
+func (m *WebSocketManager) IsMIDIConnected() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.midiController != nil && m.midiController.connected
+}
+
+// GetMIDIDevices returns a list of available MIDI devices
+func (m *WebSocketManager) GetMIDIDevices() ([]MIDIDevice, error) {
+	// Create temporary controller to list devices
+	controller := &MIDIController{}
+	return controller.ListDevices()
+}
+
+// GetMIDIStatus returns the current MIDI status
+func (m *WebSocketManager) GetMIDIStatus() MIDIStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.midiController == nil {
+		return MIDIStatus{
+			Connected: false,
+		}
+	}
+
+	return m.midiController.GetStatus()
+}
+
+// GetMIDIMappings returns the current MIDI mappings
+func (m *WebSocketManager) GetMIDIMappings() map[MIDIKey]MIDIMapping {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.midiController == nil {
+		return make(map[MIDIKey]MIDIMapping)
+	}
+
+	return m.midiController.GetMappings()
+}
+
+// AddMIDIMapping adds a new MIDI mapping
+func (m *WebSocketManager) AddMIDIMapping(key MIDIKey, mapping MIDIMapping) {
+	m.mu.RLock()
+	controller := m.midiController
+	m.mu.RUnlock()
+
+	if controller == nil {
+		log.Printf("Cannot add MIDI mapping: MIDI not connected")
+		return
+	}
+
+	controller.AddMapping(key, mapping)
+}
+
+// DeleteMIDIMapping removes a MIDI mapping
+func (m *WebSocketManager) DeleteMIDIMapping(key MIDIKey) {
+	m.mu.RLock()
+	controller := m.midiController
+	m.mu.RUnlock()
+
+	if controller == nil {
+		log.Printf("Cannot delete MIDI mapping: MIDI not connected")
+		return
+	}
+
+	controller.mu.Lock()
+	delete(controller.mappings, key)
+	controller.mu.Unlock()
+}
+
+// StartMIDILearnMode starts MIDI learn mode
+func (m *WebSocketManager) StartMIDILearnMode(function string, isEncoder bool, callback func(MIDILearnResponse)) error {
+	m.mu.RLock()
+	controller := m.midiController
+	m.mu.RUnlock()
+
+	if controller == nil {
+		return fmt.Errorf("MIDI not connected")
+	}
+
+	controller.StartLearnMode(function, isEncoder, callback)
+	return nil
+}
+
+// StopMIDILearnMode stops MIDI learn mode
+func (m *WebSocketManager) StopMIDILearnMode() error {
+	m.mu.RLock()
+	controller := m.midiController
+	m.mu.RUnlock()
+
+	if controller == nil {
+		return fmt.Errorf("MIDI not connected")
+	}
+
+	controller.StopLearnMode()
+	return nil
+}
+
+// SaveMIDIConfig saves the MIDI configuration to file
+func (m *WebSocketManager) SaveMIDIConfig() error {
+	m.mu.RLock()
+	controller := m.midiController
+	m.mu.RUnlock()
+
+	if controller == nil {
+		return fmt.Errorf("MIDI not connected")
+	}
+
+	return controller.SaveConfig()
+}
+
+// LoadMIDIConfig loads the MIDI configuration from file
+func (m *WebSocketManager) LoadMIDIConfig() error {
+	m.mu.RLock()
+	controller := m.midiController
+	m.mu.RUnlock()
+
+	if controller == nil {
+		return fmt.Errorf("MIDI not connected")
+	}
+
+	return controller.LoadConfig()
+}
+
+// startMIDIPolling starts the MIDI polling goroutine
+func (m *WebSocketManager) startMIDIPolling() {
+	if m.midiPolling {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.midiPollCancel = cancel
+	m.midiPolling = true
+
+	go func() {
+		log.Printf("MIDI polling goroutine started")
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Printf("MIDI polling goroutine stopped (context done)")
+				return
+			default:
+				// MIDI messages are handled via callbacks in the controller
+				// This goroutine just keeps the context alive
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}()
+
+	log.Printf("Started MIDI polling")
+}
+
+// stopMIDIPolling stops the MIDI polling goroutine
+func (m *WebSocketManager) stopMIDIPolling() {
+	if !m.midiPolling {
+		return
+	}
+
+	if m.midiPollCancel != nil {
+		m.midiPollCancel()
+		m.midiPollCancel = nil
+	}
+
+	m.midiPolling = false
+	log.Printf("Stopped MIDI polling")
 }

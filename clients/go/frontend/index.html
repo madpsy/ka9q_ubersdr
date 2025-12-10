@@ -470,6 +470,144 @@
                 </div>
             </section>
 
+            <!-- MIDI Control Panel -->
+            <section class="panel">
+                <h2>MIDI Control</h2>
+                <div class="info-box">
+                    <p><strong>Note:</strong> Connect a MIDI controller to control the SDR with physical knobs, buttons, and faders. Map MIDI controls to radio functions using learn mode.</p>
+                </div>
+                
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="midi-enabled">
+                        <span>Enable MIDI Control</span>
+                    </label>
+                </div>
+
+                <div id="midi-controls" style="display: none;">
+                    <h3 style="margin-top: 15px;">MIDI Device</h3>
+                    <div class="form-group">
+                        <label for="midi-device-select">MIDI Input Device:</label>
+                        <select id="midi-device-select">
+                            <option value="">-- Select MIDI Device --</option>
+                        </select>
+                        <button id="midi-refresh-devices-btn" class="btn btn-small" style="margin-top: 5px;">Refresh Devices</button>
+                    </div>
+
+                    <div class="button-group" style="margin-top: 15px;">
+                        <button id="midi-connect-btn" class="btn btn-primary" disabled>Connect to MIDI</button>
+                        <button id="midi-disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                    </div>
+
+                    <div id="midi-status-display" style="display: none; margin-top: 15px;">
+                        <h4>MIDI Status</h4>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="label">Connection:</span>
+                                <span id="midi-connection-status" class="status-badge disconnected">Disconnected</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Device:</span>
+                                <span id="midi-device-name">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Mappings:</span>
+                                <span id="midi-mapping-count">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Learn Mode:</span>
+                                <span id="midi-learn-status" class="status-badge">Inactive</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="midi-mappings-section" style="display: none; margin-top: 20px;">
+                        <h4>MIDI Mappings</h4>
+                        <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
+                            <button id="midi-learn-btn" class="btn btn-primary">Learn New Mapping</button>
+                            <button id="midi-stop-learn-btn" class="btn btn-secondary" disabled style="display: none;">Stop Learning</button>
+                            <button id="midi-clear-mappings-btn" class="btn btn-secondary">Clear All Mappings</button>
+                        </div>
+
+                        <div id="midi-learn-panel" style="display: none; margin-bottom: 15px; padding: 15px; background: #e3f2fd; border-radius: 4px; border-left: 4px solid #2196F3;">
+                            <h5 style="margin-top: 0;">Learn Mode Active</h5>
+                            <div class="form-group">
+                                <label for="midi-learn-function">Select Function to Map:</label>
+                                <select id="midi-learn-function">
+                                    <option value="">-- Select Function --</option>
+                                    <optgroup label="Frequency">
+                                        <option value="Frequency: Step Up">Step Up</option>
+                                        <option value="Frequency: Step Down">Step Down</option>
+                                        <option value="Frequency: Encoder (10 Hz)">Encoder (10 Hz)</option>
+                                        <option value="Frequency: Encoder (100 Hz)">Encoder (100 Hz)</option>
+                                        <option value="Frequency: Encoder (500 Hz)">Encoder (500 Hz)</option>
+                                        <option value="Frequency: Encoder (1 kHz)">Encoder (1 kHz)</option>
+                                        <option value="Frequency: Encoder (10 kHz)">Encoder (10 kHz)</option>
+                                    </optgroup>
+                                    <optgroup label="Mode">
+                                        <option value="Mode: USB">USB</option>
+                                        <option value="Mode: LSB">LSB</option>
+                                        <option value="Mode: AM">AM</option>
+                                        <option value="Mode: FM">FM</option>
+                                        <option value="Mode: CW">CW</option>
+                                        <option value="Mode: Next">Next Mode</option>
+                                        <option value="Mode: Previous">Previous Mode</option>
+                                    </optgroup>
+                                    <optgroup label="Bands">
+                                        <option value="Band: 160m">160m</option>
+                                        <option value="Band: 80m">80m</option>
+                                        <option value="Band: 60m">60m</option>
+                                        <option value="Band: 40m">40m</option>
+                                        <option value="Band: 30m">30m</option>
+                                        <option value="Band: 20m">20m</option>
+                                        <option value="Band: 17m">17m</option>
+                                        <option value="Band: 15m">15m</option>
+                                        <option value="Band: 12m">12m</option>
+                                        <option value="Band: 10m">10m</option>
+                                    </optgroup>
+                                    <optgroup label="Bandwidth">
+                                        <option value="Bandwidth: Low">Bandwidth Low</option>
+                                        <option value="Bandwidth: High">Bandwidth High</option>
+                                    </optgroup>
+                                    <optgroup label="Other">
+                                        <option value="NR2: Toggle">NR2 Toggle</option>
+                                        <option value="Mute: Toggle">Mute Toggle</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label>
+                                    <input type="checkbox" id="midi-learn-map-both">
+                                    <span>Map both press and release (for buttons)</span>
+                                </label>
+                            </div>
+                            <p id="midi-learn-message" style="margin: 10px 0; font-weight: 500; color: #1976D2;">
+                                Select a function above, then press/turn a control on your MIDI device...
+                            </p>
+                        </div>
+
+                        <div class="table-container">
+                            <table id="midi-mappings-table" class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>MIDI Control</th>
+                                        <th>Function</th>
+                                        <th>Throttle</th>
+                                        <th>Mode</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="midi-mappings-tbody">
+                                    <tr>
+                                        <td colspan="5" style="text-align: center; color: #999;">No mappings configured. Use Learn Mode to add mappings.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Resampling Settings Panel -->
             <section class="panel">
                 <h2>Audio Resampling</h2>
@@ -637,6 +775,7 @@
 
     <script src="audio-visualizer.js"></script>
     <script src="spectrum-display.js"></script>
+    <script src="midi-control.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

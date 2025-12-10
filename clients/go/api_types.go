@@ -148,6 +148,27 @@ type SerialSyncRequest struct {
 	SyncFromRig bool `json:"syncFromRig"` // Sync rig frequency changes to SDR
 }
 
+// MIDIConnectRequest represents a request to connect to a MIDI device
+type MIDIConnectRequest struct {
+	DeviceName string `json:"deviceName"`
+}
+
+// MIDILearnRequest represents a request to start MIDI learn mode
+type MIDILearnRequest struct {
+	Function string `json:"function"` // Function to learn
+	MapBoth  bool   `json:"mapBoth"`  // Map both press and release
+}
+
+// MIDIAddMappingRequest represents a request to add a MIDI mapping
+type MIDIAddMappingRequest struct {
+	Type       uint8  `json:"type"`       // MIDI message type (0x90=Note On, 0x80=Note Off, 0xB0=CC)
+	Channel    uint8  `json:"channel"`    // MIDI channel (0-15)
+	Data1      uint8  `json:"data1"`      // Note number or CC number
+	Function   string `json:"function"`   // Function to execute
+	ThrottleMS int    `json:"throttleMs"` // Throttle time in milliseconds
+	Mode       string `json:"mode"`       // Throttle mode: "debounce" or "rate_limit"
+}
+
 // API Response Types
 
 // StatusResponse represents the current client status

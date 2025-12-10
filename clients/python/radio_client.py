@@ -1402,8 +1402,9 @@ class RadioClient:
                 ping_interval=None,
                 additional_headers={'User-Agent': 'UberSDR Client 1.0 (python)'}
             ) as websocket:
-                # Store websocket reference for GUI access
+                # Store websocket reference and event loop for GUI access and radio control
                 self.ws = websocket
+                self._event_loop = asyncio.get_event_loop()
                 self._log("Connected!")
 
                 # Reset retry count on successful connection
@@ -1430,6 +1431,22 @@ class RadioClient:
                 # Start keepalive task
                 keepalive_task = asyncio.create_task(self.send_keepalive(websocket))
                 
+                # Start radio polling task if radio control is enabled
+                radio_poll_task = None
+                if hasattr(self, 'radio_control') and self.radio_control:
+                    if hasattr(self, 'radio_sync_direction') and self.radio_sync_direction in ('rig-to-sdr', 'bidirectional'):
+                        async def poll_radio():
+                            """Poll radio for changes."""
+                            while self.running:
+                                try:
+                                    self.radio_control.poll()
+                                    await asyncio.sleep(0.1)  # Poll every 100ms
+                                except Exception as e:
+                                    print(f"Radio poll error: {e}", file=sys.stderr)
+                                    break
+
+                        radio_poll_task = asyncio.create_task(poll_radio())
+
                 # Receive and process messages
                 while self.running:
                     try:
@@ -1448,13 +1465,22 @@ class RadioClient:
                     await keepalive_task
                 except asyncio.CancelledError:
                     pass
+
+                # Cancel radio polling task if it exists
+                if radio_poll_task:
+                    radio_poll_task.cancel()
+                    try:
+                        await radio_poll_task
+                    except asyncio.CancelledError:
+                        pass
                 
         except Exception as e:
             print(f"Connection error: {e}", file=sys.stderr)
             return 1
         finally:
-            # Clear websocket reference
+            # Clear websocket and event loop references
             self.ws = None
+            self._event_loop = None
             await self.cleanup()
         
         return 0
@@ -2375,14 +2401,26 @@ Examples:
                 if last_rig_freq != freq_hz and abs(freq_hz - last_sdr_freq) > 100:
                     last_rig_freq = freq_hz
                     last_sdr_freq = freq_hz
-                    # Update SDR frequency via WebSocket
-                    if client.ws:
-                        asyncio.create_task(client.ws.send(json.dumps({
-                            'type': 'set_frequency',
-                            'frequency': freq_hz
-                        })))
-                        print(f"Radio → SDR: {freq_hz} Hz", file=sys.stderr)
-        
+                    # Update SDR frequency via WebSocket (use 'tune' message type like GUI does)
+                    if client.ws and hasattr(client, '_event_loop') and client._event_loop:
+                        # Schedule the coroutine and get the future
+                        future = asyncio.run_coroutine_threadsafe(
+                            client.ws.send(json.dumps({
+                                'type': 'tune',
+                                'frequency': freq_hz,
+                                'mode': client.mode,
+                                'bandwidthLow': client.bandwidth_low,
+                                'bandwidthHigh': client.bandwidth_high
+                            })),
+                            client._event_loop
+                        )
+                        # Wait for completion with timeout to ensure it actually sends
+                        try:
+                            future.result(timeout=1.0)
+                            print(f"Radio → SDR: {freq_hz} Hz", file=sys.stderr)
+                        except Exception as e:
+                            print(f"Failed to send frequency: {e}", file=sys.stderr)
+
         def on_rig_mode_change(mode: str):
             """Called when rig mode changes."""
             nonlocal last_rig_mode, last_sdr_mode
@@ -2393,13 +2431,27 @@ Examples:
                     sdr_mode = radio_to_sdr_mode.get(mode.upper(), 'usb')
                     if sdr_mode != last_sdr_mode:
                         last_sdr_mode = sdr_mode
-                        # Update SDR mode via WebSocket
-                        if client.ws:
-                            asyncio.create_task(client.ws.send(json.dumps({
-                                'type': 'set_mode',
-                                'mode': sdr_mode
-                            })))
-                            print(f"Radio → SDR: {mode} → {sdr_mode}", file=sys.stderr)
+                        # Update client's mode state
+                        client.mode = sdr_mode
+                        # Update SDR mode via WebSocket (use 'tune' message type like GUI does)
+                        if client.ws and hasattr(client, '_event_loop') and client._event_loop:
+                            # Schedule the coroutine and get the future
+                            future = asyncio.run_coroutine_threadsafe(
+                                client.ws.send(json.dumps({
+                                    'type': 'tune',
+                                    'frequency': client.frequency,
+                                    'mode': sdr_mode,
+                                    'bandwidthLow': client.bandwidth_low,
+                                    'bandwidthHigh': client.bandwidth_high
+                                })),
+                                client._event_loop
+                            )
+                            # Wait for completion with timeout to ensure it actually sends
+                            try:
+                                future.result(timeout=1.0)
+                                print(f"Radio → SDR: {mode} → {sdr_mode}", file=sys.stderr)
+                            except Exception as e:
+                                print(f"Failed to send mode: {e}", file=sys.stderr)
         
         def on_rig_error(error: str):
             """Called when radio control error occurs."""
@@ -2413,24 +2465,24 @@ Examples:
                 error_callback=on_rig_error
             )
             print(f"Radio sync: {sync_direction}", file=sys.stderr)
-        
+
         # Set up SDR-to-rig sync by modifying client's handle_message
         if sync_direction in ('sdr-to-rig', 'bidirectional'):
             original_handle_message = client.handle_message
-            
+
             async def handle_message_with_sync(message: dict):
                 """Wrapper to sync SDR changes to rig."""
                 nonlocal last_sdr_freq, last_sdr_mode, last_rig_freq, last_rig_mode
-                
+
                 # Call original handler
                 await original_handle_message(message)
-                
+
                 # Check for frequency/mode changes in status messages
                 msg_type = message.get('type')
                 if msg_type == 'status':
                     freq = message.get('frequency')
                     mode = message.get('mode', '').lower()
-                    
+
                     # Sync frequency to rig
                     if freq and freq != last_sdr_freq:
                         # Avoid feedback loop
@@ -2438,7 +2490,7 @@ Examples:
                             last_sdr_freq = freq
                             radio_control.set_frequency(freq)
                             print(f"SDR → Radio: {freq} Hz", file=sys.stderr)
-                    
+
                     # Sync mode to rig
                     if mode and mode != last_sdr_mode:
                         radio_mode = sdr_to_radio_mode.get(mode, 'USB')
@@ -2447,23 +2499,23 @@ Examples:
                             last_sdr_mode = mode
                             radio_control.set_mode(radio_mode)
                             print(f"SDR → Radio: {mode} → {radio_mode}", file=sys.stderr)
-            
+
             client.handle_message = handle_message_with_sync
-        
-        # Start polling for rig changes (for rig-to-SDR sync)
-        if sync_direction in ('rig-to-sdr', 'bidirectional'):
-            async def poll_radio():
-                """Poll radio for changes."""
-                while client.running:
-                    try:
-                        radio_control.poll()
-                        await asyncio.sleep(0.1)  # Poll every 100ms
-                    except Exception as e:
-                        print(f"Radio poll error: {e}", file=sys.stderr)
-                        break
-            
-            # Start polling task
-            asyncio.create_task(poll_radio())
+
+            # Perform initial sync from SDR to rig
+            # This ensures the rig is set to the initial frequency/mode when starting
+            print(f"Initial sync: Setting radio to {args.frequency} Hz, {args.mode}", file=sys.stderr)
+            radio_mode = sdr_to_radio_mode.get(args.mode, 'USB')
+            radio_control.set_frequency(args.frequency)
+            radio_control.set_mode(radio_mode)
+            last_sdr_freq = args.frequency
+            last_sdr_mode = args.mode
+            last_rig_freq = args.frequency
+            last_rig_mode = radio_mode
+
+        # Store radio control and sync settings on client for later use
+        client.radio_control = radio_control
+        client.radio_sync_direction = sync_direction
     
     # Setup signal handler for graceful shutdown
     def signal_handler(sig, frame):

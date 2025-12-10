@@ -10,14 +10,14 @@ A command-line Go client for connecting to the ka9q_ubersdr WebSocket server to 
 - Configurable frequency and bandwidth
 - **NR2 Spectral Subtraction Noise Reduction**: FFT-based noise reduction with adaptive learning
 - Multiple output options:
-  - **PipeWire**: Real-time audio playback via PipeWire
+  - **PortAudio**: Cross-platform real-time audio playback (Windows, macOS, Linux)
   - **stdout**: Raw PCM output to stdout (for piping to other tools)
   - **WAV file**: Record to PCM WAV file with optional time limit
 
 ## Requirements
 
 - Go 1.21 or later
-- For PipeWire output: `pipewire-utils` package (provides `pw-play`)
+- For PortAudio output: PortAudio library (cross-platform audio I/O)
 
 ## Installation
 
@@ -41,25 +41,48 @@ go build -o radio_client
 
 ### System Requirements
 
-For PipeWire output, install pipewire-utils:
+For PortAudio output, install the PortAudio development library:
+
+**Linux:**
 ```bash
 # Debian/Ubuntu
-sudo apt install pipewire-utils
+sudo apt install portaudio19-dev
 
-# Fedora
-sudo dnf install pipewire-utils
+# Fedora/RHEL
+sudo dnf install portaudio-devel
 
 # Arch
-sudo pacman -S pipewire
+sudo pacman -S portaudio
 ```
+
+**macOS:**
+```bash
+# Using Homebrew
+brew install portaudio
+```
+
+**Windows:**
+PortAudio is typically bundled with the Go bindings. If you encounter issues:
+- Download pre-built binaries from [PortAudio website](http://www.portaudio.com/)
+- Or use MSYS2: `pacman -S mingw-w64-x86_64-portaudio`
 
 ## Usage
 
 ### Basic Examples
 
-Listen to 14.074 MHz USB via PipeWire:
+List available audio devices:
+```bash
+./radio_client --list-devices
+```
+
+Listen to 14.074 MHz USB via PortAudio (default device):
 ```bash
 ./radio_client -f 14074000 -m usb
+```
+
+Listen using a specific audio device:
+```bash
+./radio_client -f 14074000 -m usb --audio-device 2
 ```
 
 Connect using full WebSocket URL:
@@ -101,7 +124,11 @@ Options:
   -b string
         Bandwidth in format low:high (e.g., -5000:5000)
   -o string
-        Output mode (pipewire, stdout, wav) (default "pipewire")
+        Output mode (portaudio, stdout, wav) (default "portaudio")
+  --audio-device int
+        PortAudio device index (-1 for default, use --list-devices to see available devices) (default -1)
+  --list-devices
+        List available audio output devices and exit
   -w string
         WAV file path (required when output=wav)
   -t float
@@ -151,11 +178,47 @@ If not specified, the server will use mode-specific defaults.
 
 ### Output Modes
 
-#### PipeWire (default)
-Real-time audio playback through PipeWire:
+#### PortAudio (default)
+Cross-platform real-time audio playback through PortAudio:
 ```bash
 ./radio_client -f 14074000 -m usb
 ```
+
+PortAudio automatically selects the best audio backend for your system:
+- **Linux**: ALSA, JACK, or PulseAudio
+- **macOS**: CoreAudio
+- **Windows**: WASAPI, DirectSound, or MME
+
+##### Selecting Audio Output Device
+
+List available devices:
+```bash
+./radio_client --list-devices
+```
+
+Example output:
+```
+Available PortAudio output devices:
+
+  [0] Built-in Audio Analog Stereo
+      Max channels: 2, Sample rate: 44100 Hz
+      Latency: 5.8 ms
+
+  [1] USB Audio Device (default)
+      Max channels: 2, Sample rate: 48000 Hz
+      Latency: 5.3 ms
+
+  [2] HDMI Audio Output
+      Max channels: 8, Sample rate: 48000 Hz
+      Latency: 10.0 ms
+```
+
+Use a specific device:
+```bash
+./radio_client -f 14074000 -m usb --audio-device 1
+```
+
+If `--audio-device` is not specified or set to `-1`, the system default device is used.
 
 #### stdout
 Output raw PCM data to stdout for piping:
@@ -290,7 +353,7 @@ Record with noise reduction:
 - For rapidly changing noise conditions, increase `-nr2-adapt-rate` to 1.5-2%
 - The algorithm works best with continuous noise (static, hiss) rather than impulsive noise (clicks, pops)
 - NR2 adds minimal latency (~85ms) due to FFT processing
-- Works with all output modes (PipeWire, stdout, WAV)
+- Works with all output modes (PortAudio, stdout, WAV)
 
 ### When to Use NR2
 
@@ -344,10 +407,25 @@ GOOS=darwin GOARCH=arm64 go build -o radio_client-darwin-arm64
 GOOS=windows GOARCH=amd64 go build -o radio_client-windows-amd64.exe
 ```
 
+**Note:** Cross-compilation with PortAudio requires the target platform's PortAudio library. For true cross-platform builds, compile on the target platform or use a cross-compilation toolchain with the appropriate libraries.
+
 ## Troubleshooting
 
-### "pw-play not found"
-Install pipewire-utils package for your distribution.
+### PortAudio initialization errors
+- **Linux**: Install `portaudio19-dev` package
+- **macOS**: Install PortAudio via Homebrew: `brew install portaudio`
+- **Windows**: Ensure PortAudio DLL is in your PATH or application directory
+
+### "cannot find -lportaudio" during build
+Install the PortAudio development library for your platform (see System Requirements above).
+
+### Wrong audio device selected
+Use `--list-devices` to see all available devices and their indices, then use `--audio-device N` to select the correct one.
+
+### Audio device not showing up
+- Ensure the device is properly connected and recognized by your system
+- Try running `--list-devices` as administrator/root if devices are missing
+- On Linux, check that your user is in the `audio` group
 
 ### Connection refused
 - Verify the server is running
@@ -355,9 +433,10 @@ Install pipewire-utils package for your distribution.
 - Ensure firewall allows connections
 
 ### No audio output
-- Check PipeWire is running: `systemctl --user status pipewire`
-- Verify audio device: `pw-cli list-objects | grep node.name`
-- Try stdout mode to verify data is being received
+- Verify your audio device is working with other applications
+- Check system audio settings and volume levels
+- Try stdout mode to verify data is being received: `-o stdout | aplay -f S16_LE -r 12000 -c 1`
+- On Linux, check if PulseAudio/PipeWire is running
 
 ### Audio glitches or dropouts
 - Check network connection quality
@@ -372,6 +451,7 @@ Install pipewire-utils package for your distribution.
 ## Dependencies
 
 - [github.com/google/uuid](https://github.com/google/uuid) - UUID generation
+- [github.com/gordonklaus/portaudio](https://github.com/gordonklaus/portaudio) - PortAudio Go bindings for cross-platform audio
 - [github.com/gorilla/websocket](https://github.com/gorilla/websocket) - WebSocket client
 - [github.com/mjibson/go-dsp](https://github.com/mjibson/go-dsp) - FFT for NR2 processing
 

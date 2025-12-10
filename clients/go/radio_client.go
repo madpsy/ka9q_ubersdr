@@ -8,51 +8,51 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gordonklaus/portaudio"
 	"github.com/gorilla/websocket"
 )
 
 // RadioClient represents the WebSocket radio client
 type RadioClient struct {
-	url           string
-	host          string
-	port          int
-	frequency     int
-	mode          string
-	bandwidthLow  *int
-	bandwidthHigh *int
-	outputMode    string
-	wavFile       string
-	duration      *float64
-	ssl           bool
-	password      string
-	userSessionID string
-	running       bool
-	startTime     *time.Time
-	sampleRate    int
-	channels      int
-	wavWriter     *WAVWriter
-	pipewireCmd   *exec.Cmd
-	pipewireStdin io.WriteCloser
-	nr2Enabled    bool
-	nr2Processor  *NR2Processor
-	nr2Strength   float64
-	nr2Floor      float64
-	nr2AdaptRate  float64
-	autoReconnect bool
-	retryCount    int
-	maxBackoff    time.Duration
+	url              string
+	host             string
+	port             int
+	frequency        int
+	mode             string
+	bandwidthLow     *int
+	bandwidthHigh    *int
+	outputMode       string
+	wavFile          string
+	duration         *float64
+	ssl              bool
+	password         string
+	userSessionID    string
+	running          bool
+	startTime        *time.Time
+	sampleRate       int
+	channels         int
+	wavWriter        *WAVWriter
+	audioStream      *portaudio.Stream
+	audioBuffer      chan []int16
+	audioDeviceIndex int // PortAudio device index (-1 = default)
+	nr2Enabled       bool
+	nr2Processor     *NR2Processor
+	nr2Strength      float64
+	nr2Floor         float64
+	nr2AdaptRate     float64
+	autoReconnect    bool
+	retryCount       int
+	maxBackoff       time.Duration
 }
 
 // WAVWriter handles WAV file writing
@@ -94,7 +94,7 @@ type ConnectionCheckResponse struct {
 // NewRadioClient creates a new radio client instance
 func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 	bandwidthLow, bandwidthHigh *int, outputMode, wavFile string,
-	duration *float64, ssl bool, password string, nr2Enabled bool, nr2Strength, nr2Floor, nr2AdaptRate float64,
+	duration *float64, ssl bool, password string, audioDeviceIndex int, nr2Enabled bool, nr2Strength, nr2Floor, nr2AdaptRate float64,
 	autoReconnect bool) *RadioClient {
 
 	// Determine default channels based on mode
@@ -106,29 +106,30 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 	}
 
 	client := &RadioClient{
-		url:           urlStr,
-		host:          host,
-		port:          port,
-		frequency:     frequency,
-		mode:          modeStr,
-		bandwidthLow:  bandwidthLow,
-		bandwidthHigh: bandwidthHigh,
-		outputMode:    outputMode,
-		wavFile:       wavFile,
-		duration:      duration,
-		ssl:           ssl,
-		password:      password,
-		userSessionID: uuid.New().String(),
-		running:       true,
-		sampleRate:    12000,           // Default, will be updated from server
-		channels:      defaultChannels, // Default based on mode, will be updated from server
-		nr2Enabled:    nr2Enabled,
-		nr2Strength:   nr2Strength,
-		nr2Floor:      nr2Floor,
-		nr2AdaptRate:  nr2AdaptRate,
-		autoReconnect: autoReconnect,
-		retryCount:    0,
-		maxBackoff:    60 * time.Second,
+		url:              urlStr,
+		host:             host,
+		port:             port,
+		frequency:        frequency,
+		mode:             modeStr,
+		bandwidthLow:     bandwidthLow,
+		bandwidthHigh:    bandwidthHigh,
+		outputMode:       outputMode,
+		wavFile:          wavFile,
+		duration:         duration,
+		ssl:              ssl,
+		password:         password,
+		userSessionID:    uuid.New().String(),
+		running:          true,
+		sampleRate:       12000,           // Default, will be updated from server
+		channels:         defaultChannels, // Default based on mode, will be updated from server
+		audioDeviceIndex: audioDeviceIndex,
+		nr2Enabled:       nr2Enabled,
+		nr2Strength:      nr2Strength,
+		nr2Floor:         nr2Floor,
+		nr2AdaptRate:     nr2AdaptRate,
+		autoReconnect:    autoReconnect,
+		retryCount:       0,
+		maxBackoff:       60 * time.Second,
 	}
 
 	// Initialize NR2 processor if enabled
@@ -221,29 +222,115 @@ func (c *RadioClient) SetupWAVWriter() error {
 	return nil
 }
 
-// SetupPipewire starts PipeWire playback process
-func (c *RadioClient) SetupPipewire() error {
-	cmd := exec.Command("pw-play",
-		"--format=s16",
-		fmt.Sprintf("--rate=%d", c.sampleRate),
-		fmt.Sprintf("--channels=%d", c.channels),
-		"-")
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
+// SetupPortAudio initializes PortAudio for audio playback
+func (c *RadioClient) SetupPortAudio() error {
+	// Initialize PortAudio
+	if err := portaudio.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize PortAudio: %w", err)
 	}
 
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// Create buffered channel for audio samples
+	// Buffer size: enough for about 1 second of audio
+	bufferFrames := c.sampleRate * c.channels
+	c.audioBuffer = make(chan []int16, bufferFrames/256) // ~4 chunks per second
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start pw-play: %w", err)
+	// Current position in the current chunk
+	var currentChunk []int16
+	var chunkPos int
+
+	// Audio callback - called by PortAudio when it needs data
+	callback := func(out []int16) {
+		outPos := 0
+		for outPos < len(out) {
+			// If we've exhausted the current chunk, get a new one
+			if currentChunk == nil || chunkPos >= len(currentChunk) {
+				select {
+				case currentChunk = <-c.audioBuffer:
+					chunkPos = 0
+				default:
+					// No data available - output silence
+					for i := outPos; i < len(out); i++ {
+						out[i] = 0
+					}
+					return
+				}
+			}
+
+			// Copy from current chunk to output
+			toCopy := len(out) - outPos
+			remaining := len(currentChunk) - chunkPos
+			if toCopy > remaining {
+				toCopy = remaining
+			}
+
+			copy(out[outPos:], currentChunk[chunkPos:chunkPos+toCopy])
+			outPos += toCopy
+			chunkPos += toCopy
+		}
 	}
 
-	c.pipewireCmd = cmd
-	c.pipewireStdin = stdin
-	fmt.Fprintf(os.Stderr, "PipeWire output started (sample rate: %d Hz, channels: %d)\n", c.sampleRate, c.channels)
+	// Open audio stream with 256 frames per buffer (~21ms at 12kHz)
+	var stream *portaudio.Stream
+	var err error
+
+	if c.audioDeviceIndex >= 0 {
+		// Open specific device
+		deviceInfo, err := portaudio.Devices()
+		if err != nil {
+			portaudio.Terminate()
+			return fmt.Errorf("failed to get device list: %w", err)
+		}
+
+		if c.audioDeviceIndex >= len(deviceInfo) {
+			portaudio.Terminate()
+			return fmt.Errorf("invalid device index %d (max: %d)", c.audioDeviceIndex, len(deviceInfo)-1)
+		}
+
+		device := deviceInfo[c.audioDeviceIndex]
+
+		// Create stream parameters for specific device
+		streamParams := portaudio.StreamParameters{
+			Output: portaudio.StreamDeviceParameters{
+				Device:   device,
+				Channels: c.channels,
+				Latency:  device.DefaultLowOutputLatency,
+			},
+			SampleRate:      float64(c.sampleRate),
+			FramesPerBuffer: 256,
+		}
+
+		stream, err = portaudio.OpenStream(streamParams, callback)
+		if err != nil {
+			portaudio.Terminate()
+			return fmt.Errorf("failed to open audio stream on device %d: %w", c.audioDeviceIndex, err)
+		}
+
+		fmt.Fprintf(os.Stderr, "Using audio device [%d]: %s\n", c.audioDeviceIndex, device.Name)
+	} else {
+		// Use default device
+		stream, err = portaudio.OpenDefaultStream(
+			0,          // no input channels
+			c.channels, // output channels
+			float64(c.sampleRate),
+			256, // frames per buffer
+			callback,
+		)
+		if err != nil {
+			portaudio.Terminate()
+			return fmt.Errorf("failed to open audio stream: %w", err)
+		}
+	}
+
+	// Start the stream
+	if err := stream.Start(); err != nil {
+		stream.Close()
+		portaudio.Terminate()
+		return fmt.Errorf("failed to start audio stream: %w", err)
+	}
+
+	c.audioStream = stream
+	fmt.Fprintf(os.Stderr, "PortAudio output started (sample rate: %d Hz, channels: %d)\n",
+		c.sampleRate, c.channels)
 	return nil
 }
 
@@ -312,15 +399,21 @@ func (c *RadioClient) OutputAudio(pcmData []byte) error {
 		_, err := os.Stdout.Write(pcmData)
 		return err
 
-	case "pipewire":
-		// Write to PipeWire process
-		if c.pipewireStdin != nil {
-			_, err := c.pipewireStdin.Write(pcmData)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "PipeWire connection lost\n")
-				c.running = false
-				return err
-			}
+	case "portaudio":
+		// Convert PCM bytes to int16 samples for PortAudio
+		numSamples := len(pcmData) / 2
+		samples := make([]int16, numSamples)
+		for i := 0; i < numSamples; i++ {
+			samples[i] = int16(binary.LittleEndian.Uint16(pcmData[i*2:]))
+		}
+
+		// Send to audio buffer (blocking with timeout)
+		select {
+		case c.audioBuffer <- samples:
+			// Successfully queued
+		case <-time.After(100 * time.Millisecond):
+			// Buffer full - this shouldn't happen with proper sizing
+			fmt.Fprintf(os.Stderr, "Warning: Audio buffer full, dropping samples\n")
 		}
 
 	case "wav":
@@ -378,20 +471,18 @@ func (c *RadioClient) HandleMessage(msg WebSocketMessage) error {
 			fmt.Fprintf(os.Stderr, "Sample rate updated: %d Hz\n", c.sampleRate)
 		}
 
-		// Update channels if changed (requires restarting PipeWire)
+		// Update channels if changed (requires restarting PortAudio)
 		if channels != c.channels {
 			c.channels = channels
 			fmt.Fprintf(os.Stderr, "Channels updated: %d\n", c.channels)
 
-			// Restart PipeWire with new channel count if active
-			if c.outputMode == "pipewire" && c.pipewireStdin != nil {
-				fmt.Fprintf(os.Stderr, "Restarting PipeWire with new channel configuration...\n")
-				c.pipewireStdin.Close()
-				if c.pipewireCmd != nil {
-					c.pipewireCmd.Wait()
-				}
-				if err := c.SetupPipewire(); err != nil {
-					fmt.Fprintf(os.Stderr, "Failed to restart PipeWire: %v\n", err)
+			// Restart PortAudio with new channel count if active
+			if c.outputMode == "portaudio" && c.audioStream != nil {
+				fmt.Fprintf(os.Stderr, "Restarting PortAudio with new channel configuration...\n")
+				c.audioStream.Stop()
+				c.audioStream.Close()
+				if err := c.SetupPortAudio(); err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to restart PortAudio: %v\n", err)
 					c.running = false
 					return err
 				}
@@ -585,8 +676,8 @@ func (c *RadioClient) runOnce() int {
 
 	// Setup output based on mode
 	switch c.outputMode {
-	case "pipewire":
-		if err := c.SetupPipewire(); err != nil {
+	case "portaudio":
+		if err := c.SetupPortAudio(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return 1
 		}
@@ -677,12 +768,17 @@ func (c *RadioClient) Cleanup() {
 		fmt.Fprintf(os.Stderr, "WAV file closed: %s\n", c.wavFile)
 	}
 
-	// Close PipeWire process
-	if c.pipewireStdin != nil {
-		c.pipewireStdin.Close()
+	// Close PortAudio stream
+	if c.audioStream != nil {
+		c.audioStream.Stop()
+		c.audioStream.Close()
+		portaudio.Terminate()
+		fmt.Fprintf(os.Stderr, "PortAudio closed\n")
 	}
-	if c.pipewireCmd != nil {
-		c.pipewireCmd.Wait()
+
+	// Close audio buffer channel
+	if c.audioBuffer != nil {
+		close(c.audioBuffer)
 	}
 }
 
@@ -746,6 +842,44 @@ func (w *WAVWriter) Close() error {
 	return w.file.Close()
 }
 
+func listAudioDevices() {
+	// Initialize PortAudio
+	if err := portaudio.Initialize(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize PortAudio: %v\n", err)
+		os.Exit(1)
+	}
+	defer portaudio.Terminate()
+
+	devices, err := portaudio.Devices()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get device list: %v\n", err)
+		os.Exit(1)
+	}
+
+	defaultOutput, err := portaudio.DefaultOutputDevice()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Could not get default output device: %v\n", err)
+	}
+
+	fmt.Println("Available PortAudio output devices:")
+	fmt.Println()
+
+	for i, device := range devices {
+		if device.MaxOutputChannels > 0 {
+			defaultMarker := ""
+			if defaultOutput != nil && device.Name == defaultOutput.Name {
+				defaultMarker = " (default)"
+			}
+
+			fmt.Printf("  [%d] %s%s\n", i, device.Name, defaultMarker)
+			fmt.Printf("      Max channels: %d, Sample rate: %.0f Hz\n",
+				device.MaxOutputChannels, device.DefaultSampleRate)
+			fmt.Printf("      Latency: %.1f ms\n", device.DefaultLowOutputLatency.Seconds()*1000)
+			fmt.Println()
+		}
+	}
+}
+
 func main() {
 	// Command-line flags
 	urlFlag := flag.String("u", "", "Full WebSocket URL (e.g., ws://host:port/ws or wss://host/ws)")
@@ -754,10 +888,12 @@ func main() {
 	frequencyFlag := flag.Int("f", 0, "Frequency in Hz (e.g., 14074000 for 14.074 MHz)")
 	modeFlag := flag.String("m", "", "Demodulation mode (am, sam, usb, lsb, fm, nfm, cwu, cwl, iq, iq48, iq96, iq192, iq384 - wide IQ modes require bypassed IP)")
 	bandwidthFlag := flag.String("b", "", "Bandwidth in format low:high (e.g., -5000:5000)")
-	outputFlag := flag.String("o", "pipewire", "Output mode (pipewire, stdout, wav)")
+	outputFlag := flag.String("o", "portaudio", "Output mode (portaudio, stdout, wav)")
 	wavFileFlag := flag.String("w", "", "WAV file path (required when output=wav)")
 	timeFlag := flag.Float64("t", 0, "Recording duration in seconds (for WAV output)")
 	sslFlag := flag.Bool("s", false, "Use WSS (WebSocket Secure, ignored if --url is provided)")
+	audioDeviceFlag := flag.Int("audio-device", -1, "PortAudio device index (-1 for default, use --list-devices to see available devices)")
+	listDevicesFlag := flag.Bool("list-devices", false, "List available audio output devices and exit")
 	nr2Flag := flag.Bool("nr2", false, "Enable NR2 spectral subtraction noise reduction")
 	nr2StrengthFlag := flag.Float64("nr2-strength", 40.0, "NR2 noise reduction strength, 0-100% (default: 40)")
 	nr2FloorFlag := flag.Float64("nr2-floor", 10.0, "NR2 spectral floor to prevent musical noise, 0-10% (default: 10)")
@@ -771,8 +907,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  # Listen to 14.074 MHz USB via PipeWire\n")
+		fmt.Fprintf(os.Stderr, "  # List available audio devices\n")
+		fmt.Fprintf(os.Stderr, "  %s --list-devices\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Listen to 14.074 MHz USB via PortAudio (default device)\n")
 		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Listen using specific audio device\n")
+		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb --audio-device 2\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Connect using full URL\n")
 		fmt.Fprintf(os.Stderr, "  %s -u ws://radio.example.com:8073/ws -f 14074000 -m usb\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Record 1000 kHz AM to WAV file for 60 seconds\n")
@@ -782,6 +922,12 @@ func main() {
 	}
 
 	flag.Parse()
+
+	// List devices mode
+	if *listDevicesFlag {
+		listAudioDevices()
+		os.Exit(0)
+	}
 
 	// Validate required arguments
 	if *frequencyFlag == 0 {
@@ -876,7 +1022,7 @@ func main() {
 	client := NewRadioClient(
 		*urlFlag, *hostFlag, *portFlag, *frequencyFlag, *modeFlag,
 		bandwidthLow, bandwidthHigh, *outputFlag, *wavFileFlag,
-		duration, *sslFlag, *passwordFlag, *nr2Flag, *nr2StrengthFlag, *nr2FloorFlag, *nr2AdaptRateFlag,
+		duration, *sslFlag, *passwordFlag, *audioDeviceFlag, *nr2Flag, *nr2StrengthFlag, *nr2FloorFlag, *nr2AdaptRateFlag,
 		*autoReconnectFlag,
 	)
 

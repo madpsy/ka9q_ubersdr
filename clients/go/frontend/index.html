@@ -39,10 +39,18 @@
                         <label for="password">Password:</label>
                         <input type="password" id="password" placeholder="Optional">
                     </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="auto-connect">
+                            <span>Auto-connect on start</span>
+                        </label>
+                    </div>
                 </div>
                 <div class="button-group">
                     <button id="connect-btn" class="btn btn-primary">Connect</button>
                     <button id="disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                    <button id="local-instances-btn" class="btn btn-secondary">🔍 Local Instances</button>
+                    <button id="public-instances-btn" class="btn btn-secondary">🌐 Public Instances</button>
                 </div>
             </section>
 
@@ -132,6 +140,35 @@
                 </div>
             </section>
 
+            <!-- Audio Preview Panel -->
+            <section class="panel">
+                <h2>Audio Preview</h2>
+                <div class="audio-preview-controls-row">
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="audio-preview-enabled">
+                            <span>Enable Browser Audio Preview</span>
+                        </label>
+                    </div>
+                    <button id="audio-mute-btn" class="btn btn-small" disabled style="display: none;">
+                        🔊 Mute
+                    </button>
+                </div>
+                <div class="info-box">
+                    <p><strong>Note:</strong> When enabled, audio will be streamed to your browser through the WebSocket connection using a separate audio room. This allows you to preview the audio without needing PortAudio or other audio devices configured.</p>
+                </div>
+                <div id="audio-preview-controls" style="display: none;">
+                    <div class="audio-status">
+                        <span class="label">Audio Status:</span>
+                        <span id="audio-preview-status" class="status-badge disconnected">Not streaming</span>
+                    </div>
+                    <div class="audio-visualizer">
+                        <canvas id="audio-spectrum-canvas" width="800" height="200"></canvas>
+                        <canvas id="audio-waterfall-canvas" width="800" height="200"></canvas>
+                    </div>
+                </div>
+            </section>
+
             <!-- Resampling Settings Panel -->
             <section class="panel">
                 <h2>Audio Resampling</h2>
@@ -152,13 +189,6 @@
                             <option value="44100" selected>44.1 kHz</option>
                             <option value="48000">48 kHz</option>
                             <option value="96000">96 kHz</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="resample-quality">Quality:</label>
-                        <select id="resample-quality">
-                            <option value="high" selected>High (Sinc)</option>
-                            <option value="fast">Fast (Linear)</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -237,6 +267,45 @@
         </footer>
     </div>
 
+    <!-- Local Instances Modal -->
+    <div id="local-instances-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🔍 Local UberSDR Instances</h2>
+                <span class="close" data-modal="local-instances-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p id="local-instances-status">Searching for local instances...</p>
+                <div id="local-instances-list" class="instances-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-modal="local-instances-modal">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Public Instances Modal -->
+    <div id="public-instances-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🌐 Public UberSDR Instances</h2>
+                <span class="close" data-modal="public-instances-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="filter-group">
+                    <label for="public-filter">Filter:</label>
+                    <input type="text" id="public-filter" placeholder="Search by name, callsign, or location...">
+                </div>
+                <p id="public-instances-status">Loading public instances...</p>
+                <div id="public-instances-list" class="instances-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-modal="public-instances-modal">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="audio-visualizer.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

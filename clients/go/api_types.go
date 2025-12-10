@@ -22,7 +22,6 @@ type ConnectRequest struct {
 	NR2AdaptRate       float64 `json:"nr2AdaptRate,omitempty"`
 	ResampleEnabled    bool    `json:"resampleEnabled,omitempty"`
 	ResampleOutputRate int     `json:"resampleOutputRate,omitempty"`
-	ResampleQuality    string  `json:"resampleQuality,omitempty"`
 	OutputChannels     int     `json:"outputChannels,omitempty"`
 }
 
@@ -62,10 +61,13 @@ type VolumeRequest struct {
 
 // ConfigUpdateRequest represents a request to update configuration
 type ConfigUpdateRequest struct {
-	NR2Enabled   *bool    `json:"nr2Enabled,omitempty"`
-	NR2Strength  *float64 `json:"nr2Strength,omitempty"`
-	NR2Floor     *float64 `json:"nr2Floor,omitempty"`
-	NR2AdaptRate *float64 `json:"nr2AdaptRate,omitempty"`
+	NR2Enabled          *bool    `json:"nr2Enabled,omitempty"`
+	NR2Strength         *float64 `json:"nr2Strength,omitempty"`
+	NR2Floor            *float64 `json:"nr2Floor,omitempty"`
+	NR2AdaptRate        *float64 `json:"nr2AdaptRate,omitempty"`
+	AudioPreviewEnabled *bool    `json:"audioPreviewEnabled,omitempty"`
+	AudioPreviewMuted   *bool    `json:"audioPreviewMuted,omitempty"`
+	AutoConnect         *bool    `json:"autoConnect,omitempty"`
 }
 
 // API Response Types
@@ -90,7 +92,6 @@ type StatusResponse struct {
 	NR2AdaptRate       float64   `json:"nr2AdaptRate"`
 	ResampleEnabled    bool      `json:"resampleEnabled"`
 	ResampleOutputRate int       `json:"resampleOutputRate"`
-	ResampleQuality    string    `json:"resampleQuality"`
 	OutputChannels     int       `json:"outputChannels"`
 	Host               string    `json:"host,omitempty"`
 	Port               int       `json:"port,omitempty"`
@@ -116,23 +117,25 @@ type AudioDevicesResponse struct {
 
 // ConfigResponse represents the current configuration
 type ConfigResponse struct {
-	Host               string  `json:"host"`
-	Port               int     `json:"port"`
-	SSL                bool    `json:"ssl"`
-	Frequency          int     `json:"frequency"`
-	Mode               string  `json:"mode"`
-	BandwidthLow       *int    `json:"bandwidthLow,omitempty"`
-	BandwidthHigh      *int    `json:"bandwidthHigh,omitempty"`
-	OutputMode         string  `json:"outputMode"`
-	AudioDevice        int     `json:"audioDevice"`
-	NR2Enabled         bool    `json:"nr2Enabled"`
-	NR2Strength        float64 `json:"nr2Strength"`
-	NR2Floor           float64 `json:"nr2Floor"`
-	NR2AdaptRate       float64 `json:"nr2AdaptRate"`
-	ResampleEnabled    bool    `json:"resampleEnabled"`
-	ResampleOutputRate int     `json:"resampleOutputRate"`
-	ResampleQuality    string  `json:"resampleQuality"`
-	OutputChannels     int     `json:"outputChannels"`
+	Host                string  `json:"host"`
+	Port                int     `json:"port"`
+	SSL                 bool    `json:"ssl"`
+	Frequency           int     `json:"frequency"`
+	Mode                string  `json:"mode"`
+	BandwidthLow        *int    `json:"bandwidthLow,omitempty"`
+	BandwidthHigh       *int    `json:"bandwidthHigh,omitempty"`
+	OutputMode          string  `json:"outputMode"`
+	AudioDevice         int     `json:"audioDevice"`
+	NR2Enabled          bool    `json:"nr2Enabled"`
+	NR2Strength         float64 `json:"nr2Strength"`
+	NR2Floor            float64 `json:"nr2Floor"`
+	NR2AdaptRate        float64 `json:"nr2AdaptRate"`
+	ResampleEnabled     bool    `json:"resampleEnabled"`
+	ResampleOutputRate  int     `json:"resampleOutputRate"`
+	OutputChannels      int     `json:"outputChannels"`
+	AudioPreviewEnabled bool    `json:"audioPreviewEnabled"`
+	AudioPreviewMuted   bool    `json:"audioPreviewMuted"`
+	AutoConnect         bool    `json:"autoConnect"`
 }
 
 // ErrorResponse represents an error response

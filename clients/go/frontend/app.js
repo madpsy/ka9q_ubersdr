@@ -22,6 +22,7 @@ class UberSDRClient {
         this.portInput = document.getElementById('port');
         this.sslCheckbox = document.getElementById('ssl');
         this.passwordInput = document.getElementById('password');
+        this.autoConnectCheckbox = document.getElementById('auto-connect');
         this.connectBtn = document.getElementById('connect-btn');
         this.disconnectBtn = document.getElementById('disconnect-btn');
         
@@ -40,6 +41,14 @@ class UberSDRClient {
         this.audioDeviceSelect = document.getElementById('audio-device');
         this.outputModeSelect = document.getElementById('output-mode');
         
+        // Audio preview elements
+        this.audioPreviewEnabled = document.getElementById('audio-preview-enabled');
+        this.audioPreviewControls = document.getElementById('audio-preview-controls');
+        this.audioPreviewStatus = document.getElementById('audio-preview-status');
+        this.audioMuteBtn = document.getElementById('audio-mute-btn');
+        this.spectrumCanvas = document.getElementById('audio-spectrum-canvas');
+        this.waterfallCanvas = document.getElementById('audio-waterfall-canvas');
+        
         // NR2 elements
         this.nr2EnabledCheckbox = document.getElementById('nr2-enabled');
         this.nr2StrengthInput = document.getElementById('nr2-strength');
@@ -49,7 +58,6 @@ class UberSDRClient {
         // Resampling elements
         this.resampleEnabledCheckbox = document.getElementById('resample-enabled');
         this.resampleRateSelect = document.getElementById('resample-rate');
-        this.resampleQualitySelect = document.getElementById('resample-quality');
         this.outputChannelsSelect = document.getElementById('output-channels');
         
         // Status elements
@@ -61,12 +69,53 @@ class UberSDRClient {
         this.statusChannels = document.getElementById('status-channels');
         this.statusSession = document.getElementById('status-session');
         this.statusAudioDevice = document.getElementById('status-audio-device');
+        
+        // Audio streaming state
+        this.audioStreamActive = false;
+        this.audioQueue = [];
+        this.audioMuted = true; // Muted by default
+        
+        // Audio visualizer
+        this.audioVisualizer = null;
     }
 
     attachEventListeners() {
         // Connection buttons
         this.connectBtn.addEventListener('click', () => this.connect());
         this.disconnectBtn.addEventListener('click', () => this.disconnect());
+        
+        // Instance discovery buttons
+        const localInstancesBtn = document.getElementById('local-instances-btn');
+        const publicInstancesBtn = document.getElementById('public-instances-btn');
+        if (localInstancesBtn) {
+            localInstancesBtn.addEventListener('click', () => this.showLocalInstances());
+        }
+        if (publicInstancesBtn) {
+            publicInstancesBtn.addEventListener('click', () => this.showPublicInstances());
+        }
+        
+        // Modal close buttons
+        document.querySelectorAll('.close, .modal-footer .btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const modalId = e.target.dataset.modal || e.target.closest('.modal-content')?.parentElement.id;
+                if (modalId) {
+                    this.closeModal(modalId);
+                }
+            });
+        });
+        
+        // Close modal when clicking outside
+        window.addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal')) {
+                this.closeModal(e.target.id);
+            }
+        });
+        
+        // Public instances filter
+        const publicFilter = document.getElementById('public-filter');
+        if (publicFilter) {
+            publicFilter.addEventListener('input', (e) => this.filterPublicInstances(e.target.value));
+        }
         
         // Frequency controls
         this.frequencyInput.addEventListener('change', () => this.updateFrequency());
@@ -94,6 +143,22 @@ class UberSDRClient {
         this.nr2StrengthInput.addEventListener('change', () => this.updateNR2Config());
         this.nr2FloorInput.addEventListener('change', () => this.updateNR2Config());
         this.nr2AdaptInput.addEventListener('change', () => this.updateNR2Config());
+        
+        // Audio preview settings
+        this.audioPreviewEnabled.addEventListener('change', () => {
+            this.toggleAudioPreview();
+            this.saveAudioPreviewConfig();
+        });
+        this.audioMuteBtn.addEventListener('click', () => {
+            this.toggleMute();
+            this.saveAudioPreviewConfig();
+        });
+        
+        // Auto-connect setting
+        this.autoConnectCheckbox.addEventListener('change', () => {
+            console.log('Auto-connect changed to:', this.autoConnectCheckbox.checked);
+            this.saveAutoConnectConfig();
+        });
     }
 
     connectWebSocket() {
@@ -139,6 +204,8 @@ class UberSDRClient {
             this.handleConnectionUpdate(data);
         } else if (data.type === 'error') {
             this.showError(data.error, data.message);
+        } else if (data.type === 'audio') {
+            this.handleAudioData(data);
         } else if (data.connected !== undefined) {
             // Initial status message
             this.updateStatusDisplay(data);
@@ -172,10 +239,9 @@ class UberSDRClient {
             nr2Strength: parseFloat(this.nr2StrengthInput.value),
             nr2Floor: parseFloat(this.nr2FloorInput.value),
             nr2AdaptRate: parseFloat(this.nr2AdaptInput.value),
-            resampleEnabled: document.getElementById('resample-enabled').checked,
-            resampleOutputRate: parseInt(document.getElementById('resample-rate').value),
-            resampleQuality: document.getElementById('resample-quality').value,
-            outputChannels: parseInt(document.getElementById('output-channels').value)
+            resampleEnabled: this.resampleEnabledCheckbox.checked,
+            resampleOutputRate: parseInt(this.resampleRateSelect.value),
+            outputChannels: parseInt(this.outputChannelsSelect.value)
         };
 
         try {
@@ -403,13 +469,93 @@ class UberSDRClient {
                 if (config.nr2AdaptRate) this.nr2AdaptInput.value = config.nr2AdaptRate;
                 if (config.resampleEnabled !== undefined) this.resampleEnabledCheckbox.checked = config.resampleEnabled;
                 if (config.resampleOutputRate) this.resampleRateSelect.value = config.resampleOutputRate;
-                if (config.resampleQuality) this.resampleQualitySelect.value = config.resampleQuality;
                 if (config.outputChannels !== undefined) this.outputChannelsSelect.value = config.outputChannels;
+                
+                // Load audio preview settings
+                if (config.audioPreviewEnabled !== undefined) {
+                    this.audioPreviewEnabled.checked = config.audioPreviewEnabled;
+                    if (config.audioPreviewEnabled) {
+                        this.toggleAudioPreview();
+                    }
+                }
+                if (config.audioPreviewMuted !== undefined) {
+                    this.audioMuted = config.audioPreviewMuted;
+                    this.updateMuteButton();
+                }
+                
+                // Load auto-connect setting
+                if (config.autoConnect !== undefined) {
+                    this.autoConnectCheckbox.checked = config.autoConnect;
+                    
+                    // Auto-connect if enabled and not already connected
+                    // Check connection status first to avoid duplicate connection attempts
+                    if (config.autoConnect) {
+                        console.log('Auto-connect is enabled, checking connection status...');
+                        // Wait a bit for status to be updated, then check if we need to connect
+                        setTimeout(() => {
+                            if (!this.connected) {
+                                console.log('Not connected, attempting auto-connect...');
+                                this.connect();
+                            } else {
+                                console.log('Already connected (backend auto-connect succeeded)');
+                            }
+                        }, 1500); // Increased delay to allow status update
+                    }
+                }
                 
                 console.log('Loaded saved configuration');
             }
         } catch (error) {
             console.error('Failed to load saved config:', error);
+        }
+    }
+
+    async saveAutoConnectConfig() {
+        const autoConnectValue = this.autoConnectCheckbox.checked;
+        const config = {
+            autoConnect: autoConnectValue
+        };
+
+        console.log('Saving auto-connect config:', config);
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                console.error('Failed to save auto-connect config:', data.message || data.error);
+            } else {
+                const result = await response.json();
+                console.log('Auto-connect setting saved successfully:', autoConnectValue, result);
+            }
+        } catch (error) {
+            console.error('Error saving auto-connect config:', error);
+        }
+    }
+
+    async saveAudioPreviewConfig() {
+        const config = {
+            audioPreviewEnabled: this.audioPreviewEnabled.checked,
+            audioPreviewMuted: this.audioMuted
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                console.error('Failed to save audio preview config:', data.message || data.error);
+            }
+        } catch (error) {
+            console.error('Error saving audio preview config:', error);
         }
     }
 
@@ -470,6 +616,420 @@ class UberSDRClient {
 
     showInfo(message) {
         console.log('ℹ', message);
+    }
+
+    // Instance Discovery Methods
+    
+    async showLocalInstances() {
+        const modal = document.getElementById('local-instances-modal');
+        const statusEl = document.getElementById('local-instances-status');
+        const listEl = document.getElementById('local-instances-list');
+        
+        this.openModal('local-instances-modal');
+        statusEl.textContent = 'Searching for local instances...';
+        listEl.innerHTML = '';
+        
+        try {
+            const response = await fetch(`${this.apiBase}/api/instances/local`);
+            const data = await response.json();
+            
+            if (data.instances && data.instances.length > 0) {
+                statusEl.textContent = `Found ${data.instances.length} local instance(s)`;
+                this.renderLocalInstances(data.instances, listEl);
+            } else {
+                statusEl.textContent = 'No local instances found';
+            }
+        } catch (error) {
+            statusEl.textContent = 'Error fetching local instances';
+            console.error('Failed to fetch local instances:', error);
+        }
+    }
+    
+    renderLocalInstances(instances, container) {
+        instances.forEach(instance => {
+            const card = this.createInstanceCard(instance, true);
+            card.addEventListener('click', () => this.connectToInstance(instance, true));
+            container.appendChild(card);
+        });
+    }
+    
+    async showPublicInstances() {
+        const modal = document.getElementById('public-instances-modal');
+        const statusEl = document.getElementById('public-instances-status');
+        const listEl = document.getElementById('public-instances-list');
+        
+        this.openModal('public-instances-modal');
+        statusEl.textContent = 'Loading public instances...';
+        listEl.innerHTML = '';
+        
+        try {
+            const response = await fetch(`${this.apiBase}/api/instances/public`);
+            const data = await response.json();
+            
+            if (data.instances && data.instances.length > 0) {
+                this.publicInstances = data.instances;
+                this.localUUIDs = new Set(data.localUUIDs || []);
+                statusEl.textContent = `Showing ${data.instances.length} public instance(s)`;
+                this.renderPublicInstances(data.instances, listEl);
+            } else {
+                statusEl.textContent = 'No public instances found';
+            }
+        } catch (error) {
+            statusEl.textContent = 'Error fetching public instances';
+            console.error('Failed to fetch public instances:', error);
+        }
+    }
+    
+    renderPublicInstances(instances, container) {
+        container.innerHTML = '';
+        instances.forEach(instance => {
+            const isLocal = this.localUUIDs && this.localUUIDs.has(instance.id);
+            const card = this.createInstanceCard(instance, false, isLocal);
+            card.addEventListener('click', () => this.connectToInstance(instance, false));
+            container.appendChild(card);
+        });
+    }
+    
+    filterPublicInstances(filterText) {
+        if (!this.publicInstances) return;
+        
+        const filtered = this.publicInstances.filter(instance => {
+            const searchText = filterText.toLowerCase();
+            return instance.name.toLowerCase().includes(searchText) ||
+                   (instance.callsign && instance.callsign.toLowerCase().includes(searchText)) ||
+                   (instance.location && instance.location.toLowerCase().includes(searchText));
+        });
+        
+        const listEl = document.getElementById('public-instances-list');
+        const statusEl = document.getElementById('public-instances-status');
+        
+        if (filtered.length > 0) {
+            statusEl.textContent = `Showing ${filtered.length} of ${this.publicInstances.length} instance(s)`;
+            this.renderPublicInstances(filtered, listEl);
+        } else {
+            statusEl.textContent = `No instances match filter (0/${this.publicInstances.length})`;
+            listEl.innerHTML = '';
+        }
+    }
+    
+    createInstanceCard(instance, isLocal, highlightAsLocal = false) {
+        const card = document.createElement('div');
+        card.className = 'instance-card';
+        if (isLocal || highlightAsLocal) {
+            card.classList.add('local-instance');
+        }
+        
+        const desc = instance.description || instance;
+        
+        // Header
+        const header = document.createElement('div');
+        header.className = 'instance-header';
+        
+        const name = document.createElement('div');
+        name.className = 'instance-name';
+        name.textContent = instance.name || 'Unknown';
+        header.appendChild(name);
+        
+        const badges = document.createElement('div');
+        badges.className = 'instance-badges';
+        
+        if (isLocal || highlightAsLocal) {
+            const localBadge = document.createElement('span');
+            localBadge.className = 'badge badge-success';
+            localBadge.textContent = 'LOCAL';
+            badges.appendChild(localBadge);
+        }
+        
+        if (desc.cw_skimmer || desc.CWSkimmer) {
+            const cwBadge = document.createElement('span');
+            cwBadge.className = 'badge badge-info';
+            cwBadge.textContent = 'CW';
+            badges.appendChild(cwBadge);
+        }
+        
+        if (desc.digital_decodes || desc.DigitalDecodes) {
+            const digiBadge = document.createElement('span');
+            digiBadge.className = 'badge badge-info';
+            digiBadge.textContent = 'Digital';
+            badges.appendChild(digiBadge);
+        }
+        
+        header.appendChild(badges);
+        card.appendChild(header);
+        
+        // Details
+        const details = document.createElement('div');
+        details.className = 'instance-details';
+        
+        const addDetail = (label, value) => {
+            if (value) {
+                const detail = document.createElement('div');
+                detail.className = 'instance-detail';
+                detail.innerHTML = `<strong>${label}:</strong> ${value}`;
+                details.appendChild(detail);
+            }
+        };
+        
+        if (isLocal) {
+            addDetail('Host', `${instance.host}:${instance.port}`);
+            if (desc.receiver) {
+                addDetail('Callsign', desc.receiver.callsign);
+                addDetail('Location', desc.receiver.location);
+            }
+        } else {
+            addDetail('Callsign', instance.callsign);
+            addDetail('Location', instance.location);
+            addDetail('Users', `${instance.available_clients}/${instance.max_clients}`);
+            if (instance.max_session_time > 0) {
+                addDetail('Session', `${Math.floor(instance.max_session_time / 60)}m`);
+            }
+        }
+        
+        addDetail('Version', instance.version || desc.version);
+        
+        if (desc.public_iq_modes && desc.public_iq_modes.length > 0) {
+            const iqModes = desc.public_iq_modes.map(m => m.replace('iq', '')).join(', ');
+            addDetail('IQ (kHz)', iqModes);
+        } else if (instance.public_iq_modes && instance.public_iq_modes.length > 0) {
+            const iqModes = instance.public_iq_modes.map(m => m.replace('iq', '')).join(', ');
+            addDetail('IQ (kHz)', iqModes);
+        }
+        
+        card.appendChild(details);
+        
+        return card;
+    }
+    
+    async connectToInstance(instance, isLocal) {
+        // Close the modal
+        this.closeModal(isLocal ? 'local-instances-modal' : 'public-instances-modal');
+        
+        // Populate connection form
+        this.hostInput.value = instance.host;
+        this.portInput.value = instance.port;
+        this.sslCheckbox.checked = instance.tls || instance.TLS || false;
+        
+        // Show connecting message
+        this.showSuccess(`Connecting to ${instance.name}...`);
+        
+        // Auto-connect
+        await this.connect();
+    }
+    
+    openModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.classList.add('show');
+        }
+    }
+    
+    closeModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.classList.remove('show');
+        }
+    }
+
+    // Audio Preview Methods
+
+    toggleAudioPreview() {
+        const enabled = this.audioPreviewEnabled.checked;
+
+        if (enabled) {
+            this.audioPreviewControls.style.display = 'block';
+            this.audioMuteBtn.style.display = 'inline-block';
+            this.audioMuteBtn.disabled = false;
+            this.startAudioStream();
+            
+            // Initialize audio visualizer
+            if (!this.audioVisualizer && this.spectrumCanvas && this.waterfallCanvas) {
+                this.audioVisualizer = new AudioVisualizer(this.spectrumCanvas, this.waterfallCanvas);
+            }
+        } else {
+            this.audioPreviewControls.style.display = 'none';
+            this.audioMuteBtn.style.display = 'none';
+            this.audioMuteBtn.disabled = true;
+            this.stopAudioStream();
+            
+            // Clear visualizer
+            if (this.audioVisualizer) {
+                this.audioVisualizer.clear();
+            }
+        }
+    }
+
+    toggleMute() {
+        this.audioMuted = !this.audioMuted;
+        this.updateMuteButton();
+        console.log('Audio muted:', this.audioMuted);
+    }
+
+    updateMuteButton() {
+        if (this.audioMuted) {
+            this.audioMuteBtn.textContent = '🔇 Unmute';
+            this.audioMuteBtn.classList.add('muted');
+        } else {
+            this.audioMuteBtn.textContent = '🔊 Mute';
+            this.audioMuteBtn.classList.remove('muted');
+        }
+    }
+
+    async startAudioStream() {
+        if (this.audioStreamActive) {
+            return;
+        }
+
+        try {
+            // Use Web Audio API directly for PCM audio streaming
+            this.initWebAudioAPI();
+        } catch (error) {
+            console.error('Failed to start audio stream:', error);
+            this.updateAudioStatus('Failed to start');
+            this.showError('Audio Stream Error', error.message);
+        }
+    }
+
+    stopAudioStream() {
+        if (!this.audioStreamActive) {
+            return;
+        }
+
+        // Send message to backend to stop audio streaming
+        this.sendAudioStreamRequest(false);
+
+        if (this.audioContext) {
+            this.audioContext.close();
+            this.audioContext = null;
+        }
+
+        this.audioStreamActive = false;
+        this.audioQueue = [];
+        this.nextPlayTime = 0;
+        this.updateAudioStatus('Not streaming');
+    }
+
+    initWebAudioAPI() {
+        // Initialize Web Audio API for PCM audio streaming
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        this.audioContext = new AudioContext();
+        this.nextPlayTime = 0; // Track when to schedule next audio chunk
+        this.audioStreamActive = true;
+        this.updateAudioStatus('Streaming');
+        this.sendAudioStreamRequest(true);
+        console.log('Web Audio API initialized, sample rate:', this.audioContext.sampleRate);
+    }
+
+    sendAudioStreamRequest(enable) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            console.warn('WebSocket not connected, cannot send audio stream request');
+            return;
+        }
+
+        const message = {
+            type: 'audio_stream',
+            enabled: enable,
+            room: 'audio_preview'
+        };
+
+        this.ws.send(JSON.stringify(message));
+        console.log('Sent audio stream request:', message);
+    }
+
+    handleAudioData(data) {
+        if (!this.audioStreamActive) {
+            return;
+        }
+
+        // Handle incoming audio data
+        if (data.format === 'pcm' && data.data) {
+            // Convert base64 to ArrayBuffer
+            const binaryString = atob(data.data);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            const sampleRate = data.sampleRate || 48000;
+            const channels = data.channels || 2;
+
+            if (this.audioContext) {
+                // Use Web Audio API for playback
+                this.playPCMData(bytes.buffer, sampleRate, channels);
+                
+                // Send to visualizer for FFT
+                if (this.audioVisualizer) {
+                    this.audioVisualizer.addAudioData(bytes.buffer, sampleRate, channels);
+                }
+            }
+        }
+    }
+
+    playPCMData(arrayBuffer, sampleRate, channels) {
+        if (!this.audioContext) {
+            return;
+        }
+
+        try {
+            // Decode PCM data (16-bit little-endian signed integers)
+            const dataView = new DataView(arrayBuffer);
+            const numSamples = arrayBuffer.byteLength / 2;
+            const samplesPerChannel = numSamples / channels;
+
+            // Create audio buffer
+            const audioBuffer = this.audioContext.createBuffer(channels, samplesPerChannel, sampleRate);
+
+            // Fill channels
+            for (let channel = 0; channel < channels; channel++) {
+                const channelData = audioBuffer.getChannelData(channel);
+                for (let i = 0; i < samplesPerChannel; i++) {
+                    // Read 16-bit PCM sample and convert to float [-1, 1]
+                    const sampleIndex = (i * channels + channel) * 2;
+                    const sample = dataView.getInt16(sampleIndex, true); // little-endian
+                    channelData[i] = sample / 32768.0;
+                }
+            }
+
+            // Only play audio if not muted
+            if (!this.audioMuted) {
+                // Schedule playback
+                const source = this.audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(this.audioContext.destination);
+
+                // Calculate when to play this chunk
+                const now = this.audioContext.currentTime;
+                if (this.nextPlayTime < now) {
+                    this.nextPlayTime = now;
+                }
+
+                source.start(this.nextPlayTime);
+                
+                // Update next play time
+                this.nextPlayTime += audioBuffer.duration;
+            } else {
+                // Still update next play time even when muted to keep sync
+                const now = this.audioContext.currentTime;
+                if (this.nextPlayTime < now) {
+                    this.nextPlayTime = now;
+                }
+                this.nextPlayTime += audioBuffer.duration;
+            }
+
+        } catch (error) {
+            console.error('Error playing PCM data:', error);
+        }
+    }
+
+
+    updateAudioStatus(status) {
+        this.audioPreviewStatus.textContent = status;
+        if (status.includes('Streaming')) {
+            this.audioPreviewStatus.className = 'status-badge connected';
+        } else if (status.includes('Error') || status.includes('Failed')) {
+            this.audioPreviewStatus.className = 'status-badge error';
+        } else {
+            this.audioPreviewStatus.className = 'status-badge disconnected';
+        }
     }
 }
 

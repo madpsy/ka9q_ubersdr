@@ -20,22 +20,30 @@ var frontendFS embed.FS
 
 // APIServer represents the HTTP/WebSocket API server
 type APIServer struct {
-	manager       *WebSocketManager
-	configManager *ConfigManager
-	router        *mux.Router
-	server        *http.Server
-	upgrader      websocket.Upgrader
-	mu            sync.RWMutex
+	manager           *WebSocketManager
+	configManager     *ConfigManager
+	instanceDiscovery *InstanceDiscovery
+	router            *mux.Router
+	server            *http.Server
+	upgrader          websocket.Upgrader
+	mu                sync.RWMutex
 }
 
 // NewAPIServer creates a new API server
 func NewAPIServer(manager *WebSocketManager, configManager *ConfigManager, port int) *APIServer {
 	router := mux.NewRouter()
 
+	// Initialize instance discovery
+	instanceDiscovery := NewInstanceDiscovery()
+	if err := instanceDiscovery.StartLocalDiscovery(); err != nil {
+		log.Printf("Warning: Failed to start local instance discovery: %v", err)
+	}
+
 	server := &APIServer{
-		manager:       manager,
-		configManager: configManager,
-		router:        router,
+		manager:           manager,
+		configManager:     configManager,
+		instanceDiscovery: instanceDiscovery,
+		router:            router,
 		server: &http.Server{
 			Addr:         fmt.Sprintf(":%d", port),
 			Handler:      router,
@@ -70,6 +78,10 @@ func (s *APIServer) setupRoutes() {
 	api.HandleFunc("/devices", s.handleDevices).Methods("GET", "OPTIONS")
 	api.HandleFunc("/device", s.handleDevice).Methods("POST", "OPTIONS")
 	api.HandleFunc("/config", s.handleConfig).Methods("GET", "POST", "OPTIONS")
+
+	// Instance discovery endpoints
+	api.HandleFunc("/instances/local", s.handleLocalInstances).Methods("GET", "OPTIONS")
+	api.HandleFunc("/instances/public", s.handlePublicInstances).Methods("GET", "OPTIONS")
 
 	// WebSocket endpoint for real-time updates
 	s.router.HandleFunc("/ws", s.handleWebSocket)
@@ -112,6 +124,9 @@ func (s *APIServer) Start() error {
 // Stop gracefully stops the API server
 func (s *APIServer) Stop(ctx context.Context) error {
 	log.Println("Stopping API server...")
+	if s.instanceDiscovery != nil {
+		s.instanceDiscovery.Stop()
+	}
 	return s.server.Shutdown(ctx)
 }
 
@@ -176,17 +191,13 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if resampleRate == 0 {
 		resampleRate = 44100 // Default to 44.1 kHz (most widely supported)
 	}
-	resampleQuality := req.ResampleQuality
-	if resampleQuality == "" {
-		resampleQuality = "high" // Default to high quality
-	}
 
 	client := NewRadioClient(
 		"", req.Host, req.Port, req.Frequency, req.Mode,
 		req.BandwidthLow, req.BandwidthHigh, req.OutputMode, "",
 		nil, req.SSL, req.Password, req.AudioDevice, req.NR2Enabled,
 		req.NR2Strength, req.NR2Floor, req.NR2AdaptRate, false,
-		resampleEnabled, resampleRate, resampleQuality,
+		resampleEnabled, resampleRate,
 		req.OutputChannels, // 0 = auto (2 when resampling, otherwise match input)
 	)
 
@@ -338,23 +349,25 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// Get saved config from ConfigManager (not from current status)
 		savedConfig := s.configManager.Get()
 		config := ConfigResponse{
-			Host:               savedConfig.Host,
-			Port:               savedConfig.Port,
-			SSL:                savedConfig.SSL,
-			Frequency:          savedConfig.Frequency,
-			Mode:               savedConfig.Mode,
-			BandwidthLow:       savedConfig.BandwidthLow,
-			BandwidthHigh:      savedConfig.BandwidthHigh,
-			OutputMode:         savedConfig.OutputMode,
-			AudioDevice:        savedConfig.AudioDevice,
-			NR2Enabled:         savedConfig.NR2Enabled,
-			NR2Strength:        savedConfig.NR2Strength,
-			NR2Floor:           savedConfig.NR2Floor,
-			NR2AdaptRate:       savedConfig.NR2AdaptRate,
-			ResampleEnabled:    savedConfig.ResampleEnabled,
-			ResampleOutputRate: savedConfig.ResampleOutputRate,
-			ResampleQuality:    savedConfig.ResampleQuality,
-			OutputChannels:     savedConfig.OutputChannels,
+			Host:                savedConfig.Host,
+			Port:                savedConfig.Port,
+			SSL:                 savedConfig.SSL,
+			Frequency:           savedConfig.Frequency,
+			Mode:                savedConfig.Mode,
+			BandwidthLow:        savedConfig.BandwidthLow,
+			BandwidthHigh:       savedConfig.BandwidthHigh,
+			OutputMode:          savedConfig.OutputMode,
+			AudioDevice:         savedConfig.AudioDevice,
+			NR2Enabled:          savedConfig.NR2Enabled,
+			NR2Strength:         savedConfig.NR2Strength,
+			NR2Floor:            savedConfig.NR2Floor,
+			NR2AdaptRate:        savedConfig.NR2AdaptRate,
+			ResampleEnabled:     savedConfig.ResampleEnabled,
+			ResampleOutputRate:  savedConfig.ResampleOutputRate,
+			OutputChannels:      savedConfig.OutputChannels,
+			AudioPreviewEnabled: savedConfig.AudioPreviewEnabled,
+			AudioPreviewMuted:   savedConfig.AudioPreviewMuted,
+			AutoConnect:         savedConfig.AutoConnect,
 		}
 		respondJSON(w, http.StatusOK, config)
 		return
@@ -367,12 +380,44 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.manager.UpdateConfig(req); err != nil {
-		respondError(w, http.StatusInternalServerError, "Failed to update config", err.Error())
+	// Save to config manager (works even when not connected)
+	if err := s.configManager.UpdateNR2Config(req); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to save config", err.Error())
 		return
 	}
 
+	// Also update the active client if connected
+	if s.manager.IsConnected() {
+		if err := s.manager.UpdateConfig(req); err != nil {
+			log.Printf("Warning: Failed to update active client config: %v", err)
+			// Don't fail the request - config was saved successfully
+		}
+	}
+
 	respondSuccess(w, "Configuration updated successfully")
+}
+
+// handleLocalInstances handles GET /api/instances/local
+func (s *APIServer) handleLocalInstances(w http.ResponseWriter, r *http.Request) {
+	instances := s.instanceDiscovery.GetLocalInstances()
+	respondJSON(w, http.StatusOK, LocalInstancesResponse{Instances: instances})
+}
+
+// handlePublicInstances handles GET /api/instances/public
+func (s *APIServer) handlePublicInstances(w http.ResponseWriter, r *http.Request) {
+	instances, err := GetPublicInstances()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to fetch public instances", err.Error())
+		return
+	}
+
+	// Get local instance UUIDs to mark them in the response
+	localUUIDs := s.instanceDiscovery.GetLocalInstanceUUIDs()
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"instances":  instances,
+		"localUUIDs": localUUIDs,
+	})
 }
 
 // handleWebSocket handles WebSocket connections for real-time updates
@@ -395,12 +440,60 @@ func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle updates
-	for update := range updates {
-		if err := conn.WriteJSON(update); err != nil {
-			log.Printf("WebSocket write error: %v", err)
+	// Channel for incoming messages
+	done := make(chan struct{})
+	defer close(done)
+
+	// Handle incoming messages from client
+	go func() {
+		for {
+			var msg map[string]interface{}
+			if err := conn.ReadJSON(&msg); err != nil {
+				log.Printf("WebSocket read error: %v", err)
+				return
+			}
+
+			// Handle audio stream requests
+			if msgType, ok := msg["type"].(string); ok && msgType == "audio_stream" {
+				if enabled, ok := msg["enabled"].(bool); ok {
+					s.handleAudioStreamRequest(conn, enabled, msg)
+				}
+			}
+		}
+	}()
+
+	// Handle updates from manager
+	for {
+		select {
+		case update, ok := <-updates:
+			if !ok {
+				return
+			}
+			if err := conn.WriteJSON(update); err != nil {
+				log.Printf("WebSocket write error: %v", err)
+				return
+			}
+		case <-done:
 			return
 		}
+	}
+}
+
+// handleAudioStreamRequest handles audio streaming enable/disable requests
+func (s *APIServer) handleAudioStreamRequest(conn *websocket.Conn, enabled bool, msg map[string]interface{}) {
+	room, _ := msg["room"].(string)
+	if room == "" {
+		room = "audio_preview"
+	}
+
+	log.Printf("Audio stream request: enabled=%v, room=%s", enabled, room)
+
+	if enabled {
+		// Enable audio streaming to this WebSocket connection
+		s.manager.EnableAudioStream(conn, room)
+	} else {
+		// Disable audio streaming
+		s.manager.DisableAudioStream(conn)
 	}
 }
 

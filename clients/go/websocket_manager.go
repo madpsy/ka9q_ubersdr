@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"sync"
@@ -24,6 +25,8 @@ type WebSocketManager struct {
 	connBroadcast   chan WSConnectionUpdate
 	subscribers     map[chan interface{}]bool
 	subMu           sync.RWMutex
+	audioStreams    map[*websocket.Conn]string // Maps WebSocket connections to their audio room names
+	audioStreamsMu  sync.RWMutex
 }
 
 // NewWebSocketManager creates a new WebSocket manager
@@ -36,6 +39,7 @@ func NewWebSocketManager() *WebSocketManager {
 		errorBroadcast:  make(chan WSErrorUpdate, 10),
 		connBroadcast:   make(chan WSConnectionUpdate, 10),
 		subscribers:     make(map[chan interface{}]bool),
+		audioStreams:    make(map[*websocket.Conn]string),
 	}
 }
 
@@ -137,7 +141,6 @@ func (m *WebSocketManager) GetStatus() StatusResponse {
 		status.NR2AdaptRate = m.client.nr2AdaptRate
 		status.ResampleEnabled = m.client.resampleEnabled
 		status.ResampleOutputRate = m.client.resampleOutputRate
-		status.ResampleQuality = m.client.resampleQuality
 		status.OutputChannels = m.client.outputChannels
 		status.Host = m.client.host
 		status.Port = m.client.port
@@ -411,4 +414,72 @@ func SendTuneMessage(conn *websocket.Conn, frequency int, mode string, bandwidth
 	}
 
 	return conn.WriteJSON(tuneMsg)
+}
+
+// EnableAudioStream enables audio streaming to a WebSocket connection
+func (m *WebSocketManager) EnableAudioStream(conn *websocket.Conn, room string) {
+	m.audioStreamsMu.Lock()
+	defer m.audioStreamsMu.Unlock()
+
+	m.audioStreams[conn] = room
+	log.Printf("Enabled audio streaming to room '%s' for connection", room)
+
+	// If we have a client, enable audio callback
+	m.mu.RLock()
+	client := m.client
+	m.mu.RUnlock()
+
+	if client != nil {
+		client.SetAudioCallback(func(audioData []byte, sampleRate int, channels int) {
+			m.broadcastAudioData(audioData, sampleRate, channels, room)
+		})
+	}
+}
+
+// DisableAudioStream disables audio streaming for a WebSocket connection
+func (m *WebSocketManager) DisableAudioStream(conn *websocket.Conn) {
+	m.audioStreamsMu.Lock()
+	defer m.audioStreamsMu.Unlock()
+
+	if room, ok := m.audioStreams[conn]; ok {
+		delete(m.audioStreams, conn)
+		log.Printf("Disabled audio streaming from room '%s' for connection", room)
+	}
+
+	// If no more audio streams, disable audio callback
+	if len(m.audioStreams) == 0 {
+		m.mu.RLock()
+		client := m.client
+		m.mu.RUnlock()
+
+		if client != nil {
+			client.SetAudioCallback(nil)
+		}
+	}
+}
+
+// broadcastAudioData sends audio data to all WebSocket connections subscribed to the given room
+func (m *WebSocketManager) broadcastAudioData(audioData []byte, sampleRate int, channels int, room string) {
+	m.audioStreamsMu.RLock()
+	defer m.audioStreamsMu.RUnlock()
+
+	// Encode audio data as base64 for JSON transmission
+	encodedData := base64.StdEncoding.EncodeToString(audioData)
+
+	audioMsg := map[string]interface{}{
+		"type":       "audio",
+		"format":     "pcm",
+		"data":       encodedData,
+		"sampleRate": sampleRate,
+		"channels":   channels,
+		"room":       room,
+	}
+
+	for conn, connRoom := range m.audioStreams {
+		if connRoom == room {
+			if err := conn.WriteJSON(audioMsg); err != nil {
+				log.Printf("Failed to send audio data to WebSocket: %v", err)
+			}
+		}
+	}
 }

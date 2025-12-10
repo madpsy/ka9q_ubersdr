@@ -54,13 +54,19 @@ type ClientConfig struct {
 	PortAudioEnabled    bool            `json:"portAudioEnabled"`
 	PortAudioDevice     int             `json:"portAudioDevice"`
 	// Radio control settings
-	RadioControlType string `json:"radioControlType,omitempty"` // "none", "flrig", "rigctl", "serial", "omnirig"
-	FlrigEnabled     bool   `json:"flrigEnabled"`
-	FlrigHost        string `json:"flrigHost,omitempty"`
-	FlrigPort        int    `json:"flrigPort,omitempty"`
-	FlrigVFO         string `json:"flrigVFO,omitempty"` // "A" or "B"
-	FlrigSyncToRig   bool   `json:"flrigSyncToRig"`     // Sync SDR frequency changes to rig
-	FlrigSyncFromRig bool   `json:"flrigSyncFromRig"`   // Sync rig frequency changes to SDR
+	RadioControlType  string `json:"radioControlType,omitempty"` // "none", "flrig", "rigctl", "serial", "omnirig"
+	FlrigEnabled      bool   `json:"flrigEnabled"`
+	FlrigHost         string `json:"flrigHost,omitempty"`
+	FlrigPort         int    `json:"flrigPort,omitempty"`
+	FlrigVFO          string `json:"flrigVFO,omitempty"` // "A" or "B"
+	FlrigSyncToRig    bool   `json:"flrigSyncToRig"`     // Sync SDR frequency changes to rig
+	FlrigSyncFromRig  bool   `json:"flrigSyncFromRig"`   // Sync rig frequency changes to SDR
+	RigctlEnabled     bool   `json:"rigctlEnabled"`
+	RigctlHost        string `json:"rigctlHost,omitempty"`
+	RigctlPort        int    `json:"rigctlPort,omitempty"`
+	RigctlVFO         string `json:"rigctlVFO,omitempty"` // "VFOA" or "VFOB"
+	RigctlSyncToRig   bool   `json:"rigctlSyncToRig"`     // Sync SDR frequency changes to rig
+	RigctlSyncFromRig bool   `json:"rigctlSyncFromRig"`   // Sync rig frequency changes to SDR
 }
 
 // ConfigManager handles loading and saving configuration
@@ -115,6 +121,12 @@ func getDefaultConfig() ClientConfig {
 		FlrigVFO:            "A",         // Default to VFO A
 		FlrigSyncToRig:      true,        // Sync SDR->rig by default
 		FlrigSyncFromRig:    true,        // Sync rig->SDR by default
+		RigctlEnabled:       false,       // rigctl disabled by default
+		RigctlHost:          "localhost", // Default rigctld host
+		RigctlPort:          4532,        // Default rigctld port
+		RigctlVFO:           "VFOA",      // Default to VFO A
+		RigctlSyncToRig:     true,        // Sync SDR->rig by default
+		RigctlSyncFromRig:   true,        // Sync rig->SDR by default
 	}
 }
 

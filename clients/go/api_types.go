@@ -108,6 +108,26 @@ type FlrigSyncRequest struct {
 	SyncFromRig bool `json:"syncFromRig"` // Sync rig frequency changes to SDR
 }
 
+// RigctlConnectRequest represents a request to connect to rigctld
+type RigctlConnectRequest struct {
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	VFO         string `json:"vfo"`         // "VFOA" or "VFOB"
+	SyncToRig   bool   `json:"syncToRig"`   // Sync SDR frequency changes to rig
+	SyncFromRig bool   `json:"syncFromRig"` // Sync rig frequency changes to SDR
+}
+
+// RigctlVFORequest represents a request to change rigctl VFO
+type RigctlVFORequest struct {
+	VFO string `json:"vfo"` // "VFOA" or "VFOB"
+}
+
+// RigctlSyncRequest represents a request to update rigctl sync settings
+type RigctlSyncRequest struct {
+	SyncToRig   bool `json:"syncToRig"`   // Sync SDR frequency changes to rig
+	SyncFromRig bool `json:"syncFromRig"` // Sync rig frequency changes to SDR
+}
+
 // API Response Types
 
 // StatusResponse represents the current client status
@@ -188,6 +208,20 @@ type ConfigResponse struct {
 	UDPHost             string  `json:"udpHost,omitempty"`
 	UDPPort             int     `json:"udpPort,omitempty"`
 	UDPEnabled          bool    `json:"udpEnabled"`
+	// Radio control settings
+	RadioControlType  string `json:"radioControlType,omitempty"`
+	FlrigEnabled      bool   `json:"flrigEnabled"`
+	FlrigHost         string `json:"flrigHost,omitempty"`
+	FlrigPort         int    `json:"flrigPort,omitempty"`
+	FlrigVFO          string `json:"flrigVFO,omitempty"`
+	FlrigSyncToRig    bool   `json:"flrigSyncToRig"`
+	FlrigSyncFromRig  bool   `json:"flrigSyncFromRig"`
+	RigctlEnabled     bool   `json:"rigctlEnabled"`
+	RigctlHost        string `json:"rigctlHost,omitempty"`
+	RigctlPort        int    `json:"rigctlPort,omitempty"`
+	RigctlVFO         string `json:"rigctlVFO,omitempty"`
+	RigctlSyncToRig   bool   `json:"rigctlSyncToRig"`
+	RigctlSyncFromRig bool   `json:"rigctlSyncFromRig"`
 }
 
 // ErrorResponse represents an error response

@@ -240,6 +240,7 @@
                     <select id="radio-control-type">
                         <option value="none">None</option>
                         <option value="flrig">flrig</option>
+                        <option value="rigctl">rigctl (Hamlib)</option>
                     </select>
                 </div>
 
@@ -304,6 +305,74 @@
                             <div class="status-item">
                                 <span class="label">PTT:</span>
                                 <span id="flrig-ptt">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="rigctl-controls" style="display: none;">
+                    <h3 style="margin-top: 15px;">rigctl (Hamlib) Settings</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="rigctl-host">Host:</label>
+                            <input type="text" id="rigctl-host" value="localhost" placeholder="localhost">
+                        </div>
+                        <div class="form-group">
+                            <label for="rigctl-port">Port:</label>
+                            <input type="number" id="rigctl-port" value="4532" placeholder="4532">
+                        </div>
+                        <div class="form-group">
+                            <label for="rigctl-vfo">VFO:</label>
+                            <select id="rigctl-vfo">
+                                <option value="VFOA">VFO A</option>
+                                <option value="VFOB">VFO B</option>
+                                <option value="Main">Main</option>
+                                <option value="Sub">Sub</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <h4 style="margin-top: 15px;">Synchronization</h4>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="rigctl-sync-to-rig" checked>
+                            <span>Sync SDR → Rig (SDR frequency changes update rig)</span>
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="rigctl-sync-from-rig" checked>
+                            <span>Sync Rig → SDR (Rig frequency changes update SDR)</span>
+                        </label>
+                    </div>
+
+                    <div class="button-group" style="margin-top: 15px;">
+                        <button id="rigctl-connect-btn" class="btn btn-primary">Connect to rigctl</button>
+                        <button id="rigctl-disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                    </div>
+
+                    <div id="rigctl-status-display" style="display: none; margin-top: 15px;">
+                        <h4>rigctl Status</h4>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="label">Connection:</span>
+                                <span id="rigctl-connection-status" class="status-badge disconnected">Disconnected</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Rig Frequency:</span>
+                                <span id="rigctl-frequency">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Rig Mode:</span>
+                                <span id="rigctl-mode">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">VFO:</span>
+                                <span id="rigctl-vfo-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">PTT:</span>
+                                <span id="rigctl-ptt">-</span>
                             </div>
                         </div>
                     </div>

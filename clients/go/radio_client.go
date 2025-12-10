@@ -481,7 +481,14 @@ func (c *RadioClient) SetupFIFO() error {
 }
 
 // SetupPortAudio initializes PortAudio for audio playback
-func (c *RadioClient) SetupPortAudio() error {
+func (c *RadioClient) SetupPortAudio() (returnErr error) {
+	// Recover from PortAudio panics (e.g., assertion failures in pa_front.c)
+	defer func() {
+		if r := recover(); r != nil {
+			returnErr = fmt.Errorf("PortAudio initialization panic: %v (this may indicate an audio system configuration issue)", r)
+		}
+	}()
+
 	// Initialize PortAudio
 	if err := portaudio.Initialize(); err != nil {
 		return fmt.Errorf("failed to initialize PortAudio: %w", err)
@@ -1277,6 +1284,15 @@ func (w *WAVWriter) Close() error {
 }
 
 func listAudioDevices() {
+	// Recover from PortAudio panics
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "PortAudio panic during device listing: %v\n", r)
+			fmt.Fprintf(os.Stderr, "This indicates an audio system configuration issue.\n")
+			os.Exit(1)
+		}
+	}()
+
 	// Initialize PortAudio
 	if err := portaudio.Initialize(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize PortAudio: %v\n", err)
@@ -1480,6 +1496,23 @@ func main() {
 
 						// Note: UDP state is already restored via the UDPEnabled flag passed to NewRadioClient
 					}()
+				}
+			}()
+		}
+
+		// Check for flrig auto-connect (independent of SDR connection)
+		if config.FlrigEnabled && config.RadioControlType == "flrig" {
+			log.Printf("flrig auto-connect enabled, connecting to %s:%d...", config.FlrigHost, config.FlrigPort)
+			go func() {
+				// Wait a moment for the API server to be ready
+				time.Sleep(500 * time.Millisecond)
+
+				if err := manager.ConnectFlrig(config.FlrigHost, config.FlrigPort, config.FlrigVFO,
+					config.FlrigSyncToRig, config.FlrigSyncFromRig); err != nil {
+					log.Printf("flrig auto-connect failed: %v", err)
+				} else {
+					log.Printf("flrig auto-connect successful (VFO %s, sync: SDR->rig=%v, rig->SDR=%v)",
+						config.FlrigVFO, config.FlrigSyncToRig, config.FlrigSyncFromRig)
 				}
 			}()
 		}

@@ -109,6 +109,22 @@ class UberSDRClient {
         this.flrigVFOStatus = document.getElementById('flrig-vfo-status');
         this.flrigPTT = document.getElementById('flrig-ptt');
 
+        // Rigctl control elements
+        this.rigctlControls = document.getElementById('rigctl-controls');
+        this.rigctlHost = document.getElementById('rigctl-host');
+        this.rigctlPort = document.getElementById('rigctl-port');
+        this.rigctlVFO = document.getElementById('rigctl-vfo');
+        this.rigctlSyncToRig = document.getElementById('rigctl-sync-to-rig');
+        this.rigctlSyncFromRig = document.getElementById('rigctl-sync-from-rig');
+        this.rigctlConnectBtn = document.getElementById('rigctl-connect-btn');
+        this.rigctlDisconnectBtn = document.getElementById('rigctl-disconnect-btn');
+        this.rigctlStatusDisplay = document.getElementById('rigctl-status-display');
+        this.rigctlConnectionStatus = document.getElementById('rigctl-connection-status');
+        this.rigctlFrequency = document.getElementById('rigctl-frequency');
+        this.rigctlMode = document.getElementById('rigctl-mode');
+        this.rigctlVFOStatus = document.getElementById('rigctl-vfo-status');
+        this.rigctlPTT = document.getElementById('rigctl-ptt');
+
         // Audio streaming state
         this.audioStreamActive = false;
         this.audioQueue = [];
@@ -268,6 +284,12 @@ class UberSDRClient {
         this.flrigDisconnectBtn.addEventListener('click', () => this.disconnectFlrig());
         this.flrigSyncToRig.addEventListener('change', () => this.updateFlrigSync());
         this.flrigSyncFromRig.addEventListener('change', () => this.updateFlrigSync());
+
+        // Rigctl control event listeners
+        this.rigctlConnectBtn.addEventListener('click', () => this.connectRigctl());
+        this.rigctlDisconnectBtn.addEventListener('click', () => this.disconnectRigctl());
+        this.rigctlSyncToRig.addEventListener('change', () => this.updateRigctlSync());
+        this.rigctlSyncFromRig.addEventListener('change', () => this.updateRigctlSync());
     }
 
     connectWebSocket() {
@@ -648,7 +670,7 @@ class UberSDRClient {
                 if (config.resampleEnabled !== undefined) this.resampleEnabledCheckbox.checked = config.resampleEnabled;
                 if (config.resampleOutputRate) this.resampleRateSelect.value = config.resampleOutputRate;
                 if (config.outputChannels !== undefined) this.outputChannelsSelect.value = config.outputChannels;
-                
+
                 // Load audio preview settings
                 if (config.audioPreviewEnabled !== undefined) {
                     this.audioPreviewEnabled.checked = config.audioPreviewEnabled;
@@ -698,6 +720,38 @@ class UberSDRClient {
                     clickTune: config.spectrumClickTune,
                     centerTune: config.spectrumCenterTune
                 });
+
+                // Load radio control settings
+                if (config.radioControlType) {
+                    this.radioControlType.value = config.radioControlType;
+                    this.onRadioControlTypeChanged(); // Show/hide controls based on type
+                }
+                if (config.flrigHost) this.flrigHost.value = config.flrigHost;
+                if (config.flrigPort) this.flrigPort.value = config.flrigPort;
+                if (config.flrigVFO) this.flrigVFO.value = config.flrigVFO;
+                if (config.flrigSyncToRig !== undefined) this.flrigSyncToRig.checked = config.flrigSyncToRig;
+                if (config.flrigSyncFromRig !== undefined) this.flrigSyncFromRig.checked = config.flrigSyncFromRig;
+
+                // Load rigctl settings
+                if (config.rigctlHost) this.rigctlHost.value = config.rigctlHost;
+                if (config.rigctlPort) this.rigctlPort.value = config.rigctlPort;
+                if (config.rigctlVFO) this.rigctlVFO.value = config.rigctlVFO;
+                if (config.rigctlSyncToRig !== undefined) this.rigctlSyncToRig.checked = config.rigctlSyncToRig;
+                if (config.rigctlSyncFromRig !== undefined) this.rigctlSyncFromRig.checked = config.rigctlSyncFromRig;
+
+                // Check if flrig is already connected (via auto-connect)
+                if (config.flrigEnabled && config.radioControlType === 'flrig') {
+                    setTimeout(() => {
+                        this.checkFlrigConnection();
+                    }, 1000); // Wait a bit for backend auto-connect to complete
+                }
+
+                // Check if rigctl is already connected (via auto-connect)
+                if (config.rigctlEnabled && config.radioControlType === 'rigctl') {
+                    setTimeout(() => {
+                        this.checkRigctlConnection();
+                    }, 1000); // Wait a bit for backend auto-connect to complete
+                }
 
                 console.log('Loaded saved configuration');
             }
@@ -1653,11 +1707,40 @@ class UberSDRClient {
 
     onRadioControlTypeChanged() {
         const type = this.radioControlType.value;
-        
+
         if (type === 'flrig') {
             this.flrigControls.style.display = 'block';
+            this.rigctlControls.style.display = 'none';
+        } else if (type === 'rigctl') {
+            this.flrigControls.style.display = 'none';
+            this.rigctlControls.style.display = 'block';
         } else {
             this.flrigControls.style.display = 'none';
+            this.rigctlControls.style.display = 'none';
+        }
+
+        // Save the radio control type selection
+        this.saveRadioControlType();
+    }
+
+    async saveRadioControlType() {
+        const config = {
+            radioControlType: this.radioControlType.value
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                console.error('Failed to save radio control type:', data.message || data.error);
+            }
+        } catch (error) {
+            console.error('Error saving radio control type:', error);
         }
     }
 
@@ -1685,7 +1768,7 @@ class UberSDRClient {
                 this.flrigDisconnectBtn.disabled = false;
                 this.flrigStatusDisplay.style.display = 'block';
                 this.updateFlrigStatus();
-                
+
                 // Start polling flrig status
                 this.startFlrigStatusPolling();
             } else {
@@ -1709,7 +1792,7 @@ class UberSDRClient {
                 this.flrigConnectBtn.disabled = false;
                 this.flrigDisconnectBtn.disabled = true;
                 this.flrigStatusDisplay.style.display = 'none';
-                
+
                 // Stop polling flrig status
                 this.stopFlrigStatusPolling();
             } else {
@@ -1725,7 +1808,7 @@ class UberSDRClient {
             const response = await fetch(`${this.apiBase}/api/radio/flrig/status`);
             if (response.ok) {
                 const status = await response.json();
-                
+
                 // Update connection status
                 if (status.connected) {
                     this.flrigConnectionStatus.textContent = 'Connected';
@@ -1734,28 +1817,28 @@ class UberSDRClient {
                     this.flrigConnectionStatus.textContent = 'Disconnected';
                     this.flrigConnectionStatus.className = 'status-badge disconnected';
                 }
-                
+
                 // Update frequency
                 if (status.frequency) {
                     this.flrigFrequency.textContent = this.formatFrequency(status.frequency);
                 } else {
                     this.flrigFrequency.textContent = '-';
                 }
-                
+
                 // Update mode
                 if (status.mode) {
                     this.flrigMode.textContent = status.mode.toUpperCase();
                 } else {
                     this.flrigMode.textContent = '-';
                 }
-                
+
                 // Update VFO
                 if (status.vfo) {
                     this.flrigVFOStatus.textContent = status.vfo;
                 } else {
                     this.flrigVFOStatus.textContent = '-';
                 }
-                
+
                 // Update PTT
                 if (status.ptt !== undefined) {
                     this.flrigPTT.textContent = status.ptt ? 'ON' : 'OFF';
@@ -1815,6 +1898,219 @@ class UberSDRClient {
             }
         } catch (error) {
             this.showError('Error updating sync settings', error.message);
+        }
+    }
+
+    async checkFlrigConnection() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/flrig/status`);
+            if (response.ok) {
+                const status = await response.json();
+
+                if (status.connected) {
+                    console.log('flrig is already connected (auto-connect)');
+                    // Update UI to reflect connected state
+                    this.flrigConnectBtn.disabled = true;
+                    this.flrigDisconnectBtn.disabled = false;
+                    this.flrigStatusDisplay.style.display = 'block';
+
+                    // Update status display
+                    this.updateFlrigStatus();
+
+                    // Start polling flrig status
+                    this.startFlrigStatusPolling();
+                } else {
+                    console.log('flrig not connected');
+                }
+            }
+        } catch (error) {
+            console.error('Failed to check flrig connection:', error);
+        }
+    }
+
+    // Radio Control Methods (rigctl)
+
+    async connectRigctl() {
+        const config = {
+            host: this.rigctlHost.value,
+            port: parseInt(this.rigctlPort.value),
+            vfo: this.rigctlVFO.value,
+            syncToRig: this.rigctlSyncToRig.checked,
+            syncFromRig: this.rigctlSyncFromRig.checked
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/rigctl/connect`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.showSuccess(data.message || 'Connected to rigctl');
+                this.rigctlConnectBtn.disabled = true;
+                this.rigctlDisconnectBtn.disabled = false;
+                this.rigctlStatusDisplay.style.display = 'block';
+                this.updateRigctlStatus();
+
+                // Start polling rigctl status
+                this.startRigctlStatusPolling();
+            } else {
+                this.showError('Failed to connect to rigctl', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error connecting to rigctl', error.message);
+        }
+    }
+
+    async disconnectRigctl() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/rigctl/disconnect`, {
+                method: 'POST'
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.showSuccess(data.message || 'Disconnected from rigctl');
+                this.rigctlConnectBtn.disabled = false;
+                this.rigctlDisconnectBtn.disabled = true;
+                this.rigctlStatusDisplay.style.display = 'none';
+
+                // Stop polling rigctl status
+                this.stopRigctlStatusPolling();
+            } else {
+                this.showError('Failed to disconnect from rigctl', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error disconnecting from rigctl', error.message);
+        }
+    }
+
+    async updateRigctlStatus() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/rigctl/status`);
+            if (response.ok) {
+                const status = await response.json();
+
+                // Update connection status
+                if (status.connected) {
+                    this.rigctlConnectionStatus.textContent = 'Connected';
+                    this.rigctlConnectionStatus.className = 'status-badge connected';
+                } else {
+                    this.rigctlConnectionStatus.textContent = 'Disconnected';
+                    this.rigctlConnectionStatus.className = 'status-badge disconnected';
+                }
+
+                // Update frequency
+                if (status.frequency) {
+                    this.rigctlFrequency.textContent = this.formatFrequency(status.frequency);
+                } else {
+                    this.rigctlFrequency.textContent = '-';
+                }
+
+                // Update mode
+                if (status.mode) {
+                    this.rigctlMode.textContent = status.mode.toUpperCase();
+                } else {
+                    this.rigctlMode.textContent = '-';
+                }
+
+                // Update VFO
+                if (status.vfo) {
+                    this.rigctlVFOStatus.textContent = status.vfo;
+                } else {
+                    this.rigctlVFOStatus.textContent = '-';
+                }
+
+                // Update PTT
+                if (status.ptt !== undefined) {
+                    this.rigctlPTT.textContent = status.ptt ? 'ON' : 'OFF';
+                } else {
+                    this.rigctlPTT.textContent = '-';
+                }
+            }
+        } catch (error) {
+            console.error('Failed to fetch rigctl status:', error);
+        }
+    }
+
+    startRigctlStatusPolling() {
+        // Poll rigctl status every 2 seconds
+        this.rigctlStatusInterval = setInterval(() => {
+            this.updateRigctlStatus();
+        }, 2000);
+    }
+
+    stopRigctlStatusPolling() {
+        if (this.rigctlStatusInterval) {
+            clearInterval(this.rigctlStatusInterval);
+            this.rigctlStatusInterval = null;
+        }
+    }
+
+    async updateRigctlSync() {
+        // Only update if rigctl is connected
+        const response = await fetch(`${this.apiBase}/api/radio/rigctl/status`);
+        if (!response.ok) return;
+
+        const status = await response.json();
+        if (!status.connected) {
+            console.log('rigctl not connected, skipping sync update');
+            return;
+        }
+
+        const config = {
+            syncToRig: this.rigctlSyncToRig.checked,
+            syncFromRig: this.rigctlSyncFromRig.checked
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/rigctl/sync`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                console.log('Updated rigctl sync settings:', config);
+                this.showSuccess(data.message || 'Sync settings updated');
+            } else {
+                this.showError('Failed to update sync settings', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error updating sync settings', error.message);
+        }
+    }
+
+    async checkRigctlConnection() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/radio/rigctl/status`);
+            if (response.ok) {
+                const status = await response.json();
+
+                if (status.connected) {
+                    console.log('rigctl is already connected (auto-connect)');
+                    // Update UI to reflect connected state
+                    this.rigctlConnectBtn.disabled = true;
+                    this.rigctlDisconnectBtn.disabled = false;
+                    this.rigctlStatusDisplay.style.display = 'block';
+
+                    // Update status display
+                    this.updateRigctlStatus();
+
+                    // Start polling rigctl status
+                    this.startRigctlStatusPolling();
+                } else {
+                    console.log('rigctl not connected');
+                }
+            }
+        } catch (error) {
+            console.error('Failed to check rigctl connection:', error);
         }
     }
 }

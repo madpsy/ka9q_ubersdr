@@ -32,11 +32,17 @@ type WebSocketManager struct {
 	spectrumClient    *SpectrumClient            // Spectrum WebSocket client
 	spectrumStreams   map[*websocket.Conn]string // Maps WebSocket connections to their spectrum room names
 	spectrumStreamsMu sync.RWMutex
-	flrigClient       *FlrigClient       // flrig radio control client
-	flrigPolling      bool               // Whether flrig polling is active
-	flrigPollCancel   context.CancelFunc // Cancel function for flrig polling
-	flrigSyncToRig    bool               // Sync SDR frequency changes to rig
-	flrigSyncFromRig  bool               // Sync rig frequency changes to SDR
+	spectrumConnMu    map[*websocket.Conn]*sync.Mutex // Per-connection write mutexes for spectrum streams
+	flrigClient       *FlrigClient                    // flrig radio control client
+	flrigPolling      bool                            // Whether flrig polling is active
+	flrigPollCancel   context.CancelFunc              // Cancel function for flrig polling
+	flrigSyncToRig    bool                            // Sync SDR frequency changes to rig
+	flrigSyncFromRig  bool                            // Sync rig frequency changes to SDR
+	rigctlClient      *RigctlClient                   // rigctl radio control client
+	rigctlPolling     bool                            // Whether rigctl polling is active
+	rigctlPollCancel  context.CancelFunc              // Cancel function for rigctl polling
+	rigctlSyncToRig   bool                            // Sync SDR frequency changes to rig
+	rigctlSyncFromRig bool                            // Sync rig frequency changes to SDR
 }
 
 // NewWebSocketManager creates a new WebSocket manager
@@ -51,6 +57,7 @@ func NewWebSocketManager() *WebSocketManager {
 		subscribers:     make(map[chan interface{}]bool),
 		audioStreams:    make(map[*websocket.Conn]string),
 		spectrumStreams: make(map[*websocket.Conn]string),
+		spectrumConnMu:  make(map[*websocket.Conn]*sync.Mutex),
 	}
 }
 
@@ -232,6 +239,8 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 	conn := m.conn
 	flrigClient := m.flrigClient
 	flrigSyncToRig := m.flrigSyncToRig
+	rigctlClient := m.rigctlClient
+	rigctlSyncToRig := m.rigctlSyncToRig
 	m.mu.RUnlock()
 
 	// Send tune message with WebSocket write lock
@@ -275,6 +284,24 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 				log.Printf("Warning: Failed to sync mode to flrig: %v", err)
 			} else {
 				log.Printf("Synced mode %s to flrig", req.Mode)
+			}
+		}
+	}
+
+	// Sync to rigctl if enabled and connected (without holding lock)
+	if rigctlClient != nil && rigctlClient.IsConnected() && rigctlSyncToRig {
+		if req.Frequency != nil {
+			if err := rigctlClient.SetFrequency(*req.Frequency); err != nil {
+				log.Printf("Warning: Failed to sync frequency to rigctl: %v", err)
+			} else {
+				log.Printf("Synced frequency %d Hz to rigctl", *req.Frequency)
+			}
+		}
+		if req.Mode != "" {
+			if err := rigctlClient.SetMode(req.Mode); err != nil {
+				log.Printf("Warning: Failed to sync mode to rigctl: %v", err)
+			} else {
+				log.Printf("Synced mode %s to rigctl", req.Mode)
 			}
 		}
 	}
@@ -345,7 +372,24 @@ func (m *WebSocketManager) EnablePortAudioOutput(deviceIndex int) error {
 		return fmt.Errorf("client not initialized")
 	}
 
-	return m.client.EnablePortAudio(deviceIndex)
+	// Run PortAudio initialization in a goroutine with timeout to handle potential crashes
+	errChan := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				errChan <- fmt.Errorf("PortAudio panic: %v", r)
+			}
+		}()
+		errChan <- m.client.EnablePortAudio(deviceIndex)
+	}()
+
+	// Wait for result with timeout
+	select {
+	case err := <-errChan:
+		return err
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("PortAudio initialization timeout (possible system audio configuration issue)")
+	}
 }
 
 // DisablePortAudioOutput disables PortAudio output
@@ -661,6 +705,7 @@ func (m *WebSocketManager) EnableSpectrumStream(conn *websocket.Conn, room strin
 	defer m.spectrumStreamsMu.Unlock()
 
 	m.spectrumStreams[conn] = room
+	m.spectrumConnMu[conn] = &sync.Mutex{} // Create per-connection mutex
 	log.Printf("Enabled spectrum streaming to room '%s' for connection", room)
 
 	// Create spectrum client if not exists
@@ -698,6 +743,7 @@ func (m *WebSocketManager) DisableSpectrumStream(conn *websocket.Conn) {
 
 	if room, ok := m.spectrumStreams[conn]; ok {
 		delete(m.spectrumStreams, conn)
+		delete(m.spectrumConnMu, conn) // Remove per-connection mutex
 		log.Printf("Disabled spectrum streaming from room '%s' for connection", room)
 	}
 
@@ -714,25 +760,46 @@ func (m *WebSocketManager) DisableSpectrumStream(conn *websocket.Conn) {
 
 // broadcastSpectrumData sends spectrum data to all WebSocket connections subscribed to the given room
 func (m *WebSocketManager) broadcastSpectrumData(data []byte, room string) {
-	m.spectrumStreamsMu.Lock()
-	defer m.spectrumStreamsMu.Unlock()
+	m.spectrumStreamsMu.RLock()
 
-	// Collect connections to remove after iteration
-	var toRemove []*websocket.Conn
+	// Build list of connections to write to (with their mutexes)
+	type connWithMutex struct {
+		conn *websocket.Conn
+		mu   *sync.Mutex
+	}
+	var connsToWrite []connWithMutex
 
 	for conn, connRoom := range m.spectrumStreams {
 		if connRoom == room {
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				// Connection is dead, mark for removal
-				toRemove = append(toRemove, conn)
+			if mu, ok := m.spectrumConnMu[conn]; ok {
+				connsToWrite = append(connsToWrite, connWithMutex{conn: conn, mu: mu})
 			}
+		}
+	}
+	m.spectrumStreamsMu.RUnlock()
+
+	// Write to each connection with its own mutex (outside the main lock)
+	var toRemove []*websocket.Conn
+	for _, cw := range connsToWrite {
+		cw.mu.Lock()
+		err := cw.conn.WriteMessage(websocket.TextMessage, data)
+		cw.mu.Unlock()
+
+		if err != nil {
+			// Connection is dead, mark for removal
+			toRemove = append(toRemove, cw.conn)
 		}
 	}
 
 	// Remove dead connections
-	for _, conn := range toRemove {
-		delete(m.spectrumStreams, conn)
-		log.Printf("Removed dead spectrum connection from room '%s'", room)
+	if len(toRemove) > 0 {
+		m.spectrumStreamsMu.Lock()
+		for _, conn := range toRemove {
+			delete(m.spectrumStreams, conn)
+			delete(m.spectrumConnMu, conn)
+			log.Printf("Removed dead spectrum connection from room '%s'", room)
+		}
+		m.spectrumStreamsMu.Unlock()
 	}
 
 	// If no more spectrum streams, disconnect spectrum client
@@ -1076,4 +1143,304 @@ func (m *WebSocketManager) stopFlrigPolling() {
 
 	m.flrigPolling = false
 	log.Printf("Stopped flrig polling")
+}
+
+// Radio Control Methods (rigctl)
+
+// ConnectRigctl connects to rigctld server
+func (m *WebSocketManager) ConnectRigctl(host string, port int, vfo string, syncToRig bool, syncFromRig bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Disconnect existing rigctl client if any
+	if m.rigctlClient != nil {
+		m.stopRigctlPolling()
+		m.rigctlClient.Disconnect()
+		m.rigctlClient = nil
+	}
+
+	// Store sync direction settings
+	m.rigctlSyncToRig = syncToRig
+	m.rigctlSyncFromRig = syncFromRig
+
+	// Create new rigctl client
+	m.rigctlClient = NewRigctlClient(host, port, vfo)
+
+	// Set up callbacks
+	m.rigctlClient.SetCallbacks(
+		func(freq int) {
+			// Run callback in goroutine to avoid blocking polling
+			go func() {
+				// Check sync setting with lock
+				m.mu.RLock()
+				syncFromRig := m.rigctlSyncFromRig
+				m.mu.RUnlock()
+
+				if !syncFromRig {
+					log.Printf("rigctl frequency changed to %d Hz (sync disabled)", freq)
+					return
+				}
+
+				// Check connection without holding lock for too long
+				m.mu.RLock()
+				connected := m.connected
+				client := m.client
+				m.mu.RUnlock()
+
+				if !connected || client == nil {
+					log.Printf("rigctl frequency changed to %d Hz (not connected to SDR)", freq)
+					return
+				}
+
+				log.Printf("rigctl frequency changed to %d Hz (syncing to SDR)", freq)
+
+				// Temporarily disable sync to rig to avoid feedback loop
+				m.mu.Lock()
+				oldSyncToRig := m.rigctlSyncToRig
+				m.rigctlSyncToRig = false
+				m.mu.Unlock()
+
+				if err := m.SetFrequency(freq); err != nil {
+					log.Printf("Failed to update SDR frequency from rigctl: %v", err)
+				}
+
+				// Restore sync setting
+				m.mu.Lock()
+				m.rigctlSyncToRig = oldSyncToRig
+				m.mu.Unlock()
+			}()
+		},
+		func(mode string) {
+			// Run callback in goroutine to avoid blocking polling
+			go func() {
+				// Check sync setting with lock
+				m.mu.RLock()
+				syncFromRig := m.rigctlSyncFromRig
+				m.mu.RUnlock()
+
+				if !syncFromRig {
+					log.Printf("rigctl mode changed to %s (sync disabled)", mode)
+					return
+				}
+
+				// Check connection without holding lock for too long
+				m.mu.RLock()
+				connected := m.connected
+				client := m.client
+				m.mu.RUnlock()
+
+				if !connected || client == nil {
+					log.Printf("rigctl mode changed to %s (not connected to SDR)", mode)
+					return
+				}
+
+				// Convert mode to lowercase for SDR server
+				modeLower := strings.ToLower(mode)
+				log.Printf("rigctl mode changed to %s (syncing to SDR as %s)", mode, modeLower)
+
+				// Temporarily disable sync to rig to avoid feedback loop
+				m.mu.Lock()
+				oldSyncToRig := m.rigctlSyncToRig
+				m.rigctlSyncToRig = false
+				m.mu.Unlock()
+
+				if err := m.SetMode(modeLower); err != nil {
+					log.Printf("Failed to update SDR mode from rigctl: %v", err)
+				}
+
+				// Restore sync setting
+				m.mu.Lock()
+				m.rigctlSyncToRig = oldSyncToRig
+				m.mu.Unlock()
+			}()
+		},
+		func(ptt bool) {
+			// PTT changed in rigctl
+			log.Printf("rigctl PTT changed to %v", ptt)
+			// PTT handling could be added here if needed
+		},
+		func(errMsg string) {
+			// Error from rigctl
+			log.Printf("rigctl error: %s", errMsg)
+		},
+	)
+
+	// Connect to rigctl
+	if err := m.rigctlClient.Connect(); err != nil {
+		m.rigctlClient = nil
+		return fmt.Errorf("failed to connect to rigctl: %w", err)
+	}
+
+	log.Printf("Connected to rigctld at %s:%d (VFO %s, sync: SDR->rig=%v, rig->SDR=%v)",
+		host, port, vfo, syncToRig, syncFromRig)
+
+	// Start polling goroutine
+	m.startRigctlPolling()
+
+	return nil
+}
+
+// DisconnectRigctl disconnects from rigctld server
+func (m *WebSocketManager) DisconnectRigctl() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.rigctlClient == nil {
+		return fmt.Errorf("rigctl not connected")
+	}
+
+	m.stopRigctlPolling()
+	m.rigctlClient.Disconnect()
+	m.rigctlClient = nil
+
+	log.Printf("Disconnected from rigctld")
+	return nil
+}
+
+// IsRigctlConnected returns whether rigctl is connected
+func (m *WebSocketManager) IsRigctlConnected() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.rigctlClient != nil && m.rigctlClient.IsConnected()
+}
+
+// SetRigctlFrequency sets the frequency in rigctl
+func (m *WebSocketManager) SetRigctlFrequency(freq int) error {
+	m.mu.RLock()
+	client := m.rigctlClient
+	m.mu.RUnlock()
+
+	if client == nil {
+		return fmt.Errorf("rigctl not connected")
+	}
+
+	return client.SetFrequency(freq)
+}
+
+// SetRigctlMode sets the mode in rigctl
+func (m *WebSocketManager) SetRigctlMode(mode string) error {
+	m.mu.RLock()
+	client := m.rigctlClient
+	m.mu.RUnlock()
+
+	if client == nil {
+		return fmt.Errorf("rigctl not connected")
+	}
+
+	return client.SetMode(mode)
+}
+
+// SetRigctlVFO sets the VFO in rigctl
+func (m *WebSocketManager) SetRigctlVFO(vfo string) error {
+	m.mu.RLock()
+	client := m.rigctlClient
+	m.mu.RUnlock()
+
+	if client == nil {
+		return fmt.Errorf("rigctl not connected")
+	}
+
+	return client.SetVFO(vfo)
+}
+
+// SetRigctlSync updates the rigctl sync direction settings
+func (m *WebSocketManager) SetRigctlSync(syncToRig bool, syncFromRig bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.rigctlClient == nil {
+		return fmt.Errorf("rigctl not connected")
+	}
+
+	m.rigctlSyncToRig = syncToRig
+	m.rigctlSyncFromRig = syncFromRig
+
+	log.Printf("Updated rigctl sync settings: SDR->rig=%v, rig->SDR=%v", syncToRig, syncFromRig)
+	return nil
+}
+
+// GetRigctlStatus returns the current rigctl status
+func (m *WebSocketManager) GetRigctlStatus() map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.rigctlClient == nil {
+		return map[string]interface{}{
+			"connected": false,
+		}
+	}
+
+	return map[string]interface{}{
+		"connected": m.rigctlClient.IsConnected(),
+		"frequency": m.rigctlClient.GetCachedFrequency(),
+		"mode":      m.rigctlClient.GetCachedMode(),
+		"ptt":       m.rigctlClient.GetCachedPTT(),
+		"vfo":       m.rigctlClient.GetVFO(),
+	}
+}
+
+// startRigctlPolling starts the rigctl polling goroutine
+func (m *WebSocketManager) startRigctlPolling() {
+	if m.rigctlPolling {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.rigctlPollCancel = cancel
+	m.rigctlPolling = true
+
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond) // Poll every 200ms for faster response
+		defer ticker.Stop()
+
+		log.Printf("rigctl polling goroutine started")
+		pollCount := 0
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Printf("rigctl polling goroutine stopped (context done)")
+				return
+			case <-ticker.C:
+				pollCount++
+				m.mu.RLock()
+				client := m.rigctlClient
+				m.mu.RUnlock()
+
+				if client == nil {
+					if pollCount%20 == 0 {
+						log.Printf("rigctl polling: client is nil (poll #%d)", pollCount)
+					}
+					continue
+				}
+
+				connected := client.IsConnected()
+				if !connected {
+					if pollCount%20 == 0 {
+						log.Printf("rigctl polling: client not connected (poll #%d)", pollCount)
+					}
+					continue
+				}
+
+				client.Poll()
+			}
+		}
+	}()
+
+	log.Printf("Started rigctl polling")
+}
+
+// stopRigctlPolling stops the rigctl polling goroutine
+func (m *WebSocketManager) stopRigctlPolling() {
+	if !m.rigctlPolling {
+		return
+	}
+
+	if m.rigctlPollCancel != nil {
+		m.rigctlPollCancel()
+		m.rigctlPollCancel = nil
+	}
+
+	m.rigctlPolling = false
+	log.Printf("Stopped rigctl polling")
 }

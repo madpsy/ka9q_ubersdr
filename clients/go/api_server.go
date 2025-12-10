@@ -94,6 +94,15 @@ func (s *APIServer) setupRoutes() {
 	api.HandleFunc("/radio/flrig/vfo", s.handleFlrigVFO).Methods("POST", "OPTIONS")
 	api.HandleFunc("/radio/flrig/sync", s.handleFlrigSync).Methods("POST", "OPTIONS")
 
+	// Radio control endpoints (rigctl)
+	api.HandleFunc("/radio/rigctl/connect", s.handleRigctlConnect).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/rigctl/disconnect", s.handleRigctlDisconnect).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/rigctl/status", s.handleRigctlStatus).Methods("GET", "OPTIONS")
+	api.HandleFunc("/radio/rigctl/frequency", s.handleRigctlFrequency).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/rigctl/mode", s.handleRigctlMode).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/rigctl/vfo", s.handleRigctlVFO).Methods("POST", "OPTIONS")
+	api.HandleFunc("/radio/rigctl/sync", s.handleRigctlSync).Methods("POST", "OPTIONS")
+
 	// Saved instances management endpoints
 	api.HandleFunc("/instances/saved", s.handleSavedInstances).Methods("GET", "OPTIONS")
 	api.HandleFunc("/instances/saved", s.handleSaveInstance).Methods("POST", "OPTIONS")
@@ -443,6 +452,19 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			UDPHost:             savedConfig.UDPHost,
 			UDPPort:             savedConfig.UDPPort,
 			UDPEnabled:          savedConfig.UDPEnabled,
+			RadioControlType:    savedConfig.RadioControlType,
+			FlrigEnabled:        savedConfig.FlrigEnabled,
+			FlrigHost:           savedConfig.FlrigHost,
+			FlrigPort:           savedConfig.FlrigPort,
+			FlrigVFO:            savedConfig.FlrigVFO,
+			FlrigSyncToRig:      savedConfig.FlrigSyncToRig,
+			FlrigSyncFromRig:    savedConfig.FlrigSyncFromRig,
+			RigctlEnabled:       savedConfig.RigctlEnabled,
+			RigctlHost:          savedConfig.RigctlHost,
+			RigctlPort:          savedConfig.RigctlPort,
+			RigctlVFO:           savedConfig.RigctlVFO,
+			RigctlSyncToRig:     savedConfig.RigctlSyncToRig,
+			RigctlSyncFromRig:   savedConfig.RigctlSyncFromRig,
 		}
 		respondJSON(w, http.StatusOK, config)
 		return
@@ -1074,6 +1096,184 @@ func (s *APIServer) handleFlrigSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondSuccess(w, fmt.Sprintf("flrig sync updated (SDR->rig=%v, rig->SDR=%v)", req.SyncToRig, req.SyncFromRig))
+}
+
+// Radio Control Handlers (rigctl)
+
+// handleRigctlConnect handles POST /api/radio/rigctl/connect
+func (s *APIServer) handleRigctlConnect(w http.ResponseWriter, r *http.Request) {
+	var req RigctlConnectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.Host == "" {
+		respondError(w, http.StatusBadRequest, "Host is required", "")
+		return
+	}
+
+	if req.Port == 0 {
+		req.Port = 4532 // Default rigctld port
+	}
+
+	if req.VFO == "" {
+		req.VFO = "VFOA" // Default VFO
+	}
+
+	// Connect to rigctl
+	if err := s.manager.ConnectRigctl(req.Host, req.Port, req.VFO, req.SyncToRig, req.SyncFromRig); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to connect to rigctld", err.Error())
+		return
+	}
+
+	// Save rigctl config
+	if err := s.configManager.Update(func(c *ClientConfig) {
+		c.RadioControlType = "rigctl"
+		c.RigctlEnabled = true
+		c.RigctlHost = req.Host
+		c.RigctlPort = req.Port
+		c.RigctlVFO = req.VFO
+		c.RigctlSyncToRig = req.SyncToRig
+		c.RigctlSyncFromRig = req.SyncFromRig
+	}); err != nil {
+		log.Printf("Warning: Failed to save rigctl config: %v", err)
+	}
+
+	respondSuccess(w, fmt.Sprintf("Connected to rigctld at %s:%d (sync: SDR->rig=%v, rig->SDR=%v)",
+		req.Host, req.Port, req.SyncToRig, req.SyncFromRig))
+}
+
+// handleRigctlDisconnect handles POST /api/radio/rigctl/disconnect
+func (s *APIServer) handleRigctlDisconnect(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsRigctlConnected() {
+		respondError(w, http.StatusConflict, "rigctl not connected", "")
+		return
+	}
+
+	if err := s.manager.DisconnectRigctl(); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to disconnect from rigctld", err.Error())
+		return
+	}
+
+	// Update config
+	if err := s.configManager.Update(func(c *ClientConfig) {
+		c.RigctlEnabled = false
+	}); err != nil {
+		log.Printf("Warning: Failed to save rigctl config: %v", err)
+	}
+
+	respondSuccess(w, "Disconnected from rigctld")
+}
+
+// handleRigctlStatus handles GET /api/radio/rigctl/status
+func (s *APIServer) handleRigctlStatus(w http.ResponseWriter, r *http.Request) {
+	status := s.manager.GetRigctlStatus()
+	respondJSON(w, http.StatusOK, status)
+}
+
+// handleRigctlFrequency handles POST /api/radio/rigctl/frequency
+func (s *APIServer) handleRigctlFrequency(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsRigctlConnected() {
+		respondError(w, http.StatusConflict, "rigctl not connected", "")
+		return
+	}
+
+	var req FrequencyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if err := s.manager.SetRigctlFrequency(req.Frequency); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to set rigctl frequency", err.Error())
+		return
+	}
+
+	respondSuccess(w, "rigctl frequency set successfully")
+}
+
+// handleRigctlMode handles POST /api/radio/rigctl/mode
+func (s *APIServer) handleRigctlMode(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsRigctlConnected() {
+		respondError(w, http.StatusConflict, "rigctl not connected", "")
+		return
+	}
+
+	var req ModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if err := s.manager.SetRigctlMode(req.Mode); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to set rigctl mode", err.Error())
+		return
+	}
+
+	respondSuccess(w, "rigctl mode set successfully")
+}
+
+// handleRigctlVFO handles POST /api/radio/rigctl/vfo
+func (s *APIServer) handleRigctlVFO(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsRigctlConnected() {
+		respondError(w, http.StatusConflict, "rigctl not connected", "")
+		return
+	}
+
+	var req RigctlVFORequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.VFO == "" {
+		respondError(w, http.StatusBadRequest, "VFO is required", "")
+		return
+	}
+
+	if err := s.manager.SetRigctlVFO(req.VFO); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to set rigctl VFO", err.Error())
+		return
+	}
+
+	// Save VFO to config
+	if err := s.configManager.Update(func(c *ClientConfig) {
+		c.RigctlVFO = req.VFO
+	}); err != nil {
+		log.Printf("Warning: Failed to save rigctl VFO config: %v", err)
+	}
+
+	respondSuccess(w, fmt.Sprintf("rigctl VFO set to %s", req.VFO))
+}
+
+// handleRigctlSync handles POST /api/radio/rigctl/sync
+func (s *APIServer) handleRigctlSync(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsRigctlConnected() {
+		respondError(w, http.StatusConflict, "rigctl not connected", "")
+		return
+	}
+
+	var req RigctlSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if err := s.manager.SetRigctlSync(req.SyncToRig, req.SyncFromRig); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to update rigctl sync settings", err.Error())
+		return
+	}
+
+	// Save sync settings to config
+	if err := s.configManager.Update(func(c *ClientConfig) {
+		c.RigctlSyncToRig = req.SyncToRig
+		c.RigctlSyncFromRig = req.SyncFromRig
+	}); err != nil {
+		log.Printf("Warning: Failed to save rigctl sync config: %v", err)
+	}
+
+	respondSuccess(w, fmt.Sprintf("rigctl sync updated (SDR->rig=%v, rig->SDR=%v)", req.SyncToRig, req.SyncFromRig))
 }
 
 // Helper functions

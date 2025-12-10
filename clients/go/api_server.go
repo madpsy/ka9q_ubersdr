@@ -459,6 +459,18 @@ func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					s.handleAudioStreamRequest(conn, enabled, msg)
 				}
 			}
+
+			// Handle spectrum stream requests
+			if msgType, ok := msg["type"].(string); ok && msgType == "spectrum_stream" {
+				if enabled, ok := msg["enabled"].(bool); ok {
+					s.handleSpectrumStreamRequest(conn, enabled, msg)
+				}
+			}
+
+			// Handle spectrum commands (zoom, pan)
+			if msgType, ok := msg["type"].(string); ok && (msgType == "zoom" || msgType == "pan") {
+				s.handleSpectrumCommand(conn, msgType, msg)
+			}
 		}
 	}()
 
@@ -494,6 +506,50 @@ func (s *APIServer) handleAudioStreamRequest(conn *websocket.Conn, enabled bool,
 	} else {
 		// Disable audio streaming
 		s.manager.DisableAudioStream(conn)
+	}
+}
+
+// handleSpectrumStreamRequest handles spectrum streaming enable/disable requests
+func (s *APIServer) handleSpectrumStreamRequest(conn *websocket.Conn, enabled bool, msg map[string]interface{}) {
+	room, _ := msg["room"].(string)
+	if room == "" {
+		room = "spectrum_preview"
+	}
+
+	log.Printf("Spectrum stream request: enabled=%v, room=%s", enabled, room)
+
+	if enabled {
+		// Enable spectrum streaming to this WebSocket connection
+		if err := s.manager.EnableSpectrumStream(conn, room); err != nil {
+			log.Printf("Failed to enable spectrum stream: %v", err)
+			// Send error message back to client
+			errorMsg := map[string]interface{}{
+				"type":    "error",
+				"error":   "spectrum_stream_failed",
+				"message": err.Error(),
+			}
+			conn.WriteJSON(errorMsg)
+		}
+	} else {
+		// Disable spectrum streaming
+		s.manager.DisableSpectrumStream(conn)
+	}
+}
+
+// handleSpectrumCommand handles spectrum control commands (zoom, pan)
+func (s *APIServer) handleSpectrumCommand(conn *websocket.Conn, cmdType string, msg map[string]interface{}) {
+	log.Printf("Spectrum command: type=%s, params=%v", cmdType, msg)
+
+	// Extract parameters and send to spectrum client
+	if err := s.manager.SendSpectrumCommand(cmdType, msg); err != nil {
+		log.Printf("Failed to send spectrum command: %v", err)
+		// Send error message back to client
+		errorMsg := map[string]interface{}{
+			"type":    "error",
+			"error":   "spectrum_command_failed",
+			"message": err.Error(),
+		}
+		conn.WriteJSON(errorMsg)
 	}
 }
 

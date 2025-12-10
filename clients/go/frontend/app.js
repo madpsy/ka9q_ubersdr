@@ -49,6 +49,13 @@ class UberSDRClient {
         this.spectrumCanvas = document.getElementById('audio-spectrum-canvas');
         this.waterfallCanvas = document.getElementById('audio-waterfall-canvas');
         
+        // RF Spectrum elements
+        this.spectrumEnabled = document.getElementById('spectrum-enabled');
+        this.spectrumDisplayContainer = document.getElementById('spectrum-display-container');
+        this.spectrumStatus = document.getElementById('spectrum-status');
+        this.rfSpectrumCanvas = document.getElementById('rf-spectrum-canvas');
+        this.rfWaterfallCanvas = document.getElementById('rf-waterfall-canvas');
+        
         // NR2 elements
         this.nr2EnabledCheckbox = document.getElementById('nr2-enabled');
         this.nr2StrengthInput = document.getElementById('nr2-strength');
@@ -77,6 +84,9 @@ class UberSDRClient {
         
         // Audio visualizer
         this.audioVisualizer = null;
+        
+        // RF Spectrum display
+        this.spectrumDisplay = null;
     }
 
     attachEventListeners() {
@@ -159,6 +169,11 @@ class UberSDRClient {
             console.log('Auto-connect changed to:', this.autoConnectCheckbox.checked);
             this.saveAutoConnectConfig();
         });
+        
+        // RF Spectrum settings
+        this.spectrumEnabled.addEventListener('change', () => {
+            this.toggleSpectrumDisplay();
+        });
     }
 
     connectWebSocket() {
@@ -206,6 +221,11 @@ class UberSDRClient {
             this.showError(data.error, data.message);
         } else if (data.type === 'audio') {
             this.handleAudioData(data);
+        } else if (data.type === 'config' || data.type === 'spectrum') {
+            // Forward to spectrum display
+            if (this.spectrumDisplay) {
+                this.spectrumDisplay.handleMessage(data);
+            }
         } else if (data.connected !== undefined) {
             // Initial status message
             this.updateStatusDisplay(data);
@@ -258,6 +278,11 @@ class UberSDRClient {
                 this.updateConnectionUI();
                 this.showSuccess(data.message || 'Connected successfully');
                 this.updateStatus();
+
+                // Enable spectrum display if checkbox is checked
+                if (this.spectrumEnabled.checked) {
+                    setTimeout(() => this.enableSpectrumDisplay(), 500);
+                }
             } else {
                 this.showError('Connection failed', data.message || data.error);
             }
@@ -278,6 +303,11 @@ class UberSDRClient {
                 this.connected = false;
                 this.updateConnectionUI();
                 this.showSuccess(data.message || 'Disconnected successfully');
+
+                // Disable spectrum display
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.disable();
+                }
             } else {
                 this.showError('Disconnect failed', data.message || data.error);
             }
@@ -1029,6 +1059,53 @@ class UberSDRClient {
             this.audioPreviewStatus.className = 'status-badge error';
         } else {
             this.audioPreviewStatus.className = 'status-badge disconnected';
+        }
+    }
+
+    // RF Spectrum Display Methods
+
+    toggleSpectrumDisplay() {
+        const enabled = this.spectrumEnabled.checked;
+
+        if (enabled) {
+            this.spectrumDisplayContainer.style.display = 'block';
+            if (this.connected) {
+                this.enableSpectrumDisplay();
+            }
+        } else {
+            this.spectrumDisplayContainer.style.display = 'none';
+            if (this.spectrumDisplay) {
+                this.spectrumDisplay.disable();
+                this.updateSpectrumStatus('Not streaming');
+            }
+        }
+    }
+
+    enableSpectrumDisplay() {
+        if (!this.connected) {
+            console.warn('Cannot enable spectrum display: not connected');
+            return;
+        }
+
+        // Initialize spectrum display if not already created
+        if (!this.spectrumDisplay && this.rfSpectrumCanvas && this.rfWaterfallCanvas) {
+            this.spectrumDisplay = new SpectrumDisplay(this.rfSpectrumCanvas, this.rfWaterfallCanvas);
+        }
+
+        if (this.spectrumDisplay && this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.spectrumDisplay.enable(this.ws);
+            this.updateSpectrumStatus('Streaming');
+        }
+    }
+
+    updateSpectrumStatus(status) {
+        this.spectrumStatus.textContent = status;
+        if (status.includes('Streaming')) {
+            this.spectrumStatus.className = 'status-badge connected';
+        } else if (status.includes('Error') || status.includes('Failed')) {
+            this.spectrumStatus.className = 'status-badge error';
+        } else {
+            this.spectrumStatus.className = 'status-badge disconnected';
         }
     }
 }

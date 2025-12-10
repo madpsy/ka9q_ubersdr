@@ -169,6 +169,30 @@
                 </div>
             </section>
 
+            <!-- RF Spectrum Display Panel -->
+            <section class="panel">
+                <h2>RF Spectrum Display</h2>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="spectrum-enabled">
+                        <span>Enable RF Spectrum Display</span>
+                    </label>
+                </div>
+                <div class="info-box">
+                    <p><strong>Note:</strong> Displays the RF spectrum and waterfall from the SDR receiver. Shows the actual RF spectrum centered on your tuned frequency with 200 kHz bandwidth by default.</p>
+                </div>
+                <div id="spectrum-display-container" style="display: block;">
+                    <div class="spectrum-status">
+                        <span class="label">Spectrum Status:</span>
+                        <span id="spectrum-status" class="status-badge disconnected">Not streaming</span>
+                    </div>
+                    <div class="spectrum-visualizer">
+                        <canvas id="rf-spectrum-canvas" width="800" height="200"></canvas>
+                        <canvas id="rf-waterfall-canvas" width="800" height="300"></canvas>
+                    </div>
+                </div>
+            </section>
+
             <!-- Resampling Settings Panel -->
             <section class="panel">
                 <h2>Audio Resampling</h2>
@@ -306,6 +330,7 @@
     </div>
 
     <script src="audio-visualizer.js"></script>
+    <script src="spectrum-display.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

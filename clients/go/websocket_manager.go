@@ -13,20 +13,23 @@ import (
 
 // WebSocketManager manages the WebSocket connection with thread-safe operations
 type WebSocketManager struct {
-	client          *RadioClient
-	conn            *websocket.Conn // WebSocket connection for sending tune messages
-	mu              sync.RWMutex
-	connected       bool
-	connectedAt     time.Time
-	ctx             context.Context
-	cancel          context.CancelFunc
-	statusBroadcast chan WSStatusUpdate
-	errorBroadcast  chan WSErrorUpdate
-	connBroadcast   chan WSConnectionUpdate
-	subscribers     map[chan interface{}]bool
-	subMu           sync.RWMutex
-	audioStreams    map[*websocket.Conn]string // Maps WebSocket connections to their audio room names
-	audioStreamsMu  sync.RWMutex
+	client            *RadioClient
+	conn              *websocket.Conn // WebSocket connection for sending tune messages
+	mu                sync.RWMutex
+	connected         bool
+	connectedAt       time.Time
+	ctx               context.Context
+	cancel            context.CancelFunc
+	statusBroadcast   chan WSStatusUpdate
+	errorBroadcast    chan WSErrorUpdate
+	connBroadcast     chan WSConnectionUpdate
+	subscribers       map[chan interface{}]bool
+	subMu             sync.RWMutex
+	audioStreams      map[*websocket.Conn]string // Maps WebSocket connections to their audio room names
+	audioStreamsMu    sync.RWMutex
+	spectrumClient    *SpectrumClient            // Spectrum WebSocket client
+	spectrumStreams   map[*websocket.Conn]string // Maps WebSocket connections to their spectrum room names
+	spectrumStreamsMu sync.RWMutex
 }
 
 // NewWebSocketManager creates a new WebSocket manager
@@ -40,6 +43,7 @@ func NewWebSocketManager() *WebSocketManager {
 		connBroadcast:   make(chan WSConnectionUpdate, 10),
 		subscribers:     make(map[chan interface{}]bool),
 		audioStreams:    make(map[*websocket.Conn]string),
+		spectrumStreams: make(map[*websocket.Conn]string),
 	}
 }
 
@@ -481,5 +485,110 @@ func (m *WebSocketManager) broadcastAudioData(audioData []byte, sampleRate int, 
 				log.Printf("Failed to send audio data to WebSocket: %v", err)
 			}
 		}
+	}
+}
+
+// EnableSpectrumStream enables spectrum streaming to a WebSocket connection
+func (m *WebSocketManager) EnableSpectrumStream(conn *websocket.Conn, room string) error {
+	m.spectrumStreamsMu.Lock()
+	defer m.spectrumStreamsMu.Unlock()
+
+	m.spectrumStreams[conn] = room
+	log.Printf("Enabled spectrum streaming to room '%s' for connection", room)
+
+	// Create spectrum client if not exists
+	m.mu.Lock()
+	if m.spectrumClient == nil && m.client != nil {
+		// Build server URL from client config
+		protocol := "http"
+		if m.client.ssl {
+			protocol = "https"
+		}
+		serverURL := fmt.Sprintf("%s://%s:%d", protocol, m.client.host, m.client.port)
+
+		m.spectrumClient = NewSpectrumClient(serverURL, m.client.userSessionID, m.client.password)
+
+		// Set callback to broadcast spectrum data
+		m.spectrumClient.SetDataCallback(func(data []byte) {
+			m.broadcastSpectrumData(data, room)
+		})
+
+		// Connect to spectrum WebSocket
+		if err := m.spectrumClient.Connect(); err != nil {
+			m.mu.Unlock()
+			return fmt.Errorf("failed to connect spectrum client: %w", err)
+		}
+	}
+	m.mu.Unlock()
+
+	return nil
+}
+
+// DisableSpectrumStream disables spectrum streaming for a WebSocket connection
+func (m *WebSocketManager) DisableSpectrumStream(conn *websocket.Conn) {
+	m.spectrumStreamsMu.Lock()
+	defer m.spectrumStreamsMu.Unlock()
+
+	if room, ok := m.spectrumStreams[conn]; ok {
+		delete(m.spectrumStreams, conn)
+		log.Printf("Disabled spectrum streaming from room '%s' for connection", room)
+	}
+
+	// If no more spectrum streams, disconnect spectrum client
+	if len(m.spectrumStreams) == 0 {
+		m.mu.Lock()
+		if m.spectrumClient != nil {
+			m.spectrumClient.Disconnect()
+			m.spectrumClient = nil
+		}
+		m.mu.Unlock()
+	}
+}
+
+// broadcastSpectrumData sends spectrum data to all WebSocket connections subscribed to the given room
+func (m *WebSocketManager) broadcastSpectrumData(data []byte, room string) {
+	m.spectrumStreamsMu.RLock()
+	defer m.spectrumStreamsMu.RUnlock()
+
+	for conn, connRoom := range m.spectrumStreams {
+		if connRoom == room {
+			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				// Only log if it's not a normal close error
+				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					log.Printf("Failed to send spectrum data to WebSocket: %v", err)
+				}
+			}
+		}
+	}
+}
+
+// SendSpectrumCommand sends a command to the spectrum WebSocket (zoom, pan, etc.)
+func (m *WebSocketManager) SendSpectrumCommand(cmdType string, params map[string]interface{}) error {
+	m.mu.RLock()
+	spectrumClient := m.spectrumClient
+	m.mu.RUnlock()
+
+	if spectrumClient == nil || !spectrumClient.IsConnected() {
+		return fmt.Errorf("spectrum client not connected")
+	}
+
+	switch cmdType {
+	case "zoom":
+		frequency, ok1 := params["frequency"].(float64)
+		binBandwidth, ok2 := params["binBandwidth"].(float64)
+		if !ok1 || !ok2 {
+			return fmt.Errorf("invalid zoom parameters")
+		}
+		return spectrumClient.SendZoomCommand(int(frequency), binBandwidth)
+
+	case "pan":
+		frequency, ok := params["frequency"].(float64)
+		if !ok {
+			return fmt.Errorf("invalid pan parameters")
+		}
+		return spectrumClient.SendPanCommand(int(frequency))
+
+	default:
+		return fmt.Errorf("unknown command type: %s", cmdType)
 	}
 }

@@ -1,5 +1,35 @@
 /* UberSDR Go Client Styles */
 
+/* Spectrum Display Styles */
+.spectrum-visualizer {
+    margin-top: 15px;
+    background: #000;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 0px;
+}
+
+.spectrum-visualizer canvas {
+    display: block;
+    width: 100%;
+    margin: 0;
+    border: none;
+}
+
+.spectrum-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+#spectrum-display-container {
+    margin-top: 15px;
+}
+
 :root {
     --primary-color: #2563eb;
     --primary-hover: #1d4ed8;

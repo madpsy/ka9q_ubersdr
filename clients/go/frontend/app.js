@@ -224,8 +224,20 @@ class UberSDRClient {
         // Bookmark selection
         this.bookmarkSelect.addEventListener('change', () => this.onBookmarkSelected());
 
-        // Mode change
-        this.modeSelect.addEventListener('change', () => this.updateModeDefaults());
+        // Mode change - but not when triggered by bookmark
+        this.modeSelect.addEventListener('change', () => {
+            // Only update defaults if not from bookmark (check if we're in a bookmark operation)
+            if (!this.bookmarkModeChange) {
+                this.updateModeDefaults();
+            }
+            // Set flag to indicate user is manually changing mode
+            this.userModeChange = true;
+            // Clear flag after a delay to allow user to apply settings
+            clearTimeout(this.userModeChangeTimeout);
+            this.userModeChangeTimeout = setTimeout(() => {
+                this.userModeChange = false;
+            }, 5000); // Give user 5 seconds to apply settings
+        });
 
         // Bandwidth changes - update visualizer in real-time
         this.bandwidthLowInput.addEventListener('input', () => this.updateVisualizerBandwidth());
@@ -432,6 +444,9 @@ class UberSDRClient {
                 this.showSuccess(data.message || 'Connected successfully');
                 this.updateStatus();
 
+                // Load bookmarks after successful connection
+                setTimeout(() => this.loadBookmarks(), 500);
+
                 // Update output status after a delay to allow backend restoration
                 setTimeout(() => this.updateOutputStatus(), 1000);
 
@@ -480,6 +495,11 @@ class UberSDRClient {
             this.connected = status.connected;
             this.updateConnectionUI();
             this.updateStatusDisplay(status);
+
+            // Load bookmarks if connected and not already loaded
+            if (status.connected && this.bookmarkSelect && this.bookmarkSelect.options.length <= 1) {
+                this.loadBookmarks();
+            }
         } catch (error) {
             console.error('Failed to fetch status:', error);
         }
@@ -517,9 +537,15 @@ class UberSDRClient {
         }
         if (status.mode) {
             this.statusMode.textContent = status.mode.toUpperCase();
-            // Also update the mode select for real-time sync
-            if (this.modeSelect.value != status.mode) {
+            // Also update the mode select for real-time sync, but not during bookmark operations or user changes
+            if (this.modeSelect.value != status.mode && !this.bookmarkModeChange && !this.userModeChange) {
+                // Set flag to prevent triggering updateModeDefaults
+                this.bookmarkModeChange = true;
                 this.modeSelect.value = status.mode;
+                // Clear flag after a short delay
+                setTimeout(() => {
+                    this.bookmarkModeChange = false;
+                }, 100);
             }
         }
         if (status.sampleRate) {
@@ -547,6 +573,10 @@ class UberSDRClient {
             this.showError('Not connected', 'Connect to SDR server first');
             return;
         }
+
+        // Clear user mode change flag since settings are being applied
+        this.userModeChange = false;
+        clearTimeout(this.userModeChangeTimeout);
 
         const tuneRequest = {
             frequency: parseInt(this.frequencyInput.value),
@@ -1579,7 +1609,38 @@ class UberSDRClient {
             // Set frequency callback for click-to-tune
             this.spectrumDisplay.setFrequencyCallback((frequency) => {
                 console.log(`Spectrum clicked: tuning to ${frequency} Hz`);
-                this.setFrequency(frequency);
+                // Update frequency input
+                this.frequencyInput.value = frequency;
+                // Send complete tune request with current mode and bandwidth
+                if (this.connected) {
+                    this.applySettings();
+                }
+            });
+
+            // Set mode callback for bookmark clicks
+            this.spectrumDisplay.setModeCallback((mode) => {
+                console.log(`Spectrum bookmark mode change: ${mode}`);
+                // Map mode names if needed
+                const modeMap = {
+                    'CWR': 'cw',
+                    'CW': 'cwu',
+                };
+                const mappedMode = modeMap[mode] || mode.toLowerCase();
+
+                // Set flag to prevent mode change event from calling updateModeDefaults
+                this.bookmarkModeChange = true;
+
+                // Update mode select
+                if (this.modeSelect.value !== mappedMode) {
+                    this.modeSelect.value = mappedMode;
+                    // Update bandwidth defaults for the new mode
+                    this.updateModeDefaults();
+                }
+
+                // Clear flag after a short delay
+                setTimeout(() => {
+                    this.bookmarkModeChange = false;
+                }, 100);
             });
 
             // Set initial control states
@@ -1587,6 +1648,23 @@ class UberSDRClient {
             this.spectrumDisplay.setScrollMode(scrollMode);
             this.spectrumDisplay.setClickTuneEnabled(this.spectrumClickTuneCheckbox.checked);
             this.spectrumDisplay.setCenterTuneEnabled(this.spectrumCenterTuneCheckbox.checked);
+
+            // Set bookmarks if already loaded
+            if (this.bookmarkSelect && this.bookmarkSelect.options.length > 1) {
+                // Extract bookmarks from dropdown options
+                const bookmarks = [];
+                for (let i = 1; i < this.bookmarkSelect.options.length; i++) {
+                    try {
+                        const bookmark = JSON.parse(this.bookmarkSelect.options[i].value);
+                        bookmarks.push(bookmark);
+                    } catch (e) {
+                        console.error('Error parsing bookmark:', e);
+                    }
+                }
+                if (bookmarks.length > 0) {
+                    this.spectrumDisplay.setBookmarks(bookmarks);
+                }
+            }
         }
 
         if (this.spectrumDisplay && this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -2380,14 +2458,30 @@ class UberSDRClient {
     // Bookmark Methods
 
     async loadBookmarks() {
+        if (!this.connected) {
+            console.log('Not connected, skipping bookmark load');
+            return;
+        }
+
+        console.log('Loading bookmarks from API...');
         try {
             const response = await fetch(`${this.apiBase}/api/bookmarks`);
+            console.log('Bookmarks API response status:', response.status);
+
             if (response.ok) {
                 const bookmarks = await response.json();
+                console.log('Received bookmarks:', bookmarks);
                 this.populateBookmarks(bookmarks);
-                console.log(`Loaded ${bookmarks.length} bookmarks`);
+
+                // Update spectrum display with bookmarks
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.setBookmarks(bookmarks);
+                }
+
+                console.log(`Successfully loaded ${bookmarks.length} bookmarks`);
             } else {
-                console.error('Failed to load bookmarks:', response.statusText);
+                const errorText = await response.text();
+                console.error('Failed to load bookmarks:', response.status, errorText);
                 this.clearBookmarks();
             }
         } catch (error) {
@@ -2453,15 +2547,16 @@ class UberSDRClient {
             // Map mode names (similar to Python client)
             const modeMap = {
                 'CWR': 'cw',
-                'CW': 'cw',
+                'CW': 'cwu',  // CW -> CW-U
                 'cw': 'cwu',  // Default CW to CW-U
                 'cwu': 'cwu',
                 'cwl': 'cwl'
             };
 
+            // Convert mode to lowercase first, then check map
             let mappedMode = mode ? mode.toLowerCase() : 'usb';
-            if (modeMap[mode]) {
-                mappedMode = modeMap[mode];
+            if (modeMap[mappedMode]) {
+                mappedMode = modeMap[mappedMode];
             }
 
             // Update frequency input
@@ -2474,17 +2569,23 @@ class UberSDRClient {
                     opt => opt.value === mappedMode
                 );
                 if (modeOption) {
+                    // Set flag to prevent mode change event from calling updateModeDefaults
+                    this.bookmarkModeChange = true;
                     this.modeSelect.value = mappedMode;
                     // Update bandwidth defaults for the new mode
                     this.updateModeDefaults();
+                    // Clear flag after a short delay
+                    setTimeout(() => {
+                        this.bookmarkModeChange = false;
+                    }, 100);
                 } else {
                     console.warn(`Mode ${mappedMode} not found in mode select, keeping current mode`);
                 }
             }
 
-            // Apply the changes if connected
+            // Apply the changes if connected - use applySettings to send both frequency AND mode
             if (this.connected) {
-                this.updateFrequency();
+                this.applySettings();
                 this.showSuccess(`Loaded bookmark: ${bookmark.name}`);
             } else {
                 this.showInfo(`Bookmark loaded: ${bookmark.name} (connect to apply)`);

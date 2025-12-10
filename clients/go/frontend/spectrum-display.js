@@ -7,7 +7,7 @@ class SpectrumDisplay {
         this.waterfallCanvas = waterfallCanvas;
         this.spectrumCtx = spectrumCanvas.getContext('2d');
         this.waterfallCtx = waterfallCanvas.getContext('2d');
-        
+
         // Spectrum data
         this.spectrumData = null;
         this.centerFreq = 0;
@@ -18,47 +18,51 @@ class SpectrumDisplay {
         this.tunedFreq = 0;  // Tuned frequency (where we're listening)
         this.bandwidthLow = 0;  // Filter bandwidth low edge (Hz, relative to tuned freq)
         this.bandwidthHigh = 0;  // Filter bandwidth high edge (Hz, relative to tuned freq)
-        
+
+        // Bookmarks
+        this.bookmarks = [];  // Array of bookmark objects with {name, frequency, mode}
+        this.modeCallback = null;  // Callback for mode changes from bookmark clicks
+
         // Display parameters
         this.minDb = -100;
         this.maxDb = 0;
-        
+
         // Drag state for panning
         this.dragging = false;
         this.dragStartX = 0;
         this.dragStartFreq = 0;
         this.dragThreshold = 5;  // Pixels - movement less than this is considered a click
-        
+
         // Frequency change callback
         this.frequencyCallback = null;
-        
+
         // Control settings
         this.scrollMode = 'zoom';  // 'zoom' or 'pan'
         this.clickTuneEnabled = true;
         this.centerTuneEnabled = true;
-        
+
         // Cursor/tooltip state
         this.cursorX = -1;
         this.cursorFreq = 0;
         this.cursorDbValue = null;
-        
+
         // Waterfall
         this.waterfallImageData = null;
         this.waterfallHistory = [];
         this.maxHistory = waterfallCanvas.height;
-        
+
         // WebSocket connection
         this.ws = null;
         this.connected = false;
         this.enabled = false;
-        
+
         // Mouse interaction
         this.setupMouseHandlers();
-        
+
         // Initialize waterfall
         this.initWaterfall();
     }
-    
+
     initWaterfall() {
         this.waterfallImageData = this.waterfallCtx.createImageData(
             this.waterfallCanvas.width,
@@ -72,10 +76,10 @@ class SpectrumDisplay {
             this.waterfallImageData.data[i + 3] = 255; // A
         }
     }
-    
+
     enable(ws) {
         if (this.enabled) return;
-        
+
         this.ws = ws;
         this.enabled = true;
 
@@ -87,18 +91,18 @@ class SpectrumDisplay {
             enabled: true,
             room: 'spectrum_preview'
         };
-        
+
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(msg));
             console.log('Spectrum stream enabled, waiting for config...');
         }
     }
-    
+
     disable() {
         if (!this.enabled) return;
-        
+
         this.enabled = false;
-        
+
         // Send spectrum stream disable message
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             const msg = {
@@ -109,16 +113,16 @@ class SpectrumDisplay {
             this.ws.send(JSON.stringify(msg));
             console.log('Spectrum stream disabled');
         }
-        
+
         // Clear displays
         this.clear();
     }
-    
+
     handleMessage(data) {
         if (!this.enabled) return;
-        
+
         const msgType = data.type;
-        
+
         if (msgType === 'config') {
             // Configuration update
             const oldBinCount = this.binCount;
@@ -126,13 +130,13 @@ class SpectrumDisplay {
             this.binCount = data.binCount || 0;
             this.binBandwidth = data.binBandwidth || 0;
             this.totalBandwidth = data.totalBandwidth || 0;
-            
+
             if (this.initialBinBandwidth === 0) {
                 this.initialBinBandwidth = this.binBandwidth;
             }
-            
+
             console.log(`Spectrum config: ${this.binCount} bins @ ${this.binBandwidth.toFixed(2)} Hz/bin = ${(this.totalBandwidth/1000).toFixed(1)} kHz total`);
-            
+
             // Send initial zoom to 200 kHz if this is first config
             // Use tunedFreq if set, otherwise fall back to centerFreq
             if (oldBinCount === 0 && this.binCount > 0) {
@@ -143,51 +147,51 @@ class SpectrumDisplay {
         } else if (msgType === 'spectrum') {
             // Spectrum data update
             const rawData = data.data || [];
-            
+
             if (rawData.length > 0) {
                 // Unwrap FFT bin ordering
                 const N = rawData.length;
                 const halfBins = Math.floor(N / 2);
-                
+
                 // Rearrange: [negative freqs, positive freqs]
                 this.spectrumData = [...rawData.slice(halfBins), ...rawData.slice(0, halfBins)];
-                
+
                 // Update displays
                 this.draw();
             }
         }
     }
-    
+
     sendZoomCommand(frequency, bandwidth) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         if (this.binCount === 0) return;
-        
+
         const binBandwidth = bandwidth / this.binCount;
-        
+
         const command = {
             type: 'zoom',
             frequency: frequency,
             binBandwidth: binBandwidth
         };
-        
+
         console.log(`Sending zoom: ${(bandwidth/1000).toFixed(1)} kHz (${binBandwidth.toFixed(2)} Hz/bin)`);
         this.ws.send(JSON.stringify(command));
     }
-    
+
     sendPanCommand(frequency) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-        
+
         const command = {
             type: 'pan',
             frequency: frequency
         };
-        
+
         this.ws.send(JSON.stringify(command));
     }
-    
+
     draw() {
         if (!this.spectrumData) return;
-        
+
         // Auto-range dB scale
         const validData = this.spectrumData.filter(v => isFinite(v));
         if (validData.length > 0) {
@@ -196,10 +200,10 @@ class SpectrumDisplay {
             this.minDb = p1 - 2;
             this.maxDb = p99 + 5;
         }
-        
+
         this.drawSpectrum();
         this.drawWaterfall();
-        
+
         // Redraw cursor and tooltip if active
         if (this.cursorX >= 0) {
             // Recalculate dB value at cursor position with updated spectrum data
@@ -207,22 +211,22 @@ class SpectrumDisplay {
             const marginRight = 20;
             const graphWidth = this.spectrumCanvas.width - marginLeft - marginRight;
             const x = this.cursorX - marginLeft;
-            
+
             if (x >= 0 && x <= graphWidth && this.spectrumData && this.spectrumData.length > 0) {
                 const binIndex = Math.floor((x / graphWidth) * this.spectrumData.length);
                 if (binIndex >= 0 && binIndex < this.spectrumData.length) {
                     this.cursorDbValue = this.spectrumData[binIndex];
                 }
             }
-            
+
             this.drawCursorLine(this.spectrumCanvas, this.cursorX);
             this.drawCursorLine(this.waterfallCanvas, this.cursorX);
-            
+
             // Determine which canvas to draw tooltip on based on cursor position
             const rect = this.spectrumCanvas.getBoundingClientRect();
             const scaleY = this.spectrumCanvas.height / rect.height;
             const canvasY = this.cursorY * scaleY;
-            
+
             if (this.cursorCanvas === this.spectrumCanvas) {
                 this.drawTooltip(this.spectrumCanvas, this.cursorX, canvasY, this.cursorFreq, this.cursorDbValue);
             } else {
@@ -230,36 +234,36 @@ class SpectrumDisplay {
             }
         }
     }
-    
+
     drawSpectrum() {
         const ctx = this.spectrumCtx;
         const width = this.spectrumCanvas.width;
         const height = this.spectrumCanvas.height;
-        
+
         // Clear
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, width, height);
-        
+
         if (!this.spectrumData || this.spectrumData.length === 0) return;
-        
+
         const marginLeft = 50;
         const marginRight = 20;
         const marginTop = 30;
         const marginBottom = 30;  // Increased to make room for frequency scale
         const graphWidth = width - marginLeft - marginRight;
         const graphHeight = height - marginTop - marginBottom;
-        
+
         // Draw dB scale
         ctx.fillStyle = '#ffffff';
         ctx.font = '10px monospace';
         ctx.textAlign = 'right';
-        
+
         for (let i = 0; i < 5; i++) {
             const db = this.minDb + (i / 4) * (this.maxDb - this.minDb);
             const y = marginTop + graphHeight - (i / 4) * graphHeight;
-            
+
             ctx.fillText(db.toFixed(0), marginLeft - 10, y + 4);
-            
+
             // Grid line
             ctx.strokeStyle = '#333333';
             ctx.beginPath();
@@ -267,27 +271,27 @@ class SpectrumDisplay {
             ctx.lineTo(marginLeft + graphWidth, y);
             ctx.stroke();
         }
-        
+
         // Draw frequency scale at bottom
         this.drawFrequencyScale(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight);
-        
+
         // Draw spectrum line
         const dbRange = this.maxDb - this.minDb;
         if (dbRange === 0) return;
-        
+
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        
+
         let firstPoint = true;
         for (let i = 0; i < this.spectrumData.length; i++) {
             const db = this.spectrumData[i];
             if (!isFinite(db)) continue;
-            
+
             const x = marginLeft + (i / this.spectrumData.length) * graphWidth;
             const normalized = Math.max(0, Math.min(1, (db - this.minDb) / dbRange));
             const y = marginTop + graphHeight - (normalized * graphHeight);
-            
+
             if (firstPoint) {
                 ctx.moveTo(x, y);
                 firstPoint = false;
@@ -295,34 +299,94 @@ class SpectrumDisplay {
                 ctx.lineTo(x, y);
             }
         }
-        
+
         ctx.stroke();
-        
+
         // Draw filled area
         ctx.fillStyle = 'rgba(30, 144, 255, 0.3)';
         ctx.lineTo(marginLeft + graphWidth, marginTop + graphHeight);
         ctx.lineTo(marginLeft, marginTop + graphHeight);
         ctx.closePath();
         ctx.fill();
-        
+
+        // Draw bookmarks (above spectrum)
+        this.drawBookmarks(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight);
+
         // Draw tuned frequency marker and bandwidth filter
         this.drawTunedFrequencyMarker(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight);
         this.drawBandwidthFilter(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight);
     }
-    
-    drawTunedFrequencyMarker(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
-        if (this.tunedFreq === 0 || this.totalBandwidth === 0) return;
-        
+
+    drawBookmarks(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
+        if (!this.bookmarks || this.bookmarks.length === 0 || this.totalBandwidth === 0) return;
+
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const endFreq = this.centerFreq + this.totalBandwidth / 2;
-        
+
+        // Y position for bookmarks (above spectrum, below the orange frequency label)
+        const bookmarkY = 0;
+
+        for (const bookmark of this.bookmarks) {
+            const freq = bookmark.frequency || 0;
+            const name = bookmark.name || 'Unknown';
+
+            // Only draw if bookmark is within visible range
+            if (freq < startFreq || freq > endFreq) continue;
+
+            // Calculate x position
+            const freqOffset = freq - startFreq;
+            const x = marginLeft + (freqOffset / this.totalBandwidth) * graphWidth;
+
+            // Draw bookmark label (gold background with black text)
+            const labelWidth = name.length * 7 + 8;
+            const labelHeight = 12;
+
+            // Gold background
+            ctx.fillStyle = '#FFD700';
+            ctx.fillRect(x - labelWidth / 2, bookmarkY, labelWidth, labelHeight);
+
+            // White border
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x - labelWidth / 2, bookmarkY, labelWidth, labelHeight);
+
+            // Black text
+            ctx.fillStyle = 'black';
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(name, x, bookmarkY + 6);
+
+            // Draw downward arrow below label
+            const arrowY = bookmarkY + labelHeight;
+            const arrowLength = 6;
+
+            // Arrow triangle (gold with white border)
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.moveTo(x, arrowY + arrowLength);  // Tip
+            ctx.lineTo(x - 4, arrowY);             // Left
+            ctx.lineTo(x + 4, arrowY);             // Right
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = 'white';
+            ctx.stroke();
+        }
+    }
+
+    drawTunedFrequencyMarker(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
+        if (this.tunedFreq === 0 || this.totalBandwidth === 0) return;
+
+        const startFreq = this.centerFreq - this.totalBandwidth / 2;
+        const endFreq = this.centerFreq + this.totalBandwidth / 2;
+
         // Check if tuned frequency is visible
         if (this.tunedFreq < startFreq || this.tunedFreq > endFreq) return;
-        
+
         // Calculate x position
         const freqOffset = this.tunedFreq - startFreq;
         const x = marginLeft + (freqOffset / this.totalBandwidth) * graphWidth;
-        
+
         // Draw vertical dashed line
         ctx.strokeStyle = '#FFA500';  // Orange
         ctx.lineWidth = 2;
@@ -333,7 +397,7 @@ class SpectrumDisplay {
         ctx.stroke();
         ctx.setLineDash([]);  // Reset dash
         ctx.lineWidth = 1;
-        
+
         // Draw frequency label above the line
         const freqMhz = this.tunedFreq / 1e6;
         ctx.fillStyle = '#FFA500';  // Orange
@@ -341,29 +405,29 @@ class SpectrumDisplay {
         ctx.textAlign = 'center';
         ctx.fillText(`${freqMhz.toFixed(6)} MHz`, x, marginTop - 10);
     }
-    
+
     drawBandwidthFilter(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
         if (this.totalBandwidth === 0 || this.tunedFreq === 0) return;
         if (this.bandwidthLow === 0 && this.bandwidthHigh === 0) return;
-        
+
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const endFreq = this.centerFreq + this.totalBandwidth / 2;
-        
+
         // Calculate filter edge frequencies
         const filterLowFreq = this.tunedFreq + this.bandwidthLow;
         const filterHighFreq = this.tunedFreq + this.bandwidthHigh;
-        
+
         // Check if filter edges are visible
         if (filterLowFreq < startFreq || filterHighFreq > endFreq) return;
-        
+
         // Calculate x positions
         const lowX = marginLeft + ((filterLowFreq - startFreq) / this.totalBandwidth) * graphWidth;
         const highX = marginLeft + ((filterHighFreq - startFreq) / this.totalBandwidth) * graphWidth;
-        
+
         // Draw semi-transparent yellow overlay
         ctx.fillStyle = 'rgba(255, 255, 0, 0.2)';
         ctx.fillRect(lowX, marginTop, highX - lowX, graphHeight);
-        
+
         // Draw solid yellow lines at filter edges
         ctx.strokeStyle = '#FFFF00';  // Yellow
         ctx.lineWidth = 2;
@@ -377,50 +441,50 @@ class SpectrumDisplay {
         ctx.stroke();
         ctx.lineWidth = 1;
     }
-    
+
     drawFrequencyScale(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
         if (this.totalBandwidth === 0) return;
-        
+
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const scaleY = this.spectrumCanvas.height - marginBottom + 10;
-        
+
         ctx.fillStyle = '#ffffff';
         ctx.font = '9px monospace';
         ctx.textAlign = 'center';
-        
+
         // Draw 5 frequency markers
         for (let i = 0; i < 5; i++) {
             const freq = startFreq + (i / 4) * this.totalBandwidth;
             const x = marginLeft + (i / 4) * graphWidth;
-            
+
             // Draw tick
             ctx.strokeStyle = '#ffffff';
             ctx.beginPath();
             ctx.moveTo(x, scaleY - 5);
             ctx.lineTo(x, scaleY);
             ctx.stroke();
-            
+
             // Draw label
             const freqMhz = freq / 1e6;
             ctx.fillText(freqMhz.toFixed(3), x, scaleY + 10);
         }
     }
-    
+
     drawWaterfall() {
         if (!this.spectrumData || this.spectrumData.length === 0) return;
-        
+
         const width = this.waterfallCanvas.width;
         const height = this.waterfallCanvas.height;
-        
+
         // Use same margins as spectrum display
         const marginLeft = 50;
         const marginRight = 20;
         const graphWidth = width - marginLeft - marginRight;
-        
+
         // Scroll waterfall down
         const imageData = this.waterfallImageData;
         const data = imageData.data;
-        
+
         // Shift pixels down by one row
         for (let y = height - 1; y > 0; y--) {
             for (let x = 0; x < width; x++) {
@@ -432,10 +496,10 @@ class SpectrumDisplay {
                 data[dstIdx + 3] = 255;
             }
         }
-        
+
         // Add new spectrum line at top (only in the graph area)
         const dbRange = this.maxDb - this.minDb;
-        
+
         // Fill left margin with black
         for (let x = 0; x < marginLeft; x++) {
             const idx = x * 4;
@@ -444,16 +508,16 @@ class SpectrumDisplay {
             data[idx + 2] = 0;
             data[idx + 3] = 255;
         }
-        
+
         // Fill graph area with spectrum data
         for (let x = 0; x < graphWidth; x++) {
             const binIdx = Math.floor((x / graphWidth) * this.spectrumData.length);
             const db = this.spectrumData[binIdx];
-            
+
             if (isFinite(db)) {
                 const normalized = Math.max(0, Math.min(1, (db - this.minDb) / dbRange));
                 const rgb = this.dbToRgb(normalized);
-                
+
                 const canvasX = marginLeft + x;
                 const idx = canvasX * 4;
                 data[idx] = rgb[0];
@@ -462,7 +526,7 @@ class SpectrumDisplay {
                 data[idx + 3] = 255;
             }
         }
-        
+
         // Fill right margin with black
         for (let x = marginLeft + graphWidth; x < width; x++) {
             const idx = x * 4;
@@ -471,35 +535,35 @@ class SpectrumDisplay {
             data[idx + 2] = 0;
             data[idx + 3] = 255;
         }
-        
+
         // Draw to canvas
         this.waterfallCtx.putImageData(imageData, 0, 0);
-        
+
         // Draw tuned frequency marker and bandwidth filter on waterfall
         this.drawTunedFrequencyMarkerOnWaterfall();
         this.drawBandwidthFilterOnWaterfall();
     }
-    
+
     drawTunedFrequencyMarkerOnWaterfall() {
         if (this.tunedFreq === 0 || this.totalBandwidth === 0) return;
-        
+
         const ctx = this.waterfallCtx;
         const width = this.waterfallCanvas.width;
         const height = this.waterfallCanvas.height;
         const marginLeft = 50;
         const marginRight = 20;
         const graphWidth = width - marginLeft - marginRight;
-        
+
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const endFreq = this.centerFreq + this.totalBandwidth / 2;
-        
+
         // Check if tuned frequency is visible
         if (this.tunedFreq < startFreq || this.tunedFreq > endFreq) return;
-        
+
         // Calculate x position
         const freqOffset = this.tunedFreq - startFreq;
         const x = marginLeft + (freqOffset / this.totalBandwidth) * graphWidth;
-        
+
         // Draw vertical dashed line
         ctx.strokeStyle = '#FFA500';  // Orange
         ctx.lineWidth = 2;
@@ -511,36 +575,36 @@ class SpectrumDisplay {
         ctx.setLineDash([]);  // Reset dash
         ctx.lineWidth = 1;
     }
-    
+
     drawBandwidthFilterOnWaterfall() {
         if (this.totalBandwidth === 0 || this.tunedFreq === 0) return;
         if (this.bandwidthLow === 0 && this.bandwidthHigh === 0) return;
-        
+
         const ctx = this.waterfallCtx;
         const width = this.waterfallCanvas.width;
         const height = this.waterfallCanvas.height;
         const marginLeft = 50;
         const marginRight = 20;
         const graphWidth = width - marginLeft - marginRight;
-        
+
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const endFreq = this.centerFreq + this.totalBandwidth / 2;
-        
+
         // Calculate filter edge frequencies
         const filterLowFreq = this.tunedFreq + this.bandwidthLow;
         const filterHighFreq = this.tunedFreq + this.bandwidthHigh;
-        
+
         // Check if filter edges are visible
         if (filterLowFreq < startFreq || filterHighFreq > endFreq) return;
-        
+
         // Calculate x positions
         const lowX = marginLeft + ((filterLowFreq - startFreq) / this.totalBandwidth) * graphWidth;
         const highX = marginLeft + ((filterHighFreq - startFreq) / this.totalBandwidth) * graphWidth;
-        
+
         // Draw semi-transparent yellow overlay
         ctx.fillStyle = 'rgba(255, 255, 0, 0.2)';
         ctx.fillRect(lowX, 0, highX - lowX, height);
-        
+
         // Draw solid yellow lines at filter edges
         ctx.strokeStyle = '#FFFF00';  // Yellow
         ctx.lineWidth = 2;
@@ -554,11 +618,11 @@ class SpectrumDisplay {
         ctx.stroke();
         ctx.lineWidth = 1;
     }
-    
+
     dbToRgb(normalized) {
         // Color gradient: blue (low) -> cyan -> green -> yellow -> red (high)
         let r, g, b;
-        
+
         if (normalized < 0.25) {
             const t = normalized / 0.25;
             r = 0;
@@ -580,21 +644,21 @@ class SpectrumDisplay {
             g = Math.floor((1 - t) * 255);
             b = 0;
         }
-        
+
         return [r, g, b];
     }
-    
+
     percentile(arr, p) {
         const sorted = [...arr].sort((a, b) => a - b);
         const index = Math.floor((p / 100) * sorted.length);
         return sorted[index];
     }
-    
+
     setupMouseHandlers() {
         // Mouse wheel for zoom or frequency stepping
         const handleWheel = (e) => {
             e.preventDefault();
-            
+
             if (this.scrollMode === 'zoom') {
                 // Zoom mode: scroll to zoom in/out
                 if (e.deltaY < 0) {
@@ -606,31 +670,31 @@ class SpectrumDisplay {
                 // Pan mode: scroll to step frequency up/down
                 // This matches Python client behavior where pan mode steps frequency
                 if (!this.frequencyCallback) return;
-                
+
                 // Get current frequency
                 const currentFreq = this.tunedFreq || 14074000;
                 const stepSize = 1000; // 1 kHz steps
                 const direction = e.deltaY < 0 ? 1 : -1; // Scroll up = increase freq
                 const newFreq = currentFreq + (direction * stepSize);
-                
+
                 // Call frequency callback to update frequency
                 this.frequencyCallback(newFreq);
             }
         };
-        
+
         this.spectrumCanvas.addEventListener('wheel', handleWheel);
         this.waterfallCanvas.addEventListener('wheel', handleWheel);
-        
+
         // Mouse down - start drag
         const handleMouseDown = (e) => {
             this.dragging = true;
             this.dragStartX = e.offsetX;
             this.dragStartFreq = this.centerFreq;
         };
-        
+
         this.spectrumCanvas.addEventListener('mousedown', handleMouseDown);
         this.waterfallCanvas.addEventListener('mousedown', handleMouseDown);
-        
+
         // Mouse up - end drag or process click
         const handleMouseUp = (e) => {
             if (this.dragging) {
@@ -642,38 +706,45 @@ class SpectrumDisplay {
             }
             this.dragging = false;
         };
-        
+
         this.spectrumCanvas.addEventListener('mouseup', handleMouseUp);
         this.waterfallCanvas.addEventListener('mouseup', handleMouseUp);
-        
+
         // Mouse move - handle drag and tooltip
         const handleMouseMove = (e) => {
             const canvas = e.target;
             const rect = canvas.getBoundingClientRect();
             const marginLeft = 50;
             const marginRight = 20;
+            const marginTop = 30;
             const graphWidth = canvas.width - marginLeft - marginRight;
-            
+
+            // Get mouse position relative to canvas (accounting for canvas scaling)
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const canvasX = (e.clientX - rect.left) * scaleX;
+            const canvasY = (e.clientY - rect.top) * scaleY;
+
             // Handle dragging
             if (this.dragging && this.totalBandwidth !== 0) {
                 // Calculate frequency change based on pixel movement
                 const dx = e.offsetX - this.dragStartX;
                 const freqPerPixel = this.totalBandwidth / graphWidth;
                 const freqChange = -dx * freqPerPixel;  // Negative for natural drag direction
-                
+
                 let newCenter = this.dragStartFreq + freqChange;
-                
+
                 // Constrain to valid range (keep view within 100 kHz - 30 MHz)
                 const halfBw = this.totalBandwidth / 2;
                 const minCenter = 100000 + halfBw;
                 const maxCenter = 30000000 - halfBw;
                 newCenter = Math.max(minCenter, Math.min(maxCenter, newCenter));
-                
+
                 // Check if tuned frequency will be off-screen after pan
                 if (this.tunedFreq !== 0) {
                     const startFreq = newCenter - halfBw;
                     const endFreq = newCenter + halfBw;
-                    
+
                     // If tuned frequency is outside the new view, retune to keep it visible
                     if (this.tunedFreq < startFreq || this.tunedFreq > endFreq) {
                         let newTunedFreq;
@@ -684,41 +755,76 @@ class SpectrumDisplay {
                             // Tuned freq is off the right edge - retune to right edge
                             newTunedFreq = endFreq - (halfBw * 0.1);  // 10% from edge
                         }
-                        
+
                         // Snap to 1 kHz boundary
                         newTunedFreq = Math.round(newTunedFreq / 1000) * 1000;
-                        
+
                         // Call frequency callback to update tuned frequency
                         if (this.frequencyCallback) {
                             this.frequencyCallback(newTunedFreq);
                         }
                     }
                 }
-                
+
                 // Send pan command
                 this.sendPanCommand(newCenter);
             }
-            
+
             // Handle tooltip/cursor (when not dragging)
             if (!this.dragging && this.totalBandwidth !== 0) {
-                // Get mouse position relative to canvas (accounting for canvas scaling)
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                const canvasX = (e.clientX - rect.left) * scaleX;
-                const canvasY = (e.clientY - rect.top) * scaleY;
                 const x = canvasX - marginLeft;
-                
+
+                // Check if hovering over a bookmark (only on spectrum canvas)
+                const bookmarkSectionBottom = marginTop - 10;
+                if (canvas === this.spectrumCanvas && canvasY < bookmarkSectionBottom && this.bookmarks && this.bookmarks.length > 0) {
+                    const startFreq = this.centerFreq - this.totalBandwidth / 2;
+                    const endFreq = this.centerFreq + this.totalBandwidth / 2;
+
+                    // Check which bookmark we're hovering over
+                    for (const bookmark of this.bookmarks) {
+                        const freq = bookmark.frequency || 0;
+                        if (freq < startFreq || freq > endFreq) continue;
+
+                        const freqOffset = freq - startFreq;
+                        const bookmarkX = marginLeft + (freqOffset / this.totalBandwidth) * graphWidth;
+                        const name = bookmark.name || 'Unknown';
+                        const labelWidth = name.length * 7 + 8;
+
+                        // Check if mouse is over this bookmark
+                        if (Math.abs(canvasX - bookmarkX) < labelWidth / 2) {
+                            // Hovering over bookmark - show bookmark tooltip
+                            // Store cursor state to keep tooltip visible
+                            this.cursorX = canvasX;
+                            this.cursorY = canvasY;
+                            this.cursorCanvas = canvas;
+                            this.cursorFreq = freq;
+                            this.cursorDbValue = null;
+
+                            // Draw cursor line on both canvases
+                            this.drawCursorLine(this.spectrumCanvas, canvasX);
+                            this.drawCursorLine(this.waterfallCanvas, canvasX);
+
+                            // Draw bookmark tooltip
+                            const mode = bookmark.mode || 'USB';
+                            const freqMhz = (freq / 1e6).toFixed(6);
+                            const tooltipText = `${name}\n${freqMhz} MHz\n${mode}`;
+                            this.drawBookmarkTooltip(canvas, canvasX, canvasY, tooltipText);
+                            return;
+                        }
+                    }
+                }
+
                 // Clear tooltip and cursor if outside graph area
                 if (x < 0 || x > graphWidth) {
                     this.cursorX = -1;
                     this.draw();
                     return;
                 }
-                
+
                 // Calculate frequency at cursor
                 const freqOffset = (x / graphWidth - 0.5) * this.totalBandwidth;
                 const freq = this.centerFreq + freqOffset;
-                
+
                 // Get dB value at cursor position
                 let dbValue = null;
                 if (this.spectrumData && this.spectrumData.length > 0) {
@@ -727,26 +833,26 @@ class SpectrumDisplay {
                         dbValue = this.spectrumData[binIndex];
                     }
                 }
-                
+
                 // Store cursor state
                 this.cursorX = canvasX;
                 this.cursorY = e.clientY - rect.top;
                 this.cursorCanvas = canvas;
                 this.cursorFreq = freq;
                 this.cursorDbValue = dbValue;
-                
+
                 // Draw cursor line on both canvases
                 this.drawCursorLine(this.spectrumCanvas, canvasX);
                 this.drawCursorLine(this.waterfallCanvas, canvasX);
-                
+
                 // Draw tooltip on the canvas being hovered
                 this.drawTooltip(canvas, canvasX, canvasY, freq, dbValue);
             }
         };
-        
+
         this.spectrumCanvas.addEventListener('mousemove', handleMouseMove);
         this.waterfallCanvas.addEventListener('mousemove', handleMouseMove);
-        
+
         // Mouse leave - clear tooltip
         const handleMouseLeave = () => {
             if (!this.dragging) {
@@ -754,42 +860,72 @@ class SpectrumDisplay {
                 this.draw();
             }
         };
-        
+
         this.spectrumCanvas.addEventListener('mouseleave', handleMouseLeave);
         this.waterfallCanvas.addEventListener('mouseleave', handleMouseLeave);
     }
-    
+
     handleClick(e) {
-        // Only process clicks if click-to-tune is enabled
-        if (!this.clickTuneEnabled) return;
         if (this.totalBandwidth === 0) return;
-        
+
         const canvas = e.target;
         const rect = canvas.getBoundingClientRect();
         const marginLeft = 50;
         const marginRight = 20;
+        const marginTop = 30;
         const graphWidth = canvas.width - marginLeft - marginRight;
-        
+
         // Get click position relative to canvas (accounting for canvas scaling)
         const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
         const canvasX = (e.clientX - rect.left) * scaleX;
+        const canvasY = (e.clientY - rect.top) * scaleY;
+
+        // Check if click is in bookmark section (above spectrum graph)
+        const bookmarkSectionBottom = marginTop - 10;  // Just above orange frequency label
+        if (canvasY < bookmarkSectionBottom && this.bookmarks && this.bookmarks.length > 0) {
+            // Click is in bookmark area - check which bookmark was clicked
+            const startFreq = this.centerFreq - this.totalBandwidth / 2;
+            const endFreq = this.centerFreq + this.totalBandwidth / 2;
+
+            for (const bookmark of this.bookmarks) {
+                const freq = bookmark.frequency || 0;
+                // Skip bookmarks outside visible range
+                if (freq < startFreq || freq > endFreq) continue;
+
+                // Calculate bookmark x position
+                const freqOffset = freq - startFreq;
+                const x = marginLeft + (freqOffset / this.totalBandwidth) * graphWidth;
+
+                // Check if click is within bookmark bounds
+                const name = bookmark.name || 'Unknown';
+                const labelWidth = name.length * 7 + 8;
+                if (Math.abs(canvasX - x) < labelWidth / 2) {
+                    // Clicked on this bookmark - tune to it
+                    this.handleBookmarkClick(bookmark);
+                    return;
+                }
+            }
+        }
+
+        // Normal click-to-tune behavior (only if enabled)
+        if (!this.clickTuneEnabled) return;
+
         const x = canvasX - marginLeft;
-        
         if (x < 0 || x > graphWidth) return;
-        
+
         // Map x position to frequency offset from center (-0.5 to +0.5 of bandwidth)
-        // This matches Python client: freq_offset = (x / width - 0.5) * total_bandwidth
         const freqOffset = (x / graphWidth - 0.5) * this.totalBandwidth;
         const clickedFreq = this.centerFreq + freqOffset;
-        
+
         // Snap to nearest 1 kHz boundary
         const newFreq = Math.round(clickedFreq / 1000) * 1000;
-        
+
         // Call frequency callback to tune to clicked frequency
         if (this.frequencyCallback) {
             this.frequencyCallback(newFreq);
         }
-        
+
         // If center-tune is enabled, also re-center the spectrum on the new frequency
         if (this.centerTuneEnabled && this.ws && this.ws.readyState === WebSocket.OPEN) {
             setTimeout(() => {
@@ -798,12 +934,32 @@ class SpectrumDisplay {
         }
     }
 
+    handleBookmarkClick(bookmark) {
+        const freq = bookmark.frequency || 0;
+        const mode = bookmark.mode || 'USB';
+
+        console.log(`Bookmark clicked: ${bookmark.name} - ${freq} Hz, ${mode}`);
+
+        // Call mode callback FIRST to change mode before frequency
+        if (mode && this.modeCallback) {
+            this.modeCallback(mode.toUpperCase());
+        }
+
+        // Then call frequency callback to tune to bookmark frequency
+        // Use a longer delay to ensure mode change is sent to server first
+        if (freq && this.frequencyCallback) {
+            setTimeout(() => {
+                this.frequencyCallback(freq);
+            }, 150);
+        }
+    }
+
     drawCursorLine(canvas, x) {
         const ctx = canvas.getContext('2d');
-        
+
         // Save the current state
         ctx.save();
-        
+
         // Draw dashed white vertical line
         ctx.strokeStyle = 'white';
         ctx.lineWidth = 1;
@@ -812,29 +968,29 @@ class SpectrumDisplay {
         ctx.moveTo(x, 0);
         ctx.lineTo(x, canvas.height);
         ctx.stroke();
-        
+
         // Restore the state
         ctx.restore();
     }
 
     drawTooltip(canvas, x, y, freq, dbValue) {
         const ctx = canvas.getContext('2d');
-        
+
         // Format tooltip text
         let text = `${(freq / 1e6).toFixed(6)} MHz`;
         if (dbValue !== null && !isNaN(dbValue)) {
             text += `\n${dbValue.toFixed(1)} dB`;
         }
-        
+
         // Set font for measuring
         ctx.font = 'bold 9px monospace';
-        
+
         // Measure text size
         const lines = text.split('\n');
         const lineHeight = 14;
         const textWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
         const textHeight = lines.length * lineHeight;
-        
+
         // Position tooltip (left or right of cursor depending on space)
         let tooltipX, anchor;
         if (x > canvas.width / 2) {
@@ -845,13 +1001,13 @@ class SpectrumDisplay {
             anchor = 'left';
         }
         const tooltipY = y - 10;
-        
+
         // Draw white background
         ctx.fillStyle = 'white';
         ctx.strokeStyle = 'black';
         ctx.lineWidth = 1;
         ctx.setLineDash([]);
-        
+
         let bgX, bgY, bgWidth, bgHeight;
         if (anchor === 'right') {
             bgX = tooltipX - textWidth - 4;
@@ -864,120 +1020,191 @@ class SpectrumDisplay {
             bgWidth = textWidth + 4;
             bgHeight = textHeight + 4;
         }
-        
+
         ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
         ctx.strokeRect(bgX, bgY, bgWidth, bgHeight);
-        
+
         // Draw text
         ctx.fillStyle = 'black';
         ctx.textBaseline = 'middle';
         ctx.textAlign = anchor === 'right' ? 'right' : 'left';
-        
+
         lines.forEach((line, i) => {
             const lineY = tooltipY - textHeight / 2 + (i + 0.5) * lineHeight;
             const lineX = anchor === 'right' ? tooltipX - 2 : tooltipX + 2;
             ctx.fillText(line, lineX, lineY);
         });
     }
-    
+
+    drawBookmarkTooltip(canvas, x, y, text) {
+        const ctx = canvas.getContext('2d');
+
+        // Set font for measuring
+        ctx.font = 'bold 10px monospace';
+
+        // Measure text size
+        const lines = text.split('\n');
+        const lineHeight = 16;
+        const textWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+        const textHeight = lines.length * lineHeight;
+
+        // Position tooltip (left or right of cursor depending on space)
+        let tooltipX, anchor;
+        if (x > canvas.width / 2) {
+            tooltipX = x - 10;
+            anchor = 'right';
+        } else {
+            tooltipX = x + 10;
+            anchor = 'left';
+        }
+        const tooltipY = y + 10;  // Below cursor for bookmarks
+
+        // Draw gold background (matching bookmark color)
+        ctx.fillStyle = '#FFD700';
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+
+        let bgX, bgY, bgWidth, bgHeight;
+        const padding = 6;
+        if (anchor === 'right') {
+            bgX = tooltipX - textWidth - padding * 2;
+            bgY = tooltipY - padding;
+            bgWidth = textWidth + padding * 2;
+            bgHeight = textHeight + padding * 2;
+        } else {
+            bgX = tooltipX;
+            bgY = tooltipY - padding;
+            bgWidth = textWidth + padding * 2;
+            bgHeight = textHeight + padding * 2;
+        }
+
+        ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+        ctx.strokeRect(bgX, bgY, bgWidth, bgHeight);
+
+        // Draw text in black
+        ctx.fillStyle = 'black';
+        ctx.textBaseline = 'top';
+        ctx.textAlign = anchor === 'right' ? 'right' : 'left';
+
+        lines.forEach((line, i) => {
+            const lineY = tooltipY + i * lineHeight;
+            const lineX = anchor === 'right' ? tooltipX - padding : tooltipX + padding;
+            ctx.fillText(line, lineX, lineY);
+        });
+    }
+
     zoomIn() {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         if (this.binCount === 0) return;
-        
+
         // Halve the bin bandwidth = half the total bandwidth = 2x zoom
         const newBinBandwidth = this.binBandwidth / 2;
-        
+
         // Minimum practical limit
         if (newBinBandwidth < 1) {
             console.log('Maximum zoom reached (1 Hz/bin minimum)');
             return;
         }
-        
+
         // Calculate new total bandwidth
         const newTotalBandwidth = newBinBandwidth * this.binCount;
-        
+
         // Always center on tuned frequency when zooming, regardless of center-tune state
         const zoomCenter = this.tunedFreq || this.centerFreq;
-        
+
         // Constrain center frequency to keep view within 100 kHz - 30 MHz
         const halfBandwidth = newTotalBandwidth / 2;
         const minCenter = 100000 + halfBandwidth;
         const maxCenter = 30000000 - halfBandwidth;
         const constrainedCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
-        
+
         console.log(`Zoom in: ${(this.totalBandwidth/1000).toFixed(1)} kHz -> ${(newTotalBandwidth/1000).toFixed(1)} kHz`);
-        
+
         this.sendZoomCommand(constrainedCenter, newTotalBandwidth);
     }
-    
+
     zoomOut() {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         if (this.binCount === 0) return;
-        
+
         // Don't zoom out past initial bandwidth
         if (this.initialBinBandwidth > 0 && this.binBandwidth >= this.initialBinBandwidth) {
             console.log('Already at full bandwidth');
             return;
         }
-        
+
         // Double the bin bandwidth = double the total bandwidth = 0.5x zoom
         let newBinBandwidth = this.binBandwidth * 2;
-        
+
         // Don't zoom out past initial bandwidth
         if (this.initialBinBandwidth > 0 && newBinBandwidth > this.initialBinBandwidth) {
             newBinBandwidth = this.initialBinBandwidth;
         }
-        
+
         // Calculate new total bandwidth
         const newTotalBandwidth = newBinBandwidth * this.binCount;
-        
+
         // Always center on tuned frequency when zooming, regardless of center-tune state
         const zoomCenter = this.tunedFreq || this.centerFreq;
-        
+
         // Constrain center frequency to keep view within 100 kHz - 30 MHz
         const halfBandwidth = newTotalBandwidth / 2;
         const minCenter = 100000 + halfBandwidth;
         const maxCenter = 30000000 - halfBandwidth;
         const constrainedCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
-        
+
         console.log(`Zoom out: ${(this.totalBandwidth/1000).toFixed(1)} kHz -> ${(newTotalBandwidth/1000).toFixed(1)} kHz`);
-        
+
         this.sendZoomCommand(constrainedCenter, newTotalBandwidth);
     }
-    
+
     setFrequencyCallback(callback) {
         this.frequencyCallback = callback;
     }
-    
+
     setScrollMode(mode) {
         this.scrollMode = mode;
         console.log(`Spectrum scroll mode set to: ${mode}`);
     }
-    
+
     setClickTuneEnabled(enabled) {
         this.clickTuneEnabled = enabled;
         console.log(`Spectrum click-to-tune ${enabled ? 'enabled' : 'disabled'}`);
     }
-    
+
     setCenterTuneEnabled(enabled) {
         this.centerTuneEnabled = enabled;
         console.log(`Spectrum center-tune ${enabled ? 'enabled' : 'disabled'}`);
     }
-    
+
     updateBandwidth(low, high) {
         this.bandwidthLow = low;
         this.bandwidthHigh = high;
     }
-    
+
+    setBookmarks(bookmarks) {
+        this.bookmarks = bookmarks || [];
+        console.log(`Spectrum display: ${this.bookmarks.length} bookmarks set`);
+        // Redraw to show bookmarks
+        if (this.spectrumData) {
+            this.draw();
+        }
+    }
+    setModeCallback(callback) {
+        this.modeCallback = callback;
+    }
+
+
     clear() {
         // Clear spectrum
         this.spectrumCtx.fillStyle = '#000000';
         this.spectrumCtx.fillRect(0, 0, this.spectrumCanvas.width, this.spectrumCanvas.height);
-        
+
         // Clear waterfall
         this.initWaterfall();
         this.waterfallCtx.putImageData(this.waterfallImageData, 0, 0);
-        
+
         this.spectrumData = null;
     }
 }

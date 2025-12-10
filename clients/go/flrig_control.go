@@ -26,6 +26,7 @@ type FlrigClient struct {
 	cachedMode      string
 	cachedPTT       bool
 	cacheMu         sync.RWMutex
+	firstPoll       bool // Track if this is the first poll after connection
 
 	// Callbacks
 	frequencyCallback func(int)
@@ -47,6 +48,7 @@ func NewFlrigClient(host string, port int, vfo string) *FlrigClient {
 			Timeout: 5 * time.Second,
 		},
 		connected: false,
+		firstPoll: true, // Mark that we haven't polled yet
 	}
 }
 
@@ -306,25 +308,39 @@ func (f *FlrigClient) Poll() {
 		log.Printf("flrig: Poll #%d - freq=%d, mode=%s, ptt=%v", f.pollCount, freq, mode, ptt)
 	}
 
-	// Trigger callbacks if values changed
-	if freq != oldFreq {
-		log.Printf("flrig: frequency changed from %d to %d Hz", oldFreq, freq)
+	// On first poll, always trigger callbacks to sync initial state
+	// On subsequent polls, only trigger if values changed
+	isFirstPoll := f.firstPoll
+	if isFirstPoll {
+		f.firstPoll = false
+		log.Printf("flrig: First poll - initializing with freq=%d, mode=%s, ptt=%v", freq, mode, ptt)
+	}
+
+	// Trigger callbacks if values changed OR if this is the first poll
+	if freq != oldFreq || isFirstPoll {
+		if freq != oldFreq {
+			log.Printf("flrig: frequency changed from %d to %d Hz", oldFreq, freq)
+		}
 		if f.frequencyCallback != nil {
 			f.frequencyCallback(freq)
 		} else {
 			log.Printf("flrig: frequency callback is nil!")
 		}
 	}
-	if mode != oldMode {
-		log.Printf("flrig: mode changed from %s to %s", oldMode, mode)
+	if mode != oldMode || isFirstPoll {
+		if mode != oldMode {
+			log.Printf("flrig: mode changed from %s to %s", oldMode, mode)
+		}
 		if f.modeCallback != nil {
 			f.modeCallback(mode)
 		} else {
 			log.Printf("flrig: mode callback is nil!")
 		}
 	}
-	if ptt != oldPTT {
-		log.Printf("flrig: PTT changed from %v to %v", oldPTT, ptt)
+	if ptt != oldPTT || isFirstPoll {
+		if ptt != oldPTT {
+			log.Printf("flrig: PTT changed from %v to %v", oldPTT, ptt)
+		}
 		if f.pttCallback != nil {
 			f.pttCallback(ptt)
 		} else {

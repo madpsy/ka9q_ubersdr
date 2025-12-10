@@ -25,6 +25,7 @@ type RigctlClient struct {
 	cachedMode      string
 	cachedPTT       bool
 	cacheMu         sync.RWMutex
+	firstPoll       bool // Track if this is the first poll after connection
 
 	// Callbacks
 	frequencyCallback func(int)
@@ -43,6 +44,7 @@ func NewRigctlClient(host string, port int, vfo string) *RigctlClient {
 		port:      port,
 		vfo:       vfo,
 		connected: false,
+		firstPoll: true, // Mark that we haven't polled yet
 	}
 }
 
@@ -313,25 +315,39 @@ func (r *RigctlClient) Poll() {
 		log.Printf("rigctl: Poll #%d - freq=%d, mode=%s, ptt=%v", r.pollCount, freq, mode, ptt)
 	}
 
-	// Trigger callbacks if values changed
-	if freq != oldFreq {
-		log.Printf("rigctl: frequency changed from %d to %d Hz", oldFreq, freq)
+	// On first poll, always trigger callbacks to sync initial state
+	// On subsequent polls, only trigger if values changed
+	isFirstPoll := r.firstPoll
+	if isFirstPoll {
+		r.firstPoll = false
+		log.Printf("rigctl: First poll - initializing with freq=%d, mode=%s, ptt=%v", freq, mode, ptt)
+	}
+
+	// Trigger callbacks if values changed OR if this is the first poll
+	if freq != oldFreq || isFirstPoll {
+		if freq != oldFreq {
+			log.Printf("rigctl: frequency changed from %d to %d Hz", oldFreq, freq)
+		}
 		if r.frequencyCallback != nil {
 			r.frequencyCallback(freq)
 		} else {
 			log.Printf("rigctl: frequency callback is nil!")
 		}
 	}
-	if mode != oldMode {
-		log.Printf("rigctl: mode changed from %s to %s", oldMode, mode)
+	if mode != oldMode || isFirstPoll {
+		if mode != oldMode {
+			log.Printf("rigctl: mode changed from %s to %s", oldMode, mode)
+		}
 		if r.modeCallback != nil {
 			r.modeCallback(mode)
 		} else {
 			log.Printf("rigctl: mode callback is nil!")
 		}
 	}
-	if ptt != oldPTT {
-		log.Printf("rigctl: PTT changed from %v to %v", oldPTT, ptt)
+	if ptt != oldPTT || isFirstPoll {
+		if ptt != oldPTT {
+			log.Printf("rigctl: PTT changed from %v to %v", oldPTT, ptt)
+		}
 		if r.pttCallback != nil {
 			r.pttCallback(ptt)
 		} else {

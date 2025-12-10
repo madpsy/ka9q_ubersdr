@@ -1061,12 +1061,10 @@ class UberSDRClient {
                 if (config.outputChannels !== undefined) this.outputChannelsSelect.value = config.outputChannels;
 
                 // Load audio preview settings
-                if (config.audioPreviewEnabled !== undefined) {
-                    this.audioPreviewEnabled.checked = config.audioPreviewEnabled;
-                    if (config.audioPreviewEnabled) {
-                        this.toggleAudioPreview();
-                    }
-                }
+                // Note: audioPreviewEnabled is always unchecked on page load to comply with browser autoplay policies
+                // User must manually enable it after page load
+                this.audioPreviewEnabled.checked = false;
+                this.audioPreviewControls.style.display = 'none';
                 if (config.audioPreviewMuted !== undefined) {
                     this.audioMuted = config.audioPreviewMuted;
                     this.updateMuteButton();

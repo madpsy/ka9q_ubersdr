@@ -1449,10 +1449,13 @@ func (m *WebSocketManager) ConnectFlrig(host string, port int, vfo string, syncT
 				// Check sync setting with lock
 				m.mu.RLock()
 				syncFromRig := m.flrigSyncFromRig
+				syncToRig := m.flrigSyncToRig
 				m.mu.RUnlock()
 
+				log.Printf("DEBUG: flrig frequency callback fired: freq=%d Hz, syncFromRig=%v, syncToRig=%v", freq, syncFromRig, syncToRig)
+
 				if !syncFromRig {
-					log.Printf("flrig frequency changed to %d Hz (sync disabled)", freq)
+					log.Printf("flrig frequency changed to %d Hz (sync FROM rig DISABLED - not syncing to SDR)", freq)
 					return
 				}
 
@@ -1463,26 +1466,18 @@ func (m *WebSocketManager) ConnectFlrig(host string, port int, vfo string, syncT
 				m.mu.RUnlock()
 
 				if !connected || client == nil {
-					log.Printf("flrig frequency changed to %d Hz (not connected to SDR)", freq)
+					log.Printf("flrig frequency changed to %d Hz (not connected to SDR - cannot sync)", freq)
 					return
 				}
 
-				log.Printf("flrig frequency changed to %d Hz (syncing to SDR)", freq)
+				log.Printf("flrig frequency changed to %d Hz (sync FROM rig enabled - syncing to SDR)", freq)
 
-				// Temporarily disable sync to rig to avoid feedback loop
-				m.mu.Lock()
-				oldSyncToRig := m.flrigSyncToRig
-				m.flrigSyncToRig = false
-				m.mu.Unlock()
-
+				// Update SDR frequency
+				// Note: We don't need to disable syncToRig here because SetFrequency
+				// will sync to flrig, but flrig already has this frequency, so it's a no-op
 				if err := m.SetFrequency(freq); err != nil {
 					log.Printf("Failed to update SDR frequency from flrig: %v", err)
 				}
-
-				// Restore sync setting
-				m.mu.Lock()
-				m.flrigSyncToRig = oldSyncToRig
-				m.mu.Unlock()
 			}()
 		},
 		func(mode string) {
@@ -1491,10 +1486,13 @@ func (m *WebSocketManager) ConnectFlrig(host string, port int, vfo string, syncT
 				// Check sync setting with lock
 				m.mu.RLock()
 				syncFromRig := m.flrigSyncFromRig
+				syncToRig := m.flrigSyncToRig
 				m.mu.RUnlock()
 
+				log.Printf("DEBUG: flrig mode callback fired: mode=%s, syncFromRig=%v, syncToRig=%v", mode, syncFromRig, syncToRig)
+
 				if !syncFromRig {
-					log.Printf("flrig mode changed to %s (sync disabled)", mode)
+					log.Printf("flrig mode changed to %s (sync FROM rig DISABLED - not syncing to SDR)", mode)
 					return
 				}
 
@@ -1505,28 +1503,20 @@ func (m *WebSocketManager) ConnectFlrig(host string, port int, vfo string, syncT
 				m.mu.RUnlock()
 
 				if !connected || client == nil {
-					log.Printf("flrig mode changed to %s (not connected to SDR)", mode)
+					log.Printf("flrig mode changed to %s (not connected to SDR - cannot sync)", mode)
 					return
 				}
 
 				// Convert mode to lowercase for SDR server
 				modeLower := strings.ToLower(mode)
-				log.Printf("flrig mode changed to %s (syncing to SDR as %s)", mode, modeLower)
+				log.Printf("flrig mode changed to %s (sync FROM rig enabled - syncing to SDR as %s)", mode, modeLower)
 
-				// Temporarily disable sync to rig to avoid feedback loop
-				m.mu.Lock()
-				oldSyncToRig := m.flrigSyncToRig
-				m.flrigSyncToRig = false
-				m.mu.Unlock()
-
+				// Update SDR mode
+				// Note: We don't need to disable syncToRig here because SetMode
+				// will sync to flrig, but flrig already has this mode, so it's a no-op
 				if err := m.SetMode(modeLower); err != nil {
 					log.Printf("Failed to update SDR mode from flrig: %v", err)
 				}
-
-				// Restore sync setting
-				m.mu.Lock()
-				m.flrigSyncToRig = oldSyncToRig
-				m.mu.Unlock()
 			}()
 		},
 		func(ptt bool) {
@@ -1546,11 +1536,59 @@ func (m *WebSocketManager) ConnectFlrig(host string, port int, vfo string, syncT
 		return fmt.Errorf("failed to connect to flrig: %w", err)
 	}
 
-	log.Printf("Connected to flrig at %s:%d (VFO %s, sync: SDR->rig=%v, rig->SDR=%v)",
+	log.Printf("DEBUG: Connected to flrig at %s:%d (VFO %s, sync: SDR->rig=%v, rig->SDR=%v)",
 		host, port, vfo, syncToRig, syncFromRig)
+	log.Printf("DEBUG: Sync flags stored in manager: m.flrigSyncToRig=%v, m.flrigSyncFromRig=%v",
+		m.flrigSyncToRig, m.flrigSyncFromRig)
+
+	// Perform initial sync from SDR to rig if enabled and SDR is connected
+	if syncToRig && m.connected && m.client != nil {
+		currentFreq := m.client.frequency
+		currentMode := m.client.mode
+
+		log.Printf("Performing initial sync to flrig: freq=%d Hz, mode=%s", currentFreq, currentMode)
+
+		if currentFreq > 0 {
+			if err := m.flrigClient.SetFrequency(currentFreq); err != nil {
+				log.Printf("Warning: Failed to sync initial frequency to flrig: %v", err)
+			} else {
+				log.Printf("Synced initial frequency %d Hz to flrig", currentFreq)
+			}
+		}
+
+		if currentMode != "" {
+			if err := m.flrigClient.SetMode(currentMode); err != nil {
+				log.Printf("Warning: Failed to sync initial mode to flrig: %v", err)
+			} else {
+				log.Printf("Synced initial mode %s to flrig", currentMode)
+			}
+		}
+	}
 
 	// Start polling goroutine
+	log.Printf("DEBUG: Starting flrig polling goroutine...")
 	m.startFlrigPolling()
+
+	// Force an immediate poll to sync initial state if sync is enabled
+	// This ensures callbacks fire right away with the correct sync settings
+	if syncFromRig && m.flrigClient != nil {
+		log.Printf("DEBUG: syncFromRig is enabled, scheduling immediate poll...")
+		go func() {
+			// Small delay to ensure polling goroutine is running
+			time.Sleep(100 * time.Millisecond)
+			m.mu.RLock()
+			client := m.flrigClient
+			m.mu.RUnlock()
+			if client != nil && client.IsConnected() {
+				log.Printf("DEBUG: Triggering initial flrig poll to sync state...")
+				client.Poll()
+			} else {
+				log.Printf("DEBUG: Cannot trigger initial poll - client not connected")
+			}
+		}()
+	} else {
+		log.Printf("DEBUG: NOT scheduling immediate poll (syncFromRig=%v, client=%v)", syncFromRig, m.flrigClient != nil)
+	}
 
 	return nil
 }
@@ -1621,16 +1659,37 @@ func (m *WebSocketManager) SetFlrigVFO(vfo string) error {
 // SetFlrigSync updates the flrig sync direction settings
 func (m *WebSocketManager) SetFlrigSync(syncToRig bool, syncFromRig bool) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.flrigClient == nil {
+		m.mu.Unlock()
 		return fmt.Errorf("flrig not connected")
 	}
+
+	oldSyncToRig := m.flrigSyncToRig
+	oldSyncFromRig := m.flrigSyncFromRig
 
 	m.flrigSyncToRig = syncToRig
 	m.flrigSyncFromRig = syncFromRig
 
-	log.Printf("Updated flrig sync settings: SDR->rig=%v, rig->SDR=%v", syncToRig, syncFromRig)
+	// Reset firstPoll flag to force callbacks to fire on next poll
+	// This ensures sync starts working immediately when enabled
+	client := m.flrigClient
+	m.mu.Unlock()
+
+	log.Printf("DEBUG: SetFlrigSync called - changing from (SDR->rig=%v, rig->SDR=%v) to (SDR->rig=%v, rig->SDR=%v)",
+		oldSyncToRig, oldSyncFromRig, syncToRig, syncFromRig)
+
+	if client != nil {
+		client.cacheMu.Lock()
+		oldFirstPoll := client.firstPoll
+		client.firstPoll = true
+		client.cacheMu.Unlock()
+		log.Printf("DEBUG: Reset firstPoll flag (was %v, now true) - callbacks will fire on next poll", oldFirstPoll)
+		log.Printf("Updated flrig sync settings: SDR->rig=%v, rig->SDR=%v (will sync on next poll)", syncToRig, syncFromRig)
+	} else {
+		log.Printf("DEBUG: Cannot reset firstPoll - client is nil")
+	}
+
 	return nil
 }
 
@@ -1848,6 +1907,30 @@ func (m *WebSocketManager) ConnectRigctl(host string, port int, vfo string, sync
 
 	log.Printf("Connected to rigctld at %s:%d (VFO %s, sync: SDR->rig=%v, rig->SDR=%v)",
 		host, port, vfo, syncToRig, syncFromRig)
+
+	// Perform initial sync from SDR to rig if enabled and SDR is connected
+	if syncToRig && m.connected && m.client != nil {
+		currentFreq := m.client.frequency
+		currentMode := m.client.mode
+
+		log.Printf("Performing initial sync to rigctl: freq=%d Hz, mode=%s", currentFreq, currentMode)
+
+		if currentFreq > 0 {
+			if err := m.rigctlClient.SetFrequency(currentFreq); err != nil {
+				log.Printf("Warning: Failed to sync initial frequency to rigctl: %v", err)
+			} else {
+				log.Printf("Synced initial frequency %d Hz to rigctl", currentFreq)
+			}
+		}
+
+		if currentMode != "" {
+			if err := m.rigctlClient.SetMode(currentMode); err != nil {
+				log.Printf("Warning: Failed to sync initial mode to rigctl: %v", err)
+			} else {
+				log.Printf("Synced initial mode %s to rigctl", currentMode)
+			}
+		}
+	}
 
 	// Start polling goroutine
 	m.startRigctlPolling()

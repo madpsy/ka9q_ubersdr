@@ -1093,6 +1093,11 @@ class UberSDRClient {
         }
 
         if (this.spectrumDisplay && this.ws && this.ws.readyState === WebSocket.OPEN) {
+            // Get current tuned frequency from the frequency input
+            const tunedFreq = parseInt(this.frequencyInput.value) || 14074000;
+            this.spectrumDisplay.tunedFreq = tunedFreq;
+            console.log(`Enabling spectrum display at ${tunedFreq} Hz`);
+
             this.spectrumDisplay.enable(this.ws);
             this.updateSpectrumStatus('Streaming');
         }

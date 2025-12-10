@@ -8,6 +8,23 @@ class UberSDRClient {
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
 
+        // Band condition color constants (matching Python client)
+        this.BAND_CONDITION_COLORS = {
+            'POOR': '#ef4444',      // red
+            'FAIR': '#ff9800',      // orange
+            'GOOD': '#fbbf24',      // bright yellow
+            'EXCELLENT': '#22c55e', // green
+            'UNKNOWN': '#9ca3af'    // gray
+        };
+
+        // SNR thresholds (matching Python client)
+        this.SNR_THRESHOLDS = {
+            'POOR': 6,
+            'FAIR': 20,
+            'GOOD': 30,
+            'EXCELLENT': 30
+        };
+
         this.initializeElements();
         this.attachEventListeners();
         this.loadSavedInstances();
@@ -96,6 +113,17 @@ class UberSDRClient {
         this.statusSession = document.getElementById('status-session');
         this.statusAudioDevice = document.getElementById('status-audio-device');
 
+        // Session timer elements
+        this.sessionTimerDiv = document.getElementById('session-timer');
+        this.sessionTimeRemaining = document.getElementById('session-time-remaining');
+        this.sessionTimerInterval = null;
+        this.sessionStartTime = null;
+        this.maxSessionTime = 0; // 0 = unlimited
+
+        // Instance info elements
+        this.instanceInfoDiv = document.getElementById('instance-info');
+        this.instanceInfoText = document.getElementById('instance-info-text');
+
         // Radio control elements
         this.radioControlType = document.getElementById('radio-control-type');
         this.flrigControls = document.getElementById('flrig-controls');
@@ -158,6 +186,10 @@ class UberSDRClient {
 
         // Bands (stored for later use when spectrum is enabled)
         this.loadedBands = [];
+
+        // Band conditions data
+        this.bandConditions = {};
+        this.bandConditionsInterval = null;
 
         // Saved instances
         this.savedInstances = [];
@@ -321,6 +353,7 @@ class UberSDRClient {
                 this.spectrumDisplay.setCenterTuneEnabled(this.spectrumCenterTuneCheckbox.checked);
             }
             this.saveSpectrumConfig();
+            console.log(`Center-tune ${this.spectrumCenterTuneCheckbox.checked ? 'enabled' : 'disabled'}`);
         });
 
         // Dynamic output control event listeners
@@ -421,6 +454,7 @@ class UberSDRClient {
     }
 
     async connect() {
+        console.log('DEBUG: connect() method called');
         const config = {
             host: this.hostInput.value,
             port: parseInt(this.portInput.value),
@@ -446,19 +480,28 @@ class UberSDRClient {
         };
 
         try {
+            console.log('DEBUG: Sending connect request to', `${this.apiBase}/api/connect`);
             const response = await fetch(`${this.apiBase}/api/connect`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
             });
 
+            console.log('DEBUG: Got response, status:', response.status);
             const data = await response.json();
+            console.log('DEBUG: Response data:', data);
 
             if (response.ok) {
+                console.log('DEBUG: Response OK, entering success block');
                 this.connected = true;
                 this.updateConnectionUI();
                 this.showSuccess(data.message || 'Connected successfully');
                 this.updateStatus();
+
+                // Load instance description and display info
+                setTimeout(() => {
+                    this.loadInstanceInfo();
+                }, 500);
 
                 // Load bookmarks and bands after successful connection
                 setTimeout(() => {
@@ -473,6 +516,13 @@ class UberSDRClient {
                 if (this.spectrumEnabled.checked) {
                     setTimeout(() => this.enableSpectrumDisplay(), 500);
                 }
+
+                // Start band conditions polling
+                console.log('DEBUG: About to schedule startBandConditionsPolling in 1 second');
+                setTimeout(() => {
+                    console.log('DEBUG: setTimeout fired, calling startBandConditionsPolling');
+                    this.startBandConditionsPolling();
+                }, 1000);
             } else {
                 this.showError('Connection failed', data.message || data.error);
             }
@@ -494,6 +544,12 @@ class UberSDRClient {
                 this.updateConnectionUI();
                 this.showSuccess(data.message || 'Disconnected successfully');
 
+                // Stop band conditions polling
+                this.stopBandConditionsPolling();
+
+                // Stop session timer
+                this.stopSessionTimer();
+
                 // Disable spectrum display
                 if (this.spectrumDisplay) {
                     this.spectrumDisplay.disable();
@@ -511,14 +567,21 @@ class UberSDRClient {
             const response = await fetch(`${this.apiBase}/api/status`);
             const status = await response.json();
 
+            const wasConnected = this.connected;
             this.connected = status.connected;
             this.updateConnectionUI();
             this.updateStatusDisplay(status);
 
-            // Load bookmarks and bands if connected and not already loaded
+            // Load bookmarks, bands, and instance info if connected and not already loaded
             if (status.connected && this.bookmarkSelect && this.bookmarkSelect.options.length <= 1) {
                 this.loadBookmarks();
                 this.loadBands();
+            }
+
+            // Load instance info if we just became connected (including auto-connect on page load)
+            if (status.connected && !wasConnected) {
+                console.log('Connection detected in updateStatus, loading instance info');
+                this.loadInstanceInfo();
             }
         } catch (error) {
             console.error('Failed to fetch status:', error);
@@ -581,10 +644,114 @@ class UberSDRClient {
         if (status.uptime) {
             this.uptimeSpan.textContent = `Uptime: ${status.uptime}`;
         }
-        
+
         // Update IQ mode button visibility based on allowed modes
         if (status.allowedIQModes !== undefined) {
             this.updateIQModeButtons(status.allowedIQModes, status.bypassed);
+        }
+
+        // Update session timer if max_session_time is provided
+        console.log('Status update - maxSessionTime:', status.maxSessionTime, 'sessionStartTime:', status.sessionStartTime);
+        if (status.maxSessionTime !== undefined && status.sessionStartTime) {
+            console.log('Calling updateSessionTimer with:', status.maxSessionTime, status.sessionStartTime);
+            this.updateSessionTimer(status.maxSessionTime, status.sessionStartTime);
+        }
+    }
+
+    updateSessionTimer(maxSessionTime, sessionStartTime) {
+        console.log('updateSessionTimer called with:', maxSessionTime, sessionStartTime);
+        
+        // Store max session time
+        this.maxSessionTime = maxSessionTime;
+
+        // Always show the timer
+        this.sessionTimerDiv.style.display = 'block';
+
+        // If 0, it means unlimited - show "Unlimited"
+        if (maxSessionTime === 0) {
+            console.log('Session time is 0 (unlimited), showing "Unlimited"');
+            this.sessionTimeRemaining.textContent = 'Unlimited';
+            this.sessionTimeRemaining.style.color = '#2196F3'; // Blue
+            this.stopSessionTimer();
+            return;
+        }
+
+        console.log('Session time is', maxSessionTime, 'seconds, showing countdown');
+
+        // Convert backend timestamp to JavaScript timestamp
+        // Backend sends RFC3339 format, parse it
+        if (sessionStartTime) {
+            this.sessionStartTime = new Date(sessionStartTime).getTime();
+            console.log('Parsed session start time:', this.sessionStartTime, 'from', sessionStartTime);
+        }
+
+        // Start the countdown if not already started
+        if (!this.sessionTimerInterval) {
+            console.log('Starting session timer interval');
+            this.startSessionTimer();
+        } else {
+            console.log('Session timer interval already running');
+        }
+    }
+
+    startSessionTimer() {
+        // Clear any existing timer
+        this.stopSessionTimer();
+
+        // Update immediately
+        this.updateSessionTimerDisplay();
+
+        // Update every second
+        this.sessionTimerInterval = setInterval(() => {
+            this.updateSessionTimerDisplay();
+        }, 1000);
+    }
+
+    stopSessionTimer() {
+        if (this.sessionTimerInterval) {
+            clearInterval(this.sessionTimerInterval);
+            this.sessionTimerInterval = null;
+        }
+        this.sessionStartTime = null;
+    }
+
+    updateSessionTimerDisplay() {
+        if (!this.sessionStartTime || this.maxSessionTime === 0) {
+            return;
+        }
+
+        // Calculate elapsed time in seconds
+        const elapsedSeconds = Math.floor((Date.now() - this.sessionStartTime) / 1000);
+
+        // Calculate remaining time
+        const remainingSeconds = Math.max(0, this.maxSessionTime - elapsedSeconds);
+
+        // Format as "Xh Ym Zs"
+        const hours = Math.floor(remainingSeconds / 3600);
+        const minutes = Math.floor((remainingSeconds % 3600) / 60);
+        const seconds = remainingSeconds % 60;
+
+        let timeStr = '';
+        if (hours > 0) {
+            timeStr += `${hours}h `;
+        }
+        if (hours > 0 || minutes > 0) {
+            timeStr += `${minutes}m `;
+        }
+        timeStr += `${seconds}s`;
+
+        this.sessionTimeRemaining.textContent = timeStr.trim();
+
+        // Color based on remaining time
+        if (remainingSeconds < 300) {
+            // Less than 5 minutes - red
+            this.sessionTimeRemaining.style.color = '#ef4444';
+            if (remainingSeconds === 0) {
+                this.showInfo('Session time expired - you may be disconnected soon');
+            }
+        } else {
+            // 5 minutes or more - blue
+            this.sessionTimeRemaining.style.color = '#2196F3';
         }
     }
 
@@ -600,10 +767,17 @@ class UberSDRClient {
 
         const tuneRequest = {
             frequency: parseInt(this.frequencyInput.value),
-            mode: this.currentMode,
-            bandwidthLow: parseInt(this.bandwidthLowInput.value),
-            bandwidthHigh: parseInt(this.bandwidthHighInput.value)
+            mode: this.currentMode
         };
+
+        // Only include bandwidth for non-IQ modes
+        const isIQMode = this.currentMode === 'iq' || this.currentMode === 'iq48' ||
+            this.currentMode === 'iq96' || this.currentMode === 'iq192' || this.currentMode === 'iq384';
+
+        if (!isIQMode) {
+            tuneRequest.bandwidthLow = parseInt(this.bandwidthLowInput.value);
+            tuneRequest.bandwidthHigh = parseInt(this.bandwidthHighInput.value);
+        }
 
         try {
             const response = await fetch(`${this.apiBase}/api/tune`, {
@@ -636,6 +810,14 @@ class UberSDRClient {
 
     async applyBandwidthOnly() {
         if (!this.connected) return;
+
+        // Don't send bandwidth updates for IQ modes
+        const isIQMode = this.currentMode === 'iq' || this.currentMode === 'iq48' ||
+            this.currentMode === 'iq96' || this.currentMode === 'iq192' || this.currentMode === 'iq384';
+
+        if (isIQMode) {
+            return; // Skip bandwidth updates for IQ modes
+        }
 
         const tuneRequest = {
             frequency: parseInt(this.frequencyInput.value),
@@ -739,7 +921,9 @@ class UberSDRClient {
 
                     // If center-tune is enabled, always re-center on the new frequency
                     // If center-tune is disabled but frequency is outside view, pan to show it
+                    console.log(`updateFrequency: centerTuneEnabled=${this.spectrumDisplay.centerTuneEnabled}, isOutsideView=${isOutsideView}`);
                     if (this.spectrumDisplay.centerTuneEnabled || isOutsideView) {
+                        console.log(`Re-centering spectrum to ${frequency} Hz`);
                         this.spectrumDisplay.sendZoomCommand(frequency, this.spectrumDisplay.totalBandwidth);
                     }
                 }
@@ -890,6 +1074,9 @@ class UberSDRClient {
                                 this.connect();
                             } else {
                                 console.log('Already connected (backend auto-connect succeeded)');
+                                // Start band conditions polling for auto-connected sessions
+                                console.log('DEBUG: Starting band conditions polling for auto-connect');
+                                setTimeout(() => this.startBandConditionsPolling(), 1000);
                             }
                         }, 1500); // Increased delay to allow status update
                     }
@@ -1227,7 +1414,7 @@ class UberSDRClient {
 
             // Enable output controls
             this.updateOutputStatus();
-            
+
             // Enable mode buttons
             this.modeButtons.forEach(btn => btn.disabled = false);
         } else {
@@ -1237,6 +1424,11 @@ class UberSDRClient {
             this.disconnectBtn.disabled = true;
             this.uptimeSpan.textContent = '';
 
+            // Hide session timer and instance info
+            this.sessionTimerDiv.style.display = 'none';
+            this.stopSessionTimer();
+            this.instanceInfoDiv.style.display = 'none';
+
             // Disable output controls
             this.portaudioOutputEnabled.disabled = true;
             this.portaudioOutputEnabled.checked = false;
@@ -1244,7 +1436,7 @@ class UberSDRClient {
             this.fifoOutputEnabled.checked = false;
             this.udpOutputEnabled.disabled = true;
             this.udpOutputEnabled.checked = false;
-            
+
             // Disable mode buttons
             this.modeButtons.forEach(btn => btn.disabled = true);
         }
@@ -1458,6 +1650,13 @@ class UberSDRClient {
     async connectToInstance(instance, isLocal) {
         // Close the modal
         this.closeModal(isLocal ? 'local-instances-modal' : 'public-instances-modal');
+
+        // Disconnect if currently connected
+        if (this.connected) {
+            await this.disconnect();
+            // Wait a bit for disconnect to complete
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
 
         // Populate connection form
         this.hostInput.value = instance.host;
@@ -1764,6 +1963,7 @@ class UberSDRClient {
             this.spectrumDisplay.setScrollMode(scrollMode);
             this.spectrumDisplay.setClickTuneEnabled(this.spectrumClickTuneCheckbox.checked);
             this.spectrumDisplay.setCenterTuneEnabled(this.spectrumCenterTuneCheckbox.checked);
+            console.log(`Spectrum display initialized with center-tune: ${this.spectrumCenterTuneCheckbox.checked}`);
 
             // Set bookmarks if already loaded
             if (this.bookmarkSelect && this.bookmarkSelect.options.length > 1) {
@@ -2830,6 +3030,214 @@ class UberSDRClient {
         } catch (error) {
             console.error('Error parsing band:', error);
             this.showError('Band Error', 'Failed to load band');
+        }
+    }
+
+    // Band Conditions Methods
+
+    async loadBandConditions() {
+        if (!this.connected) {
+            console.log('Not connected, skipping band conditions load');
+            return;
+        }
+
+        console.log('Fetching band conditions from:', `${this.apiBase}/api/noisefloor/latest`);
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/noisefloor/latest`);
+            
+            if (response.status === 204) {
+                // No data available yet
+                console.log('No band condition data available yet');
+                return;
+            }
+
+            if (response.ok) {
+                const data = await response.json();
+                console.log('Received band conditions:', data);
+                this.updateBandConditions(data);
+            } else {
+                console.error('Failed to load band conditions:', response.status);
+            }
+        } catch (error) {
+            console.error('Error loading band conditions:', error);
+        }
+    }
+
+    updateBandConditions(data) {
+        // Store the band conditions data
+        this.bandConditions = data;
+
+        // Update band button colors
+        this.updateBandButtonColors();
+    }
+
+    calculateBandStatus(ft8Snr) {
+        if (!ft8Snr || ft8Snr <= 0) {
+            return 'UNKNOWN';
+        }
+
+        if (ft8Snr < this.SNR_THRESHOLDS.POOR) {
+            return 'POOR';
+        } else if (ft8Snr < this.SNR_THRESHOLDS.FAIR) {
+            return 'FAIR';
+        } else if (ft8Snr < this.SNR_THRESHOLDS.GOOD) {
+            return 'GOOD';
+        } else {
+            return 'EXCELLENT';
+        }
+    }
+
+    updateBandButtonColors() {
+        console.log('updateBandButtonColors called');
+        console.log('Band conditions data:', this.bandConditions);
+        console.log('Number of band buttons:', this.bandButtons.length);
+
+        // Update colors for band buttons in the UI
+        this.bandButtons.forEach(btn => {
+            const bandLabel = btn.textContent.trim();
+            console.log(`Processing button: "${bandLabel}"`);
+
+            // Find matching band data (handle different naming conventions)
+            let bandData = null;
+            for (const [bandName, data] of Object.entries(this.bandConditions)) {
+                console.log(`  Checking band name: "${bandName}" against "${bandLabel}"`);
+                // Match band names like "20m" with button labels like "20m"
+                if (bandName === bandLabel || bandName.toLowerCase() === bandLabel.toLowerCase()) {
+                    bandData = data;
+                    console.log(`  Match found! Data:`, data);
+                    break;
+                }
+            }
+
+            if (bandData && bandData.ft8_snr) {
+                const status = this.calculateBandStatus(bandData.ft8_snr);
+                const color = this.BAND_CONDITION_COLORS[status];
+
+                // Apply color to button
+                btn.style.backgroundColor = color;
+                btn.style.borderColor = color;
+
+                // Add tooltip with SNR value
+                btn.title = `${bandLabel}: ${status} (${bandData.ft8_snr.toFixed(1)} dB SNR)`;
+
+                console.log(`Updated ${bandLabel} button: ${status} (${bandData.ft8_snr.toFixed(1)} dB), color: ${color}`);
+            } else {
+                // No data available - use unknown color
+                const color = this.BAND_CONDITION_COLORS.UNKNOWN;
+                btn.style.backgroundColor = color;
+                btn.style.borderColor = color;
+                btn.title = `${bandLabel}: No data available`;
+                console.log(`No data for ${bandLabel}, using UNKNOWN color: ${color}`);
+            }
+        });
+    }
+
+    startBandConditionsPolling() {
+        console.log('startBandConditionsPolling() called');
+        console.log('Connected:', this.connected);
+        console.log('Band buttons count:', this.bandButtons ? this.bandButtons.length : 'undefined');
+
+        // Load immediately
+        this.loadBandConditions();
+
+        // Then poll every 60 seconds
+        this.bandConditionsInterval = setInterval(() => {
+            this.loadBandConditions();
+        }, 60000);
+
+        console.log('Started band conditions polling (60 second interval)');
+    }
+
+    stopBandConditionsPolling() {
+        if (this.bandConditionsInterval) {
+            clearInterval(this.bandConditionsInterval);
+            this.bandConditionsInterval = null;
+            console.log('Stopped band conditions polling');
+        }
+
+        // Reset band button colors to default
+        this.bandButtons.forEach(btn => {
+            btn.style.backgroundColor = '';
+            btn.style.borderColor = '';
+            btn.title = '';
+        });
+    }
+
+    // Instance Info Methods
+
+    async loadInstanceInfo() {
+        console.log('loadInstanceInfo: Fetching from', `${this.apiBase}/api/description`);
+        try {
+            const response = await fetch(`${this.apiBase}/api/description`);
+            console.log('loadInstanceInfo: Response status:', response.status);
+            
+            if (response.ok) {
+                const description = await response.json();
+                console.log('loadInstanceInfo: Received description:', description);
+                this.displayInstanceInfo(description);
+            } else {
+                const errorText = await response.text();
+                console.log('loadInstanceInfo: No instance description available, status:', response.status, 'error:', errorText);
+            }
+        } catch (error) {
+            console.error('loadInstanceInfo: Error loading instance info:', error);
+        }
+    }
+
+    displayInstanceInfo(desc) {
+        if (!desc || !this.instanceInfoDiv || !this.instanceInfoText) {
+            return;
+        }
+
+        console.log('Instance description received:', desc);
+
+        // Build the info string: callsign - name - location | version | Open Map
+        const parts = [];
+        
+        // Handle both nested receiver object and flat structure
+        const callsign = desc.receiver?.callsign || desc.callsign || desc.Callsign;
+        const name = desc.receiver?.name || desc.name || desc.Name;
+        const location = desc.receiver?.location || desc.location || desc.Location;
+        const version = desc.version || desc.Version;
+        const publicUUID = desc.public_uuid || desc.PublicUUID || desc.public_UUID;
+        // public_url is nested in receiver object
+        const publicURL = desc.receiver?.public_url || desc.public_url || desc.PublicURL || desc.public_URL;
+
+        if (callsign) parts.push(callsign);
+        if (name) parts.push(name);
+        if (location) parts.push(location);
+
+        let infoHTML = '';
+        
+        // Make the callsign/name/location part a link if public_url is available
+        const infoText = parts.join(' - ');
+        if (infoText) {
+            if (publicURL) {
+                infoHTML = `<a href="${publicURL}" target="_blank" style="color: #2196F3; text-decoration: none;">${infoText}</a>`;
+            } else {
+                infoHTML = infoText;
+            }
+        }
+
+        // Add version with 'v' prefix
+        if (version) {
+            if (infoHTML) infoHTML += ' | ';
+            infoHTML += 'v' + version;
+        }
+
+        // Add map link if public_uuid is available
+        if (publicUUID) {
+            if (infoHTML) infoHTML += ' | ';
+            infoHTML += `<a href="https://instances.ubersdr.org/?uuid=${publicUUID}" target="_blank" style="color: #2196F3; text-decoration: none;">Open Map</a>`;
+        }
+
+        if (infoHTML) {
+            this.instanceInfoText.innerHTML = infoHTML;
+            this.instanceInfoDiv.style.display = 'block';
+            console.log('Instance info displayed:', infoHTML);
+        } else {
+            console.log('No instance info to display');
         }
     }
 }

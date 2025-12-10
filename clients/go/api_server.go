@@ -129,6 +129,12 @@ func (s *APIServer) setupRoutes() {
 	// Bands endpoint
 	api.HandleFunc("/bands", s.handleBands).Methods("GET", "OPTIONS")
 
+	// Noise floor endpoint
+	api.HandleFunc("/noisefloor/latest", s.handleNoiseFloor).Methods("GET", "OPTIONS")
+
+	// Instance description endpoint
+	api.HandleFunc("/description", s.handleInstanceDescription).Methods("GET", "OPTIONS")
+
 	// WebSocket endpoint for real-time updates
 	s.router.HandleFunc("/ws", s.handleWebSocket)
 
@@ -238,9 +244,20 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 		resampleRate = 44100 // Default to 44.1 kHz (most widely supported)
 	}
 
+	// For IQ modes, ignore bandwidth parameters
+	bandwidthLow := req.BandwidthLow
+	bandwidthHigh := req.BandwidthHigh
+	isIQMode := req.Mode == "iq" || req.Mode == "iq48" || req.Mode == "iq96" ||
+		req.Mode == "iq192" || req.Mode == "iq384"
+	if isIQMode {
+		bandwidthLow = nil
+		bandwidthHigh = nil
+		log.Printf("IQ mode detected (%s), ignoring bandwidth parameters", req.Mode)
+	}
+
 	client := NewRadioClient(
 		"", req.Host, req.Port, req.Frequency, req.Mode,
-		req.BandwidthLow, req.BandwidthHigh, req.OutputMode, "",
+		bandwidthLow, bandwidthHigh, req.OutputMode, "",
 		nil, req.SSL, req.Password, req.AudioDevice, req.NR2Enabled,
 		req.NR2Strength, req.NR2Floor, req.NR2AdaptRate, false,
 		resampleEnabled, resampleRate,
@@ -1482,6 +1499,42 @@ func (s *APIServer) handleBands(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, bands)
+}
+
+// handleNoiseFloor handles GET /api/noisefloor/latest
+// Fetches noise floor data from the connected SDR server
+func (s *APIServer) handleNoiseFloor(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsConnected() {
+		respondError(w, http.StatusConflict, "Not connected", "Connect to SDR server first")
+		return
+	}
+
+	// Get noise floor data from the SDR server via the manager
+	noiseFloor, err := s.manager.GetNoiseFloor()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to fetch noise floor", err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, noiseFloor)
+}
+
+// handleInstanceDescription handles GET /api/description
+// Returns the instance description from the connected SDR server
+func (s *APIServer) handleInstanceDescription(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsConnected() {
+		respondError(w, http.StatusConflict, "Not connected", "Connect to SDR server first")
+		return
+	}
+
+	// Get instance description from the manager
+	description := s.manager.GetInstanceDescription()
+	if description == nil {
+		respondJSON(w, http.StatusOK, map[string]interface{}{})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, description)
 }
 
 // Helper functions

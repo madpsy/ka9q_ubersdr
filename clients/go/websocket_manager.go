@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -17,39 +18,83 @@ import (
 
 // WebSocketManager manages the WebSocket connection with thread-safe operations
 type WebSocketManager struct {
-	client             *RadioClient
-	conn               *websocket.Conn // WebSocket connection for sending tune messages
-	connMu             sync.Mutex      // Protects WebSocket writes
-	mu                 sync.RWMutex
-	connected          bool
-	connectedAt        time.Time
-	bypassed           bool     // Whether the connection is bypassed (from /connection response)
-	allowedIQModes     []string // Allowed IQ modes (from /connection response)
-	ctx                context.Context
-	cancel             context.CancelFunc
-	statusBroadcast    chan WSStatusUpdate
-	errorBroadcast     chan WSErrorUpdate
-	connBroadcast      chan WSConnectionUpdate
-	subscribers        map[chan interface{}]bool
-	subMu              sync.RWMutex
-	audioStreams       map[*websocket.Conn]string // Maps WebSocket connections to their audio room names
-	audioStreamsMu     sync.RWMutex
-	audioWriteChans    map[*websocket.Conn]chan interface{} // Per-connection write channels for audio
-	spectrumClient     *SpectrumClient                      // Spectrum WebSocket client
-	spectrumStreams    map[*websocket.Conn]string           // Maps WebSocket connections to their spectrum room names
-	spectrumStreamsMu  sync.RWMutex
-	spectrumWriteChans map[*websocket.Conn]chan interface{} // Per-connection write channels for spectrum
-	flrigClient        *FlrigClient                         // flrig radio control client
-	flrigPolling       bool                                 // Whether flrig polling is active
-	flrigPollCancel    context.CancelFunc                   // Cancel function for flrig polling
-	flrigSyncToRig     bool                                 // Sync SDR frequency changes to rig
-	flrigSyncFromRig   bool                                 // Sync rig frequency changes to SDR
-	rigctlClient       *RigctlClient                        // rigctl radio control client
-	rigctlPolling      bool                                 // Whether rigctl polling is active
-	rigctlPollCancel   context.CancelFunc                   // Cancel function for rigctl polling
-	rigctlSyncToRig    bool                                 // Sync SDR frequency changes to rig
-	rigctlSyncFromRig  bool                                 // Sync rig frequency changes to SDR
-	serialServer       *SerialCATServer                     // serial CAT server
+	client              *RadioClient
+	conn                *websocket.Conn // WebSocket connection for sending tune messages
+	connMu              sync.Mutex      // Protects WebSocket writes
+	mu                  sync.RWMutex
+	connected           bool
+	connectedAt         time.Time
+	bypassed            bool                   // Whether the connection is bypassed (from /connection response)
+	allowedIQModes      []string               // Allowed IQ modes (from /connection response)
+	maxSessionTime      int                    // Maximum session time in seconds (0 = unlimited)
+	sessionStartTime    time.Time              // When the session started (for calculating remaining time)
+	instanceDescription map[string]interface{} // Description of the connected instance
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	statusBroadcast     chan WSStatusUpdate
+	errorBroadcast      chan WSErrorUpdate
+	connBroadcast       chan WSConnectionUpdate
+	subscribers         map[chan interface{}]bool
+	subMu               sync.RWMutex
+	audioStreams        map[*websocket.Conn]string // Maps WebSocket connections to their audio room names
+	audioStreamsMu      sync.RWMutex
+	audioWriteChans     map[*websocket.Conn]chan interface{} // Per-connection write channels for audio
+	spectrumClient      *SpectrumClient                      // Spectrum WebSocket client
+	spectrumStreams     map[*websocket.Conn]string           // Maps WebSocket connections to their spectrum room names
+	spectrumStreamsMu   sync.RWMutex
+	spectrumWriteChans  map[*websocket.Conn]chan interface{} // Per-connection write channels for spectrum
+	flrigClient         *FlrigClient                         // flrig radio control client
+	flrigPolling        bool                                 // Whether flrig polling is active
+	flrigPollCancel     context.CancelFunc                   // Cancel function for flrig polling
+	flrigSyncToRig      bool                                 // Sync SDR frequency changes to rig
+	flrigSyncFromRig    bool                                 // Sync rig frequency changes to SDR
+	rigctlClient        *RigctlClient                        // rigctl radio control client
+	rigctlPolling       bool                                 // Whether rigctl polling is active
+	rigctlPollCancel    context.CancelFunc                   // Cancel function for rigctl polling
+	rigctlSyncToRig     bool                                 // Sync SDR frequency changes to rig
+	rigctlSyncFromRig   bool                                 // Sync rig frequency changes to SDR
+	serialServer        *SerialCATServer                     // serial CAT server
+
+	// Auto-reconnect state
+	autoReconnect          bool
+	reconnecting           bool
+	reconnectAttempts      int
+	maxReconnectDelay      time.Duration
+	reconnectCancel        context.CancelFunc
+	savedClientConfig      *RadioClient        // Saved client config for reconnection
+	savedOutputStates      *OutputStates       // Saved output states for restoration
+	savedRadioControlState *RadioControlStates // Saved radio control states for restoration
+}
+
+// OutputStates stores the state of all outputs for restoration after reconnect
+type OutputStates struct {
+	PortAudioEnabled bool
+	PortAudioDevice  int
+	FIFOEnabled      bool
+	FIFOPath         string
+	UDPEnabled       bool
+	UDPHost          string
+	UDPPort          int
+}
+
+// RadioControlStates stores the state of radio control connections
+type RadioControlStates struct {
+	FlrigConnected    bool
+	FlrigHost         string
+	FlrigPort         int
+	FlrigVFO          string
+	FlrigSyncToRig    bool
+	FlrigSyncFromRig  bool
+	RigctlConnected   bool
+	RigctlHost        string
+	RigctlPort        int
+	RigctlVFO         string
+	RigctlSyncToRig   bool
+	RigctlSyncFromRig bool
+	SerialRunning     bool
+	SerialPort        string
+	SerialBaudrate    int
+	SerialVFO         string
 }
 
 // NewWebSocketManager creates a new WebSocket manager
@@ -66,17 +111,30 @@ func NewWebSocketManager() *WebSocketManager {
 		audioWriteChans:    make(map[*websocket.Conn]chan interface{}),
 		spectrumStreams:    make(map[*websocket.Conn]string),
 		spectrumWriteChans: make(map[*websocket.Conn]chan interface{}),
+		autoReconnect:      true,             // Enable auto-reconnect by default
+		maxReconnectDelay:  60 * time.Second, // Max 60 seconds between reconnect attempts
 	}
 }
 
 // Connect establishes a connection to the SDR server
 func (m *WebSocketManager) Connect(client *RadioClient) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.connected {
+		m.mu.Unlock()
 		return fmt.Errorf("already connected")
 	}
+
+	// Save client config for potential reconnection
+	m.savedClientConfig = client
+
+	// Capture current output states and radio control states before connection
+	if m.client != nil {
+		m.savedOutputStates = m.captureOutputStates()
+		m.savedRadioControlState = m.captureRadioControlStates()
+	}
+
+	m.mu.Unlock()
 
 	// Check connection permission and get allowed IQ modes
 	allowed, err := client.CheckConnectionAllowed()
@@ -87,13 +145,21 @@ func (m *WebSocketManager) Connect(client *RadioClient) error {
 		return fmt.Errorf("connection not allowed")
 	}
 
+	m.mu.Lock()
 	// Store connection data from client
 	m.bypassed = client.bypassed
 	m.allowedIQModes = client.allowedIQModes
+	m.maxSessionTime = client.maxSessionTime
+	m.sessionStartTime = time.Now()
+
+	// Fetch instance description from the server
+	m.fetchInstanceDescription(client)
 
 	m.client = client
 	m.connected = true
 	m.connectedAt = time.Now()
+	m.reconnectAttempts = 0 // Reset reconnect counter on successful connection
+	m.mu.Unlock()
 
 	// Set callback to capture WebSocket connection when established
 	client.connCallback = func(conn *websocket.Conn) {
@@ -109,14 +175,45 @@ func (m *WebSocketManager) Connect(client *RadioClient) error {
 
 		// Mark as disconnected when client stops
 		m.mu.Lock()
+		wasConnected := m.connected
 		m.connected = false
 		m.conn = nil
 		m.bypassed = false
 		m.allowedIQModes = nil
+		savedMaxSessionTime := m.maxSessionTime
+		savedSessionStartTime := m.sessionStartTime
+		m.maxSessionTime = 0
+		m.sessionStartTime = time.Time{}
+		m.instanceDescription = nil
+
+		// Check if disconnection was likely due to max session time being reached
+		sessionTimeExpired := false
+		if savedMaxSessionTime > 0 && !savedSessionStartTime.IsZero() {
+			sessionDuration := time.Since(savedSessionStartTime).Seconds()
+			// Consider session expired if we're within 10 seconds of the limit
+			// This accounts for network delays and timing variations
+			if sessionDuration >= float64(savedMaxSessionTime)-10 {
+				sessionTimeExpired = true
+				log.Printf("Session time limit reached (%.0fs of %ds), will not auto-reconnect",
+					sessionDuration, savedMaxSessionTime)
+			}
+		}
+
+		shouldReconnect := m.autoReconnect && wasConnected && !m.reconnecting && !sessionTimeExpired
 		m.mu.Unlock()
 
 		// Broadcast disconnection
-		m.BroadcastConnection(false, "Connection closed")
+		if sessionTimeExpired {
+			m.BroadcastConnection(false, "Session time limit reached")
+		} else {
+			m.BroadcastConnection(false, "Connection closed")
+		}
+
+		// Attempt auto-reconnect if enabled and not already reconnecting
+		if shouldReconnect {
+			log.Printf("Connection lost, attempting auto-reconnect...")
+			m.startReconnect()
+		}
 	}()
 
 	// Give the client a moment to establish connection
@@ -131,22 +228,427 @@ func (m *WebSocketManager) Connect(client *RadioClient) error {
 // Disconnect closes the connection to the SDR server
 func (m *WebSocketManager) Disconnect() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if !m.connected {
+		m.mu.Unlock()
 		return fmt.Errorf("not connected")
 	}
+
+	// Cancel any ongoing reconnect attempts
+	if m.reconnectCancel != nil {
+		m.reconnectCancel()
+		m.reconnectCancel = nil
+	}
+	m.reconnecting = false
+	m.autoReconnect = false // Disable auto-reconnect on manual disconnect
 
 	if m.client != nil {
 		m.client.running = false
 	}
 
 	m.connected = false
+	m.mu.Unlock()
 
 	// Broadcast disconnection
 	m.BroadcastConnection(false, "Disconnected by user")
 
 	return nil
+}
+
+// captureOutputStates captures the current state of all outputs
+func (m *WebSocketManager) captureOutputStates() *OutputStates {
+	if m.client == nil {
+		return nil
+	}
+
+	status := m.client.GetOutputStatus()
+	states := &OutputStates{}
+
+	if pa, ok := status["portaudio"].(map[string]interface{}); ok {
+		if enabled, ok := pa["enabled"].(bool); ok {
+			states.PortAudioEnabled = enabled
+		}
+		if deviceIdx, ok := pa["deviceIndex"].(int); ok {
+			states.PortAudioDevice = deviceIdx
+		}
+	}
+
+	if fifo, ok := status["fifo"].(map[string]interface{}); ok {
+		if enabled, ok := fifo["enabled"].(bool); ok {
+			states.FIFOEnabled = enabled
+		}
+		if path, ok := fifo["path"].(string); ok {
+			states.FIFOPath = path
+		}
+	}
+
+	if udp, ok := status["udp"].(map[string]interface{}); ok {
+		if enabled, ok := udp["enabled"].(bool); ok {
+			states.UDPEnabled = enabled
+		}
+		if host, ok := udp["host"].(string); ok {
+			states.UDPHost = host
+		}
+		if port, ok := udp["port"].(int); ok {
+			states.UDPPort = port
+		}
+	}
+
+	return states
+}
+
+// captureRadioControlStates captures the current state of all radio control connections
+func (m *WebSocketManager) captureRadioControlStates() *RadioControlStates {
+	states := &RadioControlStates{}
+
+	// Capture flrig state
+	if m.flrigClient != nil && m.flrigClient.IsConnected() {
+		states.FlrigConnected = true
+		states.FlrigHost = m.flrigClient.host
+		states.FlrigPort = m.flrigClient.port
+		states.FlrigVFO = m.flrigClient.vfo
+		states.FlrigSyncToRig = m.flrigSyncToRig
+		states.FlrigSyncFromRig = m.flrigSyncFromRig
+	}
+
+	// Capture rigctl state
+	if m.rigctlClient != nil && m.rigctlClient.IsConnected() {
+		states.RigctlConnected = true
+		states.RigctlHost = m.rigctlClient.host
+		states.RigctlPort = m.rigctlClient.port
+		states.RigctlVFO = m.rigctlClient.vfo
+		states.RigctlSyncToRig = m.rigctlSyncToRig
+		states.RigctlSyncFromRig = m.rigctlSyncFromRig
+	}
+
+	// Capture serial CAT state
+	if m.serialServer != nil && m.serialServer.IsRunning() {
+		states.SerialRunning = true
+		states.SerialPort = m.serialServer.GetPort()
+		states.SerialBaudrate = m.serialServer.GetBaudrate()
+		states.SerialVFO = m.serialServer.GetVFO()
+	}
+
+	return states
+}
+
+// startReconnect initiates the auto-reconnect process
+func (m *WebSocketManager) startReconnect() {
+	m.mu.Lock()
+
+	if m.reconnecting {
+		m.mu.Unlock()
+		return // Already reconnecting
+	}
+
+	if m.savedClientConfig == nil {
+		m.mu.Unlock()
+		log.Printf("Cannot reconnect: no saved client configuration")
+		return
+	}
+
+	m.reconnecting = true
+	m.reconnectAttempts++
+
+	// Create cancellable context for reconnect attempts
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.reconnectCancel = cancel
+
+	savedConfig := m.savedClientConfig
+	m.mu.Unlock()
+
+	go m.reconnectLoop(ctx, savedConfig)
+}
+
+// reconnectLoop handles the reconnection attempts with exponential backoff
+func (m *WebSocketManager) reconnectLoop(ctx context.Context, savedConfig *RadioClient) {
+	for {
+		m.mu.RLock()
+		attempts := m.reconnectAttempts
+		maxDelay := m.maxReconnectDelay
+		m.mu.RUnlock()
+
+		// Calculate exponential backoff: 2^attempts seconds, capped at maxDelay
+		backoff := time.Duration(1<<uint(attempts-1)) * time.Second
+		if backoff > maxDelay {
+			backoff = maxDelay
+		}
+
+		log.Printf("Reconnect attempt %d in %v...", attempts, backoff)
+
+		// Wait with ability to cancel
+		select {
+		case <-ctx.Done():
+			log.Printf("Reconnect cancelled")
+			m.mu.Lock()
+			m.reconnecting = false
+			m.mu.Unlock()
+			return
+		case <-time.After(backoff):
+			// Continue to reconnect attempt
+		}
+
+		// Create new client with same configuration
+		newClient := NewRadioClient(
+			savedConfig.url,
+			savedConfig.host,
+			savedConfig.port,
+			savedConfig.frequency,
+			savedConfig.mode,
+			savedConfig.bandwidthLow,
+			savedConfig.bandwidthHigh,
+			savedConfig.outputMode,
+			savedConfig.wavFile,
+			savedConfig.duration,
+			savedConfig.ssl,
+			savedConfig.password,
+			savedConfig.audioDeviceIndex,
+			savedConfig.nr2Enabled,
+			savedConfig.nr2Strength,
+			savedConfig.nr2Floor,
+			savedConfig.nr2AdaptRate,
+			false, // Don't use RadioClient's auto-reconnect, we handle it here
+			savedConfig.resampleEnabled,
+			savedConfig.resampleOutputRate,
+			savedConfig.outputChannels,
+			savedConfig.fifoPath,
+			savedConfig.udpHost,
+			savedConfig.udpPort,
+			savedConfig.udpEnabled,
+		)
+
+		// Temporarily disable auto-reconnect to avoid recursive reconnection
+		m.mu.Lock()
+		oldAutoReconnect := m.autoReconnect
+		m.autoReconnect = false
+		m.mu.Unlock()
+
+		// Attempt connection
+		err := m.Connect(newClient)
+
+		// Restore auto-reconnect setting
+		m.mu.Lock()
+		m.autoReconnect = oldAutoReconnect
+		m.reconnecting = false
+		m.mu.Unlock()
+
+		if err == nil {
+			log.Printf("Reconnection successful after %d attempts", attempts)
+
+			// Restore output states after successful reconnection
+			go m.restoreOutputStates()
+
+			return
+		}
+
+		log.Printf("Reconnection attempt %d failed: %v", attempts, err)
+
+		m.mu.Lock()
+		m.reconnectAttempts++
+		m.reconnecting = true // Set back to true for next attempt
+		m.mu.Unlock()
+	}
+}
+
+// restoreOutputStates restores the output states after reconnection
+func (m *WebSocketManager) restoreOutputStates() {
+	// Wait for connection to stabilize
+	time.Sleep(2 * time.Second)
+
+	m.mu.RLock()
+	if !m.connected {
+		m.mu.RUnlock()
+		log.Printf("Connection lost before output restoration")
+		return
+	}
+
+	savedStates := m.savedOutputStates
+	m.mu.RUnlock()
+
+	if savedStates == nil {
+		log.Printf("No saved output states to restore")
+		return
+	}
+
+	log.Printf("Restoring output states after reconnection...")
+
+	// Restore PortAudio
+	if savedStates.PortAudioEnabled {
+		log.Printf("Restoring PortAudio output (device %d)...", savedStates.PortAudioDevice)
+		if err := m.EnablePortAudioOutput(savedStates.PortAudioDevice); err != nil {
+			log.Printf("Warning: Failed to restore PortAudio: %v", err)
+		} else {
+			log.Printf("PortAudio output restored")
+		}
+	}
+
+	// Restore FIFO
+	if savedStates.FIFOEnabled && savedStates.FIFOPath != "" {
+		log.Printf("Restoring FIFO output (%s)...", savedStates.FIFOPath)
+		if err := m.EnableFIFOOutput(savedStates.FIFOPath); err != nil {
+			log.Printf("Warning: Failed to restore FIFO: %v", err)
+		} else {
+			log.Printf("FIFO output restored")
+		}
+	}
+
+	// Restore UDP
+	if savedStates.UDPEnabled {
+		log.Printf("Restoring UDP output (%s:%d)...", savedStates.UDPHost, savedStates.UDPPort)
+		if err := m.EnableUDPOutput(savedStates.UDPHost, savedStates.UDPPort); err != nil {
+			log.Printf("Warning: Failed to restore UDP: %v", err)
+		} else {
+			log.Printf("UDP output restored")
+		}
+	}
+
+	log.Printf("Output state restoration complete")
+
+	// Also restore radio control connections
+	m.restoreRadioControlStates()
+}
+
+// restoreRadioControlStates restores radio control connections and syncs frequency/mode
+func (m *WebSocketManager) restoreRadioControlStates() {
+	m.mu.RLock()
+	savedStates := m.savedRadioControlState
+	currentFreq := 0
+	currentMode := ""
+	if m.client != nil {
+		currentFreq = m.client.frequency
+		currentMode = m.client.mode
+	}
+	m.mu.RUnlock()
+
+	if savedStates == nil {
+		log.Printf("No saved radio control states to restore")
+		return
+	}
+
+	log.Printf("Restoring radio control connections after reconnection...")
+
+	// Restore flrig connection
+	if savedStates.FlrigConnected {
+		log.Printf("Restoring flrig connection (%s:%d)...", savedStates.FlrigHost, savedStates.FlrigPort)
+
+		m.mu.RLock()
+		alreadyConnected := m.flrigClient != nil && m.flrigClient.IsConnected()
+		m.mu.RUnlock()
+
+		if !alreadyConnected {
+			// Reconnect to flrig
+			if err := m.ConnectFlrig(savedStates.FlrigHost, savedStates.FlrigPort, savedStates.FlrigVFO,
+				savedStates.FlrigSyncToRig, savedStates.FlrigSyncFromRig); err != nil {
+				log.Printf("Warning: Failed to restore flrig connection: %v", err)
+			} else {
+				log.Printf("flrig connection restored")
+			}
+		} else {
+			log.Printf("flrig already connected, syncing frequency/mode...")
+		}
+
+		// Sync current frequency and mode to flrig if sync is enabled
+		if savedStates.FlrigSyncToRig && currentFreq > 0 {
+			m.mu.RLock()
+			client := m.flrigClient
+			m.mu.RUnlock()
+
+			if client != nil && client.IsConnected() {
+				if err := client.SetFrequency(currentFreq); err != nil {
+					log.Printf("Warning: Failed to sync frequency to flrig: %v", err)
+				} else {
+					log.Printf("Synced frequency %d Hz to flrig", currentFreq)
+				}
+				if currentMode != "" {
+					if err := client.SetMode(currentMode); err != nil {
+						log.Printf("Warning: Failed to sync mode to flrig: %v", err)
+					} else {
+						log.Printf("Synced mode %s to flrig", currentMode)
+					}
+				}
+			}
+		}
+	}
+
+	// Restore rigctl connection
+	if savedStates.RigctlConnected {
+		log.Printf("Restoring rigctl connection (%s:%d)...", savedStates.RigctlHost, savedStates.RigctlPort)
+
+		m.mu.RLock()
+		alreadyConnected := m.rigctlClient != nil && m.rigctlClient.IsConnected()
+		m.mu.RUnlock()
+
+		if !alreadyConnected {
+			// Reconnect to rigctl
+			if err := m.ConnectRigctl(savedStates.RigctlHost, savedStates.RigctlPort, savedStates.RigctlVFO,
+				savedStates.RigctlSyncToRig, savedStates.RigctlSyncFromRig); err != nil {
+				log.Printf("Warning: Failed to restore rigctl connection: %v", err)
+			} else {
+				log.Printf("rigctl connection restored")
+			}
+		} else {
+			log.Printf("rigctl already connected, syncing frequency/mode...")
+		}
+
+		// Sync current frequency and mode to rigctl if sync is enabled
+		if savedStates.RigctlSyncToRig && currentFreq > 0 {
+			m.mu.RLock()
+			client := m.rigctlClient
+			m.mu.RUnlock()
+
+			if client != nil && client.IsConnected() {
+				if err := client.SetFrequency(currentFreq); err != nil {
+					log.Printf("Warning: Failed to sync frequency to rigctl: %v", err)
+				} else {
+					log.Printf("Synced frequency %d Hz to rigctl", currentFreq)
+				}
+				if currentMode != "" {
+					if err := client.SetMode(currentMode); err != nil {
+						log.Printf("Warning: Failed to sync mode to rigctl: %v", err)
+					} else {
+						log.Printf("Synced mode %s to rigctl", currentMode)
+					}
+				}
+			}
+		}
+	}
+
+	// Restore serial CAT server
+	if savedStates.SerialRunning {
+		log.Printf("Restoring serial CAT server (%s at %d baud)...", savedStates.SerialPort, savedStates.SerialBaudrate)
+
+		m.mu.RLock()
+		alreadyRunning := m.serialServer != nil && m.serialServer.IsRunning()
+		m.mu.RUnlock()
+
+		if !alreadyRunning {
+			// Restart serial CAT server
+			if err := m.StartSerialServer(savedStates.SerialPort, savedStates.SerialBaudrate, savedStates.SerialVFO); err != nil {
+				log.Printf("Warning: Failed to restore serial CAT server: %v", err)
+			} else {
+				log.Printf("Serial CAT server restored")
+			}
+		} else {
+			log.Printf("Serial CAT server already running")
+		}
+
+		// Update serial server with current frequency/mode
+		if currentFreq > 0 {
+			m.mu.RLock()
+			server := m.serialServer
+			m.mu.RUnlock()
+
+			if server != nil && server.IsRunning() {
+				server.UpdateFrequency(currentFreq)
+				if currentMode != "" {
+					server.UpdateMode(currentMode)
+				}
+				log.Printf("Updated serial CAT server with current frequency/mode")
+			}
+		}
+	}
+
+	log.Printf("Radio control state restoration complete")
 }
 
 // IsConnected returns whether the client is currently connected
@@ -156,16 +658,87 @@ func (m *WebSocketManager) IsConnected() bool {
 	return m.connected
 }
 
+// fetchInstanceDescription fetches the description from the connected server
+func (m *WebSocketManager) fetchInstanceDescription(client *RadioClient) {
+	// Build HTTP URL for description endpoint
+	protocol := "http"
+	if client.ssl {
+		protocol = "https"
+	}
+
+	var host string
+	var port int
+
+	if client.url != "" {
+		// Extract host and port from WebSocket URL
+		parsedURL, err := url.Parse(client.url)
+		if err != nil {
+			log.Printf("Failed to parse URL for description fetch: %v", err)
+			return
+		}
+		host = parsedURL.Hostname()
+		port = 80
+		if parsedURL.Port() != "" {
+			fmt.Sscanf(parsedURL.Port(), "%d", &port)
+		} else if parsedURL.Scheme == "wss" {
+			port = 443
+		}
+	} else {
+		host = client.host
+		port = client.port
+	}
+
+	httpURL := fmt.Sprintf("%s://%s:%d/api/description", protocol, host, port)
+
+	req, err := http.NewRequest("GET", httpURL, nil)
+	if err != nil {
+		log.Printf("Failed to create description request: %v", err)
+		return
+	}
+	req.Header.Set("User-Agent", "UberSDR Client 1.0 (go)")
+
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		log.Printf("Failed to fetch instance description: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Failed to fetch instance description: HTTP %d", resp.StatusCode)
+		return
+	}
+
+	var description map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&description); err != nil {
+		log.Printf("Failed to decode instance description: %v", err)
+		return
+	}
+
+	m.instanceDescription = description
+	log.Printf("Fetched instance description successfully")
+}
+
+// GetInstanceDescription returns the stored instance description
+func (m *WebSocketManager) GetInstanceDescription() map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.instanceDescription
+}
+
 // GetStatus returns the current status
 func (m *WebSocketManager) GetStatus() StatusResponse {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	status := StatusResponse{
-		Connected:      m.connected,
-		UserSessionID:  "",
-		Bypassed:       m.bypassed,
-		AllowedIQModes: m.allowedIQModes,
+		Connected:        m.connected,
+		UserSessionID:    "",
+		Bypassed:         m.bypassed,
+		AllowedIQModes:   m.allowedIQModes,
+		MaxSessionTime:   m.maxSessionTime,
+		SessionStartTime: m.sessionStartTime,
 	}
 
 	if m.client != nil {
@@ -237,15 +810,19 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 	}
 
 	// Update mode if provided
+	var effectiveMode string
 	if req.Mode != "" {
 		tuneMsg["mode"] = req.Mode
+		effectiveMode = req.Mode
 	} else {
 		tuneMsg["mode"] = m.client.mode
+		effectiveMode = m.client.mode
 	}
 
 	// Update bandwidth if provided (only for non-IQ modes)
-	isIQMode := m.client.mode == "iq" || m.client.mode == "iq48" ||
-		m.client.mode == "iq96" || m.client.mode == "iq192" || m.client.mode == "iq384"
+	// Check the effective mode (the one being set, not the current one)
+	isIQMode := effectiveMode == "iq" || effectiveMode == "iq48" ||
+		effectiveMode == "iq96" || effectiveMode == "iq192" || effectiveMode == "iq384"
 
 	if !isIQMode {
 		if req.BandwidthLow != nil {
@@ -1645,4 +2222,46 @@ func (m *WebSocketManager) GetBands() ([]map[string]interface{}, error) {
 
 	log.Printf("Fetched %d bands from SDR server", len(bands))
 	return bands, nil
+}
+
+// GetNoiseFloor fetches noise floor data from the connected SDR server
+func (m *WebSocketManager) GetNoiseFloor() (map[string]interface{}, error) {
+	m.mu.RLock()
+	if !m.connected || m.client == nil {
+		m.mu.RUnlock()
+		return nil, fmt.Errorf("not connected to SDR server")
+	}
+
+	// Build the API URL
+	protocol := "http"
+	if m.client.ssl {
+		protocol = "https"
+	}
+	apiURL := fmt.Sprintf("%s://%s:%d/api/noisefloor/latest", protocol, m.client.host, m.client.port)
+	m.mu.RUnlock()
+
+	// Make HTTP request to fetch noise floor data
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch noise floor: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch noise floor: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse JSON response
+	var noiseFloor map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&noiseFloor); err != nil {
+		return nil, fmt.Errorf("failed to parse noise floor: %w", err)
+	}
+
+	log.Printf("Fetched noise floor data from SDR server")
+	return noiseFloor, nil
 }

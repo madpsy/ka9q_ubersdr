@@ -58,11 +58,19 @@
                         <button id="delete-instance-btn" class="btn btn-small" disabled>Delete</button>
                     </div>
                 </div>
-                <div class="button-group">
-                    <button id="connect-btn" class="btn btn-primary">Connect</button>
-                    <button id="disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
-                    <button id="local-instances-btn" class="btn btn-secondary">🔍 Local Instances</button>
-                    <button id="public-instances-btn" class="btn btn-secondary">🌐 Public Instances</button>
+                <div id="instance-info" style="display: none; margin-top: 10px; margin-bottom: 15px; font-size: 14px; color: #2196F3; font-weight: 500;">
+                    <span id="instance-info-text"></span>
+                </div>
+                <div class="button-group" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; gap: 10px;">
+                        <button id="connect-btn" class="btn btn-primary">Connect</button>
+                        <button id="disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                        <button id="local-instances-btn" class="btn btn-secondary">🔍 Local Instances</button>
+                        <button id="public-instances-btn" class="btn btn-secondary">🌐 Public Instances</button>
+                    </div>
+                    <div id="session-timer" style="display: none; font-size: 14px; color: #666; font-weight: 500;">
+                        Session: <span id="session-time-remaining">--</span>
+                    </div>
                 </div>
             </section>
 
@@ -74,14 +82,16 @@
                     <span class="unit">Hz</span>
                 </div>
                 <div class="frequency-buttons">
-                    <button class="btn btn-small" data-step="-1000000">-1 MHz</button>
-                    <button class="btn btn-small" data-step="-100000">-100 kHz</button>
                     <button class="btn btn-small" data-step="-10000">-10 kHz</button>
                     <button class="btn btn-small" data-step="-1000">-1 kHz</button>
+                    <button class="btn btn-small" data-step="-500">-500 Hz</button>
+                    <button class="btn btn-small" data-step="-100">-100 Hz</button>
+                    <button class="btn btn-small" data-step="-10">-10 Hz</button>
+                    <button class="btn btn-small" data-step="10">+10 Hz</button>
+                    <button class="btn btn-small" data-step="100">+100 Hz</button>
+                    <button class="btn btn-small" data-step="500">+500 Hz</button>
                     <button class="btn btn-small" data-step="1000">+1 kHz</button>
                     <button class="btn btn-small" data-step="10000">+10 kHz</button>
-                    <button class="btn btn-small" data-step="100000">+100 kHz</button>
-                    <button class="btn btn-small" data-step="1000000">+1 MHz</button>
                 </div>
                 <div class="band-buttons">
                     <h3>Bands</h3>

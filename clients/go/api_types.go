@@ -182,6 +182,8 @@ type StatusResponse struct {
 	UDPEnabled         bool                   `json:"udpEnabled"`
 	Bypassed           bool                   `json:"bypassed"`
 	AllowedIQModes     []string               `json:"allowedIQModes,omitempty"`
+	MaxSessionTime     int                    `json:"maxSessionTime"`
+	SessionStartTime   time.Time              `json:"sessionStartTime,omitempty"`
 	OutputStatus       map[string]interface{} `json:"outputStatus,omitempty"`
 }
 

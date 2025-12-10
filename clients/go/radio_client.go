@@ -61,6 +61,7 @@ type RadioClient struct {
 	// Connection response data
 	bypassed       bool     // Whether the connection is bypassed
 	allowedIQModes []string // Allowed IQ modes from server
+	maxSessionTime int      // Maximum session time in seconds (0 = unlimited)
 
 	// Resampling support
 	resampleEnabled    bool
@@ -1034,13 +1035,14 @@ func (c *RadioClient) CheckConnectionAllowed() (bool, error) {
 	// Store connection response data
 	c.bypassed = respData.Bypassed
 	c.allowedIQModes = respData.AllowedIQModes
+	c.maxSessionTime = respData.MaxSessionTime
 
 	clientIP := respData.ClientIP
 	if clientIP == "" {
 		clientIP = "unknown"
 	}
-	fmt.Fprintf(os.Stderr, "Connection allowed (client IP: %s, bypassed: %v, allowed IQ modes: %v)\n",
-		clientIP, c.bypassed, c.allowedIQModes)
+	fmt.Fprintf(os.Stderr, "Connection allowed (client IP: %s, bypassed: %v, allowed IQ modes: %v, max session time: %ds)\n",
+		clientIP, c.bypassed, c.allowedIQModes, c.maxSessionTime)
 	return true, nil
 }
 

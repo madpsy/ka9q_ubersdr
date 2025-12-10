@@ -437,9 +437,33 @@ class UberSDRClient {
     updateStatusDisplay(status) {
         if (status.frequency) {
             this.statusFrequency.textContent = this.formatFrequency(status.frequency);
+            // Also update the frequency input field for real-time sync
+            if (this.frequencyInput.value != status.frequency) {
+                this.frequencyInput.value = status.frequency;
+
+                // Update spectrum display if active
+                if (this.spectrumDisplay && this.spectrumDisplay.totalBandwidth > 0) {
+                    this.spectrumDisplay.tunedFreq = status.frequency;
+
+                    // Check if new frequency is outside the currently displayed bandwidth
+                    const halfBw = this.spectrumDisplay.totalBandwidth / 2;
+                    const startFreq = this.spectrumDisplay.centerFreq - halfBw;
+                    const endFreq = this.spectrumDisplay.centerFreq + halfBw;
+                    const isOutsideView = status.frequency < startFreq || status.frequency > endFreq;
+
+                    // If center-tune is enabled or frequency is outside view, re-center
+                    if (this.spectrumDisplay.centerTuneEnabled || isOutsideView) {
+                        this.spectrumDisplay.sendZoomCommand(status.frequency, this.spectrumDisplay.totalBandwidth);
+                    }
+                }
+            }
         }
         if (status.mode) {
             this.statusMode.textContent = status.mode.toUpperCase();
+            // Also update the mode select for real-time sync
+            if (this.modeSelect.value != status.mode) {
+                this.modeSelect.value = status.mode;
+            }
         }
         if (status.sampleRate) {
             this.statusSampleRate.textContent = `${status.sampleRate} Hz`;

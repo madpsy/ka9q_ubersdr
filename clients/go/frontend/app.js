@@ -55,6 +55,10 @@ class UberSDRClient {
         this.spectrumStatus = document.getElementById('spectrum-status');
         this.rfSpectrumCanvas = document.getElementById('rf-spectrum-canvas');
         this.rfWaterfallCanvas = document.getElementById('rf-waterfall-canvas');
+        this.spectrumZoomScrollCheckbox = document.getElementById('spectrum-zoom-scroll');
+        this.spectrumPanScrollCheckbox = document.getElementById('spectrum-pan-scroll');
+        this.spectrumClickTuneCheckbox = document.getElementById('spectrum-click-tune');
+        this.spectrumCenterTuneCheckbox = document.getElementById('spectrum-center-tune');
         
         // NR2 elements
         this.nr2EnabledCheckbox = document.getElementById('nr2-enabled');
@@ -173,6 +177,41 @@ class UberSDRClient {
         // RF Spectrum settings
         this.spectrumEnabled.addEventListener('change', () => {
             this.toggleSpectrumDisplay();
+        });
+        
+        // Spectrum control checkboxes
+        this.spectrumZoomScrollCheckbox.addEventListener('change', () => {
+            if (this.spectrumZoomScrollCheckbox.checked) {
+                this.spectrumPanScrollCheckbox.checked = false;
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.setScrollMode('zoom');
+                }
+            }
+            this.saveSpectrumConfig();
+        });
+        
+        this.spectrumPanScrollCheckbox.addEventListener('change', () => {
+            if (this.spectrumPanScrollCheckbox.checked) {
+                this.spectrumZoomScrollCheckbox.checked = false;
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.setScrollMode('pan');
+                }
+            }
+            this.saveSpectrumConfig();
+        });
+        
+        this.spectrumClickTuneCheckbox.addEventListener('change', () => {
+            if (this.spectrumDisplay) {
+                this.spectrumDisplay.setClickTuneEnabled(this.spectrumClickTuneCheckbox.checked);
+            }
+            this.saveSpectrumConfig();
+        });
+        
+        this.spectrumCenterTuneCheckbox.addEventListener('change', () => {
+            if (this.spectrumDisplay) {
+                this.spectrumDisplay.setCenterTuneEnabled(this.spectrumCenterTuneCheckbox.checked);
+            }
+            this.saveSpectrumConfig();
         });
     }
 
@@ -383,6 +422,11 @@ class UberSDRClient {
             
             if (response.ok) {
                 this.showSuccess('Settings applied');
+                
+                // Update spectrum display with new bandwidth
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.updateBandwidth(tuneRequest.bandwidthLow, tuneRequest.bandwidthHigh);
+                }
             } else {
                 this.showError('Failed to apply settings', data.message || data.error);
             }
@@ -406,6 +450,23 @@ class UberSDRClient {
             if (!response.ok) {
                 const data = await response.json();
                 this.showError('Failed to set frequency', data.message || data.error);
+            } else {
+                // Update spectrum display with new tuned frequency
+                if (this.spectrumDisplay && this.spectrumDisplay.totalBandwidth > 0) {
+                    this.spectrumDisplay.tunedFreq = frequency;
+                    
+                    // Check if new frequency is outside the currently displayed bandwidth
+                    const halfBw = this.spectrumDisplay.totalBandwidth / 2;
+                    const startFreq = this.spectrumDisplay.centerFreq - halfBw;
+                    const endFreq = this.spectrumDisplay.centerFreq + halfBw;
+                    const isOutsideView = frequency < startFreq || frequency > endFreq;
+                    
+                    // If center-tune is enabled, always re-center on the new frequency
+                    // If center-tune is disabled but frequency is outside view, pan to show it
+                    if (this.spectrumDisplay.centerTuneEnabled || isOutsideView) {
+                        this.spectrumDisplay.sendZoomCommand(frequency, this.spectrumDisplay.totalBandwidth);
+                    }
+                }
             }
         } catch (error) {
             this.showError('Error setting frequency', error.message);
@@ -533,6 +594,20 @@ class UberSDRClient {
                     }
                 }
                 
+                // Load spectrum control settings
+                if (config.spectrumZoomScroll !== undefined) {
+                    this.spectrumZoomScrollCheckbox.checked = config.spectrumZoomScroll;
+                }
+                if (config.spectrumPanScroll !== undefined) {
+                    this.spectrumPanScrollCheckbox.checked = config.spectrumPanScroll;
+                }
+                if (config.spectrumClickTune !== undefined) {
+                    this.spectrumClickTuneCheckbox.checked = config.spectrumClickTune;
+                }
+                if (config.spectrumCenterTune !== undefined) {
+                    this.spectrumCenterTuneCheckbox.checked = config.spectrumCenterTune;
+                }
+                
                 console.log('Loaded saved configuration');
             }
         } catch (error) {
@@ -586,6 +661,30 @@ class UberSDRClient {
             }
         } catch (error) {
             console.error('Error saving audio preview config:', error);
+        }
+    }
+
+    async saveSpectrumConfig() {
+        const config = {
+            spectrumZoomScroll: this.spectrumZoomScrollCheckbox.checked,
+            spectrumPanScroll: this.spectrumPanScrollCheckbox.checked,
+            spectrumClickTune: this.spectrumClickTuneCheckbox.checked,
+            spectrumCenterTune: this.spectrumCenterTuneCheckbox.checked
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                console.error('Failed to save spectrum config:', data.message || data.error);
+            }
+        } catch (error) {
+            console.error('Error saving spectrum config:', error);
         }
     }
 
@@ -1096,13 +1195,23 @@ class UberSDRClient {
                 console.log(`Spectrum clicked: tuning to ${frequency} Hz`);
                 this.setFrequency(frequency);
             });
+            
+            // Set initial control states
+            const scrollMode = this.spectrumZoomScrollCheckbox.checked ? 'zoom' : 'pan';
+            this.spectrumDisplay.setScrollMode(scrollMode);
+            this.spectrumDisplay.setClickTuneEnabled(this.spectrumClickTuneCheckbox.checked);
+            this.spectrumDisplay.setCenterTuneEnabled(this.spectrumCenterTuneCheckbox.checked);
         }
 
         if (this.spectrumDisplay && this.ws && this.ws.readyState === WebSocket.OPEN) {
-            // Get current tuned frequency from the frequency input
+            // Get current tuned frequency and bandwidth from inputs
             const tunedFreq = parseInt(this.frequencyInput.value) || 14074000;
+            const bandwidthLow = parseInt(this.bandwidthLowInput.value) || 50;
+            const bandwidthHigh = parseInt(this.bandwidthHighInput.value) || 2700;
+            
             this.spectrumDisplay.tunedFreq = tunedFreq;
-            console.log(`Enabling spectrum display at ${tunedFreq} Hz`);
+            this.spectrumDisplay.updateBandwidth(bandwidthLow, bandwidthHigh);
+            console.log(`Enabling spectrum display at ${tunedFreq} Hz with BW ${bandwidthLow} to ${bandwidthHigh} Hz`);
 
             this.spectrumDisplay.enable(this.ws);
             this.updateSpectrumStatus('Streaming');

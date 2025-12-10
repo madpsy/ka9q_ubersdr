@@ -119,56 +119,6 @@
                 <button id="apply-settings-btn" class="btn btn-primary" disabled>Apply Settings</button>
             </section>
 
-            <!-- Audio Settings Panel -->
-            <section class="panel">
-                <h2>Audio Settings</h2>
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="audio-device">Audio Device:</label>
-                        <select id="audio-device">
-                            <option value="-1">Default Device</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="output-mode">Output Mode:</label>
-                        <select id="output-mode">
-                            <option value="portaudio">PortAudio</option>
-                            <option value="stdout">Stdout</option>
-                            <option value="wav">WAV File</option>
-                        </select>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Audio Preview Panel -->
-            <section class="panel">
-                <h2>Audio Preview</h2>
-                <div class="audio-preview-controls-row">
-                    <div class="form-group checkbox-group">
-                        <label>
-                            <input type="checkbox" id="audio-preview-enabled">
-                            <span>Enable Browser Audio Preview</span>
-                        </label>
-                    </div>
-                    <button id="audio-mute-btn" class="btn btn-small" disabled style="display: none;">
-                        🔊 Mute
-                    </button>
-                </div>
-                <div class="info-box">
-                    <p><strong>Note:</strong> When enabled, audio will be streamed to your browser through the WebSocket connection using a separate audio room. This allows you to preview the audio without needing PortAudio or other audio devices configured.</p>
-                </div>
-                <div id="audio-preview-controls" style="display: none;">
-                    <div class="audio-status">
-                        <span class="label">Audio Status:</span>
-                        <span id="audio-preview-status" class="status-badge disconnected">Not streaming</span>
-                    </div>
-                    <div class="audio-visualizer">
-                        <canvas id="audio-spectrum-canvas" width="800" height="200"></canvas>
-                        <canvas id="audio-waterfall-canvas" width="800" height="200"></canvas>
-                    </div>
-                </div>
-            </section>
-
             <!-- RF Spectrum Display Panel -->
             <section class="panel">
                 <h2>RF Spectrum Display</h2>
@@ -186,9 +136,48 @@
                         <span class="label">Spectrum Status:</span>
                         <span id="spectrum-status" class="status-badge disconnected">Not streaming</span>
                     </div>
+                    <div class="spectrum-controls" style="margin: 10px 0; display: flex; gap: 15px; flex-wrap: wrap;">
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" id="spectrum-zoom-scroll" checked>
+                            <span>Zoom Scroll</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" id="spectrum-pan-scroll">
+                            <span>Pan Scroll</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" id="spectrum-click-tune" checked>
+                            <span>Click Tune</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" id="spectrum-center-tune" checked>
+                            <span>Center Tune</span>
+                        </label>
+                    </div>
                     <div class="spectrum-visualizer">
                         <canvas id="rf-spectrum-canvas" width="800" height="200"></canvas>
                         <canvas id="rf-waterfall-canvas" width="800" height="300"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Audio Settings Panel -->
+            <section class="panel">
+                <h2>Audio Settings</h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="audio-device">Audio Device:</label>
+                        <select id="audio-device">
+                            <option value="-1">Default Device</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="output-mode">Output Mode:</label>
+                        <select id="output-mode">
+                            <option value="portaudio">PortAudio</option>
+                            <option value="stdout">Stdout</option>
+                            <option value="wav">WAV File</option>
+                        </select>
                     </div>
                 </div>
             </section>
@@ -226,6 +215,35 @@
                 </div>
                 <div class="info-box">
                     <p><strong>Note:</strong> Enable resampling if your audio device doesn't support the server's sample rate (typically 12 kHz). Most devices support 44.1 kHz or 48 kHz and require stereo (2 channels). Use --list-devices to see what your device supports. Resampling is automatically disabled for IQ modes.</p>
+                </div>
+            </section>
+
+            <!-- Audio Preview Panel -->
+            <section class="panel">
+                <h2>Audio Preview</h2>
+                <div class="audio-preview-controls-row">
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="audio-preview-enabled">
+                            <span>Enable Browser Audio Preview</span>
+                        </label>
+                    </div>
+                    <button id="audio-mute-btn" class="btn btn-small" disabled style="display: none;">
+                        🔊 Mute
+                    </button>
+                </div>
+                <div class="info-box">
+                    <p><strong>Note:</strong> When enabled, audio will be streamed to your browser through the WebSocket connection using a separate audio room. This allows you to preview the audio without needing PortAudio or other audio devices configured.</p>
+                </div>
+                <div id="audio-preview-controls" style="display: none;">
+                    <div class="audio-status">
+                        <span class="label">Audio Status:</span>
+                        <span id="audio-preview-status" class="status-badge disconnected">Not streaming</span>
+                    </div>
+                    <div class="audio-visualizer">
+                        <canvas id="audio-spectrum-canvas" width="800" height="200"></canvas>
+                        <canvas id="audio-waterfall-canvas" width="800" height="200"></canvas>
+                    </div>
                 </div>
             </section>
 

@@ -464,8 +464,8 @@ func (m *WebSocketManager) DisableAudioStream(conn *websocket.Conn) {
 
 // broadcastAudioData sends audio data to all WebSocket connections subscribed to the given room
 func (m *WebSocketManager) broadcastAudioData(audioData []byte, sampleRate int, channels int, room string) {
-	m.audioStreamsMu.RLock()
-	defer m.audioStreamsMu.RUnlock()
+	m.audioStreamsMu.Lock()
+	defer m.audioStreamsMu.Unlock()
 
 	// Encode audio data as base64 for JSON transmission
 	encodedData := base64.StdEncoding.EncodeToString(audioData)
@@ -479,11 +479,33 @@ func (m *WebSocketManager) broadcastAudioData(audioData []byte, sampleRate int, 
 		"room":       room,
 	}
 
+	// Collect connections to remove after iteration
+	var toRemove []*websocket.Conn
+
 	for conn, connRoom := range m.audioStreams {
 		if connRoom == room {
 			if err := conn.WriteJSON(audioMsg); err != nil {
-				log.Printf("Failed to send audio data to WebSocket: %v", err)
+				// Connection is dead, mark for removal
+				toRemove = append(toRemove, conn)
 			}
+		}
+	}
+
+	// Remove dead connections
+	for _, conn := range toRemove {
+		delete(m.audioStreams, conn)
+		log.Printf("Removed dead audio connection from room '%s'", room)
+	}
+
+	// If no more audio streams, disable audio callback
+	if len(m.audioStreams) == 0 {
+		m.mu.RLock()
+		client := m.client
+		m.mu.RUnlock()
+
+		if client != nil {
+			client.SetAudioCallback(nil)
+			log.Printf("Disabled audio callback (no active streams)")
 		}
 	}
 }
@@ -547,18 +569,36 @@ func (m *WebSocketManager) DisableSpectrumStream(conn *websocket.Conn) {
 
 // broadcastSpectrumData sends spectrum data to all WebSocket connections subscribed to the given room
 func (m *WebSocketManager) broadcastSpectrumData(data []byte, room string) {
-	m.spectrumStreamsMu.RLock()
-	defer m.spectrumStreamsMu.RUnlock()
+	m.spectrumStreamsMu.Lock()
+	defer m.spectrumStreamsMu.Unlock()
+
+	// Collect connections to remove after iteration
+	var toRemove []*websocket.Conn
 
 	for conn, connRoom := range m.spectrumStreams {
 		if connRoom == room {
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				// Only log if it's not a normal close error
-				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					log.Printf("Failed to send spectrum data to WebSocket: %v", err)
-				}
+				// Connection is dead, mark for removal
+				toRemove = append(toRemove, conn)
 			}
 		}
+	}
+
+	// Remove dead connections
+	for _, conn := range toRemove {
+		delete(m.spectrumStreams, conn)
+		log.Printf("Removed dead spectrum connection from room '%s'", room)
+	}
+
+	// If no more spectrum streams, disconnect spectrum client
+	if len(m.spectrumStreams) == 0 {
+		m.mu.Lock()
+		if m.spectrumClient != nil {
+			m.spectrumClient.Disconnect()
+			m.spectrumClient = nil
+			log.Printf("Disconnected spectrum client (no active streams)")
+		}
+		m.mu.Unlock()
 	}
 }
 

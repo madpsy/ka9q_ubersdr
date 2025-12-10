@@ -415,7 +415,9 @@ func (cm *ConfigManager) UpdateMIDIConfig(enabled bool, deviceName string, mappi
 		// Convert MIDIKey map to string map for JSON compatibility
 		c.MIDIMappings = make(map[string]MIDIMapping, len(mappings))
 		for key, mapping := range mappings {
-			c.MIDIMappings[key.String()] = mapping
+			// Use MarshalText to get the proper serialized format (type:channel:data1)
+			keyBytes, _ := key.MarshalText()
+			c.MIDIMappings[string(keyBytes)] = mapping
 		}
 	})
 }
@@ -428,13 +430,13 @@ func (cm *ConfigManager) GetMIDIConfig() (bool, string, map[MIDIKey]MIDIMapping)
 	// Convert string map back to MIDIKey map
 	mappings := make(map[MIDIKey]MIDIMapping, len(cm.config.MIDIMappings))
 	for keyStr, mapping := range cm.config.MIDIMappings {
-		// Parse the key string (format: "CC 25 (Ch 1)" or similar)
-		// We need to extract type, channel, data1 from the stored mapping
-		// For now, we'll store the raw key string and parse it when needed
-		// This is a simplified approach - in production you'd want proper serialization
 		var key MIDIKey
-		// Parse format like "176:0:25" (type:channel:data1)
-		fmt.Sscanf(keyStr, "%d:%d:%d", &key.Type, &key.Channel, &key.Data1)
+		// Use UnmarshalText to properly parse the key
+		if err := key.UnmarshalText([]byte(keyStr)); err != nil {
+			// Log error but continue with other mappings
+			fmt.Printf("Warning: Failed to parse MIDI key '%s': %v\n", keyStr, err)
+			continue
+		}
 		mappings[key] = mapping
 	}
 

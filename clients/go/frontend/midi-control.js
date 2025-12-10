@@ -10,6 +10,9 @@ class MIDIControl {
         
         this.initializeElements();
         this.attachEventListeners();
+        
+        // Load config after a short delay to ensure everything is initialized
+        setTimeout(() => this.loadConfig(), 500);
     }
 
     initializeElements() {
@@ -430,6 +433,39 @@ class MIDIControl {
             setTimeout(() => {
                 this.stopLearnMode();
             }, 2000);
+        }
+    }
+
+    async loadConfig() {
+        try {
+            console.log('Loading MIDI config...');
+            // Load MIDI status to check if it's enabled and connected
+            const response = await fetch(`${this.client.apiBase}/api/midi/status`);
+            const data = await response.json();
+            console.log('MIDI status:', data);
+            
+            // If MIDI is connected, enable the checkbox and show controls
+            if (data.connected) {
+                console.log('MIDI is connected, enabling UI...');
+                this.midiEnabled.checked = true;
+                this.midiControls.style.display = 'block';
+                this.connected = true;
+                
+                // Load devices and select the connected one
+                await this.refreshDevices();
+                if (data.device_name) {
+                    console.log('Setting device select to:', data.device_name);
+                    this.midiDeviceSelect.value = data.device_name;
+                }
+                
+                this.updateConnectionStatus();
+                this.loadMappings();
+                console.log('MIDI config loaded successfully');
+            } else {
+                console.log('MIDI not connected');
+            }
+        } catch (error) {
+            console.error('Failed to load MIDI config:', error);
         }
     }
 

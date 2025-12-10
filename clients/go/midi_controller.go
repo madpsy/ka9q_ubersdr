@@ -49,6 +49,7 @@ func NewMIDIController(manager *WebSocketManager, configManager *ConfigManager) 
 	}
 
 	// Load saved configuration from config manager
+	// This will start auto-connect goroutine if needed
 	mc.LoadConfig()
 
 	return mc
@@ -598,20 +599,31 @@ func (mc *MIDIController) LoadConfig() error {
 	if mc.mappings == nil {
 		mc.mappings = make(map[MIDIKey]MIDIMapping)
 	}
+	alreadyConnected := mc.connected
 	mc.mu.Unlock()
 
 	log.Printf("MIDI configuration loaded (%d mappings)", len(mappings))
 
-	// Auto-connect to saved device if specified
-	if enabled && deviceName != "" {
-		go func() {
-			time.Sleep(1 * time.Second) // Give system time to initialize
-			if err := mc.Connect(deviceName); err != nil {
-				log.Printf("Failed to auto-connect to MIDI device %s: %v", deviceName, err)
-			} else {
-				log.Printf("Auto-connected to MIDI device: %s", deviceName)
+	// Auto-connect to saved device if specified and not already connected
+	if enabled && deviceName != "" && !alreadyConnected {
+		// Capture device name for goroutine
+		savedDeviceName := deviceName
+
+		// Use a timer-based approach for delayed auto-connect
+		time.AfterFunc(1*time.Second, func() {
+			// Double-check we're still not connected
+			mc.mu.RLock()
+			stillNotConnected := !mc.connected
+			mc.mu.RUnlock()
+
+			if stillNotConnected {
+				if err := mc.Connect(savedDeviceName); err != nil {
+					log.Printf("Failed to auto-connect to MIDI device %s: %v", savedDeviceName, err)
+				} else {
+					log.Printf("Auto-connected to MIDI device: %s", savedDeviceName)
+				}
 			}
-		}()
+		})
 	}
 
 	return nil

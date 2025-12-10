@@ -104,7 +104,7 @@ type RadioControlStates struct {
 // NewWebSocketManager creates a new WebSocket manager
 func NewWebSocketManager() *WebSocketManager {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &WebSocketManager{
+	wm := &WebSocketManager{
 		ctx:                ctx,
 		cancel:             cancel,
 		statusBroadcast:    make(chan WSStatusUpdate, 10),
@@ -118,6 +118,7 @@ func NewWebSocketManager() *WebSocketManager {
 		autoReconnect:      true,             // Enable auto-reconnect by default
 		maxReconnectDelay:  60 * time.Second, // Max 60 seconds between reconnect attempts
 	}
+	return wm
 }
 
 // Connect establishes a connection to the SDR server
@@ -2273,8 +2274,17 @@ func (m *WebSocketManager) GetNoiseFloor() (map[string]interface{}, error) {
 // SetConfigManager sets the configuration manager for the WebSocketManager
 func (m *WebSocketManager) SetConfigManager(configManager *ConfigManager) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.configManager = configManager
+	m.mu.Unlock()
+
+	// Initialize MIDI controller with config manager
+	// This will load saved config and auto-connect if enabled
+	m.mu.Lock()
+	if m.midiController == nil {
+		m.midiController = NewMIDIController(m, configManager)
+		log.Printf("MIDI controller initialized")
+	}
+	m.mu.Unlock()
 }
 
 // MIDI Control Methods

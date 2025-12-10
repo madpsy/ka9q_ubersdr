@@ -1403,21 +1403,48 @@ func (m *WebSocketManager) broadcastSpectrumData(data []byte, room string) {
 	}
 
 	// Send to all connections for this room via their write channels
-	m.spectrumStreamsMu.RLock()
+	m.spectrumStreamsMu.Lock()
+	defer m.spectrumStreamsMu.Unlock()
+
+	// Track connections with closed channels for cleanup
+	var closedConns []*websocket.Conn
+
 	for conn, connRoom := range m.spectrumStreams {
 		if connRoom == room {
 			if writeChan, ok := m.spectrumWriteChans[conn]; ok {
-				select {
-				case writeChan <- spectrumMsg:
-					// Sent successfully
-				default:
-					// Channel full, skip this frame
-					log.Printf("Spectrum write channel full for room '%s', dropping frame", room)
+				// Use defer/recover to catch any panics from closed channels
+				channelClosed := false
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("Detected closed channel in broadcastSpectrumData, will clean up connection")
+							channelClosed = true
+						}
+					}()
+
+					select {
+					case writeChan <- spectrumMsg:
+						// Sent successfully
+					default:
+						// Channel full, skip this frame
+						log.Printf("Spectrum write channel full for room '%s', dropping frame", room)
+					}
+				}()
+
+				// If channel was closed, mark connection for cleanup
+				if channelClosed {
+					closedConns = append(closedConns, conn)
 				}
 			}
 		}
 	}
-	m.spectrumStreamsMu.RUnlock()
+
+	// Clean up connections with closed channels
+	for _, conn := range closedConns {
+		log.Printf("Cleaning up closed spectrum stream connection")
+		delete(m.spectrumStreams, conn)
+		delete(m.spectrumWriteChans, conn)
+	}
 }
 
 // SendSpectrumCommand sends a command to the spectrum WebSocket (zoom, pan, etc.)

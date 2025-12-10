@@ -30,6 +30,33 @@
     margin-top: 15px;
 }
 
+.spectrum-zoom-controls {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 10px;
+    padding: 10px;
+    background-color: var(--bg-color);
+    border-radius: 6px;
+}
+
+.spectrum-zoom-controls .btn {
+    min-width: 80px;
+}
+
+@media (max-width: 768px) {
+    .spectrum-zoom-controls {
+        gap: 5px;
+    }
+
+    .spectrum-zoom-controls .btn {
+        flex: 1;
+        min-width: 0;
+        padding: 8px 4px;
+        font-size: 11px;
+    }
+}
+
 :root {
     --primary-color: #2563eb;
     --primary-hover: #1d4ed8;
@@ -249,6 +276,7 @@ header h1 {
     background-color: #f1f5f9;
     color: var(--text-color);
     border: 1px solid var(--border-color);
+    margin: 5px;
 }
 
 .btn-band:hover {
@@ -261,6 +289,53 @@ header h1 {
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
+    align-items: center;
+    row-gap: 10px;
+}
+
+/* Connection section button layout improvements */
+.panel .button-group {
+    width: 100%;
+}
+
+.panel .button-group > div:first-child {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+@media (max-width: 768px) {
+    .panel .button-group {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .panel .button-group > div:first-child {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    /* Connect/Disconnect buttons on first row */
+    .panel .button-group #connect-btn,
+    .panel .button-group #disconnect-btn {
+        flex: 1 1 calc(50% - 5px);
+        min-width: 0;
+    }
+
+    /* Local/Public instances buttons on second row */
+    .panel .button-group #local-instances-btn,
+    .panel .button-group #public-instances-btn {
+        flex: 1 1 calc(50% - 5px);
+        min-width: 0;
+    }
+
+    #session-timer {
+        text-align: center;
+        margin-top: 0;
+    }
 }
 
 /* Frequency Display */
@@ -293,6 +368,7 @@ header h1 {
     gap: 8px;
     flex-wrap: wrap;
     margin-bottom: 15px;
+    justify-content: center;
 }
 
 .band-buttons {
@@ -367,14 +443,60 @@ footer a:hover {
 
     .frequency-buttons {
         justify-content: center;
+        flex-wrap: nowrap;
+        gap: 5px;
+    }
+
+    /* Hide some frequency step buttons on mobile, keep only ±1kHz, ±500Hz, ±100Hz */
+    .frequency-buttons .btn[data-step="-10000"],
+    .frequency-buttons .btn[data-step="10000"],
+    .frequency-buttons .btn[data-step="-10"],
+    .frequency-buttons .btn[data-step="10"] {
+        display: none;
+    }
+
+    /* Ensure remaining buttons fit on one row */
+    .frequency-buttons .btn {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 8px 4px;
+        font-size: 11px;
+        white-space: nowrap;
     }
 
     .band-buttons .button-group {
         justify-content: center;
+        gap: 5px;
+        row-gap: 5px;
+        margin: -5px;
+    }
+
+    .btn-band {
+        min-width: 80px;
+        margin: 5px;
     }
 
     .status-grid {
         grid-template-columns: 1fr;
+    }
+
+    /* Fix bookmark and band selector overflow */
+    .bookmark-selector {
+        flex-direction: column !important;
+        gap: 10px !important;
+    }
+
+    .bookmark-selector > div {
+        width: 100%;
+    }
+
+    .bookmark-selector select {
+        width: 100%;
+        min-width: 0 !important;
+    }
+
+    .bookmark-selector label {
+        white-space: nowrap;
     }
 }
 
@@ -748,6 +870,78 @@ footer a:hover {
     cursor: pointer;
     border: none;
     transition: all 0.2s;
+}
+
+/* Table Styles */
+.table-container {
+    overflow-x: auto;
+    margin-top: 15px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    font-size: 14px;
+}
+
+.data-table thead {
+    background: var(--bg-color);
+    border-bottom: 2px solid var(--border-color);
+}
+
+.data-table th {
+    padding: 12px 15px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-color);
+    white-space: nowrap;
+}
+
+.data-table tbody tr {
+    border-bottom: 1px solid var(--border-color);
+    transition: background-color 0.2s;
+}
+
+.data-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.data-table tbody tr:hover {
+    background-color: #f8fafc;
+}
+
+.data-table td {
+    padding: 12px 15px;
+    color: var(--text-color);
+    vertical-align: middle;
+}
+
+.data-table td:first-child {
+    font-weight: 500;
+    color: var(--primary-color);
+}
+
+/* Mobile responsive table */
+@media (max-width: 768px) {
+    .table-container {
+        border: none;
+    }
+    
+    .data-table {
+        font-size: 12px;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 8px 10px;
+    }
+    
+    .data-table th {
+        font-size: 11px;
+    }
 }
 
 .bandwidth-group input[type="range"]::-moz-range-thumb:hover {

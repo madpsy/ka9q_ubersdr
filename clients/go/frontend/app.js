@@ -364,6 +364,44 @@ class UberSDRClient {
             console.log(`Center-tune ${this.spectrumCenterTuneCheckbox.checked ? 'enabled' : 'disabled'}`);
         });
 
+        // Spectrum zoom control buttons
+        const spectrumZoomResetBtn = document.getElementById('spectrum-zoom-reset');
+        const spectrumZoomOutBtn = document.getElementById('spectrum-zoom-out');
+        const spectrumZoomInBtn = document.getElementById('spectrum-zoom-in');
+        const spectrumZoomMaxBtn = document.getElementById('spectrum-zoom-max');
+
+        if (spectrumZoomResetBtn) {
+            spectrumZoomResetBtn.addEventListener('click', () => {
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.zoomReset();
+                }
+            });
+        }
+
+        if (spectrumZoomOutBtn) {
+            spectrumZoomOutBtn.addEventListener('click', () => {
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.zoomOut();
+                }
+            });
+        }
+
+        if (spectrumZoomInBtn) {
+            spectrumZoomInBtn.addEventListener('click', () => {
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.zoomIn();
+                }
+            });
+        }
+
+        if (spectrumZoomMaxBtn) {
+            spectrumZoomMaxBtn.addEventListener('click', () => {
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.zoomMax();
+                }
+            });
+        }
+
         // Dynamic output control event listeners
         this.portaudioOutputEnabled.addEventListener('change', () => this.togglePortAudioOutput());
         this.fifoOutputEnabled.addEventListener('change', () => this.toggleFIFOOutput());

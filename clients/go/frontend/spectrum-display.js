@@ -15,6 +15,7 @@ class SpectrumDisplay {
         this.binBandwidth = 0;
         this.totalBandwidth = 0;
         this.initialBinBandwidth = 0;
+        this.tunedFreq = 0;  // Tuned frequency (where we're listening)
         
         // Display parameters
         this.minDb = -100;
@@ -56,7 +57,9 @@ class SpectrumDisplay {
         
         this.ws = ws;
         this.enabled = true;
-        
+
+        console.log(`Spectrum display enable() called with tunedFreq: ${this.tunedFreq}`);
+
         // Send spectrum stream enable message
         const msg = {
             type: 'spectrum_stream',
@@ -66,7 +69,7 @@ class SpectrumDisplay {
         
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(msg));
-            console.log('Spectrum stream enabled');
+            console.log('Spectrum stream enabled, waiting for config...');
         }
     }
     
@@ -97,6 +100,7 @@ class SpectrumDisplay {
         
         if (msgType === 'config') {
             // Configuration update
+            const oldBinCount = this.binCount;
             this.centerFreq = data.centerFreq || 0;
             this.binCount = data.binCount || 0;
             this.binBandwidth = data.binBandwidth || 0;
@@ -109,8 +113,11 @@ class SpectrumDisplay {
             console.log(`Spectrum config: ${this.binCount} bins @ ${this.binBandwidth.toFixed(2)} Hz/bin = ${(this.totalBandwidth/1000).toFixed(1)} kHz total`);
             
             // Send initial zoom to 200 kHz if this is first config
-            if (this.binCount > 0 && this.centerFreq > 0) {
-                this.sendZoomCommand(this.centerFreq, 200000);
+            // Use tunedFreq if set, otherwise fall back to centerFreq
+            if (oldBinCount === 0 && this.binCount > 0) {
+                const zoomFreq = this.tunedFreq || this.centerFreq;
+                console.log(`Sending initial zoom to ${zoomFreq} Hz (tunedFreq: ${this.tunedFreq}, centerFreq: ${this.centerFreq})`);
+                this.sendZoomCommand(zoomFreq, 200000);
             }
         } else if (msgType === 'spectrum') {
             // Spectrum data update

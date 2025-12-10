@@ -253,13 +253,19 @@ func (s *SpectrumClient) handleTextMessage(message []byte) {
 
 	switch msgType {
 	case "config":
-		// Configuration update
+		// Configuration update - forward to frontend clients
 		s.mu.RLock()
-		callback := s.configCallback
+		callback := s.dataCallback
 		s.mu.RUnlock()
 
 		if callback != nil {
-			callback(data)
+			// Re-encode as JSON to send to frontend
+			jsonData, err := json.Marshal(data)
+			if err != nil {
+				log.Printf("Failed to marshal config data: %v", err)
+				return
+			}
+			callback(jsonData)
 		}
 
 	case "spectrum":

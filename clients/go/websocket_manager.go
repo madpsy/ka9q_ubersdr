@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -14,51 +15,53 @@ import (
 
 // WebSocketManager manages the WebSocket connection with thread-safe operations
 type WebSocketManager struct {
-	client            *RadioClient
-	conn              *websocket.Conn // WebSocket connection for sending tune messages
-	connMu            sync.Mutex      // Protects WebSocket writes
-	mu                sync.RWMutex
-	connected         bool
-	connectedAt       time.Time
-	ctx               context.Context
-	cancel            context.CancelFunc
-	statusBroadcast   chan WSStatusUpdate
-	errorBroadcast    chan WSErrorUpdate
-	connBroadcast     chan WSConnectionUpdate
-	subscribers       map[chan interface{}]bool
-	subMu             sync.RWMutex
-	audioStreams      map[*websocket.Conn]string // Maps WebSocket connections to their audio room names
-	audioStreamsMu    sync.RWMutex
-	spectrumClient    *SpectrumClient            // Spectrum WebSocket client
-	spectrumStreams   map[*websocket.Conn]string // Maps WebSocket connections to their spectrum room names
-	spectrumStreamsMu sync.RWMutex
-	spectrumConnMu    map[*websocket.Conn]*sync.Mutex // Per-connection write mutexes for spectrum streams
-	flrigClient       *FlrigClient                    // flrig radio control client
-	flrigPolling      bool                            // Whether flrig polling is active
-	flrigPollCancel   context.CancelFunc              // Cancel function for flrig polling
-	flrigSyncToRig    bool                            // Sync SDR frequency changes to rig
-	flrigSyncFromRig  bool                            // Sync rig frequency changes to SDR
-	rigctlClient      *RigctlClient                   // rigctl radio control client
-	rigctlPolling     bool                            // Whether rigctl polling is active
-	rigctlPollCancel  context.CancelFunc              // Cancel function for rigctl polling
-	rigctlSyncToRig   bool                            // Sync SDR frequency changes to rig
-	rigctlSyncFromRig bool                            // Sync rig frequency changes to SDR
-	serialServer      *SerialCATServer                // serial CAT server
+	client             *RadioClient
+	conn               *websocket.Conn // WebSocket connection for sending tune messages
+	connMu             sync.Mutex      // Protects WebSocket writes
+	mu                 sync.RWMutex
+	connected          bool
+	connectedAt        time.Time
+	ctx                context.Context
+	cancel             context.CancelFunc
+	statusBroadcast    chan WSStatusUpdate
+	errorBroadcast     chan WSErrorUpdate
+	connBroadcast      chan WSConnectionUpdate
+	subscribers        map[chan interface{}]bool
+	subMu              sync.RWMutex
+	audioStreams       map[*websocket.Conn]string // Maps WebSocket connections to their audio room names
+	audioStreamsMu     sync.RWMutex
+	audioWriteChans    map[*websocket.Conn]chan interface{} // Per-connection write channels for audio
+	spectrumClient     *SpectrumClient                      // Spectrum WebSocket client
+	spectrumStreams    map[*websocket.Conn]string           // Maps WebSocket connections to their spectrum room names
+	spectrumStreamsMu  sync.RWMutex
+	spectrumWriteChans map[*websocket.Conn]chan interface{} // Per-connection write channels for spectrum
+	flrigClient        *FlrigClient                         // flrig radio control client
+	flrigPolling       bool                                 // Whether flrig polling is active
+	flrigPollCancel    context.CancelFunc                   // Cancel function for flrig polling
+	flrigSyncToRig     bool                                 // Sync SDR frequency changes to rig
+	flrigSyncFromRig   bool                                 // Sync rig frequency changes to SDR
+	rigctlClient       *RigctlClient                        // rigctl radio control client
+	rigctlPolling      bool                                 // Whether rigctl polling is active
+	rigctlPollCancel   context.CancelFunc                   // Cancel function for rigctl polling
+	rigctlSyncToRig    bool                                 // Sync SDR frequency changes to rig
+	rigctlSyncFromRig  bool                                 // Sync rig frequency changes to SDR
+	serialServer       *SerialCATServer                     // serial CAT server
 }
 
 // NewWebSocketManager creates a new WebSocket manager
 func NewWebSocketManager() *WebSocketManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WebSocketManager{
-		ctx:             ctx,
-		cancel:          cancel,
-		statusBroadcast: make(chan WSStatusUpdate, 10),
-		errorBroadcast:  make(chan WSErrorUpdate, 10),
-		connBroadcast:   make(chan WSConnectionUpdate, 10),
-		subscribers:     make(map[chan interface{}]bool),
-		audioStreams:    make(map[*websocket.Conn]string),
-		spectrumStreams: make(map[*websocket.Conn]string),
-		spectrumConnMu:  make(map[*websocket.Conn]*sync.Mutex),
+		ctx:                ctx,
+		cancel:             cancel,
+		statusBroadcast:    make(chan WSStatusUpdate, 10),
+		errorBroadcast:     make(chan WSErrorUpdate, 10),
+		connBroadcast:      make(chan WSConnectionUpdate, 10),
+		subscribers:        make(map[chan interface{}]bool),
+		audioStreams:       make(map[*websocket.Conn]string),
+		audioWriteChans:    make(map[*websocket.Conn]chan interface{}),
+		spectrumStreams:    make(map[*websocket.Conn]string),
+		spectrumWriteChans: make(map[*websocket.Conn]chan interface{}),
 	}
 }
 
@@ -622,6 +625,8 @@ func SendTuneMessage(conn *websocket.Conn, frequency int, mode string, bandwidth
 }
 
 // EnableAudioStream enables audio streaming to a WebSocket connection
+// The writeChan parameter is optional - if provided, audio data will be sent through it
+// instead of directly to the connection (for API server WebSocket connections)
 func (m *WebSocketManager) EnableAudioStream(conn *websocket.Conn, room string) {
 	m.audioStreamsMu.Lock()
 	defer m.audioStreamsMu.Unlock()
@@ -648,6 +653,7 @@ func (m *WebSocketManager) DisableAudioStream(conn *websocket.Conn) {
 
 	if room, ok := m.audioStreams[conn]; ok {
 		delete(m.audioStreams, conn)
+		delete(m.audioWriteChans, conn)
 		log.Printf("Disabled audio streaming from room '%s' for connection", room)
 	}
 
@@ -665,9 +671,6 @@ func (m *WebSocketManager) DisableAudioStream(conn *websocket.Conn) {
 
 // broadcastAudioData sends audio data to all WebSocket connections subscribed to the given room
 func (m *WebSocketManager) broadcastAudioData(audioData []byte, sampleRate int, channels int, room string) {
-	m.audioStreamsMu.Lock()
-	defer m.audioStreamsMu.Unlock()
-
 	// Encode audio data as base64 for JSON transmission
 	encodedData := base64.StdEncoding.EncodeToString(audioData)
 
@@ -680,35 +683,22 @@ func (m *WebSocketManager) broadcastAudioData(audioData []byte, sampleRate int, 
 		"room":       room,
 	}
 
-	// Collect connections to remove after iteration
-	var toRemove []*websocket.Conn
-
+	// Send to all connections for this room via their write channels
+	m.audioStreamsMu.RLock()
 	for conn, connRoom := range m.audioStreams {
 		if connRoom == room {
-			if err := conn.WriteJSON(audioMsg); err != nil {
-				// Connection is dead, mark for removal
-				toRemove = append(toRemove, conn)
+			if writeChan, ok := m.audioWriteChans[conn]; ok {
+				select {
+				case writeChan <- audioMsg:
+					// Sent successfully
+				default:
+					// Channel full, skip this frame
+					log.Printf("Audio write channel full for room '%s', dropping frame", room)
+				}
 			}
 		}
 	}
-
-	// Remove dead connections
-	for _, conn := range toRemove {
-		delete(m.audioStreams, conn)
-		log.Printf("Removed dead audio connection from room '%s'", room)
-	}
-
-	// If no more audio streams, disable audio callback
-	if len(m.audioStreams) == 0 {
-		m.mu.RLock()
-		client := m.client
-		m.mu.RUnlock()
-
-		if client != nil {
-			client.SetAudioCallback(nil)
-			log.Printf("Disabled audio callback (no active streams)")
-		}
-	}
+	m.audioStreamsMu.RUnlock()
 }
 
 // EnableSpectrumStream enables spectrum streaming to a WebSocket connection
@@ -717,7 +707,6 @@ func (m *WebSocketManager) EnableSpectrumStream(conn *websocket.Conn, room strin
 	defer m.spectrumStreamsMu.Unlock()
 
 	m.spectrumStreams[conn] = room
-	m.spectrumConnMu[conn] = &sync.Mutex{} // Create per-connection mutex
 	log.Printf("Enabled spectrum streaming to room '%s' for connection", room)
 
 	// Create spectrum client if not exists
@@ -755,7 +744,7 @@ func (m *WebSocketManager) DisableSpectrumStream(conn *websocket.Conn) {
 
 	if room, ok := m.spectrumStreams[conn]; ok {
 		delete(m.spectrumStreams, conn)
-		delete(m.spectrumConnMu, conn) // Remove per-connection mutex
+		delete(m.spectrumWriteChans, conn)
 		log.Printf("Disabled spectrum streaming from room '%s' for connection", room)
 	}
 
@@ -772,58 +761,29 @@ func (m *WebSocketManager) DisableSpectrumStream(conn *websocket.Conn) {
 
 // broadcastSpectrumData sends spectrum data to all WebSocket connections subscribed to the given room
 func (m *WebSocketManager) broadcastSpectrumData(data []byte, room string) {
-	m.spectrumStreamsMu.RLock()
-
-	// Build list of connections to write to (with their mutexes)
-	type connWithMutex struct {
-		conn *websocket.Conn
-		mu   *sync.Mutex
+	// Parse the JSON data to send as a map
+	var spectrumMsg map[string]interface{}
+	if err := json.Unmarshal(data, &spectrumMsg); err != nil {
+		log.Printf("Failed to unmarshal spectrum data: %v", err)
+		return
 	}
-	var connsToWrite []connWithMutex
 
+	// Send to all connections for this room via their write channels
+	m.spectrumStreamsMu.RLock()
 	for conn, connRoom := range m.spectrumStreams {
 		if connRoom == room {
-			if mu, ok := m.spectrumConnMu[conn]; ok {
-				connsToWrite = append(connsToWrite, connWithMutex{conn: conn, mu: mu})
+			if writeChan, ok := m.spectrumWriteChans[conn]; ok {
+				select {
+				case writeChan <- spectrumMsg:
+					// Sent successfully
+				default:
+					// Channel full, skip this frame
+					log.Printf("Spectrum write channel full for room '%s', dropping frame", room)
+				}
 			}
 		}
 	}
 	m.spectrumStreamsMu.RUnlock()
-
-	// Write to each connection with its own mutex (outside the main lock)
-	var toRemove []*websocket.Conn
-	for _, cw := range connsToWrite {
-		cw.mu.Lock()
-		err := cw.conn.WriteMessage(websocket.TextMessage, data)
-		cw.mu.Unlock()
-
-		if err != nil {
-			// Connection is dead, mark for removal
-			toRemove = append(toRemove, cw.conn)
-		}
-	}
-
-	// Remove dead connections
-	if len(toRemove) > 0 {
-		m.spectrumStreamsMu.Lock()
-		for _, conn := range toRemove {
-			delete(m.spectrumStreams, conn)
-			delete(m.spectrumConnMu, conn)
-			log.Printf("Removed dead spectrum connection from room '%s'", room)
-		}
-		m.spectrumStreamsMu.Unlock()
-	}
-
-	// If no more spectrum streams, disconnect spectrum client
-	if len(m.spectrumStreams) == 0 {
-		m.mu.Lock()
-		if m.spectrumClient != nil {
-			m.spectrumClient.Disconnect()
-			m.spectrumClient = nil
-			log.Printf("Disconnected spectrum client (no active streams)")
-		}
-		m.mu.Unlock()
-	}
 }
 
 // SendSpectrumCommand sends a command to the spectrum WebSocket (zoom, pan, etc.)

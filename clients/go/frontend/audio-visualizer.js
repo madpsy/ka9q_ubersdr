@@ -183,84 +183,108 @@ class AudioVisualizer {
         ctx.textAlign = 'left';
         ctx.fillText('dB', 5, 15);
 
-        // Calculate frequency range to display based on bandwidth
-        // Show only the actual bandwidth being used (e.g., 50-2700 Hz for USB)
+        // Calculate display range - matches main app's displayLow/displayHigh logic
+        // The main app displays from displayLow to displayHigh (the configured bandwidth with CW offset)
         const nyquist = sampleRate / 2;
-        let startFreq, endFreq;
 
+        // Add CW offset if in CW mode (matches main app lines 3288, 4815, 5012)
+        const cwOffset = (Math.abs(this.bandwidthLow) < 500 && Math.abs(this.bandwidthHigh) < 500) ? 500 : 0;
+        const displayLow = cwOffset + this.bandwidthLow;
+        const displayHigh = cwOffset + this.bandwidthHigh;
+
+        // For LSB mode, frequencies are negative, so we need to handle them specially
+        let binStartFreq, binEndFreq;
         if (this.bandwidthLow < 0 && this.bandwidthHigh <= 0) {
-            // LSB mode: negative bandwidth, but audio spectrum is positive
-            startFreq = Math.abs(this.bandwidthHigh);
-            endFreq = Math.abs(this.bandwidthLow);
+            // LSB: bandwidth is negative (e.g., -2700 to -50)
+            // FFT bins are always positive, so convert: display -2700 to -50 as 50 to 2700
+            binStartFreq = Math.abs(displayHigh);
+            binEndFreq = Math.abs(displayLow);
         } else {
-            // USB/other modes: use bandwidth as-is
-            startFreq = Math.max(0, this.bandwidthLow);
-            endFreq = this.bandwidthHigh;
+            // USB, CW, AM, etc: use display range directly
+            binStartFreq = Math.max(0, displayLow);
+            binEndFreq = displayHigh;
         }
 
-        // Map frequencies to FFT bins
-        // dbData.length = fftSize/2 (number of frequency bins from 0 to Nyquist)
-        // To map a frequency to a bin: bin = (freq / nyquist) * dbData.length
-        const startBin = Math.floor((startFreq / nyquist) * dbData.length);
-        const endBin = Math.ceil((endFreq / nyquist) * dbData.length);
-        const numBins = endBin - startBin;
+        const bandwidth = binEndFreq - binStartFreq;
 
-        // Debug logging (only log occasionally to avoid spam)
-        if (Math.random() < 0.01) {
-            console.log(`Spectrum: sampleRate=${sampleRate}, nyquist=${nyquist}`);
-            console.log(`Bandwidth: ${this.bandwidthLow}-${this.bandwidthHigh} Hz, display=${startFreq}-${endFreq} Hz (${endFreq-startFreq} Hz total)`);
-            console.log(`FFT bins: start=${startBin}, end=${endBin}, numBins=${numBins}, totalBins=${dbData.length}`);
-        }
+        // Map to FFT bins
+        const startBin = Math.floor((binStartFreq / nyquist) * dbData.length);
+        const binsForBandwidth = Math.floor((bandwidth / nyquist) * dbData.length);
 
-        // Draw spectrum line (only the bandwidth range)
+        // Draw spectrum line
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 2;
         ctx.beginPath();
 
-        let pointsDrawn = 0;
-        for (let i = 0; i < numBins; i++) {
-            const binIndex = startBin + i;
-            if (binIndex >= dbData.length) {
-                console.warn(`Bin ${binIndex} out of range (max ${dbData.length})`);
-                break;
+        const numPoints = width - 50;
+        const binsPerPoint = binsForBandwidth / numPoints;
+
+        for (let i = 0; i < numPoints; i++) {
+            // Average the bins for this point (like main app)
+            const pointStartBin = startBin + (i * binsPerPoint);
+            const pointEndBin = pointStartBin + binsPerPoint;
+
+            let sum = 0;
+            let count = 0;
+
+            for (let binIndex = Math.floor(pointStartBin); binIndex < Math.ceil(pointEndBin) && binIndex < dbData.length; binIndex++) {
+                sum += dbData[binIndex] || 0;
+                count++;
             }
 
-            const x = 50 + (i / numBins) * (width - 50);
-            const normalized = (dbData[binIndex] - minDb) / dbRange;
+            const average = count > 0 ? sum / count : minDb;
+            const normalized = (average - minDb) / dbRange;
             const y = height - (Math.max(0, Math.min(1, normalized)) * height);
+            const x = 50 + i;
 
             if (i === 0) {
                 ctx.moveTo(x, y);
             } else {
                 ctx.lineTo(x, y);
             }
-            pointsDrawn++;
         }
         ctx.stroke();
 
-        // Debug: show how many points were actually drawn
-        if (Math.random() < 0.01) {
-            console.log(`Drew ${pointsDrawn} points from ${numBins} bins`);
-        }
-
         // Draw frequency axis labels (show actual audio frequencies)
         ctx.fillStyle = '#fff';
-        ctx.textAlign = 'center';
-        const displayBandwidth = endFreq - startFreq;
-
-        // Add more detailed debug info
-        ctx.font = '9px monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(`BW: ${startFreq}-${endFreq} Hz (${displayBandwidth} Hz)`, 55, 15);
-        ctx.fillText(`Bins: ${startBin}-${endBin} (${numBins} of ${dbData.length})`, 55, 25);
-
-        // Draw frequency axis labels
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
-        for (let i = 0; i <= 4; i++) {
-            const freq = startFreq + (i / 4) * displayBandwidth;
-            const x = 50 + (i / 4) * (width - 50);
-            const label = freq >= 1000 ? `${(freq/1000).toFixed(1)}k` : `${freq.toFixed(0)}`;
+
+        // Calculate appropriate label spacing based on bandwidth
+        const audioBandwidth = bandwidth;
+        let labelStep;
+        if (audioBandwidth <= 100) {
+            labelStep = 20;
+        } else if (audioBandwidth <= 200) {
+            labelStep = 50;
+        } else if (audioBandwidth <= 500) {
+            labelStep = 100;
+        } else if (audioBandwidth <= 1000) {
+            labelStep = 200;
+        } else if (audioBandwidth <= 2000) {
+            labelStep = 250;
+        } else if (audioBandwidth <= 5000) {
+            labelStep = 500;
+        } else {
+            labelStep = 1000;
+        }
+
+        // Draw labels from low to high frequency
+        const startLabelFreq = Math.ceil(binStartFreq / labelStep) * labelStep;
+        for (let freq = startLabelFreq; freq <= binEndFreq; freq += labelStep) {
+            const pixelPos = ((freq - binStartFreq) / bandwidth) * (width - 50);
+            const x = 50 + pixelPos;
+
+            // For LSB mode, show inverted frequencies
+            let displayFreq;
+            if (this.bandwidthLow < 0 && this.bandwidthHigh <= 0) {
+                // LSB: invert display
+                displayFreq = Math.abs(this.bandwidthLow) + Math.abs(this.bandwidthHigh) - Math.abs(freq);
+            } else {
+                displayFreq = freq;
+            }
+
+            const label = displayFreq >= 1000 ? `${(displayFreq/1000).toFixed(1)}k` : `${displayFreq.toFixed(0)}`;
             ctx.fillText(label, x, height - 5);
         }
 
@@ -289,34 +313,58 @@ class AudioVisualizer {
         const maxDb = -20;
         const dbRange = maxDb - minDb;
 
-        // Calculate frequency range to display based on bandwidth
+        // Calculate frequency range - EXACTLY like spectrum
         const nyquist = sampleRate / 2;
-        let startFreq, endFreq;
+        let binStartFreq, binEndFreq;
 
-        if (this.bandwidthLow < 0 && this.bandwidthHigh <= 0) {
-            // LSB mode: negative bandwidth, but audio spectrum is positive
-            startFreq = Math.abs(this.bandwidthHigh);
-            endFreq = Math.abs(this.bandwidthLow);
+        // Check if we're in CW mode (narrow bandwidth around zero)
+        if (Math.abs(this.bandwidthLow) < 500 && Math.abs(this.bandwidthHigh) < 500) {
+            // CW mode: center the display on 500 Hz (the inherent CW offset)
+            const cwOffset = 500;
+            const halfBW = Math.max(Math.abs(this.bandwidthLow), Math.abs(this.bandwidthHigh));
+            binStartFreq = Math.max(0, cwOffset - halfBW);
+            binEndFreq = cwOffset + halfBW;
+        } else if (this.bandwidthLow < 0 && this.bandwidthHigh > 0) {
+            // Bandwidth spans zero (e.g., AM/SAM: -5000 to +5000)
+            // Show the full range from 0 to the maximum extent
+            binStartFreq = 0;
+            binEndFreq = Math.max(Math.abs(this.bandwidthLow), Math.abs(this.bandwidthHigh));
+        } else if (this.bandwidthLow < 0 && this.bandwidthHigh <= 0) {
+            // Both negative (e.g., LSB: -2700 to -50)
+            // Convert to positive frequencies (reversed order)
+            binStartFreq = Math.abs(this.bandwidthHigh);
+            binEndFreq = Math.abs(this.bandwidthLow);
         } else {
-            // USB/other modes: use bandwidth as-is
-            startFreq = Math.max(0, this.bandwidthLow);
-            endFreq = this.bandwidthHigh;
+            // Both positive or zero (e.g., USB: 50 to 2700)
+            binStartFreq = Math.max(0, this.bandwidthLow);
+            binEndFreq = this.bandwidthHigh;
         }
 
-        // Map frequencies to FFT bins (same as spectrum)
-        const startBin = Math.floor((startFreq / nyquist) * dbData.length);
-        const endBin = Math.ceil((endFreq / nyquist) * dbData.length);
-        const numBins = endBin - startBin;
+        const bandwidth = binEndFreq - binStartFreq;
 
-        // Draw new line at top (only the bandwidth range, starting after left margin)
+        // Map to FFT bins
+        const startBin = Math.floor((binStartFreq / nyquist) * dbData.length);
+        const binsForBandwidth = Math.floor((bandwidth / nyquist) * dbData.length);
+
+        // Draw new line at top (starting after left margin)
         const displayWidth = width - leftMargin;
-        for (let x = 0; x < displayWidth; x++) {
-            const binOffset = Math.floor((x / displayWidth) * numBins);
-            const binIndex = startBin + binOffset;
-            if (binIndex >= dbData.length) break;
+        const binsPerPixel = binsForBandwidth / displayWidth;
 
-            const db = dbData[binIndex];
-            const normalized = (db - minDb) / dbRange;
+        for (let x = 0; x < displayWidth; x++) {
+            // Average the bins for this pixel (like main app)
+            const pixelStartBin = startBin + (x * binsPerPixel);
+            const pixelEndBin = pixelStartBin + binsPerPixel;
+
+            let sum = 0;
+            let count = 0;
+
+            for (let binIndex = Math.floor(pixelStartBin); binIndex < Math.ceil(pixelEndBin) && binIndex < dbData.length; binIndex++) {
+                sum += dbData[binIndex] || 0;
+                count++;
+            }
+
+            const average = count > 0 ? sum / count : minDb;
+            const normalized = (average - minDb) / dbRange;
             const color = this.dbToColor(Math.max(0, Math.min(1, normalized)));
 
             ctx.fillStyle = color;

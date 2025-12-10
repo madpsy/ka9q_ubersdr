@@ -817,10 +817,31 @@ func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	updates := s.manager.Subscribe()
 	defer s.manager.Unsubscribe(updates)
 
-	// Send initial status
+	// Create write channel for this connection to serialize all writes
+	writeChan := make(chan interface{}, 100)
+	writeErrors := make(chan error, 1)
+
+	// Start write worker goroutine
+	go func() {
+		for msg := range writeChan {
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteJSON(msg); err != nil {
+				select {
+				case writeErrors <- err:
+				default:
+				}
+				return
+			}
+		}
+	}()
+	defer close(writeChan)
+
+	// Send initial status via write channel
 	status := s.manager.GetStatus()
-	if err := conn.WriteJSON(status); err != nil {
-		log.Printf("WebSocket write error: %v", err)
+	select {
+	case writeChan <- status:
+	case <-time.After(5 * time.Second):
+		log.Printf("Timeout sending initial status")
 		return
 	}
 
@@ -834,26 +855,27 @@ func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			var msg map[string]interface{}
 			if err := conn.ReadJSON(&msg); err != nil {
 				log.Printf("WebSocket read error: %v", err)
+				close(done)
 				return
 			}
 
 			// Handle audio stream requests
 			if msgType, ok := msg["type"].(string); ok && msgType == "audio_stream" {
 				if enabled, ok := msg["enabled"].(bool); ok {
-					s.handleAudioStreamRequest(conn, enabled, msg)
+					s.handleAudioStreamRequest(conn, enabled, msg, writeChan)
 				}
 			}
 
 			// Handle spectrum stream requests
 			if msgType, ok := msg["type"].(string); ok && msgType == "spectrum_stream" {
 				if enabled, ok := msg["enabled"].(bool); ok {
-					s.handleSpectrumStreamRequest(conn, enabled, msg)
+					s.handleSpectrumStreamRequest(conn, enabled, msg, writeChan)
 				}
 			}
 
 			// Handle spectrum commands (zoom, pan)
 			if msgType, ok := msg["type"].(string); ok && (msgType == "zoom" || msgType == "pan") {
-				s.handleSpectrumCommand(conn, msgType, msg)
+				s.handleSpectrumCommand(conn, msgType, msg, writeChan)
 			}
 		}
 	}()
@@ -865,10 +887,14 @@ func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if err := conn.WriteJSON(update); err != nil {
-				log.Printf("WebSocket write error: %v", err)
-				return
+			select {
+			case writeChan <- update:
+			default:
+				log.Printf("Write channel full, dropping update")
 			}
+		case err := <-writeErrors:
+			log.Printf("WebSocket write error: %v", err)
+			return
 		case <-done:
 			return
 		}
@@ -876,7 +902,7 @@ func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAudioStreamRequest handles audio streaming enable/disable requests
-func (s *APIServer) handleAudioStreamRequest(conn *websocket.Conn, enabled bool, msg map[string]interface{}) {
+func (s *APIServer) handleAudioStreamRequest(conn *websocket.Conn, enabled bool, msg map[string]interface{}, writeChan chan interface{}) {
 	room, _ := msg["room"].(string)
 	if room == "" {
 		room = "audio_preview"
@@ -885,6 +911,11 @@ func (s *APIServer) handleAudioStreamRequest(conn *websocket.Conn, enabled bool,
 	log.Printf("Audio stream request: enabled=%v, room=%s", enabled, room)
 
 	if enabled {
+		// Register the write channel for this connection
+		s.manager.audioStreamsMu.Lock()
+		s.manager.audioWriteChans[conn] = writeChan
+		s.manager.audioStreamsMu.Unlock()
+
 		// Enable audio streaming to this WebSocket connection
 		s.manager.EnableAudioStream(conn, room)
 	} else {
@@ -894,7 +925,7 @@ func (s *APIServer) handleAudioStreamRequest(conn *websocket.Conn, enabled bool,
 }
 
 // handleSpectrumStreamRequest handles spectrum streaming enable/disable requests
-func (s *APIServer) handleSpectrumStreamRequest(conn *websocket.Conn, enabled bool, msg map[string]interface{}) {
+func (s *APIServer) handleSpectrumStreamRequest(conn *websocket.Conn, enabled bool, msg map[string]interface{}, writeChan chan interface{}) {
 	room, _ := msg["room"].(string)
 	if room == "" {
 		room = "spectrum_preview"
@@ -903,16 +934,25 @@ func (s *APIServer) handleSpectrumStreamRequest(conn *websocket.Conn, enabled bo
 	log.Printf("Spectrum stream request: enabled=%v, room=%s", enabled, room)
 
 	if enabled {
+		// Register the write channel for this connection
+		s.manager.spectrumStreamsMu.Lock()
+		s.manager.spectrumWriteChans[conn] = writeChan
+		s.manager.spectrumStreamsMu.Unlock()
+
 		// Enable spectrum streaming to this WebSocket connection
 		if err := s.manager.EnableSpectrumStream(conn, room); err != nil {
 			log.Printf("Failed to enable spectrum stream: %v", err)
-			// Send error message back to client
+			// Send error message back to client via write channel
 			errorMsg := map[string]interface{}{
 				"type":    "error",
 				"error":   "spectrum_stream_failed",
 				"message": err.Error(),
 			}
-			conn.WriteJSON(errorMsg)
+			select {
+			case writeChan <- errorMsg:
+			default:
+				log.Printf("Failed to send error message: write channel full")
+			}
 		}
 	} else {
 		// Disable spectrum streaming
@@ -921,19 +961,23 @@ func (s *APIServer) handleSpectrumStreamRequest(conn *websocket.Conn, enabled bo
 }
 
 // handleSpectrumCommand handles spectrum control commands (zoom, pan)
-func (s *APIServer) handleSpectrumCommand(conn *websocket.Conn, cmdType string, msg map[string]interface{}) {
+func (s *APIServer) handleSpectrumCommand(conn *websocket.Conn, cmdType string, msg map[string]interface{}, writeChan chan interface{}) {
 	log.Printf("Spectrum command: type=%s, params=%v", cmdType, msg)
 
 	// Extract parameters and send to spectrum client
 	if err := s.manager.SendSpectrumCommand(cmdType, msg); err != nil {
 		log.Printf("Failed to send spectrum command: %v", err)
-		// Send error message back to client
+		// Send error message back to client via write channel
 		errorMsg := map[string]interface{}{
 			"type":    "error",
 			"error":   "spectrum_command_failed",
 			"message": err.Error(),
 		}
-		conn.WriteJSON(errorMsg)
+		select {
+		case writeChan <- errorMsg:
+		default:
+			log.Printf("Failed to send error message: write channel full")
+		}
 	}
 }
 

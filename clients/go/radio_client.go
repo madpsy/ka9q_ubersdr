@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -73,6 +74,176 @@ type RadioClient struct {
 	udpPort    int
 	udpConn    *net.UDPConn
 	udpEnabled bool
+
+	// Mutex for thread-safe output control
+	mu sync.RWMutex
+}
+
+// Output control methods for dynamic enable/disable
+
+// EnablePortAudio starts PortAudio output with the specified device
+func (c *RadioClient) EnablePortAudio(deviceIndex int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.audioStream != nil {
+		return fmt.Errorf("PortAudio already enabled")
+	}
+
+	c.audioDeviceIndex = deviceIndex
+
+	// Initialize resampler if needed and not already initialized
+	if c.resampleEnabled && c.resampler == nil && c.sampleRate > 0 {
+		// Don't resample IQ modes - they require exact sample rates
+		isIQMode := strings.HasPrefix(c.mode, "iq")
+		if isIQMode {
+			fmt.Fprintf(os.Stderr, "Resampling disabled for IQ mode (requires exact sample rate)\n")
+			c.resampleEnabled = false
+		} else {
+			// Always use mono (1 channel) for resampling, we'll convert to stereo after if needed
+			libsrResampler, err := NewLibsamplerateResampler(c.sampleRate, c.resampleOutputRate, 1, 0)
+			if err == nil {
+				c.resampler = libsrResampler
+				fmt.Fprintf(os.Stderr, "libsamplerate resampler initialized (SRC_SINC_BEST_QUALITY): %d Hz -> %d Hz\n",
+					c.sampleRate, c.resampleOutputRate)
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: libsamplerate not available: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Resampling disabled. Please rebuild with libsamplerate support (see build.sh)\n")
+				c.resampleEnabled = false
+			}
+		}
+	}
+
+	return c.SetupPortAudio()
+}
+
+// DisablePortAudio stops and closes PortAudio output
+func (c *RadioClient) DisablePortAudio() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.audioStream == nil {
+		return fmt.Errorf("PortAudio not enabled")
+	}
+
+	c.audioStream.Stop()
+	c.audioStream.Close()
+	c.audioStream = nil
+
+	if c.audioBuffer != nil {
+		close(c.audioBuffer)
+		c.audioBuffer = nil
+	}
+
+	fmt.Fprintf(os.Stderr, "PortAudio disabled\n")
+	return nil
+}
+
+// EnableFIFO creates and opens a FIFO at the specified path
+func (c *RadioClient) EnableFIFO(path string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.fifoPath != "" {
+		return fmt.Errorf("FIFO already enabled at %s", c.fifoPath)
+	}
+
+	c.fifoPath = path
+	return c.SetupFIFO()
+}
+
+// DisableFIFO closes and optionally removes the FIFO
+func (c *RadioClient) DisableFIFO() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.fifoPath == "" {
+		return fmt.Errorf("FIFO not enabled")
+	}
+
+	// Close FIFO file if open
+	if c.fifoFile != nil {
+		c.fifoFile.Close()
+		c.fifoFile = nil
+	}
+
+	// Remove FIFO if we created it
+	if c.fifoCreated {
+		if err := os.Remove(c.fifoPath); err == nil {
+			fmt.Fprintf(os.Stderr, "FIFO removed: %s\n", c.fifoPath)
+		}
+		c.fifoCreated = false
+	}
+
+	fmt.Fprintf(os.Stderr, "FIFO disabled: %s\n", c.fifoPath)
+	c.fifoPath = ""
+	return nil
+}
+
+// EnableUDP opens a UDP connection to the specified host and port
+func (c *RadioClient) EnableUDP(host string, port int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.udpConn != nil {
+		return fmt.Errorf("UDP already enabled")
+	}
+
+	c.udpHost = host
+	c.udpPort = port
+
+	addr := &net.UDPAddr{
+		IP:   net.ParseIP(host),
+		Port: port,
+	}
+
+	conn, err := net.DialUDP("udp", nil, addr)
+	if err != nil {
+		return fmt.Errorf("failed to create UDP connection: %w", err)
+	}
+
+	c.udpConn = conn
+	c.udpEnabled = true
+	fmt.Fprintf(os.Stderr, "UDP enabled: %s:%d\n", host, port)
+	return nil
+}
+
+// DisableUDP closes the UDP connection
+func (c *RadioClient) DisableUDP() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.udpConn == nil {
+		return fmt.Errorf("UDP not enabled")
+	}
+
+	c.udpConn.Close()
+	c.udpConn = nil
+	c.udpEnabled = false
+	fmt.Fprintf(os.Stderr, "UDP disabled\n")
+	return nil
+}
+
+// GetOutputStatus returns the current status of all outputs
+func (c *RadioClient) GetOutputStatus() map[string]interface{} {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return map[string]interface{}{
+		"portaudio": map[string]interface{}{
+			"enabled":     c.audioStream != nil,
+			"deviceIndex": c.audioDeviceIndex,
+		},
+		"fifo": map[string]interface{}{
+			"enabled": c.fifoPath != "",
+			"path":    c.fifoPath,
+		},
+		"udp": map[string]interface{}{
+			"enabled": c.udpConn != nil,
+			"host":    c.udpHost,
+			"port":    c.udpPort,
+		},
+	}
 }
 
 // WAVWriter handles WAV file writing
@@ -559,26 +730,25 @@ func (c *RadioClient) OutputAudio(pcmData []byte) error {
 		return err
 
 	case "portaudio":
-		// Skip if PortAudio not initialized yet
-		if c.audioBuffer == nil {
-			return nil
-		}
+		// Only send to PortAudio if it's initialized
+		if c.audioBuffer != nil {
+			// Convert PCM bytes to int16 samples for PortAudio
+			numSamples := len(pcmData) / 2
+			samples := make([]int16, numSamples)
+			for i := 0; i < numSamples; i++ {
+				samples[i] = int16(binary.LittleEndian.Uint16(pcmData[i*2:]))
+			}
 
-		// Convert PCM bytes to int16 samples for PortAudio
-		numSamples := len(pcmData) / 2
-		samples := make([]int16, numSamples)
-		for i := 0; i < numSamples; i++ {
-			samples[i] = int16(binary.LittleEndian.Uint16(pcmData[i*2:]))
+			// Send to audio buffer (blocking with timeout)
+			select {
+			case c.audioBuffer <- samples:
+				// Successfully queued
+			case <-time.After(100 * time.Millisecond):
+				// Buffer full - this shouldn't happen with proper sizing
+				fmt.Fprintf(os.Stderr, "Warning: Audio buffer full, dropping samples\n")
+			}
 		}
-
-		// Send to audio buffer (blocking with timeout)
-		select {
-		case c.audioBuffer <- samples:
-			// Successfully queued
-		case <-time.After(100 * time.Millisecond):
-			// Buffer full - this shouldn't happen with proper sizing
-			fmt.Fprintf(os.Stderr, "Warning: Audio buffer full, dropping samples\n")
-		}
+		// Continue to process UDP/FIFO outputs even if PortAudio is disabled
 
 	case "wav":
 		// Write to WAV file
@@ -592,20 +762,16 @@ func (c *RadioClient) OutputAudio(pcmData []byte) error {
 
 	case "udp":
 		// Send to UDP socket (main output mode)
+		// UDP is connectionless - silently ignore any errors (nothing listening is normal)
 		if c.udpConn != nil {
-			_, err := c.udpConn.Write(pcmData)
-			if err != nil {
-				return fmt.Errorf("UDP send error: %w", err)
-			}
+			c.udpConn.Write(pcmData)
 		}
 	}
 
 	// Send UDP output if enabled as additional output (works alongside any output mode)
+	// UDP is connectionless - silently ignore any errors (nothing listening is normal)
 	if c.udpEnabled && c.udpConn != nil && c.outputMode != "udp" {
-		_, err := c.udpConn.Write(pcmData)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "UDP send error: %v\n", err)
-		}
+		c.udpConn.Write(pcmData)
 	}
 
 	return nil
@@ -646,12 +812,10 @@ func (c *RadioClient) HandleMessage(msg WebSocketMessage) error {
 			channels = c.channels
 		}
 
-		// Update sample rate if changed OR if this is the first audio packet
-		if sampleRate != c.sampleRate || (c.outputMode == "portaudio" && c.audioStream == nil) {
-			if sampleRate != c.sampleRate {
-				c.sampleRate = sampleRate
-				fmt.Fprintf(os.Stderr, "Sample rate updated: %d Hz\n", c.sampleRate)
-			}
+		// Update sample rate if changed
+		if sampleRate != c.sampleRate {
+			c.sampleRate = sampleRate
+			fmt.Fprintf(os.Stderr, "Sample rate updated: %d Hz\n", c.sampleRate)
 
 			// Initialize resampler now that we know the actual sample rate
 			if c.resampleEnabled && c.resampler == nil {
@@ -674,15 +838,6 @@ func (c *RadioClient) HandleMessage(msg WebSocketMessage) error {
 					}
 				}
 			}
-
-			// Setup PortAudio now that we have the actual sample rate (first time only)
-			if c.outputMode == "portaudio" && c.audioStream == nil {
-				if err := c.SetupPortAudio(); err != nil {
-					fmt.Fprintf(os.Stderr, "Failed to setup PortAudio: %v\n", err)
-					c.running = false
-					return err
-				}
-			}
 		}
 
 		// Update channels if changed (requires restarting PortAudio)
@@ -690,8 +845,8 @@ func (c *RadioClient) HandleMessage(msg WebSocketMessage) error {
 			c.channels = channels
 			fmt.Fprintf(os.Stderr, "Channels updated: %d\n", c.channels)
 
-			// Restart PortAudio with new channel count if active
-			if c.outputMode == "portaudio" && c.audioStream != nil {
+			// Restart PortAudio with new channel count if it's currently active
+			if c.audioStream != nil {
 				fmt.Fprintf(os.Stderr, "Restarting PortAudio with new channel configuration...\n")
 				c.audioStream.Stop()
 				c.audioStream.Close()
@@ -1286,6 +1441,45 @@ func main() {
 					log.Printf("Auto-connect failed: %v", err)
 				} else {
 					log.Printf("Auto-connect successful")
+
+					// Restore saved output states after auto-connect
+					go func() {
+						log.Printf("Output restoration goroutine started (auto-connect), waiting 2 seconds...")
+						time.Sleep(2 * time.Second)
+
+						log.Printf("Checking connection status for output restoration...")
+						if !manager.IsConnected() {
+							log.Printf("Connection lost before output restoration could complete")
+							return
+						}
+
+						log.Printf("Connection still active, loading config...")
+						config := configManager.Get()
+						log.Printf("Config loaded: PortAudioEnabled=%v, FIFOEnabled=%v, UDPEnabled=%v",
+							config.PortAudioEnabled, config.FIFOEnabled, config.UDPEnabled)
+
+						// Restore PortAudio state
+						if config.PortAudioEnabled {
+							log.Printf("Attempting to restore PortAudio output (device %d)...", config.PortAudioDevice)
+							if err := manager.EnablePortAudioOutput(config.PortAudioDevice); err != nil {
+								log.Printf("Warning: Failed to restore PortAudio output: %v", err)
+							} else {
+								log.Printf("Successfully restored PortAudio output (device %d)", config.PortAudioDevice)
+							}
+						}
+
+						// Restore FIFO state
+						if config.FIFOEnabled && config.FIFOPath != "" {
+							log.Printf("Attempting to restore FIFO output (%s)...", config.FIFOPath)
+							if err := manager.EnableFIFOOutput(config.FIFOPath); err != nil {
+								log.Printf("Warning: Failed to restore FIFO output: %v", err)
+							} else {
+								log.Printf("Successfully restored FIFO output (%s)", config.FIFOPath)
+							}
+						}
+
+						// Note: UDP state is already restored via the UDPEnabled flag passed to NewRadioClient
+					}()
 				}
 			}()
 		}

@@ -47,9 +47,12 @@ type ClientConfig struct {
 	APIPort             int             `json:"apiPort"`
 	SavedInstances      []SavedInstance `json:"savedInstances,omitempty"`
 	FIFOPath            string          `json:"fifoPath,omitempty"`
+	FIFOEnabled         bool            `json:"fifoEnabled"`
 	UDPHost             string          `json:"udpHost,omitempty"`
 	UDPPort             int             `json:"udpPort,omitempty"`
 	UDPEnabled          bool            `json:"udpEnabled"`
+	PortAudioEnabled    bool            `json:"portAudioEnabled"`
+	PortAudioDevice     int             `json:"portAudioDevice"`
 }
 
 // ConfigManager handles loading and saving configuration
@@ -91,9 +94,12 @@ func getDefaultConfig() ClientConfig {
 		AutoConnect:         false, // Disabled by default
 		APIPort:             8090,
 		FIFOPath:            "",          // No FIFO by default
+		FIFOEnabled:         false,       // FIFO disabled by default
 		UDPHost:             "127.0.0.1", // Default UDP host
 		UDPPort:             8888,        // Default UDP port
 		UDPEnabled:          false,       // UDP disabled by default
+		PortAudioEnabled:    false,       // PortAudio disabled by default
+		PortAudioDevice:     -1,          // Auto-select device
 	}
 }
 
@@ -192,6 +198,7 @@ func (cm *ConfigManager) UpdateFromConnectRequest(req ConnectRequest) error {
 		c.UDPHost = req.UDPHost
 		c.UDPPort = req.UDPPort
 		c.UDPEnabled = req.UDPEnabled
+		// Note: PortAudio and FIFO enabled states are managed separately via output control API
 	})
 }
 
@@ -252,6 +259,16 @@ func (cm *ConfigManager) UpdateNR2Config(req ConfigUpdateRequest) error {
 		if req.SpectrumCenterTune != nil {
 			c.SpectrumCenterTune = *req.SpectrumCenterTune
 		}
+	})
+}
+
+// UpdateOutputStates updates the output enabled states
+func (cm *ConfigManager) UpdateOutputStates(portAudioEnabled bool, portAudioDevice int, fifoEnabled bool, udpEnabled bool) error {
+	return cm.Update(func(c *ClientConfig) {
+		c.PortAudioEnabled = portAudioEnabled
+		c.PortAudioDevice = portAudioDevice
+		c.FIFOEnabled = fifoEnabled
+		c.UDPEnabled = udpEnabled
 	})
 }
 

@@ -165,6 +165,13 @@ func (m *WebSocketManager) GetStatus() StatusResponse {
 	return status
 }
 
+// GetStatusWithOutputs returns the current status including output status
+func (m *WebSocketManager) GetStatusWithOutputs() StatusResponse {
+	status := m.GetStatus()
+	status.OutputStatus = m.GetOutputStatus()
+	return status
+}
+
 // Tune changes frequency/mode/bandwidth without reconnecting
 func (m *WebSocketManager) Tune(req TuneRequest) error {
 	m.mu.Lock()
@@ -280,6 +287,96 @@ func (m *WebSocketManager) UpdateConfig(req ConfigUpdateRequest) error {
 	}
 
 	return nil
+}
+
+// Output Control Methods
+
+// EnablePortAudioOutput enables PortAudio output with the specified device
+func (m *WebSocketManager) EnablePortAudioOutput(deviceIndex int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.client == nil {
+		return fmt.Errorf("client not initialized")
+	}
+
+	return m.client.EnablePortAudio(deviceIndex)
+}
+
+// DisablePortAudioOutput disables PortAudio output
+func (m *WebSocketManager) DisablePortAudioOutput() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.client == nil {
+		return fmt.Errorf("client not initialized")
+	}
+
+	return m.client.DisablePortAudio()
+}
+
+// EnableFIFOOutput enables FIFO output at the specified path
+func (m *WebSocketManager) EnableFIFOOutput(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.client == nil {
+		return fmt.Errorf("client not initialized")
+	}
+
+	return m.client.EnableFIFO(path)
+}
+
+// DisableFIFOOutput disables FIFO output
+func (m *WebSocketManager) DisableFIFOOutput() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.client == nil {
+		return fmt.Errorf("client not initialized")
+	}
+
+	return m.client.DisableFIFO()
+}
+
+// EnableUDPOutput enables UDP output to the specified host and port
+func (m *WebSocketManager) EnableUDPOutput(host string, port int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.client == nil {
+		return fmt.Errorf("client not initialized")
+	}
+
+	return m.client.EnableUDP(host, port)
+}
+
+// DisableUDPOutput disables UDP output
+func (m *WebSocketManager) DisableUDPOutput() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.client == nil {
+		return fmt.Errorf("client not initialized")
+	}
+
+	return m.client.DisableUDP()
+}
+
+// GetOutputStatus returns the current status of all outputs
+func (m *WebSocketManager) GetOutputStatus() map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.client == nil {
+		return map[string]interface{}{
+			"portaudio": map[string]interface{}{"enabled": false},
+			"fifo":      map[string]interface{}{"enabled": false},
+			"udp":       map[string]interface{}{"enabled": false},
+		}
+	}
+
+	return m.client.GetOutputStatus()
 }
 
 // BroadcastStatus sends a status update to all subscribers

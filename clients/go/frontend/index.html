@@ -173,57 +173,58 @@
                 </div>
             </section>
 
-            <!-- Audio Settings Panel -->
+            <!-- Dynamic Output Control Panel -->
             <section class="panel">
-                <h2>Audio Settings</h2>
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="audio-device">Audio Device:</label>
-                        <select id="audio-device">
-                            <option value="-1">Default Device</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="output-mode">Output Mode:</label>
-                        <select id="output-mode">
-                            <option value="portaudio">PortAudio</option>
-                            <option value="stdout">Stdout</option>
-                            <option value="wav">WAV File</option>
-                            <option value="udp">UDP</option>
-                        </select>
-                    </div>
-                </div>
-                
-                <!-- FIFO Output Settings -->
-                <h3 style="margin-top: 20px;">FIFO Output (Named Pipe)</h3>
-                <div class="form-group">
-                    <label for="fifo-path">FIFO Path:</label>
-                    <input type="text" id="fifo-path" placeholder="/tmp/audio.fifo (optional)">
-                </div>
+                <h2>Dynamic Output Control</h2>
                 <div class="info-box">
-                    <p><strong>Note:</strong> Write audio to a named pipe (FIFO) alongside the main output. Non-blocking, works with any output mode. Leave empty to disable.</p>
+                    <p><strong>Note:</strong> Enable or disable outputs while connected without reconnecting. Fields are locked when outputs are active.</p>
                 </div>
                 
-                <!-- UDP Output Settings -->
+                <!-- PortAudio Output Control -->
+                <h3 style="margin-top: 15px;">Physical Audio Device (PortAudio)</h3>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="portaudio-output-enabled">
+                        <span>Enable PortAudio Output</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="portaudio-device-select">Audio Device:</label>
+                    <select id="portaudio-device-select">
+                        <option value="-1">Default Device</option>
+                    </select>
+                </div>
+                
+                <!-- FIFO Output Control -->
+                <h3 style="margin-top: 20px;">FIFO Output (Named Pipe)</h3>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="fifo-output-enabled">
+                        <span>Enable FIFO Output</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="fifo-output-path">FIFO Path:</label>
+                    <input type="text" id="fifo-output-path" placeholder="/tmp/audio.fifo">
+                </div>
+                
+                <!-- UDP Output Control -->
                 <h3 style="margin-top: 20px;">UDP Output</h3>
                 <div class="form-group checkbox-group">
                     <label>
-                        <input type="checkbox" id="udp-enabled">
-                        <span>Enable UDP as additional output</span>
+                        <input type="checkbox" id="udp-output-enabled">
+                        <span>Enable UDP Output</span>
                     </label>
                 </div>
                 <div class="form-grid">
                     <div class="form-group">
-                        <label for="udp-host">UDP Host:</label>
-                        <input type="text" id="udp-host" value="127.0.0.1" placeholder="127.0.0.1">
+                        <label for="udp-output-host">UDP Host:</label>
+                        <input type="text" id="udp-output-host" value="127.0.0.1" placeholder="127.0.0.1">
                     </div>
                     <div class="form-group">
-                        <label for="udp-port">UDP Port:</label>
-                        <input type="number" id="udp-port" value="8888" placeholder="8888">
+                        <label for="udp-output-port">UDP Port:</label>
+                        <input type="number" id="udp-output-port" value="8888" placeholder="8888">
                     </div>
-                </div>
-                <div class="info-box">
-                    <p><strong>Note:</strong> UDP output can work as the main output mode or as an additional output alongside PortAudio/WAV. Useful for streaming audio to other applications.</p>
                 </div>
             </section>
 

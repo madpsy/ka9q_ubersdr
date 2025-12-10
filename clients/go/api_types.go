@@ -79,38 +79,48 @@ type ConfigUpdateRequest struct {
 	SpectrumCenterTune  *bool    `json:"spectrumCenterTune,omitempty"`
 }
 
+// OutputControlRequest represents a request to control an output
+type OutputControlRequest struct {
+	Enabled     bool   `json:"enabled"`
+	DeviceIndex *int   `json:"deviceIndex,omitempty"` // For PortAudio
+	Path        string `json:"path,omitempty"`        // For FIFO
+	Host        string `json:"host,omitempty"`        // For UDP
+	Port        int    `json:"port,omitempty"`        // For UDP
+}
+
 // API Response Types
 
 // StatusResponse represents the current client status
 type StatusResponse struct {
-	Connected          bool      `json:"connected"`
-	Frequency          int       `json:"frequency"`
-	Mode               string    `json:"mode"`
-	BandwidthLow       *int      `json:"bandwidthLow,omitempty"`
-	BandwidthHigh      *int      `json:"bandwidthHigh,omitempty"`
-	SampleRate         int       `json:"sampleRate"`
-	Channels           int       `json:"channels"`
-	SessionID          string    `json:"sessionId,omitempty"`
-	UserSessionID      string    `json:"userSessionId"`
-	AudioDevice        string    `json:"audioDevice"`
-	AudioDeviceIdx     int       `json:"audioDeviceIndex"`
-	OutputMode         string    `json:"outputMode"`
-	NR2Enabled         bool      `json:"nr2Enabled"`
-	NR2Strength        float64   `json:"nr2Strength"`
-	NR2Floor           float64   `json:"nr2Floor"`
-	NR2AdaptRate       float64   `json:"nr2AdaptRate"`
-	ResampleEnabled    bool      `json:"resampleEnabled"`
-	ResampleOutputRate int       `json:"resampleOutputRate"`
-	OutputChannels     int       `json:"outputChannels"`
-	Host               string    `json:"host,omitempty"`
-	Port               int       `json:"port,omitempty"`
-	SSL                bool      `json:"ssl"`
-	ConnectedAt        time.Time `json:"connectedAt,omitempty"`
-	Uptime             string    `json:"uptime,omitempty"`
-	FIFOPath           string    `json:"fifoPath,omitempty"`
-	UDPHost            string    `json:"udpHost,omitempty"`
-	UDPPort            int       `json:"udpPort,omitempty"`
-	UDPEnabled         bool      `json:"udpEnabled"`
+	Connected          bool                   `json:"connected"`
+	Frequency          int                    `json:"frequency"`
+	Mode               string                 `json:"mode"`
+	BandwidthLow       *int                   `json:"bandwidthLow,omitempty"`
+	BandwidthHigh      *int                   `json:"bandwidthHigh,omitempty"`
+	SampleRate         int                    `json:"sampleRate"`
+	Channels           int                    `json:"channels"`
+	SessionID          string                 `json:"sessionId,omitempty"`
+	UserSessionID      string                 `json:"userSessionId"`
+	AudioDevice        string                 `json:"audioDevice"`
+	AudioDeviceIdx     int                    `json:"audioDeviceIndex"`
+	OutputMode         string                 `json:"outputMode"`
+	NR2Enabled         bool                   `json:"nr2Enabled"`
+	NR2Strength        float64                `json:"nr2Strength"`
+	NR2Floor           float64                `json:"nr2Floor"`
+	NR2AdaptRate       float64                `json:"nr2AdaptRate"`
+	ResampleEnabled    bool                   `json:"resampleEnabled"`
+	ResampleOutputRate int                    `json:"resampleOutputRate"`
+	OutputChannels     int                    `json:"outputChannels"`
+	Host               string                 `json:"host,omitempty"`
+	Port               int                    `json:"port,omitempty"`
+	SSL                bool                   `json:"ssl"`
+	ConnectedAt        time.Time              `json:"connectedAt,omitempty"`
+	Uptime             string                 `json:"uptime,omitempty"`
+	FIFOPath           string                 `json:"fifoPath,omitempty"`
+	UDPHost            string                 `json:"udpHost,omitempty"`
+	UDPPort            int                    `json:"udpPort,omitempty"`
+	UDPEnabled         bool                   `json:"udpEnabled"`
+	OutputStatus       map[string]interface{} `json:"outputStatus,omitempty"`
 }
 
 // AudioDevice represents an audio output device

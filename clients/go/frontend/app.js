@@ -43,14 +43,6 @@ class UberSDRClient {
         this.bandwidthHighInput = document.getElementById('bandwidth-high');
         this.applySettingsBtn = document.getElementById('apply-settings-btn');
 
-        // Audio elements
-        this.audioDeviceSelect = document.getElementById('audio-device');
-        this.outputModeSelect = document.getElementById('output-mode');
-        this.fifoPathInput = document.getElementById('fifo-path');
-        this.udpEnabledCheckbox = document.getElementById('udp-enabled');
-        this.udpHostInput = document.getElementById('udp-host');
-        this.udpPortInput = document.getElementById('udp-port');
-
         // Audio preview elements
         this.audioPreviewEnabled = document.getElementById('audio-preview-enabled');
         this.audioPreviewControls = document.getElementById('audio-preview-controls');
@@ -80,6 +72,15 @@ class UberSDRClient {
         this.resampleEnabledCheckbox = document.getElementById('resample-enabled');
         this.resampleRateSelect = document.getElementById('resample-rate');
         this.outputChannelsSelect = document.getElementById('output-channels');
+
+        // Dynamic output control elements
+        this.portaudioOutputEnabled = document.getElementById('portaudio-output-enabled');
+        this.portaudioDeviceSelect = document.getElementById('portaudio-device-select');
+        this.fifoOutputEnabled = document.getElementById('fifo-output-enabled');
+        this.fifoOutputPath = document.getElementById('fifo-output-path');
+        this.udpOutputEnabled = document.getElementById('udp-output-enabled');
+        this.udpOutputHost = document.getElementById('udp-output-host');
+        this.udpOutputPort = document.getElementById('udp-output-port');
 
         // Status elements
         this.connectionStatus = document.getElementById('connection-status');
@@ -238,6 +239,11 @@ class UberSDRClient {
             }
             this.saveSpectrumConfig();
         });
+
+        // Dynamic output control event listeners
+        this.portaudioOutputEnabled.addEventListener('change', () => this.togglePortAudioOutput());
+        this.fifoOutputEnabled.addEventListener('change', () => this.toggleFIFOOutput());
+        this.udpOutputEnabled.addEventListener('change', () => this.toggleUDPOutput());
     }
 
     connectWebSocket() {
@@ -317,8 +323,8 @@ class UberSDRClient {
             bandwidthLow: parseInt(this.bandwidthLowInput.value),
             bandwidthHigh: parseInt(this.bandwidthHighInput.value),
             password: this.passwordInput.value,
-            outputMode: this.outputModeSelect.value,
-            audioDevice: parseInt(this.audioDeviceSelect.value),
+            outputMode: "portaudio", // Default to portaudio
+            audioDevice: -1, // Default device
             nr2Enabled: this.nr2EnabledCheckbox.checked,
             nr2Strength: parseFloat(this.nr2StrengthInput.value),
             nr2Floor: parseFloat(this.nr2FloorInput.value),
@@ -326,10 +332,10 @@ class UberSDRClient {
             resampleEnabled: this.resampleEnabledCheckbox.checked,
             resampleOutputRate: parseInt(this.resampleRateSelect.value),
             outputChannels: parseInt(this.outputChannelsSelect.value),
-            fifoPath: this.fifoPathInput.value,
-            udpEnabled: this.udpEnabledCheckbox.checked,
-            udpHost: this.udpHostInput.value,
-            udpPort: parseInt(this.udpPortInput.value)
+            fifoPath: "", // Will be set dynamically
+            udpEnabled: false, // Will be set dynamically
+            udpHost: "127.0.0.1",
+            udpPort: 8888
         };
 
         try {
@@ -346,6 +352,9 @@ class UberSDRClient {
                 this.updateConnectionUI();
                 this.showSuccess(data.message || 'Connected successfully');
                 this.updateStatus();
+
+                // Update output status after a delay to allow backend restoration
+                setTimeout(() => this.updateOutputStatus(), 1000);
 
                 // Enable spectrum display if checkbox is checked
                 if (this.spectrumEnabled.checked) {
@@ -398,6 +407,9 @@ class UberSDRClient {
 
         // Poll status every 2 seconds
         setTimeout(() => this.updateStatus(), 2000);
+
+        // Also update output status
+        this.updateOutputStatus();
     }
 
     updateStatusDisplay(status) {
@@ -581,8 +593,6 @@ class UberSDRClient {
                 if (config.bandwidthHigh !== null && config.bandwidthHigh !== undefined) {
                     this.bandwidthHighInput.value = config.bandwidthHigh;
                 }
-                if (config.outputMode) this.outputModeSelect.value = config.outputMode;
-                if (config.audioDevice !== undefined) this.audioDeviceSelect.value = config.audioDevice;
                 if (config.nr2Enabled !== undefined) this.nr2EnabledCheckbox.checked = config.nr2Enabled;
                 if (config.nr2Strength) this.nr2StrengthInput.value = config.nr2Strength;
                 if (config.nr2Floor) this.nr2FloorInput.value = config.nr2Floor;
@@ -591,12 +601,6 @@ class UberSDRClient {
                 if (config.resampleOutputRate) this.resampleRateSelect.value = config.resampleOutputRate;
                 if (config.outputChannels !== undefined) this.outputChannelsSelect.value = config.outputChannels;
                 
-                // Load FIFO and UDP settings
-                if (config.fifoPath) this.fifoPathInput.value = config.fifoPath;
-                if (config.udpEnabled !== undefined) this.udpEnabledCheckbox.checked = config.udpEnabled;
-                if (config.udpHost) this.udpHostInput.value = config.udpHost;
-                if (config.udpPort) this.udpPortInput.value = config.udpPort;
-
                 // Load audio preview settings
                 if (config.audioPreviewEnabled !== undefined) {
                     this.audioPreviewEnabled.checked = config.audioPreviewEnabled;
@@ -739,16 +743,176 @@ class UberSDRClient {
             const data = await response.json();
 
             if (data.devices) {
+                // Update both device selects
                 this.audioDeviceSelect.innerHTML = '<option value="-1">Default Device</option>';
+                this.portaudioDeviceSelect.innerHTML = '<option value="-1">Default Device</option>';
+
                 data.devices.forEach(device => {
-                    const option = document.createElement('option');
-                    option.value = device.index;
-                    option.textContent = `[${device.index}] ${device.name}${device.isDefault ? ' (default)' : ''}`;
-                    this.audioDeviceSelect.appendChild(option);
+                    const option1 = document.createElement('option');
+                    option1.value = device.index;
+                    option1.textContent = `[${device.index}] ${device.name}${device.isDefault ? ' (default)' : ''}`;
+                    this.audioDeviceSelect.appendChild(option1);
+
+                    const option2 = document.createElement('option');
+                    option2.value = device.index;
+                    option2.textContent = `[${device.index}] ${device.name}${device.isDefault ? ' (default)' : ''}`;
+                    this.portaudioDeviceSelect.appendChild(option2);
                 });
             }
         } catch (error) {
             console.error('Failed to load audio devices:', error);
+        }
+    }
+
+    // Dynamic Output Control Methods
+
+    async togglePortAudioOutput() {
+        const enabled = this.portaudioOutputEnabled.checked;
+        const deviceIndex = parseInt(this.portaudioDeviceSelect.value);
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/outputs/portaudio`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled, deviceIndex })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.showSuccess(data.message || (enabled ? 'PortAudio enabled' : 'PortAudio disabled'));
+                // Lock/unlock device select
+                this.portaudioDeviceSelect.disabled = enabled;
+            } else {
+                this.showError('Failed to toggle PortAudio', data.message || data.error);
+                // Revert checkbox
+                this.portaudioOutputEnabled.checked = !enabled;
+            }
+        } catch (error) {
+            this.showError('Error toggling PortAudio', error.message);
+            // Revert checkbox
+            this.portaudioOutputEnabled.checked = !enabled;
+        }
+    }
+
+    async toggleFIFOOutput() {
+        const enabled = this.fifoOutputEnabled.checked;
+        const path = this.fifoOutputPath.value;
+
+        if (enabled && !path) {
+            this.showError('FIFO path required', 'Please enter a FIFO path');
+            this.fifoOutputEnabled.checked = false;
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/outputs/fifo`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled, path })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.showSuccess(data.message || (enabled ? 'FIFO enabled' : 'FIFO disabled'));
+                // Lock/unlock path input
+                this.fifoOutputPath.disabled = enabled;
+            } else {
+                this.showError('Failed to toggle FIFO', data.message || data.error);
+                // Revert checkbox
+                this.fifoOutputEnabled.checked = !enabled;
+            }
+        } catch (error) {
+            this.showError('Error toggling FIFO', error.message);
+            // Revert checkbox
+            this.fifoOutputEnabled.checked = !enabled;
+        }
+    }
+
+    async toggleUDPOutput() {
+        const enabled = this.udpOutputEnabled.checked;
+        const host = this.udpOutputHost.value;
+        const port = parseInt(this.udpOutputPort.value);
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/outputs/udp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled, host, port })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                this.showSuccess(data.message || (enabled ? 'UDP enabled' : 'UDP disabled'));
+                // Lock/unlock host/port inputs
+                this.udpOutputHost.disabled = enabled;
+                this.udpOutputPort.disabled = enabled;
+            } else {
+                this.showError('Failed to toggle UDP', data.message || data.error);
+                // Revert checkbox
+                this.udpOutputEnabled.checked = !enabled;
+            }
+        } catch (error) {
+            this.showError('Error toggling UDP', error.message);
+            // Revert checkbox
+            this.udpOutputEnabled.checked = !enabled;
+        }
+    }
+
+    async updateOutputStatus() {
+        if (!this.connected) {
+            // Disable all output controls when not connected
+            this.portaudioOutputEnabled.disabled = true;
+            this.fifoOutputEnabled.disabled = true;
+            this.udpOutputEnabled.disabled = true;
+            return;
+        }
+
+        // Enable controls when connected
+        this.portaudioOutputEnabled.disabled = false;
+        this.fifoOutputEnabled.disabled = false;
+        this.udpOutputEnabled.disabled = false;
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/outputs/status`);
+            if (response.ok) {
+                const status = await response.json();
+
+                // Update PortAudio status
+                if (status.portaudio) {
+                    this.portaudioOutputEnabled.checked = status.portaudio.enabled;
+                    this.portaudioDeviceSelect.disabled = status.portaudio.enabled;
+                    if (status.portaudio.deviceIndex !== undefined) {
+                        this.portaudioDeviceSelect.value = status.portaudio.deviceIndex;
+                    }
+                }
+
+                // Update FIFO status
+                if (status.fifo) {
+                    this.fifoOutputEnabled.checked = status.fifo.enabled;
+                    this.fifoOutputPath.disabled = status.fifo.enabled;
+                    if (status.fifo.path) {
+                        this.fifoOutputPath.value = status.fifo.path;
+                    }
+                }
+
+                // Update UDP status
+                if (status.udp) {
+                    this.udpOutputEnabled.checked = status.udp.enabled;
+                    this.udpOutputHost.disabled = status.udp.enabled;
+                    this.udpOutputPort.disabled = status.udp.enabled;
+                    if (status.udp.host) {
+                        this.udpOutputHost.value = status.udp.host;
+                    }
+                    if (status.udp.port) {
+                        this.udpOutputPort.value = status.udp.port;
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Failed to fetch output status:', error);
         }
     }
 
@@ -759,6 +923,9 @@ class UberSDRClient {
             this.connectBtn.disabled = true;
             this.disconnectBtn.disabled = false;
             this.applySettingsBtn.disabled = false;
+
+            // Enable output controls
+            this.updateOutputStatus();
         } else {
             this.connectionStatus.textContent = 'Disconnected';
             this.connectionStatus.className = 'status-badge disconnected';
@@ -766,6 +933,14 @@ class UberSDRClient {
             this.disconnectBtn.disabled = true;
             this.applySettingsBtn.disabled = true;
             this.uptimeSpan.textContent = '';
+
+            // Disable output controls
+            this.portaudioOutputEnabled.disabled = true;
+            this.portaudioOutputEnabled.checked = false;
+            this.fifoOutputEnabled.disabled = true;
+            this.fifoOutputEnabled.checked = false;
+            this.udpOutputEnabled.disabled = true;
+            this.udpOutputEnabled.checked = false;
         }
     }
 

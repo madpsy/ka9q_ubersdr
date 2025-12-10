@@ -79,6 +79,12 @@ func (s *APIServer) setupRoutes() {
 	api.HandleFunc("/device", s.handleDevice).Methods("POST", "OPTIONS")
 	api.HandleFunc("/config", s.handleConfig).Methods("GET", "POST", "OPTIONS")
 
+	// Output control endpoints
+	api.HandleFunc("/outputs/portaudio", s.handlePortAudioOutput).Methods("POST", "OPTIONS")
+	api.HandleFunc("/outputs/fifo", s.handleFIFOOutput).Methods("POST", "OPTIONS")
+	api.HandleFunc("/outputs/udp", s.handleUDPOutput).Methods("POST", "OPTIONS")
+	api.HandleFunc("/outputs/status", s.handleOutputStatus).Methods("GET", "OPTIONS")
+
 	// Saved instances management endpoints
 	api.HandleFunc("/instances/saved", s.handleSavedInstances).Methods("GET", "OPTIONS")
 	api.HandleFunc("/instances/saved", s.handleSaveInstance).Methods("POST", "OPTIONS")
@@ -214,6 +220,50 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Restore saved output states after connection (in background to not block response)
+	go func() {
+		log.Printf("Output restoration goroutine started, waiting 2 seconds...")
+
+		// Wait longer for client to be fully ready and audio system initialized
+		// The client needs time to establish WebSocket connection and start audio processing
+		time.Sleep(2 * time.Second)
+
+		log.Printf("Checking connection status for output restoration...")
+
+		// Double-check we're still connected
+		if !s.manager.IsConnected() {
+			log.Printf("Connection lost before output restoration could complete")
+			return
+		}
+
+		log.Printf("Connection still active, loading config...")
+		config := s.configManager.Get()
+		log.Printf("Config loaded: PortAudioEnabled=%v, FIFOEnabled=%v, UDPEnabled=%v",
+			config.PortAudioEnabled, config.FIFOEnabled, config.UDPEnabled)
+
+		// Restore PortAudio state
+		if config.PortAudioEnabled {
+			log.Printf("Attempting to restore PortAudio output (device %d)...", config.PortAudioDevice)
+			if err := s.manager.EnablePortAudioOutput(config.PortAudioDevice); err != nil {
+				log.Printf("Warning: Failed to restore PortAudio output: %v", err)
+			} else {
+				log.Printf("Successfully restored PortAudio output (device %d)", config.PortAudioDevice)
+			}
+		}
+
+		// Restore FIFO state
+		if config.FIFOEnabled && config.FIFOPath != "" {
+			log.Printf("Attempting to restore FIFO output (%s)...", config.FIFOPath)
+			if err := s.manager.EnableFIFOOutput(config.FIFOPath); err != nil {
+				log.Printf("Warning: Failed to restore FIFO output: %v", err)
+			} else {
+				log.Printf("Successfully restored FIFO output (%s)", config.FIFOPath)
+			}
+		}
+
+		// Note: UDP state is already restored via the UDPEnabled flag passed to NewRadioClient
+	}()
+
 	respondSuccess(w, "Connected successfully")
 }
 
@@ -234,7 +284,7 @@ func (s *APIServer) handleDisconnect(w http.ResponseWriter, r *http.Request) {
 
 // handleStatus handles GET /api/status
 func (s *APIServer) handleStatus(w http.ResponseWriter, r *http.Request) {
-	status := s.manager.GetStatus()
+	status := s.manager.GetStatusWithOutputs()
 	respondJSON(w, http.StatusOK, status)
 }
 
@@ -411,6 +461,189 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondSuccess(w, "Configuration updated successfully")
+}
+
+// handlePortAudioOutput handles POST /api/outputs/portaudio
+func (s *APIServer) handlePortAudioOutput(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsConnected() {
+		respondError(w, http.StatusConflict, "Not connected", "Connect to SDR server first")
+		return
+	}
+
+	var req OutputControlRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.Enabled {
+		// Enable PortAudio with specified device
+		deviceIndex := -1 // Default device
+		if req.DeviceIndex != nil {
+			deviceIndex = *req.DeviceIndex
+		}
+
+		if err := s.manager.EnablePortAudioOutput(deviceIndex); err != nil {
+			respondError(w, http.StatusInternalServerError, "Failed to enable PortAudio", err.Error())
+			return
+		}
+
+		// Save state to config
+		outputStatus := s.manager.GetOutputStatus()
+		fifoEnabled := outputStatus["fifo"].(map[string]interface{})["enabled"].(bool)
+		udpEnabled := outputStatus["udp"].(map[string]interface{})["enabled"].(bool)
+		if err := s.configManager.UpdateOutputStates(true, deviceIndex, fifoEnabled, udpEnabled); err != nil {
+			log.Printf("Warning: Failed to save output state: %v", err)
+		}
+
+		respondSuccess(w, "PortAudio output enabled")
+	} else {
+		// Disable PortAudio
+		if err := s.manager.DisablePortAudioOutput(); err != nil {
+			respondError(w, http.StatusInternalServerError, "Failed to disable PortAudio", err.Error())
+			return
+		}
+
+		// Save state to config
+		outputStatus := s.manager.GetOutputStatus()
+		fifoEnabled := outputStatus["fifo"].(map[string]interface{})["enabled"].(bool)
+		udpEnabled := outputStatus["udp"].(map[string]interface{})["enabled"].(bool)
+		if err := s.configManager.UpdateOutputStates(false, -1, fifoEnabled, udpEnabled); err != nil {
+			log.Printf("Warning: Failed to save output state: %v", err)
+		}
+
+		respondSuccess(w, "PortAudio output disabled")
+	}
+}
+
+// handleFIFOOutput handles POST /api/outputs/fifo
+func (s *APIServer) handleFIFOOutput(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsConnected() {
+		respondError(w, http.StatusConflict, "Not connected", "Connect to SDR server first")
+		return
+	}
+
+	var req OutputControlRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.Enabled {
+		// Enable FIFO at specified path
+		if req.Path == "" {
+			respondError(w, http.StatusBadRequest, "FIFO path is required", "")
+			return
+		}
+
+		if err := s.manager.EnableFIFOOutput(req.Path); err != nil {
+			respondError(w, http.StatusInternalServerError, "Failed to enable FIFO", err.Error())
+			return
+		}
+
+		// Save state to config
+		outputStatus := s.manager.GetOutputStatus()
+		portAudioEnabled := outputStatus["portaudio"].(map[string]interface{})["enabled"].(bool)
+		portAudioDevice := -1
+		if deviceIdx, ok := outputStatus["portaudio"].(map[string]interface{})["deviceIndex"].(int); ok {
+			portAudioDevice = deviceIdx
+		}
+		udpEnabled := outputStatus["udp"].(map[string]interface{})["enabled"].(bool)
+		if err := s.configManager.UpdateOutputStates(portAudioEnabled, portAudioDevice, true, udpEnabled); err != nil {
+			log.Printf("Warning: Failed to save output state: %v", err)
+		}
+
+		respondSuccess(w, "FIFO output enabled")
+	} else {
+		// Disable FIFO
+		if err := s.manager.DisableFIFOOutput(); err != nil {
+			respondError(w, http.StatusInternalServerError, "Failed to disable FIFO", err.Error())
+			return
+		}
+
+		// Save state to config
+		outputStatus := s.manager.GetOutputStatus()
+		portAudioEnabled := outputStatus["portaudio"].(map[string]interface{})["enabled"].(bool)
+		portAudioDevice := -1
+		if deviceIdx, ok := outputStatus["portaudio"].(map[string]interface{})["deviceIndex"].(int); ok {
+			portAudioDevice = deviceIdx
+		}
+		udpEnabled := outputStatus["udp"].(map[string]interface{})["enabled"].(bool)
+		if err := s.configManager.UpdateOutputStates(portAudioEnabled, portAudioDevice, false, udpEnabled); err != nil {
+			log.Printf("Warning: Failed to save output state: %v", err)
+		}
+
+		respondSuccess(w, "FIFO output disabled")
+	}
+}
+
+// handleUDPOutput handles POST /api/outputs/udp
+func (s *APIServer) handleUDPOutput(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsConnected() {
+		respondError(w, http.StatusConflict, "Not connected", "Connect to SDR server first")
+		return
+	}
+
+	var req OutputControlRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	if req.Enabled {
+		// Enable UDP with specified host and port
+		if req.Host == "" {
+			req.Host = "127.0.0.1" // Default host
+		}
+		if req.Port == 0 {
+			req.Port = 8888 // Default port
+		}
+
+		if err := s.manager.EnableUDPOutput(req.Host, req.Port); err != nil {
+			respondError(w, http.StatusInternalServerError, "Failed to enable UDP", err.Error())
+			return
+		}
+
+		// Save state to config
+		outputStatus := s.manager.GetOutputStatus()
+		portAudioEnabled := outputStatus["portaudio"].(map[string]interface{})["enabled"].(bool)
+		portAudioDevice := -1
+		if deviceIdx, ok := outputStatus["portaudio"].(map[string]interface{})["deviceIndex"].(int); ok {
+			portAudioDevice = deviceIdx
+		}
+		fifoEnabled := outputStatus["fifo"].(map[string]interface{})["enabled"].(bool)
+		if err := s.configManager.UpdateOutputStates(portAudioEnabled, portAudioDevice, fifoEnabled, true); err != nil {
+			log.Printf("Warning: Failed to save output state: %v", err)
+		}
+
+		respondSuccess(w, fmt.Sprintf("UDP output enabled (%s:%d)", req.Host, req.Port))
+	} else {
+		// Disable UDP
+		if err := s.manager.DisableUDPOutput(); err != nil {
+			respondError(w, http.StatusInternalServerError, "Failed to disable UDP", err.Error())
+			return
+		}
+
+		// Save state to config
+		outputStatus := s.manager.GetOutputStatus()
+		portAudioEnabled := outputStatus["portaudio"].(map[string]interface{})["enabled"].(bool)
+		portAudioDevice := -1
+		if deviceIdx, ok := outputStatus["portaudio"].(map[string]interface{})["deviceIndex"].(int); ok {
+			portAudioDevice = deviceIdx
+		}
+		fifoEnabled := outputStatus["fifo"].(map[string]interface{})["enabled"].(bool)
+		if err := s.configManager.UpdateOutputStates(portAudioEnabled, portAudioDevice, fifoEnabled, false); err != nil {
+			log.Printf("Warning: Failed to save output state: %v", err)
+		}
+
+		respondSuccess(w, "UDP output disabled")
+	}
+}
+
+// handleOutputStatus handles GET /api/outputs/status
+func (s *APIServer) handleOutputStatus(w http.ResponseWriter, r *http.Request) {
+	status := s.manager.GetOutputStatus()
+	respondJSON(w, http.StatusOK, status)
 }
 
 // handleLocalInstances handles GET /api/instances/local

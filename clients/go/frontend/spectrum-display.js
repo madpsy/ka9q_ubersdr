@@ -23,6 +23,9 @@ class SpectrumDisplay {
         this.bookmarks = [];  // Array of bookmark objects with {name, frequency, mode}
         this.modeCallback = null;  // Callback for mode changes from bookmark clicks
 
+        // Bands
+        this.bands = [];  // Array of band objects with {label, start, end, color}
+
         // Display parameters
         this.minDb = -100;
         this.maxDb = 0;
@@ -253,6 +256,9 @@ class SpectrumDisplay {
         const graphWidth = width - marginLeft - marginRight;
         const graphHeight = height - marginTop - marginBottom;
 
+        // Draw band backgrounds FIRST (behind everything)
+        this.drawBandBackgrounds(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight);
+
         // Draw dB scale
         ctx.fillStyle = '#ffffff';
         ctx.font = '10px monospace';
@@ -315,6 +321,101 @@ class SpectrumDisplay {
         // Draw tuned frequency marker and bandwidth filter
         this.drawTunedFrequencyMarker(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight);
         this.drawBandwidthFilter(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight);
+    }
+
+    drawBandBackgrounds(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
+        if (!this.bands || this.bands.length === 0 || this.totalBandwidth === 0) {
+            return;
+        }
+
+        const startFreq = this.centerFreq - this.totalBandwidth / 2;
+        const endFreq = this.centerFreq + this.totalBandwidth / 2;
+
+        // Y position and height for band section (aligned with bookmark tops at Y=0)
+        const bandY = 0;
+        const bandHeight = 18;
+
+        // First, fill entire bookmark section with light grey to show gaps between bands
+        ctx.fillStyle = '#d3d3d3';
+        ctx.fillRect(marginLeft, bandY, graphWidth, bandHeight);
+
+        // Sort bands by width (widest first) for proper layering
+        const sortedBands = [...this.bands].sort((a, b) => {
+            const widthA = a.end - a.start;
+            const widthB = b.end - b.start;
+            return widthB - widthA;
+        });
+
+        // Draw colored rectangles for each band
+        for (const band of sortedBands) {
+            const bandStart = band.start || 0;
+            const bandEnd = band.end || 0;
+
+            // Check if band overlaps with visible range
+            if (bandEnd < startFreq || bandStart > endFreq) continue;
+
+            // Calculate visible portion of band
+            const visibleStart = Math.max(bandStart, startFreq);
+            const visibleEnd = Math.min(bandEnd, endFreq);
+
+            // Calculate x positions
+            const startX = marginLeft + ((visibleStart - startFreq) / this.totalBandwidth) * graphWidth;
+            const endX = marginLeft + ((visibleEnd - startFreq) / this.totalBandwidth) * graphWidth;
+            const width = endX - startX;
+
+            // Draw colored rectangle with semi-transparent stipple pattern
+            ctx.fillStyle = band.color || '#cccccc';
+            ctx.globalAlpha = 0.6;
+            ctx.fillRect(startX, bandY, width, bandHeight);
+            ctx.globalAlpha = 1.0;
+        }
+
+        // Draw band labels with intelligent spacing
+        for (const band of this.bands) {
+            const bandStart = band.start || 0;
+            const bandEnd = band.end || 0;
+            const label = band.label || 'Unknown';
+
+            // Check if band overlaps with visible range
+            if (bandEnd < startFreq || bandStart > endFreq) continue;
+
+            // Calculate visible portion of band
+            const visibleStart = Math.max(bandStart, startFreq);
+            const visibleEnd = Math.min(bandEnd, endFreq);
+
+            // Calculate x positions
+            const startX = marginLeft + ((visibleStart - startFreq) / this.totalBandwidth) * graphWidth;
+            const endX = marginLeft + ((visibleEnd - startFreq) / this.totalBandwidth) * graphWidth;
+            const width = endX - startX;
+
+            // Measure label width
+            ctx.font = 'bold 9px monospace';
+            const labelWidth = ctx.measureText(label).width;
+
+            // Determine how many labels to draw based on band width
+            // Only show label if band is wide enough (at least 50 pixels)
+            if (width < 50) continue;
+
+            const labelSpacing = labelWidth + 60;  // Increased minimum spacing between labels
+            const numLabels = Math.max(1, Math.floor(width / labelSpacing));
+
+            // Draw labels
+            ctx.fillStyle = 'black';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            if (numLabels === 1) {
+                // Single label in center
+                const centerX = (startX + endX) / 2;
+                ctx.fillText(label, centerX, bandY + bandHeight / 2);
+            } else {
+                // Multiple labels evenly spaced
+                for (let i = 0; i < numLabels; i++) {
+                    const labelX = startX + (width / (numLabels + 1)) * (i + 1);
+                    ctx.fillText(label, labelX, bandY + bandHeight / 2);
+                }
+            }
+        }
     }
 
     drawBookmarks(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
@@ -398,12 +499,12 @@ class SpectrumDisplay {
         ctx.setLineDash([]);  // Reset dash
         ctx.lineWidth = 1;
 
-        // Draw frequency label above the line
+        // Draw frequency label above the line (moved down to avoid overlap with bands/bookmarks)
         const freqMhz = this.tunedFreq / 1e6;
         ctx.fillStyle = '#FFA500';  // Orange
         ctx.font = 'bold 10px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(`${freqMhz.toFixed(6)} MHz`, x, marginTop - 10);
+        ctx.fillText(`${freqMhz.toFixed(6)} MHz`, x, marginTop - 5);
     }
 
     drawBandwidthFilter(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
@@ -1191,6 +1292,16 @@ class SpectrumDisplay {
             this.draw();
         }
     }
+
+    setBands(bands) {
+        this.bands = bands || [];
+        console.log(`Spectrum display: ${this.bands.length} bands set`);
+        // Redraw to show bands
+        if (this.spectrumData) {
+            this.draw();
+        }
+    }
+
     setModeCallback(callback) {
         this.modeCallback = callback;
     }

@@ -37,6 +37,7 @@ class UberSDRClient {
         this.frequencyButtons = document.querySelectorAll('.frequency-buttons .btn');
         this.bandButtons = document.querySelectorAll('.btn-band');
         this.bookmarkSelect = document.getElementById('bookmark-select');
+        this.bandSelect = document.getElementById('band-select');
 
         // Mode and bandwidth elements
         this.modeSelect = document.getElementById('mode');
@@ -153,6 +154,9 @@ class UberSDRClient {
         // RF Spectrum display
         this.spectrumDisplay = null;
 
+        // Bands (stored for later use when spectrum is enabled)
+        this.loadedBands = [];
+
         // Saved instances
         this.savedInstances = [];
     }
@@ -223,6 +227,9 @@ class UberSDRClient {
 
         // Bookmark selection
         this.bookmarkSelect.addEventListener('change', () => this.onBookmarkSelected());
+
+        // Band selection
+        this.bandSelect.addEventListener('change', () => this.onBandSelected());
 
         // Mode change - but not when triggered by bookmark
         this.modeSelect.addEventListener('change', () => {
@@ -397,6 +404,8 @@ class UberSDRClient {
             this.showSuccess('Connected to SDR server');
             // Load bookmarks after successful connection
             this.loadBookmarks();
+            // Load bands after successful connection
+            this.loadBands();
         } else {
             this.showInfo(`Disconnected: ${data.reason || 'Unknown reason'}`);
             // Clear bookmarks on disconnect
@@ -444,8 +453,11 @@ class UberSDRClient {
                 this.showSuccess(data.message || 'Connected successfully');
                 this.updateStatus();
 
-                // Load bookmarks after successful connection
-                setTimeout(() => this.loadBookmarks(), 500);
+                // Load bookmarks and bands after successful connection
+                setTimeout(() => {
+                    this.loadBookmarks();
+                    this.loadBands();
+                }, 500);
 
                 // Update output status after a delay to allow backend restoration
                 setTimeout(() => this.updateOutputStatus(), 1000);
@@ -496,9 +508,10 @@ class UberSDRClient {
             this.updateConnectionUI();
             this.updateStatusDisplay(status);
 
-            // Load bookmarks if connected and not already loaded
+            // Load bookmarks and bands if connected and not already loaded
             if (status.connected && this.bookmarkSelect && this.bookmarkSelect.options.length <= 1) {
                 this.loadBookmarks();
+                this.loadBands();
             }
         } catch (error) {
             console.error('Failed to fetch status:', error);
@@ -1611,6 +1624,8 @@ class UberSDRClient {
                 console.log(`Spectrum clicked: tuning to ${frequency} Hz`);
                 // Update frequency input
                 this.frequencyInput.value = frequency;
+                // Update spectrum display's tuned frequency immediately for visual feedback
+                this.spectrumDisplay.tunedFreq = frequency;
                 // Send complete tune request with current mode and bandwidth
                 if (this.connected) {
                     this.applySettings();
@@ -1664,6 +1679,12 @@ class UberSDRClient {
                 if (bookmarks.length > 0) {
                     this.spectrumDisplay.setBookmarks(bookmarks);
                 }
+            }
+
+            // Set bands if already loaded
+            if (this.loadedBands && this.loadedBands.length > 0) {
+                console.log(`Applying ${this.loadedBands.length} previously loaded bands to spectrum display`);
+                this.spectrumDisplay.setBands(this.loadedBands);
             }
         }
 
@@ -2594,6 +2615,120 @@ class UberSDRClient {
         } catch (error) {
             console.error('Error parsing bookmark:', error);
             this.showError('Bookmark Error', 'Failed to load bookmark');
+        }
+    }
+
+    // Band Methods
+
+    async loadBands() {
+        if (!this.connected) {
+            console.log('Not connected, skipping band load');
+            return;
+        }
+
+        console.log('Loading bands from API...');
+        try {
+            const response = await fetch(`${this.apiBase}/api/bands`);
+            console.log('Bands API response status:', response.status);
+
+            if (response.ok) {
+                const bands = await response.json();
+                console.log('Received bands:', bands);
+
+                // Assign colors to bands (rainbow gradient with pastel colors)
+                const colors = [
+                    '#ffcccc', '#ffd9cc', '#ffe6cc', '#ffffcc', '#e6ffcc',
+                    '#ccffcc', '#ccffe6', '#ccffff', '#cce6ff', '#ccccff',
+                    '#d9ccff', '#e6ccff', '#ffccff', '#ffcce6'
+                ];
+
+                if (bands && bands.length > 0) {
+                    bands.forEach((band, index) => {
+                        band.color = colors[index % colors.length];
+                    });
+
+                    // Store bands for later use
+                    this.loadedBands = bands;
+
+                    // Populate band dropdown
+                    this.populateBands(bands);
+
+                    // Update spectrum display with bands (if it exists)
+                    if (this.spectrumDisplay) {
+                        console.log('Setting bands on spectrum display...');
+                        this.spectrumDisplay.setBands(bands);
+                    } else {
+                        console.log('Spectrum display not initialized yet - bands stored for later');
+                    }
+
+                    console.log(`Successfully loaded ${bands.length} bands`);
+                } else {
+                    console.log('No bands available');
+                }
+            } else {
+                const errorText = await response.text();
+                console.error('Failed to load bands:', response.status, errorText);
+            }
+        } catch (error) {
+            console.error('Error loading bands:', error);
+        }
+    }
+
+    populateBands(bands) {
+        if (!this.bandSelect) return;
+
+        // Clear existing options except the first one
+        this.bandSelect.innerHTML = '<option value="">-- Select Band --</option>';
+
+        // Add bands
+        if (bands && bands.length > 0) {
+            bands.forEach(band => {
+                const option = document.createElement('option');
+                option.value = JSON.stringify(band); // Store full band data
+                option.textContent = band.label || 'Unnamed';
+                this.bandSelect.appendChild(option);
+            });
+
+            // Enable the dropdown
+            this.bandSelect.disabled = false;
+            console.log(`Populated ${bands.length} bands in dropdown`);
+        } else {
+            this.bandSelect.disabled = true;
+            console.log('No bands available for dropdown');
+        }
+    }
+
+    onBandSelected() {
+        const selectedValue = this.bandSelect.value;
+
+        // Reset to default selection after processing
+        setTimeout(() => {
+            this.bandSelect.value = '';
+        }, 100);
+
+        if (!selectedValue) return;
+
+        try {
+            const band = JSON.parse(selectedValue);
+            console.log('Selected band:', band);
+
+            // Calculate center frequency of the band
+            const centerFreq = Math.floor((band.start + band.end) / 2);
+
+            // Update frequency input
+            this.frequencyInput.value = centerFreq;
+
+            // Apply the frequency change if connected
+            if (this.connected) {
+                this.updateFrequency();
+                this.showSuccess(`Tuned to ${band.label}: ${this.formatFrequency(centerFreq)}`);
+            } else {
+                this.showInfo(`Band loaded: ${band.label} (connect to apply)`);
+            }
+
+        } catch (error) {
+            console.error('Error parsing band:', error);
+            this.showError('Band Error', 'Failed to load band');
         }
     }
 }

@@ -1585,3 +1585,45 @@ func (m *WebSocketManager) GetBookmarks() ([]map[string]interface{}, error) {
 	log.Printf("Fetched %d bookmarks from SDR server", len(bookmarks))
 	return bookmarks, nil
 }
+
+// GetBands fetches bands from the connected SDR server
+func (m *WebSocketManager) GetBands() ([]map[string]interface{}, error) {
+	m.mu.RLock()
+	if !m.connected || m.client == nil {
+		m.mu.RUnlock()
+		return nil, fmt.Errorf("not connected to SDR server")
+	}
+
+	// Build the API URL
+	protocol := "http"
+	if m.client.ssl {
+		protocol = "https"
+	}
+	apiURL := fmt.Sprintf("%s://%s:%d/api/bands", protocol, m.client.host, m.client.port)
+	m.mu.RUnlock()
+
+	// Make HTTP request to fetch bands
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch bands: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch bands: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse JSON response
+	var bands []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&bands); err != nil {
+		return nil, fmt.Errorf("failed to parse bands: %w", err)
+	}
+
+	log.Printf("Fetched %d bands from SDR server", len(bands))
+	return bands, nil
+}

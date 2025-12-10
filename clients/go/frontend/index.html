@@ -95,11 +95,19 @@
                     <button class="btn btn-band" data-freq="24915000">12m</button>
                     <button class="btn btn-band" data-freq="28074000">10m</button>
                 </div>
-                <div class="bookmark-selector" style="margin-top: 15px;">
-                    <label for="bookmark-select">Bookmarks:</label>
-                    <select id="bookmark-select" disabled>
-                        <option value="">-- Select Bookmark --</option>
-                    </select>
+                <div class="bookmark-selector" style="margin-top: 15px; display: flex; gap: 20px; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <label for="bookmark-select">Bookmarks:</label>
+                        <select id="bookmark-select" disabled>
+                            <option value="">-- Select Bookmark --</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <label for="band-select">Band:</label>
+                        <select id="band-select" disabled style="min-width: 200px;">
+                            <option value="">-- Select Band --</option>
+                        </select>
+                    </div>
                 </div>
             </section>
 

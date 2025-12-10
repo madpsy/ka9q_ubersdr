@@ -126,6 +126,9 @@ func (s *APIServer) setupRoutes() {
 	// Bookmarks endpoint
 	api.HandleFunc("/bookmarks", s.handleBookmarks).Methods("GET", "OPTIONS")
 
+	// Bands endpoint
+	api.HandleFunc("/bands", s.handleBands).Methods("GET", "OPTIONS")
+
 	// WebSocket endpoint for real-time updates
 	s.router.HandleFunc("/ws", s.handleWebSocket)
 
@@ -1461,6 +1464,24 @@ func (s *APIServer) handleBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, bookmarks)
+}
+
+// handleBands handles GET /api/bands
+// Fetches bands from the connected SDR server
+func (s *APIServer) handleBands(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsConnected() {
+		respondError(w, http.StatusConflict, "Not connected", "Connect to SDR server first")
+		return
+	}
+
+	// Get bands from the SDR server via the manager
+	bands, err := s.manager.GetBands()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to fetch bands", err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, bands)
 }
 
 // Helper functions

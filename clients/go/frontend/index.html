@@ -131,14 +131,14 @@
                 <div class="info-box">
                     <p><strong>Note:</strong> Displays the RF spectrum and waterfall from the SDR receiver. Shows the actual RF spectrum centered on your tuned frequency with 200 kHz bandwidth by default.</p>
                 </div>
-                <div id="spectrum-display-container" style="display: block;">
+                <div id="spectrum-display-container" style="display: none;">
                     <div class="spectrum-status">
                         <span class="label">Spectrum Status:</span>
                         <span id="spectrum-status" class="status-badge disconnected">Not streaming</span>
                     </div>
                     <div class="spectrum-controls" style="margin: 10px 0; display: flex; gap: 15px; flex-wrap: wrap;">
                         <label style="display: flex; align-items: center; gap: 5px;">
-                            <input type="checkbox" id="spectrum-zoom-scroll" checked>
+                            <input type="checkbox" id="spectrum-zoom-scroll">
                             <span>Zoom Scroll</span>
                         </label>
                         <label style="display: flex; align-items: center; gap: 5px;">
@@ -146,11 +146,11 @@
                             <span>Pan Scroll</span>
                         </label>
                         <label style="display: flex; align-items: center; gap: 5px;">
-                            <input type="checkbox" id="spectrum-click-tune" checked>
+                            <input type="checkbox" id="spectrum-click-tune">
                             <span>Click Tune</span>
                         </label>
                         <label style="display: flex; align-items: center; gap: 5px;">
-                            <input type="checkbox" id="spectrum-center-tune" checked>
+                            <input type="checkbox" id="spectrum-center-tune">
                             <span>Center Tune</span>
                         </label>
                     </div>

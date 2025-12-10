@@ -368,6 +368,11 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			AudioPreviewEnabled: savedConfig.AudioPreviewEnabled,
 			AudioPreviewMuted:   savedConfig.AudioPreviewMuted,
 			AutoConnect:         savedConfig.AutoConnect,
+			SpectrumEnabled:     savedConfig.SpectrumEnabled,
+			SpectrumZoomScroll:  savedConfig.SpectrumZoomScroll,
+			SpectrumPanScroll:   savedConfig.SpectrumPanScroll,
+			SpectrumClickTune:   savedConfig.SpectrumClickTune,
+			SpectrumCenterTune:  savedConfig.SpectrumCenterTune,
 		}
 		respondJSON(w, http.StatusOK, config)
 		return

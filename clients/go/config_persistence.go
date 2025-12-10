@@ -30,6 +30,11 @@ type ClientConfig struct {
 	AudioPreviewEnabled bool    `json:"audioPreviewEnabled"`
 	AudioPreviewMuted   bool    `json:"audioPreviewMuted"`
 	AutoConnect         bool    `json:"autoConnect"`
+	SpectrumEnabled     bool    `json:"spectrumEnabled"`
+	SpectrumZoomScroll  bool    `json:"spectrumZoomScroll"`
+	SpectrumPanScroll   bool    `json:"spectrumPanScroll"`
+	SpectrumClickTune   bool    `json:"spectrumClickTune"`
+	SpectrumCenterTune  bool    `json:"spectrumCenterTune"`
 	APIPort             int     `json:"apiPort"`
 }
 
@@ -209,6 +214,21 @@ func (cm *ConfigManager) UpdateNR2Config(req ConfigUpdateRequest) error {
 		}
 		if req.AutoConnect != nil {
 			c.AutoConnect = *req.AutoConnect
+		}
+		if req.SpectrumEnabled != nil {
+			c.SpectrumEnabled = *req.SpectrumEnabled
+		}
+		if req.SpectrumZoomScroll != nil {
+			c.SpectrumZoomScroll = *req.SpectrumZoomScroll
+		}
+		if req.SpectrumPanScroll != nil {
+			c.SpectrumPanScroll = *req.SpectrumPanScroll
+		}
+		if req.SpectrumClickTune != nil {
+			c.SpectrumClickTune = *req.SpectrumClickTune
+		}
+		if req.SpectrumCenterTune != nil {
+			c.SpectrumCenterTune = *req.SpectrumCenterTune
 		}
 	})
 }

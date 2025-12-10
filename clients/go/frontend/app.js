@@ -177,6 +177,7 @@ class UberSDRClient {
         // RF Spectrum settings
         this.spectrumEnabled.addEventListener('change', () => {
             this.toggleSpectrumDisplay();
+            this.saveSpectrumConfig();
         });
         
         // Spectrum control checkboxes
@@ -594,19 +595,23 @@ class UberSDRClient {
                     }
                 }
                 
-                // Load spectrum control settings
-                if (config.spectrumZoomScroll !== undefined) {
-                    this.spectrumZoomScrollCheckbox.checked = config.spectrumZoomScroll;
-                }
-                if (config.spectrumPanScroll !== undefined) {
-                    this.spectrumPanScrollCheckbox.checked = config.spectrumPanScroll;
-                }
-                if (config.spectrumClickTune !== undefined) {
-                    this.spectrumClickTuneCheckbox.checked = config.spectrumClickTune;
-                }
-                if (config.spectrumCenterTune !== undefined) {
-                    this.spectrumCenterTuneCheckbox.checked = config.spectrumCenterTune;
-                }
+                // Load spectrum control settings with defaults
+                // Note: spectrumEnabled is always unchecked on page load to avoid timing issues
+                this.spectrumEnabled.checked = false;
+                this.spectrumDisplayContainer.style.display = 'none';
+
+                // Set spectrum control checkboxes - use saved values or defaults
+                this.spectrumZoomScrollCheckbox.checked = (config.spectrumZoomScroll !== undefined) ? config.spectrumZoomScroll : true;
+                this.spectrumPanScrollCheckbox.checked = (config.spectrumPanScroll !== undefined) ? config.spectrumPanScroll : false;
+                this.spectrumClickTuneCheckbox.checked = (config.spectrumClickTune !== undefined) ? config.spectrumClickTune : true;
+                this.spectrumCenterTuneCheckbox.checked = (config.spectrumCenterTune !== undefined) ? config.spectrumCenterTune : true;
+
+                console.log('Loaded spectrum config (enabled always starts unchecked):', {
+                    zoomScroll: config.spectrumZoomScroll,
+                    panScroll: config.spectrumPanScroll,
+                    clickTune: config.spectrumClickTune,
+                    centerTune: config.spectrumCenterTune
+                });
                 
                 console.log('Loaded saved configuration');
             }
@@ -666,11 +671,14 @@ class UberSDRClient {
 
     async saveSpectrumConfig() {
         const config = {
+            spectrumEnabled: this.spectrumEnabled.checked,
             spectrumZoomScroll: this.spectrumZoomScrollCheckbox.checked,
             spectrumPanScroll: this.spectrumPanScrollCheckbox.checked,
             spectrumClickTune: this.spectrumClickTuneCheckbox.checked,
             spectrumCenterTune: this.spectrumCenterTuneCheckbox.checked
         };
+
+        console.log('Saving spectrum config:', config);
 
         try {
             const response = await fetch(`${this.apiBase}/api/config`, {
@@ -682,6 +690,9 @@ class UberSDRClient {
             if (!response.ok) {
                 const data = await response.json();
                 console.error('Failed to save spectrum config:', data.message || data.error);
+            } else {
+                const result = await response.json();
+                console.log('Spectrum config saved successfully:', result);
             }
         } catch (error) {
             console.error('Error saving spectrum config:', error);

@@ -68,6 +68,11 @@ type ConfigUpdateRequest struct {
 	AudioPreviewEnabled *bool    `json:"audioPreviewEnabled,omitempty"`
 	AudioPreviewMuted   *bool    `json:"audioPreviewMuted,omitempty"`
 	AutoConnect         *bool    `json:"autoConnect,omitempty"`
+	SpectrumEnabled     *bool    `json:"spectrumEnabled,omitempty"`
+	SpectrumZoomScroll  *bool    `json:"spectrumZoomScroll,omitempty"`
+	SpectrumPanScroll   *bool    `json:"spectrumPanScroll,omitempty"`
+	SpectrumClickTune   *bool    `json:"spectrumClickTune,omitempty"`
+	SpectrumCenterTune  *bool    `json:"spectrumCenterTune,omitempty"`
 }
 
 // API Response Types
@@ -136,6 +141,11 @@ type ConfigResponse struct {
 	AudioPreviewEnabled bool    `json:"audioPreviewEnabled"`
 	AudioPreviewMuted   bool    `json:"audioPreviewMuted"`
 	AutoConnect         bool    `json:"autoConnect"`
+	SpectrumEnabled     bool    `json:"spectrumEnabled"`
+	SpectrumZoomScroll  bool    `json:"spectrumZoomScroll"`
+	SpectrumPanScroll   bool    `json:"spectrumPanScroll"`
+	SpectrumClickTune   bool    `json:"spectrumClickTune"`
+	SpectrumCenterTune  bool    `json:"spectrumCenterTune"`
 }
 
 // ErrorResponse represents an error response

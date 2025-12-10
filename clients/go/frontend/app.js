@@ -36,6 +36,7 @@ class UberSDRClient {
         this.frequencyInput = document.getElementById('frequency-input');
         this.frequencyButtons = document.querySelectorAll('.frequency-buttons .btn');
         this.bandButtons = document.querySelectorAll('.btn-band');
+        this.bookmarkSelect = document.getElementById('bookmark-select');
 
         // Mode and bandwidth elements
         this.modeSelect = document.getElementById('mode');
@@ -220,6 +221,9 @@ class UberSDRClient {
             });
         });
 
+        // Bookmark selection
+        this.bookmarkSelect.addEventListener('change', () => this.onBookmarkSelected());
+
         // Mode change
         this.modeSelect.addEventListener('change', () => this.updateModeDefaults());
 
@@ -379,8 +383,12 @@ class UberSDRClient {
 
         if (data.connected) {
             this.showSuccess('Connected to SDR server');
+            // Load bookmarks after successful connection
+            this.loadBookmarks();
         } else {
             this.showInfo(`Disconnected: ${data.reason || 'Unknown reason'}`);
+            // Clear bookmarks on disconnect
+            this.clearBookmarks();
         }
     }
 
@@ -2366,6 +2374,125 @@ class UberSDRClient {
             }
         } catch (error) {
             console.error('Failed to check serial connection:', error);
+        }
+    }
+
+    // Bookmark Methods
+
+    async loadBookmarks() {
+        try {
+            const response = await fetch(`${this.apiBase}/api/bookmarks`);
+            if (response.ok) {
+                const bookmarks = await response.json();
+                this.populateBookmarks(bookmarks);
+                console.log(`Loaded ${bookmarks.length} bookmarks`);
+            } else {
+                console.error('Failed to load bookmarks:', response.statusText);
+                this.clearBookmarks();
+            }
+        } catch (error) {
+            console.error('Error loading bookmarks:', error);
+            this.clearBookmarks();
+        }
+    }
+
+    populateBookmarks(bookmarks) {
+        if (!this.bookmarkSelect) return;
+
+        // Clear existing options except the first one
+        this.bookmarkSelect.innerHTML = '<option value="">-- Select Bookmark --</option>';
+
+        // Add bookmarks
+        if (bookmarks && bookmarks.length > 0) {
+            bookmarks.forEach(bookmark => {
+                const option = document.createElement('option');
+                option.value = JSON.stringify(bookmark); // Store full bookmark data
+                option.textContent = bookmark.name || 'Unnamed';
+                this.bookmarkSelect.appendChild(option);
+            });
+
+            // Enable the dropdown
+            this.bookmarkSelect.disabled = false;
+            console.log(`Populated ${bookmarks.length} bookmarks`);
+        } else {
+            this.bookmarkSelect.disabled = true;
+            console.log('No bookmarks available');
+        }
+    }
+
+    clearBookmarks() {
+        if (!this.bookmarkSelect) return;
+
+        this.bookmarkSelect.innerHTML = '<option value="">-- Select Bookmark --</option>';
+        this.bookmarkSelect.disabled = true;
+    }
+
+    onBookmarkSelected() {
+        const selectedValue = this.bookmarkSelect.value;
+
+        // Reset to default selection after processing
+        setTimeout(() => {
+            this.bookmarkSelect.value = '';
+        }, 100);
+
+        if (!selectedValue) return;
+
+        try {
+            const bookmark = JSON.parse(selectedValue);
+            console.log('Selected bookmark:', bookmark);
+
+            // Extract frequency and mode
+            const frequency = bookmark.frequency;
+            const mode = bookmark.mode;
+
+            if (!frequency) {
+                console.error('Bookmark missing frequency');
+                return;
+            }
+
+            // Map mode names (similar to Python client)
+            const modeMap = {
+                'CWR': 'cw',
+                'CW': 'cw',
+                'cw': 'cwu',  // Default CW to CW-U
+                'cwu': 'cwu',
+                'cwl': 'cwl'
+            };
+
+            let mappedMode = mode ? mode.toLowerCase() : 'usb';
+            if (modeMap[mode]) {
+                mappedMode = modeMap[mode];
+            }
+
+            // Update frequency input
+            this.frequencyInput.value = frequency;
+
+            // Update mode select if mode is provided
+            if (mode) {
+                // Check if the mode exists in the select options
+                const modeOption = Array.from(this.modeSelect.options).find(
+                    opt => opt.value === mappedMode
+                );
+                if (modeOption) {
+                    this.modeSelect.value = mappedMode;
+                    // Update bandwidth defaults for the new mode
+                    this.updateModeDefaults();
+                } else {
+                    console.warn(`Mode ${mappedMode} not found in mode select, keeping current mode`);
+                }
+            }
+
+            // Apply the changes if connected
+            if (this.connected) {
+                this.updateFrequency();
+                this.showSuccess(`Loaded bookmark: ${bookmark.name}`);
+            } else {
+                this.showInfo(`Bookmark loaded: ${bookmark.name} (connect to apply)`);
+            }
+
+        } catch (error) {
+            console.error('Error parsing bookmark:', error);
+            this.showError('Bookmark Error', 'Failed to load bookmark');
         }
     }
 }

@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -1540,4 +1542,46 @@ func (m *WebSocketManager) GetSerialServerStatus() map[string]interface{} {
 		"frequency": m.serialServer.GetCachedFrequency(),
 		"mode":      m.serialServer.GetCachedMode(),
 	}
+}
+
+// GetBookmarks fetches bookmarks from the connected SDR server
+func (m *WebSocketManager) GetBookmarks() ([]map[string]interface{}, error) {
+	m.mu.RLock()
+	if !m.connected || m.client == nil {
+		m.mu.RUnlock()
+		return nil, fmt.Errorf("not connected to SDR server")
+	}
+
+	// Build the API URL
+	protocol := "http"
+	if m.client.ssl {
+		protocol = "https"
+	}
+	apiURL := fmt.Sprintf("%s://%s:%d/api/bookmarks", protocol, m.client.host, m.client.port)
+	m.mu.RUnlock()
+
+	// Make HTTP request to fetch bookmarks
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch bookmarks: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch bookmarks: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse JSON response
+	var bookmarks []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&bookmarks); err != nil {
+		return nil, fmt.Errorf("failed to parse bookmarks: %w", err)
+	}
+
+	log.Printf("Fetched %d bookmarks from SDR server", len(bookmarks))
+	return bookmarks, nil
 }

@@ -123,6 +123,9 @@ func (s *APIServer) setupRoutes() {
 	api.HandleFunc("/instances/local", s.handleLocalInstances).Methods("GET", "OPTIONS")
 	api.HandleFunc("/instances/public", s.handlePublicInstances).Methods("GET", "OPTIONS")
 
+	// Bookmarks endpoint
+	api.HandleFunc("/bookmarks", s.handleBookmarks).Methods("GET", "OPTIONS")
+
 	// WebSocket endpoint for real-time updates
 	s.router.HandleFunc("/ws", s.handleWebSocket)
 
@@ -1440,6 +1443,24 @@ func (s *APIServer) handleSerialPorts(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"ports": ports,
 	})
+}
+
+// handleBookmarks handles GET /api/bookmarks
+// Fetches bookmarks from the connected SDR server
+func (s *APIServer) handleBookmarks(w http.ResponseWriter, r *http.Request) {
+	if !s.manager.IsConnected() {
+		respondError(w, http.StatusConflict, "Not connected", "Connect to SDR server first")
+		return
+	}
+
+	// Get bookmarks from the SDR server via the manager
+	bookmarks, err := s.manager.GetBookmarks()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to fetch bookmarks", err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, bookmarks)
 }
 
 // Helper functions

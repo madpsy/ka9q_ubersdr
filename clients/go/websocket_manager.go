@@ -864,17 +864,30 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 
 	// Update client state with Lock
 	m.mu.Lock()
+	// Track if we need to reset NR2 learning
+	needsNR2Reset := false
+
 	if req.Frequency != nil {
 		m.client.frequency = *req.Frequency
+		needsNR2Reset = true
 	}
 	if req.Mode != "" {
 		m.client.mode = req.Mode
+		needsNR2Reset = true
 	}
 	if req.BandwidthLow != nil {
 		m.client.bandwidthLow = req.BandwidthLow
+		needsNR2Reset = true
 	}
 	if req.BandwidthHigh != nil {
 		m.client.bandwidthHigh = req.BandwidthHigh
+		needsNR2Reset = true
+	}
+
+	// Reset NR2 noise learning when frequency/mode/bandwidth changes
+	if needsNR2Reset && m.client.nr2Processor != nil && m.client.nr2Enabled {
+		m.client.nr2Processor.ResetLearning()
+		log.Printf("NR2: Reset noise learning due to frequency/mode/bandwidth change")
 	}
 	m.mu.Unlock()
 
@@ -956,6 +969,24 @@ func (m *WebSocketManager) UpdateConfig(req ConfigUpdateRequest) error {
 
 	if req.NR2Enabled != nil {
 		m.client.nr2Enabled = *req.NR2Enabled
+
+		if *req.NR2Enabled {
+			// Create NR2 processor if it doesn't exist
+			if m.client.nr2Processor == nil {
+				m.client.nr2Processor = NewNR2Processor(m.client.sampleRate, 2048, 4)
+				m.client.nr2Processor.SetParameters(m.client.nr2Strength, m.client.nr2Floor, m.client.nr2AdaptRate)
+				log.Printf("NR2 processor created (strength=%.1f%%, floor=%.1f%%, adapt=%.1f%%)",
+					m.client.nr2Strength, m.client.nr2Floor, m.client.nr2AdaptRate)
+			}
+			// Enable and reset learning whenever NR2 is enabled
+			m.client.nr2Processor.Enabled = true
+			m.client.nr2Processor.ResetLearning()
+			log.Printf("NR2 noise reduction enabled, learning noise profile...")
+		} else if m.client.nr2Processor != nil {
+			// Disable processor when disabling NR2
+			m.client.nr2Processor.Enabled = false
+			log.Printf("NR2 noise reduction disabled")
+		}
 	}
 	if req.NR2Strength != nil {
 		m.client.nr2Strength = *req.NR2Strength

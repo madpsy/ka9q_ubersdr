@@ -1,18 +1,21 @@
 # Go Radio Client for ka9q_ubersdr
 
-A command-line Go client for connecting to the ka9q_ubersdr WebSocket server to receive and output radio audio.
+A command-line and REST API Go client for connecting to the ka9q_ubersdr WebSocket server to receive and output radio audio.
 
 ## Features
 
+- **🌐 REST API & Web Interface**: Control the client via HTTP API with a modern web UI
+- **🎛️ On-the-Fly Tuning**: Change frequency, mode, and bandwidth without reconnecting (like Python client)
 - **Connection validation**: Checks server permission before connecting (respects IP bans, session limits, etc.)
 - Connect to ka9q_ubersdr WebSocket server
-- Support for multiple demodulation modes (AM, USB, LSB, FM, etc.)
+- Support for multiple demodulation modes (AM, USB, LSB, FM, IQ, etc.)
 - Configurable frequency and bandwidth
 - **NR2 Spectral Subtraction Noise Reduction**: FFT-based noise reduction with adaptive learning
 - Multiple output options:
   - **PortAudio**: Cross-platform real-time audio playback (Windows, macOS, Linux)
   - **stdout**: Raw PCM output to stdout (for piping to other tools)
   - **WAV file**: Record to PCM WAV file with optional time limit
+- **WebSocket Updates**: Real-time status updates for web interface
 
 ## Requirements
 
@@ -67,6 +70,24 @@ PortAudio is typically bundled with the Go bindings. If you encounter issues:
 - Or use MSYS2: `pacman -S mingw-w64-x86_64-portaudio`
 
 ## Usage
+
+### API Mode (Web Interface)
+
+Run the client with a REST API and web interface:
+
+```bash
+# Start API server on default port (8090)
+./radio_client --api
+
+# Start on custom port
+./radio_client --api --api-port 9000
+```
+
+Then open your browser to `http://localhost:8090` to access the web interface.
+
+**See [API_README.md](API_README.md) for complete REST API documentation.**
+
+### CLI Mode (Command Line)
 
 ### Basic Examples
 
@@ -448,11 +469,44 @@ Use `--list-devices` to see all available devices and their indices, then use `-
 - Increase `-nr2-floor` (try 12-15%)
 - Ensure signal is strong enough (NR2 works best with SNR > 0 dB)
 
+## API Mode
+
+The Go client now includes a full REST API and web interface for controlling the radio. Key features:
+
+- **Connect/Disconnect**: Manage SDR server connections via HTTP
+- **Tune Command**: Change frequency/mode/bandwidth without reconnecting (matches Python client functionality)
+- **Audio Device Selection**: List and select audio output devices
+- **Real-time Updates**: WebSocket for instant status updates
+- **Modern Web UI**: Responsive interface with frequency controls, band buttons, and status display
+
+For complete API documentation, see [API_README.md](API_README.md).
+
+### Quick API Examples
+
+```bash
+# Start API server
+./radio_client --api
+
+# Connect to SDR (using curl)
+curl -X POST http://localhost:8090/api/connect \
+  -H "Content-Type: application/json" \
+  -d '{"host":"localhost","port":8080,"frequency":14074000,"mode":"usb"}'
+
+# Change frequency without reconnecting
+curl -X POST http://localhost:8090/api/tune \
+  -H "Content-Type: application/json" \
+  -d '{"frequency":7074000}'
+
+# Get status
+curl http://localhost:8090/api/status
+```
+
 ## Dependencies
 
 - [github.com/google/uuid](https://github.com/google/uuid) - UUID generation
 - [github.com/gordonklaus/portaudio](https://github.com/gordonklaus/portaudio) - PortAudio Go bindings for cross-platform audio
 - [github.com/gorilla/websocket](https://github.com/gorilla/websocket) - WebSocket client
+- [github.com/gorilla/mux](https://github.com/gorilla/mux) - HTTP router for REST API
 - [github.com/mjibson/go-dsp](https://github.com/mjibson/go-dsp) - FFT for NR2 processing
 
 ## License

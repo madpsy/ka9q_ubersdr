@@ -53,6 +53,7 @@ type RadioClient struct {
 	autoReconnect    bool
 	retryCount       int
 	maxBackoff       time.Duration
+	connCallback     func(*websocket.Conn) // Callback to notify when connection is established
 }
 
 // WAVWriter handles WAV file writing
@@ -531,6 +532,34 @@ func (c *RadioClient) HandleMessage(msg WebSocketMessage) error {
 	return nil
 }
 
+// SendTuneMessage sends a tune message to change frequency/mode/bandwidth without reconnecting
+func (c *RadioClient) SendTuneMessage(conn *websocket.Conn, frequency int, mode string, bandwidthLow, bandwidthHigh *int) error {
+	// Build tune message
+	tuneMsg := map[string]interface{}{
+		"type":      "tune",
+		"frequency": frequency,
+		"mode":      mode,
+	}
+
+	// Only include bandwidth for non-IQ modes
+	isIQMode := mode == "iq" || mode == "iq48" || mode == "iq96" || mode == "iq192" || mode == "iq384"
+	if !isIQMode {
+		if bandwidthLow != nil {
+			tuneMsg["bandwidthLow"] = *bandwidthLow
+		}
+		if bandwidthHigh != nil {
+			tuneMsg["bandwidthHigh"] = *bandwidthHigh
+		}
+	}
+
+	// Send the tune message
+	if err := conn.WriteJSON(tuneMsg); err != nil {
+		return fmt.Errorf("failed to send tune message: %w", err)
+	}
+
+	return nil
+}
+
 // SendKeepalive sends periodic keepalive messages
 func (c *RadioClient) SendKeepalive(ctx context.Context, conn *websocket.Conn) {
 	ticker := time.NewTicker(30 * time.Second)
@@ -670,6 +699,11 @@ func (c *RadioClient) runOnce() int {
 	defer conn.Close()
 
 	fmt.Fprintf(os.Stderr, "Connected!\n")
+
+	// Notify callback if set (for API mode)
+	if c.connCallback != nil {
+		c.connCallback(conn)
+	}
 
 	// Reset retry count on successful connection
 	c.retryCount = 0
@@ -882,6 +916,8 @@ func listAudioDevices() {
 
 func main() {
 	// Command-line flags
+	apiModeFlag := flag.Bool("api", false, "Run in API mode with web interface")
+	apiPortFlag := flag.Int("api-port", 8090, "API server port (default: 8090)")
 	urlFlag := flag.String("u", "", "Full WebSocket URL (e.g., ws://host:port/ws or wss://host/ws)")
 	hostFlag := flag.String("H", "localhost", "Server hostname (default: localhost, ignored if --url is provided)")
 	portFlag := flag.Int("p", 8080, "Server port (default: 8080, ignored if --url is provided)")
@@ -907,6 +943,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  # Run in API mode with web interface\n")
+		fmt.Fprintf(os.Stderr, "  %s --api\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Run in API mode on custom port\n")
+		fmt.Fprintf(os.Stderr, "  %s --api --api-port 9000\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # List available audio devices\n")
 		fmt.Fprintf(os.Stderr, "  %s --list-devices\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Listen to 14.074 MHz USB via PortAudio (default device)\n")
@@ -923,21 +963,69 @@ func main() {
 
 	flag.Parse()
 
+	// API mode
+	if *apiModeFlag {
+		// Initialize config manager
+		configManager := NewConfigManager(GetConfigPath())
+		if err := configManager.Load(); err != nil {
+			log.Printf("Warning: Failed to load config: %v (using defaults)", err)
+		} else {
+			log.Printf("Loaded configuration from %s", GetConfigPath())
+		}
+
+		// Update API port from config if not specified on command line
+		if *apiPortFlag == 8090 { // Default value
+			config := configManager.Get()
+			if config.APIPort != 0 {
+				*apiPortFlag = config.APIPort
+			}
+		}
+
+		// Save API port to config
+		configManager.Update(func(c *ClientConfig) {
+			c.APIPort = *apiPortFlag
+		})
+
+		manager := NewWebSocketManager()
+		defer manager.Cleanup()
+
+		server := NewAPIServer(manager, configManager, *apiPortFlag)
+
+		// Setup signal handler for graceful shutdown
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigChan
+			fmt.Fprintf(os.Stderr, "\nShutting down API server...\n")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			server.Stop(ctx)
+			os.Exit(0)
+		}()
+
+		// Start API server
+		log.Printf("Configuration will be saved to: %s", GetConfigPath())
+		if err := server.Start(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("API server error: %v", err)
+		}
+		return
+	}
+
 	// List devices mode
 	if *listDevicesFlag {
 		listAudioDevices()
 		os.Exit(0)
 	}
 
-	// Validate required arguments
+	// Validate required arguments for CLI mode
 	if *frequencyFlag == 0 {
-		fmt.Fprintf(os.Stderr, "Error: -f/--frequency is required\n")
+		fmt.Fprintf(os.Stderr, "Error: -f/--frequency is required in CLI mode\n")
 		flag.Usage()
 		os.Exit(1)
 	}
 
 	if *modeFlag == "" {
-		fmt.Fprintf(os.Stderr, "Error: -m/--mode is required\n")
+		fmt.Fprintf(os.Stderr, "Error: -m/--mode is required in CLI mode\n")
 		flag.Usage()
 		os.Exit(1)
 	}

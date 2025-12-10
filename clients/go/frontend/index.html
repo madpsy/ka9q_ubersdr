@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UberSDR Go Client</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎙️ UberSDR Go Client</h1>
+            <div class="status-bar">
+                <span id="connection-status" class="status-badge disconnected">Disconnected</span>
+                <span id="uptime"></span>
+            </div>
+        </header>
+
+        <main>
+            <!-- Connection Panel -->
+            <section class="panel">
+                <h2>Connection</h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="host">Host:</label>
+                        <input type="text" id="host" value="localhost" placeholder="localhost">
+                    </div>
+                    <div class="form-group">
+                        <label for="port">Port:</label>
+                        <input type="number" id="port" value="8080" placeholder="8080">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="ssl">
+                            <span>Use SSL</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password:</label>
+                        <input type="password" id="password" placeholder="Optional">
+                    </div>
+                </div>
+                <div class="button-group">
+                    <button id="connect-btn" class="btn btn-primary">Connect</button>
+                    <button id="disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                </div>
+            </section>
+
+            <!-- Frequency Control Panel -->
+            <section class="panel">
+                <h2>Frequency Control</h2>
+                <div class="frequency-display">
+                    <input type="text" id="frequency-input" value="14074000" placeholder="14074000">
+                    <span class="unit">Hz</span>
+                </div>
+                <div class="frequency-buttons">
+                    <button class="btn btn-small" data-step="-1000000">-1 MHz</button>
+                    <button class="btn btn-small" data-step="-100000">-100 kHz</button>
+                    <button class="btn btn-small" data-step="-10000">-10 kHz</button>
+                    <button class="btn btn-small" data-step="-1000">-1 kHz</button>
+                    <button class="btn btn-small" data-step="1000">+1 kHz</button>
+                    <button class="btn btn-small" data-step="10000">+10 kHz</button>
+                    <button class="btn btn-small" data-step="100000">+100 kHz</button>
+                    <button class="btn btn-small" data-step="1000000">+1 MHz</button>
+                </div>
+                <div class="band-buttons">
+                    <h3>Bands</h3>
+                    <button class="btn btn-band" data-freq="1900000">160m</button>
+                    <button class="btn btn-band" data-freq="3573000">80m</button>
+                    <button class="btn btn-band" data-freq="7074000">40m</button>
+                    <button class="btn btn-band" data-freq="10136000">30m</button>
+                    <button class="btn btn-band" data-freq="14074000">20m</button>
+                    <button class="btn btn-band" data-freq="18100000">17m</button>
+                    <button class="btn btn-band" data-freq="21074000">15m</button>
+                    <button class="btn btn-band" data-freq="24915000">12m</button>
+                    <button class="btn btn-band" data-freq="28074000">10m</button>
+                </div>
+            </section>
+
+            <!-- Mode and Bandwidth Panel -->
+            <section class="panel">
+                <h2>Mode & Bandwidth</h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="mode">Mode:</label>
+                        <select id="mode">
+                            <option value="usb">USB</option>
+                            <option value="lsb">LSB</option>
+                            <option value="am">AM</option>
+                            <option value="sam">SAM</option>
+                            <option value="fm">FM</option>
+                            <option value="nfm">NFM</option>
+                            <option value="cwu">CW-U</option>
+                            <option value="cwl">CW-L</option>
+                            <option value="iq">IQ</option>
+                            <option value="iq48">IQ-48</option>
+                            <option value="iq96">IQ-96</option>
+                            <option value="iq192">IQ-192</option>
+                            <option value="iq384">IQ-384</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="bandwidth-low">Bandwidth Low (Hz):</label>
+                        <input type="number" id="bandwidth-low" value="50" placeholder="50">
+                    </div>
+                    <div class="form-group">
+                        <label for="bandwidth-high">Bandwidth High (Hz):</label>
+                        <input type="number" id="bandwidth-high" value="2700" placeholder="2700">
+                    </div>
+                </div>
+                <button id="apply-settings-btn" class="btn btn-primary" disabled>Apply Settings</button>
+            </section>
+
+            <!-- Audio Settings Panel -->
+            <section class="panel">
+                <h2>Audio Settings</h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="audio-device">Audio Device:</label>
+                        <select id="audio-device">
+                            <option value="-1">Default Device</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="output-mode">Output Mode:</label>
+                        <select id="output-mode">
+                            <option value="portaudio">PortAudio</option>
+                            <option value="stdout">Stdout</option>
+                            <option value="wav">WAV File</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <!-- NR2 Settings Panel -->
+            <section class="panel">
+                <h2>NR2 Noise Reduction</h2>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="nr2-enabled">
+                        <span>Enable NR2</span>
+                    </label>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="nr2-strength">Strength (%):</label>
+                        <input type="number" id="nr2-strength" value="40" min="0" max="100" step="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="nr2-floor">Floor (%):</label>
+                        <input type="number" id="nr2-floor" value="10" min="0" max="10" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="nr2-adapt">Adapt Rate (%):</label>
+                        <input type="number" id="nr2-adapt" value="1.0" min="0.1" max="5.0" step="0.1">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Status Panel -->
+            <section class="panel">
+                <h2>Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="label">Frequency:</span>
+                        <span id="status-frequency">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Mode:</span>
+                        <span id="status-mode">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Sample Rate:</span>
+                        <span id="status-samplerate">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Channels:</span>
+                        <span id="status-channels">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Session ID:</span>
+                        <span id="status-session">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Audio Device:</span>
+                        <span id="status-audio-device">-</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>UberSDR Go Client | <a href="https://github.com/ka9q/ubersdr" target="_blank">GitHub</a></p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

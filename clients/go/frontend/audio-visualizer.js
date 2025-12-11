@@ -206,10 +206,17 @@ class AudioVisualizer {
         ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(0, 0, width, height);
 
-        // Calculate display range
-        const sourceNyquist = 6000;
-        const configuredBandwidth = Math.abs(this.bandwidthHigh - this.bandwidthLow);
-        const displayBandwidth = Math.min(configuredBandwidth * 1.2, sourceNyquist);
+        // Calculate display range based on configured bandwidth
+        // The bandwidth values are RF offsets (can be negative for LSB)
+        // For audio FFT, we want to show from 0 Hz to the maximum extent
+        const maxExtent = Math.max(Math.abs(this.bandwidthLow), Math.abs(this.bandwidthHigh));
+        // Add 20% margin to show a bit beyond the filter edges
+        const displayBandwidth = maxExtent * 1.2;
+
+        // Debug logging (only log occasionally to avoid spam)
+        if (Math.random() < 0.01) {
+            console.log(`FFT Display: BW Low=${this.bandwidthLow}, High=${this.bandwidthHigh}, MaxExtent=${maxExtent}, Display=${displayBandwidth}`);
+        }
 
         // Display from 0 to the bandwidth (with 20% margin)
         const binStartFreq = 0;
@@ -380,14 +387,12 @@ class AudioVisualizer {
         ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(0, 0, leftMargin, 1);
 
-        // Calculate display range with 20% margin (same as spectrum)
-        // The actual audio content is limited by the source sample rate (12 kHz)
-        // So the maximum useful frequency is 6 kHz (Nyquist of 12 kHz)
-        const sourceNyquist = 6000;  // 12 kHz / 2
-
-        // Calculate configured bandwidth
-        const configuredBandwidth = Math.abs(this.bandwidthHigh - this.bandwidthLow);
-        const displayBandwidth = Math.min(configuredBandwidth * 1.2, sourceNyquist);
+        // Calculate display range based on configured bandwidth
+        // The bandwidth values are RF offsets (can be negative for LSB)
+        // For audio FFT, we want to show from 0 Hz to the maximum extent
+        const maxExtent = Math.max(Math.abs(this.bandwidthLow), Math.abs(this.bandwidthHigh));
+        // Add 20% margin to show a bit beyond the filter edges
+        const displayBandwidth = maxExtent * 1.2;
 
         // Display from 0 to the bandwidth (with 20% margin)
         const binStartFreq = 0;

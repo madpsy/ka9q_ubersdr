@@ -682,6 +682,16 @@
                     <button id="audio-mute-btn" class="btn btn-small" disabled style="display: none;">
                         🔊 Mute
                     </button>
+                    <div style="display: none; gap: 15px; align-items: center; margin-left: 10px;" id="audio-preview-channel-controls">
+                        <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                            <input type="checkbox" id="audio-preview-left-channel" checked>
+                            <span>Left</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                            <input type="checkbox" id="audio-preview-right-channel" checked>
+                            <span>Right</span>
+                        </label>
+                    </div>
                 </div>
                 <div class="info-box">
                     <p><strong>Note:</strong> When enabled, audio will be streamed to your browser through the WebSocket connection using a separate audio room. This allows you to preview the audio without needing PortAudio or other audio devices configured.</p>

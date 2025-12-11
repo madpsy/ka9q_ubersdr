@@ -74,6 +74,9 @@ class UberSDRClient {
         this.audioPreviewControls = document.getElementById('audio-preview-controls');
         this.audioPreviewStatus = document.getElementById('audio-preview-status');
         this.audioMuteBtn = document.getElementById('audio-mute-btn');
+        this.audioPreviewChannelControls = document.getElementById('audio-preview-channel-controls');
+        this.audioPreviewLeftChannel = document.getElementById('audio-preview-left-channel');
+        this.audioPreviewRightChannel = document.getElementById('audio-preview-right-channel');
         this.spectrumCanvas = document.getElementById('audio-spectrum-canvas');
         this.waterfallCanvas = document.getElementById('audio-waterfall-canvas');
 
@@ -318,6 +321,14 @@ class UberSDRClient {
         this.audioMuteBtn.addEventListener('click', () => {
             this.toggleMute();
             this.saveAudioPreviewConfig();
+        });
+
+        // Audio preview channel controls (browser-only, not saved)
+        this.audioPreviewLeftChannel.addEventListener('change', () => {
+            console.log('Audio preview left channel:', this.audioPreviewLeftChannel.checked);
+        });
+        this.audioPreviewRightChannel.addEventListener('change', () => {
+            console.log('Audio preview right channel:', this.audioPreviewRightChannel.checked);
         });
 
         // Auto-connect setting
@@ -1809,6 +1820,7 @@ class UberSDRClient {
             this.audioPreviewControls.style.display = 'block';
             this.audioMuteBtn.style.display = 'inline-block';
             this.audioMuteBtn.disabled = false;
+            this.audioPreviewChannelControls.style.display = 'flex';
             this.startAudioStream();
 
             // Initialize audio visualizer with current bandwidth settings
@@ -1823,6 +1835,7 @@ class UberSDRClient {
             this.audioPreviewControls.style.display = 'none';
             this.audioMuteBtn.style.display = 'none';
             this.audioMuteBtn.disabled = true;
+            this.audioPreviewChannelControls.style.display = 'none';
             this.stopAudioStream();
 
             // Clear visualizer
@@ -1949,17 +1962,42 @@ class UberSDRClient {
             const numSamples = arrayBuffer.byteLength / 2;
             const samplesPerChannel = numSamples / channels;
 
-            // Create audio buffer
-            const audioBuffer = this.audioContext.createBuffer(channels, samplesPerChannel, sampleRate);
+            // Get channel enable states
+            const leftEnabled = this.audioPreviewLeftChannel.checked;
+            const rightEnabled = this.audioPreviewRightChannel.checked;
 
-            // Fill channels
-            for (let channel = 0; channel < channels; channel++) {
-                const channelData = audioBuffer.getChannelData(channel);
+            // Always create stereo output (2 channels) for browser audio
+            const audioBuffer = this.audioContext.createBuffer(2, samplesPerChannel, sampleRate);
+
+            if (channels === 1) {
+                // Mono input: duplicate to both channels
+                const leftData = audioBuffer.getChannelData(0);
+                const rightData = audioBuffer.getChannelData(1);
+
                 for (let i = 0; i < samplesPerChannel; i++) {
-                    // Read 16-bit PCM sample and convert to float [-1, 1]
-                    const sampleIndex = (i * channels + channel) * 2;
+                    const sampleIndex = i * 2;
                     const sample = dataView.getInt16(sampleIndex, true); // little-endian
-                    channelData[i] = sample / 32768.0;
+                    const normalizedSample = sample / 32768.0;
+
+                    // Apply channel muting
+                    leftData[i] = leftEnabled ? normalizedSample : 0;
+                    rightData[i] = rightEnabled ? normalizedSample : 0;
+                }
+            } else {
+                // Stereo input: process each channel separately
+                const leftData = audioBuffer.getChannelData(0);
+                const rightData = audioBuffer.getChannelData(1);
+
+                for (let i = 0; i < samplesPerChannel; i++) {
+                    // Left channel
+                    const leftSampleIndex = (i * 2) * 2;
+                    const leftSample = dataView.getInt16(leftSampleIndex, true);
+                    leftData[i] = leftEnabled ? (leftSample / 32768.0) : 0;
+
+                    // Right channel
+                    const rightSampleIndex = (i * 2 + 1) * 2;
+                    const rightSample = dataView.getInt16(rightSampleIndex, true);
+                    rightData[i] = rightEnabled ? (rightSample / 32768.0) : 0;
                 }
             }
 

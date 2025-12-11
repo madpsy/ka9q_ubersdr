@@ -355,12 +355,20 @@ body.dark-mode .status-badge.disconnected {
 .btn-band {
     padding: 8px 16px;
     background-color: #f1f5f9;
-    color: var(--text-color);
+    color: #1e293b; /* Always use dark text for default light gray background */
     border: 1px solid var(--border-color);
     margin: 5px;
 }
 
-.btn-band:hover {
+.btn-band.no-data {
+    color: #000000 !important;
+}
+
+.btn-band.no-data:hover {
+    color: #000000 !important;
+}
+
+.btn-band:hover:not(.no-data) {
     background-color: var(--primary-color);
     color: white;
     border-color: var(--primary-color);

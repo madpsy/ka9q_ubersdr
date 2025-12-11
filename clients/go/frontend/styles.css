@@ -69,15 +69,9 @@ body.dark-mode .spectrum-visualizer {
         font-size: 11px;
     }
 
-    /* Make SNR and peak displays wrap on mobile */
+    /* Reduce gap on mobile for spectrum controls */
     .spectrum-controls-row {
         gap: 10px;
-    }
-
-    #spectrum-snr-display,
-    #spectrum-peak-display {
-        flex-basis: 100%;
-        margin-left: 0 !important;
     }
 }
 
@@ -216,7 +210,7 @@ header h1 {
 
 body.dark-mode .status-badge.connected {
     background-color: #22c55e;
-    color: #000000;
+    color: #ffffff;
 }
 
 .status-badge.disconnected {
@@ -451,10 +445,14 @@ body.dark-mode .status-badge.disconnected {
 
 .band-buttons {
     margin-top: 15px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    justify-content: center;
 }
 
-.band-buttons .button-group {
-    margin-top: 10px;
+.band-buttons .btn-band {
+    margin: 0;
 }
 
 /* Status Grid */
@@ -893,6 +891,7 @@ body.dark-mode .instance-card.local-instance {
     flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 20px;
+    justify-content: center;
 }
 
 .btn-mode {

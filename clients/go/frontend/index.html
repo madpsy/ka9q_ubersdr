@@ -51,7 +51,6 @@
                 </div>
                 <div style="margin-top: 10px; display: flex; gap: 10px; align-items: flex-end;">
                     <div class="form-group" style="flex: 1;">
-                        <label for="saved-instances">Saved Instances:</label>
                         <select id="saved-instances">
                             <option value="">-- Select Saved Instance --</option>
                         </select>
@@ -97,7 +96,6 @@
                     <button class="btn btn-small" data-step="10000">+10 kHz</button>
                 </div>
                 <div class="band-buttons">
-                    <h3>Bands</h3>
                     <button class="btn btn-band" data-freq="1900000">160m</button>
                     <button class="btn btn-band" data-freq="3573000">80m</button>
                     <button class="btn btn-band" data-freq="7074000">40m</button>
@@ -110,13 +108,11 @@
                 </div>
                 <div class="bookmark-selector" style="margin-top: 15px; display: flex; gap: 20px; align-items: center;">
                     <div style="display: flex; align-items: center; gap: 5px;">
-                        <label for="bookmark-select">Bookmarks:</label>
                         <select id="bookmark-select" disabled>
                             <option value="">-- Select Bookmark --</option>
                         </select>
                     </div>
                     <div style="display: flex; align-items: center; gap: 5px;">
-                        <label for="band-select">Band:</label>
                         <select id="band-select" disabled style="min-width: 200px;">
                             <option value="">-- Select Band --</option>
                         </select>
@@ -167,12 +163,6 @@
                     <button id="spectrum-audio-toggle" class="btn btn-small" style="display: none; min-width: 100px;">
                         🔇 Audio Off
                     </button>
-                    <div id="spectrum-snr-display" style="display: none; font-weight: bold; font-size: 14px; padding: 4px 8px; color: #2196F3; margin-left: auto;">
-                        SNR: <span id="spectrum-snr-value" style="color: inherit;"><span id="spectrum-snr-number">--</span> dB</span>
-                    </div>
-                    <div id="spectrum-peak-display" style="display: none; font-weight: bold; font-size: 14px; padding: 4px 8px; color: #2196F3;">
-                        Peak: <span id="spectrum-peak-freq">--</span> MHz @ <span id="spectrum-peak-level">--</span> dB
-                    </div>
                 </div>
                 <div id="spectrum-display-container" style="display: none;">
                     <div class="spectrum-controls" style="margin: 10px 0; display: flex; gap: 15px; flex-wrap: wrap;">
@@ -200,6 +190,14 @@
                                 <option value="1000">1 kHz</option>
                             </select>
                         </label>
+                    </div>
+                    <div style="display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap;">
+                        <div id="spectrum-snr-display" style="display: none; font-weight: bold; font-size: 14px; padding: 4px 8px; color: #2196F3;">
+                            SNR: <span id="spectrum-snr-value" style="color: inherit;"><span id="spectrum-snr-number">--</span> dB</span>
+                        </div>
+                        <div id="spectrum-peak-display" style="display: none; font-weight: bold; font-size: 14px; padding: 4px 8px; color: #2196F3;">
+                            Peak: <span id="spectrum-peak-freq">--</span> MHz @ <span id="spectrum-peak-level">--</span> dB
+                        </div>
                     </div>
                     <div class="spectrum-visualizer">
                         <canvas id="rf-spectrum-canvas" width="800" height="200"></canvas>

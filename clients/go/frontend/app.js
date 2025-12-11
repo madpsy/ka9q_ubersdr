@@ -3947,7 +3947,9 @@ class UberSDRClient {
             const bandLabel = btn.textContent.trim();
             // Match band names like "20m" with currentBand like "20m"
             if (bandLabel === currentBand || bandLabel.toLowerCase() === currentBand.toLowerCase()) {
-                btn.style.border = '2px solid black';
+                // Use white border in dark mode, black in light mode
+                const borderColor = document.body.classList.contains('dark-mode') ? 'white' : 'black';
+                btn.style.border = `2px solid ${borderColor}`;
                 console.log(`Highlighted band button: ${bandLabel}`);
             }
         });

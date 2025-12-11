@@ -550,6 +550,12 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Broadcast config update to WebSocket subscribers for real-time UI updates
+	s.manager.broadcastToSubscribers(map[string]interface{}{
+		"type":   "config_update",
+		"config": req,
+	})
+
 	respondSuccess(w, "Configuration updated successfully")
 }
 

@@ -1110,7 +1110,6 @@ func (m *WebSocketManager) UpdateConfig(req ConfigUpdateRequest) error {
 		m.client.mu.Lock()
 		m.client.volume = *req.Volume
 		m.client.mu.Unlock()
-		log.Printf("Volume updated to %.2f", *req.Volume)
 	}
 	if req.LeftChannelEnabled != nil {
 		m.client.mu.Lock()
@@ -1124,6 +1123,12 @@ func (m *WebSocketManager) UpdateConfig(req ConfigUpdateRequest) error {
 		m.client.mu.Unlock()
 		log.Printf("Right channel enabled: %v", *req.RightChannelEnabled)
 	}
+
+	// Broadcast config update to WebSocket subscribers for real-time UI updates
+	m.broadcastToSubscribers(map[string]interface{}{
+		"type":   "config_update",
+		"config": req,
+	})
 
 	return nil
 }

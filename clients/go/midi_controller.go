@@ -436,17 +436,36 @@ func (mc *MIDIController) executeFunction(function string, value uint8) {
 			mc.manager.SetBandwidth(*status.BandwidthLow, newHigh)
 		}
 
+	// Volume control
+	case "Volume":
+		// Map MIDI 0-127 to volume 0.0-1.0 (0-100%)
+		volume := float64(value) / 127.0
+		mc.manager.UpdateConfig(ConfigUpdateRequest{
+			Volume: &volume,
+		})
+
+	// Mute control
+	case "Mute":
+		if value > 0 {
+			// Toggle mute by inverting both left and right channels
+			// Get current channel states from config manager
+			if mc.configManager != nil {
+				config := mc.configManager.Get()
+				newLeft := !config.LeftChannelEnabled
+				newRight := !config.RightChannelEnabled
+				mc.manager.UpdateConfig(ConfigUpdateRequest{
+					LeftChannelEnabled:  &newLeft,
+					RightChannelEnabled: &newRight,
+				})
+			}
+		}
+
 	// Toggle controls (only on button press, value > 0)
 	case "NR2: Toggle":
 		if value > 0 {
 			mc.manager.UpdateConfig(ConfigUpdateRequest{
 				NR2Enabled: boolPtr(!status.NR2Enabled),
 			})
-		}
-	case "Mute: Toggle":
-		if value > 0 {
-			// Toggle mute - this would need additional implementation in WebSocketManager
-			log.Printf("Mute toggle not yet implemented")
 		}
 	}
 }

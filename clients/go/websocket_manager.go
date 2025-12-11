@@ -59,6 +59,12 @@ type WebSocketManager struct {
 	midiPolling         bool                                 // Whether MIDI polling is active
 	midiPollCancel      context.CancelFunc                   // Cancel function for MIDI polling
 
+	// Noise floor caching
+	cachedNoiseFloor     map[string]interface{} // Cached noise floor data
+	noiseFloorMu         sync.RWMutex           // Protects noise floor cache
+	noiseFloorPolling    bool                   // Whether noise floor polling is active
+	noiseFloorPollCancel context.CancelFunc     // Cancel function for noise floor polling
+
 	// Auto-reconnect state
 	autoReconnect          bool
 	reconnecting           bool
@@ -123,9 +129,12 @@ func NewWebSocketManager() *WebSocketManager {
 
 // Connect establishes a connection to the SDR server
 func (m *WebSocketManager) Connect(client *RadioClient) error {
+	log.Printf("DEBUG Connect: Attempting to acquire lock...")
 	m.mu.Lock()
+	log.Printf("DEBUG Connect: Lock acquired")
 
 	if m.connected {
+		log.Printf("DEBUG Connect: Already connected, releasing lock and returning error")
 		m.mu.Unlock()
 		return fmt.Errorf("already connected")
 	}
@@ -173,6 +182,9 @@ func (m *WebSocketManager) Connect(client *RadioClient) error {
 		m.mu.Unlock()
 		log.Printf("WebSocket connection captured for tune messages")
 	}
+
+	// Start noise floor polling
+	m.startNoiseFloorPolling()
 
 	// Start the client in a goroutine
 	go func() {
@@ -232,9 +244,12 @@ func (m *WebSocketManager) Connect(client *RadioClient) error {
 
 // Disconnect closes the connection to the SDR server
 func (m *WebSocketManager) Disconnect() error {
+	log.Printf("DEBUG Disconnect: Called, attempting to acquire lock...")
 	m.mu.Lock()
+	log.Printf("DEBUG Disconnect: Lock acquired")
 
 	if !m.connected {
+		log.Printf("DEBUG Disconnect: Not connected, releasing lock and returning error")
 		m.mu.Unlock()
 		return fmt.Errorf("not connected")
 	}
@@ -247,16 +262,62 @@ func (m *WebSocketManager) Disconnect() error {
 	m.reconnecting = false
 	m.autoReconnect = false // Disable auto-reconnect on manual disconnect
 
-	if m.client != nil {
-		m.client.running = false
+	// Get client reference before unlocking
+	client := m.client
+	log.Printf("DEBUG: client is nil: %v", client == nil)
+
+	if client != nil {
+		log.Printf("DEBUG: Setting client.running = false")
+		client.running = false
 	}
 
+	// Close the audio WebSocket connection to force immediate disconnect
+	if m.conn != nil {
+		log.Printf("DEBUG: Closing m.conn (audio) WebSocket connection")
+		m.conn.Close()
+		m.conn = nil
+	} else {
+		log.Printf("DEBUG: m.conn is nil, cannot close")
+	}
+
+	// Close the spectrum WebSocket connection if it exists
+	if m.spectrumClient != nil {
+		log.Printf("DEBUG: Disconnecting spectrum client")
+		m.spectrumClient.Disconnect()
+		m.spectrumClient = nil
+	} else {
+		log.Printf("DEBUG: spectrumClient is nil, no spectrum connection to close")
+	}
+
+	// Stop noise floor polling
+	log.Printf("DEBUG Disconnect: Stopping noise floor polling")
+	m.stopNoiseFloorPolling()
+
 	m.connected = false
+	log.Printf("DEBUG Disconnect: Set m.connected = false, about to unlock mutex")
+
+	// Get client reference before unlocking
+	clientToCleanup := client
+
 	m.mu.Unlock()
+	log.Printf("DEBUG Disconnect: Mutex unlocked")
+
+	// Call client's Cleanup() method to clean up resources (PortAudio, FIFO, etc.)
+	// Note: The WebSocket connections are already closed above
+	// This MUST be done outside the lock to avoid deadlock, as PortAudio operations can block
+	if clientToCleanup != nil {
+		log.Printf("DEBUG Disconnect: Calling client.Cleanup() to clean up PortAudio/FIFO/UDP resources")
+		clientToCleanup.Cleanup()
+		log.Printf("DEBUG Disconnect: client.Cleanup() completed")
+	} else {
+		log.Printf("DEBUG Disconnect: client is nil, skipping Cleanup()")
+	}
 
 	// Broadcast disconnection
+	log.Printf("DEBUG Disconnect: Broadcasting disconnection")
 	m.BroadcastConnection(false, "Disconnected by user")
 
+	log.Printf("DEBUG Disconnect: Completed successfully")
 	return nil
 }
 
@@ -658,7 +719,9 @@ func (m *WebSocketManager) restoreRadioControlStates() {
 
 // IsConnected returns whether the client is currently connected
 func (m *WebSocketManager) IsConnected() bool {
+	log.Printf("DEBUG IsConnected: Attempting to acquire RLock...")
 	m.mu.RLock()
+	log.Printf("DEBUG IsConnected: RLock acquired, connected=%v", m.connected)
 	defer m.mu.RUnlock()
 	return m.connected
 }
@@ -783,6 +846,24 @@ func (m *WebSocketManager) GetStatus() StatusResponse {
 	}
 
 	return status
+}
+
+// GetChannelStates returns the current left and right channel enabled states
+func (m *WebSocketManager) GetChannelStates() (leftEnabled bool, rightEnabled bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.client != nil {
+		m.client.mu.RLock()
+		leftEnabled = m.client.leftChannelEnabled
+		rightEnabled = m.client.rightChannelEnabled
+		m.client.mu.RUnlock()
+	} else {
+		// Default to both enabled if no client
+		leftEnabled = true
+		rightEnabled = true
+	}
+	return
 }
 
 // GetStatusWithOutputs returns the current status including output status
@@ -1423,25 +1504,38 @@ func (m *WebSocketManager) EnableAudioStream(conn *websocket.Conn, room string) 
 
 // DisableAudioStream disables audio streaming for a WebSocket connection
 func (m *WebSocketManager) DisableAudioStream(conn *websocket.Conn) {
+	log.Printf("DisableAudioStream called for connection")
 	m.audioStreamsMu.Lock()
-	defer m.audioStreamsMu.Unlock()
-
 	if room, ok := m.audioStreams[conn]; ok {
 		delete(m.audioStreams, conn)
 		delete(m.audioWriteChans, conn)
 		log.Printf("Disabled audio streaming from room '%s' for connection", room)
+	} else {
+		log.Printf("DisableAudioStream: Connection not found in audioStreams map")
 	}
 
 	// If no more audio streams, disable audio callback
 	if len(m.audioStreams) == 0 {
+		log.Printf("DisableAudioStream: No more audio streams, disabling audio callback")
 		m.mu.RLock()
 		client := m.client
 		m.mu.RUnlock()
 
 		if client != nil {
 			client.SetAudioCallback(nil)
+			log.Printf("DisableAudioStream: Audio callback disabled")
+		} else {
+			log.Printf("DisableAudioStream: Client is nil, cannot disable callback")
 		}
+	} else {
+		log.Printf("DisableAudioStream: Still have %d audio streams active", len(m.audioStreams))
 	}
+	m.audioStreamsMu.Unlock()
+
+	// Check if we should auto-disconnect (no more clients)
+	// Run in separate goroutine to avoid deadlocks
+	log.Printf("DisableAudioStream: Calling checkAutoDisconnect in goroutine")
+	go m.checkAutoDisconnect()
 }
 
 // broadcastAudioData sends audio data to all WebSocket connections subscribed to the given room
@@ -1542,8 +1636,6 @@ func (m *WebSocketManager) EnableSpectrumStream(conn *websocket.Conn, room strin
 // DisableSpectrumStream disables spectrum streaming for a WebSocket connection
 func (m *WebSocketManager) DisableSpectrumStream(conn *websocket.Conn) {
 	m.spectrumStreamsMu.Lock()
-	defer m.spectrumStreamsMu.Unlock()
-
 	if room, ok := m.spectrumStreams[conn]; ok {
 		delete(m.spectrumStreams, conn)
 		delete(m.spectrumWriteChans, conn)
@@ -1559,6 +1651,11 @@ func (m *WebSocketManager) DisableSpectrumStream(conn *websocket.Conn) {
 		}
 		m.mu.Unlock()
 	}
+	m.spectrumStreamsMu.Unlock()
+
+	// Check if we should auto-disconnect (no more clients)
+	// Run in separate goroutine to avoid deadlocks
+	go m.checkAutoDisconnect()
 }
 
 // broadcastSpectrumData sends spectrum data to all WebSocket connections subscribed to the given room
@@ -2538,12 +2635,24 @@ func (m *WebSocketManager) GetBands() ([]map[string]interface{}, error) {
 	return bands, nil
 }
 
-// GetNoiseFloor fetches noise floor data from the connected SDR server
+// GetNoiseFloor returns the cached noise floor data
 func (m *WebSocketManager) GetNoiseFloor() (map[string]interface{}, error) {
+	m.noiseFloorMu.RLock()
+	defer m.noiseFloorMu.RUnlock()
+
+	if m.cachedNoiseFloor == nil {
+		return nil, fmt.Errorf("no noise floor data available yet")
+	}
+
+	return m.cachedNoiseFloor, nil
+}
+
+// fetchNoiseFloorData fetches noise floor data from the connected SDR server
+func (m *WebSocketManager) fetchNoiseFloorData() error {
 	m.mu.RLock()
 	if !m.connected || m.client == nil {
 		m.mu.RUnlock()
-		return nil, fmt.Errorf("not connected to SDR server")
+		return fmt.Errorf("not connected to SDR server")
 	}
 
 	// Build the API URL
@@ -2561,23 +2670,96 @@ func (m *WebSocketManager) GetNoiseFloor() (map[string]interface{}, error) {
 
 	resp, err := client.Get(apiURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch noise floor: %w", err)
+		return fmt.Errorf("failed to fetch noise floor: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to fetch noise floor: status %d, body: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("failed to fetch noise floor: status %d, body: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse JSON response
 	var noiseFloor map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&noiseFloor); err != nil {
-		return nil, fmt.Errorf("failed to parse noise floor: %w", err)
+		return fmt.Errorf("failed to parse noise floor: %w", err)
 	}
 
-	log.Printf("Fetched noise floor data from SDR server")
-	return noiseFloor, nil
+	// Update cache
+	m.noiseFloorMu.Lock()
+	m.cachedNoiseFloor = noiseFloor
+	m.noiseFloorMu.Unlock()
+
+	log.Printf("Fetched and cached noise floor data from SDR server")
+	return nil
+}
+
+// startNoiseFloorPolling starts the noise floor polling goroutine
+func (m *WebSocketManager) startNoiseFloorPolling() {
+	m.mu.Lock()
+	if m.noiseFloorPolling {
+		m.mu.Unlock()
+		return
+	}
+
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.noiseFloorPollCancel = cancel
+	m.noiseFloorPolling = true
+	m.mu.Unlock()
+
+	go func() {
+		// Fetch immediately on start
+		if err := m.fetchNoiseFloorData(); err != nil {
+			log.Printf("Initial noise floor fetch failed: %v", err)
+		}
+
+		ticker := time.NewTicker(60 * time.Second) // Poll every 60 seconds
+		defer ticker.Stop()
+
+		log.Printf("Noise floor polling goroutine started (60 second interval)")
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Printf("Noise floor polling goroutine stopped (context done)")
+				return
+			case <-ticker.C:
+				if err := m.fetchNoiseFloorData(); err != nil {
+					log.Printf("Noise floor fetch failed: %v", err)
+				}
+			}
+		}
+	}()
+
+	log.Printf("Started noise floor polling")
+}
+
+// stopNoiseFloorPolling stops the noise floor polling goroutine
+// NOTE: This method assumes the caller already holds m.mu lock (called from Disconnect)
+func (m *WebSocketManager) stopNoiseFloorPolling() {
+	log.Printf("DEBUG stopNoiseFloorPolling: Called (assumes lock already held)")
+	if !m.noiseFloorPolling {
+		log.Printf("DEBUG stopNoiseFloorPolling: Not polling, returning")
+		return
+	}
+
+	log.Printf("DEBUG stopNoiseFloorPolling: Cancelling poll context...")
+	if m.noiseFloorPollCancel != nil {
+		m.noiseFloorPollCancel()
+		m.noiseFloorPollCancel = nil
+	}
+	log.Printf("DEBUG stopNoiseFloorPolling: Poll context cancelled")
+
+	m.noiseFloorPolling = false
+
+	// Clear cached data
+	log.Printf("DEBUG stopNoiseFloorPolling: Clearing cached data...")
+	m.noiseFloorMu.Lock()
+	m.cachedNoiseFloor = nil
+	m.noiseFloorMu.Unlock()
+	log.Printf("DEBUG stopNoiseFloorPolling: Cached data cleared")
+
+	log.Printf("Stopped noise floor polling and cleared cache")
 }
 
 // SetConfigManager sets the configuration manager for the WebSocketManager
@@ -2810,4 +2992,72 @@ func (m *WebSocketManager) stopMIDIPolling() {
 
 	m.midiPolling = false
 	log.Printf("Stopped MIDI polling")
+}
+
+// checkAutoDisconnect checks if ConnectOnDemand is enabled and disconnects if no clients remain
+func (m *WebSocketManager) checkAutoDisconnect() {
+	// Check if ConnectOnDemand is enabled
+	if m.configManager == nil {
+		return
+	}
+
+	config := m.configManager.Get()
+	if !config.ConnectOnDemand {
+		return // Auto-disconnect only when ConnectOnDemand is enabled
+	}
+
+	// Count active clients
+	m.audioStreamsMu.RLock()
+	audioClients := len(m.audioStreams)
+	m.audioStreamsMu.RUnlock()
+
+	m.spectrumStreamsMu.RLock()
+	spectrumClients := len(m.spectrumStreams)
+	m.spectrumStreamsMu.RUnlock()
+
+	totalClients := audioClients + spectrumClients
+
+	log.Printf("ConnectOnDemand: Checking client count - audio: %d, spectrum: %d, total: %d",
+		audioClients, spectrumClients, totalClients)
+
+	// If no clients remain, disconnect from SDR
+	if totalClients == 0 {
+		m.mu.RLock()
+		connected := m.connected
+		m.mu.RUnlock()
+
+		if connected {
+			log.Printf("ConnectOnDemand: No clients remaining, scheduling auto-disconnect from SDR instance")
+			// Use a timer to delay the disconnect slightly, allowing any pending operations to complete
+			// and avoiding potential deadlocks from immediate disconnect during cleanup
+			time.AfterFunc(500*time.Millisecond, func() {
+				// Double-check we're still connected and still have no clients
+				m.audioStreamsMu.RLock()
+				audioClients := len(m.audioStreams)
+				m.audioStreamsMu.RUnlock()
+
+				m.spectrumStreamsMu.RLock()
+				spectrumClients := len(m.spectrumStreams)
+				m.spectrumStreamsMu.RUnlock()
+
+				if audioClients == 0 && spectrumClients == 0 {
+					m.mu.RLock()
+					stillConnected := m.connected
+					m.mu.RUnlock()
+
+					if stillConnected {
+						log.Printf("ConnectOnDemand: Executing auto-disconnect (no clients after delay)")
+						if err := m.Disconnect(); err != nil {
+							log.Printf("ConnectOnDemand: Auto-disconnect failed: %v", err)
+						} else {
+							log.Printf("ConnectOnDemand: Successfully auto-disconnected from SDR instance")
+						}
+					}
+				} else {
+					log.Printf("ConnectOnDemand: Auto-disconnect cancelled - clients reconnected (audio: %d, spectrum: %d)",
+						audioClients, spectrumClients)
+				}
+			})
+		}
+	}
 }

@@ -32,6 +32,10 @@ type MIDIController struct {
 	learnCallback func(MIDILearnResponse)
 	ctx           context.Context
 	cancel        context.CancelFunc
+	// Mute state memory
+	mutedState      bool // true if currently muted
+	savedLeftState  bool // saved left channel state before muting
+	savedRightState bool // saved right channel state before muting
 }
 
 // NewMIDIController creates a new MIDI controller
@@ -447,17 +451,32 @@ func (mc *MIDIController) executeFunction(function string, value uint8) {
 	// Mute control
 	case "Mute":
 		if value > 0 {
-			// Toggle mute by inverting both left and right channels
-			// Get current channel states from config manager
-			if mc.configManager != nil {
-				config := mc.configManager.Get()
-				newLeft := !config.LeftChannelEnabled
-				newRight := !config.RightChannelEnabled
+			// Toggle mute with state memory
+			// Get current channel states from the manager (runtime state)
+			leftEnabled, rightEnabled := mc.manager.GetChannelStates()
+
+			mc.mu.Lock()
+			if mc.mutedState {
+				// Currently muted - restore previous state
+				log.Printf("Unmuting - restoring Left: %v, Right: %v", mc.savedLeftState, mc.savedRightState)
 				mc.manager.UpdateConfig(ConfigUpdateRequest{
-					LeftChannelEnabled:  &newLeft,
-					RightChannelEnabled: &newRight,
+					LeftChannelEnabled:  &mc.savedLeftState,
+					RightChannelEnabled: &mc.savedRightState,
 				})
+				mc.mutedState = false
+			} else {
+				// Currently unmuted - save state and mute
+				mc.savedLeftState = leftEnabled
+				mc.savedRightState = rightEnabled
+				muted := false
+				log.Printf("Muting - saving Left: %v, Right: %v", leftEnabled, rightEnabled)
+				mc.manager.UpdateConfig(ConfigUpdateRequest{
+					LeftChannelEnabled:  &muted,
+					RightChannelEnabled: &muted,
+				})
+				mc.mutedState = true
 			}
+			mc.mu.Unlock()
 		}
 
 	// Toggle controls (only on button press, value > 0)

@@ -1323,6 +1323,13 @@ func (c *RadioClient) Run() int {
 
 // Cleanup cleans up resources
 func (c *RadioClient) Cleanup() {
+	// Recover from any panics during cleanup
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Panic during cleanup (recovered): %v\n", r)
+		}
+	}()
+
 	fmt.Fprintf(os.Stderr, "\nCleaning up...\n")
 
 	// Close FIFO
@@ -1354,9 +1361,14 @@ func (c *RadioClient) Cleanup() {
 	}
 
 	// Close audio buffer channel
-	if c.audioBuffer != nil {
-		close(c.audioBuffer)
-	}
+	// Use defer/recover to handle potential double-close panics
+	func() {
+		defer func() { recover() }()
+		if c.audioBuffer != nil {
+			close(c.audioBuffer)
+			c.audioBuffer = nil
+		}
+	}()
 
 	// Close UDP connection
 	if c.udpConn != nil {

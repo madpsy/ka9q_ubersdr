@@ -200,11 +200,13 @@ func (s *APIServer) Stop(ctx context.Context) error {
 
 // handleConnect handles POST /api/connect
 func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
+	log.Printf("DEBUG handleConnect: Request received")
 	var req ConnectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
+	log.Printf("DEBUG handleConnect: Request decoded successfully")
 
 	// Validate required fields
 	if req.Host == "" {
@@ -225,10 +227,23 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if already connected
+	// Wait a moment if a disconnect is in progress (from auto-disconnect)
+	log.Printf("DEBUG handleConnect: Checking if already connected...")
+	for i := 0; i < 10; i++ {
+		if !s.manager.IsConnected() {
+			log.Printf("DEBUG handleConnect: Not connected (check %d)", i)
+			break
+		}
+		log.Printf("DEBUG handleConnect: Still connected, waiting... (attempt %d/10)", i+1)
+		time.Sleep(100 * time.Millisecond)
+	}
+
 	if s.manager.IsConnected() {
+		log.Printf("DEBUG handleConnect: Still connected after waiting, returning error")
 		respondError(w, http.StatusConflict, "Already connected", "Disconnect first")
 		return
 	}
+	log.Printf("DEBUG handleConnect: Connection check passed")
 
 	// Set defaults
 	if req.OutputMode == "" {
@@ -271,6 +286,7 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 		log.Printf("IQ mode detected (%s), ignoring bandwidth parameters", req.Mode)
 	}
 
+	log.Printf("DEBUG handleConnect: Creating RadioClient...")
 	client := NewRadioClient(
 		"", req.Host, req.Port, req.Frequency, req.Mode,
 		bandwidthLow, bandwidthHigh, req.OutputMode, "",
@@ -280,12 +296,32 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 		req.OutputChannels, // 0 = auto (2 when resampling, otherwise match input)
 		req.FIFOPath, req.UDPHost, req.UDPPort, req.UDPEnabled,
 	)
+	log.Printf("DEBUG handleConnect: RadioClient created")
 
-	// Connect
-	if err := s.manager.Connect(client); err != nil {
-		respondError(w, http.StatusInternalServerError, "Failed to connect", err.Error())
+	// Connect with timeout to prevent indefinite blocking
+	log.Printf("DEBUG handleConnect: Starting connection attempt...")
+	connectDone := make(chan error, 1)
+	go func() {
+		log.Printf("DEBUG handleConnect: Goroutine calling Connect()...")
+		err := s.manager.Connect(client)
+		log.Printf("DEBUG handleConnect: Connect() returned with error: %v", err)
+		connectDone <- err
+	}()
+
+	log.Printf("DEBUG handleConnect: Waiting for connection result...")
+	select {
+	case err := <-connectDone:
+		log.Printf("DEBUG handleConnect: Received result from Connect(): %v", err)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "Failed to connect", err.Error())
+			return
+		}
+	case <-time.After(10 * time.Second):
+		log.Printf("DEBUG handleConnect: Connection timed out after 10 seconds")
+		respondError(w, http.StatusRequestTimeout, "Connection timeout", "Connection attempt took too long")
 		return
 	}
+	log.Printf("DEBUG handleConnect: Connection successful, proceeding with output restoration...")
 
 	// Restore saved output states after connection (in background to not block response)
 	go func() {
@@ -492,6 +528,7 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			AudioPreviewEnabled: savedConfig.AudioPreviewEnabled,
 			AudioPreviewMuted:   savedConfig.AudioPreviewMuted,
 			AutoConnect:         savedConfig.AutoConnect,
+			ConnectOnDemand:     savedConfig.ConnectOnDemand,
 			SpectrumEnabled:     savedConfig.SpectrumEnabled,
 			SpectrumZoomScroll:  savedConfig.SpectrumZoomScroll,
 			SpectrumPanScroll:   savedConfig.SpectrumPanScroll,
@@ -866,16 +903,35 @@ func (s *APIServer) handleLoadInstance(w http.ResponseWriter, r *http.Request) {
 
 // handleWebSocket handles WebSocket connections for real-time updates
 func (s *APIServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	log.Printf("DEBUG: New WebSocket connection from %s", r.RemoteAddr)
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
 		return
 	}
-	defer conn.Close()
+
+	log.Printf("DEBUG: WebSocket upgraded successfully")
 
 	// Subscribe to updates
 	updates := s.manager.Subscribe()
 	defer s.manager.Unsubscribe(updates)
+
+	// Ensure cleanup of audio and spectrum streams when connection closes
+	// This is critical for on-demand mode to work correctly when browser tabs close
+	// IMPORTANT: This must be deferred BEFORE conn.Close() so it executes AFTER conn closes
+	defer func() {
+		log.Printf("DEBUG: WebSocket deferred cleanup executing...")
+		log.Printf("WebSocket connection closing, cleaning up streams...")
+		s.manager.DisableAudioStream(conn)
+		s.manager.DisableSpectrumStream(conn)
+		log.Printf("DEBUG: WebSocket deferred cleanup completed")
+	}()
+
+	// Close connection last (after stream cleanup)
+	defer func() {
+		log.Printf("DEBUG: Closing WebSocket connection")
+		conn.Close()
+	}()
 
 	// Create write channel for this connection to serialize all writes
 	writeChan := make(chan interface{}, 100)

@@ -39,6 +39,7 @@ type ClientConfig struct {
 	AudioPreviewEnabled bool            `json:"audioPreviewEnabled"`
 	AudioPreviewMuted   bool            `json:"audioPreviewMuted"`
 	AutoConnect         bool            `json:"autoConnect"`
+	ConnectOnDemand     bool            `json:"connectOnDemand"`
 	SpectrumEnabled     bool            `json:"spectrumEnabled"`
 	SpectrumZoomScroll  bool            `json:"spectrumZoomScroll"`
 	SpectrumPanScroll   bool            `json:"spectrumPanScroll"`
@@ -121,6 +122,7 @@ func getDefaultConfig() ClientConfig {
 		AudioPreviewEnabled: false,
 		AudioPreviewMuted:   true,  // Muted by default
 		AutoConnect:         false, // Disabled by default
+		ConnectOnDemand:     false, // Disabled by default
 		SpectrumEnabled:     false, // Disabled by default
 		SpectrumZoomScroll:  true,  // Zoom scroll enabled by default
 		SpectrumPanScroll:   false, // Pan scroll disabled by default
@@ -303,6 +305,17 @@ func (cm *ConfigManager) UpdateConfig(req ConfigUpdateRequest) error {
 		}
 		if req.AutoConnect != nil {
 			c.AutoConnect = *req.AutoConnect
+			// If enabling AutoConnect, disable ConnectOnDemand (mutually exclusive)
+			if *req.AutoConnect {
+				c.ConnectOnDemand = false
+			}
+		}
+		if req.ConnectOnDemand != nil {
+			c.ConnectOnDemand = *req.ConnectOnDemand
+			// If enabling ConnectOnDemand, disable AutoConnect (mutually exclusive)
+			if *req.ConnectOnDemand {
+				c.AutoConnect = false
+			}
 		}
 		if req.SpectrumEnabled != nil {
 			c.SpectrumEnabled = *req.SpectrumEnabled

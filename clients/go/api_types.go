@@ -72,6 +72,7 @@ type ConfigUpdateRequest struct {
 	AudioPreviewEnabled *bool    `json:"audioPreviewEnabled,omitempty"`
 	AudioPreviewMuted   *bool    `json:"audioPreviewMuted,omitempty"`
 	AutoConnect         *bool    `json:"autoConnect,omitempty"`
+	ConnectOnDemand     *bool    `json:"connectOnDemand,omitempty"`
 	SpectrumEnabled     *bool    `json:"spectrumEnabled,omitempty"`
 	SpectrumZoomScroll  *bool    `json:"spectrumZoomScroll,omitempty"`
 	SpectrumPanScroll   *bool    `json:"spectrumPanScroll,omitempty"`
@@ -254,6 +255,7 @@ type ConfigResponse struct {
 	AudioPreviewEnabled bool    `json:"audioPreviewEnabled"`
 	AudioPreviewMuted   bool    `json:"audioPreviewMuted"`
 	AutoConnect         bool    `json:"autoConnect"`
+	ConnectOnDemand     bool    `json:"connectOnDemand"`
 	SpectrumEnabled     bool    `json:"spectrumEnabled"`
 	SpectrumZoomScroll  bool    `json:"spectrumZoomScroll"`
 	SpectrumPanScroll   bool    `json:"spectrumPanScroll"`

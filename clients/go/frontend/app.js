@@ -50,6 +50,7 @@ class UberSDRClient {
         this.sslCheckbox = document.getElementById('ssl');
         this.passwordInput = document.getElementById('password');
         this.autoConnectCheckbox = document.getElementById('auto-connect');
+        this.connectOnDemandCheckbox = document.getElementById('connect-on-demand');
         this.connectBtn = document.getElementById('connect-btn');
         this.disconnectBtn = document.getElementById('disconnect-btn');
 
@@ -398,7 +399,21 @@ class UberSDRClient {
         // Auto-connect setting
         this.autoConnectCheckbox.addEventListener('change', () => {
             console.log('Auto-connect changed to:', this.autoConnectCheckbox.checked);
+            // Implement mutual exclusivity: if auto-connect is enabled, disable connect-on-demand
+            if (this.autoConnectCheckbox.checked && this.connectOnDemandCheckbox.checked) {
+                this.connectOnDemandCheckbox.checked = false;
+            }
             this.saveAutoConnectConfig();
+        });
+
+        // Connect-on-demand setting
+        this.connectOnDemandCheckbox.addEventListener('change', () => {
+            console.log('Connect-on-demand changed to:', this.connectOnDemandCheckbox.checked);
+            // Implement mutual exclusivity: if connect-on-demand is enabled, disable auto-connect
+            if (this.connectOnDemandCheckbox.checked && this.autoConnectCheckbox.checked) {
+                this.autoConnectCheckbox.checked = false;
+            }
+            this.saveConnectOnDemandConfig();
         });
 
         // RF Spectrum settings
@@ -595,6 +610,9 @@ class UberSDRClient {
             this.showError(data.error, data.message);
         } else if (data.type === 'audio') {
             this.handleAudioData(data);
+        } else if (data.type === 'config_update') {
+            // Handle real-time config updates from backend (e.g., MIDI volume changes)
+            this.handleConfigUpdate(data.config);
         } else if (data.type === 'config' || data.type === 'spectrum') {
             // Forward to spectrum display
             if (this.spectrumDisplay) {
@@ -608,6 +626,31 @@ class UberSDRClient {
         } else if (data.connected !== undefined) {
             // Initial status message
             this.updateStatusDisplay(data);
+        }
+    }
+
+    handleConfigUpdate(config) {
+        // Update volume slider if volume changed
+        if (config.volume !== undefined && config.volume !== null) {
+            const volumePercent = Math.round(config.volume * 100);
+            if (parseInt(this.volumeSlider.value) !== volumePercent) {
+                this.volumeSlider.value = volumePercent;
+                this.volumeValue.textContent = volumePercent;
+            }
+        }
+
+        // Update left channel checkbox if changed
+        if (config.leftChannelEnabled !== undefined && config.leftChannelEnabled !== null) {
+            if (this.leftChannelEnabled.checked !== config.leftChannelEnabled) {
+                this.leftChannelEnabled.checked = config.leftChannelEnabled;
+            }
+        }
+
+        // Update right channel checkbox if changed
+        if (config.rightChannelEnabled !== undefined && config.rightChannelEnabled !== null) {
+            if (this.rightChannelEnabled.checked !== config.rightChannelEnabled) {
+                this.rightChannelEnabled.checked = config.rightChannelEnabled;
+            }
         }
     }
 
@@ -719,24 +762,52 @@ class UberSDRClient {
 
             if (response.ok) {
                 this.connected = false;
-                this.updateConnectionUI();
-                this.showSuccess(data.message || 'Disconnected successfully');
 
-                // Stop band conditions polling
-                this.stopBandConditionsPolling();
-
-                // Stop session timer
-                this.stopSessionTimer();
-
-                // Disable spectrum display
-                if (this.spectrumDisplay) {
-                    this.spectrumDisplay.disable();
+                // Stop band conditions polling (with error handling)
+                try {
+                    this.stopBandConditionsPolling();
+                } catch (e) {
+                    console.error('Error stopping band conditions polling:', e);
                 }
+
+                // Stop session timer (with error handling)
+                try {
+                    this.stopSessionTimer();
+                } catch (e) {
+                    console.error('Error stopping session timer:', e);
+                }
+
+                // Disable spectrum display (with error handling)
+                try {
+                    if (this.spectrumDisplay) {
+                        this.spectrumDisplay.disable();
+                    }
+                } catch (e) {
+                    console.error('Error disabling spectrum display:', e);
+                }
+
+                // Update UI immediately (with error handling)
+                try {
+                    this.updateConnectionUI();
+                } catch (e) {
+                    console.error('Error updating connection UI:', e);
+                }
+
+                this.showSuccess(data.message || 'Disconnected successfully');
             } else {
                 this.showError('Disconnect failed', data.message || data.error);
             }
         } catch (error) {
+            console.error('Disconnect error:', error);
             this.showError('Disconnect error', error.message);
+            
+            // Even if the API call failed, try to clean up the UI
+            try {
+                this.connected = false;
+                this.updateConnectionUI();
+            } catch (e) {
+                console.error('Error cleaning up UI after disconnect failure:', e);
+            }
         }
     }
 
@@ -752,8 +823,13 @@ class UberSDRClient {
             const status = await response.json();
 
             const wasConnected = this.connected;
-            this.connected = status.connected;
-            this.updateConnectionUI();
+
+            // Only update connected state if it changed
+            if (this.connected !== status.connected) {
+                this.connected = status.connected;
+                this.updateConnectionUI();
+            }
+
             this.updateStatusDisplay(status);
 
             // Handle reconnection or initial connection
@@ -1414,6 +1490,11 @@ class UberSDRClient {
                     }
                 }
 
+                // Load connect-on-demand setting
+                if (config.connectOnDemand !== undefined) {
+                    this.connectOnDemandCheckbox.checked = config.connectOnDemand;
+                }
+
                 // Load spectrum control settings with defaults
                 // Note: spectrumEnabled is always unchecked on page load to avoid timing issues
                 this.spectrumEnabled.checked = false;
@@ -1568,6 +1649,33 @@ class UberSDRClient {
             }
         } catch (error) {
             console.error('Error saving auto-connect config:', error);
+        }
+    }
+
+    async saveConnectOnDemandConfig() {
+        const connectOnDemandValue = this.connectOnDemandCheckbox.checked;
+        const config = {
+            connectOnDemand: connectOnDemandValue
+        };
+
+        console.log('Saving connect-on-demand config:', config);
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                console.error('Failed to save connect-on-demand config:', data.message || data.error);
+            } else {
+                const result = await response.json();
+                console.log('Connect-on-demand setting saved successfully:', connectOnDemandValue, result);
+            }
+        } catch (error) {
+            console.error('Error saving connect-on-demand config:', error);
         }
     }
 

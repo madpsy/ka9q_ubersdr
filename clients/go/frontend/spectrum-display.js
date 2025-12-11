@@ -158,9 +158,11 @@ class SpectrumDisplay {
             this.binBandwidth = data.binBandwidth || 0;
             this.totalBandwidth = data.totalBandwidth || 0;
 
-            // Store the maximum available bandwidth (from receiver)
-            if (this.initialBinBandwidth === 0) {
+            // Store the maximum available bandwidth (from receiver) - only on FIRST config
+            // This must be set before any zoom commands are sent to capture the true maximum
+            if (this.initialBinBandwidth === 0 && oldBinCount === 0) {
                 this.initialBinBandwidth = this.binBandwidth;
+                console.log(`Initial receiver bandwidth: ${this.initialBinBandwidth} Hz/bin`);
             }
 
             console.log(`Spectrum config: ${this.binCount} bins @ ${this.binBandwidth.toFixed(2)} Hz/bin = ${(this.totalBandwidth/1000).toFixed(1)} kHz total`);

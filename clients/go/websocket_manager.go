@@ -837,6 +837,13 @@ func (m *WebSocketManager) GetStatus() StatusResponse {
 		SessionStartTime: m.sessionStartTime,
 	}
 
+	// Get lock states from config
+	if m.configManager != nil {
+		config := m.configManager.Get()
+		status.FrequencyLocked = config.FrequencyLocked
+		status.ModeLocked = config.ModeLocked
+	}
+
 	if m.client != nil {
 		status.Frequency = m.client.frequency
 		status.Mode = m.client.mode
@@ -949,11 +956,19 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 	// 3. The current mode is USB or LSB (don't override other modes)
 	// 4. The current mode matches what auto-switching would choose for the CURRENT frequency
 	//    (i.e., user hasn't manually overridden it or selected a bookmark with specific mode)
+	// 5. Mode is not locked
 	//
 	// This approach: if user is already on USB at 7074 kHz (should be LSB), we assume they
 	// want USB (bookmark/manual), so we don't auto-switch when they move to another band.
 
-	if req.Frequency != nil {
+	// Check if mode is locked before attempting auto-switching
+	modeLocked := false
+	if m.configManager != nil {
+		config := m.configManager.Get()
+		modeLocked = config.ModeLocked
+	}
+
+	if req.Frequency != nil && !modeLocked {
 		// Get band names (empty string if outside defined amateur bands)
 		previousBand := GetBandForFrequency(m.client.frequency)
 		currentBand := GetBandForFrequency(effectiveFrequency)
@@ -1138,11 +1153,25 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 
 // SetFrequency changes only the frequency
 func (m *WebSocketManager) SetFrequency(frequency int) error {
+	// Check frequency lock
+	if m.configManager != nil {
+		config := m.configManager.Get()
+		if config.FrequencyLocked {
+			return fmt.Errorf("frequency is locked")
+		}
+	}
 	return m.Tune(TuneRequest{Frequency: &frequency})
 }
 
 // SetMode changes only the mode
 func (m *WebSocketManager) SetMode(mode string) error {
+	// Check mode lock
+	if m.configManager != nil {
+		config := m.configManager.Get()
+		if config.ModeLocked {
+			return fmt.Errorf("mode is locked")
+		}
+	}
 	return m.Tune(TuneRequest{Mode: mode})
 }
 
@@ -1374,15 +1403,25 @@ func (m *WebSocketManager) BroadcastStatus() {
 		return
 	}
 
+	// Get lock states from config
+	var frequencyLocked, modeLocked bool
+	if m.configManager != nil {
+		config := m.configManager.Get()
+		frequencyLocked = config.FrequencyLocked
+		modeLocked = config.ModeLocked
+	}
+
 	update := WSStatusUpdate{
-		Type:        "status",
-		Connected:   m.connected,
-		Frequency:   m.client.frequency,
-		Mode:        m.client.mode,
-		SampleRate:  m.client.sampleRate,
-		Channels:    m.client.channels,
-		CurrentBand: m.client.previousBand, // Include current band for UI highlighting
-		Timestamp:   time.Now(),
+		Type:            "status",
+		Connected:       m.connected,
+		Frequency:       m.client.frequency,
+		Mode:            m.client.mode,
+		SampleRate:      m.client.sampleRate,
+		Channels:        m.client.channels,
+		CurrentBand:     m.client.previousBand, // Include current band for UI highlighting
+		FrequencyLocked: frequencyLocked,
+		ModeLocked:      modeLocked,
+		Timestamp:       time.Now(),
 	}
 	m.mu.RUnlock()
 

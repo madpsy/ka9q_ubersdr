@@ -404,6 +404,17 @@ func (s *APIServer) handleTune(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check locks before allowing changes
+	config := s.configManager.Get()
+	if config.FrequencyLocked && req.Frequency != nil {
+		respondError(w, http.StatusForbidden, "Frequency is locked", "Cannot change frequency while lock is enabled")
+		return
+	}
+	if config.ModeLocked && req.Mode != "" {
+		respondError(w, http.StatusForbidden, "Mode is locked", "Cannot change mode while lock is enabled")
+		return
+	}
+
 	if err := s.manager.Tune(req); err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to tune", err.Error())
 		return
@@ -430,6 +441,13 @@ func (s *APIServer) handleFrequency(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check frequency lock
+	config := s.configManager.Get()
+	if config.FrequencyLocked {
+		respondError(w, http.StatusForbidden, "Frequency is locked", "Cannot change frequency while lock is enabled")
+		return
+	}
+
 	if err := s.manager.SetFrequency(req.Frequency); err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to set frequency", err.Error())
 		return
@@ -448,6 +466,13 @@ func (s *APIServer) handleMode(w http.ResponseWriter, r *http.Request) {
 	var req ModeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	// Check mode lock
+	config := s.configManager.Get()
+	if config.ModeLocked {
+		respondError(w, http.StatusForbidden, "Mode is locked", "Cannot change mode while lock is enabled")
 		return
 	}
 
@@ -561,6 +586,8 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			SerialVFO:           savedConfig.SerialVFO,
 			SerialSyncToRig:     savedConfig.SerialSyncToRig,
 			SerialSyncFromRig:   savedConfig.SerialSyncFromRig,
+			FrequencyLocked:     savedConfig.FrequencyLocked,
+			ModeLocked:          savedConfig.ModeLocked,
 		}
 		respondJSON(w, http.StatusOK, config)
 		return

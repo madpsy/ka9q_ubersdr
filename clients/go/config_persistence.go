@@ -83,6 +83,9 @@ type ClientConfig struct {
 	MIDIEnabled    bool                   `json:"midiEnabled"`
 	MIDIDeviceName string                 `json:"midiDeviceName,omitempty"`
 	MIDIMappings   map[string]MIDIMapping `json:"midiMappings,omitempty"` // Stored as string keys for JSON compatibility
+	// Lock settings
+	FrequencyLocked bool `json:"frequencyLocked"` // Lock frequency changes
+	ModeLocked      bool `json:"modeLocked"`      // Lock mode changes
 }
 
 // ConfigManager handles loading and saving configuration
@@ -162,6 +165,8 @@ func getDefaultConfig() ClientConfig {
 		MIDIEnabled:         false,                        // MIDI disabled by default
 		MIDIDeviceName:      "",                           // No default MIDI device
 		MIDIMappings:        make(map[string]MIDIMapping), // Empty mappings by default
+		FrequencyLocked:     false,                        // Frequency unlocked by default
+		ModeLocked:          false,                        // Mode unlocked by default
 	}
 }
 
@@ -358,6 +363,12 @@ func (cm *ConfigManager) UpdateConfig(req ConfigUpdateRequest) error {
 		}
 		if req.RadioControlType != nil {
 			c.RadioControlType = *req.RadioControlType
+		}
+		if req.FrequencyLocked != nil {
+			c.FrequencyLocked = *req.FrequencyLocked
+		}
+		if req.ModeLocked != nil {
+			c.ModeLocked = *req.ModeLocked
 		}
 	})
 }

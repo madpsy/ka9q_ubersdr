@@ -67,9 +67,11 @@ class UberSDRClient {
         this.bandButtons = document.querySelectorAll('.btn-band');
         this.bookmarkSelect = document.getElementById('bookmark-select');
         this.bandSelect = document.getElementById('band-select');
+        this.frequencyLockedCheckbox = document.getElementById('frequency-locked');
 
         // Mode and bandwidth elements
         this.modeButtons = document.querySelectorAll('.btn-mode');
+        this.modeLockedCheckbox = document.getElementById('mode-locked');
         this.currentMode = 'usb'; // Default mode
         this.bandwidthLowInput = document.getElementById('bandwidth-low');
         this.bandwidthHighInput = document.getElementById('bandwidth-high');
@@ -263,6 +265,22 @@ class UberSDRClient {
         const publicFilter = document.getElementById('public-filter');
         if (publicFilter) {
             publicFilter.addEventListener('input', (e) => this.filterPublicInstances(e.target.value));
+        }
+
+        // Frequency lock
+        if (this.frequencyLockedCheckbox) {
+            this.frequencyLockedCheckbox.addEventListener('change', () => {
+                this.updateFrequencyLockState();
+                this.saveLockConfig();
+            });
+        }
+
+        // Mode lock
+        if (this.modeLockedCheckbox) {
+            this.modeLockedCheckbox.addEventListener('change', () => {
+                this.updateModeLockState();
+                this.saveLockConfig();
+            });
         }
 
         // Frequency controls
@@ -903,6 +921,16 @@ class UberSDRClient {
     }
 
     updateStatusDisplay(status) {
+        // Update lock states if present in status
+        if (status.frequencyLocked !== undefined && this.frequencyLockedCheckbox) {
+            this.frequencyLockedCheckbox.checked = status.frequencyLocked;
+            this.updateFrequencyLockState();
+        }
+        if (status.modeLocked !== undefined && this.modeLockedCheckbox) {
+            this.modeLockedCheckbox.checked = status.modeLocked;
+            this.updateModeLockState();
+        }
+
         if (status.frequency) {
             this.statusFrequency.textContent = this.formatFrequency(status.frequency);
             // Also update the frequency input field for real-time sync
@@ -1429,6 +1457,16 @@ class UberSDRClient {
                     this.currentMode = config.mode;
                     this.updateModeButtons();
                 }
+                
+                // Load lock states
+                if (config.frequencyLocked !== undefined && this.frequencyLockedCheckbox) {
+                    this.frequencyLockedCheckbox.checked = config.frequencyLocked;
+                    this.updateFrequencyLockState();
+                }
+                if (config.modeLocked !== undefined && this.modeLockedCheckbox) {
+                    this.modeLockedCheckbox.checked = config.modeLocked;
+                    this.updateModeLockState();
+                }
                 if (config.bandwidthLow !== null && config.bandwidthLow !== undefined) {
                     this.bandwidthLowInput.value = config.bandwidthLow;
                 }
@@ -1679,6 +1717,54 @@ class UberSDRClient {
         } catch (error) {
             console.error('Error saving connect-on-demand config:', error);
         }
+    }
+
+    async saveLockConfig() {
+        const config = {
+            frequencyLocked: this.frequencyLockedCheckbox ? this.frequencyLockedCheckbox.checked : false,
+            modeLocked: this.modeLockedCheckbox ? this.modeLockedCheckbox.checked : false
+        };
+
+        console.log('Saving lock config:', config);
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                console.error('Failed to save lock config:', data.message || data.error);
+            } else {
+                console.log('Lock settings saved successfully');
+            }
+        } catch (error) {
+            console.error('Error saving lock config:', error);
+        }
+    }
+
+    updateFrequencyLockState() {
+        const locked = this.frequencyLockedCheckbox && this.frequencyLockedCheckbox.checked;
+        
+        // Disable/enable frequency controls
+        this.frequencyInput.disabled = locked;
+        this.frequencyButtons.forEach(btn => btn.disabled = locked);
+        this.bandButtons.forEach(btn => btn.disabled = locked);
+        if (this.bookmarkSelect) this.bookmarkSelect.disabled = locked;
+        if (this.bandSelect) this.bandSelect.disabled = locked;
+        
+        console.log('Frequency lock state updated:', locked);
+    }
+
+    updateModeLockState() {
+        const locked = this.modeLockedCheckbox && this.modeLockedCheckbox.checked;
+        
+        // Disable/enable mode controls
+        this.modeButtons.forEach(btn => btn.disabled = locked);
+        
+        console.log('Mode lock state updated:', locked);
     }
 
     async saveAudioPreviewConfig() {

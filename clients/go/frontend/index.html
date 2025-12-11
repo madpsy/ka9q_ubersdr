@@ -87,6 +87,12 @@
             <!-- Frequency Control Panel -->
             <section class="panel">
                 <h2>Frequency Control</h2>
+                <div class="form-group checkbox-group" style="margin-bottom: 10px;">
+                    <label>
+                        <input type="checkbox" id="frequency-locked">
+                        <span>🔒 Lock Frequency (prevent changes)</span>
+                    </label>
+                </div>
                 <div class="frequency-display">
                     <input type="text" id="frequency-input" value="14074000" placeholder="14074000">
                     <span class="unit">Hz</span>
@@ -131,6 +137,12 @@
             <!-- Mode and Bandwidth Panel -->
             <section class="panel">
                 <h2>Mode & Bandwidth</h2>
+                <div class="form-group checkbox-group" style="margin-bottom: 10px;">
+                    <label>
+                        <input type="checkbox" id="mode-locked">
+                        <span>🔒 Lock Mode (prevent changes)</span>
+                    </label>
+                </div>
                 <div class="mode-buttons-container">
                     <button class="btn-mode" data-mode="usb">USB</button>
                     <button class="btn-mode" data-mode="lsb">LSB</button>
@@ -624,6 +636,7 @@
                                         <option value="Frequency: Encoder (500 Hz)">Encoder (500 Hz)</option>
                                         <option value="Frequency: Encoder (1 kHz)">Encoder (1 kHz)</option>
                                         <option value="Frequency: Encoder (10 kHz)">Encoder (10 kHz)</option>
+                                        <option value="Frequency: Lock Toggle">🔒 Lock Toggle</option>
                                     </optgroup>
                                     <optgroup label="Mode">
                                         <option value="Mode: USB">USB</option>
@@ -633,6 +646,7 @@
                                         <option value="Mode: CW">CW</option>
                                         <option value="Mode: Next">Next Mode</option>
                                         <option value="Mode: Previous">Previous Mode</option>
+                                        <option value="Mode: Lock Toggle">🔒 Lock Toggle</option>
                                     </optgroup>
                                     <optgroup label="Bands">
                                         <option value="Band: 160m">160m</option>

@@ -87,6 +87,8 @@ type ConfigUpdateRequest struct {
 	ResampleOutputRate  *int     `json:"resampleOutputRate,omitempty"`
 	OutputChannels      *int     `json:"outputChannels,omitempty"`
 	RadioControlType    *string  `json:"radioControlType,omitempty"`
+	FrequencyLocked     *bool    `json:"frequencyLocked,omitempty"`
+	ModeLocked          *bool    `json:"modeLocked,omitempty"`
 }
 
 // OutputControlRequest represents a request to control an output
@@ -217,6 +219,8 @@ type StatusResponse struct {
 	SessionStartTime   time.Time              `json:"sessionStartTime,omitempty"`
 	OutputStatus       map[string]interface{} `json:"outputStatus,omitempty"`
 	CurrentBand        string                 `json:"currentBand,omitempty"` // Current amateur radio band (e.g., "20m", "40m", or "" if not in a band)
+	FrequencyLocked    bool                   `json:"frequencyLocked"`
+	ModeLocked         bool                   `json:"modeLocked"`
 }
 
 // AudioDevice represents an audio output device
@@ -290,6 +294,9 @@ type ConfigResponse struct {
 	SerialVFO         string `json:"serialVFO,omitempty"`
 	SerialSyncToRig   bool   `json:"serialSyncToRig"`
 	SerialSyncFromRig bool   `json:"serialSyncFromRig"`
+	// Lock settings
+	FrequencyLocked bool `json:"frequencyLocked"`
+	ModeLocked      bool `json:"modeLocked"`
 }
 
 // ErrorResponse represents an error response
@@ -308,15 +315,17 @@ type SuccessResponse struct {
 
 // WSStatusUpdate represents a WebSocket status update message
 type WSStatusUpdate struct {
-	Type        string    `json:"type"` // "status"
-	Connected   bool      `json:"connected"`
-	Frequency   int       `json:"frequency"`
-	Mode        string    `json:"mode"`
-	SampleRate  int       `json:"sampleRate"`
-	Channels    int       `json:"channels"`
-	SessionID   string    `json:"sessionId,omitempty"`
-	CurrentBand string    `json:"currentBand,omitempty"` // Current amateur radio band
-	Timestamp   time.Time `json:"timestamp"`
+	Type            string    `json:"type"` // "status"
+	Connected       bool      `json:"connected"`
+	Frequency       int       `json:"frequency"`
+	Mode            string    `json:"mode"`
+	SampleRate      int       `json:"sampleRate"`
+	Channels        int       `json:"channels"`
+	SessionID       string    `json:"sessionId,omitempty"`
+	CurrentBand     string    `json:"currentBand,omitempty"` // Current amateur radio band
+	FrequencyLocked bool      `json:"frequencyLocked"`
+	ModeLocked      bool      `json:"modeLocked"`
+	Timestamp       time.Time `json:"timestamp"`
 }
 
 // WSErrorUpdate represents a WebSocket error message

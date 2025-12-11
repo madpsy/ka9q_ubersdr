@@ -388,6 +388,27 @@ func (mc *MIDIController) executeFunction(function string, value uint8) {
 	case "Frequency: Encoder (10 kHz)":
 		mc.handleEncoder(status.Frequency, value, 10000)
 
+	case "Frequency: Lock Toggle":
+		if value > 0 {
+			// Get fresh status to read current lock state
+			currentStatus := mc.manager.GetStatus()
+			newLocked := !currentStatus.FrequencyLocked
+			// Save to config manager (which persists to disk)
+			if mc.configManager != nil {
+				err := mc.configManager.UpdateConfig(ConfigUpdateRequest{
+					FrequencyLocked: &newLocked,
+				})
+				if err != nil {
+					log.Printf("MIDI: Failed to save frequency lock config: %v", err)
+				}
+			}
+			log.Printf("MIDI: Frequency lock toggled from %v to %v", currentStatus.FrequencyLocked, newLocked)
+			// Small delay to ensure config is saved before broadcasting
+			time.Sleep(50 * time.Millisecond)
+			// Broadcast status update so UI gets the new lock state
+			mc.manager.BroadcastStatus()
+		}
+
 	// Mode controls
 	case "Mode: USB":
 		mc.manager.SetMode("usb")
@@ -403,6 +424,27 @@ func (mc *MIDIController) executeFunction(function string, value uint8) {
 		mc.cycleMode(status.Mode, 1)
 	case "Mode: Previous":
 		mc.cycleMode(status.Mode, -1)
+
+	case "Mode: Lock Toggle":
+		if value > 0 {
+			// Get fresh status to read current lock state
+			currentStatus := mc.manager.GetStatus()
+			newLocked := !currentStatus.ModeLocked
+			// Save to config manager (which persists to disk)
+			if mc.configManager != nil {
+				err := mc.configManager.UpdateConfig(ConfigUpdateRequest{
+					ModeLocked: &newLocked,
+				})
+				if err != nil {
+					log.Printf("MIDI: Failed to save mode lock config: %v", err)
+				}
+			}
+			log.Printf("MIDI: Mode lock toggled from %v to %v", currentStatus.ModeLocked, newLocked)
+			// Small delay to ensure config is saved before broadcasting
+			time.Sleep(50 * time.Millisecond)
+			// Broadcast status update so UI gets the new lock state
+			mc.manager.BroadcastStatus()
+		}
 
 	// Band controls
 	case "Band: 160m":

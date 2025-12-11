@@ -44,6 +44,7 @@ type ClientConfig struct {
 	SpectrumPanScroll   bool            `json:"spectrumPanScroll"`
 	SpectrumClickTune   bool            `json:"spectrumClickTune"`
 	SpectrumCenterTune  bool            `json:"spectrumCenterTune"`
+	SpectrumSnap        int             `json:"spectrumSnap"`
 	APIPort             int             `json:"apiPort"`
 	SavedInstances      []SavedInstance `json:"savedInstances,omitempty"`
 	FIFOPath            string          `json:"fifoPath,omitempty"`
@@ -120,6 +121,12 @@ func getDefaultConfig() ClientConfig {
 		AudioPreviewEnabled: false,
 		AudioPreviewMuted:   true,  // Muted by default
 		AutoConnect:         false, // Disabled by default
+		SpectrumEnabled:     false, // Disabled by default
+		SpectrumZoomScroll:  true,  // Zoom scroll enabled by default
+		SpectrumPanScroll:   false, // Pan scroll disabled by default
+		SpectrumClickTune:   true,  // Click tune enabled by default
+		SpectrumCenterTune:  false, // Center tune disabled by default
+		SpectrumSnap:        500,   // Default snap frequency 500 Hz
 		APIPort:             8090,
 		FIFOPath:            "",                           // No FIFO by default
 		FIFOEnabled:         false,                        // FIFO disabled by default
@@ -311,6 +318,9 @@ func (cm *ConfigManager) UpdateConfig(req ConfigUpdateRequest) error {
 		}
 		if req.SpectrumCenterTune != nil {
 			c.SpectrumCenterTune = *req.SpectrumCenterTune
+		}
+		if req.SpectrumSnap != nil {
+			c.SpectrumSnap = *req.SpectrumSnap
 		}
 		if req.Volume != nil {
 			c.Volume = *req.Volume

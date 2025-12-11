@@ -99,6 +99,23 @@ class SpectrumDisplay {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(msg));
             console.log('Spectrum stream enabled, waiting for config...');
+
+            // Force an initial draw to show overlays even before spectrum data arrives
+            // This ensures bookmarks, bands, frequency line, and bandwidth markers are visible
+            if (this.tunedFreq > 0 && this.totalBandwidth === 0) {
+                // Set a temporary bandwidth for initial display (will be updated when config arrives)
+                this.centerFreq = this.tunedFreq;
+                this.totalBandwidth = 200000; // 200 kHz default
+                this.binCount = 2048;
+                this.binBandwidth = this.totalBandwidth / this.binCount;
+                console.log('Setting temporary display parameters for initial draw');
+
+                // Create dummy spectrum data for initial draw
+                this.spectrumData = new Array(this.binCount).fill(-100);
+
+                // Draw once to show overlays
+                this.draw();
+            }
         }
     }
 
@@ -333,6 +350,7 @@ class SpectrumDisplay {
 
     drawBandBackgrounds(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
         if (!this.bands || this.bands.length === 0 || this.totalBandwidth === 0) {
+            console.log('drawBandBackgrounds: skipping - bands=', this.bands?.length, 'totalBandwidth=', this.totalBandwidth);
             return;
         }
 
@@ -427,7 +445,10 @@ class SpectrumDisplay {
     }
 
     drawBookmarks(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
-        if (!this.bookmarks || this.bookmarks.length === 0 || this.totalBandwidth === 0) return;
+        if (!this.bookmarks || this.bookmarks.length === 0 || this.totalBandwidth === 0) {
+            console.log('drawBookmarks: skipping - bookmarks=', this.bookmarks?.length, 'totalBandwidth=', this.totalBandwidth);
+            return;
+        }
 
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const endFreq = this.centerFreq + this.totalBandwidth / 2;
@@ -484,13 +505,19 @@ class SpectrumDisplay {
     }
 
     drawTunedFrequencyMarker(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
-        if (this.tunedFreq === 0 || this.totalBandwidth === 0) return;
+        if (this.tunedFreq === 0 || this.totalBandwidth === 0) {
+            console.log('drawTunedFrequencyMarker: skipping - tunedFreq=', this.tunedFreq, 'totalBandwidth=', this.totalBandwidth);
+            return;
+        }
 
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const endFreq = this.centerFreq + this.totalBandwidth / 2;
 
         // Check if tuned frequency is visible
-        if (this.tunedFreq < startFreq || this.tunedFreq > endFreq) return;
+        if (this.tunedFreq < startFreq || this.tunedFreq > endFreq) {
+            console.log('drawTunedFrequencyMarker: tuned freq not visible - tunedFreq=', this.tunedFreq, 'range=', startFreq, '-', endFreq);
+            return;
+        }
 
         // Calculate x position
         const freqOffset = this.tunedFreq - startFreq;
@@ -516,8 +543,14 @@ class SpectrumDisplay {
     }
 
     drawBandwidthFilter(ctx, marginLeft, marginRight, marginTop, marginBottom, graphWidth, graphHeight) {
-        if (this.totalBandwidth === 0 || this.tunedFreq === 0) return;
-        if (this.bandwidthLow === 0 && this.bandwidthHigh === 0) return;
+        if (this.totalBandwidth === 0 || this.tunedFreq === 0) {
+            console.log('drawBandwidthFilter: skipping - totalBandwidth=', this.totalBandwidth, 'tunedFreq=', this.tunedFreq);
+            return;
+        }
+        if (this.bandwidthLow === 0 && this.bandwidthHigh === 0) {
+            console.log('drawBandwidthFilter: skipping - no bandwidth set');
+            return;
+        }
 
         const startFreq = this.centerFreq - this.totalBandwidth / 2;
         const endFreq = this.centerFreq + this.totalBandwidth / 2;

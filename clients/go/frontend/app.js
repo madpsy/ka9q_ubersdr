@@ -74,7 +74,6 @@ class UberSDRClient {
         // Audio preview elements
         this.audioPreviewEnabled = document.getElementById('audio-preview-enabled');
         this.audioPreviewControls = document.getElementById('audio-preview-controls');
-        this.audioPreviewStatus = document.getElementById('audio-preview-status');
         this.audioMuteBtn = document.getElementById('audio-mute-btn');
         this.audioPreviewChannelControls = document.getElementById('audio-preview-channel-controls');
         this.audioPreviewLeftChannel = document.getElementById('audio-preview-left-channel');
@@ -85,13 +84,13 @@ class UberSDRClient {
         // RF Spectrum elements
         this.spectrumEnabled = document.getElementById('spectrum-enabled');
         this.spectrumDisplayContainer = document.getElementById('spectrum-display-container');
-        this.spectrumStatus = document.getElementById('spectrum-status');
         this.rfSpectrumCanvas = document.getElementById('rf-spectrum-canvas');
         this.rfWaterfallCanvas = document.getElementById('rf-waterfall-canvas');
         this.spectrumZoomScrollCheckbox = document.getElementById('spectrum-zoom-scroll');
         this.spectrumPanScrollCheckbox = document.getElementById('spectrum-pan-scroll');
         this.spectrumClickTuneCheckbox = document.getElementById('spectrum-click-tune');
         this.spectrumCenterTuneCheckbox = document.getElementById('spectrum-center-tune');
+        this.spectrumAudioToggle = document.getElementById('spectrum-audio-toggle');
 
         // NR2 elements
         this.nr2EnabledCheckbox = document.getElementById('nr2-enabled');
@@ -348,6 +347,17 @@ class UberSDRClient {
         this.spectrumEnabled.addEventListener('change', () => {
             this.toggleSpectrumDisplay();
             this.saveSpectrumConfig();
+            // Show/hide audio toggle button based on spectrum enabled state
+            if (this.spectrumEnabled.checked) {
+                this.spectrumAudioToggle.style.display = 'inline-block';
+            } else {
+                this.spectrumAudioToggle.style.display = 'none';
+            }
+        });
+
+        // Spectrum audio toggle button
+        this.spectrumAudioToggle.addEventListener('click', () => {
+            this.toggleSpectrumAudio();
         });
 
         // Spectrum control checkboxes
@@ -609,10 +619,8 @@ class UberSDRClient {
                 // Update output status after a delay to allow backend restoration
                 setTimeout(() => this.updateOutputStatus(), 1000);
 
-                // Enable spectrum display if checkbox is checked
-                if (this.spectrumEnabled.checked) {
-                    setTimeout(() => this.enableSpectrumDisplay(), 500);
-                }
+                // Auto-enable spectrum display and scroll to it - wait for bookmarks/bands to load
+                setTimeout(() => this.autoEnableSpectrum(), 1500);
 
                 // Start band conditions polling
                 console.log('DEBUG: About to schedule startBandConditionsPolling in 1 second');
@@ -671,8 +679,14 @@ class UberSDRClient {
 
             // Load bookmarks, bands, and instance info if connected and not already loaded
             if (status.connected && this.bookmarkSelect && this.bookmarkSelect.options.length <= 1) {
-                this.loadBookmarks();
-                this.loadBands();
+                await this.loadBookmarks();
+                await this.loadBands();
+                
+                // Auto-enable spectrum after bookmarks/bands are loaded (for auto-connect scenario)
+                if (!wasConnected) {
+                    console.log('First connection detected, auto-enabling spectrum after data load');
+                    setTimeout(() => this.autoEnableSpectrum(), 500);
+                }
             }
 
             // Load instance info if we just became connected (including auto-connect on page load)
@@ -1119,6 +1133,7 @@ class UberSDRClient {
             const response = await fetch(`${this.apiBase}/api/config`);
             if (response.ok) {
                 const config = await response.json();
+                console.log('Loaded config:', config);
 
                 // Populate form fields with saved config
                 if (config.host) this.hostInput.value = config.host;
@@ -1198,15 +1213,42 @@ class UberSDRClient {
                 this.spectrumDisplayContainer.style.display = 'none';
 
                 // Set spectrum control checkboxes - use saved values or defaults
-                this.spectrumZoomScrollCheckbox.checked = (config.spectrumZoomScroll !== undefined) ? config.spectrumZoomScroll : true;
-                this.spectrumPanScrollCheckbox.checked = (config.spectrumPanScroll !== undefined) ? config.spectrumPanScroll : false;
-                this.spectrumClickTuneCheckbox.checked = (config.spectrumClickTune !== undefined) ? config.spectrumClickTune : true;
-                this.spectrumCenterTuneCheckbox.checked = (config.spectrumCenterTune !== undefined) ? config.spectrumCenterTune : true;
+                // Only override if config value exists and is not null, otherwise keep HTML defaults
+                if (config.spectrumZoomScroll !== undefined && config.spectrumZoomScroll !== null) {
+                    this.spectrumZoomScrollCheckbox.checked = config.spectrumZoomScroll;
+                    console.log('Set spectrumZoomScroll from config:', config.spectrumZoomScroll);
+                } else {
+                    console.log('Using HTML default for spectrumZoomScroll (should be checked)');
+                }
+                
+                // Initialize audio toggle button state
+                this.updateSpectrumAudioButton();
+                if (config.spectrumPanScroll !== undefined && config.spectrumPanScroll !== null) {
+                    this.spectrumPanScrollCheckbox.checked = config.spectrumPanScroll;
+                    console.log('Set spectrumPanScroll from config:', config.spectrumPanScroll);
+                }
+                if (config.spectrumClickTune !== undefined && config.spectrumClickTune !== null) {
+                    this.spectrumClickTuneCheckbox.checked = config.spectrumClickTune;
+                    console.log('Set spectrumClickTune from config:', config.spectrumClickTune);
+                } else {
+                    console.log('Using HTML default for spectrumClickTune (should be checked)');
+                }
+                if (config.spectrumCenterTune !== undefined && config.spectrumCenterTune !== null) {
+                    this.spectrumCenterTuneCheckbox.checked = config.spectrumCenterTune;
+                    console.log('Set spectrumCenterTune from config:', config.spectrumCenterTune);
+                }
 
-                // Set spectrum snap value
+                // Set spectrum snap value - only if saved config exists and is not 0
                 const spectrumSnapSelect = document.getElementById('spectrum-snap');
-                if (spectrumSnapSelect && config.spectrumSnap !== undefined) {
+                if (spectrumSnapSelect && config.spectrumSnap !== undefined && config.spectrumSnap !== null && config.spectrumSnap !== 0) {
                     spectrumSnapSelect.value = config.spectrumSnap;
+                    console.log('Set spectrumSnap from config:', config.spectrumSnap);
+                } else {
+                    // Use default of 500 if not set or is 0
+                    if (spectrumSnapSelect) {
+                        spectrumSnapSelect.value = 500;
+                        console.log('Using default spectrumSnap: 500');
+                    }
                 }
 
                 console.log('Loaded spectrum config (enabled always starts unchecked):', {
@@ -1613,6 +1655,12 @@ class UberSDRClient {
 
             // Enable mode buttons
             this.modeButtons.forEach(btn => btn.disabled = false);
+            
+            // Enable spectrum display checkbox
+            this.spectrumEnabled.disabled = false;
+            
+            // Enable audio preview checkbox
+            this.audioPreviewEnabled.disabled = false;
         } else {
             this.connectionStatus.textContent = 'Disconnected';
             this.connectionStatus.className = 'status-badge disconnected';
@@ -1635,6 +1683,32 @@ class UberSDRClient {
 
             // Disable mode buttons
             this.modeButtons.forEach(btn => btn.disabled = true);
+            
+            // Disable and uncheck spectrum display
+            this.spectrumEnabled.disabled = true;
+            if (this.spectrumEnabled.checked) {
+                this.spectrumEnabled.checked = false;
+                this.spectrumDisplayContainer.style.display = 'none';
+                this.spectrumAudioToggle.style.display = 'none';
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.disable();
+                }
+            }
+            
+            // Disable and uncheck audio preview
+            this.audioPreviewEnabled.disabled = true;
+            if (this.audioPreviewEnabled.checked) {
+                this.audioPreviewEnabled.checked = false;
+                this.audioPreviewControls.style.display = 'none';
+                this.audioMuteBtn.style.display = 'none';
+                this.audioPreviewChannelControls.style.display = 'none';
+                this.stopAudioStream();
+                if (this.audioVisualizer) {
+                    this.audioVisualizer.clear();
+                }
+                // Update spectrum audio button state
+                this.updateSpectrumAudioButton();
+            }
         }
     }
 
@@ -1882,6 +1956,47 @@ class UberSDRClient {
 
     // Audio Preview Methods
 
+    toggleSpectrumAudio() {
+        // Toggle audio on/off (combines enable and mute)
+        const isCurrentlyOn = this.audioPreviewEnabled.checked && !this.audioMuted;
+        
+        if (isCurrentlyOn) {
+            // Turn audio off - either disable or mute
+            if (this.audioPreviewEnabled.checked) {
+                this.audioMuted = true;
+                this.updateMuteButton();
+            }
+        } else {
+            // Turn audio on - enable and unmute
+            if (!this.audioPreviewEnabled.checked) {
+                this.audioPreviewEnabled.checked = true;
+                this.toggleAudioPreview();
+            }
+            this.audioMuted = false;
+            this.updateMuteButton();
+        }
+        
+        // Update button appearance
+        this.updateSpectrumAudioButton();
+        this.saveAudioPreviewConfig();
+    }
+
+    updateSpectrumAudioButton() {
+        const isOn = this.audioPreviewEnabled.checked && !this.audioMuted;
+        
+        if (isOn) {
+            this.spectrumAudioToggle.textContent = '🔊 Audio On';
+            this.spectrumAudioToggle.style.backgroundColor = '#22c55e';
+            this.spectrumAudioToggle.style.borderColor = '#22c55e';
+            this.spectrumAudioToggle.style.color = 'white';
+        } else {
+            this.spectrumAudioToggle.textContent = '🔇 Audio Off';
+            this.spectrumAudioToggle.style.backgroundColor = '#ef4444';
+            this.spectrumAudioToggle.style.borderColor = '#ef4444';
+            this.spectrumAudioToggle.style.color = 'white';
+        }
+    }
+
     toggleAudioPreview() {
         const enabled = this.audioPreviewEnabled.checked;
 
@@ -1912,11 +2027,15 @@ class UberSDRClient {
                 this.audioVisualizer.clear();
             }
         }
+        
+        // Update spectrum audio button
+        this.updateSpectrumAudioButton();
     }
 
     toggleMute() {
         this.audioMuted = !this.audioMuted;
         this.updateMuteButton();
+        this.updateSpectrumAudioButton();
         console.log('Audio muted:', this.audioMuted);
     }
 
@@ -1940,7 +2059,6 @@ class UberSDRClient {
             this.initWebAudioAPI();
         } catch (error) {
             console.error('Failed to start audio stream:', error);
-            this.updateAudioStatus('Failed to start');
             this.showError('Audio Stream Error', error.message);
         }
     }
@@ -1961,7 +2079,6 @@ class UberSDRClient {
         this.audioStreamActive = false;
         this.audioQueue = [];
         this.nextPlayTime = 0;
-        this.updateAudioStatus('Not streaming');
     }
 
     initWebAudioAPI() {
@@ -1970,7 +2087,6 @@ class UberSDRClient {
         this.audioContext = new AudioContext();
         this.nextPlayTime = 0; // Track when to schedule next audio chunk
         this.audioStreamActive = true;
-        this.updateAudioStatus('Streaming');
         this.sendAudioStreamRequest(true);
         console.log('Web Audio API initialized, sample rate:', this.audioContext.sampleRate);
     }
@@ -2130,17 +2246,6 @@ class UberSDRClient {
     }
 
 
-    updateAudioStatus(status) {
-        this.audioPreviewStatus.textContent = status;
-        if (status.includes('Streaming')) {
-            this.audioPreviewStatus.className = 'status-badge connected';
-        } else if (status.includes('Error') || status.includes('Failed')) {
-            this.audioPreviewStatus.className = 'status-badge error';
-        } else {
-            this.audioPreviewStatus.className = 'status-badge disconnected';
-        }
-    }
-
     // RF Spectrum Display Methods
 
     toggleSpectrumDisplay() {
@@ -2149,13 +2254,15 @@ class UberSDRClient {
         if (enabled) {
             this.spectrumDisplayContainer.style.display = 'block';
             if (this.connected) {
+                console.log('toggleSpectrumDisplay: Enabling spectrum, connected=true');
                 this.enableSpectrumDisplay();
+            } else {
+                console.log('toggleSpectrumDisplay: Not connected, spectrum display shown but not enabled');
             }
         } else {
             this.spectrumDisplayContainer.style.display = 'none';
             if (this.spectrumDisplay) {
                 this.spectrumDisplay.disable();
-                this.updateSpectrumStatus('Not streaming');
             }
         }
     }
@@ -2196,12 +2303,10 @@ class UberSDRClient {
                 // Set flag to prevent mode change event from calling updateModeDefaults
                 this.bookmarkModeChange = true;
 
-                // Update mode select
-                if (this.modeSelect.value !== mappedMode) {
-                    this.modeSelect.value = mappedMode;
-                    // Update bandwidth defaults for the new mode
-                    this.updateModeDefaults();
-                }
+                // Update mode buttons
+                this.currentMode = mappedMode;
+                this.updateModeButtons();
+                this.updateModeDefaults();
 
                 // Clear flag after a short delay
                 setTimeout(() => {
@@ -2220,6 +2325,7 @@ class UberSDRClient {
             if (spectrumSnapSelect) {
                 const snapHz = parseInt(spectrumSnapSelect.value);
                 this.spectrumDisplay.setSnapFrequency(snapHz);
+                console.log(`Set snap frequency to ${snapHz} Hz`);
             }
 
             console.log(`Spectrum display initialized with center-tune: ${this.spectrumCenterTuneCheckbox.checked}`);
@@ -2238,6 +2344,7 @@ class UberSDRClient {
                 }
                 if (bookmarks.length > 0) {
                     this.spectrumDisplay.setBookmarks(bookmarks);
+                    console.log(`Set ${bookmarks.length} bookmarks on spectrum display`);
                 }
             }
 
@@ -2254,23 +2361,64 @@ class UberSDRClient {
             const bandwidthLow = parseInt(this.bandwidthLowInput.value) || 50;
             const bandwidthHigh = parseInt(this.bandwidthHighInput.value) || 2700;
 
+            // Set these BEFORE enabling to ensure they're available when first config arrives
             this.spectrumDisplay.tunedFreq = tunedFreq;
             this.spectrumDisplay.updateBandwidth(bandwidthLow, bandwidthHigh);
             console.log(`Enabling spectrum display at ${tunedFreq} Hz with BW ${bandwidthLow} to ${bandwidthHigh} Hz`);
+            console.log(`Spectrum display state: tunedFreq=${this.spectrumDisplay.tunedFreq}, bandwidthLow=${this.spectrumDisplay.bandwidthLow}, bandwidthHigh=${this.spectrumDisplay.bandwidthHigh}`);
+            console.log(`Bookmarks on spectrum: ${this.spectrumDisplay.bookmarks ? this.spectrumDisplay.bookmarks.length : 0}`);
+            console.log(`Bands on spectrum: ${this.spectrumDisplay.bands ? this.spectrumDisplay.bands.length : 0}`);
 
             this.spectrumDisplay.enable(this.ws);
-            this.updateSpectrumStatus('Streaming');
+        } else {
+            console.log('Cannot enable spectrum display:', {
+                hasDisplay: !!this.spectrumDisplay,
+                hasWS: !!this.ws,
+                wsState: this.ws ? this.ws.readyState : 'no ws',
+                wsOpen: this.ws ? this.ws.readyState === WebSocket.OPEN : false
+            });
         }
     }
 
-    updateSpectrumStatus(status) {
-        this.spectrumStatus.textContent = status;
-        if (status.includes('Streaming')) {
-            this.spectrumStatus.className = 'status-badge connected';
-        } else if (status.includes('Error') || status.includes('Failed')) {
-            this.spectrumStatus.className = 'status-badge error';
+    autoEnableSpectrum() {
+        if (!this.connected) {
+            console.log('autoEnableSpectrum: Not connected, skipping');
+            return;
+        }
+        
+        console.log('autoEnableSpectrum: Enabling spectrum display');
+        console.log('autoEnableSpectrum: Bookmarks loaded:', this.bookmarkSelect ? this.bookmarkSelect.options.length - 1 : 0);
+        console.log('autoEnableSpectrum: Bands loaded:', this.loadedBands ? this.loadedBands.length : 0);
+        
+        // Enable spectrum display checkbox if not already enabled
+        if (!this.spectrumEnabled.checked) {
+            console.log('autoEnableSpectrum: Checking spectrum checkbox');
+            this.spectrumEnabled.checked = true;
+            this.toggleSpectrumDisplay();
+            this.saveSpectrumConfig();
+            
+            // Wait a bit for spectrum to initialize before showing audio button
+            setTimeout(() => {
+                if (this.spectrumEnabled.checked) {
+                    this.spectrumAudioToggle.style.display = 'inline-block';
+                    console.log('autoEnableSpectrum: Showing audio toggle button');
+                }
+            }, 100);
         } else {
-            this.spectrumStatus.className = 'status-badge disconnected';
+            console.log('autoEnableSpectrum: Spectrum already enabled');
+            // Make sure audio button is visible
+            if (this.spectrumEnabled.checked) {
+                this.spectrumAudioToggle.style.display = 'inline-block';
+            }
+        }
+        
+        // Scroll to RF Spectrum Display section
+        const spectrumSection = this.spectrumEnabled.closest('.panel');
+        if (spectrumSection) {
+            console.log('autoEnableSpectrum: Scrolling to spectrum section');
+            spectrumSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+            console.log('autoEnableSpectrum: Could not find spectrum section');
         }
     }
 

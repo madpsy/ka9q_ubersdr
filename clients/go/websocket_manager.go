@@ -1369,21 +1369,48 @@ func (m *WebSocketManager) broadcastAudioData(audioData []byte, sampleRate int, 
 	}
 
 	// Send to all connections for this room via their write channels
-	m.audioStreamsMu.RLock()
+	m.audioStreamsMu.Lock()
+	defer m.audioStreamsMu.Unlock()
+
+	// Track connections with closed channels for cleanup
+	var closedConns []*websocket.Conn
+
 	for conn, connRoom := range m.audioStreams {
 		if connRoom == room {
 			if writeChan, ok := m.audioWriteChans[conn]; ok {
-				select {
-				case writeChan <- audioMsg:
-					// Sent successfully
-				default:
-					// Channel full, skip this frame
-					log.Printf("Audio write channel full for room '%s', dropping frame", room)
+				// Use defer/recover to catch any panics from closed channels
+				channelClosed := false
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("Detected closed channel in broadcastAudioData, will clean up connection")
+							channelClosed = true
+						}
+					}()
+
+					select {
+					case writeChan <- audioMsg:
+						// Sent successfully
+					default:
+						// Channel full, skip this frame
+						log.Printf("Audio write channel full for room '%s', dropping frame", room)
+					}
+				}()
+
+				// If channel was closed, mark connection for cleanup
+				if channelClosed {
+					closedConns = append(closedConns, conn)
 				}
 			}
 		}
 	}
-	m.audioStreamsMu.RUnlock()
+
+	// Clean up connections with closed channels
+	for _, conn := range closedConns {
+		log.Printf("Cleaning up closed audio stream connection")
+		delete(m.audioStreams, conn)
+		delete(m.audioWriteChans, conn)
+	}
 }
 
 // EnableSpectrumStream enables spectrum streaming to a WebSocket connection

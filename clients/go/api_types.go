@@ -77,6 +77,7 @@ type ConfigUpdateRequest struct {
 	SpectrumPanScroll   *bool    `json:"spectrumPanScroll,omitempty"`
 	SpectrumClickTune   *bool    `json:"spectrumClickTune,omitempty"`
 	SpectrumCenterTune  *bool    `json:"spectrumCenterTune,omitempty"`
+	SpectrumSnap        *int     `json:"spectrumSnap,omitempty"`
 	Volume              *float64 `json:"volume,omitempty"`
 	LeftChannelEnabled  *bool    `json:"leftChannelEnabled,omitempty"`
 	RightChannelEnabled *bool    `json:"rightChannelEnabled,omitempty"`
@@ -257,6 +258,7 @@ type ConfigResponse struct {
 	SpectrumPanScroll   bool    `json:"spectrumPanScroll"`
 	SpectrumClickTune   bool    `json:"spectrumClickTune"`
 	SpectrumCenterTune  bool    `json:"spectrumCenterTune"`
+	SpectrumSnap        int     `json:"spectrumSnap"`
 	FIFOPath            string  `json:"fifoPath,omitempty"`
 	UDPHost             string  `json:"udpHost,omitempty"`
 	UDPPort             int     `json:"udpPort,omitempty"`

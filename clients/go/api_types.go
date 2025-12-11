@@ -215,6 +215,7 @@ type StatusResponse struct {
 	MaxSessionTime     int                    `json:"maxSessionTime"`
 	SessionStartTime   time.Time              `json:"sessionStartTime,omitempty"`
 	OutputStatus       map[string]interface{} `json:"outputStatus,omitempty"`
+	CurrentBand        string                 `json:"currentBand,omitempty"` // Current amateur radio band (e.g., "20m", "40m", or "" if not in a band)
 }
 
 // AudioDevice represents an audio output device
@@ -305,14 +306,15 @@ type SuccessResponse struct {
 
 // WSStatusUpdate represents a WebSocket status update message
 type WSStatusUpdate struct {
-	Type       string    `json:"type"` // "status"
-	Connected  bool      `json:"connected"`
-	Frequency  int       `json:"frequency"`
-	Mode       string    `json:"mode"`
-	SampleRate int       `json:"sampleRate"`
-	Channels   int       `json:"channels"`
-	SessionID  string    `json:"sessionId,omitempty"`
-	Timestamp  time.Time `json:"timestamp"`
+	Type        string    `json:"type"` // "status"
+	Connected   bool      `json:"connected"`
+	Frequency   int       `json:"frequency"`
+	Mode        string    `json:"mode"`
+	SampleRate  int       `json:"sampleRate"`
+	Channels    int       `json:"channels"`
+	SessionID   string    `json:"sessionId,omitempty"`
+	CurrentBand string    `json:"currentBand,omitempty"` // Current amateur radio band
+	Timestamp   time.Time `json:"timestamp"`
 }
 
 // WSErrorUpdate represents a WebSocket error message

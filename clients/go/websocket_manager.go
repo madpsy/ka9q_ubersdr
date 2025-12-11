@@ -767,6 +767,9 @@ func (m *WebSocketManager) GetStatus() StatusResponse {
 		status.Port = m.client.port
 		status.SSL = m.client.ssl
 
+		// Add current band information for UI band button highlighting
+		status.CurrentBand = m.client.previousBand // previousBand tracks the current band
+
 		if m.connected {
 			status.ConnectedAt = m.connectedAt
 			status.Uptime = time.Since(m.connectedAt).Round(time.Second).String()
@@ -791,6 +794,10 @@ func (m *WebSocketManager) GetStatusWithOutputs() StatusResponse {
 
 // Tune changes frequency/mode/bandwidth without reconnecting
 func (m *WebSocketManager) Tune(req TuneRequest) error {
+	// Track if mode was auto-switched (needs to be accessible in both RLock and Lock sections)
+	var autoSwitchedMode bool
+	var effectiveMode string
+
 	// Read state with RLock first
 	m.mu.RLock()
 	if !m.connected || m.client == nil {
@@ -807,21 +814,87 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 		"type": "tune",
 	}
 
-	// Update frequency if provided
+	// Determine the effective frequency (new or current)
+	var effectiveFrequency int
 	if req.Frequency != nil {
+		effectiveFrequency = *req.Frequency
 		tuneMsg["frequency"] = *req.Frequency
 	} else {
+		effectiveFrequency = m.client.frequency
 		tuneMsg["frequency"] = m.client.frequency
 	}
 
-	// Update mode if provided
-	var effectiveMode string
+	// Determine the effective mode (new or current)
 	if req.Mode != "" {
 		tuneMsg["mode"] = req.Mode
 		effectiveMode = req.Mode
 	} else {
 		tuneMsg["mode"] = m.client.mode
 		effectiveMode = m.client.mode
+	}
+
+	// Automatic LSB/USB mode switching based on band changes
+	// Only switch mode when:
+	// 1. Moving between defined amateur radio bands (not outside bands like WEFAX, broadcast, etc.)
+	// 2. The band itself changes (not just frequency within same band)
+	// 3. The current mode is USB or LSB (don't override other modes)
+	// 4. The current mode matches what auto-switching would choose for the CURRENT frequency
+	//    (i.e., user hasn't manually overridden it or selected a bookmark with specific mode)
+	//
+	// This approach: if user is already on USB at 7074 kHz (should be LSB), we assume they
+	// want USB (bookmark/manual), so we don't auto-switch when they move to another band.
+
+	if req.Frequency != nil {
+		// Get band names (empty string if outside defined amateur bands)
+		previousBand := GetBandForFrequency(m.client.frequency)
+		currentBand := GetBandForFrequency(effectiveFrequency)
+
+		// Only auto-switch when moving between defined amateur bands
+		// This prevents auto-switching when listening to WEFAX, broadcast, etc.
+		if previousBand != "" && currentBand != "" && previousBand != currentBand {
+			currentModeLower := strings.ToLower(m.client.mode)
+			requestedModeLower := strings.ToLower(effectiveMode)
+
+			// Only process if both current and requested modes are USB or LSB
+			if (currentModeLower == "usb" || currentModeLower == "lsb") &&
+				(requestedModeLower == "usb" || requestedModeLower == "lsb") {
+
+				// Determine what auto-switching would choose for CURRENT frequency
+				var currentAutoMode string
+				if m.client.frequency < 10000000 {
+					currentAutoMode = "lsb"
+				} else {
+					currentAutoMode = "usb"
+				}
+
+				// Determine what auto-switching would choose for NEW frequency
+				var newAutoMode string
+				if effectiveFrequency < 10000000 {
+					newAutoMode = "lsb"
+				} else {
+					newAutoMode = "usb"
+				}
+
+				// Only auto-switch if:
+				// 1. Current mode matches what auto-switching chose for current freq (not overridden)
+				// 2. New frequency requires different mode
+				// 3. User didn't explicitly change mode in this request
+				userChangedMode := req.Mode != "" && requestedModeLower != currentModeLower
+				currentModeIsAuto := currentModeLower == currentAutoMode
+				modeNeedsChange := newAutoMode != currentModeLower
+
+				if currentModeIsAuto && modeNeedsChange && !userChangedMode {
+					log.Printf("Band change detected: %s -> %s (freq %d Hz), auto-switching mode: %s -> %s",
+						previousBand, currentBand, effectiveFrequency, currentModeLower, newAutoMode)
+					tuneMsg["mode"] = newAutoMode
+					effectiveMode = newAutoMode
+					autoSwitchedMode = true
+				} else if !currentModeIsAuto {
+					log.Printf("Band change detected: %s -> %s (freq %d Hz), keeping user-overridden mode: %s (auto would choose %s)",
+						previousBand, currentBand, effectiveFrequency, currentModeLower, newAutoMode)
+				}
+			}
+		}
 	}
 
 	// Update bandwidth if provided (only for non-IQ modes)
@@ -870,8 +943,19 @@ func (m *WebSocketManager) Tune(req TuneRequest) error {
 	if req.Frequency != nil {
 		m.client.frequency = *req.Frequency
 		needsNR2Reset = true
+
+		// Update previousBand for band change detection
+		newBand := GetBandForFrequency(*req.Frequency)
+		if newBand != m.client.previousBand {
+			log.Printf("Band updated: %s -> %s", m.client.previousBand, newBand)
+			m.client.previousBand = newBand
+		}
 	}
-	if req.Mode != "" {
+	if autoSwitchedMode {
+		// Update mode if it was auto-switched due to band change
+		m.client.mode = effectiveMode
+		needsNR2Reset = true
+	} else if req.Mode != "" {
 		m.client.mode = req.Mode
 		needsNR2Reset = true
 	}
@@ -1177,13 +1261,14 @@ func (m *WebSocketManager) BroadcastStatus() {
 	}
 
 	update := WSStatusUpdate{
-		Type:       "status",
-		Connected:  m.connected,
-		Frequency:  m.client.frequency,
-		Mode:       m.client.mode,
-		SampleRate: m.client.sampleRate,
-		Channels:   m.client.channels,
-		Timestamp:  time.Now(),
+		Type:        "status",
+		Connected:   m.connected,
+		Frequency:   m.client.frequency,
+		Mode:        m.client.mode,
+		SampleRate:  m.client.sampleRate,
+		Channels:    m.client.channels,
+		CurrentBand: m.client.previousBand, // Include current band for UI highlighting
+		Timestamp:   time.Now(),
 	}
 	m.mu.RUnlock()
 

@@ -11,6 +11,9 @@ class AudioVisualizer {
         this.waterfallHistory = [];
         this.maxWaterfallLines = 200;
 
+        // Waterfall ImageData (like RF spectrum)
+        this.waterfallImageData = null;
+
         // Display parameters - will be dynamically adjusted
         this.minDb = -80;
         this.maxDb = -20;
@@ -54,6 +57,23 @@ class AudioVisualizer {
         this.waterfallHistorySize = 10;  // Average over 10 samples
         this.waterfallContrast = 0;      // Noise floor suppression (0-100)
         this.waterfallIntensity = 0;     // Brightness adjustment (-1 to +1)
+
+        // Cursor/tooltip state (like RF spectrum)
+        this.cursorX = -1;
+        this.cursorY = -1;
+        this.cursorCanvas = null;  // Track which canvas is being hovered
+        this.cursorFreq = 0;
+        this.cursorDbValue = null;
+
+        // Current FFT data for tooltip
+        this.currentDbData = null;
+        this.currentSampleRate = 0;
+
+        // Setup mouse handlers for tooltip
+        this.setupMouseHandlers();
+
+        // Initialize waterfall ImageData
+        this.initWaterfall();
     }
 
     // Update bandwidth settings from app
@@ -185,9 +205,41 @@ class AudioVisualizer {
             const dbData = new Float32Array(bufferLength);
             this.analyser.getFloatFrequencyData(dbData);
 
+            // Store current data for tooltip
+            this.currentDbData = dbData;
+            this.currentSampleRate = this.audioContext.sampleRate;
+
             // Update visualizations
             this.drawSpectrum(dbData, this.audioContext.sampleRate);
             this.drawWaterfall(dbData, this.audioContext.sampleRate);
+
+            // Draw cursor line and tooltip AFTER both spectrum and waterfall are drawn
+            if (this.cursorX >= 0) {
+                // Recalculate dB value at cursor position with updated spectrum data
+                const marginLeft = 50;
+                const marginRight = 0;
+                const graphWidth = this.spectrumCanvas.width - marginLeft - marginRight;
+                const x = this.cursorX - marginLeft;
+
+                if (x >= 0 && x <= graphWidth && this.currentDbData && this.currentSampleRate > 0) {
+                    const maxExtent = Math.max(Math.abs(this.bandwidthLow), Math.abs(this.bandwidthHigh));
+                    const displayBandwidth = maxExtent * 1.2;
+                    const freq = (x / graphWidth) * displayBandwidth;
+                    const actualNyquist = this.currentSampleRate / 2;
+                    const binIndex = Math.floor((freq / actualNyquist) * this.currentDbData.length);
+                    if (binIndex >= 0 && binIndex < this.currentDbData.length) {
+                        this.cursorDbValue = this.currentDbData[binIndex];
+                    }
+                }
+
+                // Draw cursor line on both canvases (like RF spectrum)
+                this.drawCursorLine(this.spectrumCanvas, this.cursorX);
+                this.drawCursorLine(this.waterfallCanvas, this.cursorX);
+
+                // Draw tooltip on the canvas being hovered (stored in cursorCanvas)
+                const canvas = this.cursorCanvas || this.spectrumCanvas;
+                this.drawTooltip(canvas, this.cursorX, this.cursorY, this.cursorFreq, this.cursorDbValue);
+            }
 
             this.animationFrameId = requestAnimationFrame(draw);
         };
@@ -211,7 +263,7 @@ class AudioVisualizer {
         // For audio FFT, we want to show from 0 Hz to the maximum extent
         const maxExtent = Math.max(Math.abs(this.bandwidthLow), Math.abs(this.bandwidthHigh));
         // Add 20% margin to show a bit beyond the filter edges
-        const displayBandwidth = maxExtent * 1.2;
+        const displayBandwidth = maxExtent * 1.1;
 
         // Debug logging (only log occasionally to avoid spam)
         if (Math.random() < 0.01) {
@@ -228,45 +280,58 @@ class AudioVisualizer {
         const startBin = Math.floor((binStartFreq / actualNyquist) * dbData.length);
         const binsForBandwidth = Math.floor((bandwidth / actualNyquist) * dbData.length);
 
-        // Dynamic dB range with temporal smoothing (like main app lines 4286-4312)
+        // Dynamic dB range with better contrast (use min of mins, max of maxes)
         const now = Date.now();
 
         // Find min and max in current frame (only in visible bandwidth)
-        let currentMinDb = 0;
-        let currentMaxDb = -Infinity;
+        let currentMinDb = -100;  // Start with reasonable default instead of 0
+        let currentMaxDb = -100;  // Start with reasonable default instead of -Infinity
+        let foundValidData = false;
+
         for (let i = startBin; i < startBin + binsForBandwidth && i < dbData.length; i++) {
             const db = dbData[i];
             if (isFinite(db)) {
+                foundValidData = true;
                 currentMaxDb = Math.max(currentMaxDb, db);
-                if (currentMinDb === 0 || db < currentMinDb) {
-                    currentMinDb = db;
-                }
+                currentMinDb = Math.min(currentMinDb, db);
             }
         }
 
-        // Track minimum values over time for stable noise floor (2 second window)
-        this.minHistory.push({ value: currentMinDb, timestamp: now });
-        this.minHistory = this.minHistory.filter(m => now - m.timestamp <= this.minHistoryMaxAge);
-        const avgMinDb = this.minHistory.length > 0
-            ? this.minHistory.reduce((sum, m) => sum + m.value, 0) / this.minHistory.length
-            : currentMinDb;
+        // Only update history if we found valid data
+        if (foundValidData) {
+            // Track minimum values over time for stable noise floor (2 second window)
+            this.minHistory.push({ value: currentMinDb, timestamp: now });
+            this.minHistory = this.minHistory.filter(m => now - m.timestamp <= this.minHistoryMaxAge);
 
-        // Track maximum values over time for stable ceiling (20 second window)
-        this.maxHistory.push({ value: currentMaxDb, timestamp: now });
-        this.maxHistory = this.maxHistory.filter(m => now - m.timestamp <= this.maxHistoryMaxAge);
-        const avgMaxDb = this.maxHistory.length > 0
-            ? this.maxHistory.reduce((sum, m) => sum + m.value, 0) / this.maxHistory.length
-            : currentMaxDb;
+            // Track maximum values over time for stable ceiling (20 second window)
+            this.maxHistory.push({ value: currentMaxDb, timestamp: now });
+            this.maxHistory = this.maxHistory.filter(m => now - m.timestamp <= this.maxHistoryMaxAge);
+        }
 
-        // Use smoothed values for display range
-        const minDb = avgMinDb;
-        const maxDb = avgMaxDb;
+        // Use the MINIMUM of recent minimums for noise floor (not average)
+        // Filter out any non-finite values before calculating
+        const validMins = this.minHistory.map(m => m.value).filter(v => isFinite(v));
+        const minDb = validMins.length > 0 ? Math.min(...validMins) : -100;
+
+        // Use the MAXIMUM of recent maximums for ceiling (not average)
+        // Filter out any non-finite values before calculating
+        const validMaxs = this.maxHistory.map(m => m.value).filter(v => isFinite(v));
+        const maxDb = validMaxs.length > 0 ? Math.max(...validMaxs) : -20;
+
+        // Calculate dynamic range
         let dbRange = maxDb - minDb;
 
-        // Fallback to reasonable range if no valid data
-        if (dbRange <= 0 || !isFinite(dbRange)) {
+        // Ensure minimum dynamic range of 60 dB for good contrast
+        const minDynamicRange = 60;
+        if (!isFinite(minDb) || !isFinite(maxDb) || dbRange <= 0) {
+            // Fallback to reasonable range if no valid data
             this.cachedMinDb = -100;
             this.cachedMaxDb = -20;
+        } else if (dbRange < minDynamicRange) {
+            // Expand range symmetrically around the midpoint
+            const midpoint = (maxDb + minDb) / 2;
+            this.cachedMinDb = midpoint - minDynamicRange / 2;
+            this.cachedMaxDb = midpoint + minDynamicRange / 2;
         } else {
             this.cachedMinDb = minDb;
             this.cachedMaxDb = maxDb;
@@ -372,20 +437,45 @@ class AudioVisualizer {
         ctx.fillText('Hz', width - 5, height - 5);
     }
 
-    drawWaterfall(dbData, sampleRate) {
+    initWaterfall() {
         if (!this.waterfallCtx) return;
+
+        this.waterfallImageData = this.waterfallCtx.createImageData(
+            this.waterfallCanvas.width,
+            this.waterfallCanvas.height
+        );
+        // Fill with black
+        for (let i = 0; i < this.waterfallImageData.data.length; i += 4) {
+            this.waterfallImageData.data[i] = 26;     // R (matches #1a1a1a)
+            this.waterfallImageData.data[i + 1] = 26; // G
+            this.waterfallImageData.data[i + 2] = 26; // B
+            this.waterfallImageData.data[i + 3] = 255; // A
+        }
+    }
+
+    drawWaterfall(dbData, sampleRate) {
+        if (!this.waterfallCtx || !this.waterfallImageData) return;
 
         const ctx = this.waterfallCtx;
         const width = this.waterfallCanvas.width;
         const height = this.waterfallCanvas.height;
         const leftMargin = 50; // Match spectrum's left margin for axis labels
 
-        // Scroll existing content down by 1 pixel (efficient like main app)
-        ctx.drawImage(this.waterfallCanvas, 0, 0, width, height - 1, 0, 1, width, height - 1);
+        // Scroll waterfall down by manipulating ImageData directly (like RF spectrum)
+        const imageData = this.waterfallImageData;
+        const data = imageData.data;
 
-        // Clear the left margin area
-        ctx.fillStyle = '#1a1a1a';
-        ctx.fillRect(0, 0, leftMargin, 1);
+        // Shift pixels down by one row
+        for (let y = height - 1; y > 0; y--) {
+            for (let x = 0; x < width; x++) {
+                const srcIdx = ((y - 1) * width + x) * 4;
+                const dstIdx = (y * width + x) * 4;
+                data[dstIdx] = data[srcIdx];
+                data[dstIdx + 1] = data[srcIdx + 1];
+                data[dstIdx + 2] = data[srcIdx + 2];
+                data[dstIdx + 3] = 255;
+            }
+        }
 
         // Calculate display range based on configured bandwidth
         // The bandwidth values are RF offsets (can be negative for LSB)
@@ -472,7 +562,16 @@ class AudioVisualizer {
         const maxDb = this.cachedMaxDb;
         const dbRange = maxDb - minDb;
 
-        // Draw new line at top (starting after left margin)
+        // Fill left margin with black
+        for (let x = 0; x < leftMargin; x++) {
+            const idx = x * 4;
+            data[idx] = 26;     // R (matches #1a1a1a)
+            data[idx + 1] = 26; // G
+            data[idx + 2] = 26; // B
+            data[idx + 3] = 255; // A
+        }
+
+        // Add new spectrum line at top (starting after left margin)
         const displayWidth = width - leftMargin;
         const binsPerPixel = binsForBandwidth / displayWidth;
 
@@ -511,14 +610,23 @@ class AudioVisualizer {
                 normalized = Math.min(1, normalized * (1 + this.waterfallIntensity * 2));
             }
 
-            const color = this.dbToColor(Math.max(0, Math.min(1, normalized)));
+            // Convert normalized value to RGB
+            const rgb = this.dbToRgb(Math.max(0, Math.min(1, normalized)));
 
-            ctx.fillStyle = color;
-            ctx.fillRect(leftMargin + x, 0, 1, 1);
+            // Write to ImageData
+            const canvasX = leftMargin + x;
+            const idx = canvasX * 4;
+            data[idx] = rgb[0];
+            data[idx + 1] = rgb[1];
+            data[idx + 2] = rgb[2];
+            data[idx + 3] = 255;
         }
+
+        // Draw ImageData to canvas
+        ctx.putImageData(imageData, 0, 0);
     }
 
-    dbToColor(normalized) {
+    dbToRgb(normalized) {
         // Color gradient: blue (low) -> cyan -> green -> yellow -> red (high)
         let r, g, b;
 
@@ -544,7 +652,154 @@ class AudioVisualizer {
             b = 0;
         }
 
-        return `rgb(${r},${g},${b})`;
+        return [r, g, b];
+    }
+
+    setupMouseHandlers() {
+        if (!this.spectrumCanvas) return;
+
+        // Mouse move - handle tooltip (for both spectrum and waterfall)
+        const handleMouseMove = (e) => {
+            const canvas = e.target;
+            const rect = canvas.getBoundingClientRect();
+            const marginLeft = 50;
+            const marginRight = 0;
+            const graphWidth = canvas.width - marginLeft - marginRight;
+
+            // Get mouse position relative to canvas (accounting for canvas scaling)
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const canvasX = (e.clientX - rect.left) * scaleX;
+            const canvasY = (e.clientY - rect.top) * scaleY;
+
+            const x = canvasX - marginLeft;
+
+            // Clear tooltip if outside graph area
+            if (x < 0 || x > graphWidth) {
+                this.cursorX = -1;
+                return;
+            }
+
+            // Calculate frequency at cursor
+            const maxExtent = Math.max(Math.abs(this.bandwidthLow), Math.abs(this.bandwidthHigh));
+            const displayBandwidth = maxExtent * 1.2;
+            const freq = (x / graphWidth) * displayBandwidth;
+
+            // Get dB value at cursor position
+            let dbValue = null;
+            if (this.currentDbData && this.currentSampleRate > 0) {
+                const actualNyquist = this.currentSampleRate / 2;
+                const binIndex = Math.floor((freq / actualNyquist) * this.currentDbData.length);
+                if (binIndex >= 0 && binIndex < this.currentDbData.length) {
+                    dbValue = this.currentDbData[binIndex];
+                }
+            }
+
+            // Store cursor state
+            this.cursorX = canvasX;
+            this.cursorY = canvasY;
+            this.cursorCanvas = canvas;  // Store which canvas is being hovered
+            this.cursorFreq = freq;
+            this.cursorDbValue = dbValue;
+        };
+
+        // Add handlers to both canvases
+        this.spectrumCanvas.addEventListener('mousemove', handleMouseMove);
+        if (this.waterfallCanvas) {
+            this.waterfallCanvas.addEventListener('mousemove', handleMouseMove);
+        }
+
+        // Mouse leave - clear tooltip (for both canvases)
+        const handleMouseLeave = () => {
+            this.cursorX = -1;
+        };
+
+        this.spectrumCanvas.addEventListener('mouseleave', handleMouseLeave);
+        if (this.waterfallCanvas) {
+            this.waterfallCanvas.addEventListener('mouseleave', handleMouseLeave);
+        }
+    }
+
+    drawCursorLine(canvas, x) {
+        const ctx = canvas.getContext('2d');
+
+        // Save the current state
+        ctx.save();
+
+        // Draw dashed white vertical line
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+
+        // Restore the state
+        ctx.restore();
+    }
+
+    drawTooltip(canvas, x, y, freq, dbValue) {
+        const ctx = canvas.getContext('2d');
+
+        // Format tooltip text
+        let text = `${freq.toFixed(1)} Hz`;
+        if (dbValue !== null && !isNaN(dbValue) && isFinite(dbValue)) {
+            text += `\n${dbValue.toFixed(1)} dB`;
+        }
+
+        // Set font for measuring
+        ctx.font = 'bold 9px monospace';
+
+        // Measure text size
+        const lines = text.split('\n');
+        const lineHeight = 14;
+        const textWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+        const textHeight = lines.length * lineHeight;
+
+        // Position tooltip (left or right of cursor depending on space)
+        let tooltipX, anchor;
+        if (x > canvas.width / 2) {
+            tooltipX = x - 10;
+            anchor = 'right';
+        } else {
+            tooltipX = x + 10;
+            anchor = 'left';
+        }
+        const tooltipY = y - 10;
+
+        // Draw white background
+        ctx.fillStyle = 'white';
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+
+        let bgX, bgY, bgWidth, bgHeight;
+        if (anchor === 'right') {
+            bgX = tooltipX - textWidth - 4;
+            bgY = tooltipY - textHeight / 2 - 2;
+            bgWidth = textWidth + 4;
+            bgHeight = textHeight + 4;
+        } else {
+            bgX = tooltipX - 2;
+            bgY = tooltipY - textHeight / 2 - 2;
+            bgWidth = textWidth + 4;
+            bgHeight = textHeight + 4;
+        }
+
+        ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+        ctx.strokeRect(bgX, bgY, bgWidth, bgHeight);
+
+        // Draw text
+        ctx.fillStyle = 'black';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = anchor === 'right' ? 'right' : 'left';
+
+        lines.forEach((line, i) => {
+            const lineY = tooltipY - textHeight / 2 + (i + 0.5) * lineHeight;
+            const lineX = anchor === 'right' ? tooltipX - 2 : tooltipX + 2;
+            ctx.fillText(line, lineX, lineY);
+        });
     }
 
     clear() {
@@ -561,8 +816,8 @@ class AudioVisualizer {
         }
 
         if (this.waterfallCtx) {
-            this.waterfallCtx.fillStyle = '#000';
-            this.waterfallCtx.fillRect(0, 0, this.waterfallCanvas.width, this.waterfallCanvas.height);
+            this.initWaterfall();
+            this.waterfallCtx.putImageData(this.waterfallImageData, 0, 0);
         }
 
         // Close AudioContext when clearing

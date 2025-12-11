@@ -24,6 +24,38 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// BandRange represents a frequency range for an amateur radio band
+type BandRange struct {
+	Min int // Minimum frequency in Hz
+	Max int // Maximum frequency in Hz
+}
+
+// BandRanges defines the frequency ranges for amateur radio bands
+// Based on UK RSGB allocations, matching the Python client
+var BandRanges = map[string]BandRange{
+	"160m": {Min: 1810000, Max: 2000000},
+	"80m":  {Min: 3500000, Max: 3800000},
+	"60m":  {Min: 5258500, Max: 5406500},
+	"40m":  {Min: 7000000, Max: 7200000},
+	"30m":  {Min: 10100000, Max: 10150000},
+	"20m":  {Min: 14000000, Max: 14350000},
+	"17m":  {Min: 18068000, Max: 18168000},
+	"15m":  {Min: 21000000, Max: 21450000},
+	"12m":  {Min: 24890000, Max: 24990000},
+	"10m":  {Min: 28000000, Max: 29700000},
+}
+
+// GetBandForFrequency returns the band name for a given frequency
+// Returns empty string if frequency is not within any defined band
+func GetBandForFrequency(frequency int) string {
+	for band, bandRange := range BandRanges {
+		if frequency >= bandRange.Min && frequency <= bandRange.Max {
+			return band
+		}
+	}
+	return ""
+}
+
 // RadioClient represents the WebSocket radio client
 type RadioClient struct {
 	url              string
@@ -87,6 +119,9 @@ type RadioClient struct {
 
 	// Mutex for thread-safe output control
 	mu sync.RWMutex
+
+	// Band tracking for automatic LSB/USB mode switching
+	previousBand string // Track previous band to detect band changes
 }
 
 // Output control methods for dynamic enable/disable
@@ -357,9 +392,10 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		udpHost:             udpHost,
 		udpPort:             udpPort,
 		udpEnabled:          udpEnabled,
-		volume:              1.0,  // Default volume at 100%
-		leftChannelEnabled:  true, // Left channel enabled by default
-		rightChannelEnabled: true, // Right channel enabled by default
+		volume:              1.0,                            // Default volume at 100%
+		leftChannelEnabled:  true,                           // Left channel enabled by default
+		rightChannelEnabled: true,                           // Right channel enabled by default
+		previousBand:        GetBandForFrequency(frequency), // Initialize with current band
 	}
 
 	// Initialize NR2 processor if enabled

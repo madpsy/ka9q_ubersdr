@@ -27,17 +27,25 @@ type SpectrumClient struct {
 	cancel         context.CancelFunc
 	dataCallback   func([]byte)                 // Callback to send spectrum data to frontend clients
 	configCallback func(map[string]interface{}) // Callback for config updates
+
+	// Rate limiting for commands (10 per second max)
+	lastCommandTime time.Time
+	commandMu       sync.Mutex
+	minCommandDelay time.Duration
 }
 
 // NewSpectrumClient creates a new spectrum client
 func NewSpectrumClient(serverURL, userSessionID, password string) *SpectrumClient {
 	ctx, cancel := context.WithCancel(context.Background())
+
 	return &SpectrumClient{
-		serverURL:     serverURL,
-		userSessionID: userSessionID,
-		password:      password,
-		ctx:           ctx,
-		cancel:        cancel,
+		serverURL:       serverURL,
+		userSessionID:   userSessionID,
+		password:        password,
+		ctx:             ctx,
+		cancel:          cancel,
+		minCommandDelay: 100 * time.Millisecond, // 10 commands per second max
+		lastCommandTime: time.Time{},
 	}
 }
 
@@ -138,6 +146,20 @@ func (s *SpectrumClient) SetConfigCallback(callback func(map[string]interface{})
 
 // SendZoomCommand sends a zoom command to change spectrum bandwidth
 func (s *SpectrumClient) SendZoomCommand(frequency int, binBandwidth float64) error {
+	// Apply rate limiting
+	s.commandMu.Lock()
+	now := time.Now()
+	timeSinceLastCommand := now.Sub(s.lastCommandTime)
+
+	if timeSinceLastCommand < s.minCommandDelay && !s.lastCommandTime.IsZero() {
+		// Too soon since last command, drop this one (throttled)
+		s.commandMu.Unlock()
+		return nil
+	}
+
+	s.lastCommandTime = now
+	s.commandMu.Unlock()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -151,11 +173,26 @@ func (s *SpectrumClient) SendZoomCommand(frequency int, binBandwidth float64) er
 		"binBandwidth": binBandwidth,
 	}
 
+	log.Printf("Spectrum command: type=zoom, params=map[binBandwidth:%v frequency:%v type:zoom]", binBandwidth, frequency)
 	return s.conn.WriteJSON(command)
 }
 
 // SendPanCommand sends a pan command to change center frequency
 func (s *SpectrumClient) SendPanCommand(frequency int) error {
+	// Apply rate limiting
+	s.commandMu.Lock()
+	now := time.Now()
+	timeSinceLastCommand := now.Sub(s.lastCommandTime)
+
+	if timeSinceLastCommand < s.minCommandDelay && !s.lastCommandTime.IsZero() {
+		// Too soon since last command, drop this one (throttled)
+		s.commandMu.Unlock()
+		return nil
+	}
+
+	s.lastCommandTime = now
+	s.commandMu.Unlock()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -168,6 +205,7 @@ func (s *SpectrumClient) SendPanCommand(frequency int) error {
 		"frequency": frequency,
 	}
 
+	log.Printf("Spectrum command: type=pan, params=map[frequency:%v type:pan]", frequency)
 	return s.conn.WriteJSON(command)
 }
 

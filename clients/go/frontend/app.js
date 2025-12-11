@@ -423,6 +423,11 @@ class UberSDRClient {
                 if (this.spectrumDisplay) {
                     this.spectrumDisplay.setScrollMode('zoom');
                 }
+            } else {
+                // If unchecking zoom and pan is also unchecked, disable scrolling
+                if (!this.spectrumPanScrollCheckbox.checked && this.spectrumDisplay) {
+                    this.spectrumDisplay.setScrollMode('none');
+                }
             }
             this.saveSpectrumConfig();
         });
@@ -432,6 +437,11 @@ class UberSDRClient {
                 this.spectrumZoomScrollCheckbox.checked = false;
                 if (this.spectrumDisplay) {
                     this.spectrumDisplay.setScrollMode('pan');
+                }
+            } else {
+                // If unchecking pan and zoom is also unchecked, disable scrolling
+                if (!this.spectrumZoomScrollCheckbox.checked && this.spectrumDisplay) {
+                    this.spectrumDisplay.setScrollMode('none');
                 }
             }
             this.saveSpectrumConfig();
@@ -785,12 +795,29 @@ class UberSDRClient {
                 }
             }
         }
+
+        // Update band button highlighting based on current band
+        // Call even if empty string to clear highlighting when outside bands
+        if (status.currentBand !== undefined) {
+            this.updateBandButtonHighlight(status.currentBand);
+        }
         if (status.mode) {
+            console.log(`[updateStatusDisplay] Received mode from backend: ${status.mode}, current frontend mode: ${this.currentMode}, bookmarkModeChange: ${this.bookmarkModeChange}`);
             this.statusMode.textContent = status.mode.toUpperCase();
-            // Also update the mode buttons for real-time sync
-            if (this.currentMode != status.mode && !this.bookmarkModeChange && !this.userModeChange) {
-                this.currentMode = status.mode;
-                this.updateModeButtons();
+            // Always sync mode from backend (including auto-switched modes)
+            // Only skip update if we just changed it via bookmark to prevent flicker
+            if (!this.bookmarkModeChange) {
+                if (this.currentMode != status.mode) {
+                    console.log(`[updateStatusDisplay] Mode sync: ${this.currentMode} -> ${status.mode}`);
+                    this.currentMode = status.mode;
+                    this.updateModeButtons();
+                    // Update bandwidth defaults for the new mode (important for auto-switched modes)
+                    this.updateModeDefaults();
+                } else {
+                    console.log(`[updateStatusDisplay] Mode already matches, no update needed`);
+                }
+            } else {
+                console.log(`[updateStatusDisplay] Skipping mode update due to bookmarkModeChange flag`);
             }
         }
         if (status.sampleRate) {
@@ -1258,8 +1285,9 @@ class UberSDRClient {
                 console.log('Loaded config:', config);
 
                 // Check if an instance was loaded from config (has host and port set)
+                // Consider it loaded if host is set and is not the default localhost:8080
                 const hasInstanceFromConfig = config.host && config.port &&
-                    (config.host !== 'localhost' || config.port !== 8080);
+                    !(config.host === 'localhost' && config.port === 8080);
 
                 // Populate form fields with saved config
                 if (config.host) this.hostInput.value = config.host;
@@ -2482,7 +2510,12 @@ class UberSDRClient {
             });
 
             // Set initial control states
-            const scrollMode = this.spectrumZoomScrollCheckbox.checked ? 'zoom' : 'pan';
+            let scrollMode = 'none';
+            if (this.spectrumZoomScrollCheckbox.checked) {
+                scrollMode = 'zoom';
+            } else if (this.spectrumPanScrollCheckbox.checked) {
+                scrollMode = 'pan';
+            }
             this.spectrumDisplay.setScrollMode(scrollMode);
             this.spectrumDisplay.setClickTuneEnabled(this.spectrumClickTuneCheckbox.checked);
             this.spectrumDisplay.setCenterTuneEnabled(this.spectrumCenterTuneCheckbox.checked);
@@ -3730,6 +3763,28 @@ class UberSDRClient {
             btn.style.backgroundColor = '';
             btn.style.borderColor = '';
             btn.title = '';
+        });
+    }
+
+    updateBandButtonHighlight(currentBand) {
+        // Remove highlight from all band buttons
+        this.bandButtons.forEach(btn => {
+            btn.style.border = '';
+        });
+
+        // If currentBand is empty or not set, don't highlight anything
+        if (!currentBand) {
+            return;
+        }
+
+        // Find and highlight the button for the current band
+        this.bandButtons.forEach(btn => {
+            const bandLabel = btn.textContent.trim();
+            // Match band names like "20m" with currentBand like "20m"
+            if (bandLabel === currentBand || bandLabel.toLowerCase() === currentBand.toLowerCase()) {
+                btn.style.border = '2px solid black';
+                console.log(`Highlighted band button: ${bandLabel}`);
+            }
         });
     }
 

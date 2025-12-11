@@ -36,6 +36,12 @@ class SpectrumDisplay {
         this.dragStartFreq = 0;
         this.dragThreshold = 5;  // Pixels - movement less than this is considered a click
 
+        // Pinch-to-zoom state
+        this.pinching = false;
+        this.initialPinchDistance = 0;
+        this.initialPinchBandwidth = 0;
+        this.pinchCenterFreq = 0;
+
         // Frequency change callback
         this.frequencyCallback = null;
 
@@ -192,26 +198,40 @@ class SpectrumDisplay {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         if (this.binCount === 0) return;
 
+        // Constrain frequency to keep view within 100 kHz - 30 MHz
+        const halfBw = bandwidth / 2;
+        const minCenter = 100000 + halfBw;
+        const maxCenter = 30000000 - halfBw;
+        const constrainedFreq = Math.max(minCenter, Math.min(maxCenter, frequency));
+
         const binBandwidth = bandwidth / this.binCount;
 
         const command = {
             type: 'zoom',
-            frequency: frequency,
+            frequency: constrainedFreq,
             binBandwidth: binBandwidth
         };
 
-        console.log(`Sending zoom: ${(bandwidth/1000).toFixed(1)} kHz (${binBandwidth.toFixed(2)} Hz/bin)`);
+        console.log(`Sending zoom: ${(bandwidth/1000).toFixed(1)} kHz at ${(constrainedFreq/1e6).toFixed(3)} MHz (${binBandwidth.toFixed(2)} Hz/bin) - requested ${(frequency/1e6).toFixed(3)} MHz`);
         this.ws.send(JSON.stringify(command));
     }
 
     sendPanCommand(frequency) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        if (this.totalBandwidth === 0) return;
+
+        // Constrain frequency to keep view within 100 kHz - 30 MHz
+        const halfBw = this.totalBandwidth / 2;
+        const minCenter = 100000 + halfBw;
+        const maxCenter = 30000000 - halfBw;
+        const constrainedFreq = Math.max(minCenter, Math.min(maxCenter, frequency));
 
         const command = {
             type: 'pan',
-            frequency: frequency
+            frequency: constrainedFreq
         };
 
+        console.log(`Sending pan: ${(constrainedFreq/1e6).toFixed(3)} MHz (bandwidth: ${(this.totalBandwidth/1000).toFixed(1)} kHz)`);
         this.ws.send(JSON.stringify(command));
     }
 
@@ -223,8 +243,19 @@ class SpectrumDisplay {
         if (validData.length > 0) {
             const p1 = this.percentile(validData, 1);
             const p99 = this.percentile(validData, 99);
-            this.minDb = p1 - 2;
-            this.maxDb = p99 + 5;
+            // Ensure percentile values are finite before using them
+            if (isFinite(p1) && isFinite(p99)) {
+                this.minDb = p1 - 2;
+                this.maxDb = p99 + 5;
+            } else {
+                // Fallback to safe defaults if percentiles are invalid
+                this.minDb = -100;
+                this.maxDb = 0;
+            }
+        } else {
+            // No valid data - use safe defaults
+            this.minDb = -100;
+            this.maxDb = 0;
         }
 
         this.drawSpectrum();
@@ -807,6 +838,11 @@ class SpectrumDisplay {
 
         // Mouse wheel for zoom or frequency stepping
         const handleWheel = (e) => {
+            // Do nothing if scroll mode is 'none' (both checkboxes unchecked)
+            if (this.scrollMode === 'none') {
+                return;
+            }
+
             e.preventDefault();
 
             if (this.scrollMode === 'zoom') {
@@ -1030,7 +1066,7 @@ class SpectrumDisplay {
     }
 
     setupTouchHandlers() {
-        // Touch start - begin drag
+        // Touch start - begin drag or pinch
         const handleTouchStart = (e) => {
             if (e.touches.length === 1) {
                 e.preventDefault();
@@ -1042,15 +1078,47 @@ class SpectrumDisplay {
                 this.dragging = true;
                 this.dragStartX = offsetX;
                 this.dragStartFreq = this.centerFreq;
+                this.pinching = false;
+            } else if (e.touches.length === 2) {
+                e.preventDefault();
+                // Start pinch-to-zoom
+                this.pinching = true;
+                this.dragging = false;
+
+                const touch1 = e.touches[0];
+                const touch2 = e.touches[1];
+
+                // Calculate initial distance between fingers
+                const dx = touch2.clientX - touch1.clientX;
+                const dy = touch2.clientY - touch1.clientY;
+                this.initialPinchDistance = Math.sqrt(dx * dx + dy * dy);
+                this.initialPinchBandwidth = this.totalBandwidth;
+
+                // Calculate center point of pinch (in frequency space)
+                const rect = e.target.getBoundingClientRect();
+                const scaleX = e.target.width / rect.width;
+                const marginLeft = 50;
+                const marginRight = 20;
+                const graphWidth = e.target.width - marginLeft - marginRight;
+
+                const centerX = ((touch1.clientX + touch2.clientX) / 2 - rect.left) * scaleX;
+                const x = centerX - marginLeft;
+
+                if (x >= 0 && x <= graphWidth && this.totalBandwidth !== 0) {
+                    const freqOffset = (x / graphWidth - 0.5) * this.totalBandwidth;
+                    this.pinchCenterFreq = this.centerFreq + freqOffset;
+                } else {
+                    this.pinchCenterFreq = this.centerFreq;
+                }
             }
         };
 
         this.spectrumCanvas.addEventListener('touchstart', handleTouchStart, { passive: false });
         this.waterfallCanvas.addEventListener('touchstart', handleTouchStart, { passive: false });
 
-        // Touch move - handle drag
+        // Touch move - handle drag or pinch
         const handleTouchMove = (e) => {
-            if (e.touches.length === 1 && this.dragging) {
+            if (e.touches.length === 1 && this.dragging && !this.pinching) {
                 e.preventDefault();
                 const touch = e.touches[0];
                 const canvas = e.target;
@@ -1100,42 +1168,105 @@ class SpectrumDisplay {
                     // Send pan command
                     this.sendPanCommand(newCenter);
                 }
+            } else if (e.touches.length === 2 && this.pinching) {
+                e.preventDefault();
+
+                const touch1 = e.touches[0];
+                const touch2 = e.touches[1];
+
+                // Calculate current distance between fingers
+                const dx = touch2.clientX - touch1.clientX;
+                const dy = touch2.clientY - touch1.clientY;
+                const currentDistance = Math.sqrt(dx * dx + dy * dy);
+
+                // Calculate zoom factor based on pinch distance change
+                const distanceRatio = this.initialPinchDistance / currentDistance;
+
+                // Calculate new bandwidth (inverse relationship: pinch in = zoom in = smaller bandwidth)
+                let newBandwidth = this.initialPinchBandwidth * distanceRatio;
+
+                // Constrain bandwidth to reasonable limits
+                const minBandwidth = this.binCount * 1; // 1 Hz/bin minimum
+                // Allow zooming out up to the maximum receiver bandwidth if available
+                const maxBandwidth = this.initialBinBandwidth > 0 ? this.initialBinBandwidth * this.binCount : Infinity;
+                newBandwidth = Math.max(minBandwidth, Math.min(maxBandwidth, newBandwidth));
+
+                // Calculate new bin bandwidth
+                const newBinBandwidth = newBandwidth / this.binCount;
+
+                // Constrain center frequency to keep view within 100 kHz - 30 MHz
+                const halfBandwidth = newBandwidth / 2;
+                const minCenter = 100000 + halfBandwidth;
+                const maxCenter = 30000000 - halfBandwidth;
+
+                // Constrain the pinch center to valid range
+                let zoomCenter = this.pinchCenterFreq;
+                zoomCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
+
+                // Send zoom command
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    const command = {
+                        type: 'zoom',
+                        frequency: zoomCenter,
+                        binBandwidth: newBinBandwidth
+                    };
+                    console.log(`Pinch zoom: ${(newBandwidth/1000).toFixed(1)} kHz at ${(zoomCenter/1e6).toFixed(3)} MHz`);
+                    this.ws.send(JSON.stringify(command));
+                }
             }
         };
 
         this.spectrumCanvas.addEventListener('touchmove', handleTouchMove, { passive: false });
         this.waterfallCanvas.addEventListener('touchmove', handleTouchMove, { passive: false });
 
-        // Touch end - end drag or process tap
+        // Touch end - end drag/pinch or process tap
         const handleTouchEnd = (e) => {
-            if (this.dragging) {
+            if (e.touches.length === 0) {
+                // All fingers lifted
+                if (this.dragging && !this.pinching) {
+                    e.preventDefault();
+                    const touch = e.changedTouches[0];
+                    const rect = e.target.getBoundingClientRect();
+                    const scaleX = e.target.width / rect.width;
+                    const offsetX = (touch.clientX - rect.left) * scaleX;
+
+                    const dragDistance = Math.abs(offsetX - this.dragStartX);
+                    if (dragDistance < this.dragThreshold) {
+                        // Small movement - treat as tap
+                        // Create a synthetic event for handleClick
+                        const syntheticEvent = {
+                            target: e.target,
+                            clientX: touch.clientX,
+                            clientY: touch.clientY
+                        };
+                        this.handleClick(syntheticEvent);
+                    }
+                }
+                this.dragging = false;
+                this.pinching = false;
+            } else if (e.touches.length === 1 && this.pinching) {
+                // One finger lifted during pinch - switch back to drag mode
                 e.preventDefault();
-                const touch = e.changedTouches[0];
+                this.pinching = false;
+                this.dragging = true;
+
+                const touch = e.touches[0];
                 const rect = e.target.getBoundingClientRect();
                 const scaleX = e.target.width / rect.width;
                 const offsetX = (touch.clientX - rect.left) * scaleX;
 
-                const dragDistance = Math.abs(offsetX - this.dragStartX);
-                if (dragDistance < this.dragThreshold) {
-                    // Small movement - treat as tap
-                    // Create a synthetic event for handleClick
-                    const syntheticEvent = {
-                        target: e.target,
-                        clientX: touch.clientX,
-                        clientY: touch.clientY
-                    };
-                    this.handleClick(syntheticEvent);
-                }
+                this.dragStartX = offsetX;
+                this.dragStartFreq = this.centerFreq;
             }
-            this.dragging = false;
         };
 
         this.spectrumCanvas.addEventListener('touchend', handleTouchEnd, { passive: false });
         this.waterfallCanvas.addEventListener('touchend', handleTouchEnd, { passive: false });
 
-        // Touch cancel - end drag
+        // Touch cancel - end drag/pinch
         const handleTouchCancel = () => {
             this.dragging = false;
+            this.pinching = false;
         };
 
         this.spectrumCanvas.addEventListener('touchcancel', handleTouchCancel);
@@ -1387,57 +1518,57 @@ class SpectrumDisplay {
         // Calculate new total bandwidth
         const newTotalBandwidth = newBinBandwidth * this.binCount;
 
-        // Always center on tuned frequency when zooming, regardless of center-tune state
-        const zoomCenter = this.tunedFreq || this.centerFreq;
-
-        // Constrain center frequency to keep view within 100 kHz - 30 MHz
+        // Prefer tuned frequency, but constrain to keep view within 100 kHz - 30 MHz
         const halfBandwidth = newTotalBandwidth / 2;
         const minCenter = 100000 + halfBandwidth;
         const maxCenter = 30000000 - halfBandwidth;
-        const constrainedCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
 
-        console.log(`Zoom in: ${(this.totalBandwidth/1000).toFixed(1)} kHz -> ${(newTotalBandwidth/1000).toFixed(1)} kHz`);
+        // Start with preferred center (tuned freq or current center)
+        let zoomCenter = this.tunedFreq || this.centerFreq;
 
-        this.sendZoomCommand(constrainedCenter, newTotalBandwidth);
+        // Constrain to valid range
+        zoomCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
+
+        console.log(`Zoom in: ${(this.totalBandwidth/1000).toFixed(1)} kHz -> ${(newTotalBandwidth/1000).toFixed(1)} kHz at ${(zoomCenter/1e6).toFixed(3)} MHz`);
+
+        this.sendZoomCommand(zoomCenter, newTotalBandwidth);
     }
 
     zoomOut() {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         if (this.binCount === 0) return;
 
-        // Calculate current total bandwidth
-        const currentTotalBandwidth = this.binBandwidth * this.binCount;
-        const maxTotalBandwidth = this.initialBinBandwidth * this.binCount;
-
-        // Don't zoom out past the maximum receiver bandwidth
-        if (this.initialBinBandwidth > 0 && currentTotalBandwidth >= maxTotalBandwidth) {
-            console.log('Already at full receiver bandwidth');
-            return;
-        }
-
         // Double the bin bandwidth = double the total bandwidth = 0.5x zoom
         let newBinBandwidth = this.binBandwidth * 2;
 
-        // Don't zoom out past the maximum receiver bandwidth
+        // Don't zoom out past the maximum receiver bandwidth if we know it
         if (this.initialBinBandwidth > 0 && newBinBandwidth > this.initialBinBandwidth) {
+            // Check if we're already at max
+            if (this.binBandwidth >= this.initialBinBandwidth) {
+                console.log('Already at full receiver bandwidth');
+                return;
+            }
+            // Clamp to max receiver bandwidth
             newBinBandwidth = this.initialBinBandwidth;
         }
 
         // Calculate new total bandwidth
         const newTotalBandwidth = newBinBandwidth * this.binCount;
 
-        // Always center on tuned frequency when zooming, regardless of center-tune state
-        const zoomCenter = this.tunedFreq || this.centerFreq;
-
-        // Constrain center frequency to keep view within 100 kHz - 30 MHz
+        // Prefer tuned frequency, but constrain to keep view within 100 kHz - 30 MHz
         const halfBandwidth = newTotalBandwidth / 2;
         const minCenter = 100000 + halfBandwidth;
         const maxCenter = 30000000 - halfBandwidth;
-        const constrainedCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
 
-        console.log(`Zoom out: ${(this.totalBandwidth/1000).toFixed(1)} kHz -> ${(newTotalBandwidth/1000).toFixed(1)} kHz`);
+        // Start with preferred center (tuned freq or current center)
+        let zoomCenter = this.tunedFreq || this.centerFreq;
 
-        this.sendZoomCommand(constrainedCenter, newTotalBandwidth);
+        // Constrain to valid range
+        zoomCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
+
+        console.log(`Zoom out: ${(this.totalBandwidth/1000).toFixed(1)} kHz -> ${(newTotalBandwidth/1000).toFixed(1)} kHz at ${(zoomCenter/1e6).toFixed(3)} MHz`);
+
+        this.sendZoomCommand(zoomCenter, newTotalBandwidth);
     }
 
     zoomReset() {

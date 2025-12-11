@@ -1022,9 +1022,7 @@ func (s *APIServer) handleSpectrumStreamRequest(conn *websocket.Conn, enabled bo
 
 // handleSpectrumCommand handles spectrum control commands (zoom, pan)
 func (s *APIServer) handleSpectrumCommand(conn *websocket.Conn, cmdType string, msg map[string]interface{}, writeChan chan interface{}) {
-	log.Printf("Spectrum command: type=%s, params=%v", cmdType, msg)
-
-	// Extract parameters and send to spectrum client
+	// Extract parameters and send to spectrum client (throttling happens in spectrum_client.go)
 	if err := s.manager.SendSpectrumCommand(cmdType, msg); err != nil {
 		log.Printf("Failed to send spectrum command: %v", err)
 		// Send error message back to client via write channel

@@ -31,6 +31,14 @@ body.dark-mode .spectrum-visualizer {
     margin-top: 10px;
 }
 
+.spectrum-controls-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
 #spectrum-display-container {
     margin-top: 15px;
 }
@@ -59,6 +67,17 @@ body.dark-mode .spectrum-visualizer {
         min-width: 0;
         padding: 8px 4px;
         font-size: 11px;
+    }
+
+    /* Make SNR and peak displays wrap on mobile */
+    .spectrum-controls-row {
+        gap: 10px;
+    }
+
+    #spectrum-snr-display,
+    #spectrum-peak-display {
+        flex-basis: 100%;
+        margin-left: 0 !important;
     }
 }
 

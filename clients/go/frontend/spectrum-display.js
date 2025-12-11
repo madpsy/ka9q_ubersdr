@@ -261,6 +261,9 @@ class SpectrumDisplay {
         this.drawSpectrum();
         this.drawWaterfall();
 
+        // Update SNR and peak frequency displays
+        this.updateSignalMetrics();
+
         // Redraw cursor and tooltip if active
         if (this.cursorX >= 0) {
             // Recalculate dB value at cursor position with updated spectrum data
@@ -830,6 +833,114 @@ class SpectrumDisplay {
         const sorted = [...arr].sort((a, b) => a - b);
         const index = Math.floor((p / 100) * sorted.length);
         return sorted[index];
+    }
+
+    // Calculate signal metrics (SNR and peak frequency/dB)
+    calculateSignalMetrics() {
+        if (!this.spectrumData || this.spectrumData.length === 0 || this.totalBandwidth === 0) {
+            return { snr: null, peakFreq: null, peakDb: null, floorDb: null };
+        }
+
+        const validData = this.spectrumData.filter(v => isFinite(v));
+        if (validData.length === 0) {
+            return { snr: null, peakFreq: null, peakDb: null, floorDb: null };
+        }
+
+        // Calculate noise floor (minimum dB in full spectrum)
+        const floorDb = Math.min(...validData);
+
+        // Find peak in bandwidth if tuned frequency is set
+        let peakDb, peakFreq;
+
+        if (this.tunedFreq > 0 && this.bandwidthLow !== 0 && this.bandwidthHigh !== 0) {
+            // Calculate signal metrics within the bandwidth filter
+            const startFreq = this.centerFreq - this.totalBandwidth / 2;
+
+            // Calculate absolute frequencies for bandwidth edges
+            const filterLowFreq = this.tunedFreq + this.bandwidthLow;
+            const filterHighFreq = this.tunedFreq + this.bandwidthHigh;
+
+            // Map frequencies to bin indices
+            const lowBin = Math.floor((filterLowFreq - startFreq) / this.totalBandwidth * this.spectrumData.length);
+            const highBin = Math.floor((filterHighFreq - startFreq) / this.totalBandwidth * this.spectrumData.length);
+
+            // Ensure bins are within valid range
+            const clampedLowBin = Math.max(0, Math.min(this.spectrumData.length - 1, lowBin));
+            const clampedHighBin = Math.max(0, Math.min(this.spectrumData.length - 1, highBin));
+
+            // Extract bandwidth data
+            const bandwidthData = this.spectrumData.slice(clampedLowBin, clampedHighBin + 1);
+            const validBandwidthData = bandwidthData.filter(v => isFinite(v));
+
+            if (validBandwidthData.length > 0) {
+                // Find peak (maximum) dB within the bandwidth
+                peakDb = Math.max(...validBandwidthData);
+
+                // Find the bin index of the peak within the bandwidth
+                const peakBinInBandwidth = bandwidthData.indexOf(peakDb);
+                const peakBinIndex = clampedLowBin + peakBinInBandwidth;
+
+                // Calculate peak frequency
+                const freqOffset = (peakBinIndex / this.spectrumData.length - 0.5) * this.totalBandwidth;
+                peakFreq = this.centerFreq + freqOffset;
+            }
+        } else {
+            // No bandwidth filter set - find peak in full spectrum
+            peakDb = Math.max(...validData);
+
+            // Find the bin index of the peak
+            const peakBinIndex = this.spectrumData.indexOf(peakDb);
+
+            // Calculate peak frequency
+            const freqOffset = (peakBinIndex / this.spectrumData.length - 0.5) * this.totalBandwidth;
+            peakFreq = this.centerFreq + freqOffset;
+        }
+
+        // Calculate SNR
+        const snr = peakDb !== undefined ? peakDb - floorDb : null;
+
+        return { snr, peakFreq, peakDb, floorDb };
+    }
+
+    // Update the signal metrics display elements
+    updateSignalMetrics() {
+        const metrics = this.calculateSignalMetrics();
+
+        // Update SNR display
+        const snrDisplay = document.getElementById('spectrum-snr-display');
+        const snrValue = document.getElementById('spectrum-snr-value');
+        const snrNumber = document.getElementById('spectrum-snr-number');
+
+        if (snrDisplay && snrValue && snrNumber && metrics.snr !== null) {
+            snrNumber.textContent = metrics.snr.toFixed(1);
+
+            // Color based on SNR quality (matching Python client)
+            // Color the value and "dB", not the "SNR:" label
+            if (metrics.snr >= 20) {
+                snrValue.style.color = '#00ff00';  // Green - excellent
+            } else if (metrics.snr >= 10) {
+                snrValue.style.color = '#ffff00';  // Yellow - good
+            } else {
+                snrValue.style.color = '#ff6600';  // Orange - poor
+            }
+
+            snrDisplay.style.display = 'block';
+        } else if (snrDisplay) {
+            snrDisplay.style.display = 'none';
+        }
+
+        // Update peak frequency/dB display
+        const peakDisplay = document.getElementById('spectrum-peak-display');
+        const peakFreqSpan = document.getElementById('spectrum-peak-freq');
+        const peakLevelSpan = document.getElementById('spectrum-peak-level');
+
+        if (peakDisplay && peakFreqSpan && peakLevelSpan && metrics.peakFreq !== null && metrics.peakDb !== null) {
+            peakFreqSpan.textContent = (metrics.peakFreq / 1e6).toFixed(4);
+            peakLevelSpan.textContent = metrics.peakDb.toFixed(1);
+            peakDisplay.style.display = 'block';
+        } else if (peakDisplay) {
+            peakDisplay.style.display = 'none';
+        }
     }
 
     setupMouseHandlers() {

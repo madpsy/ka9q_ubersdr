@@ -164,6 +164,12 @@
                     <button id="spectrum-audio-toggle" class="btn btn-small" style="display: none; min-width: 100px;">
                         🔇 Audio Off
                     </button>
+                    <div id="spectrum-snr-display" style="display: none; font-weight: bold; font-size: 14px; padding: 4px 8px; color: #2196F3; margin-left: auto;">
+                        SNR: <span id="spectrum-snr-value" style="color: inherit;"><span id="spectrum-snr-number">--</span> dB</span>
+                    </div>
+                    <div id="spectrum-peak-display" style="display: none; font-weight: bold; font-size: 14px; padding: 4px 8px; color: #2196F3;">
+                        Peak: <span id="spectrum-peak-freq">--</span> MHz @ <span id="spectrum-peak-level">--</span> dB
+                    </div>
                 </div>
                 <div id="spectrum-display-container" style="display: none;">
                     <div class="spectrum-controls" style="margin: 10px 0; display: flex; gap: 15px; flex-wrap: wrap;">
@@ -228,9 +234,9 @@
                             <span>Right</span>
                         </label>
                     </div>
-                </div>
-                <div class="info-box">
-                    <p><strong>Note:</strong> When enabled, audio will be streamed to your browser through the WebSocket connection using a separate audio room. This allows you to preview the audio without needing PortAudio or other audio devices configured.</p>
+                    <div id="audio-peak-display" style="display: none; font-weight: bold; font-size: 14px; padding: 4px 8px; color: #2196F3; margin-left: auto;">
+                        Peak: <span id="audio-peak-freq">--</span> Hz @ <span id="audio-peak-level">--</span> dB
+                    </div>
                 </div>
                 <div id="audio-preview-controls" style="display: none;">
                     <div class="audio-visualizer">

@@ -7,7 +7,7 @@ class AudioVisualizer {
         this.waterfallCanvas = waterfallCanvas;
 
         // FFT parameters - increased for more detail
-        this.fftSize = 8192;  // Increased from 2048 for 4x more frequency resolution
+        this.fftSize = 16384;  // Increased for better frequency resolution
         this.waterfallHistory = [];
         this.maxWaterfallLines = 200;
 
@@ -50,6 +50,11 @@ class AudioVisualizer {
         // Cached display range values
         this.cachedMinDb = -100;
         this.cachedMaxDb = -20;
+
+        // Peak tracking with averaging (like Python client)
+        this.peakHistory = [];  // Store last peaks
+        this.peakTimestamps = [];
+        this.peakAverageWindow = 500;  // 500ms averaging window
 
         // Waterfall auto-adjust parameters (like main app lines 5366-5371)
         this.waterfallNoiseFloorHistory = [];
@@ -155,7 +160,7 @@ class AudioVisualizer {
         // Create analyser node with native FFT (exactly like main app)
         this.analyser = this.audioContext.createAnalyser();
         this.analyser.fftSize = this.fftSize;
-        this.analyser.smoothingTimeConstant = 0.3; // Light smoothing for cleaner display
+        this.analyser.smoothingTimeConstant = 0; // No smoothing for more responsive display (like Python client)
 
         // Create channel splitter to avoid phase cancellation in stereo
         // This splits stereo into separate left/right channels
@@ -213,6 +218,9 @@ class AudioVisualizer {
             this.drawSpectrum(dbData, this.audioContext.sampleRate);
             this.drawWaterfall(dbData, this.audioContext.sampleRate);
 
+            // Update peak display
+            this.updatePeakDisplay(dbData, this.audioContext.sampleRate);
+
             // Draw cursor line and tooltip AFTER both spectrum and waterfall are drawn
             if (this.cursorX >= 0) {
                 // Recalculate dB value at cursor position with updated spectrum data
@@ -223,7 +231,7 @@ class AudioVisualizer {
 
                 if (x >= 0 && x <= graphWidth && this.currentDbData && this.currentSampleRate > 0) {
                     const maxExtent = Math.max(Math.abs(this.bandwidthLow), Math.abs(this.bandwidthHigh));
-                    const displayBandwidth = maxExtent * 1.2;
+                    const displayBandwidth = maxExtent * 1.1;
                     const freq = (x / graphWidth) * displayBandwidth;
                     const actualNyquist = this.currentSampleRate / 2;
                     const binIndex = Math.floor((freq / actualNyquist) * this.currentDbData.length);
@@ -280,64 +288,55 @@ class AudioVisualizer {
         const startBin = Math.floor((binStartFreq / actualNyquist) * dbData.length);
         const binsForBandwidth = Math.floor((bandwidth / actualNyquist) * dbData.length);
 
-        // Dynamic dB range with better contrast (use min of mins, max of maxes)
-        const now = Date.now();
-
-        // Find min and max in current frame (only in visible bandwidth)
-        let currentMinDb = -100;  // Start with reasonable default instead of 0
-        let currentMaxDb = -100;  // Start with reasonable default instead of -Infinity
-        let foundValidData = false;
-
+        // Dynamic dB range using percentiles (like Python client)
+        // Collect all valid dB values in visible bandwidth
+        const visibleValues = [];
         for (let i = startBin; i < startBin + binsForBandwidth && i < dbData.length; i++) {
             const db = dbData[i];
             if (isFinite(db)) {
-                foundValidData = true;
-                currentMaxDb = Math.max(currentMaxDb, db);
-                currentMinDb = Math.min(currentMinDb, db);
+                visibleValues.push(db);
             }
         }
 
-        // Only update history if we found valid data
-        if (foundValidData) {
-            // Track minimum values over time for stable noise floor (2 second window)
-            this.minHistory.push({ value: currentMinDb, timestamp: now });
-            this.minHistory = this.minHistory.filter(m => now - m.timestamp <= this.minHistoryMaxAge);
+        let minDb, maxDb;
+        if (visibleValues.length > 0) {
+            // Sort for percentile calculation
+            visibleValues.sort((a, b) => a - b);
 
-            // Track maximum values over time for stable ceiling (20 second window)
-            this.maxHistory.push({ value: currentMaxDb, timestamp: now });
-            this.maxHistory = this.maxHistory.filter(m => now - m.timestamp <= this.maxHistoryMaxAge);
-        }
+            // Use percentiles to separate noise from signals (like Python client)
+            // 5th percentile for noise floor, 95th percentile for signal peaks
+            const p5Index = Math.floor(visibleValues.length * 0.05);
+            const p95Index = Math.floor(visibleValues.length * 0.95);
 
-        // Use the MINIMUM of recent minimums for noise floor (not average)
-        // Filter out any non-finite values before calculating
-        const validMins = this.minHistory.map(m => m.value).filter(v => isFinite(v));
-        const minDb = validMins.length > 0 ? Math.min(...validMins) : -100;
+            const p5 = visibleValues[p5Index];
+            const p95 = visibleValues[p95Index];
 
-        // Use the MAXIMUM of recent maximums for ceiling (not average)
-        // Filter out any non-finite values before calculating
-        const validMaxs = this.maxHistory.map(m => m.value).filter(v => isFinite(v));
-        const maxDb = validMaxs.length > 0 ? Math.max(...validMaxs) : -20;
+            // Set min_db well below noise floor to show it properly (like Python: p5 - 10)
+            minDb = p5 - 10;
+            // Set max_db above typical peaks (like Python: p95 + 10)
+            maxDb = p95 + 10;
 
-        // Calculate dynamic range
-        let dbRange = maxDb - minDb;
-
-        // Ensure minimum dynamic range of 60 dB for good contrast
-        const minDynamicRange = 60;
-        if (!isFinite(minDb) || !isFinite(maxDb) || dbRange <= 0) {
-            // Fallback to reasonable range if no valid data
-            this.cachedMinDb = -100;
-            this.cachedMaxDb = -20;
-        } else if (dbRange < minDynamicRange) {
-            // Expand range symmetrically around the midpoint
-            const midpoint = (maxDb + minDb) / 2;
-            this.cachedMinDb = midpoint - minDynamicRange / 2;
-            this.cachedMaxDb = midpoint + minDynamicRange / 2;
+            // Ensure reasonable range (at least 40 dB, max 80 dB)
+            let dbRange = maxDb - minDb;
+            if (dbRange < 40) {
+                // Expand range symmetrically
+                const center = (maxDb + minDb) / 2;
+                minDb = center - 20;
+                maxDb = center + 20;
+            } else if (dbRange > 80) {
+                // Limit range to avoid too much compression
+                minDb = maxDb - 80;
+            }
         } else {
-            this.cachedMinDb = minDb;
-            this.cachedMaxDb = maxDb;
+            // Fallback to reasonable range if no valid data
+            minDb = -100;
+            maxDb = -20;
         }
 
-        dbRange = this.cachedMaxDb - this.cachedMinDb;
+        // Cache the calculated range
+        this.cachedMinDb = minDb;
+        this.cachedMaxDb = maxDb;
+        const dbRange = maxDb - minDb;
 
         // Draw dB scale grid and labels
         ctx.strokeStyle = '#333';
@@ -367,7 +366,7 @@ class AudioVisualizer {
 
         // Draw spectrum line
         ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1;
         ctx.beginPath();
 
         const numPoints = width - 50;
@@ -398,6 +397,16 @@ class AudioVisualizer {
             }
         }
         ctx.stroke();
+
+        // Draw filled area under the spectrum line (like RF spectrum)
+        ctx.fillStyle = 'rgba(30, 144, 255, 0.3)';
+        ctx.lineTo(width, height);
+        ctx.lineTo(50, height);
+        ctx.closePath();
+        ctx.fill();
+
+        // Draw white dashed vertical lines at bandwidth edges (matching Python client)
+        this.drawBandwidthMarkers(ctx, width, height, displayBandwidth);
 
         // Draw frequency axis labels (show actual audio frequencies with 20% margin)
         ctx.fillStyle = '#fff';
@@ -435,6 +444,99 @@ class AudioVisualizer {
         // Draw "Hz" label
         ctx.textAlign = 'right';
         ctx.fillText('Hz', width - 5, height - 5);
+    }
+
+    drawBandwidthMarkers(ctx, width, height, displayBandwidth) {
+        // Draw white dashed vertical lines showing the actual bandwidth edges
+        // This matches the Python client's audio_spectrum_display.py _draw_bandwidth_markers method
+        if (this.bandwidthLow === 0 && this.bandwidthHigh === 0) {
+            return;
+        }
+
+        const leftMargin = 50;
+        const graphWidth = width - leftMargin;
+        const absLow = Math.abs(this.bandwidthLow);
+        const absHigh = Math.abs(this.bandwidthHigh);
+
+        // Check if this is CW mode
+        const isCwMode = (this.bandwidthLow < 0 && this.bandwidthHigh > 0 && absLow < 500 && absHigh < 500);
+
+        ctx.strokeStyle = '#FFFFFF';  // White
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]);  // Dashed pattern
+
+        if (isCwMode) {
+            // CW mode: show markers at 500 Hz ± bandwidth edges
+            const cwOffset = 500;
+            const lowMarker = cwOffset - absLow;
+            const highMarker = cwOffset + absHigh;
+
+            // Draw low edge marker
+            if (lowMarker <= displayBandwidth) {
+                const lowX = leftMargin + (lowMarker / displayBandwidth) * graphWidth;
+                if (leftMargin <= lowX && lowX <= width) {
+                    ctx.beginPath();
+                    ctx.moveTo(lowX, 0);
+                    ctx.lineTo(lowX, height);
+                    ctx.stroke();
+                }
+            }
+
+            // Draw high edge marker
+            if (highMarker <= displayBandwidth) {
+                const highX = leftMargin + (highMarker / displayBandwidth) * graphWidth;
+                if (leftMargin <= highX && highX <= width) {
+                    ctx.beginPath();
+                    ctx.moveTo(highX, 0);
+                    ctx.lineTo(highX, height);
+                    ctx.stroke();
+                }
+            }
+        } else if (this.bandwidthLow < 0 && this.bandwidthHigh > 0) {
+            // Other symmetric modes (AM, FM): show the full span
+            const bandwidthSpan = absLow + absHigh;
+
+            // Draw marker at the full bandwidth edge
+            if (bandwidthSpan <= displayBandwidth) {
+                const markerX = leftMargin + (bandwidthSpan / displayBandwidth) * graphWidth;
+                if (leftMargin <= markerX && markerX <= width) {
+                    ctx.beginPath();
+                    ctx.moveTo(markerX, 0);
+                    ctx.lineTo(markerX, height);
+                    ctx.stroke();
+                }
+            }
+        } else {
+            // Asymmetric mode (USB, LSB): show individual edges
+            const lowFreq = absLow;
+            const highFreq = absHigh;
+
+            // Draw low edge marker
+            if (lowFreq <= displayBandwidth) {
+                const lowX = leftMargin + (lowFreq / displayBandwidth) * graphWidth;
+                if (leftMargin <= lowX && lowX <= width) {
+                    ctx.beginPath();
+                    ctx.moveTo(lowX, 0);
+                    ctx.lineTo(lowX, height);
+                    ctx.stroke();
+                }
+            }
+
+            // Draw high edge marker
+            if (highFreq <= displayBandwidth) {
+                const highX = leftMargin + (highFreq / displayBandwidth) * graphWidth;
+                if (leftMargin <= highX && highX <= width) {
+                    ctx.beginPath();
+                    ctx.moveTo(highX, 0);
+                    ctx.lineTo(highX, height);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Reset line style
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1;
     }
 
     initWaterfall() {
@@ -481,8 +583,8 @@ class AudioVisualizer {
         // The bandwidth values are RF offsets (can be negative for LSB)
         // For audio FFT, we want to show from 0 Hz to the maximum extent
         const maxExtent = Math.max(Math.abs(this.bandwidthLow), Math.abs(this.bandwidthHigh));
-        // Add 20% margin to show a bit beyond the filter edges
-        const displayBandwidth = maxExtent * 1.2;
+        // Add 10% margin to show a bit beyond the filter edges (matching spectrum)
+        const displayBandwidth = maxExtent * 1.1;
 
         // Display from 0 to the bandwidth (with 20% margin)
         const binStartFreq = 0;
@@ -624,6 +726,100 @@ class AudioVisualizer {
 
         // Draw ImageData to canvas
         ctx.putImageData(imageData, 0, 0);
+
+        // Draw white dashed vertical lines at bandwidth edges on waterfall (matching Python client)
+        this.drawBandwidthMarkersOnWaterfall(ctx, width, height, displayBandwidth, leftMargin);
+    }
+
+    drawBandwidthMarkersOnWaterfall(ctx, width, height, displayBandwidth, leftMargin) {
+        // Draw white dashed vertical lines showing the actual bandwidth edges on waterfall
+        if (this.bandwidthLow === 0 && this.bandwidthHigh === 0) {
+            return;
+        }
+
+        const graphWidth = width - leftMargin;
+        const absLow = Math.abs(this.bandwidthLow);
+        const absHigh = Math.abs(this.bandwidthHigh);
+
+        // Check if this is CW mode
+        const isCwMode = (this.bandwidthLow < 0 && this.bandwidthHigh > 0 && absLow < 500 && absHigh < 500);
+
+        ctx.strokeStyle = '#FFFFFF';  // White
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]);  // Dashed pattern
+
+        if (isCwMode) {
+            // CW mode: show markers at 500 Hz ± bandwidth edges
+            const cwOffset = 500;
+            const lowMarker = cwOffset - absLow;
+            const highMarker = cwOffset + absHigh;
+
+            // Draw low edge marker
+            if (lowMarker <= displayBandwidth) {
+                const lowX = leftMargin + (lowMarker / displayBandwidth) * graphWidth;
+                if (leftMargin <= lowX && lowX <= width) {
+                    ctx.beginPath();
+                    ctx.moveTo(lowX, 0);
+                    ctx.lineTo(lowX, height);
+                    ctx.stroke();
+                }
+            }
+
+            // Draw high edge marker
+            if (highMarker <= displayBandwidth) {
+                const highX = leftMargin + (highMarker / displayBandwidth) * graphWidth;
+                if (leftMargin <= highX && highX <= width) {
+                    ctx.beginPath();
+                    ctx.moveTo(highX, 0);
+                    ctx.lineTo(highX, height);
+                    ctx.stroke();
+                }
+            }
+        } else if (this.bandwidthLow < 0 && this.bandwidthHigh > 0) {
+            // Other symmetric modes (AM, FM): show the full span
+            const bandwidthSpan = absLow + absHigh;
+
+            // Draw marker at the full bandwidth edge
+            if (bandwidthSpan <= displayBandwidth) {
+                const markerX = leftMargin + (bandwidthSpan / displayBandwidth) * graphWidth;
+                if (leftMargin <= markerX && markerX <= width) {
+                    ctx.beginPath();
+                    ctx.moveTo(markerX, 0);
+                    ctx.lineTo(markerX, height);
+                    ctx.stroke();
+                }
+            }
+        } else {
+            // Asymmetric mode (USB, LSB): show individual edges
+            const lowFreq = absLow;
+            const highFreq = absHigh;
+
+            // Draw low edge marker
+            if (lowFreq <= displayBandwidth) {
+                const lowX = leftMargin + (lowFreq / displayBandwidth) * graphWidth;
+                if (leftMargin <= lowX && lowX <= width) {
+                    ctx.beginPath();
+                    ctx.moveTo(lowX, 0);
+                    ctx.lineTo(lowX, height);
+                    ctx.stroke();
+                }
+            }
+
+            // Draw high edge marker
+            if (highFreq <= displayBandwidth) {
+                const highX = leftMargin + (highFreq / displayBandwidth) * graphWidth;
+                if (leftMargin <= highX && highX <= width) {
+                    ctx.beginPath();
+                    ctx.moveTo(highX, 0);
+                    ctx.lineTo(highX, height);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Reset line style
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1;
     }
 
     dbToRgb(normalized) {
@@ -682,7 +878,7 @@ class AudioVisualizer {
 
             // Calculate frequency at cursor
             const maxExtent = Math.max(Math.abs(this.bandwidthLow), Math.abs(this.bandwidthHigh));
-            const displayBandwidth = maxExtent * 1.2;
+            const displayBandwidth = maxExtent * 1.1;
             const freq = (x / graphWidth) * displayBandwidth;
 
             // Get dB value at cursor position
@@ -802,6 +998,125 @@ class AudioVisualizer {
         });
     }
 
+    updatePeakDisplay(dbData, sampleRate) {
+        // Find peak frequency and level within filter bandwidth (like Python client)
+        if (!dbData || dbData.length === 0) return;
+
+        const nyquist = sampleRate / 2;
+        const absLow = Math.abs(this.bandwidthLow);
+        const absHigh = Math.abs(this.bandwidthHigh);
+
+        // Check if this is CW mode
+        const isCwMode = (this.bandwidthLow < 0 && this.bandwidthHigh > 0 && absLow < 500 && absHigh < 500);
+
+        let lowBin, highBin;
+
+        if (isCwMode) {
+            // CW mode: search around 500 Hz ± bandwidth
+            const cwOffset = 500;
+            const searchLow = cwOffset - absLow;
+            const searchHigh = cwOffset + absHigh;
+            lowBin = Math.floor((searchLow / nyquist) * dbData.length);
+            highBin = Math.floor((searchHigh / nyquist) * dbData.length);
+        } else if (this.bandwidthLow < 0 && this.bandwidthHigh > 0) {
+            // Other symmetric modes: bandwidth spans from 0 to (abs(low) + abs(high))
+            const bandwidthSpan = absLow + absHigh;
+            lowBin = 0;
+            highBin = Math.floor((bandwidthSpan / nyquist) * dbData.length);
+        } else {
+            // Asymmetric mode: use absolute values
+            if (this.bandwidthLow < 0 && this.bandwidthHigh < 0) {
+                // LSB mode: swap abs values
+                lowBin = Math.floor((absHigh / nyquist) * dbData.length);
+                highBin = Math.floor((absLow / nyquist) * dbData.length);
+            } else {
+                // USB mode: use normal order
+                lowBin = Math.floor((absLow / nyquist) * dbData.length);
+                highBin = Math.floor((absHigh / nyquist) * dbData.length);
+            }
+        }
+
+        // Ensure valid range
+        lowBin = Math.max(0, Math.min(lowBin, dbData.length - 1));
+        highBin = Math.max(lowBin + 1, Math.min(highBin, dbData.length));
+
+        // Find peak within bandwidth
+        const bandwidthData = dbData.slice(lowBin, highBin);
+        const validData = bandwidthData.filter(v => isFinite(v));
+
+        if (validData.length === 0) {
+            // Hide display if no valid data
+            const peakDisplay = document.getElementById('audio-peak-display');
+            if (peakDisplay) peakDisplay.style.display = 'none';
+            return;
+        }
+
+        // Find instantaneous peak
+        let peakIdx = 0;
+        let peakDb = bandwidthData[0];
+        for (let i = 1; i < bandwidthData.length; i++) {
+            if (isFinite(bandwidthData[i]) && bandwidthData[i] > peakDb) {
+                peakDb = bandwidthData[i];
+                peakIdx = i;
+            }
+        }
+
+        // Convert bin index to frequency
+        const actualBin = lowBin + peakIdx;
+        const peakFreq = (actualBin / dbData.length) * nyquist;
+
+        // Add to history with timestamp
+        const currentTime = performance.now();
+        this.peakHistory.push({ freq: peakFreq, db: peakDb });
+        this.peakTimestamps.push(currentTime);
+
+        // Average peaks over last 500ms
+        const cutoffTime = currentTime - this.peakAverageWindow;
+        const recentPeaks = [];
+        for (let i = 0; i < this.peakTimestamps.length; i++) {
+            if (this.peakTimestamps[i] >= cutoffTime) {
+                recentPeaks.push(this.peakHistory[i]);
+            }
+        }
+
+        // Remove old entries
+        while (this.peakTimestamps.length > 0 && this.peakTimestamps[0] < cutoffTime) {
+            this.peakTimestamps.shift();
+            this.peakHistory.shift();
+        }
+
+        if (recentPeaks.length === 0) {
+            recentPeaks.push({ freq: peakFreq, db: peakDb });
+        }
+
+        // Calculate weighted average (more recent = higher weight)
+        let totalWeight = 0;
+        let weightedFreq = 0;
+        let weightedDb = 0;
+
+        for (let i = 0; i < recentPeaks.length; i++) {
+            // Linear weight: newer samples get higher weight
+            const weight = i + 1;
+            weightedFreq += recentPeaks[i].freq * weight;
+            weightedDb += recentPeaks[i].db * weight;
+            totalWeight += weight;
+        }
+
+        const avgFreq = weightedFreq / totalWeight;
+        const avgDb = weightedDb / totalWeight;
+
+        // Update display
+        const peakDisplay = document.getElementById('audio-peak-display');
+        const peakFreqSpan = document.getElementById('audio-peak-freq');
+        const peakLevelSpan = document.getElementById('audio-peak-level');
+
+        if (peakDisplay && peakFreqSpan && peakLevelSpan) {
+            peakFreqSpan.textContent = avgFreq.toFixed(0);
+            peakLevelSpan.textContent = avgDb.toFixed(1);
+            peakDisplay.style.display = 'block';
+        }
+    }
+
     clear() {
         this.waterfallHistory = [];
 
@@ -826,5 +1141,9 @@ class AudioVisualizer {
             this.audioContext = null;
             this.analyser = null;
         }
+
+        // Hide peak display
+        const peakDisplay = document.getElementById('audio-peak-display');
+        if (peakDisplay) peakDisplay.style.display = 'none';
     }
 }

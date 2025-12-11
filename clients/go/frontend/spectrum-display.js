@@ -152,6 +152,7 @@ class SpectrumDisplay {
             this.binBandwidth = data.binBandwidth || 0;
             this.totalBandwidth = data.totalBandwidth || 0;
 
+            // Store the maximum available bandwidth (from receiver)
             if (this.initialBinBandwidth === 0) {
                 this.initialBinBandwidth = this.binBandwidth;
             }
@@ -162,8 +163,12 @@ class SpectrumDisplay {
             // Use tunedFreq if set, otherwise fall back to centerFreq
             if (oldBinCount === 0 && this.binCount > 0) {
                 const zoomFreq = this.tunedFreq || this.centerFreq;
+                const initialZoomBandwidth = 200000; // 200 kHz initial view
                 console.log(`Sending initial zoom to ${zoomFreq} Hz (tunedFreq: ${this.tunedFreq}, centerFreq: ${this.centerFreq})`);
-                this.sendZoomCommand(zoomFreq, 200000);
+                this.sendZoomCommand(zoomFreq, initialZoomBandwidth);
+
+                // Store the initial zoom bandwidth for reset functionality
+                this.initialZoomBandwidth = initialZoomBandwidth;
             }
         } else if (msgType === 'spectrum') {
             // Spectrum data update
@@ -1400,16 +1405,20 @@ class SpectrumDisplay {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         if (this.binCount === 0) return;
 
-        // Don't zoom out past initial bandwidth
-        if (this.initialBinBandwidth > 0 && this.binBandwidth >= this.initialBinBandwidth) {
-            console.log('Already at full bandwidth');
+        // Calculate current total bandwidth
+        const currentTotalBandwidth = this.binBandwidth * this.binCount;
+        const maxTotalBandwidth = this.initialBinBandwidth * this.binCount;
+
+        // Don't zoom out past the maximum receiver bandwidth
+        if (this.initialBinBandwidth > 0 && currentTotalBandwidth >= maxTotalBandwidth) {
+            console.log('Already at full receiver bandwidth');
             return;
         }
 
         // Double the bin bandwidth = double the total bandwidth = 0.5x zoom
         let newBinBandwidth = this.binBandwidth * 2;
 
-        // Don't zoom out past initial bandwidth
+        // Don't zoom out past the maximum receiver bandwidth
         if (this.initialBinBandwidth > 0 && newBinBandwidth > this.initialBinBandwidth) {
             newBinBandwidth = this.initialBinBandwidth;
         }
@@ -1435,11 +1444,11 @@ class SpectrumDisplay {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
         if (this.binCount === 0 || this.initialBinBandwidth === 0) return;
 
-        // Reset to initial bandwidth (200 kHz default)
+        // Reset to full receiver bandwidth (zoom all the way out)
         const newTotalBandwidth = this.initialBinBandwidth * this.binCount;
 
-        // Center on tuned frequency
-        const zoomCenter = this.tunedFreq || this.centerFreq;
+        // Center at 15 MHz (half of 30 MHz) to show full HF spectrum
+        const zoomCenter = 15000000;
 
         // Constrain center frequency
         const halfBandwidth = newTotalBandwidth / 2;
@@ -1447,7 +1456,7 @@ class SpectrumDisplay {
         const maxCenter = 30000000 - halfBandwidth;
         const constrainedCenter = Math.max(minCenter, Math.min(maxCenter, zoomCenter));
 
-        console.log(`Zoom reset: ${(this.totalBandwidth/1000).toFixed(1)} kHz -> ${(newTotalBandwidth/1000).toFixed(1)} kHz`);
+        console.log(`Zoom reset: ${(this.totalBandwidth/1000).toFixed(1)} kHz -> ${(newTotalBandwidth/1000).toFixed(1)} kHz at ${(constrainedCenter/1e6).toFixed(1)} MHz`);
 
         this.sendZoomCommand(constrainedCenter, newTotalBandwidth);
     }

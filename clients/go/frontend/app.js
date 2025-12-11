@@ -289,9 +289,37 @@ class UberSDRClient {
             });
         });
 
-        // Bandwidth sliders - update display and apply immediately
+        // Bandwidth sliders - update display and apply immediately with validation
         this.bandwidthLowInput.addEventListener('input', () => {
-            this.bandwidthLowValue.textContent = this.bandwidthLowInput.value;
+            let value = parseInt(this.bandwidthLowInput.value);
+            let highValue = parseInt(this.bandwidthHighInput.value);
+
+            // Validate based on mode - low bandwidth rules
+            if ((this.currentMode === 'usb' || this.currentMode === 'cwu') && value < 0) {
+                // USB/CWU: low must be positive
+                value = 0;
+                this.bandwidthLowInput.value = value;
+            } else if ((this.currentMode === 'lsb' || this.currentMode === 'cwl') && value > 0) {
+                // LSB/CWL: low must be negative
+                value = 0;
+                this.bandwidthLowInput.value = value;
+            } else if ((this.currentMode === 'am' || this.currentMode === 'sam' ||
+                       this.currentMode === 'fm' || this.currentMode === 'nfm') && value > 0) {
+                // AM/SAM/FM/NFM: low must be negative
+                value = 0;
+                this.bandwidthLowInput.value = value;
+            }
+
+            // Ensure low < high (strictly less than, not equal)
+            if (value >= highValue) {
+                // If we're at or above high, set to high - 1
+                // But also ensure we don't go below the minimum for this mode
+                const minValue = parseInt(this.bandwidthLowInput.min);
+                value = Math.max(minValue, highValue - 1);
+                this.bandwidthLowInput.value = value;
+            }
+
+            this.bandwidthLowValue.textContent = value;
             this.updateVisualizerBandwidth();
             if (this.connected) {
                 clearTimeout(this.bandwidthUpdateTimeout);
@@ -300,7 +328,35 @@ class UberSDRClient {
         });
 
         this.bandwidthHighInput.addEventListener('input', () => {
-            this.bandwidthHighValue.textContent = this.bandwidthHighInput.value;
+            let value = parseInt(this.bandwidthHighInput.value);
+            let lowValue = parseInt(this.bandwidthLowInput.value);
+
+            // Validate based on mode - high bandwidth rules
+            if ((this.currentMode === 'usb' || this.currentMode === 'cwu') && value < 0) {
+                // USB/CWU: high must be positive
+                value = 0;
+                this.bandwidthHighInput.value = value;
+            } else if ((this.currentMode === 'lsb' || this.currentMode === 'cwl') && value > 0) {
+                // LSB/CWL: high must be negative
+                value = 0;
+                this.bandwidthHighInput.value = value;
+            } else if ((this.currentMode === 'am' || this.currentMode === 'sam' ||
+                       this.currentMode === 'fm' || this.currentMode === 'nfm') && value < 0) {
+                // AM/SAM/FM/NFM: high must be positive
+                value = 0;
+                this.bandwidthHighInput.value = value;
+            }
+
+            // Ensure high > low (strictly greater than, not equal)
+            if (value <= lowValue) {
+                // If we're at or below low, set to low + 1
+                // But also ensure we don't go above the maximum for this mode
+                const maxValue = parseInt(this.bandwidthHighInput.max);
+                value = Math.min(maxValue, lowValue + 1);
+                this.bandwidthHighInput.value = value;
+            }
+
+            this.bandwidthHighValue.textContent = value;
             this.updateVisualizerBandwidth();
             if (this.connected) {
                 clearTimeout(this.bandwidthUpdateTimeout);
@@ -886,8 +942,20 @@ class UberSDRClient {
             this.currentMode === 'iq96' || this.currentMode === 'iq192' || this.currentMode === 'iq384';
 
         if (!isIQMode) {
-            tuneRequest.bandwidthLow = parseInt(this.bandwidthLowInput.value);
-            tuneRequest.bandwidthHigh = parseInt(this.bandwidthHighInput.value);
+            let bandwidthLow = parseInt(this.bandwidthLowInput.value);
+            let bandwidthHigh = parseInt(this.bandwidthHighInput.value);
+
+            // Final validation: ensure low < high before sending to server
+            if (bandwidthLow >= bandwidthHigh) {
+                console.warn(`Invalid bandwidth: low (${bandwidthLow}) >= high (${bandwidthHigh}), adjusting...`);
+                // Adjust high to be at least low + 1
+                bandwidthHigh = bandwidthLow + 1;
+                this.bandwidthHighInput.value = bandwidthHigh;
+                this.bandwidthHighValue.textContent = bandwidthHigh;
+            }
+
+            tuneRequest.bandwidthLow = bandwidthLow;
+            tuneRequest.bandwidthHigh = bandwidthHigh;
         }
 
         try {
@@ -902,9 +970,22 @@ class UberSDRClient {
             if (response.ok) {
                 this.showSuccess('Settings applied');
 
-                // Update spectrum display with new bandwidth
-                if (this.spectrumDisplay) {
+                // Update spectrum display with new frequency and bandwidth
+                if (this.spectrumDisplay && this.spectrumDisplay.totalBandwidth > 0) {
+                    this.spectrumDisplay.tunedFreq = tuneRequest.frequency;
                     this.spectrumDisplay.updateBandwidth(tuneRequest.bandwidthLow, tuneRequest.bandwidthHigh);
+
+                    // Check if new frequency is outside the currently displayed bandwidth
+                    const halfBw = this.spectrumDisplay.totalBandwidth / 2;
+                    const startFreq = this.spectrumDisplay.centerFreq - halfBw;
+                    const endFreq = this.spectrumDisplay.centerFreq + halfBw;
+                    const isOutsideView = tuneRequest.frequency < startFreq || tuneRequest.frequency > endFreq;
+
+                    // If center-tune is enabled or frequency is outside view, re-center
+                    if (this.spectrumDisplay.centerTuneEnabled || isOutsideView) {
+                        console.log(`Re-centering spectrum to ${tuneRequest.frequency} Hz`);
+                        this.spectrumDisplay.sendZoomCommand(tuneRequest.frequency, this.spectrumDisplay.totalBandwidth);
+                    }
                 }
 
                 // Update audio visualizer with new bandwidth
@@ -930,11 +1011,23 @@ class UberSDRClient {
             return; // Skip bandwidth updates for IQ modes
         }
 
+        let bandwidthLow = parseInt(this.bandwidthLowInput.value);
+        let bandwidthHigh = parseInt(this.bandwidthHighInput.value);
+
+        // Final validation: ensure low < high before sending to server
+        if (bandwidthLow >= bandwidthHigh) {
+            console.warn(`Invalid bandwidth: low (${bandwidthLow}) >= high (${bandwidthHigh}), adjusting...`);
+            // Adjust high to be at least low + 1
+            bandwidthHigh = bandwidthLow + 1;
+            this.bandwidthHighInput.value = bandwidthHigh;
+            this.bandwidthHighValue.textContent = bandwidthHigh;
+        }
+
         const tuneRequest = {
             frequency: parseInt(this.frequencyInput.value),
             mode: this.currentMode,
-            bandwidthLow: parseInt(this.bandwidthLowInput.value),
-            bandwidthHigh: parseInt(this.bandwidthHighInput.value)
+            bandwidthLow: bandwidthLow,
+            bandwidthHigh: bandwidthHigh
         };
 
         try {
@@ -964,7 +1057,36 @@ class UberSDRClient {
         this.currentMode = mode;
         this.updateModeButtons();
         this.updateModeDefaults();
-        
+
+        // Disable and mute audio preview for IQ modes
+        const isIQMode = mode === 'iq' || mode === 'iq48' || mode === 'iq96' ||
+                        mode === 'iq192' || mode === 'iq384';
+
+        if (isIQMode) {
+            // Disable audio preview if it's enabled
+            if (this.audioPreviewEnabled.checked) {
+                this.audioPreviewEnabled.checked = false;
+                this.toggleAudioPreview();
+                this.saveAudioPreviewConfig();
+            }
+            // Disable the audio preview checkbox
+            this.audioPreviewEnabled.disabled = true;
+
+            // Also disable spectrum audio toggle if visible
+            if (this.spectrumAudioToggle.style.display !== 'none') {
+                this.spectrumAudioToggle.style.display = 'none';
+            }
+        } else {
+            // Re-enable audio preview checkbox for non-IQ modes (if connected)
+            if (this.connected) {
+                this.audioPreviewEnabled.disabled = false;
+                // Show spectrum audio toggle if spectrum is enabled
+                if (this.spectrumEnabled.checked) {
+                    this.spectrumAudioToggle.style.display = 'inline-block';
+                }
+            }
+        }
+
         // Apply immediately if connected
         if (this.connected) {
             this.applySettings();
@@ -1062,28 +1184,28 @@ class UberSDRClient {
         
         // Mode defaults and ranges from Python client
         const modeConfig = {
-            'usb': { defaults: [50, 2700], range: [-10000, 10000] },
-            'lsb': { defaults: [-2700, -50], range: [-10000, 10000] },
-            'am': { defaults: [-5000, 5000], range: [-10000, 10000] },
-            'sam': { defaults: [-5000, 5000], range: [-10000, 10000] },
-            'cwu': { defaults: [-200, 200], range: [-1000, 1000] },
-            'cwl': { defaults: [-200, 200], range: [-1000, 1000] },
-            'fm': { defaults: [-8000, 8000], range: [-10000, 10000] },
-            'nfm': { defaults: [-8000, 8000], range: [-10000, 10000] },
-            'iq': { defaults: [0, 0], range: [-10000, 10000] },
-            'iq48': { defaults: [0, 0], range: [-24000, 24000] },
-            'iq96': { defaults: [0, 0], range: [-48000, 48000] },
-            'iq192': { defaults: [0, 0], range: [-96000, 96000] },
-            'iq384': { defaults: [0, 0], range: [-192000, 192000] }
+            'usb': { defaults: [50, 2700], range: [0, 10000], lowRange: [0, 10000], highRange: [0, 10000] },      // USB: only positive
+            'lsb': { defaults: [-2700, -50], range: [-10000, 0], lowRange: [-10000, 0], highRange: [-10000, 0] },   // LSB: only negative
+            'am': { defaults: [-5000, 5000], range: [-10000, 10000], lowRange: [-10000, 0], highRange: [0, 10000] },  // AM: low negative, high positive
+            'sam': { defaults: [-5000, 5000], range: [-10000, 10000], lowRange: [-10000, 0], highRange: [0, 10000] }, // SAM: low negative, high positive
+            'cwu': { defaults: [-200, 200], range: [-1000, 1000], lowRange: [0, 1000], highRange: [0, 1000] },      // CWU: only positive
+            'cwl': { defaults: [-200, 200], range: [-1000, 1000], lowRange: [-1000, 0], highRange: [-1000, 0] },    // CWL: only negative
+            'fm': { defaults: [-8000, 8000], range: [-10000, 10000], lowRange: [-10000, 0], highRange: [0, 10000] },  // FM: low negative, high positive
+            'nfm': { defaults: [-8000, 8000], range: [-10000, 10000], lowRange: [-10000, 0], highRange: [0, 10000] }, // NFM: low negative, high positive
+            'iq': { defaults: [0, 0], range: [-10000, 10000], lowRange: [-10000, 10000], highRange: [-10000, 10000] },
+            'iq48': { defaults: [0, 0], range: [-24000, 24000], lowRange: [-24000, 24000], highRange: [-24000, 24000] },
+            'iq96': { defaults: [0, 0], range: [-48000, 48000], lowRange: [-48000, 48000], highRange: [-48000, 48000] },
+            'iq192': { defaults: [0, 0], range: [-96000, 96000], lowRange: [-96000, 96000], highRange: [-96000, 96000] },
+            'iq384': { defaults: [0, 0], range: [-192000, 192000], lowRange: [-192000, 192000], highRange: [-192000, 192000] }
         };
 
         const config = modeConfig[mode] || modeConfig['usb'];
         
-        // Update slider ranges
-        this.bandwidthLowInput.min = config.range[0];
-        this.bandwidthLowInput.max = config.range[1];
-        this.bandwidthHighInput.min = config.range[0];
-        this.bandwidthHighInput.max = config.range[1];
+        // Update slider ranges - use specific ranges for low and high if available
+        this.bandwidthLowInput.min = config.lowRange ? config.lowRange[0] : config.range[0];
+        this.bandwidthLowInput.max = config.lowRange ? config.lowRange[1] : config.range[1];
+        this.bandwidthHighInput.min = config.highRange ? config.highRange[0] : config.range[0];
+        this.bandwidthHighInput.max = config.highRange ? config.highRange[1] : config.range[1];
         
         // Update values
         this.bandwidthLowInput.value = config.defaults[0];
@@ -1134,6 +1256,10 @@ class UberSDRClient {
             if (response.ok) {
                 const config = await response.json();
                 console.log('Loaded config:', config);
+
+                // Check if an instance was loaded from config (has host and port set)
+                const hasInstanceFromConfig = config.host && config.port &&
+                    (config.host !== 'localhost' || config.port !== 8080);
 
                 // Populate form fields with saved config
                 if (config.host) this.hostInput.value = config.host;
@@ -1303,6 +1429,34 @@ class UberSDRClient {
                 }
 
                 console.log('Loaded saved configuration');
+
+                // If no instance was loaded from config, show appropriate overlay
+                if (!hasInstanceFromConfig) {
+                    // Check if there are any local instances
+                    try {
+                        const localResponse = await fetch(`${this.apiBase}/api/instances/local`);
+                        if (localResponse.ok) {
+                            const localData = await localResponse.json();
+                            if (localData.instances && localData.instances.length > 0) {
+                                // Show local instances overlay
+                                console.log('No instance from config, showing local instances overlay');
+                                setTimeout(() => this.showLocalInstances(), 500);
+                            } else {
+                                // No local instances, show public instances overlay
+                                console.log('No instance from config and no local instances, showing public instances overlay');
+                                setTimeout(() => this.showPublicInstances(), 500);
+                            }
+                        } else {
+                            // Error checking local instances, show public instances as fallback
+                            console.log('Error checking local instances, showing public instances overlay');
+                            setTimeout(() => this.showPublicInstances(), 500);
+                        }
+                    } catch (error) {
+                        console.error('Error checking for local instances:', error);
+                        // Show public instances as fallback
+                        setTimeout(() => this.showPublicInstances(), 500);
+                    }
+                }
             }
         } catch (error) {
             console.error('Failed to load saved config:', error);
@@ -2000,6 +2154,19 @@ class UberSDRClient {
     toggleAudioPreview() {
         const enabled = this.audioPreviewEnabled.checked;
 
+        // Prevent enabling audio preview for IQ modes
+        const isIQMode = this.currentMode === 'iq' || this.currentMode === 'iq48' ||
+                        this.currentMode === 'iq96' || this.currentMode === 'iq192' ||
+                        this.currentMode === 'iq384';
+
+        if (enabled && isIQMode) {
+            // Immediately uncheck and disable
+            this.audioPreviewEnabled.checked = false;
+            this.audioPreviewEnabled.disabled = true;
+            console.log('Audio preview cannot be enabled in IQ mode');
+            return;
+        }
+
         if (enabled) {
             this.audioPreviewControls.style.display = 'block';
             this.audioMuteBtn.style.display = 'inline-block';
@@ -2027,7 +2194,7 @@ class UberSDRClient {
                 this.audioVisualizer.clear();
             }
         }
-        
+
         // Update spectrum audio button
         this.updateSpectrumAudioButton();
     }
@@ -3291,25 +3458,20 @@ class UberSDRClient {
             // Update frequency input
             this.frequencyInput.value = frequency;
 
-            // Update mode select if mode is provided
+            // Update mode if mode is provided
             if (mode) {
-                // Check if the mode exists in the select options
-                const modeOption = Array.from(this.modeSelect.options).find(
-                    opt => opt.value === mappedMode
-                );
-                if (modeOption) {
-                    // Set flag to prevent mode change event from calling updateModeDefaults
-                    this.bookmarkModeChange = true;
-                    this.modeSelect.value = mappedMode;
-                    // Update bandwidth defaults for the new mode
-                    this.updateModeDefaults();
-                    // Clear flag after a short delay
-                    setTimeout(() => {
-                        this.bookmarkModeChange = false;
-                    }, 100);
-                } else {
-                    console.warn(`Mode ${mappedMode} not found in mode select, keeping current mode`);
-                }
+                // Set flag to prevent mode change event from calling updateModeDefaults
+                this.bookmarkModeChange = true;
+
+                // Update current mode and buttons
+                this.currentMode = mappedMode;
+                this.updateModeButtons();
+                this.updateModeDefaults();
+
+                // Clear flag after a short delay
+                setTimeout(() => {
+                    this.bookmarkModeChange = false;
+                }, 100);
             }
 
             // Apply the changes if connected - use applySettings to send both frequency AND mode

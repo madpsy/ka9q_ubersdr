@@ -195,9 +195,19 @@ header h1 {
     color: #065f46;
 }
 
+body.dark-mode .status-badge.connected {
+    background-color: #22c55e;
+    color: #000000;
+}
+
 .status-badge.disconnected {
     background-color: #fee2e2;
     color: #991b1b;
+}
+
+body.dark-mode .status-badge.disconnected {
+    background-color: #ef4444;
+    color: #ffffff;
 }
 
 /* Panels */

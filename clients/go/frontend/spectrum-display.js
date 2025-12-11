@@ -43,6 +43,7 @@ class SpectrumDisplay {
         this.scrollMode = 'zoom';  // 'zoom' or 'pan'
         this.clickTuneEnabled = true;
         this.centerTuneEnabled = true;
+        this.snapFrequency = 500;  // Default snap frequency in Hz
 
         // Cursor/tooltip state
         this.cursorX = -1;
@@ -784,7 +785,7 @@ class SpectrumDisplay {
 
                 // Get current frequency
                 const currentFreq = this.tunedFreq || 14074000;
-                const stepSize = 1000; // 1 kHz steps
+                const stepSize = this.snapFrequency; // Use configurable snap frequency
                 const direction = e.deltaY < 0 ? 1 : -1; // Scroll up = increase freq
                 const newFreq = currentFreq + (direction * stepSize);
 
@@ -867,8 +868,8 @@ class SpectrumDisplay {
                             newTunedFreq = endFreq - (halfBw * 0.1);  // 10% from edge
                         }
 
-                        // Snap to 1 kHz boundary
-                        newTunedFreq = Math.round(newTunedFreq / 1000) * 1000;
+                        // Snap to configured boundary
+                        newTunedFreq = Math.round(newTunedFreq / this.snapFrequency) * this.snapFrequency;
 
                         // Call frequency callback to update tuned frequency
                         if (this.frequencyCallback) {
@@ -1050,7 +1051,7 @@ class SpectrumDisplay {
                                 newTunedFreq = endFreq - (halfBw * 0.1);
                             }
 
-                            newTunedFreq = Math.round(newTunedFreq / 1000) * 1000;
+                            newTunedFreq = Math.round(newTunedFreq / this.snapFrequency) * this.snapFrequency;
 
                             if (this.frequencyCallback) {
                                 this.frequencyCallback(newTunedFreq);
@@ -1156,8 +1157,8 @@ class SpectrumDisplay {
         const freqOffset = (x / graphWidth - 0.5) * this.totalBandwidth;
         const clickedFreq = this.centerFreq + freqOffset;
 
-        // Snap to nearest 1 kHz boundary
-        const newFreq = Math.round(clickedFreq / 1000) * 1000;
+        // Snap to nearest boundary based on snap setting
+        const newFreq = Math.round(clickedFreq / this.snapFrequency) * this.snapFrequency;
 
         // Call frequency callback to tune to clicked frequency
         if (this.frequencyCallback) {
@@ -1457,6 +1458,11 @@ class SpectrumDisplay {
     setCenterTuneEnabled(enabled) {
         this.centerTuneEnabled = enabled;
         console.log(`Spectrum center-tune ${enabled ? 'enabled' : 'disabled'}`);
+    }
+
+    setSnapFrequency(snapHz) {
+        this.snapFrequency = snapHz;
+        console.log(`Spectrum snap frequency set to: ${snapHz} Hz`);
     }
 
     updateBandwidth(low, high) {

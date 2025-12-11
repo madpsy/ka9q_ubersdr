@@ -386,6 +386,18 @@ class UberSDRClient {
             console.log(`Center-tune ${this.spectrumCenterTuneCheckbox.checked ? 'enabled' : 'disabled'}`);
         });
 
+        // Spectrum snap control
+        const spectrumSnapSelect = document.getElementById('spectrum-snap');
+        if (spectrumSnapSelect) {
+            spectrumSnapSelect.addEventListener('change', () => {
+                const snapHz = parseInt(spectrumSnapSelect.value);
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.setSnapFrequency(snapHz);
+                }
+                this.saveSpectrumConfig();
+            });
+        }
+
         // Spectrum zoom control buttons
         const spectrumZoomResetBtn = document.getElementById('spectrum-zoom-reset');
         const spectrumZoomOutBtn = document.getElementById('spectrum-zoom-out');
@@ -1191,6 +1203,12 @@ class UberSDRClient {
                 this.spectrumClickTuneCheckbox.checked = (config.spectrumClickTune !== undefined) ? config.spectrumClickTune : true;
                 this.spectrumCenterTuneCheckbox.checked = (config.spectrumCenterTune !== undefined) ? config.spectrumCenterTune : true;
 
+                // Set spectrum snap value
+                const spectrumSnapSelect = document.getElementById('spectrum-snap');
+                if (spectrumSnapSelect && config.spectrumSnap !== undefined) {
+                    spectrumSnapSelect.value = config.spectrumSnap;
+                }
+
                 console.log('Loaded spectrum config (enabled always starts unchecked):', {
                     zoomScroll: config.spectrumZoomScroll,
                     panScroll: config.spectrumPanScroll,
@@ -1299,12 +1317,14 @@ class UberSDRClient {
     }
 
     async saveSpectrumConfig() {
+        const spectrumSnapSelect = document.getElementById('spectrum-snap');
         const config = {
             spectrumEnabled: this.spectrumEnabled.checked,
             spectrumZoomScroll: this.spectrumZoomScrollCheckbox.checked,
             spectrumPanScroll: this.spectrumPanScrollCheckbox.checked,
             spectrumClickTune: this.spectrumClickTuneCheckbox.checked,
-            spectrumCenterTune: this.spectrumCenterTuneCheckbox.checked
+            spectrumCenterTune: this.spectrumCenterTuneCheckbox.checked,
+            spectrumSnap: spectrumSnapSelect ? parseInt(spectrumSnapSelect.value) : 500
         };
 
         console.log('Saving spectrum config:', config);
@@ -2194,6 +2214,14 @@ class UberSDRClient {
             this.spectrumDisplay.setScrollMode(scrollMode);
             this.spectrumDisplay.setClickTuneEnabled(this.spectrumClickTuneCheckbox.checked);
             this.spectrumDisplay.setCenterTuneEnabled(this.spectrumCenterTuneCheckbox.checked);
+
+            // Set snap frequency
+            const spectrumSnapSelect = document.getElementById('spectrum-snap');
+            if (spectrumSnapSelect) {
+                const snapHz = parseInt(spectrumSnapSelect.value);
+                this.spectrumDisplay.setSnapFrequency(snapHz);
+            }
+
             console.log(`Spectrum display initialized with center-tune: ${this.spectrumCenterTuneCheckbox.checked}`);
 
             // Set bookmarks if already loaded

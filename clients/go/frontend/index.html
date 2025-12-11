@@ -160,9 +160,6 @@
                         <span>Enable RF Spectrum Display</span>
                     </label>
                 </div>
-                <div class="info-box">
-                    <p><strong>Note:</strong> Displays the RF spectrum and waterfall from the SDR receiver. Shows the actual RF spectrum centered on your tuned frequency with 200 kHz bandwidth by default.</p>
-                </div>
                 <div id="spectrum-display-container" style="display: none;">
                     <div class="spectrum-status">
                         <span class="label">Spectrum Status:</span>
@@ -184,6 +181,14 @@
                         <label style="display: flex; align-items: center; gap: 5px;">
                             <input type="checkbox" id="spectrum-center-tune">
                             <span>Center Tune</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <span>Snap:</span>
+                            <select id="spectrum-snap">
+                                <option value="100">100 Hz</option>
+                                <option value="500" selected>500 Hz</option>
+                                <option value="1000">1 kHz</option>
+                            </select>
                         </label>
                     </div>
                     <div class="spectrum-visualizer">
@@ -766,7 +771,7 @@
         </main>
 
         <footer>
-            <p>UberSDR Go Client | <a href="https://github.com/ka9q/ubersdr" target="_blank">GitHub</a></p>
+            <p>UberSDR Client | <a href="https://ubersdr.org" target="_blank">UberSDR</a></p>
         </footer>
     </div>
 

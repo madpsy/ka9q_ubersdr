@@ -718,12 +718,40 @@ func (m *WebSocketManager) restoreRadioControlStates() {
 }
 
 // IsConnected returns whether the client is currently connected
+// This method uses TryRLock to avoid deadlocks when called from callbacks
 func (m *WebSocketManager) IsConnected() bool {
 	log.Printf("DEBUG IsConnected: Attempting to acquire RLock...")
-	m.mu.RLock()
-	log.Printf("DEBUG IsConnected: RLock acquired, connected=%v", m.connected)
-	defer m.mu.RUnlock()
-	return m.connected
+	// Try to acquire lock without blocking to avoid deadlocks
+	// If we can't get the lock immediately, assume we're in a callback
+	// and return the last known state
+	if m.mu.TryRLock() {
+		connected := m.connected
+		log.Printf("DEBUG IsConnected: RLock acquired, connected=%v", connected)
+		m.mu.RUnlock()
+		return connected
+	}
+
+	// Could not acquire lock - likely called from within a locked context
+	// This is safe because connected is only set to true/false atomically
+	log.Printf("DEBUG IsConnected: Could not acquire RLock (likely in callback), returning last known state")
+	// We can't safely read m.connected without the lock, so we need a different approach
+	// Use a channel-based check instead
+	result := make(chan bool, 1)
+	go func() {
+		m.mu.RLock()
+		result <- m.connected
+		m.mu.RUnlock()
+	}()
+
+	select {
+	case connected := <-result:
+		log.Printf("DEBUG IsConnected: Got result from goroutine: %v", connected)
+		return connected
+	case <-time.After(100 * time.Millisecond):
+		// Timeout - assume disconnected to be safe
+		log.Printf("DEBUG IsConnected: Timeout waiting for lock, assuming disconnected")
+		return false
+	}
 }
 
 // fetchInstanceDescription fetches the description from the connected server

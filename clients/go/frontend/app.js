@@ -34,6 +34,8 @@ class UberSDRClient {
             // Load config after devices are loaded so device selection can be restored
             this.loadSavedConfig();
         });
+        // Set initial UI state based on connection status (disconnected by default)
+        this.updateConnectionUI();
         this.updateStatus();
         this.connectWebSocket();
         
@@ -2027,8 +2029,9 @@ class UberSDRClient {
             // Disable mode buttons
             this.modeButtons.forEach(btn => btn.disabled = true);
             
-            // Disable and uncheck spectrum display
+            // Disable spectrum display checkbox (always disable when disconnected)
             this.spectrumEnabled.disabled = true;
+            // Uncheck and hide if currently enabled
             if (this.spectrumEnabled.checked) {
                 this.spectrumEnabled.checked = false;
                 this.spectrumDisplayContainer.style.display = 'none';
@@ -2038,8 +2041,9 @@ class UberSDRClient {
                 }
             }
             
-            // Disable and uncheck audio preview
+            // Disable audio preview checkbox (always disable when disconnected)
             this.audioPreviewEnabled.disabled = true;
+            // Uncheck and cleanup if currently enabled
             if (this.audioPreviewEnabled.checked) {
                 this.audioPreviewEnabled.checked = false;
                 this.audioPreviewControls.style.display = 'none';

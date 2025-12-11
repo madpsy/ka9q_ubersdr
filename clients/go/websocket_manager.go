@@ -1007,6 +1007,20 @@ func (m *WebSocketManager) UpdateConfig(req ConfigUpdateRequest) error {
 		}
 	}
 
+	// Update resampling settings
+	if req.ResampleEnabled != nil {
+		m.client.resampleEnabled = *req.ResampleEnabled
+		log.Printf("Resampling enabled updated to: %v", *req.ResampleEnabled)
+	}
+	if req.ResampleOutputRate != nil {
+		m.client.resampleOutputRate = *req.ResampleOutputRate
+		log.Printf("Resampling output rate updated to: %d", *req.ResampleOutputRate)
+	}
+	if req.OutputChannels != nil {
+		m.client.outputChannels = *req.OutputChannels
+		log.Printf("Output channels updated to: %d", *req.OutputChannels)
+	}
+
 	// Update volume and channel settings
 	if req.Volume != nil {
 		m.client.mu.Lock()
@@ -1055,6 +1069,23 @@ func (m *WebSocketManager) EnablePortAudioOutput(deviceIndex int) error {
 	// Wait for result with timeout
 	select {
 	case err := <-errChan:
+		if err == nil {
+			// Update the client's audioDeviceIndex to ensure status updates reflect the correct device
+			m.client.audioDeviceIndex = deviceIndex
+			log.Printf("Audio device index updated to %d in client state", deviceIndex)
+
+			// If resampling was automatically enabled during PortAudio setup, save it to config
+			if m.client.resampleEnabled && m.configManager != nil {
+				m.configManager.Update(func(c *ClientConfig) {
+					if !c.ResampleEnabled {
+						c.ResampleEnabled = true
+						c.ResampleOutputRate = m.client.resampleOutputRate
+						log.Printf("Automatic resampling enabled and saved to config: %d Hz -> %d Hz",
+							m.client.sampleRate, m.client.resampleOutputRate)
+					}
+				})
+			}
+		}
 		return err
 	case <-time.After(5 * time.Second):
 		return fmt.Errorf("PortAudio initialization timeout (possible system audio configuration issue)")

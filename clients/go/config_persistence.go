@@ -273,8 +273,8 @@ func (cm *ConfigManager) UpdateFromTuneRequest(req TuneRequest) error {
 	})
 }
 
-// UpdateNR2Config updates NR2 configuration
-func (cm *ConfigManager) UpdateNR2Config(req ConfigUpdateRequest) error {
+// UpdateConfig updates configuration from a ConfigUpdateRequest
+func (cm *ConfigManager) UpdateConfig(req ConfigUpdateRequest) error {
 	return cm.Update(func(c *ClientConfig) {
 		if req.NR2Enabled != nil {
 			c.NR2Enabled = *req.NR2Enabled
@@ -320,6 +320,21 @@ func (cm *ConfigManager) UpdateNR2Config(req ConfigUpdateRequest) error {
 		}
 		if req.RightChannelEnabled != nil {
 			c.RightChannelEnabled = *req.RightChannelEnabled
+		}
+		if req.PortAudioDevice != nil {
+			c.PortAudioDevice = *req.PortAudioDevice
+		}
+		if req.ResampleEnabled != nil {
+			c.ResampleEnabled = *req.ResampleEnabled
+		}
+		if req.ResampleOutputRate != nil {
+			c.ResampleOutputRate = *req.ResampleOutputRate
+		}
+		if req.OutputChannels != nil {
+			c.OutputChannels = *req.OutputChannels
+		}
+		if req.RadioControlType != nil {
+			c.RadioControlType = *req.RadioControlType
 		}
 	})
 }

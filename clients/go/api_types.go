@@ -80,6 +80,11 @@ type ConfigUpdateRequest struct {
 	Volume              *float64 `json:"volume,omitempty"`
 	LeftChannelEnabled  *bool    `json:"leftChannelEnabled,omitempty"`
 	RightChannelEnabled *bool    `json:"rightChannelEnabled,omitempty"`
+	PortAudioDevice     *int     `json:"portAudioDevice,omitempty"`
+	ResampleEnabled     *bool    `json:"resampleEnabled,omitempty"`
+	ResampleOutputRate  *int     `json:"resampleOutputRate,omitempty"`
+	OutputChannels      *int     `json:"outputChannels,omitempty"`
+	RadioControlType    *string  `json:"radioControlType,omitempty"`
 }
 
 // OutputControlRequest represents a request to control an output
@@ -259,6 +264,7 @@ type ConfigResponse struct {
 	Volume              float64 `json:"volume"`
 	LeftChannelEnabled  bool    `json:"leftChannelEnabled"`
 	RightChannelEnabled bool    `json:"rightChannelEnabled"`
+	PortAudioDevice     int     `json:"portAudioDevice"`
 	// Radio control settings
 	RadioControlType  string `json:"radioControlType,omitempty"`
 	FlrigEnabled      bool   `json:"flrigEnabled"`

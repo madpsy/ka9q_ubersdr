@@ -517,6 +517,73 @@ func (c *RadioClient) SetupPortAudio() (returnErr error) {
 		outputRate = c.resampleOutputRate
 	}
 
+	// Try to open the stream, with automatic resampling fallback on sample rate error
+	stream, err := c.openPortAudioStream(outputRate)
+	if err != nil && !c.resampleEnabled && strings.Contains(err.Error(), "Invalid sample rate") {
+		// Sample rate not supported - try enabling resampling to 48kHz (widely supported)
+		fmt.Fprintf(os.Stderr, "Warning: Device doesn't support %d Hz, enabling automatic resampling to 48000 Hz...\n", outputRate)
+
+		// Don't resample IQ modes - they require exact sample rates
+		isIQMode := strings.HasPrefix(c.mode, "iq")
+		if isIQMode {
+			portaudio.Terminate()
+			return fmt.Errorf("device doesn't support %d Hz and IQ mode cannot be resampled: %w", outputRate, err)
+		}
+
+		// Enable resampling
+		c.resampleEnabled = true
+		c.resampleOutputRate = 48000
+		outputRate = 48000
+
+		// Initialize resampler if not already done
+		if c.resampler == nil && c.sampleRate > 0 {
+			libsrResampler, resamplerErr := NewLibsamplerateResampler(c.sampleRate, c.resampleOutputRate, 1, 0)
+			if resamplerErr == nil {
+				c.resampler = libsrResampler
+				fmt.Fprintf(os.Stderr, "libsamplerate resampler initialized (SRC_SINC_BEST_QUALITY): %d Hz -> %d Hz\n",
+					c.sampleRate, c.resampleOutputRate)
+			} else {
+				portaudio.Terminate()
+				return fmt.Errorf("failed to initialize resampler for fallback: %w", resamplerErr)
+			}
+		}
+
+		// Retry opening stream with resampled rate (PortAudio is still initialized)
+		stream, err = c.openPortAudioStream(outputRate)
+		if err != nil {
+			portaudio.Terminate()
+			return fmt.Errorf("failed to open audio stream even with resampling to %d Hz: %w", outputRate, err)
+		}
+
+		fmt.Fprintf(os.Stderr, "Successfully enabled automatic resampling fallback\n")
+	} else if err != nil {
+		portaudio.Terminate()
+		return err
+	}
+
+	// Start the stream
+	if err := stream.Start(); err != nil {
+		stream.Close()
+		portaudio.Terminate()
+		return fmt.Errorf("failed to start audio stream: %w", err)
+	}
+
+	c.audioStream = stream
+
+	if c.resampleEnabled {
+		fmt.Fprintf(os.Stderr, "PortAudio output started (sample rate: %d Hz, channels: %d, resampled from %d Hz)\n",
+			outputRate, c.outputChannels, c.sampleRate)
+	} else {
+		fmt.Fprintf(os.Stderr, "PortAudio output started (sample rate: %d Hz, channels: %d)\n",
+			outputRate, c.outputChannels)
+	}
+	return nil
+}
+
+// openPortAudioStream opens the PortAudio stream with the specified output rate
+// Returns the stream without starting it, so caller can handle errors before starting
+func (c *RadioClient) openPortAudioStream(outputRate int) (*portaudio.Stream, error) {
+
 	// Create buffered channel for audio samples
 	// Buffer size: enough for about 2 seconds of audio at output rate
 	// This needs to be larger when resampling to handle the increased data rate
@@ -570,13 +637,11 @@ func (c *RadioClient) SetupPortAudio() (returnErr error) {
 		// Open specific device
 		deviceInfo, err := portaudio.Devices()
 		if err != nil {
-			portaudio.Terminate()
-			return fmt.Errorf("failed to get device list: %w", err)
+			return nil, fmt.Errorf("failed to get device list: %w", err)
 		}
 
 		if c.audioDeviceIndex >= len(deviceInfo) {
-			portaudio.Terminate()
-			return fmt.Errorf("invalid device index %d (max: %d)", c.audioDeviceIndex, len(deviceInfo)-1)
+			return nil, fmt.Errorf("invalid device index %d (max: %d)", c.audioDeviceIndex, len(deviceInfo)-1)
 		}
 
 		device := deviceInfo[c.audioDeviceIndex]
@@ -594,8 +659,7 @@ func (c *RadioClient) SetupPortAudio() (returnErr error) {
 
 		stream, err = portaudio.OpenStream(streamParams, callback)
 		if err != nil {
-			portaudio.Terminate()
-			return fmt.Errorf("failed to open audio stream on device %d: %w", c.audioDeviceIndex, err)
+			return nil, fmt.Errorf("failed to open audio stream on device %d: %w", c.audioDeviceIndex, err)
 		}
 
 		fmt.Fprintf(os.Stderr, "Using audio device [%d]: %s\n", c.audioDeviceIndex, device.Name)
@@ -609,27 +673,11 @@ func (c *RadioClient) SetupPortAudio() (returnErr error) {
 			callback,
 		)
 		if err != nil {
-			portaudio.Terminate()
-			return fmt.Errorf("failed to open audio stream: %w", err)
+			return nil, fmt.Errorf("failed to open audio stream: %w", err)
 		}
 	}
 
-	// Start the stream
-	if err := stream.Start(); err != nil {
-		stream.Close()
-		portaudio.Terminate()
-		return fmt.Errorf("failed to start audio stream: %w", err)
-	}
-
-	c.audioStream = stream
-	if c.resampleEnabled {
-		fmt.Fprintf(os.Stderr, "PortAudio output started (sample rate: %d Hz, channels: %d, resampled from %d Hz)\n",
-			outputRate, c.outputChannels, c.sampleRate)
-	} else {
-		fmt.Fprintf(os.Stderr, "PortAudio output started (sample rate: %d Hz, channels: %d)\n",
-			outputRate, c.outputChannels)
-	}
-	return nil
+	return stream, nil
 }
 
 // DecodeAudio decodes base64 audio data to PCM bytes
@@ -791,8 +839,8 @@ func (c *RadioClient) OutputAudio(pcmData []byte) error {
 		return err
 
 	case "portaudio":
-		// Only send to PortAudio if it's initialized
-		if c.audioBuffer != nil {
+		// Only send to PortAudio if the stream is actually running
+		if c.audioStream != nil && c.audioBuffer != nil {
 			// Convert PCM bytes to int16 samples for PortAudio
 			numSamples := len(pcmData) / 2
 			samples := make([]int16, numSamples)
@@ -1391,328 +1439,162 @@ func listAudioDevices() {
 }
 
 func main() {
-	// Command-line flags
-	apiModeFlag := flag.Bool("api", false, "Run in API mode with web interface")
+	// Command-line flags - API mode only
 	apiPortFlag := flag.Int("api-port", 8090, "API server port (default: 8090)")
-	urlFlag := flag.String("u", "", "Full WebSocket URL (e.g., ws://host:port/ws or wss://host/ws)")
-	hostFlag := flag.String("H", "localhost", "Server hostname (default: localhost, ignored if --url is provided)")
-	portFlag := flag.Int("p", 8080, "Server port (default: 8080, ignored if --url is provided)")
-	frequencyFlag := flag.Int("f", 0, "Frequency in Hz (e.g., 14074000 for 14.074 MHz)")
-	modeFlag := flag.String("m", "", "Demodulation mode (am, sam, usb, lsb, fm, nfm, cwu, cwl, iq, iq48, iq96, iq192, iq384 - wide IQ modes require bypassed IP)")
-	bandwidthFlag := flag.String("b", "", "Bandwidth in format low:high (e.g., -5000:5000)")
-	outputFlag := flag.String("o", "portaudio", "Output mode (portaudio, stdout, wav, udp)")
-	wavFileFlag := flag.String("w", "", "WAV file path (required when output=wav)")
-	fifoPathFlag := flag.String("fifo-path", "", "Also write audio to named pipe (FIFO) at this path (non-blocking, works with any output mode)")
-	udpHostFlag := flag.String("udp-host", "127.0.0.1", "UDP host for audio output (default: 127.0.0.1)")
-	udpPortFlag := flag.Int("udp-port", 8888, "UDP port for audio output (default: 8888)")
-	udpEnabledFlag := flag.Bool("udp-enabled", false, "Enable UDP output as additional output (works alongside main output mode)")
-	timeFlag := flag.Float64("t", 0, "Recording duration in seconds (for WAV output)")
-	sslFlag := flag.Bool("s", false, "Use WSS (WebSocket Secure, ignored if --url is provided)")
-	audioDeviceFlag := flag.Int("audio-device", -1, "PortAudio device index (-1 for default, use --list-devices to see available devices)")
-	listDevicesFlag := flag.Bool("list-devices", false, "List available audio output devices and exit")
-	nr2Flag := flag.Bool("nr2", false, "Enable NR2 spectral subtraction noise reduction")
-	nr2StrengthFlag := flag.Float64("nr2-strength", 40.0, "NR2 noise reduction strength, 0-100% (default: 40)")
-	nr2FloorFlag := flag.Float64("nr2-floor", 10.0, "NR2 spectral floor to prevent musical noise, 0-10% (default: 10)")
-	nr2AdaptRateFlag := flag.Float64("nr2-adapt-rate", 1.0, "NR2 noise profile adaptation rate, 0.1-5.0% (default: 1)")
-	autoReconnectFlag := flag.Bool("auto-reconnect", false, "Automatically reconnect on connection loss with exponential backoff (max 60s)")
-	passwordFlag := flag.String("password", "", "Bypass password for accessing wide IQ modes and bypassing session limits")
-
-	// Resampling flags
-	resampleFlag := flag.Bool("resample", false, "Enable audio resampling (useful for devices that don't support 12 kHz)")
-	resampleRateFlag := flag.Int("resample-rate", 48000, "Target sample rate for resampling (default: 48000 Hz)")
+	configFileFlag := flag.String("config-file", "", "Path to configuration file (default: auto-detect)")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "CLI Radio Client for ka9q_ubersdr\n\n")
+		fmt.Fprintf(os.Stderr, "API Radio Client for ka9q_ubersdr\n\n")
+		fmt.Fprintf(os.Stderr, "This application runs in API mode with a web interface.\n")
+		fmt.Fprintf(os.Stderr, "Connect via web browser at http://localhost:%d\n\n", *apiPortFlag)
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  # Run in API mode with web interface\n")
-		fmt.Fprintf(os.Stderr, "  %s --api\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Run in API mode on custom port\n")
-		fmt.Fprintf(os.Stderr, "  %s --api --api-port 9000\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # List available audio devices\n")
-		fmt.Fprintf(os.Stderr, "  %s --list-devices\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Listen to 14.074 MHz USB via PortAudio (default device)\n")
-		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Listen using specific audio device\n")
-		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb --audio-device 2\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Listen with resampling to 48 kHz (for devices that don't support 12 kHz)\n")
-		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb --resample --resample-rate 48000\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Connect using full URL\n")
-		fmt.Fprintf(os.Stderr, "  %s -u ws://radio.example.com:8073/ws -f 14074000 -m usb\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Record 1000 kHz AM to WAV file for 60 seconds\n")
-		fmt.Fprintf(os.Stderr, "  %s -f 1000000 -m am -o wav -w recording.wav -t 60\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Output raw PCM to stdout with custom bandwidth\n")
-		fmt.Fprintf(os.Stderr, "  %s -f 7100000 -m lsb -b -2700:-50 -o stdout > audio.pcm\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Stream audio to UDP endpoint\n")
-		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb -o udp --udp-host 192.168.1.100 --udp-port 9999\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Write audio to FIFO (named pipe) alongside PortAudio output\n")
-		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb --fifo-path /tmp/audio.fifo\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  # Enable UDP as additional output alongside PortAudio\n")
-		fmt.Fprintf(os.Stderr, "  %s -f 14074000 -m usb --udp-enabled --udp-host 127.0.0.1 --udp-port 8888\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Run with default port (8090)\n")
+		fmt.Fprintf(os.Stderr, "  %s\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Run on custom port\n")
+		fmt.Fprintf(os.Stderr, "  %s --api-port 9000\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  # Use custom config file\n")
+		fmt.Fprintf(os.Stderr, "  %s --config-file /path/to/config.json\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "\nConfiguration:\n")
+		fmt.Fprintf(os.Stderr, "  All radio settings (frequency, mode, server connection, etc.) are\n")
+		fmt.Fprintf(os.Stderr, "  configured through the web interface and saved automatically.\n")
+		fmt.Fprintf(os.Stderr, "  Default config file location: %s\n", GetConfigPath())
 	}
 
 	flag.Parse()
 
-	// API mode
-	if *apiModeFlag {
-		// Initialize config manager
-		configManager := NewConfigManager(GetConfigPath())
-		if err := configManager.Load(); err != nil {
-			log.Printf("Warning: Failed to load config: %v (using defaults)", err)
-		} else {
-			log.Printf("Loaded configuration from %s", GetConfigPath())
-		}
+	// Determine config file path
+	configPath := *configFileFlag
+	if configPath == "" {
+		configPath = GetConfigPath()
+	}
 
-		// Update API port from config if not specified on command line
-		if *apiPortFlag == 8090 { // Default value
-			config := configManager.Get()
-			if config.APIPort != 0 {
-				*apiPortFlag = config.APIPort
-			}
-		}
+	// Initialize config manager
+	configManager := NewConfigManager(configPath)
+	if err := configManager.Load(); err != nil {
+		log.Printf("Warning: Failed to load config: %v (using defaults)", err)
+	} else {
+		log.Printf("Loaded configuration from %s", configPath)
+	}
 
-		// Save API port to config
-		configManager.Update(func(c *ClientConfig) {
-			c.APIPort = *apiPortFlag
-		})
-
-		manager := NewWebSocketManager()
-		defer manager.Cleanup()
-
-		server := NewAPIServer(manager, configManager, *apiPortFlag)
-
-		// Setup signal handler for graceful shutdown
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-		go func() {
-			<-sigChan
-			fmt.Fprintf(os.Stderr, "\nShutting down API server...\n")
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			server.Stop(ctx)
-			os.Exit(0)
-		}()
-
-		// Check for auto-connect
+	// Update API port from config if not specified on command line
+	if *apiPortFlag == 8090 { // Default value
 		config := configManager.Get()
-		if config.AutoConnect {
-			log.Printf("Auto-connect enabled, connecting to %s:%d...", config.Host, config.Port)
-
-			// Create client from saved config
-			client := NewRadioClient(
-				"", config.Host, config.Port, config.Frequency, config.Mode,
-				config.BandwidthLow, config.BandwidthHigh, config.OutputMode, "",
-				nil, config.SSL, config.Password, config.AudioDevice, config.NR2Enabled,
-				config.NR2Strength, config.NR2Floor, config.NR2AdaptRate, false,
-				config.ResampleEnabled, config.ResampleOutputRate,
-				config.OutputChannels,
-				config.FIFOPath, config.UDPHost, config.UDPPort, config.UDPEnabled,
-			)
-
-			// Attempt to connect in background
-			go func() {
-				if err := manager.Connect(client); err != nil {
-					log.Printf("Auto-connect failed: %v", err)
-				} else {
-					log.Printf("Auto-connect successful")
-
-					// Restore saved output states after auto-connect
-					go func() {
-						log.Printf("Output restoration goroutine started (auto-connect), waiting 2 seconds...")
-						time.Sleep(2 * time.Second)
-
-						log.Printf("Checking connection status for output restoration...")
-						if !manager.IsConnected() {
-							log.Printf("Connection lost before output restoration could complete")
-							return
-						}
-
-						log.Printf("Connection still active, loading config...")
-						config := configManager.Get()
-						log.Printf("Config loaded: PortAudioEnabled=%v, FIFOEnabled=%v, UDPEnabled=%v",
-							config.PortAudioEnabled, config.FIFOEnabled, config.UDPEnabled)
-
-						// Restore PortAudio state
-						if config.PortAudioEnabled {
-							log.Printf("Attempting to restore PortAudio output (device %d)...", config.PortAudioDevice)
-							if err := manager.EnablePortAudioOutput(config.PortAudioDevice); err != nil {
-								log.Printf("Warning: Failed to restore PortAudio output: %v", err)
-							} else {
-								log.Printf("Successfully restored PortAudio output (device %d)", config.PortAudioDevice)
-							}
-						}
-
-						// Restore FIFO state
-						if config.FIFOEnabled && config.FIFOPath != "" {
-							log.Printf("Attempting to restore FIFO output (%s)...", config.FIFOPath)
-							if err := manager.EnableFIFOOutput(config.FIFOPath); err != nil {
-								log.Printf("Warning: Failed to restore FIFO output: %v", err)
-							} else {
-								log.Printf("Successfully restored FIFO output (%s)", config.FIFOPath)
-							}
-						}
-
-						// Note: UDP state is already restored via the UDPEnabled flag passed to NewRadioClient
-					}()
-				}
-			}()
-		}
-
-		// Check for flrig auto-connect (independent of SDR connection)
-		if config.FlrigEnabled && config.RadioControlType == "flrig" {
-			log.Printf("flrig auto-connect enabled, connecting to %s:%d...", config.FlrigHost, config.FlrigPort)
-			go func() {
-				// Wait a moment for the API server to be ready
-				time.Sleep(500 * time.Millisecond)
-
-				if err := manager.ConnectFlrig(config.FlrigHost, config.FlrigPort, config.FlrigVFO,
-					config.FlrigSyncToRig, config.FlrigSyncFromRig); err != nil {
-					log.Printf("flrig auto-connect failed: %v", err)
-				} else {
-					log.Printf("flrig auto-connect successful (VFO %s, sync: SDR->rig=%v, rig->SDR=%v)",
-						config.FlrigVFO, config.FlrigSyncToRig, config.FlrigSyncFromRig)
-				}
-			}()
-		}
-
-		// Start API server
-		log.Printf("Configuration will be saved to: %s", GetConfigPath())
-		if err := server.Start(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("API server error: %v", err)
-		}
-		return
-	}
-
-	// List devices mode
-	if *listDevicesFlag {
-		listAudioDevices()
-		os.Exit(0)
-	}
-
-	// Validate required arguments for CLI mode
-	if *frequencyFlag == 0 {
-		fmt.Fprintf(os.Stderr, "Error: -f/--frequency is required in CLI mode\n")
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	if *modeFlag == "" {
-		fmt.Fprintf(os.Stderr, "Error: -m/--mode is required in CLI mode\n")
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	// Validate mode
-	validModes := map[string]bool{
-		"am": true, "sam": true, "usb": true, "lsb": true,
-		"fm": true, "nfm": true, "cwu": true, "cwl": true, "iq": true,
-		"iq48": true, "iq96": true, "iq192": true, "iq384": true,
-	}
-	if !validModes[strings.ToLower(*modeFlag)] {
-		fmt.Fprintf(os.Stderr, "Error: invalid mode '%s'\n", *modeFlag)
-		os.Exit(1)
-	}
-
-	// Validate output mode
-	if *outputFlag == "wav" && *wavFileFlag == "" {
-		fmt.Fprintf(os.Stderr, "Error: --wav-file is required when output mode is 'wav'\n")
-		os.Exit(1)
-	}
-
-	if *timeFlag > 0 && *outputFlag != "wav" {
-		fmt.Fprintf(os.Stderr, "Error: --time can only be used with output mode 'wav'\n")
-		os.Exit(1)
-	}
-
-	// Validate NR2 parameters
-	if *nr2StrengthFlag < 0 || *nr2StrengthFlag > 100 {
-		fmt.Fprintf(os.Stderr, "Error: --nr2-strength must be between 0 and 100\n")
-		os.Exit(1)
-	}
-	if *nr2FloorFlag < 0 || *nr2FloorFlag > 10 {
-		fmt.Fprintf(os.Stderr, "Error: --nr2-floor must be between 0 and 10\n")
-		os.Exit(1)
-	}
-	if *nr2AdaptRateFlag < 0.1 || *nr2AdaptRateFlag > 5.0 {
-		fmt.Fprintf(os.Stderr, "Error: --nr2-adapt-rate must be between 0.1 and 5.0\n")
-		os.Exit(1)
-	}
-
-	// Validate resampling parameters
-	if *resampleFlag {
-		if *resampleRateFlag <= 0 {
-			fmt.Fprintf(os.Stderr, "Error: --resample-rate must be positive\n")
-			os.Exit(1)
-		}
-		// Warn if resampling IQ modes
-		if strings.HasPrefix(*modeFlag, "iq") {
-			fmt.Fprintf(os.Stderr, "Warning: Resampling is disabled for IQ modes (they require exact sample rates)\n")
+		if config.APIPort != 0 {
+			*apiPortFlag = config.APIPort
 		}
 	}
 
-	// Validate URL
-	if *urlFlag != "" {
-		parsedURL, err := url.Parse(*urlFlag)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid URL: %v\n", err)
-			os.Exit(1)
-		}
-		if parsedURL.Scheme != "ws" && parsedURL.Scheme != "wss" {
-			fmt.Fprintf(os.Stderr, "Error: URL must use ws:// or wss:// scheme\n")
-			os.Exit(1)
-		}
-	}
+	// Save API port to config
+	configManager.Update(func(c *ClientConfig) {
+		c.APIPort = *apiPortFlag
+	})
 
-	// Parse bandwidth
-	var bandwidthLow, bandwidthHigh *int
-	if *bandwidthFlag != "" {
-		parts := strings.Split(*bandwidthFlag, ":")
-		if len(parts) != 2 {
-			fmt.Fprintf(os.Stderr, "Error: bandwidth must be in format 'low:high' (e.g., '-5000:5000')\n")
-			os.Exit(1)
-		}
-		var low, high int
-		if _, err := fmt.Sscanf(parts[0], "%d", &low); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid bandwidth low value\n")
-			os.Exit(1)
-		}
-		if _, err := fmt.Sscanf(parts[1], "%d", &high); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid bandwidth high value\n")
-			os.Exit(1)
-		}
-		bandwidthLow = &low
-		bandwidthHigh = &high
-	}
+	manager := NewWebSocketManager()
+	defer manager.Cleanup()
 
-	// Parse duration
-	var duration *float64
-	if *timeFlag > 0 {
-		duration = timeFlag
-	}
-
-	// Create client
-	client := NewRadioClient(
-		*urlFlag, *hostFlag, *portFlag, *frequencyFlag, *modeFlag,
-		bandwidthLow, bandwidthHigh, *outputFlag, *wavFileFlag,
-		duration, *sslFlag, *passwordFlag, *audioDeviceFlag, *nr2Flag, *nr2StrengthFlag, *nr2FloorFlag, *nr2AdaptRateFlag,
-		*autoReconnectFlag,
-		*resampleFlag, *resampleRateFlag,
-		0, // outputChannels: 0 = auto (2 when resampling, otherwise match input)
-		*fifoPathFlag, *udpHostFlag, *udpPortFlag, *udpEnabledFlag,
-	)
+	server := NewAPIServer(manager, configManager, *apiPortFlag)
 
 	// Setup signal handler for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		fmt.Fprintf(os.Stderr, "\nInterrupted, shutting down...\n")
-		client.running = false
+		fmt.Fprintf(os.Stderr, "\nShutting down API server...\n")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		server.Stop(ctx)
+		os.Exit(0)
 	}()
 
-	// Run client
-	exitCode := client.Run()
-	os.Exit(exitCode)
+	// Check for auto-connect
+	config := configManager.Get()
+	if config.AutoConnect {
+		log.Printf("Auto-connect enabled, connecting to %s:%d...", config.Host, config.Port)
+
+		// Create client from saved config
+		client := NewRadioClient(
+			"", config.Host, config.Port, config.Frequency, config.Mode,
+			config.BandwidthLow, config.BandwidthHigh, config.OutputMode, "",
+			nil, config.SSL, config.Password, config.AudioDevice, config.NR2Enabled,
+			config.NR2Strength, config.NR2Floor, config.NR2AdaptRate, false,
+			config.ResampleEnabled, config.ResampleOutputRate,
+			config.OutputChannels,
+			config.FIFOPath, config.UDPHost, config.UDPPort, config.UDPEnabled,
+		)
+
+		// Attempt to connect in background
+		go func() {
+			if err := manager.Connect(client); err != nil {
+				log.Printf("Auto-connect failed: %v", err)
+			} else {
+				log.Printf("Auto-connect successful")
+
+				// Restore saved output states after auto-connect
+				go func() {
+					log.Printf("Output restoration goroutine started (auto-connect), waiting 2 seconds...")
+					time.Sleep(2 * time.Second)
+
+					log.Printf("Checking connection status for output restoration...")
+					if !manager.IsConnected() {
+						log.Printf("Connection lost before output restoration could complete")
+						return
+					}
+
+					log.Printf("Connection still active, loading config...")
+					config := configManager.Get()
+					log.Printf("Config loaded: PortAudioEnabled=%v, FIFOEnabled=%v, UDPEnabled=%v",
+						config.PortAudioEnabled, config.FIFOEnabled, config.UDPEnabled)
+
+					// Restore PortAudio state
+					if config.PortAudioEnabled {
+						log.Printf("Attempting to restore PortAudio output (device %d)...", config.PortAudioDevice)
+						if err := manager.EnablePortAudioOutput(config.PortAudioDevice); err != nil {
+							log.Printf("Warning: Failed to restore PortAudio output: %v", err)
+						} else {
+							log.Printf("Successfully restored PortAudio output (device %d)", config.PortAudioDevice)
+						}
+					}
+
+					// Restore FIFO state
+					if config.FIFOEnabled && config.FIFOPath != "" {
+						log.Printf("Attempting to restore FIFO output (%s)...", config.FIFOPath)
+						if err := manager.EnableFIFOOutput(config.FIFOPath); err != nil {
+							log.Printf("Warning: Failed to restore FIFO output: %v", err)
+						} else {
+							log.Printf("Successfully restored FIFO output (%s)", config.FIFOPath)
+						}
+					}
+
+					// Note: UDP state is already restored via the UDPEnabled flag passed to NewRadioClient
+				}()
+			}
+		}()
+	}
+
+	// Check for flrig auto-connect (independent of SDR connection)
+	if config.FlrigEnabled && config.RadioControlType == "flrig" {
+		log.Printf("flrig auto-connect enabled, connecting to %s:%d...", config.FlrigHost, config.FlrigPort)
+		go func() {
+			// Wait a moment for the API server to be ready
+			time.Sleep(500 * time.Millisecond)
+
+			if err := manager.ConnectFlrig(config.FlrigHost, config.FlrigPort, config.FlrigVFO,
+				config.FlrigSyncToRig, config.FlrigSyncFromRig); err != nil {
+				log.Printf("flrig auto-connect failed: %v", err)
+			} else {
+				log.Printf("flrig auto-connect successful (VFO %s, sync: SDR->rig=%v, rig->SDR=%v)",
+					config.FlrigVFO, config.FlrigSyncToRig, config.FlrigSyncFromRig)
+			}
+		}()
+	}
+
+	// Start API server
+	log.Printf("Starting API server on http://localhost:%d", *apiPortFlag)
+	log.Printf("Configuration will be saved to: %s", configPath)
+	if err := server.Start(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("API server error: %v", err)
+	}
 }

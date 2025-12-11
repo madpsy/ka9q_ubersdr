@@ -28,8 +28,10 @@ class UberSDRClient {
         this.initializeElements();
         this.attachEventListeners();
         this.loadSavedInstances();
-        this.loadSavedConfig();
-        this.loadAudioDevices();
+        this.loadAudioDevices().then(() => {
+            // Load config after devices are loaded so device selection can be restored
+            this.loadSavedConfig();
+        });
         this.updateStatus();
         this.connectWebSocket();
         
@@ -312,6 +314,11 @@ class UberSDRClient {
         this.nr2StrengthInput.addEventListener('change', () => this.updateNR2Config());
         this.nr2FloorInput.addEventListener('change', () => this.updateNR2Config());
         this.nr2AdaptInput.addEventListener('change', () => this.updateNR2Config());
+
+        // Resampling settings
+        this.resampleEnabledCheckbox.addEventListener('change', () => this.saveResamplingConfig());
+        this.resampleRateSelect.addEventListener('change', () => this.saveResamplingConfig());
+        this.outputChannelsSelect.addEventListener('change', () => this.saveResamplingConfig());
 
         // Audio preview settings
         this.audioPreviewEnabled.addEventListener('change', () => {
@@ -661,15 +668,15 @@ class UberSDRClient {
                 console.log('Connection detected in updateStatus, loading instance info');
                 this.loadInstanceInfo();
             }
+
+            // Update output status after we know the connection state
+            this.updateOutputStatus();
         } catch (error) {
             console.error('Failed to fetch status:', error);
         }
 
         // Poll status every 2 seconds
         setTimeout(() => this.updateStatus(), 2000);
-
-        // Also update output status
-        this.updateOutputStatus();
     }
 
     updateStatusDisplay(status) {
@@ -1135,6 +1142,11 @@ class UberSDRClient {
                 this.leftChannelEnabled.checked = leftEnabled;
                 this.rightChannelEnabled.checked = rightEnabled;
 
+                // Load saved audio device selection
+                if (config.portAudioDevice !== undefined) {
+                    this.portaudioDeviceSelect.value = config.portAudioDevice;
+                }
+
                 // Load audio preview settings
                 // Note: audioPreviewEnabled is always unchecked on page load to comply with browser autoplay policies
                 // User must manually enable it after page load
@@ -1345,7 +1357,8 @@ class UberSDRClient {
         const config = {
             volume: parseFloat(this.volumeSlider.value) / 100.0,
             leftChannelEnabled: this.leftChannelEnabled.checked,
-            rightChannelEnabled: this.rightChannelEnabled.checked
+            rightChannelEnabled: this.rightChannelEnabled.checked,
+            portAudioDevice: parseInt(this.portaudioDeviceSelect.value)
         };
 
         try {
@@ -1361,6 +1374,29 @@ class UberSDRClient {
             }
         } catch (error) {
             console.error('Error saving audio output config:', error);
+        }
+    }
+
+    async saveResamplingConfig() {
+        const config = {
+            resampleEnabled: this.resampleEnabledCheckbox.checked,
+            resampleOutputRate: parseInt(this.resampleRateSelect.value),
+            outputChannels: parseInt(this.outputChannelsSelect.value)
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                console.error('Failed to save resampling config:', data.message || data.error);
+            }
+        } catch (error) {
+            console.error('Error saving resampling config:', error);
         }
     }
 
@@ -1485,7 +1521,9 @@ class UberSDRClient {
                 if (status.portaudio) {
                     this.portaudioOutputEnabled.checked = status.portaudio.enabled;
                     this.portaudioDeviceSelect.disabled = status.portaudio.enabled;
-                    if (status.portaudio.deviceIndex !== undefined) {
+                    // Only update device selection if PortAudio is actually enabled
+                    // When disabled, keep the saved preference in the dropdown
+                    if (status.portaudio.enabled && status.portaudio.deviceIndex !== undefined) {
                         this.portaudioDeviceSelect.value = status.portaudio.deviceIndex;
                     }
                 }

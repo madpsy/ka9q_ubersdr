@@ -504,6 +504,7 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			Volume:              savedConfig.Volume,
 			LeftChannelEnabled:  savedConfig.LeftChannelEnabled,
 			RightChannelEnabled: savedConfig.RightChannelEnabled,
+			PortAudioDevice:     savedConfig.PortAudioDevice,
 			RadioControlType:    savedConfig.RadioControlType,
 			FlrigEnabled:        savedConfig.FlrigEnabled,
 			FlrigHost:           savedConfig.FlrigHost,
@@ -536,7 +537,7 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save to config manager (works even when not connected)
-	if err := s.configManager.UpdateNR2Config(req); err != nil {
+	if err := s.configManager.UpdateConfig(req); err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to save config", err.Error())
 		return
 	}
@@ -572,17 +573,24 @@ func (s *APIServer) handlePortAudioOutput(w http.ResponseWriter, r *http.Request
 			deviceIndex = *req.DeviceIndex
 		}
 
+		log.Printf("Enabling PortAudio with device index: %d", deviceIndex)
+
 		if err := s.manager.EnablePortAudioOutput(deviceIndex); err != nil {
 			respondError(w, http.StatusInternalServerError, "Failed to enable PortAudio", err.Error())
 			return
 		}
 
-		// Save state to config
+		// Save state to config - use the deviceIndex from the request, not from status
 		outputStatus := s.manager.GetOutputStatus()
 		fifoEnabled := outputStatus["fifo"].(map[string]interface{})["enabled"].(bool)
 		udpEnabled := outputStatus["udp"].(map[string]interface{})["enabled"].(bool)
+
+		log.Printf("Saving PortAudio state: enabled=true, device=%d, fifo=%v, udp=%v", deviceIndex, fifoEnabled, udpEnabled)
+
 		if err := s.configManager.UpdateOutputStates(true, deviceIndex, fifoEnabled, udpEnabled); err != nil {
 			log.Printf("Warning: Failed to save output state: %v", err)
+		} else {
+			log.Printf("Successfully saved PortAudio device %d to config", deviceIndex)
 		}
 
 		respondSuccess(w, "PortAudio output enabled")
@@ -593,11 +601,15 @@ func (s *APIServer) handlePortAudioOutput(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		// Save state to config
+		// Save state to config - preserve the device index even when disabled
 		outputStatus := s.manager.GetOutputStatus()
+		portAudioDevice := -1
+		if deviceIdx, ok := outputStatus["portaudio"].(map[string]interface{})["deviceIndex"].(int); ok {
+			portAudioDevice = deviceIdx
+		}
 		fifoEnabled := outputStatus["fifo"].(map[string]interface{})["enabled"].(bool)
 		udpEnabled := outputStatus["udp"].(map[string]interface{})["enabled"].(bool)
-		if err := s.configManager.UpdateOutputStates(false, -1, fifoEnabled, udpEnabled); err != nil {
+		if err := s.configManager.UpdateOutputStates(false, portAudioDevice, fifoEnabled, udpEnabled); err != nil {
 			log.Printf("Warning: Failed to save output state: %v", err)
 		}
 

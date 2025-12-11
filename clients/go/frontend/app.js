@@ -7,6 +7,8 @@ class UberSDRClient {
         this.connected = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
+        this.userInitiatedConnection = false; // Track if connection was user-initiated
+        this.hasBeenConnected = false; // Track if we've ever been connected (to distinguish page load from reconnection)
 
         // Band condition color constants (matching Python client)
         this.BAND_CONDITION_COLORS = {
@@ -628,6 +630,7 @@ class UberSDRClient {
 
     async connect() {
         console.log('DEBUG: connect() method called');
+        this.userInitiatedConnection = true; // Mark as user-initiated
         const config = {
             host: this.hostInput.value,
             port: parseInt(this.portInput.value),
@@ -686,7 +689,11 @@ class UberSDRClient {
                 setTimeout(() => this.updateOutputStatus(), 1000);
 
                 // Auto-enable spectrum display and scroll to it - wait for bookmarks/bands to load
-                setTimeout(() => this.autoEnableSpectrum(), 1500);
+                setTimeout(() => {
+                    this.autoEnableSpectrum();
+                    // Clear the flag after auto-enable completes
+                    this.userInitiatedConnection = false;
+                }, 1500);
 
                 // Start band conditions polling
                 console.log('DEBUG: About to schedule startBandConditionsPolling in 1 second');
@@ -736,6 +743,12 @@ class UberSDRClient {
     async updateStatus() {
         try {
             const response = await fetch(`${this.apiBase}/api/status`);
+
+            // Check if the response is ok (status 200-299)
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
             const status = await response.json();
 
             const wasConnected = this.connected;
@@ -743,28 +756,68 @@ class UberSDRClient {
             this.updateConnectionUI();
             this.updateStatusDisplay(status);
 
-            // Load bookmarks, bands, and instance info if connected and not already loaded
-            if (status.connected && this.bookmarkSelect && this.bookmarkSelect.options.length <= 1) {
+            // Handle reconnection or initial connection
+            if (status.connected && !wasConnected) {
+                console.log('Connection detected (reconnection or initial), loading data...');
+
+                // Load instance info
+                this.loadInstanceInfo();
+
+                // Load bookmarks and bands
                 await this.loadBookmarks();
                 await this.loadBands();
-                
-                // Auto-enable spectrum after bookmarks/bands are loaded (for auto-connect scenario)
-                if (!wasConnected) {
-                    console.log('First connection detected, auto-enabling spectrum after data load');
-                    setTimeout(() => this.autoEnableSpectrum(), 500);
-                }
-            }
 
-            // Load instance info if we just became connected (including auto-connect on page load)
-            if (status.connected && !wasConnected) {
-                console.log('Connection detected in updateStatus, loading instance info');
-                this.loadInstanceInfo();
+                // Auto-enable spectrum only if:
+                // 1. This is NOT from a user-initiated connect() call (which handles it separately)
+                // 2. We have NEVER been connected before (i.e., this is page load auto-connect, not reconnection)
+                if (!this.userInitiatedConnection && !this.hasBeenConnected) {
+                    console.log('Initial auto-connect detected (page load), auto-enabling spectrum...');
+                    setTimeout(() => this.autoEnableSpectrum(), 1500);
+                }
+                // If this is a reconnection (hasBeenConnected=true), don't auto-enable spectrum
+                else if (this.hasBeenConnected) {
+                    console.log('Reconnection detected - NOT auto-enabling spectrum');
+                }
+
+                // Mark that we've been connected at least once
+                this.hasBeenConnected = true;
+
+                // Start band conditions polling
+                setTimeout(() => this.startBandConditionsPolling(), 1000);
+
+                this.showSuccess('Connected to server');
+            } else if (status.connected && this.bookmarkSelect && this.bookmarkSelect.options.length <= 1) {
+                // Already connected but bookmarks/bands not loaded yet (shouldn't normally happen)
+                await this.loadBookmarks();
+                await this.loadBands();
             }
 
             // Update output status after we know the connection state
             this.updateOutputStatus();
         } catch (error) {
             console.error('Failed to fetch status:', error);
+
+            // If we were connected and now can't reach the server, mark as disconnected
+            if (this.connected) {
+                console.log('Server unreachable, marking as disconnected');
+                this.connected = false;
+                this.updateConnectionUI();
+                this.showError('Connection Lost', 'Unable to reach the server');
+
+                // Stop band conditions polling
+                this.stopBandConditionsPolling();
+
+                // Stop session timer
+                this.stopSessionTimer();
+
+                // Disable spectrum display
+                if (this.spectrumDisplay) {
+                    this.spectrumDisplay.disable();
+                }
+
+                // Clear bookmarks
+                this.clearBookmarks();
+            }
         }
 
         // Poll status every 2 seconds

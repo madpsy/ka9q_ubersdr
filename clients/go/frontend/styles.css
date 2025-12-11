@@ -188,6 +188,15 @@ header h1 {
     font-size: 24px;
     font-weight: 600;
     color: var(--primary-color);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.header-logo {
+    height: 32px;
+    width: auto;
+    vertical-align: middle;
 }
 
 .status-bar {

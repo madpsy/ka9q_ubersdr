@@ -3866,7 +3866,40 @@ class UberSDRClient {
     }
 }
 
+// Dark mode functionality
+function initDarkMode() {
+    const themeToggle = document.getElementById('theme-toggle');
+    const themeIcon = document.getElementById('theme-icon');
+
+    // Check for saved theme preference or default to dark mode
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+
+    // Apply the saved theme
+    if (savedTheme === 'dark') {
+        document.body.classList.add('dark-mode');
+        themeIcon.textContent = '☀️';
+    } else {
+        document.body.classList.remove('dark-mode');
+        themeIcon.textContent = '🌙';
+    }
+
+    // Toggle theme on button click
+    themeToggle.addEventListener('click', () => {
+        document.body.classList.toggle('dark-mode');
+
+        // Update icon and save preference
+        if (document.body.classList.contains('dark-mode')) {
+            themeIcon.textContent = '☀️';
+            localStorage.setItem('theme', 'dark');
+        } else {
+            themeIcon.textContent = '🌙';
+            localStorage.setItem('theme', 'light');
+        }
+    });
+}
+
 // Initialize the client when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
+    initDarkMode();
     window.uberSDR = new UberSDRClient();
 });

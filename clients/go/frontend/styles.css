@@ -12,6 +12,11 @@
     gap: 0px;
 }
 
+body.dark-mode .spectrum-visualizer {
+    background: #0a0a0a;
+    border-color: #555;
+}
+
 .spectrum-visualizer canvas {
     display: block;
     width: 100%;
@@ -72,10 +77,45 @@
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
 
+/* Dark mode variables */
+body.dark-mode {
+    --primary-color: #3b82f6;
+    --primary-hover: #2563eb;
+    --secondary-color: #94a3b8;
+    --success-color: #22c55e;
+    --error-color: #f87171;
+    --bg-color: #0f172a;
+    --panel-bg: #1e293b;
+    --border-color: #334155;
+    --text-color: #e2e8f0;
+    --text-muted: #94a3b8;
+    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+}
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+}
+
+/* Dark mode toggle button */
+.theme-toggle {
+    background: var(--panel-bg);
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 18px;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.theme-toggle:hover {
+    background: var(--bg-color);
+    transform: scale(1.05);
 }
 
 .info-box {
@@ -86,11 +126,20 @@
     border-radius: 4px;
 }
 
+body.dark-mode .info-box {
+    background-color: #1e3a5f;
+    border-left-color: #3b82f6;
+}
+
 .info-box p {
     margin: 0;
     font-size: 14px;
     line-height: 1.5;
     color: #1565c0;
+}
+
+body.dark-mode .info-box p {
+    color: #93c5fd;
 }
 
 .info-box strong {
@@ -551,6 +600,10 @@ footer a:hover {
     display: block;
 }
 
+body.dark-mode .modal {
+    background-color: rgba(0, 0, 0, 0.8);
+}
+
 .modal-content {
     background-color: white;
     margin: 5% auto;
@@ -564,6 +617,10 @@ footer a:hover {
     flex-direction: column;
 }
 
+body.dark-mode .modal-content {
+    background-color: var(--panel-bg);
+}
+
 .modal-header {
     padding: 20px;
     border-bottom: 1px solid #e0e0e0;
@@ -572,9 +629,17 @@ footer a:hover {
     align-items: center;
 }
 
+body.dark-mode .modal-header {
+    border-bottom-color: var(--border-color);
+}
+
 .modal-header h2 {
     margin: 0;
     color: #333;
+}
+
+body.dark-mode .modal-header h2 {
+    color: var(--text-color);
 }
 
 .modal-body {
@@ -587,6 +652,10 @@ footer a:hover {
     padding: 15px 20px;
     border-top: 1px solid #e0e0e0;
     text-align: right;
+}
+
+body.dark-mode .modal-footer {
+    border-top-color: var(--border-color);
 }
 
 .close {
@@ -617,6 +686,11 @@ footer a:hover {
     transition: all 0.3s;
 }
 
+body.dark-mode .instance-card {
+    background: var(--bg-color);
+    border-color: var(--border-color);
+}
+
 .instance-card:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     border-color: #667eea;
@@ -625,6 +699,11 @@ footer a:hover {
 .instance-card.local-instance {
     background: #e8f5e9;
     border-color: #4caf50;
+}
+
+body.dark-mode .instance-card.local-instance {
+    background: #1a3a1a;
+    border-color: #22c55e;
 }
 
 .instance-header {
@@ -887,6 +966,10 @@ footer a:hover {
     font-size: 14px;
 }
 
+body.dark-mode .data-table {
+    background: var(--panel-bg);
+}
+
 .data-table thead {
     background: var(--bg-color);
     border-bottom: 2px solid var(--border-color);
@@ -911,6 +994,10 @@ footer a:hover {
 
 .data-table tbody tr:hover {
     background-color: #f8fafc;
+}
+
+body.dark-mode .data-table tbody tr:hover {
+    background-color: var(--bg-color);
 }
 
 .data-table td {

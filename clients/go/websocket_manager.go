@@ -1007,6 +1007,26 @@ func (m *WebSocketManager) UpdateConfig(req ConfigUpdateRequest) error {
 		}
 	}
 
+	// Update volume and channel settings
+	if req.Volume != nil {
+		m.client.mu.Lock()
+		m.client.volume = *req.Volume
+		m.client.mu.Unlock()
+		log.Printf("Volume updated to %.2f", *req.Volume)
+	}
+	if req.LeftChannelEnabled != nil {
+		m.client.mu.Lock()
+		m.client.leftChannelEnabled = *req.LeftChannelEnabled
+		m.client.mu.Unlock()
+		log.Printf("Left channel enabled: %v", *req.LeftChannelEnabled)
+	}
+	if req.RightChannelEnabled != nil {
+		m.client.mu.Lock()
+		m.client.rightChannelEnabled = *req.RightChannelEnabled
+		m.client.mu.Unlock()
+		log.Printf("Right channel enabled: %v", *req.RightChannelEnabled)
+	}
+
 	return nil
 }
 

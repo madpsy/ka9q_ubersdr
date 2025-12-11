@@ -80,6 +80,11 @@ type RadioClient struct {
 	udpConn    *net.UDPConn
 	udpEnabled bool
 
+	// Audio output settings
+	volume              float64 // Volume level 0.0-1.0
+	leftChannelEnabled  bool    // Enable left channel output
+	rightChannelEnabled bool    // Enable right channel output
+
 	// Mutex for thread-safe output control
 	mu sync.RWMutex
 }
@@ -248,6 +253,9 @@ func (c *RadioClient) GetOutputStatus() map[string]interface{} {
 			"host":    c.udpHost,
 			"port":    c.udpPort,
 		},
+		"volume":              c.volume,
+		"leftChannelEnabled":  c.leftChannelEnabled,
+		"rightChannelEnabled": c.rightChannelEnabled,
 	}
 }
 
@@ -315,37 +323,40 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 	}
 
 	client := &RadioClient{
-		url:                urlStr,
-		host:               host,
-		port:               port,
-		frequency:          frequency,
-		mode:               modeStr,
-		bandwidthLow:       bandwidthLow,
-		bandwidthHigh:      bandwidthHigh,
-		outputMode:         outputMode,
-		wavFile:            wavFile,
-		duration:           duration,
-		ssl:                ssl,
-		password:           password,
-		userSessionID:      uuid.New().String(),
-		running:            true,
-		sampleRate:         12000,           // Default, will be updated from server
-		channels:           defaultChannels, // Default based on mode, will be updated from server
-		audioDeviceIndex:   audioDeviceIndex,
-		nr2Enabled:         nr2Enabled,
-		nr2Strength:        nr2Strength,
-		nr2Floor:           nr2Floor,
-		nr2AdaptRate:       nr2AdaptRate,
-		autoReconnect:      autoReconnect,
-		retryCount:         0,
-		maxBackoff:         60 * time.Second,
-		resampleEnabled:    resampleEnabled,
-		resampleOutputRate: resampleOutputRate,
-		outputChannels:     outputChannels,
-		fifoPath:           fifoPath,
-		udpHost:            udpHost,
-		udpPort:            udpPort,
-		udpEnabled:         udpEnabled,
+		url:                 urlStr,
+		host:                host,
+		port:                port,
+		frequency:           frequency,
+		mode:                modeStr,
+		bandwidthLow:        bandwidthLow,
+		bandwidthHigh:       bandwidthHigh,
+		outputMode:          outputMode,
+		wavFile:             wavFile,
+		duration:            duration,
+		ssl:                 ssl,
+		password:            password,
+		userSessionID:       uuid.New().String(),
+		running:             true,
+		sampleRate:          12000,           // Default, will be updated from server
+		channels:            defaultChannels, // Default based on mode, will be updated from server
+		audioDeviceIndex:    audioDeviceIndex,
+		nr2Enabled:          nr2Enabled,
+		nr2Strength:         nr2Strength,
+		nr2Floor:            nr2Floor,
+		nr2AdaptRate:        nr2AdaptRate,
+		autoReconnect:       autoReconnect,
+		retryCount:          0,
+		maxBackoff:          60 * time.Second,
+		resampleEnabled:     resampleEnabled,
+		resampleOutputRate:  resampleOutputRate,
+		outputChannels:      outputChannels,
+		fifoPath:            fifoPath,
+		udpHost:             udpHost,
+		udpPort:             udpPort,
+		udpEnabled:          udpEnabled,
+		volume:              1.0,  // Default volume at 100%
+		leftChannelEnabled:  true, // Left channel enabled by default
+		rightChannelEnabled: true, // Right channel enabled by default
 	}
 
 	// Initialize NR2 processor if enabled
@@ -728,6 +739,43 @@ func (c *RadioClient) OutputAudio(pcmData []byte) error {
 			stereoSamples[i*2+1] = sample // Right channel (duplicate)
 		}
 		samples = stereoSamples
+	}
+
+	// Apply volume and channel selection
+	c.mu.RLock()
+	volume := c.volume
+	leftEnabled := c.leftChannelEnabled
+	rightEnabled := c.rightChannelEnabled
+	c.mu.RUnlock()
+
+	// Determine actual output channels based on resampling and mode
+	actualChannels := c.channels
+	if c.resampleEnabled || (c.channels == 1 && c.outputChannels == 2) {
+		actualChannels = c.outputChannels
+	}
+
+	// Apply volume and channel selection
+	if actualChannels == 2 {
+		// Stereo output
+		for i := 0; i < len(samples); i += 2 {
+			// Apply volume to left channel
+			if leftEnabled {
+				samples[i] = int16(float64(samples[i]) * volume)
+			} else {
+				samples[i] = 0
+			}
+			// Apply volume to right channel
+			if rightEnabled {
+				samples[i+1] = int16(float64(samples[i+1]) * volume)
+			} else {
+				samples[i+1] = 0
+			}
+		}
+	} else {
+		// Mono output - just apply volume
+		for i := 0; i < len(samples); i++ {
+			samples[i] = int16(float64(samples[i]) * volume)
+		}
 	}
 
 	// Convert samples back to PCM bytes

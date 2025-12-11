@@ -102,6 +102,10 @@ class UberSDRClient {
         // Dynamic output control elements
         this.portaudioOutputEnabled = document.getElementById('portaudio-output-enabled');
         this.portaudioDeviceSelect = document.getElementById('portaudio-device-select');
+        this.volumeSlider = document.getElementById('volume-slider');
+        this.volumeValue = document.getElementById('volume-value');
+        this.leftChannelEnabled = document.getElementById('left-channel-enabled');
+        this.rightChannelEnabled = document.getElementById('right-channel-enabled');
         this.fifoOutputEnabled = document.getElementById('fifo-output-enabled');
         this.fifoOutputPath = document.getElementById('fifo-output-path');
         this.udpOutputEnabled = document.getElementById('udp-output-enabled');
@@ -404,6 +408,18 @@ class UberSDRClient {
 
         // Dynamic output control event listeners
         this.portaudioOutputEnabled.addEventListener('change', () => this.togglePortAudioOutput());
+        this.portaudioDeviceSelect.addEventListener('change', () => this.saveAudioOutputConfig());
+        
+        // Volume slider event listener
+        this.volumeSlider.addEventListener('input', () => {
+            this.volumeValue.textContent = this.volumeSlider.value;
+        });
+        this.volumeSlider.addEventListener('change', () => this.saveAudioOutputConfig());
+        
+        // Left/Right channel event listeners
+        this.leftChannelEnabled.addEventListener('change', () => this.saveAudioOutputConfig());
+        this.rightChannelEnabled.addEventListener('change', () => this.saveAudioOutputConfig());
+        
         this.fifoOutputEnabled.addEventListener('change', () => this.toggleFIFOOutput());
         this.udpOutputEnabled.addEventListener('change', () => this.toggleUDPOutput());
 
@@ -1098,6 +1114,16 @@ class UberSDRClient {
                 if (config.resampleOutputRate) this.resampleRateSelect.value = config.resampleOutputRate;
                 if (config.outputChannels !== undefined) this.outputChannelsSelect.value = config.outputChannels;
 
+                // Load audio output settings with defaults
+                const volume = (config.volume !== undefined) ? config.volume : 0.7; // Default 70%
+                this.volumeSlider.value = Math.round(volume * 100);
+                this.volumeValue.textContent = Math.round(volume * 100);
+                
+                const leftEnabled = (config.leftChannelEnabled !== undefined) ? config.leftChannelEnabled : true;
+                const rightEnabled = (config.rightChannelEnabled !== undefined) ? config.rightChannelEnabled : true;
+                this.leftChannelEnabled.checked = leftEnabled;
+                this.rightChannelEnabled.checked = rightEnabled;
+
                 // Load audio preview settings
                 // Note: audioPreviewEnabled is always unchecked on page load to comply with browser autoplay policies
                 // User must manually enable it after page load
@@ -1304,6 +1330,29 @@ class UberSDRClient {
 
     // Dynamic Output Control Methods
 
+    async saveAudioOutputConfig() {
+        const config = {
+            volume: parseFloat(this.volumeSlider.value) / 100.0,
+            leftChannelEnabled: this.leftChannelEnabled.checked,
+            rightChannelEnabled: this.rightChannelEnabled.checked
+        };
+
+        try {
+            const response = await fetch(`${this.apiBase}/api/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                console.error('Failed to save audio output config:', data.message || data.error);
+            }
+        } catch (error) {
+            console.error('Error saving audio output config:', error);
+        }
+    }
+
     async togglePortAudioOutput() {
         const enabled = this.portaudioOutputEnabled.checked;
         const deviceIndex = parseInt(this.portaudioDeviceSelect.value);
@@ -1319,8 +1368,11 @@ class UberSDRClient {
 
             if (response.ok) {
                 this.showSuccess(data.message || (enabled ? 'PortAudio enabled' : 'PortAudio disabled'));
-                // Lock/unlock device select
+                // Lock/unlock device select and audio controls
                 this.portaudioDeviceSelect.disabled = enabled;
+                this.volumeSlider.disabled = !enabled;
+                this.leftChannelEnabled.disabled = !enabled;
+                this.rightChannelEnabled.disabled = !enabled;
             } else {
                 this.showError('Failed to toggle PortAudio', data.message || data.error);
                 // Revert checkbox
@@ -1447,6 +1499,21 @@ class UberSDRClient {
                     if (status.udp.port) {
                         this.udpOutputPort.value = status.udp.port;
                     }
+                }
+
+                // Update volume and channel settings from broadcast
+                if (status.volume !== undefined) {
+                    const volumePercent = Math.round(status.volume * 100);
+                    if (parseInt(this.volumeSlider.value) !== volumePercent) {
+                        this.volumeSlider.value = volumePercent;
+                        this.volumeValue.textContent = volumePercent;
+                    }
+                }
+                if (status.leftChannelEnabled !== undefined && this.leftChannelEnabled.checked !== status.leftChannelEnabled) {
+                    this.leftChannelEnabled.checked = status.leftChannelEnabled;
+                }
+                if (status.rightChannelEnabled !== undefined && this.rightChannelEnabled.checked !== status.rightChannelEnabled) {
+                    this.rightChannelEnabled.checked = status.rightChannelEnabled;
                 }
             }
         } catch (error) {

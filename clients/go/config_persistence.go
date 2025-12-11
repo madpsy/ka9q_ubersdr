@@ -53,6 +53,10 @@ type ClientConfig struct {
 	UDPEnabled          bool            `json:"udpEnabled"`
 	PortAudioEnabled    bool            `json:"portAudioEnabled"`
 	PortAudioDevice     int             `json:"portAudioDevice"`
+	// Audio output settings
+	Volume              float64 `json:"volume"`              // Volume level 0.0-1.0
+	LeftChannelEnabled  bool    `json:"leftChannelEnabled"`  // Enable left channel output
+	RightChannelEnabled bool    `json:"rightChannelEnabled"` // Enable right channel output
 	// Radio control settings
 	RadioControlType  string `json:"radioControlType,omitempty"` // "none", "flrig", "rigctl", "serial", "omnirig"
 	FlrigEnabled      bool   `json:"flrigEnabled"`
@@ -124,6 +128,9 @@ func getDefaultConfig() ClientConfig {
 		UDPEnabled:          false,                        // UDP disabled by default
 		PortAudioEnabled:    false,                        // PortAudio disabled by default
 		PortAudioDevice:     -1,                           // Auto-select device
+		Volume:              0.7,                          // Default volume at 70%
+		LeftChannelEnabled:  true,                         // Left channel enabled by default
+		RightChannelEnabled: true,                         // Right channel enabled by default
 		RadioControlType:    "none",                       // No radio control by default
 		FlrigEnabled:        false,                        // flrig disabled by default
 		FlrigHost:           "localhost",                  // Default flrig host
@@ -304,6 +311,15 @@ func (cm *ConfigManager) UpdateNR2Config(req ConfigUpdateRequest) error {
 		}
 		if req.SpectrumCenterTune != nil {
 			c.SpectrumCenterTune = *req.SpectrumCenterTune
+		}
+		if req.Volume != nil {
+			c.Volume = *req.Volume
+		}
+		if req.LeftChannelEnabled != nil {
+			c.LeftChannelEnabled = *req.LeftChannelEnabled
+		}
+		if req.RightChannelEnabled != nil {
+			c.RightChannelEnabled = *req.RightChannelEnabled
 		}
 	})
 }

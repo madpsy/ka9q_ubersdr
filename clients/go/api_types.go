@@ -77,6 +77,9 @@ type ConfigUpdateRequest struct {
 	SpectrumPanScroll   *bool    `json:"spectrumPanScroll,omitempty"`
 	SpectrumClickTune   *bool    `json:"spectrumClickTune,omitempty"`
 	SpectrumCenterTune  *bool    `json:"spectrumCenterTune,omitempty"`
+	Volume              *float64 `json:"volume,omitempty"`
+	LeftChannelEnabled  *bool    `json:"leftChannelEnabled,omitempty"`
+	RightChannelEnabled *bool    `json:"rightChannelEnabled,omitempty"`
 }
 
 // OutputControlRequest represents a request to control an output
@@ -253,6 +256,9 @@ type ConfigResponse struct {
 	UDPHost             string  `json:"udpHost,omitempty"`
 	UDPPort             int     `json:"udpPort,omitempty"`
 	UDPEnabled          bool    `json:"udpEnabled"`
+	Volume              float64 `json:"volume"`
+	LeftChannelEnabled  bool    `json:"leftChannelEnabled"`
+	RightChannelEnabled bool    `json:"rightChannelEnabled"`
 	// Radio control settings
 	RadioControlType  string `json:"radioControlType,omitempty"`
 	FlrigEnabled      bool   `json:"flrigEnabled"`

@@ -256,6 +256,9 @@ func (c *RadioClient) GetOutputStatus() map[string]interface{} {
 		"volume":              c.volume,
 		"leftChannelEnabled":  c.leftChannelEnabled,
 		"rightChannelEnabled": c.rightChannelEnabled,
+		"resampleEnabled":     c.resampleEnabled,
+		"resampleOutputRate":  c.resampleOutputRate,
+		"outputChannels":      c.outputChannels,
 	}
 }
 
@@ -734,6 +737,7 @@ func (c *RadioClient) OutputAudio(pcmData []byte) error {
 	}
 
 	// Call audio callback if set (for browser streaming)
+	// Browser gets raw audio before PortAudio-specific processing (volume/channel selection)
 	if c.audioCallback != nil {
 		c.audioCallback(pcmData, c.sampleRate, c.channels)
 	}

@@ -1564,6 +1564,17 @@ class UberSDRClient {
                 if (status.rightChannelEnabled !== undefined && this.rightChannelEnabled.checked !== status.rightChannelEnabled) {
                     this.rightChannelEnabled.checked = status.rightChannelEnabled;
                 }
+
+                // Update resampling settings if present
+                if (status.resampleEnabled !== undefined && this.resampleEnabledCheckbox.checked !== status.resampleEnabled) {
+                    this.resampleEnabledCheckbox.checked = status.resampleEnabled;
+                }
+                if (status.resampleOutputRate !== undefined && parseInt(this.resampleRateSelect.value) !== status.resampleOutputRate) {
+                    this.resampleRateSelect.value = status.resampleOutputRate;
+                }
+                if (status.outputChannels !== undefined && parseInt(this.outputChannelsSelect.value) !== status.outputChannels) {
+                    this.outputChannelsSelect.value = status.outputChannels;
+                }
             }
         } catch (error) {
             console.error('Failed to fetch output status:', error);
@@ -2004,47 +2015,75 @@ class UberSDRClient {
             const leftEnabled = this.audioPreviewLeftChannel.checked;
             const rightEnabled = this.audioPreviewRightChannel.checked;
 
-            // Always create stereo output (2 channels) for browser audio
-            const audioBuffer = this.audioContext.createBuffer(2, samplesPerChannel, sampleRate);
+            // Create buffer with actual input channels (let Web Audio API handle mono->stereo)
+            const audioBuffer = this.audioContext.createBuffer(channels, samplesPerChannel, sampleRate);
 
             if (channels === 1) {
-                // Mono input: duplicate to both channels
-                const leftData = audioBuffer.getChannelData(0);
-                const rightData = audioBuffer.getChannelData(1);
-
+                // Mono input: just decode the samples
+                const channelData = audioBuffer.getChannelData(0);
                 for (let i = 0; i < samplesPerChannel; i++) {
                     const sampleIndex = i * 2;
-                    const sample = dataView.getInt16(sampleIndex, true); // little-endian
-                    const normalizedSample = sample / 32768.0;
-
-                    // Apply channel muting
-                    leftData[i] = leftEnabled ? normalizedSample : 0;
-                    rightData[i] = rightEnabled ? normalizedSample : 0;
+                    const sample = dataView.getInt16(sampleIndex, true);
+                    channelData[i] = sample / 32768.0;
                 }
             } else {
-                // Stereo input: process each channel separately
+                // Stereo input: samples are interleaved (L, R, L, R, ...)
                 const leftData = audioBuffer.getChannelData(0);
                 const rightData = audioBuffer.getChannelData(1);
 
                 for (let i = 0; i < samplesPerChannel; i++) {
-                    // Left channel
+                    // Each sample is 2 bytes (16-bit), interleaved L/R
                     const leftSampleIndex = (i * 2) * 2;
                     const leftSample = dataView.getInt16(leftSampleIndex, true);
-                    leftData[i] = leftEnabled ? (leftSample / 32768.0) : 0;
+                    leftData[i] = leftSample / 32768.0;
 
-                    // Right channel
-                    const rightSampleIndex = (i * 2 + 1) * 2;
+                    const rightSampleIndex = ((i * 2) + 1) * 2;
                     const rightSample = dataView.getInt16(rightSampleIndex, true);
-                    rightData[i] = rightEnabled ? (rightSample / 32768.0) : 0;
+                    rightData[i] = rightSample / 32768.0;
                 }
             }
 
             // Only play audio if not muted
             if (!this.audioMuted) {
-                // Schedule playback
+                // Create source
                 const source = this.audioContext.createBufferSource();
                 source.buffer = audioBuffer;
-                source.connect(this.audioContext.destination);
+
+                if (channels === 1) {
+                    // Mono input: use gain nodes to control left/right independently
+                    const leftGain = this.audioContext.createGain();
+                    const rightGain = this.audioContext.createGain();
+                    const merger = this.audioContext.createChannelMerger(2);
+
+                    // Set gain based on checkbox states
+                    leftGain.gain.value = leftEnabled ? 1.0 : 0.0;
+                    rightGain.gain.value = rightEnabled ? 1.0 : 0.0;
+
+                    // Connect mono source to both gain nodes, then merge to stereo
+                    source.connect(leftGain);
+                    source.connect(rightGain);
+                    leftGain.connect(merger, 0, 0);  // Connect to left output
+                    rightGain.connect(merger, 0, 1); // Connect to right output
+                    merger.connect(this.audioContext.destination);
+                } else {
+                    // Stereo input: split channels and control independently
+                    const splitter = this.audioContext.createChannelSplitter(2);
+                    const leftGain = this.audioContext.createGain();
+                    const rightGain = this.audioContext.createGain();
+                    const merger = this.audioContext.createChannelMerger(2);
+
+                    // Set gain based on checkbox states
+                    leftGain.gain.value = leftEnabled ? 1.0 : 0.0;
+                    rightGain.gain.value = rightEnabled ? 1.0 : 0.0;
+
+                    // Connect the audio graph
+                    source.connect(splitter);
+                    splitter.connect(leftGain, 0);   // Left channel from splitter
+                    splitter.connect(rightGain, 1);  // Right channel from splitter
+                    leftGain.connect(merger, 0, 0);  // To left output
+                    rightGain.connect(merger, 0, 1); // To right output
+                    merger.connect(this.audioContext.destination);
+                }
 
                 // Calculate when to play this chunk
                 const now = this.audioContext.currentTime;

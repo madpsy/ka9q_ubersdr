@@ -1084,3 +1084,30 @@ body.dark-mode .data-table tbody tr:hover {
 .bandwidth-group input[type="range"]:focus::-moz-range-thumb {
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
 }
+
+/* MIDI Learn Panel Styles */
+#midi-learn-panel {
+    background: #e3f2fd;
+    border-left: 4px solid #2196F3;
+}
+
+body.dark-mode #midi-learn-panel {
+    background: #1e3a5f;
+    border-left-color: #3b82f6;
+}
+
+#midi-learn-panel h5 {
+    color: #1565c0;
+}
+
+body.dark-mode #midi-learn-panel h5 {
+    color: #93c5fd;
+}
+
+#midi-learn-message {
+    color: #1976D2;
+}
+
+body.dark-mode #midi-learn-message {
+    color: #93c5fd;
+}

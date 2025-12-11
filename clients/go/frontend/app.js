@@ -3970,16 +3970,18 @@ class UberSDRClient {
                 // Apply color to button
                 btn.style.backgroundColor = color;
                 btn.style.borderColor = color;
+                btn.style.color = ''; // Reset to default text color (from CSS)
 
                 // Add tooltip with SNR value
                 btn.title = `${bandLabel}: ${status} (${bandData.ft8_snr.toFixed(1)} dB SNR)`;
 
                 console.log(`Updated ${bandLabel} button: ${status} (${bandData.ft8_snr.toFixed(1)} dB), color: ${color}`);
             } else {
-                // No data available - use unknown color
+                // No data available - use unknown color with black text
                 const color = this.BAND_CONDITION_COLORS.UNKNOWN;
                 btn.style.backgroundColor = color;
                 btn.style.borderColor = color;
+                btn.style.color = '#000000'; // Black text for gray background
                 btn.title = `${bandLabel}: No data available`;
                 console.log(`No data for ${bandLabel}, using UNKNOWN color: ${color}`);
             }
@@ -4013,6 +4015,7 @@ class UberSDRClient {
         this.bandButtons.forEach(btn => {
             btn.style.backgroundColor = '';
             btn.style.borderColor = '';
+            btn.style.color = ''; // Reset text color to default
             btn.title = '';
         });
     }

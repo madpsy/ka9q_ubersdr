@@ -24,41 +24,38 @@ echo -e "${YELLOW}Go version:${NC}"
 go version
 echo ""
 
-# Check for PortAudio (optional, just a warning)
-echo -e "${YELLOW}Checking for PortAudio...${NC}"
-if pkg-config --exists portaudio-2.0 2>/dev/null; then
-    echo -e "${GREEN}✓ PortAudio found${NC}"
-elif [ -f "/usr/local/lib/libportaudio.dylib" ] || [ -f "/usr/local/lib/libportaudio.so" ]; then
-    echo -e "${GREEN}✓ PortAudio found${NC}"
-else
-    echo -e "${YELLOW}⚠ PortAudio not detected${NC}"
-    echo "  Audio output may not work. Install PortAudio:"
-    echo "  - Linux: sudo apt install portaudio19-dev"
-    echo "  - macOS: brew install portaudio"
-    echo "  - Windows: Usually bundled with Go bindings"
-fi
-echo ""
+# Check for required dependencies
+echo -e "${YELLOW}Checking for required dependencies...${NC}"
 
-# Check for libsamplerate (optional, for high-quality resampling)
-echo -e "${YELLOW}Checking for libsamplerate...${NC}"
-LIBSAMPLERATE_AVAILABLE=false
-if pkg-config --exists samplerate 2>/dev/null; then
-    echo -e "${GREEN}✓ libsamplerate found${NC}"
-    echo "  High-quality audio resampling will be available"
-    LIBSAMPLERATE_AVAILABLE=true
-else
-    echo -e "${YELLOW}⚠ libsamplerate not detected${NC}"
-    echo "  Will use simple resampler (lower quality)"
-    echo "  For better audio quality, install libsamplerate:"
+# Check for PortAudio (required)
+if ! pkg-config --exists portaudio-2.0 2>/dev/null; then
+    if [ ! -f "/usr/local/lib/libportaudio.dylib" ] && [ ! -f "/usr/local/lib/libportaudio.so" ]; then
+        echo -e "${RED}✗ PortAudio not found (required)${NC}"
+        echo "  Install PortAudio:"
+        echo "  - Linux: sudo apt install portaudio19-dev"
+        echo "  - macOS: brew install portaudio"
+        echo "  - Windows: Usually bundled with Go bindings"
+        exit 1
+    fi
+fi
+echo -e "${GREEN}✓ PortAudio found${NC}"
+
+# Check for libsamplerate (required)
+if ! pkg-config --exists samplerate 2>/dev/null; then
+    echo -e "${RED}✗ libsamplerate not found (required)${NC}"
+    echo "  Install libsamplerate:"
     echo "  - Linux: sudo apt install libsamplerate0-dev"
     echo "  - macOS: brew install libsamplerate"
     echo "  - Windows: pacman -S mingw-w64-x86_64-libsamplerate (MSYS2)"
+    exit 1
 fi
+echo -e "${GREEN}✓ libsamplerate found${NC}"
 echo ""
 
 # Clean previous builds
 echo -e "${YELLOW}Cleaning previous builds...${NC}"
 rm -f radio_client radio_client.exe
+rm -rf build/*
 echo ""
 
 # Download dependencies
@@ -71,60 +68,107 @@ echo -e "${YELLOW}Tidying dependencies...${NC}"
 go mod tidy
 echo ""
 
-# Build the binary
-echo -e "${YELLOW}Building binary...${NC}"
+# Build the binaries for multiple platforms
+echo -e "${YELLOW}Building binaries for multiple platforms...${NC}"
+echo ""
 
-# Determine build flags
-BUILD_FLAGS=""
-if [ "$LIBSAMPLERATE_AVAILABLE" = true ]; then
-    echo "  Building with libsamplerate support (CGo enabled)..."
-    BUILD_FLAGS="-tags cgo"
-    export CGO_ENABLED=1
-else
-    echo "  Building without libsamplerate (CGo disabled)..."
-    export CGO_ENABLED=0
-fi
+# Note about CGo requirement
+echo "  Note: This application requires CGo for PortAudio and libsamplerate"
+echo "  Cross-compilation will require appropriate C toolchains for each target platform"
+echo ""
 
-if go build $BUILD_FLAGS -o radio_client; then
-    echo -e "${GREEN}✓ Build successful!${NC}"
-    
-    # Show which resampler is available
-    if [ "$LIBSAMPLERATE_AVAILABLE" = true ]; then
-        echo -e "${GREEN}  Resampling: High-quality (libsamplerate)${NC}"
+# Enable CGo (required for PortAudio and libsamplerate)
+export CGO_ENABLED=1
+
+# Build with libsamplerate support
+BUILD_TAGS="-tags cgo"
+
+# Build version/timestamp info
+BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
+GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+LDFLAGS="-s -w -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}"
+
+# Array of platforms to build for
+declare -a platforms=(
+    "linux/amd64/radio_client-linux-amd64"
+    "linux/arm/radio_client-linux-arm32"
+    "linux/arm64/radio_client-linux-arm64"
+    "windows/amd64/radio_client-windows-amd64.exe"
+    "darwin/amd64/radio_client-macos-amd64"
+    "darwin/arm64/radio_client-macos-arm64"
+)
+
+echo "  Attempting to build for all platforms..."
+echo "  Note: Some builds may fail if cross-compilation toolchains are not available"
+echo ""
+
+# Build counter
+SUCCESS_COUNT=0
+FAIL_COUNT=0
+
+# Build for each platform
+for platform in "${platforms[@]}"; do
+    IFS='/' read -r GOOS GOARCH OUTPUT <<< "$platform"
+
+    echo -e "${YELLOW}Building for ${GOOS}/${GOARCH}...${NC}"
+
+    # Set environment variables for cross-compilation
+    export GOOS=$GOOS
+    export GOARCH=$GOARCH
+
+    # Special handling for ARM32
+    if [ "$GOARCH" = "arm" ]; then
+        export GOARM=7  # ARMv7 (Raspberry Pi 2+)
+    fi
+
+    # Build the binary
+    if go build ${BUILD_TAGS} -ldflags="${LDFLAGS}" -o "build/${OUTPUT}"; then
+        echo -e "${GREEN}  ✓ Successfully built: build/${OUTPUT}${NC}"
+
+        # Display file size
+        if [ -f "build/${OUTPUT}" ]; then
+            SIZE=$(ls -lh "build/${OUTPUT}" | awk '{print $5}')
+            echo -e "${GREEN}    Size: ${SIZE}${NC}"
+        fi
+
+        ((SUCCESS_COUNT++))
     else
-        echo -e "${YELLOW}  Resampling: Simple (linear interpolation)${NC}"
+        echo -e "${RED}  ✗ Failed to build for ${GOOS}/${GOARCH}${NC}"
+        ((FAIL_COUNT++))
     fi
     echo ""
-    
-    # Make executable (Unix-like systems)
-    if [ "$(uname)" != "Windows_NT" ]; then
-        chmod +x radio_client
-    fi
-    
-    # Display binary info
-    echo -e "${GREEN}Binary created:${NC}"
-    ls -lh radio_client 2>/dev/null || dir radio_client 2>/dev/null
+done
+
+# Summary
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}Build Summary${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}Successful builds: ${SUCCESS_COUNT}${NC}"
+if [ $FAIL_COUNT -gt 0 ]; then
+    echo -e "${RED}Failed builds: ${FAIL_COUNT}${NC}"
+fi
+echo ""
+
+if [ $SUCCESS_COUNT -gt 0 ]; then
+    echo -e "${GREEN}Built binaries are in the 'build/' directory:${NC}"
+    ls -lh build/ 2>/dev/null
     echo ""
-    
-    # Display usage
-    echo -e "${GREEN}Usage:${NC}"
-    echo "  API Mode (with web interface):"
-    echo "    ./radio_client --api"
+
+    echo -e "${GREEN}Usage examples:${NC}"
+    echo "  Linux (x86_64):   ./build/radio_client-linux-amd64 --api"
+    echo "  Linux (ARM32):    ./build/radio_client-linux-arm32 --api"
+    echo "  Linux (ARM64):    ./build/radio_client-linux-arm64 --api"
+    echo "  Windows:          build\\radio_client-windows-amd64.exe --api"
+    echo "  macOS (Intel):    ./build/radio_client-macos-amd64 --api"
+    echo "  macOS (Apple Silicon): ./build/radio_client-macos-arm64 --api"
     echo ""
-    echo "  CLI Mode:"
-    echo "    ./radio_client -f 14074000 -m usb"
-    echo ""
-    echo "  CLI Mode with resampling:"
-    echo "    ./radio_client -f 14074000 -m usb --resample --resample-rate 48000"
-    echo ""
-    echo "  Help:"
-    echo "    ./radio_client -h"
+    echo -e "${GREEN}CLI Mode example:${NC}"
+    echo "  ./build/radio_client-linux-amd64 -f 14074000 -m usb"
     echo ""
     echo -e "${GREEN}Web interface will be available at:${NC} http://localhost:8090"
     echo ""
-    echo -e "${YELLOW}Note:${NC} See README_RESAMPLING.md for audio resampling details"
-    
+    echo -e "${YELLOW}Note:${NC} Binaries are built with PortAudio and libsamplerate support"
 else
-    echo -e "${RED}✗ Build failed${NC}"
+    echo -e "${RED}✗ All builds failed${NC}"
     exit 1
 fi

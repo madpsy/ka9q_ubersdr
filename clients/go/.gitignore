@@ -6,6 +6,9 @@ radio_client.exe
 *.so
 *.dylib
 
+# Build directory
+build/
+
 # Test binary
 *.test
 

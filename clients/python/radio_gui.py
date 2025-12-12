@@ -18,6 +18,9 @@ import json
 import os
 import platform
 
+# Import local bookmarks manager
+from local_bookmarks import LocalBookmarkManager
+
 # Import spectrum display
 try:
     from spectrum_display import SpectrumDisplay
@@ -295,7 +298,9 @@ class RadioGUI:
         self.last_band_state_update = 0
 
         # Bookmarks
-        self.bookmarks: List[Dict] = []  # List of bookmark dictionaries
+        self.bookmarks: List[Dict] = []  # List of bookmark dictionaries (server bookmarks)
+        self.local_bookmark_manager = LocalBookmarkManager()  # Local bookmarks manager
+        self.local_bookmarks: List[Dict] = []  # List of local bookmark dictionaries
 
         # Bands (fetched from server)
         self.bands: List[Dict] = []  # List of band dictionaries from /api/bands
@@ -1167,6 +1172,9 @@ class RadioGUI:
         ttk.Button(freq_frame, text="▲", width=3, command=self.step_frequency_up).grid(row=0, column=6, sticky=tk.W, padx=1)
         ttk.Button(freq_frame, text="▼", width=3, command=self.step_frequency_down).grid(row=0, column=7, sticky=tk.W, padx=1)
 
+        # Save bookmark button (next to up/down arrows)
+        ttk.Button(freq_frame, text="💾", width=3, command=self.save_current_bookmark).grid(row=0, column=8, sticky=tk.W, padx=(5, 0))
+
         # Quick frequency buttons - all amateur bands from 160m to 10m (single row)
         # Moved to second row
         quick_frame = ttk.Frame(freq_frame)
@@ -1222,6 +1230,9 @@ class RadioGUI:
 
         # Initially disabled until bookmarks are loaded
         self.bookmark_combo.config(state='disabled')
+
+        # Local Bookmarks button
+        ttk.Button(bookmark_frame, text="Local Bookmarks", command=self.open_local_bookmarks_window).pack(side=tk.LEFT, padx=(5, 0))
 
         # Band selector dropdown (to the right of bookmarks)
         ttk.Label(bookmark_frame, text="Band:").pack(side=tk.LEFT, padx=(20, 5))
@@ -1566,11 +1577,12 @@ class RadioGUI:
             spectrum_container = tk.Frame(controls_frame)
             # Don't pack spectrum_container - it stays hidden
 
-            # Create spectrum display in hidden container
-            self.spectrum = SpectrumDisplay(spectrum_container, width=800, height=200, bookmarks=self.bookmarks)
+            # Create spectrum display in hidden container (bookmarks will be set after loading)
+            self.spectrum = SpectrumDisplay(spectrum_container, width=800, height=200, bookmarks=[])
             self.spectrum.set_frequency_callback(self.on_spectrum_frequency_click)
             self.spectrum.set_frequency_step_callback(self.on_spectrum_frequency_step)
             self.spectrum.set_mode_callback(self.on_spectrum_mode_change)
+            self.spectrum.set_bandwidth_callback(self.on_spectrum_bandwidth_change)
 
             # Initialize spectrum with current bandwidth values
             try:
@@ -2300,13 +2312,8 @@ class RadioGUI:
                 self.bookmarks = data
                 print(f"[BOOKMARKS] Fetched {len(self.bookmarks)} bookmarks from API")
                 self.populate_bookmark_dropdown()
-                # Update spectrum and waterfall displays with bookmarks
-                if self.spectrum:
-                    self.spectrum.bookmarks = self.bookmarks
-                if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
-                    self.waterfall_spectrum.bookmarks = self.bookmarks
-                if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
-                    self.waterfall_waterfall.bookmarks = self.bookmarks
+                # Update spectrum displays with merged bookmarks (server + local)
+                self.update_spectrum_bookmarks()
                 self.log_status(f"Loaded {len(self.bookmarks)} bookmark(s)")
             else:
                 print(f"[BOOKMARKS] API returned non-list data: {type(data)}")
@@ -2437,16 +2444,53 @@ class RadioGUI:
             pass  # Ignore if frequency is invalid
 
     def populate_bookmark_dropdown(self):
-        """Populate the bookmark dropdown with bookmark names."""
-        if not self.bookmarks:
+        """Populate the bookmark dropdown with bookmark names (merged server + local)."""
+        # Load local bookmarks
+        self.local_bookmarks = self.local_bookmark_manager.get_bookmarks()
+
+        # Merge server and local bookmarks
+        # Local bookmarks are prefixed with "📌 " to distinguish them
+        all_bookmarks = []
+
+        # Add server bookmarks first
+        for bookmark in self.bookmarks:
+            all_bookmarks.append({
+                'name': bookmark.get('name', 'Unnamed'),
+                'frequency': bookmark.get('frequency'),
+                'mode': bookmark.get('mode', 'USB'),
+                'bandwidth_low': bookmark.get('bandwidth_low'),
+                'bandwidth_high': bookmark.get('bandwidth_high'),
+                'is_local': False
+            })
+
+        # Add local bookmarks (keep original name, add is_local flag)
+        for bookmark in self.local_bookmarks:
+            all_bookmarks.append({
+                'name': bookmark.get('name', 'Unnamed'),  # Keep original name for spectrum display
+                'frequency': bookmark.get('frequency'),
+                'mode': bookmark.get('mode', 'USB'),
+                'bandwidth_low': bookmark.get('bandwidth_low'),
+                'bandwidth_high': bookmark.get('bandwidth_high'),
+                'is_local': True
+            })
+
+        if not all_bookmarks:
             print(f"[BOOKMARKS] populate_bookmark_dropdown: No bookmarks to populate")
             self.bookmark_combo.config(state='disabled')
             self.bookmark_combo['values'] = []
             return
 
-        # Extract bookmark names
-        bookmark_names = [bookmark.get('name', 'Unnamed') for bookmark in self.bookmarks]
-        print(f"[BOOKMARKS] populate_bookmark_dropdown: Populating {len(bookmark_names)} bookmarks into dropdown")
+        # Extract bookmark names for dropdown (add pin prefix for local bookmarks in dropdown only)
+        bookmark_names = []
+        for b in all_bookmarks:
+            if b.get('is_local', False):
+                bookmark_names.append(f"📌 {b['name']}")  # Pin prefix for dropdown display only
+            else:
+                bookmark_names.append(b['name'])
+        print(f"[BOOKMARKS] populate_bookmark_dropdown: Populating {len(bookmark_names)} bookmarks ({len(self.bookmarks)} server, {len(self.local_bookmarks)} local)")
+
+        # Store merged bookmarks for later use
+        self.all_bookmarks = all_bookmarks
 
         # Update dropdown
         self.bookmark_combo['values'] = bookmark_names
@@ -2461,24 +2505,30 @@ class RadioGUI:
             pass  # Ignore if frequency is invalid
 
     def on_bookmark_selected(self):
-        """Handle bookmark selection from dropdown."""
+        """Handle bookmark selection from dropdown (supports both server and local bookmarks)."""
         selected_name = self.bookmark_var.get()
         if not selected_name:
             return
 
-        # Find the selected bookmark
+        # Strip pin prefix if present (local bookmarks have "📌 " prefix in dropdown)
+        search_name = selected_name.replace("📌 ", "")
+
+        # Find the selected bookmark in merged list
         selected_bookmark = None
-        for bookmark in self.bookmarks:
-            if bookmark.get('name') == selected_name:
-                selected_bookmark = bookmark
-                break
+        if hasattr(self, 'all_bookmarks'):
+            for bookmark in self.all_bookmarks:
+                if bookmark.get('name') == search_name:
+                    selected_bookmark = bookmark
+                    break
 
         if not selected_bookmark:
             return
 
-        # Get frequency and mode from bookmark
+        # Get frequency, mode, and bandwidth from bookmark
         frequency = selected_bookmark.get('frequency')
         mode = selected_bookmark.get('mode', 'USB').upper()
+        bandwidth_low = selected_bookmark.get('bandwidth_low')
+        bandwidth_high = selected_bookmark.get('bandwidth_high')
 
         if frequency:
             # Set frequency
@@ -2497,11 +2547,33 @@ class RadioGUI:
                 self.mode_var.set(mapped_mode)
                 self.on_mode_changed()
 
+            # Set bandwidth if available
+            if bandwidth_low is not None and bandwidth_high is not None:
+                self.bw_low_var.set(bandwidth_low)
+                self.bw_high_var.set(bandwidth_high)
+                self.bw_low_label.config(text=f"{bandwidth_low} Hz")
+                self.bw_high_label.config(text=f"{bandwidth_high} Hz")
+
+                # Update client bandwidth values
+                if self.client:
+                    self.client.bandwidth_low = bandwidth_low
+                    self.client.bandwidth_high = bandwidth_high
+
+                # Update spectrum displays
+                if self.spectrum:
+                    self.spectrum.update_bandwidth(bandwidth_low, bandwidth_high)
+                if self.waterfall_display:
+                    self.waterfall_display.update_bandwidth(bandwidth_low, bandwidth_high)
+                if self.audio_spectrum_display:
+                    self.audio_spectrum_display.update_bandwidth(bandwidth_low, bandwidth_high)
+
             # Apply changes if connected (skip auto mode switching for bookmarks)
             if self.connected:
                 self.apply_frequency(skip_auto_mode=True)
 
-            self.log_status(f"Tuned to bookmark: {selected_name} ({frequency/1e6:.6f} MHz, {mode})")
+            bookmark_type = "local" if selected_bookmark.get('is_local') else "server"
+            bw_info = f", {bandwidth_low}-{bandwidth_high} Hz" if bandwidth_low is not None and bandwidth_high is not None else ""
+            self.log_status(f"Tuned to {bookmark_type} bookmark: {selected_name} ({frequency/1e6:.6f} MHz, {mode}{bw_info})")
 
     def on_band_selected(self):
         """Handle band selection from dropdown."""
@@ -2576,7 +2648,7 @@ class RadioGUI:
         Args:
             freq_hz: Current frequency in Hz
         """
-        if not self.bookmarks:
+        if not hasattr(self, 'all_bookmarks') or not self.all_bookmarks:
             return
 
         # Get current mode
@@ -2586,7 +2658,7 @@ class RadioGUI:
             current_mode = None
 
         # Find matching bookmark (must match both frequency and mode)
-        for bookmark in self.bookmarks:
+        for bookmark in self.all_bookmarks:
             bookmark_freq = bookmark.get('frequency')
             bookmark_mode = bookmark.get('mode', 'USB').upper()
 
@@ -2606,6 +2678,269 @@ class RadioGUI:
         # No matching bookmark - clear selection
         if self.bookmark_var.get() != "":
             self.bookmark_var.set("")
+
+    def save_current_bookmark(self):
+        """Save current frequency, mode, and bandwidth as a local bookmark."""
+        try:
+            # Get current settings
+            freq_hz = self.get_frequency_hz()
+            mode = self.mode_var.get().upper()
+            bandwidth_low = int(self.bw_low_var.get())
+            bandwidth_high = int(self.bw_high_var.get())
+
+            # Ask user for bookmark name
+            name = simpledialog.askstring(
+                "Save Bookmark",
+                "Enter a name for this bookmark:",
+                initialvalue=f"{freq_hz/1e6:.3f} MHz {mode}"
+            )
+
+            if not name:
+                return  # User cancelled
+
+            # Check if bookmark with this name already exists
+            existing_bookmarks = self.local_bookmark_manager.get_bookmarks()
+            existing_names = [b.get('name') for b in existing_bookmarks]
+
+            overwrite_confirmed = False
+            if name in existing_names:
+                # Ask user if they want to overwrite
+                overwrite_confirmed = messagebox.askyesno(
+                    "Bookmark Exists",
+                    f"A bookmark named '{name}' already exists.\nDo you want to overwrite it?",
+                    icon='warning'
+                )
+                if not overwrite_confirmed:
+                    return  # User chose not to overwrite
+
+            # Save bookmark (with overwrite flag if user confirmed)
+            success = self.local_bookmark_manager.save_bookmark(
+                name=name,
+                frequency=freq_hz,
+                mode=mode.lower(),
+                bandwidth_low=bandwidth_low,
+                bandwidth_high=bandwidth_high,
+                overwrite=overwrite_confirmed
+            )
+
+            if success:
+                self.log_status(f"Saved local bookmark: {name}")
+                # Refresh bookmark dropdown to include new bookmark
+                self.populate_bookmark_dropdown()
+                # Update spectrum displays with new bookmarks
+                self.update_spectrum_bookmarks()
+            else:
+                messagebox.showerror("Error", f"Failed to save bookmark '{name}'")
+
+        except ValueError as e:
+            messagebox.showerror("Error", f"Invalid frequency: {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save bookmark: {e}")
+            self.log_status(f"ERROR: Failed to save bookmark - {e}")
+
+    def update_spectrum_bookmarks(self):
+        """Update spectrum displays with merged bookmarks (server + local)."""
+        print(f"[BOOKMARKS] update_spectrum_bookmarks called")
+
+        # Use the already-merged bookmarks list from populate_bookmark_dropdown()
+        # This ensures dropdown and spectrum use the exact same bookmark data
+        if not hasattr(self, 'all_bookmarks'):
+            print(f"[BOOKMARKS] ERROR: all_bookmarks not yet created, skipping")
+            return
+
+        # Use the merged bookmarks list (already has is_local flags set correctly)
+        merged_bookmarks = self.all_bookmarks
+
+        # Debug logging - show first few bookmarks with is_local flag
+        local_count = sum(1 for b in merged_bookmarks if b.get('is_local', False))
+        server_count = len(merged_bookmarks) - local_count
+        print(f"[BOOKMARKS] update_spectrum_bookmarks: {server_count} server, {local_count} local (total: {len(merged_bookmarks)})")
+
+        # Show sample of bookmarks
+        for i, bm in enumerate(merged_bookmarks[:3]):
+            print(f"[BOOKMARKS]   Sample {i}: {bm.get('name')} is_local={bm.get('is_local', False)}")
+        if local_count > 0:
+            # Show first local bookmark
+            for bm in merged_bookmarks:
+                if bm.get('is_local', False):
+                    print(f"[BOOKMARKS]   First local: {bm.get('name')} @ {bm.get('frequency')} Hz is_local={bm.get('is_local')}")
+                    break
+
+        # Update spectrum displays
+        if self.spectrum:
+            print(f"[BOOKMARKS] Setting {len(merged_bookmarks)} bookmarks on main spectrum")
+            print(f"[BOOKMARKS] Before: spectrum has {len(self.spectrum.bookmarks) if self.spectrum.bookmarks else 0} bookmarks")
+            self.spectrum.bookmarks = merged_bookmarks
+            print(f"[BOOKMARKS] After: spectrum has {len(self.spectrum.bookmarks) if self.spectrum.bookmarks else 0} bookmarks")
+            # Verify what was actually set
+            if self.spectrum.bookmarks:
+                local_in_spectrum = sum(1 for b in self.spectrum.bookmarks if b.get('is_local', False))
+                print(f"[BOOKMARKS] Spectrum now has {local_in_spectrum} local bookmarks out of {len(self.spectrum.bookmarks)} total")
+            # Force redraw to show updated bookmarks (only for SpectrumDisplay objects)
+            if self.spectrum.spectrum_data is not None:
+                print(f"[BOOKMARKS] Forcing spectrum redraw")
+                self.spectrum._draw_spectrum()
+            else:
+                print(f"[BOOKMARKS] WARNING: No spectrum_data, cannot redraw")
+        else:
+            print(f"[BOOKMARKS] WARNING: No main spectrum display")
+
+        if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
+            print(f"[BOOKMARKS] Setting {len(merged_bookmarks)} bookmarks on waterfall spectrum")
+            self.waterfall_spectrum.bookmarks = merged_bookmarks
+            # Force redraw only for SpectrumDisplay objects (waterfall_spectrum is a SpectrumDisplay)
+            if hasattr(self.waterfall_spectrum, '_draw_spectrum') and self.waterfall_spectrum.spectrum_data is not None:
+                self.waterfall_spectrum._draw_spectrum()
+        if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
+            print(f"[BOOKMARKS] Setting {len(merged_bookmarks)} bookmarks on waterfall waterfall")
+            self.waterfall_waterfall.bookmarks = merged_bookmarks
+            # WaterfallDisplay doesn't have _draw_spectrum method, bookmarks will appear on next update
+
+    def open_local_bookmarks_window(self):
+        """Open the local bookmarks management window."""
+        # Don't open multiple windows
+        if hasattr(self, 'local_bookmarks_window') and self.local_bookmarks_window and self.local_bookmarks_window.winfo_exists():
+            self.local_bookmarks_window.lift()  # Bring to front
+            return
+
+        # Create new window
+        self.local_bookmarks_window = tk.Toplevel(self.root)
+        self.local_bookmarks_window.title("Local Bookmarks")
+        self.local_bookmarks_window.geometry("600x400")
+
+        # Main frame
+        main_frame = ttk.Frame(self.local_bookmarks_window, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.local_bookmarks_window.columnconfigure(0, weight=1)
+        self.local_bookmarks_window.rowconfigure(0, weight=1)
+
+        # Listbox with scrollbar
+        list_frame = ttk.Frame(main_frame)
+        list_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        self.bookmarks_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, height=15)
+        scrollbar.config(command=self.bookmarks_listbox.yview)
+
+        self.bookmarks_listbox.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+
+        # Populate listbox
+        self.refresh_bookmarks_listbox()
+
+        # Buttons frame
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=1, column=0, columnspan=2, sticky=tk.W)
+
+        ttk.Button(button_frame, text="Tune", command=self.tune_to_selected_bookmark).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="Rename", command=self.rename_selected_bookmark).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="Delete", command=self.delete_selected_bookmark).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="Close", command=self.local_bookmarks_window.destroy).pack(side=tk.LEFT, padx=(0, 5))
+
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(0, weight=1)
+
+    def refresh_bookmarks_listbox(self):
+        """Refresh the bookmarks listbox with current local bookmarks."""
+        if not hasattr(self, 'bookmarks_listbox'):
+            return
+
+        self.bookmarks_listbox.delete(0, tk.END)
+        self.local_bookmarks = self.local_bookmark_manager.get_bookmarks()
+
+        for bookmark in self.local_bookmarks:
+            name = bookmark.get('name', 'Unnamed')
+            freq = bookmark.get('frequency', 0)
+            mode = bookmark.get('mode', 'USB').upper()
+            display_text = f"{name} - {freq/1e6:.6f} MHz {mode}"
+            self.bookmarks_listbox.insert(tk.END, display_text)
+
+    def tune_to_selected_bookmark(self):
+        """Tune to the selected bookmark in the listbox."""
+        selection = self.bookmarks_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("Info", "Please select a bookmark")
+            return
+
+        index = selection[0]
+        bookmark = self.local_bookmarks[index]
+
+        # Set frequency and mode
+        freq_hz = bookmark.get('frequency')
+        mode = bookmark.get('mode', 'USB').upper()
+
+        if freq_hz:
+            self.set_frequency_hz(int(freq_hz))
+
+            # Set mode if not locked
+            if not self.mode_lock_var.get():
+                self.mode_var.set(mode)
+                self.on_mode_changed()
+
+            # Apply changes if connected
+            if self.connected:
+                self.apply_frequency(skip_auto_mode=True)
+
+            self.log_status(f"Tuned to local bookmark: {bookmark.get('name')} ({freq_hz/1e6:.6f} MHz, {mode})")
+
+    def rename_selected_bookmark(self):
+        """Rename the selected bookmark."""
+        selection = self.bookmarks_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("Info", "Please select a bookmark to rename")
+            return
+
+        index = selection[0]
+        old_name = self.local_bookmarks[index].get('name', 'Unnamed')
+
+        # Ask for new name
+        new_name = simpledialog.askstring(
+            "Rename Bookmark",
+            "Enter new name:",
+            initialvalue=old_name
+        )
+
+        if not new_name or new_name == old_name:
+            return  # User cancelled or no change
+
+        # Rename bookmark
+        success = self.local_bookmark_manager.rename_bookmark(index, new_name)
+
+        if success:
+            self.log_status(f"Renamed bookmark: {old_name} → {new_name}")
+            self.refresh_bookmarks_listbox()
+            self.populate_bookmark_dropdown()
+            self.update_spectrum_bookmarks()
+        else:
+            messagebox.showerror("Error", f"A bookmark named '{new_name}' already exists")
+
+    def delete_selected_bookmark(self):
+        """Delete the selected bookmark."""
+        selection = self.bookmarks_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("Info", "Please select a bookmark to delete")
+            return
+
+        index = selection[0]
+        name = self.local_bookmarks[index].get('name', 'Unnamed')
+
+        # Confirm deletion
+        if not messagebox.askyesno("Confirm Delete", f"Delete bookmark '{name}'?"):
+            return
+
+        # Delete bookmark
+        success = self.local_bookmark_manager.delete_bookmark(index)
+
+        if success:
+            self.log_status(f"Deleted local bookmark: {name}")
+            self.refresh_bookmarks_listbox()
+            self.populate_bookmark_dropdown()
+            self.update_spectrum_bookmarks()
+        else:
+            messagebox.showerror("Error", "Failed to delete bookmark")
 
     def apply_frequency(self, skip_auto_mode=False):
         """Apply frequency change by sending tune message.
@@ -4076,6 +4411,7 @@ class RadioGUI:
                     self.spectrum = SpectrumDisplay(self.spectrum_frame, width=780, height=200)
                     self.spectrum.set_frequency_callback(self.on_spectrum_frequency_click)
                     self.spectrum.set_frequency_step_callback(self.on_spectrum_frequency_step)
+                    self.spectrum.set_bandwidth_callback(self.on_spectrum_bandwidth_change)
                     # Set initial step size
                     self.spectrum.set_step_size(self.get_step_size_hz())
 
@@ -4165,6 +4501,36 @@ class RadioGUI:
         # Apply mode change if connected
         if self.connected:
             self.apply_mode()
+
+    def on_spectrum_bandwidth_change(self, bandwidth_low: int, bandwidth_high: int):
+        """Handle bandwidth change from spectrum bookmark click.
+
+        Args:
+            bandwidth_low: Low bandwidth edge in Hz
+            bandwidth_high: High bandwidth edge in Hz
+        """
+        # Set bandwidth sliders
+        self.bw_low_var.set(bandwidth_low)
+        self.bw_high_var.set(bandwidth_high)
+        self.bw_low_label.config(text=f"{bandwidth_low} Hz")
+        self.bw_high_label.config(text=f"{bandwidth_high} Hz")
+
+        # Update client bandwidth values
+        if self.client:
+            self.client.bandwidth_low = bandwidth_low
+            self.client.bandwidth_high = bandwidth_high
+
+        # Update spectrum displays
+        if self.spectrum:
+            self.spectrum.update_bandwidth(bandwidth_low, bandwidth_high)
+        if self.waterfall_display:
+            self.waterfall_display.update_bandwidth(bandwidth_low, bandwidth_high)
+        if self.audio_spectrum_display:
+            self.audio_spectrum_display.update_bandwidth(bandwidth_low, bandwidth_high)
+
+        # Apply bandwidth change if connected
+        if self.connected:
+            self.send_tune_message()
 
     def on_scroll_mode_changed(self):
         """Handle scroll mode change (zoom vs pan)."""

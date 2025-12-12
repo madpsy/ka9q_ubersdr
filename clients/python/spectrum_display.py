@@ -108,6 +108,7 @@ class SpectrumDisplay:
         self.frequency_callback: Optional[Callable[[float], None]] = None
         self.frequency_step_callback: Optional[Callable[[int], None]] = None  # Callback for stepping frequency
         self.mode_callback: Optional[Callable[[str], None]] = None  # Callback for mode changes
+        self.bandwidth_callback: Optional[Callable[[int, int], None]] = None  # Callback for bandwidth changes
         
         # Drawing parameters - increased top margin for bookmark section
         self.bookmark_section_height = 20  # Height for bookmark markers
@@ -725,52 +726,68 @@ class SpectrumDisplay:
 
     def _draw_bookmarks(self):
         """Draw bookmark markers in the bookmark section above spectrum."""
+        print(f"[SPECTRUM] _draw_bookmarks: {len(self.bookmarks) if self.bookmarks else 0} bookmarks, total_bandwidth={self.total_bandwidth}")
+        
         if not self.bookmarks or self.total_bandwidth == 0:
+            print(f"[SPECTRUM] Skipping: bookmarks={bool(self.bookmarks)}, total_bandwidth={self.total_bandwidth}")
             return
         
         start_freq = self.center_freq - self.total_bandwidth / 2
         end_freq = self.center_freq + self.total_bandwidth / 2
+        
+        print(f"[SPECTRUM] Visible range: {start_freq/1e6:.3f} - {end_freq/1e6:.3f} MHz")
         
         # Y position for bookmarks (in the bookmark section above spectrum, above the orange frequency readout)
         # Orange frequency is at margin_top - 10
         # To position bookmarks HIGHER (closer to top of canvas), we subtract MORE from margin_top
         bookmark_y = 5  # Position 5px from absolute top of canvas
         
+        visible_count = 0
         for bookmark in self.bookmarks:
             freq = bookmark.get('frequency', 0)
             name = bookmark.get('name', 'Unknown')
+            is_local = bookmark.get('is_local', False)
+            
+            print(f"[SPECTRUM] Checking bookmark: {name} @ {freq/1e6:.3f} MHz, is_local={is_local}")
             
             # Only draw if bookmark is within visible range
             if freq < start_freq or freq > end_freq:
+                print(f"[SPECTRUM] Bookmark {name} outside visible range")
                 continue
             
+            visible_count += 1
+            print(f"[SPECTRUM] Drawing {'LOCAL' if is_local else 'SERVER'} bookmark: {name}")
+
             # Calculate x position
             freq_offset = freq - start_freq
             x = self.margin_left + (freq_offset / self.total_bandwidth) * self.graph_width
-            
-            # Draw bookmark label (gold background)
+
+            # Draw bookmark label with color based on type
             label_width = len(name) * 7 + 8
             label_height = 12
-            
-            # Gold background
+
+            # Choose color: cyan for local bookmarks, gold for server bookmarks
+            bg_color = '#00CED1' if is_local else '#FFD700'  # DarkTurquoise for local, Gold for server
+
+            # Background rectangle
             self.canvas.create_rectangle(
                 x - label_width / 2, bookmark_y,
                 x + label_width / 2, bookmark_y + label_height,
-                fill='#FFD700', outline='white', width=1
+                fill=bg_color, outline='white', width=1
             )
-            
-            # Black text on gold background
+
+            # Black text on colored background
             self.canvas.create_text(
                 x, bookmark_y + 6,
                 text=name, fill='black',
                 font=('monospace', 9, 'bold')
             )
-            
+
             # Draw downward arrow below label
             arrow_y = bookmark_y + label_height
             arrow_length = 6
-            
-            # Arrow triangle (gold with white border)
+
+            # Arrow triangle (same color as background with white border)
             arrow_points = [
                 x, arrow_y + arrow_length,  # Tip
                 x - 4, arrow_y,              # Left
@@ -778,21 +795,30 @@ class SpectrumDisplay:
             ]
             self.canvas.create_polygon(
                 arrow_points,
-                fill='#FFD700', outline='white', width=1
+                fill=bg_color, outline='white', width=1
             )
+
+        print(f"[SPECTRUM] Drew {visible_count} bookmarks in visible range")
    
     def _on_bookmark_click(self, bookmark):
-        """Handle bookmark marker click - tune to bookmark frequency and mode."""
+        """Handle bookmark marker click - tune to bookmark frequency, mode, and bandwidth."""
         freq = bookmark.get('frequency', 0)
         mode = bookmark.get('mode', 'USB').upper()
 
         if freq and self.frequency_callback:
             # Call the frequency callback with the bookmark frequency
             self.frequency_callback(float(freq))
-        
+
         # Call the mode callback with the bookmark mode
         if mode and self.mode_callback:
             self.mode_callback(mode)
+
+        # Call the bandwidth callback with the bookmark bandwidth if available
+        bandwidth_low = bookmark.get('bandwidth_low')
+        bandwidth_high = bookmark.get('bandwidth_high')
+        if bandwidth_low is not None and bandwidth_high is not None:
+            if self.bandwidth_callback:
+                self.bandwidth_callback(bandwidth_low, bandwidth_high)
 
     def _draw_bandwidth_filter(self):
         """Draw bandwidth filter visualization with yellow lines and fill."""
@@ -1155,7 +1181,15 @@ class SpectrumDisplay:
             callback: Function to call with new mode (e.g., 'USB', 'LSB', 'CW')
         """
         self.mode_callback = callback
-    
+
+    def set_bandwidth_callback(self, callback: Callable[[int, int], None]):
+        """Set callback for bandwidth changes from bookmark clicks.
+
+        Args:
+            callback: Function to call with bandwidth_low and bandwidth_high in Hz
+        """
+        self.bandwidth_callback = callback
+
     def set_step_size(self, step_hz: int):
         """Set frequency step size for click-to-tune snapping.
         

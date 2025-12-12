@@ -883,7 +883,8 @@ def create_waterfall_window(parent_gui):
     # Update spectrum with current settings
     spectrum.click_tune_var = click_tune_var
     spectrum.center_tune_var = center_tune_var
-    spectrum.bookmarks = parent_gui.bookmarks
+    # Use merged bookmarks (server + local) instead of server-only bookmarks
+    spectrum.bookmarks = parent_gui.all_bookmarks if hasattr(parent_gui, 'all_bookmarks') else parent_gui.bookmarks
     spectrum.bands = parent_gui.bands
     spectrum.set_frequency_callback(parent_gui.on_spectrum_frequency_click)
     spectrum.set_frequency_step_callback(parent_gui.on_spectrum_frequency_step)
@@ -911,8 +912,8 @@ def create_waterfall_window(parent_gui):
     except ValueError:
         pass
     
-    # Create waterfall display below spectrum (shares spectrum's data) with bookmarks
-    waterfall = WaterfallDisplay(container, spectrum, width=800, height=400, spectrum_height=200, click_tune_var=click_tune_var, bookmarks=parent_gui.bookmarks)
+    # Create waterfall display below spectrum (shares spectrum's data) with merged bookmarks
+    waterfall = WaterfallDisplay(container, spectrum, width=800, height=400, spectrum_height=200, click_tune_var=click_tune_var, bookmarks=parent_gui.all_bookmarks if hasattr(parent_gui, 'all_bookmarks') else parent_gui.bookmarks)
     
     # Set scroll mode on waterfall too
     if hasattr(parent_gui, 'scroll_mode_var'):

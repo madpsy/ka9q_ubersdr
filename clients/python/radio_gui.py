@@ -2310,22 +2310,18 @@ class RadioGUI:
 
             if isinstance(data, list):
                 self.bookmarks = data
-                print(f"[BOOKMARKS] Fetched {len(self.bookmarks)} bookmarks from API")
                 self.populate_bookmark_dropdown()
                 # Update spectrum displays with merged bookmarks (server + local)
                 self.update_spectrum_bookmarks()
                 self.log_status(f"Loaded {len(self.bookmarks)} bookmark(s)")
             else:
-                print(f"[BOOKMARKS] API returned non-list data: {type(data)}")
                 self.log_status("No bookmarks available")
 
         except requests.exceptions.RequestException as e:
             # Silently fail if bookmarks not available (server might not support it)
-            print(f"[BOOKMARKS] Request error: {e}")
             self.log_status(f"Bookmarks not available: {e}")
             self.bookmarks = []
         except Exception as e:
-            print(f"[BOOKMARKS] Unexpected error: {e}")
             self.log_status(f"Error loading bookmarks: {e}")
             self.bookmarks = []
 
@@ -2475,7 +2471,6 @@ class RadioGUI:
             })
 
         if not all_bookmarks:
-            print(f"[BOOKMARKS] populate_bookmark_dropdown: No bookmarks to populate")
             self.bookmark_combo.config(state='disabled')
             self.bookmark_combo['values'] = []
             return
@@ -2487,7 +2482,6 @@ class RadioGUI:
                 bookmark_names.append(f"📌 {b['name']}")  # Pin prefix for dropdown display only
             else:
                 bookmark_names.append(b['name'])
-        print(f"[BOOKMARKS] populate_bookmark_dropdown: Populating {len(bookmark_names)} bookmarks ({len(self.bookmarks)} server, {len(self.local_bookmarks)} local)")
 
         # Store merged bookmarks for later use
         self.all_bookmarks = all_bookmarks
@@ -2495,7 +2489,6 @@ class RadioGUI:
         # Update dropdown
         self.bookmark_combo['values'] = bookmark_names
         self.bookmark_combo.config(state='readonly')
-        print(f"[BOOKMARKS] populate_bookmark_dropdown: Dropdown values set, state=readonly")
 
         # Update initial selection based on current frequency and mode
         try:
@@ -2740,59 +2733,27 @@ class RadioGUI:
 
     def update_spectrum_bookmarks(self):
         """Update spectrum displays with merged bookmarks (server + local)."""
-        print(f"[BOOKMARKS] update_spectrum_bookmarks called")
-
         # Use the already-merged bookmarks list from populate_bookmark_dropdown()
         # This ensures dropdown and spectrum use the exact same bookmark data
         if not hasattr(self, 'all_bookmarks'):
-            print(f"[BOOKMARKS] ERROR: all_bookmarks not yet created, skipping")
             return
 
         # Use the merged bookmarks list (already has is_local flags set correctly)
         merged_bookmarks = self.all_bookmarks
 
-        # Debug logging - show first few bookmarks with is_local flag
-        local_count = sum(1 for b in merged_bookmarks if b.get('is_local', False))
-        server_count = len(merged_bookmarks) - local_count
-        print(f"[BOOKMARKS] update_spectrum_bookmarks: {server_count} server, {local_count} local (total: {len(merged_bookmarks)})")
-
-        # Show sample of bookmarks
-        for i, bm in enumerate(merged_bookmarks[:3]):
-            print(f"[BOOKMARKS]   Sample {i}: {bm.get('name')} is_local={bm.get('is_local', False)}")
-        if local_count > 0:
-            # Show first local bookmark
-            for bm in merged_bookmarks:
-                if bm.get('is_local', False):
-                    print(f"[BOOKMARKS]   First local: {bm.get('name')} @ {bm.get('frequency')} Hz is_local={bm.get('is_local')}")
-                    break
-
         # Update spectrum displays
         if self.spectrum:
-            print(f"[BOOKMARKS] Setting {len(merged_bookmarks)} bookmarks on main spectrum")
-            print(f"[BOOKMARKS] Before: spectrum has {len(self.spectrum.bookmarks) if self.spectrum.bookmarks else 0} bookmarks")
             self.spectrum.bookmarks = merged_bookmarks
-            print(f"[BOOKMARKS] After: spectrum has {len(self.spectrum.bookmarks) if self.spectrum.bookmarks else 0} bookmarks")
-            # Verify what was actually set
-            if self.spectrum.bookmarks:
-                local_in_spectrum = sum(1 for b in self.spectrum.bookmarks if b.get('is_local', False))
-                print(f"[BOOKMARKS] Spectrum now has {local_in_spectrum} local bookmarks out of {len(self.spectrum.bookmarks)} total")
             # Force redraw to show updated bookmarks (only for SpectrumDisplay objects)
             if self.spectrum.spectrum_data is not None:
-                print(f"[BOOKMARKS] Forcing spectrum redraw")
                 self.spectrum._draw_spectrum()
-            else:
-                print(f"[BOOKMARKS] WARNING: No spectrum_data, cannot redraw")
-        else:
-            print(f"[BOOKMARKS] WARNING: No main spectrum display")
 
         if hasattr(self, 'waterfall_spectrum') and self.waterfall_spectrum:
-            print(f"[BOOKMARKS] Setting {len(merged_bookmarks)} bookmarks on waterfall spectrum")
             self.waterfall_spectrum.bookmarks = merged_bookmarks
             # Force redraw only for SpectrumDisplay objects (waterfall_spectrum is a SpectrumDisplay)
             if hasattr(self.waterfall_spectrum, '_draw_spectrum') and self.waterfall_spectrum.spectrum_data is not None:
                 self.waterfall_spectrum._draw_spectrum()
         if hasattr(self, 'waterfall_waterfall') and self.waterfall_waterfall:
-            print(f"[BOOKMARKS] Setting {len(merged_bookmarks)} bookmarks on waterfall waterfall")
             self.waterfall_waterfall.bookmarks = merged_bookmarks
             # WaterfallDisplay doesn't have _draw_spectrum method, bookmarks will appear on next update
 

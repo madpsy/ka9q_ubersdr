@@ -726,37 +726,25 @@ class SpectrumDisplay:
 
     def _draw_bookmarks(self):
         """Draw bookmark markers in the bookmark section above spectrum."""
-        print(f"[SPECTRUM] _draw_bookmarks: {len(self.bookmarks) if self.bookmarks else 0} bookmarks, total_bandwidth={self.total_bandwidth}")
-        
         if not self.bookmarks or self.total_bandwidth == 0:
-            print(f"[SPECTRUM] Skipping: bookmarks={bool(self.bookmarks)}, total_bandwidth={self.total_bandwidth}")
             return
         
         start_freq = self.center_freq - self.total_bandwidth / 2
         end_freq = self.center_freq + self.total_bandwidth / 2
-        
-        print(f"[SPECTRUM] Visible range: {start_freq/1e6:.3f} - {end_freq/1e6:.3f} MHz")
         
         # Y position for bookmarks (in the bookmark section above spectrum, above the orange frequency readout)
         # Orange frequency is at margin_top - 10
         # To position bookmarks HIGHER (closer to top of canvas), we subtract MORE from margin_top
         bookmark_y = 5  # Position 5px from absolute top of canvas
         
-        visible_count = 0
         for bookmark in self.bookmarks:
             freq = bookmark.get('frequency', 0)
             name = bookmark.get('name', 'Unknown')
             is_local = bookmark.get('is_local', False)
             
-            print(f"[SPECTRUM] Checking bookmark: {name} @ {freq/1e6:.3f} MHz, is_local={is_local}")
-            
             # Only draw if bookmark is within visible range
             if freq < start_freq or freq > end_freq:
-                print(f"[SPECTRUM] Bookmark {name} outside visible range")
                 continue
-            
-            visible_count += 1
-            print(f"[SPECTRUM] Drawing {'LOCAL' if is_local else 'SERVER'} bookmark: {name}")
 
             # Calculate x position
             freq_offset = freq - start_freq
@@ -797,8 +785,6 @@ class SpectrumDisplay:
                 arrow_points,
                 fill=bg_color, outline='white', width=1
             )
-
-        print(f"[SPECTRUM] Drew {visible_count} bookmarks in visible range")
    
     def _on_bookmark_click(self, bookmark):
         """Handle bookmark marker click - tune to bookmark frequency, mode, and bandwidth."""

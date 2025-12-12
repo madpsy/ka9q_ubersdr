@@ -17,6 +17,21 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Frequency validation constants (100 kHz - 30 MHz)
+const (
+	MinFrequencyHz = 100000   // 100 kHz
+	MaxFrequencyHz = 30000000 // 30 MHz
+)
+
+// validateFrequency checks if a frequency is within valid range
+func validateFrequency(freq int) error {
+	if freq < MinFrequencyHz || freq > MaxFrequencyHz {
+		return fmt.Errorf("Frequency %d Hz is out of valid range (%d kHz - %d MHz)",
+			freq, MinFrequencyHz/1000, MaxFrequencyHz/1000000)
+	}
+	return nil
+}
+
 //go:embed frontend/*
 var frontendFS embed.FS
 
@@ -243,6 +258,10 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Frequency is required", "")
 		return
 	}
+	if err := validateFrequency(req.Frequency); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid frequency", err.Error())
+		return
+	}
 	if req.Mode == "" {
 		respondError(w, http.StatusBadRequest, "Mode is required", "")
 		return
@@ -426,6 +445,14 @@ func (s *APIServer) handleTune(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate frequency if provided
+	if req.Frequency != nil {
+		if err := validateFrequency(*req.Frequency); err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid frequency", err.Error())
+			return
+		}
+	}
+
 	// Check locks before allowing changes
 	config := s.configManager.Get()
 	if config.FrequencyLocked && req.Frequency != nil {
@@ -460,6 +487,12 @@ func (s *APIServer) handleFrequency(w http.ResponseWriter, r *http.Request) {
 	var req FrequencyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	// Validate frequency
+	if err := validateFrequency(req.Frequency); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid frequency", err.Error())
 		return
 	}
 

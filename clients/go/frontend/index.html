@@ -94,8 +94,11 @@
                     </label>
                 </div>
                 <div class="frequency-display">
-                    <input type="text" id="frequency-input" value="14074000" placeholder="14074000">
-                    <span class="unit">Hz</span>
+                    <div class="frequency-input-wrapper">
+                        <input type="text" id="frequency-input" value="14074000" placeholder="14074000">
+                        <span class="unit">Hz</span>
+                    </div>
+                    <button id="frequency-submit-btn" class="btn btn-submit" title="Apply frequency">▶</button>
                 </div>
                 <div class="frequency-buttons">
                     <button class="btn btn-small" data-step="-10000">-10 kHz</button>
@@ -899,6 +902,22 @@
             <div class="modal-footer">
                 <button id="save-bookmark-confirm-btn" class="btn btn-primary">Save</button>
                 <button class="btn btn-secondary" data-modal="save-bookmark-modal">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Modal -->
+    <div id="error-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2 id="error-modal-title">Error</h2>
+                <span class="close" data-modal="error-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p id="error-modal-message" style="color: #ef4444; font-weight: 500;"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" data-modal="error-modal">OK</button>
             </div>
         </div>
     </div>

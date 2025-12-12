@@ -433,23 +433,65 @@ body.dark-mode .status-badge.disconnected {
     align-items: center;
     gap: 10px;
     margin-bottom: 15px;
+    flex-wrap: nowrap;
 }
 
-.frequency-display input {
+.frequency-input-wrapper {
+    position: relative;
     flex: 1;
-    padding: 12px;
+    min-width: 0;
+}
+
+.frequency-input-wrapper input {
+    width: 100%;
+    padding: 12px 50px 12px 12px;
     border: 2px solid var(--border-color);
     border-radius: 6px;
     font-size: 24px;
     font-weight: 600;
     text-align: center;
     font-family: 'Courier New', monospace;
+    background-color: var(--panel-bg);
+    color: var(--text-color);
 }
 
-.frequency-display .unit {
+.frequency-input-wrapper .unit {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
     font-size: 18px;
     font-weight: 500;
     color: var(--text-muted);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.frequency-display .btn-submit {
+    flex-shrink: 0;
+    padding: 12px 16px;
+    background-color: var(--success-color);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.frequency-display .btn-submit:hover:not(:disabled) {
+    background-color: #059669;
+    transform: scale(1.05);
+}
+
+.frequency-display .btn-submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .frequency-buttons {
@@ -532,6 +574,27 @@ footer a:hover {
 
     .form-grid {
         grid-template-columns: 1fr;
+    }
+
+    /* Keep frequency display on one line on mobile */
+    .frequency-display {
+        gap: 5px;
+    }
+
+    .frequency-input-wrapper input {
+        font-size: 18px;
+        padding: 10px 45px 10px 8px;
+    }
+
+    .frequency-input-wrapper .unit {
+        font-size: 14px;
+        right: 8px;
+    }
+
+    .frequency-display .btn-submit {
+        padding: 10px 12px;
+        font-size: 18px;
+        min-width: 45px;
     }
 
     .frequency-buttons {

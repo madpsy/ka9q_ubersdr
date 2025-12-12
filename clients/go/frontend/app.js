@@ -10,6 +10,10 @@ class UberSDRClient {
         this.userInitiatedConnection = false; // Track if connection was user-initiated
         this.hasBeenConnected = false; // Track if we've ever been connected (to distinguish page load from reconnection)
 
+        // Frequency validation constants (100 kHz - 30 MHz)
+        this.MIN_FREQUENCY_HZ = 100000;   // 100 kHz
+        this.MAX_FREQUENCY_HZ = 30000000; // 30 MHz
+
         // Band condition color constants (matching Python client)
         this.BAND_CONDITION_COLORS = {
             'POOR': '#ef4444',      // red
@@ -63,6 +67,7 @@ class UberSDRClient {
 
         // Frequency elements
         this.frequencyInput = document.getElementById('frequency-input');
+        this.frequencySubmitBtn = document.getElementById('frequency-submit-btn');
         this.frequencyButtons = document.querySelectorAll('.frequency-buttons .btn');
         this.bandButtons = document.querySelectorAll('.btn-band');
         this.bookmarkSelect = document.getElementById('bookmark-select');
@@ -292,6 +297,13 @@ class UberSDRClient {
 
         // Frequency controls
         this.frequencyInput.addEventListener('change', () => this.updateFrequency());
+        this.frequencyInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault(); // Prevent form submission
+                this.updateFrequency();
+            }
+        });
+        this.frequencySubmitBtn.addEventListener('click', () => this.updateFrequency());
         this.frequencyButtons.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const step = parseInt(e.target.dataset.step);
@@ -959,8 +971,11 @@ class UberSDRClient {
 
         if (status.frequency) {
             this.statusFrequency.textContent = this.formatFrequency(status.frequency);
-            // Also update the frequency input field for real-time sync
-            if (this.frequencyInput.value != status.frequency) {
+
+            // Only update the frequency input if it's not currently being edited by the user
+            const isUserEditing = document.activeElement === this.frequencyInput;
+
+            if (!isUserEditing && this.frequencyInput.value != status.frequency) {
                 this.frequencyInput.value = status.frequency;
 
                 // Update spectrum display if active
@@ -1343,6 +1358,13 @@ class UberSDRClient {
 
         const frequency = parseInt(this.frequencyInput.value);
 
+        // Validate frequency range
+        if (frequency < this.MIN_FREQUENCY_HZ || frequency > this.MAX_FREQUENCY_HZ) {
+            this.showError('Invalid frequency',
+                `Frequency must be between ${this.MIN_FREQUENCY_HZ / 1000} kHz and ${this.MAX_FREQUENCY_HZ / 1000000} MHz`);
+            return;
+        }
+
         try {
             const response = await fetch(`${this.apiBase}/api/frequency`, {
                 method: 'POST',
@@ -1385,6 +1407,13 @@ class UberSDRClient {
     }
 
     setFrequency(frequency) {
+        // Validate frequency range before setting
+        if (frequency < this.MIN_FREQUENCY_HZ || frequency > this.MAX_FREQUENCY_HZ) {
+            this.showError('Invalid frequency',
+                `Frequency must be between ${this.MIN_FREQUENCY_HZ / 1000} kHz and ${this.MAX_FREQUENCY_HZ / 1000000} MHz`);
+            return;
+        }
+
         this.frequencyInput.value = frequency;
         if (this.connected) {
             this.updateFrequency();
@@ -2195,7 +2224,20 @@ class UberSDRClient {
 
     showError(error, message) {
         console.error('✗', error, message);
-        alert(`Error: ${error}\n${message || ''}`);
+
+        // Use modal instead of alert
+        const modal = document.getElementById('error-modal');
+        const titleEl = document.getElementById('error-modal-title');
+        const messageEl = document.getElementById('error-modal-message');
+
+        if (modal && titleEl && messageEl) {
+            titleEl.textContent = error;
+            messageEl.textContent = message || '';
+            this.openModal('error-modal');
+        } else {
+            // Fallback to alert if modal elements not found
+            alert(`Error: ${error}\n${message || ''}`);
+        }
     }
 
     showInfo(message) {

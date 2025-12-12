@@ -112,7 +112,7 @@ if sudo test -f "$WISDOM_FILE"; then
     echo "FFTW Wisdom file already exists, skipping creation."
 else
     echo
-    echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer or something."
+    echo "Creating FFTW Wisdom... This will take several minutes. Grab a beer and be patient."
     if sudo fftwf-wisdom -v -T 1 -o "$WISDOM_FILE" rof500000 cof36480 cob1920 cob1200 cob960 cob800 cob600 cob480 cob320 cob300 cob200 cob160; then
         echo "FFTW Wisdom created successfully!"
     else

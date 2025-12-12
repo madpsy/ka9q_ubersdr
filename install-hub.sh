@@ -130,7 +130,7 @@ if crontab -l 2>/dev/null | grep -q "ubersdr/updater/latest"; then
     echo "Auto-update cron job already exists."
 else
     # Add cron job to existing crontab (or create new one if none exists)
-    (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+    (crontab -l 2>/dev/null || true; echo "$CRON_JOB") | crontab -
     echo "Auto-update cron job installed. Updates will be checked every minute."
 fi
 

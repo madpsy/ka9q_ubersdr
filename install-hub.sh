@@ -73,15 +73,15 @@ if [ -f "$INSTALLED_MARKER" ]; then
     echo
     echo "Cleaning up any existing containers..."
     cd ~/ubersdr
-    docker compose -f docker-compose.yml down 2>/dev/null || true
+    sudo docker compose -f docker-compose.yml down 2>/dev/null || true
     
     # Pull latest images
     echo "Pulling latest Docker images..."
-    docker compose -f docker-compose.yml pull
+    sudo docker compose -f docker-compose.yml pull
     
     # Start Docker containers without setting password
     echo "Starting UberSDR containers..."
-    docker compose -f docker-compose.yml up -d
+    sudo docker compose -f docker-compose.yml up -d
 else
     # Fresh installation - generate and set password
     password=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
@@ -90,15 +90,15 @@ else
     echo
     echo "Cleaning up any existing containers..."
     cd ~/ubersdr
-    docker compose -f docker-compose.yml down 2>/dev/null || true
+    sudo docker compose -f docker-compose.yml down 2>/dev/null || true
     
     # Pull latest images
     echo "Pulling latest Docker images..."
-    docker compose -f docker-compose.yml pull
+    sudo docker compose -f docker-compose.yml pull
     
     # Start Docker containers with the generated password
     echo "Starting UberSDR containers..."
-    ADMIN_PASSWORD="$password" docker compose -f docker-compose.yml up -d
+    ADMIN_PASSWORD="$password" sudo docker compose -f docker-compose.yml up -d
 fi
 
 # Create installed marker file

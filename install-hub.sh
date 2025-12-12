@@ -98,7 +98,8 @@ else
     
     # Start Docker containers with the generated password
     echo "Starting UberSDR containers..."
-    ADMIN_PASSWORD="$password" sudo docker compose -f docker-compose.yml up -d
+    export ADMIN_PASSWORD="$password"
+    sudo -E docker compose -f docker-compose.yml up -d
 fi
 
 # Create installed marker file

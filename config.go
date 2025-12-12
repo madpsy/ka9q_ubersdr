@@ -42,6 +42,9 @@ type AdminConfig struct {
 	Location             string    `yaml:"location"`
 	VersionCheckEnabled  bool      `yaml:"version_check_enabled"`  // Enable automatic version checking from GitHub
 	VersionCheckInterval int       `yaml:"version_check_interval"` // Version check interval in minutes (default: 60)
+	MaxLoginAttempts     int       `yaml:"max_login_attempts"`     // Maximum failed login attempts before temporary ban (default: 5)
+	LoginAttemptWindow   int       `yaml:"login_attempt_window"`   // Time window for counting failed attempts in seconds (default: 900 = 15 minutes)
+	LoginBanDuration     int       `yaml:"login_ban_duration"`     // Duration of temporary ban after max attempts in seconds (default: 900 = 15 minutes)
 }
 
 // GPSConfig contains GPS coordinates
@@ -345,6 +348,17 @@ func LoadConfig(filename string) (*Config, error) {
 	// For now, we'll assume it's enabled by default and users can disable it
 	if config.Admin.VersionCheckInterval == 0 {
 		config.Admin.VersionCheckInterval = 60 // Default 60 minutes
+	}
+
+	// Set login rate limiting defaults if not specified
+	if config.Admin.MaxLoginAttempts == 0 {
+		config.Admin.MaxLoginAttempts = 5 // Default 5 attempts
+	}
+	if config.Admin.LoginAttemptWindow == 0 {
+		config.Admin.LoginAttemptWindow = 900 // Default 15 minutes
+	}
+	if config.Admin.LoginBanDuration == 0 {
+		config.Admin.LoginBanDuration = 900 // Default 15 minutes
 	}
 
 	// Set spectrum defaults if not specified

@@ -11,10 +11,12 @@ import (
 
 // BannedIP represents a banned IP address
 type BannedIP struct {
-	IP       string    `yaml:"ip" json:"ip"`
-	Reason   string    `yaml:"reason" json:"reason"`
-	BannedAt time.Time `yaml:"banned_at" json:"banned_at"`
-	BannedBy string    `yaml:"banned_by" json:"banned_by"` // Admin who banned
+	IP        string    `yaml:"ip" json:"ip"`
+	Reason    string    `yaml:"reason" json:"reason"`
+	BannedAt  time.Time `yaml:"banned_at" json:"banned_at"`
+	BannedBy  string    `yaml:"banned_by" json:"banned_by"`                       // Admin who banned
+	ExpiresAt time.Time `yaml:"expires_at,omitempty" json:"expires_at,omitempty"` // Optional expiration time for temporary bans
+	Temporary bool      `yaml:"temporary" json:"temporary"`                       // Whether this is a temporary ban
 }
 
 // IPBanManager manages banned IP addresses
@@ -35,6 +37,9 @@ func NewIPBanManager(filePath string) *IPBanManager {
 	if err := manager.loadFromFile(); err != nil {
 		log.Printf("Warning: Could not load banned IPs: %v", err)
 	}
+
+	// Start cleanup goroutine for expired temporary bans
+	go manager.cleanupExpiredBans()
 
 	return manager
 }
@@ -98,26 +103,53 @@ func (ibm *IPBanManager) saveToFile() error {
 	return os.WriteFile(ibm.filePath, data, 0644)
 }
 
-// IsBanned checks if an IP address is banned
+// IsBanned checks if an IP address is banned (and not expired)
 func (ibm *IPBanManager) IsBanned(ip string) bool {
 	ibm.mu.RLock()
 	defer ibm.mu.RUnlock()
-	_, banned := ibm.bannedIPs[ip]
-	return banned
+
+	ban, exists := ibm.bannedIPs[ip]
+	if !exists {
+		return false
+	}
+
+	// Check if temporary ban has expired
+	if ban.Temporary && !ban.ExpiresAt.IsZero() && time.Now().After(ban.ExpiresAt) {
+		return false
+	}
+
+	return true
 }
 
-// BanIP bans an IP address
+// BanIP bans an IP address permanently
 func (ibm *IPBanManager) BanIP(ip, reason, bannedBy string) error {
+	return ibm.BanIPWithDuration(ip, reason, bannedBy, 0)
+}
+
+// BanIPWithDuration bans an IP address for a specific duration (0 = permanent)
+func (ibm *IPBanManager) BanIPWithDuration(ip, reason, bannedBy string, duration time.Duration) error {
 	ibm.mu.Lock()
-	ibm.bannedIPs[ip] = &BannedIP{
-		IP:       ip,
-		Reason:   reason,
-		BannedAt: time.Now(),
-		BannedBy: bannedBy,
+
+	ban := &BannedIP{
+		IP:        ip,
+		Reason:    reason,
+		BannedAt:  time.Now(),
+		BannedBy:  bannedBy,
+		Temporary: duration > 0,
 	}
+
+	if duration > 0 {
+		ban.ExpiresAt = time.Now().Add(duration)
+	}
+
+	ibm.bannedIPs[ip] = ban
 	ibm.mu.Unlock()
 
-	log.Printf("IP banned: %s (reason: %s, by: %s)", ip, reason, bannedBy)
+	if duration > 0 {
+		log.Printf("IP temporarily banned: %s (reason: %s, by: %s, duration: %v)", ip, reason, bannedBy, duration)
+	} else {
+		log.Printf("IP permanently banned: %s (reason: %s, by: %s)", ip, reason, bannedBy)
+	}
 
 	// Save to file
 	if err := ibm.saveToFile(); err != nil {
@@ -164,4 +196,33 @@ func (ibm *IPBanManager) GetBanInfo(ip string) (*BannedIP, bool) {
 	defer ibm.mu.RUnlock()
 	ban, exists := ibm.bannedIPs[ip]
 	return ban, exists
+}
+
+// cleanupExpiredBans periodically removes expired temporary bans
+func (ibm *IPBanManager) cleanupExpiredBans() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		ibm.mu.Lock()
+		now := time.Now()
+		removed := 0
+
+		for ip, ban := range ibm.bannedIPs {
+			if ban.Temporary && !ban.ExpiresAt.IsZero() && now.After(ban.ExpiresAt) {
+				delete(ibm.bannedIPs, ip)
+				removed++
+				log.Printf("Temporary ban expired for IP: %s", ip)
+			}
+		}
+
+		ibm.mu.Unlock()
+
+		// Save to file if any bans were removed
+		if removed > 0 {
+			if err := ibm.saveToFile(); err != nil {
+				log.Printf("Error saving banned IPs after cleanup: %v", err)
+			}
+		}
+	}
 }

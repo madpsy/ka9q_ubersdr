@@ -32,6 +32,24 @@ admin:
   # Minimum: 60 minutes
   version_check_interval: 60
 
+  # Login rate limiting settings
+  # Protects against brute force password attacks by temporarily banning IPs
+  # after too many failed login attempts
+
+  # Maximum failed login attempts before temporary ban (default: 5)
+  # After this many failed attempts within the time window, the IP is banned
+  max_login_attempts: 5
+
+  # Time window for counting failed attempts in seconds (default: 900 = 15 minutes)
+  # Failed attempts are counted within this rolling time window
+  # If attempts are spread out beyond this window, the counter resets
+  login_attempt_window: 900
+
+  # Duration of temporary ban in seconds (default: 900 = 15 minutes)
+  # How long an IP is banned after exceeding max_login_attempts
+  # After this duration, the ban expires and the IP can try again
+  login_ban_duration: 900
+
 # Radiod connection settings
 radiod:
   # Multicast group for status/control messages

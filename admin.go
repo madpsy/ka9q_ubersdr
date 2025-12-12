@@ -146,6 +146,92 @@ func (s *AdminSessionStore) cleanupExpiredSessions() {
 	}
 }
 
+// LoginAttempt tracks failed login attempts per IP
+type LoginAttempt struct {
+	Count     int
+	FirstTime time.Time
+	LastTime  time.Time
+}
+
+// LoginAttemptTracker tracks failed login attempts by IP address
+type LoginAttemptTracker struct {
+	attempts map[string]*LoginAttempt
+	mu       sync.RWMutex
+}
+
+// NewLoginAttemptTracker creates a new login attempt tracker
+func NewLoginAttemptTracker() *LoginAttemptTracker {
+	tracker := &LoginAttemptTracker{
+		attempts: make(map[string]*LoginAttempt),
+	}
+	// Start cleanup goroutine to remove old attempts
+	go tracker.cleanupOldAttempts()
+	return tracker
+}
+
+// RecordFailedAttempt records a failed login attempt for an IP
+func (t *LoginAttemptTracker) RecordFailedAttempt(ip string) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now := time.Now()
+	if attempt, exists := t.attempts[ip]; exists {
+		attempt.Count++
+		attempt.LastTime = now
+		return attempt.Count
+	}
+
+	t.attempts[ip] = &LoginAttempt{
+		Count:     1,
+		FirstTime: now,
+		LastTime:  now,
+	}
+	return 1
+}
+
+// GetAttemptCount returns the number of failed attempts for an IP within the window
+func (t *LoginAttemptTracker) GetAttemptCount(ip string, window time.Duration) int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	attempt, exists := t.attempts[ip]
+	if !exists {
+		return 0
+	}
+
+	// Check if attempts are within the time window
+	if time.Since(attempt.FirstTime) > window {
+		return 0
+	}
+
+	return attempt.Count
+}
+
+// ResetAttempts clears failed attempts for an IP (called on successful login)
+func (t *LoginAttemptTracker) ResetAttempts(ip string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.attempts, ip)
+}
+
+// cleanupOldAttempts periodically removes expired attempt records
+func (t *LoginAttemptTracker) cleanupOldAttempts() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		t.mu.Lock()
+		now := time.Now()
+		for ip, attempt := range t.attempts {
+			// Remove attempts older than 1 hour
+			if now.Sub(attempt.LastTime) > 1*time.Hour {
+				delete(t.attempts, ip)
+			}
+		}
+		t.mu.Unlock()
+	}
+}
+
 // AdminHandler handles admin configuration endpoints
 type AdminHandler struct {
 	config              *Config
@@ -163,6 +249,7 @@ type AdminHandler struct {
 	cwSkimmerConfig     *CWSkimmerConfig
 	cwSkimmerClient     *CWSkimmerClient
 	instanceReporter    *InstanceReporter
+	loginAttempts       *LoginAttemptTracker
 }
 
 // restartServer triggers a server restart after a short delay
@@ -241,6 +328,7 @@ func NewAdminHandler(config *Config, configFile string, configDir string, sessio
 		cwSkimmerConfig:     cwSkimmerConfig,
 		cwSkimmerClient:     cwSkimmerClient,
 		instanceReporter:    instanceReporter,
+		loginAttempts:       NewLoginAttemptTracker(),
 	}
 }
 
@@ -259,6 +347,22 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get client IP for rate limiting
+	clientIP := r.RemoteAddr
+	if forwardedFor := r.Header.Get("X-Forwarded-For"); forwardedFor != "" {
+		clientIP = strings.Split(forwardedFor, ",")[0]
+	}
+	// Strip port if present
+	if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
+		clientIP = clientIP[:idx]
+	}
+
+	// Check if IP is already temporarily banned
+	if ah.ipBanManager.IsBanned(clientIP) {
+		http.Error(w, "Too many failed login attempts. Please try again later.", http.StatusTooManyRequests)
+		return
+	}
+
 	var loginReq struct {
 		Password string `json:"password"`
 	}
@@ -270,9 +374,34 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Validate password
 	if loginReq.Password != ah.config.Admin.Password {
+		// Record failed attempt
+		attemptCount := ah.loginAttempts.RecordFailedAttempt(clientIP)
+
+		// Check if we should apply temporary ban
+		if attemptCount >= ah.config.Admin.MaxLoginAttempts {
+			// Apply temporary ban
+			banDuration := time.Duration(ah.config.Admin.LoginBanDuration) * time.Second
+			reason := fmt.Sprintf("Too many failed login attempts (%d)", attemptCount)
+			if err := ah.ipBanManager.BanIPWithDuration(clientIP, reason, "rate_limiter", banDuration); err != nil {
+				log.Printf("Failed to ban IP %s: %v", clientIP, err)
+			} else {
+				log.Printf("Temporarily banned IP %s for %v due to %d failed login attempts", clientIP, banDuration, attemptCount)
+			}
+			http.Error(w, "Too many failed login attempts. Your IP has been temporarily banned.", http.StatusTooManyRequests)
+			return
+		}
+
+		// Log the failed attempt
+		remainingAttempts := ah.config.Admin.MaxLoginAttempts - attemptCount
+		log.Printf("Failed login attempt from %s (%d/%d attempts, %d remaining)",
+			clientIP, attemptCount, ah.config.Admin.MaxLoginAttempts, remainingAttempts)
+
 		http.Error(w, "Invalid password", http.StatusUnauthorized)
 		return
 	}
+
+	// Successful login - reset attempts for this IP
+	ah.loginAttempts.ResetAttempts(clientIP)
 
 	// Create session
 	token := ah.adminSessions.CreateSession()
@@ -291,6 +420,8 @@ func (ah *AdminHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   86400, // 24 hours
 	})
+
+	log.Printf("Successful admin login from %s", clientIP)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{
@@ -3065,7 +3196,7 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 	// Determine which instance reporter to use
 	var reporter *InstanceReporter
 	var tempReporter *InstanceReporter
-	
+
 	if testParams != nil {
 		// Test mode: create a temporary instance reporter with test parameters
 		// This allows testing before instance reporting is enabled
@@ -3083,7 +3214,7 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 			}
 			return
 		}
-		
+
 		// Check if enabled when not in test mode
 		if !ah.config.InstanceReporting.Enabled {
 			http.Error(w, "Instance reporting is not enabled", http.StatusBadRequest)
@@ -3095,7 +3226,7 @@ func (ah *AdminHandler) HandleInstanceReporterTrigger(w http.ResponseWriter, r *
 			}
 			return
 		}
-		
+
 		reporter = ah.instanceReporter
 	}
 

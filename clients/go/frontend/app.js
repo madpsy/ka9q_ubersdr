@@ -68,6 +68,10 @@ class UberSDRClient {
         this.bookmarkSelect = document.getElementById('bookmark-select');
         this.bandSelect = document.getElementById('band-select');
         this.frequencyLockedCheckbox = document.getElementById('frequency-locked');
+        
+        // Local bookmarks elements
+        this.saveBookmarkBtn = document.getElementById('save-bookmark-btn');
+        this.manageLocalBookmarksBtn = document.getElementById('manage-local-bookmarks-btn');
 
         // Mode and bandwidth elements
         this.modeButtons = document.querySelectorAll('.btn-mode');
@@ -216,6 +220,9 @@ class UberSDRClient {
 
         // Saved instances
         this.savedInstances = [];
+        
+        // Local bookmarks
+        this.localBookmarks = [];
     }
 
     attachEventListeners() {
@@ -300,6 +307,20 @@ class UberSDRClient {
 
         // Bookmark selection
         this.bookmarkSelect.addEventListener('change', () => this.onBookmarkSelected());
+        
+        // Local bookmarks buttons
+        if (this.saveBookmarkBtn) {
+            this.saveBookmarkBtn.addEventListener('click', () => this.showSaveBookmarkModal());
+        }
+        if (this.manageLocalBookmarksBtn) {
+            this.manageLocalBookmarksBtn.addEventListener('click', () => this.showLocalBookmarksModal());
+        }
+        
+        // Save bookmark modal buttons
+        const saveBookmarkConfirmBtn = document.getElementById('save-bookmark-confirm-btn');
+        if (saveBookmarkConfirmBtn) {
+            saveBookmarkConfirmBtn.addEventListener('click', () => this.saveLocalBookmark());
+        }
 
         // Band selection
         this.bandSelect.addEventListener('change', () => this.onBandSelected());
@@ -682,6 +703,8 @@ class UberSDRClient {
             this.showSuccess('Connected to SDR server');
             // Load bookmarks after successful connection
             this.loadBookmarks();
+            // Load local bookmarks
+            this.loadLocalBookmarks();
             // Load bands after successful connection
             this.loadBands();
         } else {
@@ -745,6 +768,7 @@ class UberSDRClient {
                 // Load bookmarks and bands after successful connection
                 setTimeout(() => {
                     this.loadBookmarks();
+                    this.loadLocalBookmarks();
                     this.loadBands();
                 }, 500);
 
@@ -861,6 +885,7 @@ class UberSDRClient {
 
                 // Load bookmarks and bands
                 await this.loadBookmarks();
+                await this.loadLocalBookmarks();
                 await this.loadBands();
 
                 // Auto-enable spectrum only if:
@@ -885,6 +910,7 @@ class UberSDRClient {
             } else if (status.connected && this.bookmarkSelect && this.bookmarkSelect.options.length <= 1) {
                 // Already connected but bookmarks/bands not loaded yet (shouldn't normally happen)
                 await this.loadBookmarks();
+                await this.loadLocalBookmarks();
                 await this.loadBands();
             }
 
@@ -2086,12 +2112,16 @@ class UberSDRClient {
 
             // Enable mode buttons
             this.modeButtons.forEach(btn => btn.disabled = false);
-            
+
             // Enable spectrum display checkbox
             this.spectrumEnabled.disabled = false;
-            
+
             // Enable audio preview checkbox
             this.audioPreviewEnabled.disabled = false;
+
+            // Enable bookmark buttons
+            this.saveBookmarkBtn.disabled = false;
+            this.manageLocalBookmarksBtn.disabled = false;
         } else {
             this.connectionStatus.textContent = 'Disconnected';
             this.connectionStatus.className = 'status-badge disconnected';
@@ -2114,9 +2144,13 @@ class UberSDRClient {
 
             // Disable mode buttons
             this.modeButtons.forEach(btn => btn.disabled = true);
-            
+
             // Disable spectrum display checkbox (always disable when disconnected)
             this.spectrumEnabled.disabled = true;
+
+            // Disable bookmark buttons
+            this.saveBookmarkBtn.disabled = true;
+            this.manageLocalBookmarksBtn.disabled = true;
             // Uncheck and hide if currently enabled
             if (this.spectrumEnabled.checked) {
                 this.spectrumEnabled.checked = false;
@@ -3636,6 +3670,31 @@ class UberSDRClient {
     }
 
     // Bookmark Methods
+    
+    async loadLocalBookmarks() {
+        console.log('Loading local bookmarks from API...');
+        try {
+            const response = await fetch(`${this.apiBase}/api/bookmarks/local`);
+            console.log('Local bookmarks API response status:', response.status);
+
+            if (response.ok) {
+                this.localBookmarks = await response.json();
+                console.log('Received local bookmarks:', this.localBookmarks);
+                
+                // Merge and update bookmarks display
+                await this.loadBookmarks();
+                
+                console.log(`Successfully loaded ${this.localBookmarks.length} local bookmarks`);
+            } else {
+                const errorText = await response.text();
+                console.error('Failed to load local bookmarks:', response.status, errorText);
+                this.localBookmarks = [];
+            }
+        } catch (error) {
+            console.error('Error loading local bookmarks:', error);
+            this.localBookmarks = [];
+        }
+    }
 
     async loadBookmarks() {
         if (!this.connected) {
@@ -3649,16 +3708,19 @@ class UberSDRClient {
             console.log('Bookmarks API response status:', response.status);
 
             if (response.ok) {
-                const bookmarks = await response.json();
-                console.log('Received bookmarks:', bookmarks);
-                this.populateBookmarks(bookmarks);
+                const serverBookmarks = await response.json();
+                console.log('Received server bookmarks:', serverBookmarks);
+                
+                // Merge server and local bookmarks
+                const allBookmarks = this.mergeBookmarks(serverBookmarks, this.localBookmarks);
+                this.populateBookmarks(allBookmarks);
 
-                // Update spectrum display with bookmarks
+                // Update spectrum display with merged bookmarks
                 if (this.spectrumDisplay) {
-                    this.spectrumDisplay.setBookmarks(bookmarks);
+                    this.spectrumDisplay.setBookmarks(allBookmarks);
                 }
 
-                console.log(`Successfully loaded ${bookmarks.length} bookmarks`);
+                console.log(`Successfully loaded ${serverBookmarks.length} server + ${this.localBookmarks.length} local bookmarks`);
             } else {
                 const errorText = await response.text();
                 console.error('Failed to load bookmarks:', response.status, errorText);
@@ -3670,18 +3732,58 @@ class UberSDRClient {
         }
     }
 
+    mergeBookmarks(serverBookmarks, localBookmarks) {
+        // Merge server and local bookmarks, with visual distinction
+        const merged = [];
+        
+        // Add server bookmarks (marked as server)
+        if (serverBookmarks && serverBookmarks.length > 0) {
+            serverBookmarks.forEach(bookmark => {
+                merged.push({
+                    ...bookmark,
+                    isLocal: false
+                });
+            });
+        }
+        
+        // Add local bookmarks (marked as local)
+        if (localBookmarks && localBookmarks.length > 0) {
+            localBookmarks.forEach(bookmark => {
+                merged.push({
+                    ...bookmark,
+                    isLocal: true
+                });
+            });
+        }
+        
+        // Sort by frequency
+        merged.sort((a, b) => a.frequency - b.frequency);
+        
+        return merged;
+    }
+    
     populateBookmarks(bookmarks) {
         if (!this.bookmarkSelect) return;
 
         // Clear existing options except the first one
         this.bookmarkSelect.innerHTML = '<option value="">-- Select Bookmark --</option>';
 
-        // Add bookmarks
+        // Add bookmarks with visual distinction
         if (bookmarks && bookmarks.length > 0) {
             bookmarks.forEach(bookmark => {
                 const option = document.createElement('option');
                 option.value = JSON.stringify(bookmark); // Store full bookmark data
-                option.textContent = bookmark.name || 'Unnamed';
+                
+                // Add prefix for local bookmarks
+                const prefix = bookmark.isLocal ? '📌 ' : '';
+                option.textContent = prefix + (bookmark.name || 'Unnamed');
+                
+                // Style local bookmarks differently
+                if (bookmark.isLocal) {
+                    option.style.color = '#00CED1'; // Cyan for local bookmarks
+                    option.style.fontWeight = 'bold';
+                }
+                
                 this.bookmarkSelect.appendChild(option);
             });
 
@@ -3758,6 +3860,19 @@ class UberSDRClient {
                 }, 100);
             }
 
+            // Update bandwidth if provided (check both camelCase and snake_case)
+            const bwLow = bookmark.bandwidthLow ?? bookmark.bandwidth_low;
+            const bwHigh = bookmark.bandwidthHigh ?? bookmark.bandwidth_high;
+            
+            if (bwLow !== null && bwLow !== undefined) {
+                this.bandwidthLowInput.value = bwLow;
+                this.bandwidthLowValue.textContent = bwLow;
+            }
+            if (bwHigh !== null && bwHigh !== undefined) {
+                this.bandwidthHighInput.value = bwHigh;
+                this.bandwidthHighValue.textContent = bwHigh;
+            }
+
             // Apply the changes if connected - use applySettings to send both frequency AND mode
             if (this.connected) {
                 this.applySettings();
@@ -3770,6 +3885,295 @@ class UberSDRClient {
             console.error('Error parsing bookmark:', error);
             this.showError('Bookmark Error', 'Failed to load bookmark');
         }
+    }
+    
+    showSaveBookmarkModal() {
+        const modal = document.getElementById('save-bookmark-modal');
+        const nameInput = document.getElementById('bookmark-name-input');
+        
+        if (modal && nameInput) {
+            // Clear previous input
+            nameInput.value = '';
+            
+            // Populate current settings in the preview
+            const freqSpan = document.getElementById('save-bookmark-frequency');
+            const modeSpan = document.getElementById('save-bookmark-mode');
+            const bwSpan = document.getElementById('save-bookmark-bandwidth');
+            
+            if (freqSpan) {
+                freqSpan.textContent = this.formatFrequency(parseInt(this.frequencyInput.value));
+            }
+            if (modeSpan) {
+                modeSpan.textContent = this.currentMode.toUpperCase();
+            }
+            if (bwSpan) {
+                const bwLow = parseInt(this.bandwidthLowInput.value);
+                const bwHigh = parseInt(this.bandwidthHighInput.value);
+                bwSpan.textContent = `${bwLow} to ${bwHigh} Hz`;
+            }
+            
+            this.openModal('save-bookmark-modal');
+            // Focus on input
+            setTimeout(() => nameInput.focus(), 100);
+        }
+    }
+    
+    async saveLocalBookmark() {
+        const nameInput = document.getElementById('bookmark-name-input');
+        const name = nameInput ? nameInput.value.trim() : '';
+        
+        if (!name) {
+            this.showError('Name Required', 'Please enter a name for the bookmark');
+            return;
+        }
+        
+        // Check if a bookmark with this name already exists
+        const existingBookmark = this.localBookmarks.find(b => b.name === name);
+        if (existingBookmark) {
+            // Prompt user to confirm overwrite
+            if (!confirm(`A bookmark named "${name}" already exists. Do you want to overwrite it?`)) {
+                return; // User cancelled
+            }
+        }
+        
+        // Get current settings
+        const bookmark = {
+            name: name,
+            frequency: parseInt(this.frequencyInput.value),
+            mode: this.currentMode,
+            bandwidthLow: parseInt(this.bandwidthLowInput.value),
+            bandwidthHigh: parseInt(this.bandwidthHighInput.value)
+        };
+        
+        console.log('Saving local bookmark:', bookmark);
+        
+        try {
+            const response = await fetch(`${this.apiBase}/api/bookmarks/local`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bookmark)
+            });
+            
+            if (response.ok) {
+                const action = existingBookmark ? 'Updated' : 'Saved';
+                this.showSuccess(`${action} local bookmark: ${name}`);
+                this.closeModal('save-bookmark-modal');
+                
+                // Reload bookmarks
+                await this.loadLocalBookmarks();
+            } else {
+                const data = await response.json();
+                this.showError('Failed to save bookmark', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error saving bookmark', error.message);
+        }
+    }
+    
+    async showLocalBookmarksModal() {
+        this.openModal('local-bookmarks-modal');
+        // Reload local bookmarks to ensure we have the latest data
+        await this.loadLocalBookmarks();
+        this.populateLocalBookmarksTable();
+    }
+    
+    populateLocalBookmarksTable() {
+        const tbody = document.getElementById('local-bookmarks-tbody');
+        if (!tbody) {
+            console.error('Table body element not found!');
+            return;
+        }
+
+        console.log('populateLocalBookmarksTable called, localBookmarks:', this.localBookmarks);
+        
+        tbody.innerHTML = '';
+        
+        if (!this.localBookmarks || this.localBookmarks.length === 0) {
+            console.log('No local bookmarks to display');
+            const row = tbody.insertRow();
+            const cell = row.insertCell(0);
+            cell.colSpan = 5;
+            cell.textContent = 'No local bookmarks';
+            cell.style.textAlign = 'center';
+            cell.style.fontStyle = 'italic';
+            return;
+        }
+        
+        console.log(`Populating table with ${this.localBookmarks.length} bookmarks`);
+        
+        this.localBookmarks.forEach(bookmark => {
+            const row = tbody.insertRow();
+            
+            // Name
+            const nameCell = row.insertCell(0);
+            nameCell.textContent = bookmark.name;
+            
+            // Frequency
+            const freqCell = row.insertCell(1);
+            freqCell.textContent = this.formatFrequency(bookmark.frequency);
+            
+            // Mode
+            const modeCell = row.insertCell(2);
+            modeCell.textContent = bookmark.mode ? bookmark.mode.toUpperCase() : '-';
+            
+            // Bandwidth
+            const bwCell = row.insertCell(3);
+            if (bookmark.bandwidth_low !== null && bookmark.bandwidth_low !== undefined &&
+                bookmark.bandwidth_high !== null && bookmark.bandwidth_high !== undefined) {
+                bwCell.textContent = `${bookmark.bandwidth_low} to ${bookmark.bandwidth_high} Hz`;
+            } else {
+                bwCell.textContent = '-';
+            }
+            
+            // Actions
+            const actionsCell = row.insertCell(4);
+            
+            // Use button
+            const useBtn = document.createElement('button');
+            useBtn.textContent = '📻 Use';
+            useBtn.className = 'btn btn-primary btn-sm';
+            useBtn.style.marginRight = '5px';
+            useBtn.onclick = () => this.useLocalBookmark(bookmark);
+            actionsCell.appendChild(useBtn);
+            
+            // Delete button
+            const deleteBtn = document.createElement('button');
+            deleteBtn.textContent = '🗑️ Delete';
+            deleteBtn.className = 'btn btn-danger btn-sm';
+            deleteBtn.style.marginRight = '5px';
+            deleteBtn.onclick = () => this.deleteLocalBookmark(bookmark.name);
+            actionsCell.appendChild(deleteBtn);
+            
+            // Rename button
+            const renameBtn = document.createElement('button');
+            renameBtn.textContent = '✏️ Rename';
+            renameBtn.className = 'btn btn-secondary btn-sm';
+            renameBtn.onclick = () => this.renameLocalBookmark(bookmark.name);
+            actionsCell.appendChild(renameBtn);
+        });
+    }
+    
+    async deleteLocalBookmark(name) {
+        if (!confirm(`Delete local bookmark "${name}"?`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`${this.apiBase}/api/bookmarks/local/${encodeURIComponent(name)}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                this.showSuccess(`Deleted local bookmark: ${name}`);
+                
+                // Reload bookmarks
+                await this.loadLocalBookmarks();
+                
+                // Update table
+                this.populateLocalBookmarksTable();
+            } else {
+                const data = await response.json();
+                this.showError('Failed to delete bookmark', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error deleting bookmark', error.message);
+        }
+    }
+    
+    async renameLocalBookmark(oldName) {
+        const newName = prompt(`Enter new name for "${oldName}":`, oldName);
+        if (!newName || newName.trim() === '' || newName === oldName) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`${this.apiBase}/api/bookmarks/local/${encodeURIComponent(oldName)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ newName: newName.trim() })
+            });
+            
+            if (response.ok) {
+                this.showSuccess(`Renamed bookmark to: ${newName}`);
+                
+                // Reload bookmarks
+                await this.loadLocalBookmarks();
+                
+                // Update table
+                this.populateLocalBookmarksTable();
+            } else {
+                const data = await response.json();
+                this.showError('Failed to rename bookmark', data.message || data.error);
+            }
+        } catch (error) {
+            this.showError('Error renaming bookmark', error.message);
+        }
+    }
+    
+    useLocalBookmark(bookmark) {
+        console.log('Using local bookmark:', bookmark);
+        
+        // Extract frequency and mode
+        const frequency = bookmark.frequency;
+        const mode = bookmark.mode;
+        
+        if (!frequency) {
+            console.error('Bookmark missing frequency');
+            return;
+        }
+        
+        // Map mode names (similar to onBookmarkSelected)
+        const modeMap = {
+            'CWR': 'cw',
+            'CW': 'cwu',
+            'cw': 'cwu',
+            'cwu': 'cwu',
+            'cwl': 'cwl'
+        };
+        
+        let mappedMode = mode ? mode.toLowerCase() : 'usb';
+        if (modeMap[mappedMode]) {
+            mappedMode = modeMap[mappedMode];
+        }
+        
+        // Update frequency input
+        this.frequencyInput.value = frequency;
+        
+        // Update mode if provided
+        if (mode) {
+            this.bookmarkModeChange = true;
+            this.currentMode = mappedMode;
+            this.updateModeButtons();
+            this.updateModeDefaults();
+            
+            setTimeout(() => {
+                this.bookmarkModeChange = false;
+            }, 100);
+        }
+        
+        // Update bandwidth if provided (check both camelCase and snake_case)
+        const bwLow = bookmark.bandwidthLow ?? bookmark.bandwidth_low;
+        const bwHigh = bookmark.bandwidthHigh ?? bookmark.bandwidth_high;
+        
+        if (bwLow !== null && bwLow !== undefined) {
+            this.bandwidthLowInput.value = bwLow;
+            this.bandwidthLowValue.textContent = bwLow;
+        }
+        if (bwHigh !== null && bwHigh !== undefined) {
+            this.bandwidthHighInput.value = bwHigh;
+            this.bandwidthHighValue.textContent = bwHigh;
+        }
+        
+        // Apply the changes if connected
+        if (this.connected) {
+            this.applySettings();
+            this.showSuccess(`Applied bookmark: ${bookmark.name}`);
+        } else {
+            this.showInfo(`Bookmark loaded: ${bookmark.name} (connect to apply)`);
+        }
+        
+        // Close the modal
+        this.closeModal('local-bookmarks-modal');
     }
 
     // Band Methods

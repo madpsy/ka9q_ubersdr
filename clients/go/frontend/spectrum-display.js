@@ -295,7 +295,7 @@ class SpectrumDisplay {
                 const mode = (this.hoveringBookmark.mode || 'USB').toUpperCase();
                 const freqMhz = (this.cursorFreq / 1e6).toFixed(6);
                 const tooltipText = `${this.hoveringBookmark.name}\n${freqMhz} MHz\n${mode}`;
-                this.drawBookmarkTooltip(this.cursorCanvas, this.cursorX, this.cursorY, tooltipText);
+                this.drawBookmarkTooltip(this.cursorCanvas, this.cursorX, this.cursorY, tooltipText, this.hoveringBookmark.isLocal);
             } else if (this.cursorCanvas === this.spectrumCanvas) {
                 this.drawTooltip(this.spectrumCanvas, this.cursorX, canvasY, this.cursorFreq, this.cursorDbValue);
             } else {
@@ -508,12 +508,15 @@ class SpectrumDisplay {
             const freqOffset = freq - startFreq;
             const x = marginLeft + (freqOffset / this.totalBandwidth) * graphWidth;
 
-            // Draw bookmark label (gold background with black text)
+            // Draw bookmark label with color based on whether it's local or server
             const labelWidth = name.length * 7 + 8;
             const labelHeight = 12;
 
-            // Gold background
-            ctx.fillStyle = '#FFD700';
+            // Choose color: cyan for local bookmarks, gold for server bookmarks
+            const bookmarkColor = bookmark.isLocal ? '#00CED1' : '#FFD700';
+
+            // Colored background
+            ctx.fillStyle = bookmarkColor;
             ctx.fillRect(x - labelWidth / 2, bookmarkY, labelWidth, labelHeight);
 
             // White border
@@ -532,8 +535,8 @@ class SpectrumDisplay {
             const arrowY = bookmarkY + labelHeight;
             const arrowLength = 6;
 
-            // Arrow triangle (gold with white border)
-            ctx.fillStyle = '#FFD700';
+            // Arrow triangle (same color as bookmark with white border)
+            ctx.fillStyle = bookmarkColor;
             ctx.beginPath();
             ctx.moveTo(x, arrowY + arrowLength);  // Tip
             ctx.lineTo(x - 4, arrowY);             // Left
@@ -1109,7 +1112,7 @@ class SpectrumDisplay {
                         const mode = (bookmark.mode || 'USB').toUpperCase();
                         const freqMhz = (freq / 1e6).toFixed(6);
                         const tooltipText = `${name}\n${freqMhz} MHz\n${mode}`;
-                        this.drawBookmarkTooltip(canvas, canvasX, canvasY, tooltipText);
+                        this.drawBookmarkTooltip(canvas, canvasX, canvasY, tooltipText, bookmark.isLocal);
                         return;
                     }
                 }
@@ -1557,7 +1560,7 @@ class SpectrumDisplay {
         });
     }
 
-    drawBookmarkTooltip(canvas, x, y, text) {
+    drawBookmarkTooltip(canvas, x, y, text, isLocal) {
         const ctx = canvas.getContext('2d');
 
         // Set font for measuring
@@ -1580,8 +1583,9 @@ class SpectrumDisplay {
         }
         const tooltipY = y + 10;  // Below cursor for bookmarks
 
-        // Draw gold background (matching bookmark color)
-        ctx.fillStyle = '#FFD700';
+        // Draw background with color matching bookmark type (cyan for local, gold for server)
+        const bookmarkColor = isLocal ? '#00CED1' : '#FFD700';
+        ctx.fillStyle = bookmarkColor;
         ctx.strokeStyle = 'white';
         ctx.lineWidth = 2;
         ctx.setLineDash([]);

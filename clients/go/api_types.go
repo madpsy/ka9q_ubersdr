@@ -181,6 +181,24 @@ type MIDIAddMappingRequest struct {
 	Mode       string `json:"mode"`       // Throttle mode: "debounce" or "rate_limit"
 }
 
+// LocalBookmarkRequest represents a request to save a local bookmark
+type LocalBookmarkRequest struct {
+	Name          string `json:"name"`
+	Frequency     int    `json:"frequency"`
+	Mode          string `json:"mode"`
+	BandwidthLow  *int   `json:"bandwidthLow,omitempty"`
+	BandwidthHigh *int   `json:"bandwidthHigh,omitempty"`
+}
+
+// LocalBookmarkUpdateRequest represents a request to update a local bookmark
+type LocalBookmarkUpdateRequest struct {
+	NewName       string `json:"newName,omitempty"`
+	Frequency     *int   `json:"frequency,omitempty"`
+	Mode          string `json:"mode,omitempty"`
+	BandwidthLow  *int   `json:"bandwidthLow,omitempty"`
+	BandwidthHigh *int   `json:"bandwidthHigh,omitempty"`
+}
+
 // API Response Types
 
 // StatusResponse represents the current client status

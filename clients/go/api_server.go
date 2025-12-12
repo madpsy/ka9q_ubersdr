@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -23,6 +25,7 @@ type APIServer struct {
 	manager           *WebSocketManager
 	configManager     *ConfigManager
 	instanceDiscovery *InstanceDiscovery
+	bookmarkManager   *LocalBookmarkManager
 	router            *mux.Router
 	server            *http.Server
 	upgrader          websocket.Upgrader
@@ -42,10 +45,25 @@ func NewAPIServer(manager *WebSocketManager, configManager *ConfigManager, port 
 		log.Printf("Warning: Failed to start local instance discovery: %v", err)
 	}
 
+	// Initialize local bookmark manager
+	var bookmarkManager *LocalBookmarkManager
+	if configDir, err := os.UserConfigDir(); err == nil {
+		configPath := filepath.Join(configDir, "ubersdr")
+		bookmarkManager, err = NewLocalBookmarkManager(configPath)
+		if err != nil {
+			log.Printf("Warning: Failed to create local bookmark manager: %v", err)
+		} else if err := bookmarkManager.Load(); err != nil {
+			log.Printf("Warning: Failed to load local bookmarks: %v", err)
+		}
+	} else {
+		log.Printf("Warning: Failed to get user config directory: %v", err)
+	}
+
 	server := &APIServer{
 		manager:           manager,
 		configManager:     configManager,
 		instanceDiscovery: instanceDiscovery,
+		bookmarkManager:   bookmarkManager,
 		router:            router,
 		server: &http.Server{
 			Addr:         fmt.Sprintf(":%d", port),
@@ -139,8 +157,12 @@ func (s *APIServer) setupRoutes() {
 	api.HandleFunc("/instances/local", s.handleLocalInstances).Methods("GET", "OPTIONS")
 	api.HandleFunc("/instances/public", s.handlePublicInstances).Methods("GET", "OPTIONS")
 
-	// Bookmarks endpoint
+	// Bookmarks endpoints
 	api.HandleFunc("/bookmarks", s.handleBookmarks).Methods("GET", "OPTIONS")
+	api.HandleFunc("/bookmarks/local", s.handleLocalBookmarks).Methods("GET", "OPTIONS")
+	api.HandleFunc("/bookmarks/local", s.handleSaveLocalBookmark).Methods("POST", "OPTIONS")
+	api.HandleFunc("/bookmarks/local/{name}", s.handleDeleteLocalBookmark).Methods("DELETE", "OPTIONS")
+	api.HandleFunc("/bookmarks/local/{name}", s.handleUpdateLocalBookmark).Methods("PUT", "OPTIONS")
 
 	// Bands endpoint
 	api.HandleFunc("/bands", s.handleBands).Methods("GET", "OPTIONS")
@@ -1605,6 +1627,171 @@ func (s *APIServer) handleBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, bookmarks)
+}
+
+// handleLocalBookmarks handles GET /api/bookmarks/local
+// Returns only local bookmarks
+func (s *APIServer) handleLocalBookmarks(w http.ResponseWriter, r *http.Request) {
+	if s.bookmarkManager == nil {
+		respondError(w, http.StatusInternalServerError, "Local bookmarks not available", "Bookmark manager not initialized")
+		return
+	}
+
+	bookmarks := s.bookmarkManager.GetAll()
+	respondJSON(w, http.StatusOK, bookmarks)
+}
+
+// handleSaveLocalBookmark handles POST /api/bookmarks/local
+// Saves a new local bookmark
+func (s *APIServer) handleSaveLocalBookmark(w http.ResponseWriter, r *http.Request) {
+	if s.bookmarkManager == nil {
+		respondError(w, http.StatusInternalServerError, "Local bookmarks not available", "Bookmark manager not initialized")
+		return
+	}
+
+	var req LocalBookmarkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	// Validate required fields
+	if req.Name == "" {
+		respondError(w, http.StatusBadRequest, "Bookmark name is required", "")
+		return
+	}
+	if req.Frequency == 0 {
+		respondError(w, http.StatusBadRequest, "Frequency is required", "")
+		return
+	}
+	if req.Mode == "" {
+		respondError(w, http.StatusBadRequest, "Mode is required", "")
+		return
+	}
+
+	// Create bookmark (Add method handles both new and update)
+	bookmark := LocalBookmark{
+		Name:          req.Name,
+		Frequency:     req.Frequency,
+		Mode:          req.Mode,
+		BandwidthLow:  req.BandwidthLow,
+		BandwidthHigh: req.BandwidthHigh,
+	}
+
+	// Add bookmark
+	if err := s.bookmarkManager.Add(bookmark); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to save bookmark", err.Error())
+		return
+	}
+
+	respondSuccess(w, fmt.Sprintf("Bookmark '%s' saved successfully", req.Name))
+}
+
+// handleDeleteLocalBookmark handles DELETE /api/bookmarks/local/{name}
+// Deletes a local bookmark
+func (s *APIServer) handleDeleteLocalBookmark(w http.ResponseWriter, r *http.Request) {
+	if s.bookmarkManager == nil {
+		respondError(w, http.StatusInternalServerError, "Local bookmarks not available", "Bookmark manager not initialized")
+		return
+	}
+
+	vars := mux.Vars(r)
+	name := vars["name"]
+
+	if name == "" {
+		respondError(w, http.StatusBadRequest, "Bookmark name is required", "")
+		return
+	}
+
+	// Check if bookmark exists
+	if !s.bookmarkManager.Exists(name) {
+		respondError(w, http.StatusNotFound, "Bookmark not found", fmt.Sprintf("No bookmark named '%s' found", name))
+		return
+	}
+
+	// Delete bookmark
+	if err := s.bookmarkManager.Delete(name); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to delete bookmark", err.Error())
+		return
+	}
+
+	respondSuccess(w, fmt.Sprintf("Bookmark '%s' deleted successfully", name))
+}
+
+// handleUpdateLocalBookmark handles PUT /api/bookmarks/local/{name}
+// Updates a local bookmark
+func (s *APIServer) handleUpdateLocalBookmark(w http.ResponseWriter, r *http.Request) {
+	if s.bookmarkManager == nil {
+		respondError(w, http.StatusInternalServerError, "Local bookmarks not available", "Bookmark manager not initialized")
+		return
+	}
+
+	vars := mux.Vars(r)
+	name := vars["name"]
+
+	if name == "" {
+		respondError(w, http.StatusBadRequest, "Bookmark name is required", "")
+		return
+	}
+
+	// Check if bookmark exists
+	if !s.bookmarkManager.Exists(name) {
+		respondError(w, http.StatusNotFound, "Bookmark not found", fmt.Sprintf("No bookmark named '%s' found", name))
+		return
+	}
+
+	var req LocalBookmarkUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	// Get existing bookmark
+	bookmarks := s.bookmarkManager.GetAll()
+	var bookmark LocalBookmark
+	found := false
+	for _, b := range bookmarks {
+		if b.Name == name {
+			bookmark = b
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		respondError(w, http.StatusNotFound, "Bookmark not found", fmt.Sprintf("No bookmark named '%s' found", name))
+		return
+	}
+
+	// Update fields if provided
+	if req.NewName != "" && req.NewName != name {
+		// Check if new name already exists
+		if s.bookmarkManager.Exists(req.NewName) {
+			respondError(w, http.StatusConflict, "Bookmark name already exists", fmt.Sprintf("A bookmark named '%s' already exists", req.NewName))
+			return
+		}
+		bookmark.Name = req.NewName
+	}
+	if req.Frequency != nil {
+		bookmark.Frequency = *req.Frequency
+	}
+	if req.Mode != "" {
+		bookmark.Mode = req.Mode
+	}
+	if req.BandwidthLow != nil {
+		bookmark.BandwidthLow = req.BandwidthLow
+	}
+	if req.BandwidthHigh != nil {
+		bookmark.BandwidthHigh = req.BandwidthHigh
+	}
+
+	// Update bookmark
+	if err := s.bookmarkManager.Update(name, bookmark); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to update bookmark", err.Error())
+		return
+	}
+
+	respondSuccess(w, fmt.Sprintf("Bookmark '%s' updated successfully", name))
 }
 
 // handleBands handles GET /api/bands

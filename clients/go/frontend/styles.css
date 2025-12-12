@@ -763,6 +763,10 @@ body.dark-mode .instance-card.local-instance {
     color: #333;
 }
 
+body.dark-mode .instance-name {
+    color: #e2e8f0;
+}
+
 .instance-badges {
     display: flex;
     gap: 5px;
@@ -799,6 +803,10 @@ body.dark-mode .instance-card.local-instance {
     color: #666;
 }
 
+body.dark-mode .instance-details {
+    color: #94a3b8;
+}
+
 .instance-detail {
     display: flex;
     align-items: center;
@@ -807,6 +815,10 @@ body.dark-mode .instance-card.local-instance {
 
 .instance-detail strong {
     color: #333;
+}
+
+body.dark-mode .instance-detail strong {
+    color: #e2e8f0;
 }
 
 .filter-group {
@@ -820,12 +832,24 @@ body.dark-mode .instance-card.local-instance {
     color: #333;
 }
 
+body.dark-mode .filter-group label {
+    color: #e2e8f0;
+}
+
 .filter-group input {
     width: 100%;
     padding: 8px 12px;
     border: 1px solid #ddd;
     border-radius: 4px;
     font-size: 14px;
+    background-color: white;
+    color: #333;
+}
+
+body.dark-mode .filter-group input {
+    background-color: var(--bg-color);
+    border-color: var(--border-color);
+    color: var(--text-color);
 }
 
 #local-instances-status,
@@ -834,6 +858,11 @@ body.dark-mode .instance-card.local-instance {
     padding: 20px;
     color: #666;
     font-style: italic;
+}
+
+body.dark-mode #local-instances-status,
+body.dark-mode #public-instances-status {
+    color: #94a3b8;
 }
 
 /* Audio Visualizer Styles */

@@ -1156,24 +1156,29 @@ class RadioGUI:
 
         # Apply button (moved to top row)
         self.apply_freq_btn = ttk.Button(freq_frame, text="Apply", command=self.apply_frequency)
-        self.apply_freq_btn.grid(row=0, column=3, sticky=tk.W, padx=(0, 10))
+        self.apply_freq_btn.grid(row=0, column=3, sticky=tk.W, padx=(0, 5))
         self.apply_freq_btn.state(['disabled'])
 
+        # Frequency lock checkbox (next to Apply button)
+        self.freq_lock_var = tk.BooleanVar(value=False)
+        freq_lock_check = ttk.Checkbutton(freq_frame, text="Lock", variable=self.freq_lock_var)
+        freq_lock_check.grid(row=0, column=4, sticky=tk.W, padx=(0, 10))
+
         # Step size selector
-        ttk.Label(freq_frame, text="Step:").grid(row=0, column=4, sticky=tk.W, padx=(10, 5))
+        ttk.Label(freq_frame, text="Step:").grid(row=0, column=5, sticky=tk.W, padx=(10, 5))
         self.step_size_var = tk.StringVar(value="1 kHz")
         step_combo = ttk.Combobox(freq_frame, textvariable=self.step_size_var,
                                   values=["10 Hz", "100 Hz", "500 Hz", "1 kHz", "10 kHz"],
                                   state='readonly', width=8)
-        step_combo.grid(row=0, column=5, sticky=tk.W, padx=(0, 5))
+        step_combo.grid(row=0, column=6, sticky=tk.W, padx=(0, 5))
         step_combo.bind('<<ComboboxSelected>>', lambda e: self.on_step_size_changed())
 
         # Up/Down buttons
-        ttk.Button(freq_frame, text="▲", width=3, command=self.step_frequency_up).grid(row=0, column=6, sticky=tk.W, padx=1)
-        ttk.Button(freq_frame, text="▼", width=3, command=self.step_frequency_down).grid(row=0, column=7, sticky=tk.W, padx=1)
+        ttk.Button(freq_frame, text="▲", width=3, command=self.step_frequency_up).grid(row=0, column=7, sticky=tk.W, padx=1)
+        ttk.Button(freq_frame, text="▼", width=3, command=self.step_frequency_down).grid(row=0, column=8, sticky=tk.W, padx=1)
 
         # Save bookmark button (next to up/down arrows)
-        ttk.Button(freq_frame, text="💾", width=3, command=self.save_current_bookmark).grid(row=0, column=8, sticky=tk.W, padx=(5, 0))
+        ttk.Button(freq_frame, text="💾", width=3, command=self.save_current_bookmark).grid(row=0, column=9, sticky=tk.W, padx=(5, 0))
 
         # Quick frequency buttons - all amateur bands from 160m to 10m (single row)
         # Moved to second row
@@ -1709,6 +1714,11 @@ class RadioGUI:
 
     def set_frequency_hz(self, freq_hz: int):
         """Set frequency from quick button (input in Hz)."""
+        # Check if frequency is locked FIRST, before any UI updates
+        if self.freq_lock_var.get():
+            self.log_status("Frequency is locked - change blocked")
+            return
+
         # Convert to current unit
         unit = self.freq_unit_var.get()
         if unit == "MHz":
@@ -1725,6 +1735,11 @@ class RadioGUI:
 
     def set_frequency_and_mode(self, freq_hz: int):
         """Set frequency and appropriate mode from quick button (LSB < 10 MHz, USB >= 10 MHz)."""
+        # Check if frequency is locked
+        if self.freq_lock_var.get():
+            self.log_status("Frequency is locked - change blocked")
+            return
+
         # Set frequency display
         unit = self.freq_unit_var.get()
         if unit == "MHz":
@@ -1916,6 +1931,11 @@ class RadioGUI:
 
     def step_frequency_up(self):
         """Step frequency up by the selected step size, rounding to step boundaries."""
+        # Check if frequency is locked
+        if self.freq_lock_var.get():
+            self.log_status("Frequency is locked - change blocked")
+            return
+
         try:
             current_hz = self.get_frequency_hz()
             step_hz = self.get_step_size_hz()
@@ -1934,6 +1954,11 @@ class RadioGUI:
 
     def step_frequency_down(self):
         """Step frequency down by the selected step size, rounding to step boundaries."""
+        # Check if frequency is locked
+        if self.freq_lock_var.get():
+            self.log_status("Frequency is locked - change blocked")
+            return
+
         try:
             current_hz = self.get_frequency_hz()
             step_hz = self.get_step_size_hz()
@@ -1952,6 +1977,11 @@ class RadioGUI:
 
     def set_frequency_hz(self, freq_hz: int):
         """Set the frequency display to the given Hz value."""
+        # Check if frequency is locked FIRST, before any UI updates
+        if self.freq_lock_var.get():
+            self.log_status("Frequency is locked - change blocked")
+            return
+
         # Convert to current unit
         unit = self.freq_unit_var.get()
         if unit == "Hz":
@@ -2912,6 +2942,11 @@ class RadioGUI:
         if not self.connected or not self.client:
             return
 
+        # Check if frequency is locked
+        if self.freq_lock_var.get():
+            self.log_status("Frequency is locked - change blocked")
+            return
+
         try:
             freq_hz = self.get_frequency_hz()
 
@@ -3557,6 +3592,11 @@ class RadioGUI:
     
     def _apply_radio_control_frequency(self, freq_hz: int):
         """Apply frequency change from radio (runs in main thread)."""
+        # Check if frequency is locked
+        if self.freq_lock_var.get():
+            self.log_status("Frequency is locked - radio control change blocked")
+            return
+
         self.set_frequency_hz(freq_hz)
         if self.connected:
             self.apply_frequency()
@@ -4405,6 +4445,11 @@ class RadioGUI:
         Args:
             frequency: New frequency in Hz
         """
+        # Check if frequency is locked
+        if self.freq_lock_var.get():
+            self.log_status("Frequency is locked - change blocked")
+            return
+
         # Update frequency display
         self.set_frequency_hz(int(frequency))
 
@@ -4418,6 +4463,11 @@ class RadioGUI:
         Args:
             direction: +1 for step up, -1 for step down
         """
+        # Check if frequency is locked
+        if self.freq_lock_var.get():
+            self.log_status("Frequency is locked - change blocked")
+            return
+
         try:
             current_hz = self.get_frequency_hz()
             step_hz = self.get_step_size_hz()

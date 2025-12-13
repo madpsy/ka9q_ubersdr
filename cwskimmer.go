@@ -464,48 +464,54 @@ func (c *CWSkimmerClient) readLineWithContext(ctx context.Context, timeout time.
 	}
 	resultChan := make(chan readResult, 1)
 
-	// Start the read in a goroutine
-	go func() {
-		line, err := c.readLine(timeout)
-		resultChan <- readResult{line: line, err: err}
-	}()
-
-	// Wait for either the read to complete or context cancellation
-	select {
-	case <-ctx.Done():
-		// Context cancelled - return immediately
-		// Note: The goroutine will eventually complete and write to resultChan,
-		// but since resultChan is buffered, it won't block
-		return "", ctx.Err()
-	case result := <-resultChan:
-		// Read completed (successfully or with error)
-		return result.line, result.err
-	}
-}
-
-// readLine reads a line from the connection with timeout
-func (c *CWSkimmerClient) readLine(timeout time.Duration) (string, error) {
+	// Capture the current reader and conn to ensure we're reading from the right connection
 	c.mu.RLock()
 	reader := c.reader
 	conn := c.conn
 	c.mu.RUnlock()
 
+	// Check if we have a valid connection
 	if reader == nil || conn == nil {
 		return "", fmt.Errorf("not connected")
 	}
 
-	// Set read deadline
-	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		return "", fmt.Errorf("failed to set read deadline: %w", err)
-	}
+	// Start the read in a goroutine
+	go func() {
+		// Set read deadline
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			resultChan <- readResult{line: "", err: fmt.Errorf("failed to set read deadline: %w", err)}
+			return
+		}
 
-	// Read line using textproto.Reader
-	line, err := reader.ReadLine()
-	if err != nil {
-		return "", err
-	}
+		// Read line using textproto.Reader
+		line, err := reader.ReadLine()
+		if err != nil {
+			resultChan <- readResult{line: "", err: err}
+			return
+		}
 
-	return strings.TrimSpace(line), nil
+		resultChan <- readResult{line: strings.TrimSpace(line), err: nil}
+	}()
+
+	// Wait for either the read to complete or context cancellation
+	select {
+	case <-ctx.Done():
+		// Context cancelled - set immediate deadline to unblock the read goroutine
+		if conn != nil {
+			conn.SetReadDeadline(time.Now())
+		}
+		// Wait briefly for the goroutine to finish to avoid orphaned goroutines
+		select {
+		case <-resultChan:
+			// Goroutine finished, discard result
+		case <-time.After(100 * time.Millisecond):
+			// Goroutine didn't finish quickly, but that's ok - it will eventually
+		}
+		return "", ctx.Err()
+	case result := <-resultChan:
+		// Read completed (successfully or with error)
+		return result.line, result.err
+	}
 }
 
 // writeLine writes a line to the connection

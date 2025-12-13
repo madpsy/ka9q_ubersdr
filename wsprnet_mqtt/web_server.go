@@ -878,6 +878,12 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             const container = document.getElementById('bandInstanceTables');
             container.innerHTML = '';
 
+            // Create a grid container for the band sections
+            const gridContainer = document.createElement('div');
+            gridContainer.style.display = 'grid';
+            gridContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(500px, 1fr))';
+            gridContainer.style.gap = '20px';
+
             // Collect all bands and organize data by band
             const bandData = {};
             
@@ -911,14 +917,14 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 const chartId = ` + "`" + `bandChart_${band.replace(/[^a-zA-Z0-9]/g, '_')}` + "`" + `;
 
                 const sectionHTML = ` + "`" + `
-                    <div style="margin-bottom: 40px;">
+                    <div style="margin-bottom: 30px;">
                         <h3 style="color: #60a5fa; margin-bottom: 15px;">
                             <span class="badge badge-warning" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
                         </h3>
                         
                         <!-- Chart -->
-                        <div style="background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155;">
-                            <canvas id="${chartId}" style="max-height: 300px;"></canvas>
+                        <div style="background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 15px; border: 1px solid #334155;">
+                            <canvas id="${chartId}" style="max-height: 250px;"></canvas>
                         </div>
                         
                         <!-- Table -->
@@ -959,7 +965,9 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                     </div>
                 ` + "`" + `;
 
-                container.innerHTML += sectionHTML;
+                const bandDiv = document.createElement('div');
+                bandDiv.innerHTML = sectionHTML;
+                gridContainer.appendChild(bandDiv);
 
                 // Create chart after DOM is updated
                 setTimeout(() => {
@@ -1025,6 +1033,8 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
             if (bands.length === 0) {
                 container.innerHTML = '<p style="color: #94a3b8; text-align: center;">No band data available yet</p>';
+            } else {
+                container.appendChild(gridContainer);
             }
         }
 

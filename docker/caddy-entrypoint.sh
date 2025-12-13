@@ -1,6 +1,4 @@
 #!/bin/sh
-set -e
-
 # Create restart trigger directory
 mkdir -p /var/run/restart-trigger
 

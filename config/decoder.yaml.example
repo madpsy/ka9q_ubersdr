@@ -231,7 +231,7 @@ decoder:
 
     - name: "2200m-wspr"
       mode: "WSPR"
-      frequency: 137500
+      frequency: 136000
       enabled: false
 
     - name: "80m-EU-wspr"

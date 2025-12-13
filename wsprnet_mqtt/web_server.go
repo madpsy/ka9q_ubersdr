@@ -305,6 +305,66 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             width: 100%;
             border-radius: 8px;
         }
+        .filter-container {
+            background: #1e293b;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border: 1px solid #334155;
+        }
+        .filter-title {
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            color: #f1f5f9;
+            font-weight: 600;
+        }
+        .filter-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        .filter-btn {
+            padding: 8px 16px;
+            border: 2px solid;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9em;
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+        .filter-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        .filter-btn.active {
+            opacity: 1;
+        }
+        .filter-btn.inactive {
+            opacity: 0.3;
+            filter: grayscale(70%);
+        }
+        .filter-control {
+            margin-left: auto;
+            display: flex;
+            gap: 10px;
+        }
+        .control-btn {
+            padding: 8px 16px;
+            background: #334155;
+            color: #e2e8f0;
+            border: 2px solid #475569;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9em;
+            transition: all 0.2s ease;
+        }
+        .control-btn:hover {
+            background: #475569;
+            border-color: #64748b;
+        }
         .legend {
             background: rgba(30, 41, 59, 0.95);
             padding: 12px;
@@ -415,6 +475,16 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
     <div class="chart-container">
         <div class="chart-title">Live WSPR Spots Map</div>
+        <div class="filter-container">
+            <div class="filter-title">Band Filters</div>
+            <div class="filter-buttons">
+                <div id="bandFilters"></div>
+                <div class="filter-control">
+                    <button class="control-btn" onclick="selectAllBands()">All</button>
+                    <button class="control-btn" onclick="deselectAllBands()">None</button>
+                </div>
+            </div>
+        </div>
         <div id="map"></div>
     </div>
 
@@ -457,6 +527,8 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
     <script>
         let spotsChart, bandChart, map, markerClusterGroup, receiverMarker;
+        let allSpots = []; // Store all spots for filtering
+        let activeBands = new Set(); // Track which bands are active
 
         // Band colors for map markers (2200m through 10m)
         const bandColors = {
@@ -473,6 +545,126 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             '12m': '#06b6d4',
             '10m': '#0ea5e9'
         };
+
+        // Initialize band filters
+        function initBandFilters() {
+            const container = document.getElementById('bandFilters');
+            const bands = [
+                '2200m', '630m', '160m', '80m', '60m', '40m',
+                '30m', '20m', '17m', '15m', '12m', '10m'
+            ];
+            
+            bands.forEach(band => {
+                const btn = document.createElement('button');
+                btn.className = 'filter-btn active';
+                btn.style.borderColor = bandColors[band];
+                btn.style.color = bandColors[band];
+                btn.textContent = band;
+                btn.onclick = () => toggleBand(band);
+                btn.dataset.band = band;
+                container.appendChild(btn);
+                activeBands.add(band);
+            });
+        }
+
+        // Toggle band filter
+        function toggleBand(band) {
+            const btn = document.querySelector('[data-band="' + band + '"]');
+            if (activeBands.has(band)) {
+                activeBands.delete(band);
+                btn.classList.remove('active');
+                btn.classList.add('inactive');
+            } else {
+                activeBands.add(band);
+                btn.classList.remove('inactive');
+                btn.classList.add('active');
+            }
+            updateMapWithFilters();
+        }
+
+        // Select all bands
+        function selectAllBands() {
+            const bands = [
+                '2200m', '630m', '160m', '80m', '60m', '40m',
+                '30m', '20m', '17m', '15m', '12m', '10m'
+            ];
+            bands.forEach(band => {
+                activeBands.add(band);
+                const btn = document.querySelector('[data-band="' + band + '"]');
+                if (btn) {
+                    btn.classList.remove('inactive');
+                    btn.classList.add('active');
+                }
+            });
+            updateMapWithFilters();
+        }
+
+        // Deselect all bands
+        function deselectAllBands() {
+            const bands = [
+                '2200m', '630m', '160m', '80m', '60m', '40m',
+                '30m', '20m', '17m', '15m', '12m', '10m'
+            ];
+            bands.forEach(band => {
+                activeBands.delete(band);
+                const btn = document.querySelector('[data-band="' + band + '"]');
+                if (btn) {
+                    btn.classList.remove('active');
+                    btn.classList.add('inactive');
+                }
+            });
+            updateMapWithFilters();
+        }
+
+        // Update map with current filters
+        function updateMapWithFilters() {
+            if (!map || !markerClusterGroup) return;
+            
+            // Clear existing markers
+            markerClusterGroup.clearLayers();
+            
+            if (!allSpots || allSpots.length === 0) return;
+            
+            // Filter spots based on active bands
+            const filteredSpots = allSpots.map(spot => {
+                // Filter bands for this spot
+                const filteredBands = spot.bands.filter(band => activeBands.has(band));
+                if (filteredBands.length === 0) return null;
+                
+                // Filter SNR values to match filtered bands
+                const filteredSNR = spot.bands
+                    .map((band, idx) => activeBands.has(band) ? spot.snr[idx] : null)
+                    .filter(snr => snr !== null);
+                
+                return {
+                    ...spot,
+                    bands: filteredBands,
+                    snr: filteredSNR
+                };
+            }).filter(spot => spot !== null);
+            
+            // Render filtered spots
+            filteredSpots.forEach(spot => {
+                const coords = maidenheadToLatLon(spot.locator);
+                if (!coords) return;
+                
+                const icon = createMultiBandIcon(spot.bands);
+                const marker = L.marker(coords, { icon: icon });
+                
+                const bandList = spot.bands.map(b => ` + "`" + `<span style="color: ${bandColors[b]}">${b}</span>` + "`" + `).join(', ');
+                const snrList = spot.bands.map((b, i) => ` + "`" + `${b}: ${spot.snr[i]} dB` + "`" + `).join('<br>');
+                
+                marker.bindPopup(` + "`" + `
+                    <strong>${spot.callsign}</strong><br>
+                    ${spot.country}<br>
+                    Locator: ${spot.locator}<br>
+                    Bands: ${bandList}<br>
+                    SNR:<br>${snrList}
+                ` + "`" + `);
+                
+                markerClusterGroup.addLayer(marker);
+            });
+        }
 
         // Initialize map
         function initMap() {
@@ -609,35 +801,15 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             });
         }
 
-        // Update map with spots
+        // Update map with spots (stores spots and applies filters)
         function updateMap(spots) {
             if (!map || !markerClusterGroup) return;
             
-            // Clear existing markers from cluster group
-            markerClusterGroup.clearLayers();
+            // Store all spots for filtering
+            allSpots = spots || [];
             
-            if (!spots || spots.length === 0) return;
-            
-            spots.forEach(spot => {
-                const coords = maidenheadToLatLon(spot.locator);
-                if (!coords) return;
-                
-                const icon = createMultiBandIcon(spot.bands);
-                const marker = L.marker(coords, { icon: icon });
-                
-                const bandList = spot.bands.map(b => ` + "`" + `<span style="color: ${bandColors[b]}">${b}</span>` + "`" + `).join(', ');
-                const snrList = spot.bands.map((b, i) => ` + "`" + `${b}: ${spot.snr[i]} dB` + "`" + `).join('<br>');
-                
-                marker.bindPopup(` + "`" + `
-                    <strong>${spot.callsign}</strong><br>
-                    ${spot.country}<br>
-                    Locator: ${spot.locator}<br>
-                    Bands: ${bandList}<br>
-                    SNR:<br>${snrList}
-                ` + "`" + `);
-                
-                markerClusterGroup.addLayer(marker);
-            });
+            // Apply current filters
+            updateMapWithFilters();
         }
 
         // Update receiver marker on map
@@ -1304,8 +1476,9 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             }
         }
 
-        // Initialize map on load
+        // Initialize map and filters on load
         initMap();
+        initBandFilters();
 
         // Initial load
         fetchData();

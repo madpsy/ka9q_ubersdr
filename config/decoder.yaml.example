@@ -219,6 +219,26 @@ decoder:
       frequency: 28124600  # 28.1246 MHz
       enabled: false
 
+    - name: "60m-alt-wspr"
+      mode: "WSPR"
+      frequency: 5364700
+      enabled: false
+
+    - name: "630m-wspr"
+      mode: "WSPR"
+      frequency: 474200
+      enabled: false
+
+    - name: "2200m-wspr"
+      mode: "WSPR"
+      frequency: 136000
+      enabled: false
+
+    - name: "80m-EU-wspr"
+      mode: "WSPR"
+      frequency: 3592600
+      enabled: false
+
 # Notes:
 # 1. Requires external decoder binaries:
 #    - wsprd (for WSPR)

@@ -355,7 +355,7 @@
                 },
                 server: {
                     ...existingConfig.server,
-                    bypass_passwords: formData.bypassPassword ? [formData.bypassPassword] : (existingConfig.server?.bypass_passwords || []),
+                    bypass_password: formData.bypassPassword || existingConfig.server?.bypass_password || "",
                     max_session_time: parseInt(formData.maxSessionTime),
                     max_sessions: parseInt(formData.maxSessions),
                     max_sessions_ip: parseInt(formData.maxSessionsIP)

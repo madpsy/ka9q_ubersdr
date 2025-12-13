@@ -2,11 +2,9 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"log"
 	"net"
-	"net/textproto"
 	"strings"
 	"sync"
 	"time"
@@ -38,19 +36,16 @@ type CWSkimmerSpot struct {
 type CWSkimmerClient struct {
 	config               *CWSkimmerConfig
 	conn                 net.Conn
-	reader               *textproto.Reader
+	scanner              *bufio.Scanner
 	mu                   sync.RWMutex
 	connected            bool
 	stopChan             chan struct{}
-	restartChan          chan struct{}      // Signal to restart worker goroutine
-	ctx                  context.Context    // Context for cancellation
-	cancel               context.CancelFunc // Cancel function to stop operations
-	keepaliveDone        chan struct{}      // Signal to stop keepalive goroutine
-	handlerDone          chan struct{}      // Signal when handleConnection exits
-	lastActivityTime     time.Time          // For monitoring only
-	lastSpotTime         time.Time          // Time when last actual CW spot was received
-	lastPingTime         time.Time          // Time when last ping was sent
-	lastPingResponseTime time.Time          // Time when last ping response was received
+	restartChan          chan struct{} // Signal to restart worker goroutine
+	keepaliveStop        chan struct{} // Signal to stop keepalive goroutine
+	lastActivityTime     time.Time     // For monitoring only
+	lastSpotTime         time.Time     // Time when last actual CW spot was received
+	lastPingTime         time.Time     // Time when last ping was sent
+	lastPingResponseTime time.Time     // Time when last ping response was received
 	spotHandlers         []func(CWSkimmerSpot)
 	messageHandlers      []func(string)
 	spotsLogger          *CWSkimmerSpotsLogger
@@ -220,16 +215,11 @@ func (c *CWSkimmerClient) connect() error {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
-	// Create a new context for this connection
-	ctx, cancel := context.WithCancel(context.Background())
-
 	c.mu.Lock()
 	c.conn = conn
-	c.reader = textproto.NewReader(bufio.NewReader(conn))
+	c.scanner = bufio.NewScanner(conn)
 	c.connected = true
 	c.lastActivityTime = time.Now()
-	c.ctx = ctx
-	c.cancel = cancel
 	c.mu.Unlock()
 
 	log.Printf("CW Skimmer: TCP connection established to %s", addr)
@@ -254,74 +244,31 @@ func (c *CWSkimmerClient) connect() error {
 	}
 }
 
-// disconnect closes the connection and stops keepalive
+// disconnect closes the connection - simple and atomic
 func (c *CWSkimmerClient) disconnect() {
-	log.Println("CW Skimmer: disconnect() called")
+	c.mu.Lock()
 
-	// Get references we need
-	c.mu.RLock()
-	cancel := c.cancel
-	conn := c.conn
-	handlerDone := c.handlerDone
-	alreadyDisconnected := !c.connected
-	c.mu.RUnlock()
-
-	// If already disconnected, nothing to do
-	if alreadyDisconnected {
-		log.Println("CW Skimmer: Already disconnected, skipping")
+	if !c.connected {
+		c.mu.Unlock()
 		return
 	}
 
-	// Step 1: Mark as disconnected immediately to stop new operations
-	c.mu.Lock()
+	log.Println("CW Skimmer: Disconnecting...")
 	c.connected = false
-	c.mu.Unlock()
 
-	// Step 2: Set immediate read deadline to unblock any pending reads
-	if conn != nil {
-		log.Println("CW Skimmer: Setting immediate read deadline to unblock pending reads")
-		conn.SetReadDeadline(time.Now()) // Immediate timeout
+	// Stop keepalive goroutine if running
+	if c.keepaliveStop != nil {
+		close(c.keepaliveStop)
+		c.keepaliveStop = nil
 	}
 
-	// Step 3: Cancel the context to signal goroutines to stop
-	if cancel != nil {
-		log.Println("CW Skimmer: Cancelling context")
-		cancel()
+	// Close the socket - this will immediately unblock any pending reads
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
 	}
 
-	// Step 4: Close the socket
-	if conn != nil {
-		log.Println("CW Skimmer: Closing connection socket")
-		conn.Close()
-	}
-
-	// Step 5: Wait briefly for handleConnection to exit
-	// Don't wait too long - if it's stuck, we'll just abandon it and let the supervisor restart
-	if handlerDone != nil {
-		log.Println("CW Skimmer: Waiting for handleConnection to exit...")
-		select {
-		case <-handlerDone:
-			log.Println("CW Skimmer: handleConnection exited cleanly")
-		case <-time.After(500 * time.Millisecond):
-			log.Println("CW Skimmer: handleConnection did not exit quickly - abandoning and forcing restart")
-			// Don't wait forever - the supervisor will restart anyway
-		}
-	}
-
-	// Step 6: Clean up state
-	c.mu.Lock()
-	// Signal keepalive goroutine to stop
-	if c.keepaliveDone != nil {
-		close(c.keepaliveDone)
-		c.keepaliveDone = nil
-	}
-
-	// Clear references
-	c.conn = nil
-	c.reader = nil
-	c.ctx = nil
-	c.cancel = nil
-	c.handlerDone = nil
+	c.scanner = nil
 	c.mu.Unlock()
 
 	log.Println("CW Skimmer: Disconnected")
@@ -331,22 +278,21 @@ func (c *CWSkimmerClient) disconnect() {
 func (c *CWSkimmerClient) login() error {
 	c.mu.RLock()
 	conn := c.conn
+	scanner := c.scanner
 	c.mu.RUnlock()
 
-	if conn == nil {
+	if conn == nil || scanner == nil {
 		return fmt.Errorf("not connected")
 	}
 
-	// Read initial data (banner or login prompt) - use short timeout
+	// Read banner lines until we get the prompt or timeout
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
-	if err != nil {
-		return fmt.Errorf("failed to read banner: %w", err)
-	}
 
-	banner := string(buf[:n])
-	log.Printf("CW Skimmer: << %s", strings.TrimSpace(banner))
+	// Read and log banner
+	if scanner.Scan() {
+		banner := scanner.Text()
+		log.Printf("CW Skimmer: << %s", banner)
+	}
 
 	// Send callsign
 	if err := c.writeLine(c.config.Callsign); err != nil {
@@ -354,163 +300,89 @@ func (c *CWSkimmerClient) login() error {
 	}
 	log.Printf("CW Skimmer: >> %s", c.config.Callsign)
 
-	// Read welcome response
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	n, err = conn.Read(buf)
-	if err != nil {
-		return fmt.Errorf("failed to read welcome: %w", err)
-	}
-
-	welcome := string(buf[:n])
-	// Log first few lines
-	lines := strings.Split(welcome, "\n")
-	for i, line := range lines {
-		if i < 10 && strings.TrimSpace(line) != "" {
-			log.Printf("CW Skimmer: << %s", strings.TrimSpace(line))
+	// Read welcome messages
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for i := 0; i < 10 && scanner.Scan(); i++ {
+		line := scanner.Text()
+		if line != "" {
+			log.Printf("CW Skimmer: << %s", line)
+		}
+		// Stop if we see the prompt indicator
+		if strings.Contains(line, "CwSkimmer >") || strings.Contains(line, "de SKIMMER") {
+			break
 		}
 	}
-
-	// Read the prompt line (e.g., "MM3NDH de SKIMMER 2025-11-21 08:05Z CwSkimmer >")
-	// This line doesn't end with newline, so we need to read it with a timeout
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	promptBuf := make([]byte, 1024)
-	n, err = conn.Read(promptBuf)
-	if err == nil && n > 0 {
-		prompt := strings.TrimSpace(string(promptBuf[:n]))
-		if prompt != "" {
-			log.Printf("CW Skimmer: << %s", prompt)
-		}
-	}
-	// Ignore timeout errors - prompt might not be sent
 
 	log.Println("CW Skimmer: Login completed")
 
-	// Update last activity time and create channels
-	// CRITICAL: Reset ping timestamps for new connection
+	// Reset ping timestamps and create keepalive stop channel for new connection
 	c.mu.Lock()
 	c.lastActivityTime = time.Now()
-	c.lastPingTime = time.Time{}         // Reset to zero - no ping sent yet
-	c.lastPingResponseTime = time.Time{} // Reset to zero - no response yet
-	c.keepaliveDone = make(chan struct{})
-	c.handlerDone = make(chan struct{})
+	c.lastPingTime = time.Time{}
+	c.lastPingResponseTime = time.Time{}
+	c.keepaliveStop = make(chan struct{})
+	keepaliveStop := c.keepaliveStop
 	c.mu.Unlock()
 
 	log.Println("CW Skimmer: Reset ping timestamps for new connection")
 
 	// Start keepalive goroutine
-	go c.keepaliveLoop()
+	go c.keepaliveLoop(keepaliveStop)
 
 	return nil
 }
 
 // handleConnection reads and processes messages from the skimmer
 func (c *CWSkimmerClient) handleConnection() {
-	// Signal when we exit
-	defer func() {
-		log.Println("CW Skimmer: handleConnection() exiting")
-		c.mu.Lock()
-		if c.handlerDone != nil {
-			close(c.handlerDone)
-			c.handlerDone = nil
-		}
-		c.mu.Unlock()
-	}()
+	defer log.Println("CW Skimmer: handleConnection() exiting")
 
 	c.mu.RLock()
 	keepaliveDelay := c.config.KeepAliveDelay
-	ctx := c.ctx
+	scanner := c.scanner
+	conn := c.conn
 	c.mu.RUnlock()
+
+	if scanner == nil || conn == nil {
+		log.Println("CW Skimmer: No scanner or connection available")
+		return
+	}
+
+	// Set read timeout for each scan
+	readTimeout := time.Duration(keepaliveDelay*2) * time.Second
 
 	for {
 		// Check if we're still connected
 		if !c.IsConnected() {
-			log.Println("CW Skimmer: Connection closed by keepalive watchdog")
+			log.Println("CW Skimmer: Connection closed")
 			return
 		}
 
-		log.Println("CW Skimmer: handleConnection calling readLineWithContext()")
-		line, err := c.readLineWithContext(ctx, time.Duration(keepaliveDelay*2)*time.Second)
-		if err != nil {
-			if err == context.Canceled {
-				log.Println("CW Skimmer: Read cancelled by context")
-				return
-			}
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				log.Printf("CW Skimmer: Read timeout (no data for %ds), reconnecting", keepaliveDelay*2)
+		// Set deadline before each read
+		conn.SetReadDeadline(time.Now().Add(readTimeout))
+
+		// Scan for next line
+		if !scanner.Scan() {
+			// Check for error
+			if err := scanner.Err(); err != nil {
+				log.Printf("CW Skimmer: Scanner error: %v", err)
 			} else {
-				log.Printf("CW Skimmer: Read error: %v", err)
+				log.Println("CW Skimmer: Scanner reached EOF")
 			}
 			c.disconnect()
 			return
 		}
-		log.Printf("CW Skimmer: readLine() returned: %q", line)
 
-		// Update last activity time on successful read
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			log.Printf("CW Skimmer: << %s", line)
+		}
+
+		// Update last activity time
 		c.mu.Lock()
 		c.lastActivityTime = time.Now()
 		c.mu.Unlock()
 
 		c.processLine(line)
-	}
-}
-
-// readLineWithContext reads a line with context cancellation support
-// Runs the blocking read in a goroutine so we can cancel via context
-func (c *CWSkimmerClient) readLineWithContext(ctx context.Context, timeout time.Duration) (string, error) {
-	// Create a channel to receive the read result
-	type readResult struct {
-		line string
-		err  error
-	}
-	resultChan := make(chan readResult, 1)
-
-	// Capture the current reader and conn to ensure we're reading from the right connection
-	c.mu.RLock()
-	reader := c.reader
-	conn := c.conn
-	c.mu.RUnlock()
-
-	// Check if we have a valid connection
-	if reader == nil || conn == nil {
-		return "", fmt.Errorf("not connected")
-	}
-
-	// Start the read in a goroutine
-	go func() {
-		// Set read deadline
-		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-			resultChan <- readResult{line: "", err: fmt.Errorf("failed to set read deadline: %w", err)}
-			return
-		}
-
-		// Read line using textproto.Reader
-		line, err := reader.ReadLine()
-		if err != nil {
-			resultChan <- readResult{line: "", err: err}
-			return
-		}
-
-		resultChan <- readResult{line: strings.TrimSpace(line), err: nil}
-	}()
-
-	// Wait for either the read to complete or context cancellation
-	select {
-	case <-ctx.Done():
-		// Context cancelled - set immediate deadline to unblock the read goroutine
-		if conn != nil {
-			conn.SetReadDeadline(time.Now())
-		}
-		// Wait briefly for the goroutine to finish to avoid orphaned goroutines
-		select {
-		case <-resultChan:
-			// Goroutine finished, discard result
-		case <-time.After(100 * time.Millisecond):
-			// Goroutine didn't finish quickly, but that's ok - it will eventually
-		}
-		return "", ctx.Err()
-	case result := <-resultChan:
-		// Read completed (successfully or with error)
-		return result.line, result.err
 	}
 }
 
@@ -726,17 +598,16 @@ func (c *CWSkimmerClient) enrichSpot(spot *CWSkimmerSpot) {
 }
 
 // keepaliveLoop sends periodic pings to keep the connection alive
-func (c *CWSkimmerClient) keepaliveLoop() {
-	c.mu.RLock()
+func (c *CWSkimmerClient) keepaliveLoop(stopChan chan struct{}) {
 	keepaliveDelay := time.Duration(c.config.KeepAliveDelay) * time.Second
-	done := c.keepaliveDone
-	c.mu.RUnlock()
-
 	ticker := time.NewTicker(keepaliveDelay)
 	defer ticker.Stop()
 
 	for {
 		select {
+		case <-stopChan:
+			log.Println("CW Skimmer: Keepalive loop stopped")
+			return
 		case <-ticker.C:
 			if !c.IsConnected() {
 				return
@@ -750,38 +621,24 @@ func (c *CWSkimmerClient) keepaliveLoop() {
 
 			// If we sent a ping but never got response, force reconnect
 			if !lastPing.IsZero() && (lastResponse.IsZero() || lastResponse.Before(lastPing)) {
-				log.Printf("CW Skimmer: Previous ping sent at %v never received response, forcing reconnection", lastPing)
-
-				// Disconnect and force immediate restart by signaling supervisor directly
+				log.Printf("CW Skimmer: Ping timeout - no response since %v", lastPing)
 				c.disconnect()
-
-				// Force restart signal even if worker is stuck
-				log.Println("CW Skimmer: Forcing restart signal to supervisor")
-				select {
-				case c.restartChan <- struct{}{}:
-					log.Println("CW Skimmer: Restart signal sent successfully")
-				case <-time.After(100 * time.Millisecond):
-					log.Println("CW Skimmer: WARNING: Could not send restart signal (channel full)")
-				}
 				return
 			}
 
 			log.Println("CW Skimmer: Sending ping")
 
-			// Record ping time for response timing
+			// Record ping time
 			c.mu.Lock()
 			c.lastPingTime = time.Now()
 			c.mu.Unlock()
 
-			// Send "ping" command - server will respond with "Unknown command: "PING""
+			// Send ping command
 			if err := c.writeLine("ping"); err != nil {
 				log.Printf("CW Skimmer: Keepalive write failed: %v", err)
+				c.disconnect()
 				return
 			}
-
-		case <-done:
-			log.Println("CW Skimmer: Keepalive loop stopped")
-			return
 		}
 	}
 }

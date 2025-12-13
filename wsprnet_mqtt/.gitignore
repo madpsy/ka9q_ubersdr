@@ -6,6 +6,7 @@ wsprnet_mqtt-*
 config.yaml
 
 # Statistics persistence
+*.json
 *.jsonl
 
 # Go build artifacts

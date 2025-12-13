@@ -12,15 +12,17 @@ type WebServer struct {
 	stats      *StatisticsTracker
 	aggregator *SpotAggregator
 	wsprnet    *WSPRNet
+	config     *Config
 	port       int
 }
 
 // NewWebServer creates a new web server
-func NewWebServer(stats *StatisticsTracker, aggregator *SpotAggregator, wsprnet *WSPRNet, port int) *WebServer {
+func NewWebServer(stats *StatisticsTracker, aggregator *SpotAggregator, wsprnet *WSPRNet, config *Config, port int) *WebServer {
 	return &WebServer{
 		stats:      stats,
 		aggregator: aggregator,
 		wsprnet:    wsprnet,
+		config:     config,
 		port:       port,
 	}
 }
@@ -36,6 +38,7 @@ func (ws *WebServer) Start() error {
 	http.HandleFunc("/api/spots", ws.handleSpots)
 	http.HandleFunc("/api/wsprnet", ws.handleWSPRNet)
 	http.HandleFunc("/api/snr-history", ws.handleSNRHistory)
+	http.HandleFunc("/api/receiver", ws.handleReceiver)
 
 	// Dashboard
 	http.HandleFunc("/", ws.handleDashboard)
@@ -125,6 +128,18 @@ func (ws *WebServer) handleSNRHistory(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(snrHistory)
 }
 
+// handleReceiver returns receiver information from config
+func (ws *WebServer) handleReceiver(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	receiverInfo := map[string]interface{}{
+		"callsign": ws.config.Receiver.Callsign,
+		"locator":  ws.config.Receiver.Locator,
+	}
+	_ = json.NewEncoder(w).Encode(receiverInfo)
+}
+
 // handleDashboard serves the HTML dashboard
 func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
@@ -136,8 +151,12 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WSPR MQTT Aggregator Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <style>
         * {
             margin: 0;
@@ -315,6 +334,24 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             border: 2px solid white;
             box-shadow: 0 0 3px rgba(0,0,0,0.5);
         }
+        .marker-cluster-small {
+            background-color: rgba(59, 130, 246, 0.6);
+        }
+        .marker-cluster-small div {
+            background-color: rgba(59, 130, 246, 0.8);
+        }
+        .marker-cluster-medium {
+            background-color: rgba(245, 158, 11, 0.6);
+        }
+        .marker-cluster-medium div {
+            background-color: rgba(245, 158, 11, 0.8);
+        }
+        .marker-cluster-large {
+            background-color: rgba(239, 68, 68, 0.6);
+        }
+        .marker-cluster-large div {
+            background-color: rgba(239, 68, 68, 0.8);
+        }
         .sortable {
             cursor: pointer;
             user-select: none;
@@ -377,6 +414,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
     </div>
 
     <div class="chart-container">
+        <div class="chart-title">Live WSPR Spots Map</div>
+        <div id="map"></div>
+    </div>
+
+    <div class="chart-container">
         <div class="chart-title">Instance Performance</div>
         <table id="instanceTable">
             <thead>
@@ -405,11 +447,6 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
     </div>
 
     <div class="chart-container">
-        <div class="chart-title">Live WSPR Spots Map</div>
-        <div id="map"></div>
-    </div>
-
-    <div class="chart-container">
         <div class="chart-title">Country Statistics by Band</div>
         <div id="countryTables"></div>
     </div>
@@ -419,7 +456,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
     </div>
 
     <script>
-        let spotsChart, bandChart, map, markers = [];
+        let spotsChart, bandChart, map, markerClusterGroup, receiverMarker;
 
         // Band colors for map markers (2200m through 10m)
         const bandColors = {
@@ -445,6 +482,16 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 maxZoom: 18
             }).addTo(map);
             
+            // Initialize marker cluster group
+            markerClusterGroup = L.markerClusterGroup({
+                maxClusterRadius: 30,
+                spiderfyOnMaxZoom: true,
+                showCoverageOnHover: false,
+                zoomToBoundsOnClick: true,
+                disableClusteringAtZoom: 6
+            });
+            map.addLayer(markerClusterGroup);
+
             // Add legend
             const legend = L.control({position: 'bottomright'});
             legend.onAdd = function(map) {
@@ -487,41 +534,39 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         // Convert Maidenhead locator to lat/lon
         function maidenheadToLatLon(locator) {
             if (!locator || locator.length < 4) return null;
-            
+
             locator = locator.toUpperCase();
-            
+
             // Field (first 2 chars): 20° longitude, 10° latitude
             const lon1 = (locator.charCodeAt(0) - 65) * 20 - 180;
             const lat1 = (locator.charCodeAt(1) - 65) * 10 - 90;
-            
+
             // Square (next 2 chars): 2° longitude, 1° latitude
             const lon2 = parseInt(locator[2]) * 2;
             const lat2 = parseInt(locator[3]) * 1;
-            
+
             let lon = lon1 + lon2;
             let lat = lat1 + lat2;
-            
-            // Subsquare (optional 2 chars): 5' longitude, 2.5' latitude
+
+            // Subsquare (optional 2 chars): 5' (2/24°) longitude, 2.5' (1/24°) latitude
             if (locator.length >= 6) {
                 const lon3 = (locator.charCodeAt(4) - 65) * (2/24);
                 const lat3 = (locator.charCodeAt(5) - 65) * (1/24);
                 lon += lon3;
                 lat += lat3;
+                // Center of subsquare
+                lon += (1/24);
+                lat += (1/48);
+            } else {
+                // Center of square (4-char locator)
+                lon += 1;
+                lat += 0.5;
             }
-            
-            // Center of the grid square
-            lon += 1;  // Half of 2° for 4-char
-            lat += 0.5; // Half of 1° for 4-char
-            
-            if (locator.length >= 6) {
-                lon += (1/24); // Half of subsquare
-                lat += (1/48); // Half of subsquare
-            }
-            
+
             // Add small random offset to spread out multiple stations
-            lon += (Math.random() - 0.5) * 0.1;
-            lat += (Math.random() - 0.5) * 0.05;
-            
+            lon += (Math.random() - 0.5) * 0.02;
+            lat += (Math.random() - 0.5) * 0.01;
+
             return [lat, lon];
         }
 
@@ -538,30 +583,38 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 });
             }
             
-            // Multi-band: create pie chart effect
-            const size = 16;
-            const segments = colors.map((color, i) => {
-                const angle = (360 / colors.length);
-                const startAngle = i * angle - 90;
-                const endAngle = startAngle + angle;
-                return ` + "`" + `<div style="position: absolute; width: 100%; height: 100%; clip-path: polygon(50% 50%, ${50 + 50 * Math.cos(startAngle * Math.PI / 180)}% ${50 + 50 * Math.sin(startAngle * Math.PI / 180)}%, ${50 + 50 * Math.cos(endAngle * Math.PI / 180)}% ${50 + 50 * Math.sin(endAngle * Math.PI / 180)}%); background: ${color};"></div>` + "`" + `;
-            }).join('');
+            // Multi-band: create gradient or split effect
+            let background;
+            if (colors.length === 2) {
+                // Split in half
+                background = ` + "`" + `linear-gradient(90deg, ${colors[0]} 50%, ${colors[1]} 50%)` + "`" + `;
+            } else if (colors.length === 3) {
+                // Three sections
+                background = ` + "`" + `linear-gradient(90deg, ${colors[0]} 33.33%, ${colors[1]} 33.33%, ${colors[1]} 66.66%, ${colors[2]} 66.66%)` + "`" + `;
+            } else {
+                // More than 3: use conic gradient for pie chart
+                const stops = colors.map((color, i) => {
+                    const start = (i / colors.length) * 360;
+                    const end = ((i + 1) / colors.length) * 360;
+                    return ` + "`" + `${color} ${start}deg ${end}deg` + "`" + `;
+                }).join(', ');
+                background = ` + "`" + `conic-gradient(from 0deg, ${stops})` + "`" + `;
+            }
             
             return L.divIcon({
                 className: 'custom-marker',
-                html: ` + "`" + `<div style="position: relative; width: ${size}px; height: ${size}px; border-radius: 50%; overflow: hidden; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);">${segments}</div>` + "`" + `,
-                iconSize: [size, size],
-                iconAnchor: [size/2, size/2]
+                html: ` + "`" + `<div style="background: ${background}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>` + "`" + `,
+                iconSize: [18, 18],
+                iconAnchor: [9, 9]
             });
         }
 
         // Update map with spots
         function updateMap(spots) {
-            if (!map) return;
+            if (!map || !markerClusterGroup) return;
             
-            // Clear existing markers
-            markers.forEach(m => map.removeLayer(m));
-            markers = [];
+            // Clear existing markers from cluster group
+            markerClusterGroup.clearLayers();
             
             if (!spots || spots.length === 0) return;
             
@@ -570,7 +623,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 if (!coords) return;
                 
                 const icon = createMultiBandIcon(spot.bands);
-                const marker = L.marker(coords, { icon: icon }).addTo(map);
+                const marker = L.marker(coords, { icon: icon });
                 
                 const bandList = spot.bands.map(b => ` + "`" + `<span style="color: ${bandColors[b]}">${b}</span>` + "`" + `).join(', ');
                 const snrList = spot.bands.map((b, i) => ` + "`" + `${b}: ${spot.snr[i]} dB` + "`" + `).join('<br>');
@@ -583,28 +636,66 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                     SNR:<br>${snrList}
                 ` + "`" + `);
                 
-                markers.push(marker);
+                markerClusterGroup.addLayer(marker);
             });
+        }
+
+        // Update receiver marker on map
+        function updateReceiverMarker(receiverInfo) {
+            if (!map || !receiverInfo || !receiverInfo.locator) return;
+
+            const coords = maidenheadToLatLon(receiverInfo.locator);
+            if (!coords) return;
+
+            // Remove existing receiver marker if present
+            if (receiverMarker) {
+                map.removeLayer(receiverMarker);
+            }
+
+            // Create custom icon for receiver
+            const receiverIcon = L.divIcon({
+                className: 'receiver-marker',
+                html: ` + "`" + `<div style="background: radial-gradient(circle, #ef4444 0%, #dc2626 100%); width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(239, 68, 68, 0.8);"></div>` + "`" + `,
+                iconSize: [22, 22],
+                iconAnchor: [11, 11]
+            });
+
+            receiverMarker = L.marker(coords, {
+                icon: receiverIcon,
+                zIndexOffset: 1000
+            });
+
+            receiverMarker.bindPopup(` + "`" + `
+                <strong>🏠 Receiver Station</strong><br>
+                Callsign: ${receiverInfo.callsign}<br>
+                Locator: ${receiverInfo.locator}
+            ` + "`" + `);
+
+            receiverMarker.addTo(map);
         }
 
         async function fetchData() {
             try {
-                const [stats, instances, windows, aggregator, countries, spots, wsprnet] = await Promise.all([
+                const [stats, instances, windows, aggregator, countries, spots, wsprnet, snrHistory, receiver] = await Promise.all([
                     fetch('/api/stats').then(r => r.json()),
                     fetch('/api/instances').then(r => r.json()),
                     fetch('/api/windows').then(r => r.json()),
                     fetch('/api/aggregator').then(r => r.json()),
                     fetch('/api/countries').then(r => r.json()),
                     fetch('/api/spots').then(r => r.json()),
-                    fetch('/api/wsprnet').then(r => r.json())
+                    fetch('/api/wsprnet').then(r => r.json()),
+                    fetch('/api/snr-history').then(r => r.json()),
+                    fetch('/api/receiver').then(r => r.json())
                 ]);
 
                 updateStats(stats, aggregator, wsprnet);
                 updateCharts(windows);
                 updateInstanceTable(instances);
                 updateBandInstanceTable(instances);
+                updateSNRHistoryCharts(snrHistory);
                 updateCountryTables(countries);
                 updateMap(spots);
+                updateReceiverMarker(receiver);
                 
                 document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
             } catch (error) {
@@ -1056,6 +1147,9 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 </tr>
             ` + "`" + `).join('');
         }
+
+        // Store SNR charts globally
+        const snrCharts = {};
 
         function updateSNRHistoryCharts(snrHistory) {
             const container = document.getElementById('snrHistoryCharts');

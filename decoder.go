@@ -101,7 +101,12 @@ func NewMultiDecoder(config *DecoderConfig, radiod *RadiodController, sessions *
 	}
 
 	if config.WSPRNetEnabled {
-		wspr, err := NewWSPRNet(config.ReceiverCallsign, config.ReceiverLocator, "UberSDR", "")
+		// Use wsprnet_callsign if set, otherwise use receiver_callsign
+		wsprnetCallsign := config.ReceiverCallsign
+		if config.WSPRNetCallsign != "" {
+			wsprnetCallsign = config.WSPRNetCallsign
+		}
+		wspr, err := NewWSPRNet(wsprnetCallsign, config.ReceiverLocator, "UberSDR", "")
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize WSPRNet: %w", err)
 		}

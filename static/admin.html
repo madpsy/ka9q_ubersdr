@@ -3068,6 +3068,13 @@
             wsprNetField.appendChild(wsprSmall);
             reportingSection.appendChild(wsprNetField);
 
+            const wsprNetCallsignField = createConfigField('WSPRNet Callsign', 'text', currentDecoderConfig.wsprnet_callsign || '', 'wsprnet_callsign');
+            wsprNetCallsignField.querySelector('input').placeholder = 'e.g., W1ABC (optional)';
+            const wsprNetCallsignSmall = document.createElement('small');
+            wsprNetCallsignSmall.textContent = 'Optional: if set, this callsign will be used for WSPRNet instead of the receiver callsign (which is used for PSKReporter)';
+            wsprNetCallsignField.appendChild(wsprNetCallsignSmall);
+            reportingSection.appendChild(wsprNetCallsignField);
+
             // CSV Logging subsection
             const csvLoggingTitle = document.createElement('h4');
             csvLoggingTitle.textContent = 'CSV Logging';

@@ -409,7 +409,9 @@ func (sa *SpotAggregator) flushWindow(windowKey int64, spots map[string]*WSPRRep
 
 	// Save statistics to disk if persistence is enabled
 	if sa.persistenceFile != "" {
-		if err := sa.stats.SaveToFile(sa.persistenceFile); err != nil {
+		// Get WSPRNet stats and save them
+		wsprnetStats := sa.wsprNet.GetStats()
+		if err := sa.stats.SaveToFileWithWSPRNet(sa.persistenceFile, wsprnetStats); err != nil {
 			log.Printf("Warning: Failed to save statistics: %v", err)
 		}
 	}

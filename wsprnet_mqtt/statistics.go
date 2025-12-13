@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -60,6 +60,43 @@ type WindowStats struct {
 	BestSNRByInstance map[string]int      // instance -> count of best SNR wins
 	BandBreakdown     map[string]int      // band -> spot count
 	SubmittedAt       time.Time
+}
+
+// PersistenceData contains all statistics data for saving/loading
+type PersistenceData struct {
+	SavedAt      time.Time                               `json:"saved_at"`
+	Windows      []*WindowStats                          `json:"windows"`
+	Instances    map[string]*InstanceStats               `json:"instances"`
+	CountryStats map[string]*CountryStatsExport          `json:"country_stats"`
+	MapSpots     map[string]*SpotLocation                `json:"map_spots"`
+	SNRHistory   map[string]map[string][]SNRHistoryPoint `json:"snr_history"`
+	TotalStats   OverallStats                            `json:"total_stats"`
+	WSPRNetStats WSPRNetStats                            `json:"wsprnet_stats"`
+}
+
+// WSPRNetStats contains WSPRNet submission statistics
+type WSPRNetStats struct {
+	Successful int `json:"successful"`
+	Failed     int `json:"failed"`
+	Retries    int `json:"retries"`
+}
+
+// CountryStatsExport is a serializable version of CountryStats
+type CountryStatsExport struct {
+	Country         string   `json:"country"`
+	Band            string   `json:"band"`
+	UniqueCallsigns []string `json:"unique_callsigns"`
+	MinSNR          int      `json:"min_snr"`
+	MaxSNR          int      `json:"max_snr"`
+	TotalSNR        int      `json:"total_snr"`
+	Count           int      `json:"count"`
+}
+
+// OverallStats contains overall statistics
+type OverallStats struct {
+	TotalSubmitted  int `json:"total_submitted"`
+	TotalDuplicates int `json:"total_duplicates"`
+	TotalUnique     int `json:"total_unique"`
 }
 
 // SNRHistoryPoint represents average SNR for an instance on a band at a specific time
@@ -140,10 +177,7 @@ func (st *StatisticsTracker) StartWindow(windowTime time.Time) {
 		BandBreakdown:     make(map[string]int),
 	}
 
-	// Clear current window SNR accumulation
-	st.currentWindowSNRMu.Lock()
-	st.currentWindowSNR = make(map[string]*struct{ totalSNR, count int })
-	st.currentWindowSNRMu.Unlock()
+	// Don't clear currentWindowSNR here - it will be cleared after recording history in FinishWindow
 }
 
 // RecordSpot records a spot from an instance
@@ -190,6 +224,16 @@ func (st *StatisticsTracker) RecordSpot(instanceName, band, callsign, country, l
 	if locator != "" {
 		st.recordSpotLocation(callsign, locator, band, country, snr)
 	}
+
+	// Accumulate SNR for current window history
+	st.currentWindowSNRMu.Lock()
+	key := band + "_" + instanceName
+	if st.currentWindowSNR[key] == nil {
+		st.currentWindowSNR[key] = &struct{ totalSNR, count int }{}
+	}
+	st.currentWindowSNR[key].totalSNR += snr
+	st.currentWindowSNR[key].count++
+	st.currentWindowSNRMu.Unlock()
 }
 
 // recordSpotLocation updates spot location info for mapping
@@ -329,6 +373,11 @@ func (st *StatisticsTracker) FinishWindow(totalSpots, duplicates int, bandBreakd
 
 		// Record SNR history for this window
 		st.recordSNRHistory(windowTime)
+
+		// Clear current window SNR accumulation AFTER recording history
+		st.currentWindowSNRMu.Lock()
+		st.currentWindowSNR = make(map[string]*struct{ totalSNR, count int })
+		st.currentWindowSNRMu.Unlock()
 	}
 	st.currentWindow = nil
 	st.currentWindowMu.Unlock()
@@ -341,6 +390,13 @@ func (st *StatisticsTracker) recordSNRHistory(windowTime time.Time) {
 
 	st.snrHistoryMu.Lock()
 	defer st.snrHistoryMu.Unlock()
+
+	if len(st.currentWindowSNR) == 0 {
+		log.Printf("SNR History: No data to record for window %s", windowTime.Format("15:04:05"))
+		return
+	}
+
+	log.Printf("SNR History: Recording data for %d band/instance combinations", len(st.currentWindowSNR))
 
 	// Process each band_instance combination
 	for key, data := range st.currentWindowSNR {
@@ -360,6 +416,7 @@ func (st *StatisticsTracker) recordSNRHistory(windowTime time.Time) {
 		}
 
 		if band == "" || instance == "" {
+			log.Printf("SNR History: Failed to parse key '%s'", key)
 			continue
 		}
 
@@ -379,8 +436,11 @@ func (st *StatisticsTracker) recordSNRHistory(windowTime time.Time) {
 
 		st.snrHistory[band][instance] = append(st.snrHistory[band][instance], point)
 
-		// Keep only last 60 points (2 hours)
-		if len(st.snrHistory[band][instance]) > 60 {
+		log.Printf("SNR History: %s/%s - Avg SNR: %.1f dB (%d spots), Total points: %d",
+			band, instance, avgSNR, data.count, len(st.snrHistory[band][instance]))
+
+		// Keep only last 720 points (24 hours)
+		if len(st.snrHistory[band][instance]) > 720 {
 			st.snrHistory[band][instance] = st.snrHistory[band][instance][1:]
 		}
 	}
@@ -492,165 +552,209 @@ func (st *StatisticsTracker) GetCountryStats() map[string][]map[string]interface
 	return result
 }
 
-// SaveToFile saves recent windows to a JSONL file
+// SaveToFile saves all statistics to a JSON file (without WSPRNet stats)
 func (st *StatisticsTracker) SaveToFile(filename string) error {
+	return st.SaveToFileWithWSPRNet(filename, nil)
+}
+
+// SaveToFileWithWSPRNet saves all statistics including WSPRNet stats to a JSON file
+func (st *StatisticsTracker) SaveToFileWithWSPRNet(filename string, wsprnetStats map[string]interface{}) error {
+	// Gather all data with appropriate locks
 	st.recentWindowsMu.RLock()
-	defer st.recentWindowsMu.RUnlock()
+	windows := make([]*WindowStats, len(st.recentWindows))
+	copy(windows, st.recentWindows)
+	st.recentWindowsMu.RUnlock()
 
-	// Create or truncate the file
-	file, err := os.Create(filename)
+	st.instancesMu.RLock()
+	instances := make(map[string]*InstanceStats)
+	for k, v := range st.instances {
+		instances[k] = v
+	}
+	st.instancesMu.RUnlock()
+
+	st.countryStatsMu.RLock()
+	countryStats := make(map[string]*CountryStatsExport)
+	for k, v := range st.countryStats {
+		// Convert map to slice for JSON serialization
+		callsigns := make([]string, 0, len(v.UniqueCallsigns))
+		for cs := range v.UniqueCallsigns {
+			callsigns = append(callsigns, cs)
+		}
+		countryStats[k] = &CountryStatsExport{
+			Country:         v.Country,
+			Band:            v.Band,
+			UniqueCallsigns: callsigns,
+			MinSNR:          v.MinSNR,
+			MaxSNR:          v.MaxSNR,
+			TotalSNR:        v.TotalSNR,
+			Count:           v.Count,
+		}
+	}
+	st.countryStatsMu.RUnlock()
+
+	st.mapSpotsMu.RLock()
+	mapSpots := make(map[string]*SpotLocation)
+	for k, v := range st.mapSpots {
+		mapSpots[k] = v
+	}
+	st.mapSpotsMu.RUnlock()
+
+	st.snrHistoryMu.RLock()
+	snrHistory := make(map[string]map[string][]SNRHistoryPoint)
+	for band, instances := range st.snrHistory {
+		snrHistory[band] = make(map[string][]SNRHistoryPoint)
+		for inst, points := range instances {
+			snrHistory[band][inst] = points
+		}
+	}
+	st.snrHistoryMu.RUnlock()
+
+	st.statsMu.RLock()
+	totalStats := OverallStats{
+		TotalSubmitted:  st.totalSubmitted,
+		TotalDuplicates: st.totalDuplicates,
+		TotalUnique:     st.totalUnique,
+	}
+	st.statsMu.RUnlock()
+
+	// Extract WSPRNet stats if provided
+	wsprnetStatsData := WSPRNetStats{}
+	if wsprnetStats != nil {
+		if successful, ok := wsprnetStats["successful"].(int); ok {
+			wsprnetStatsData.Successful = successful
+		}
+		if failed, ok := wsprnetStats["failed"].(int); ok {
+			wsprnetStatsData.Failed = failed
+		}
+		if retries, ok := wsprnetStats["retries"].(int); ok {
+			wsprnetStatsData.Retries = retries
+		}
+	}
+
+	// Create persistence data structure
+	data := PersistenceData{
+		SavedAt:      time.Now(),
+		Windows:      windows,
+		Instances:    instances,
+		CountryStats: countryStats,
+		MapSpots:     mapSpots,
+		SNRHistory:   snrHistory,
+		TotalStats:   totalStats,
+		WSPRNetStats: wsprnetStatsData,
+	}
+
+	// Marshal to JSON
+	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to create persistence file: %w", err)
-	}
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("failed to close file: %w", closeErr)
-		}
-	}()
-
-	writer := bufio.NewWriter(file)
-
-	// Write each window as a JSON line
-	for _, window := range st.recentWindows {
-		data, err := json.Marshal(window)
-		if err != nil {
-			return fmt.Errorf("failed to marshal window: %w", err)
-		}
-
-		if _, err := writer.Write(data); err != nil {
-			return fmt.Errorf("failed to write window: %w", err)
-		}
-
-		if _, err := writer.WriteString("\n"); err != nil {
-			return fmt.Errorf("failed to write newline: %w", err)
-		}
+		return fmt.Errorf("failed to marshal persistence data: %w", err)
 	}
 
-	if err := writer.Flush(); err != nil {
-		return fmt.Errorf("failed to flush writer: %w", err)
+	// Write to file
+	if err := os.WriteFile(filename, jsonData, 0644); err != nil {
+		return fmt.Errorf("failed to write persistence file: %w", err)
 	}
 
 	return nil
 }
 
-// LoadFromFile loads windows from a JSONL file and filters to last 24 hours
-func (st *StatisticsTracker) LoadFromFile(filename string) error {
+// LoadFromFile loads all statistics from a JSON file and filters to last 24 hours
+// Returns WSPRNet stats separately so they can be restored to the WSPRNet client
+func (st *StatisticsTracker) LoadFromFile(filename string) (*WSPRNetStats, error) {
 	// Check if file exists
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		// File doesn't exist yet, that's okay
-		return nil
+		return nil, nil
 	}
 
-	file, err := os.Open(filename)
+	// Read file
+	jsonData, err := os.ReadFile(filename)
 	if err != nil {
-		return fmt.Errorf("failed to open persistence file: %w", err)
+		return nil, fmt.Errorf("failed to read persistence file: %w", err)
 	}
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("failed to close file: %w", closeErr)
-		}
-	}()
 
-	st.recentWindowsMu.Lock()
-	defer st.recentWindowsMu.Unlock()
-
-	// Clear existing windows
-	st.recentWindows = make([]*WindowStats, 0, 720)
+	// Unmarshal data
+	var data PersistenceData
+	if err := json.Unmarshal(jsonData, &data); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal persistence data: %w", err)
+	}
 
 	// Calculate cutoff time (24 hours ago)
 	cutoff := time.Now().Add(-24 * time.Hour)
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var window WindowStats
-		if err := json.Unmarshal(scanner.Bytes(), &window); err != nil {
-			// Skip malformed lines
-			continue
-		}
-
-		// Only keep windows from last 24 hours
+	// Filter windows to last 24 hours
+	st.recentWindowsMu.Lock()
+	st.recentWindows = make([]*WindowStats, 0, 720)
+	for _, window := range data.Windows {
 		if window.WindowTime.After(cutoff) {
-			st.recentWindows = append(st.recentWindows, &window)
+			st.recentWindows = append(st.recentWindows, window)
 		}
 	}
+	st.recentWindowsMu.Unlock()
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading persistence file: %w", err)
-	}
-
-	// Rebuild statistics from loaded windows
-	st.rebuildStatisticsFromWindows()
-
-	return nil
-}
-
-// rebuildStatisticsFromWindows reconstructs statistics from loaded windows
-func (st *StatisticsTracker) rebuildStatisticsFromWindows() {
-	// This is called with recentWindowsMu already locked
-
-	// Reset overall stats
-	st.statsMu.Lock()
-	st.totalSubmitted = 0
-	st.totalDuplicates = 0
-	st.totalUnique = 0
-	st.statsMu.Unlock()
-
-	// Reset instance stats
+	// Restore instances
 	st.instancesMu.Lock()
-	st.instances = make(map[string]*InstanceStats)
+	st.instances = data.Instances
+	if st.instances == nil {
+		st.instances = make(map[string]*InstanceStats)
+	}
 	st.instancesMu.Unlock()
 
-	// Reset country stats
+	// Restore country stats (convert back from export format)
 	st.countryStatsMu.Lock()
 	st.countryStats = make(map[string]*CountryStats)
+	for k, v := range data.CountryStats {
+		callsignsMap := make(map[string]bool)
+		for _, cs := range v.UniqueCallsigns {
+			callsignsMap[cs] = true
+		}
+		st.countryStats[k] = &CountryStats{
+			Country:         v.Country,
+			Band:            v.Band,
+			UniqueCallsigns: callsignsMap,
+			MinSNR:          v.MinSNR,
+			MaxSNR:          v.MaxSNR,
+			TotalSNR:        v.TotalSNR,
+			Count:           v.Count,
+		}
+	}
 	st.countryStatsMu.Unlock()
 
-	// Reset map spots
+	// Restore map spots
 	st.mapSpotsMu.Lock()
-	st.mapSpots = make(map[string]*SpotLocation)
+	st.mapSpots = data.MapSpots
+	if st.mapSpots == nil {
+		st.mapSpots = make(map[string]*SpotLocation)
+	}
 	st.mapSpotsMu.Unlock()
 
-	// Reset SNR history
+	// Restore SNR history (filter to last 24 hours)
 	st.snrHistoryMu.Lock()
 	st.snrHistory = make(map[string]map[string][]SNRHistoryPoint)
+	for band, instances := range data.SNRHistory {
+		st.snrHistory[band] = make(map[string][]SNRHistoryPoint)
+		for inst, points := range instances {
+			filteredPoints := make([]SNRHistoryPoint, 0)
+			for _, point := range points {
+				if point.WindowTime.After(cutoff) {
+					filteredPoints = append(filteredPoints, point)
+				}
+			}
+			if len(filteredPoints) > 0 {
+				st.snrHistory[band][inst] = filteredPoints
+			}
+		}
+	}
 	st.snrHistoryMu.Unlock()
 
-	// Rebuild from windows
-	for _, window := range st.recentWindows {
-		// Update overall stats
-		st.statsMu.Lock()
-		st.totalSubmitted += window.TotalSpots
-		st.totalDuplicates += window.DuplicateCount
-		st.totalUnique += (window.TotalSpots - window.DuplicateCount)
-		st.statsMu.Unlock()
+	// Restore overall stats
+	st.statsMu.Lock()
+	st.totalSubmitted = data.TotalStats.TotalSubmitted
+	st.totalDuplicates = data.TotalStats.TotalDuplicates
+	st.totalUnique = data.TotalStats.TotalUnique
+	st.statsMu.Unlock()
 
-		// Update instance stats from window data
-		st.instancesMu.Lock()
-		for instanceName, callsigns := range window.UniqueByInstance {
-			if st.instances[instanceName] == nil {
-				st.instances[instanceName] = &InstanceStats{
-					Name:            instanceName,
-					BandStats:       make(map[string]*BandInstanceStats),
-					RecentCallsigns: make([]string, 0, 10),
-					LastWindowTime:  window.WindowTime,
-				}
-			}
-			st.instances[instanceName].UniqueSpots += len(callsigns)
-		}
-
-		for instanceName, wins := range window.BestSNRByInstance {
-			if st.instances[instanceName] == nil {
-				st.instances[instanceName] = &InstanceStats{
-					Name:            instanceName,
-					BandStats:       make(map[string]*BandInstanceStats),
-					RecentCallsigns: make([]string, 0, 10),
-					LastWindowTime:  window.WindowTime,
-				}
-			}
-			st.instances[instanceName].BestSNRWins += wins
-		}
-		st.instancesMu.Unlock()
-	}
+	// Return WSPRNet stats for restoration
+	return &data.WSPRNetStats, nil
 }
 
 // GetOverallStats returns overall statistics

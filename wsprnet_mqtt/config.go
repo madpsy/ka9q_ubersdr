@@ -111,7 +111,7 @@ func (c *Config) Validate() error {
 
 	// Set default persistence file if not specified
 	if c.PersistenceFile == "" {
-		c.PersistenceFile = "wsprnet_stats.jsonl"
+		c.PersistenceFile = "wsprnet_stats.json"
 	}
 
 	return nil

@@ -29,10 +29,10 @@ web_port: 9009
 # Dry run mode - if true, will log what would be sent but not actually submit to WSPRNet
 dry_run: false
 
-# Persistence file for statistics (default: wsprnet_stats.jsonl)
-# Statistics are saved after each window and loaded on startup
-# This maintains the 24-hour rolling window across program restarts
-persistence_file: "wsprnet_stats.jsonl"
+# Persistence file for statistics (default: wsprnet_stats.json)
+# All statistics are saved after each window and fully restored on startup
+# This maintains the complete 24-hour rolling window across program restarts
+persistence_file: "wsprnet_stats.json"
 
 # The application will subscribe to: {topic_prefix}/digital_modes/WSPR/+ for each instance
 # This will receive WSPR decodes from all bands published by multiple UberSDR instances

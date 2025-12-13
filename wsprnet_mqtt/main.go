@@ -69,12 +69,20 @@ func main() {
 	stats := NewStatisticsTracker()
 
 	// Load persisted statistics if available
+	var wsprnetStats *WSPRNetStats
 	if config.PersistenceFile != "" {
 		log.Printf("Loading persisted statistics from %s...", config.PersistenceFile)
-		if err := stats.LoadFromFile(config.PersistenceFile); err != nil {
+		var err error
+		wsprnetStats, err = stats.LoadFromFile(config.PersistenceFile)
+		if err != nil {
 			log.Printf("Warning: Failed to load persisted statistics: %v", err)
 		} else {
 			log.Printf("Successfully loaded persisted statistics")
+			if wsprnetStats != nil {
+				log.Printf("Restoring WSPRNet stats: %d successful, %d failed, %d retries",
+					wsprnetStats.Successful, wsprnetStats.Failed, wsprnetStats.Retries)
+				wsprNet.SetStats(wsprnetStats.Successful, wsprnetStats.Failed, wsprnetStats.Retries)
+			}
 		}
 	}
 
@@ -86,7 +94,7 @@ func main() {
 	log.Println("Spot aggregator initialized (4-minute window for deduplication)")
 
 	// Initialize web server
-	webServer := NewWebServer(stats, aggregator, wsprNet, config.WebPort)
+	webServer := NewWebServer(stats, aggregator, wsprNet, config, config.WebPort)
 	if err := webServer.Start(); err != nil {
 		log.Fatalf("Failed to start web server: %v", err)
 	}
@@ -304,7 +312,7 @@ type WSPRDecode struct {
 	CQZone      int     `json:"CQZone"`
 	ITUZone     int     `json:"ITUZone"`
 	Continent   string  `json:"Continent"`
-	TimeOffset  int     `json:"TimeOffset"`
+	TimeOffset  float64 `json:"TimeOffset"`
 	SNR         int     `json:"snr"`
 	Frequency   uint64  `json:"frequency"`
 	Timestamp   string  `json:"timestamp"`

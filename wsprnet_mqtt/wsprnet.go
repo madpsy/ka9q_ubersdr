@@ -356,3 +356,13 @@ func (w *WSPRNet) GetStats() map[string]interface{} {
 		"retries":    w.countRetries,
 	}
 }
+
+// SetStats restores statistics from persistence
+func (w *WSPRNet) SetStats(successful, failed, retries int) {
+	w.statsMutex.Lock()
+	defer w.statsMutex.Unlock()
+
+	w.countSendsOK = successful
+	w.countSendsErrored = failed
+	w.countRetries = retries
+}

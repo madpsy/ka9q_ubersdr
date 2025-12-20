@@ -1,0 +1,13 @@
+# Ignore build artifacts
+radio_client
+*.exe
+
+# Ignore docker directory
+docker/
+
+# Ignore IDE files
+.vscode
+.idea
+
+# Ignore go.sum - let Docker generate it fresh
+go.sum

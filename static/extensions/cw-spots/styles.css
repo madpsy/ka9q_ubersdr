@@ -1,0 +1,404 @@
+/* CW Spots Extension Styles */
+
+.cw-spots-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 10px;
+    background: #1a1a1a;
+    color: #e0e0e0;
+}
+
+.cw-spots-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #333;
+}
+
+.cw-spots-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.cw-spots-title h3 {
+    margin: 0;
+    font-size: 18px;
+    color: #4a9eff;
+}
+
+.cw-spots-info {
+    display: flex;
+    gap: 15px;
+    font-size: 12px;
+    color: #888;
+}
+
+.cw-spots-container .status-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.cw-spots-container .status-connected {
+    background: #28a745;
+    color: white;
+}
+
+.cw-spots-container .status-disconnected {
+    background: #dc3545;
+    color: white;
+}
+
+.cw-spots-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.cw-spots-container .control-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.cw-spots-container .control-group label {
+    font-size: 12px;
+    color: #aaa;
+}
+
+.cw-spots-container .control-group select,
+.cw-spots-container .control-group input[type="text"] {
+    padding: 4px 8px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 12px;
+}
+
+.cw-spots-container .control-group input[type="text"] {
+    width: 120px;
+}
+
+.cw-spots-container .control-group input[type="checkbox"] {
+    margin-right: 5px;
+    cursor: pointer;
+}
+
+.cw-spots-container .btn-clear {
+    padding: 4px 12px;
+    background: #dc3545;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.cw-spots-container .btn-clear:hover {
+    background: #c82333;
+}
+
+.cw-spots-container .btn-map {
+    padding: 4px 12px;
+    background: #17a2b8;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.cw-spots-container .btn-map:hover {
+    background: #138496;
+}
+
+/* Push map button control group to far right */
+.cw-spots-container .control-group:has(#cw-spots-map-btn) {
+    margin-left: auto;
+}
+
+.cw-spots-table-container {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid #333;
+    border-radius: 4px;
+}
+
+.cw-spots-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.cw-spots-table thead {
+    position: sticky;
+    top: 0;
+    background: #2a2a2a;
+    z-index: 1;
+}
+
+.cw-spots-table th {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 2px solid #444;
+    color: #4a9eff;
+    font-weight: bold;
+}
+
+/* Column widths */
+.cw-spots-table th:nth-child(1),
+.cw-spots-table td:nth-child(1) {
+    width: 90px; /* Time */
+}
+
+.cw-spots-table th:nth-child(2),
+.cw-spots-table td:nth-child(2) {
+    width: 60px; /* Age */
+}
+
+.cw-spots-table th:nth-child(3),
+.cw-spots-table td:nth-child(3) {
+    width: 100px; /* Frequency */
+}
+
+.cw-spots-table th:nth-child(4),
+.cw-spots-table td:nth-child(4) {
+    width: 50px; /* Band */
+}
+
+.cw-spots-table th:nth-child(5),
+.cw-spots-table td:nth-child(5) {
+    width: 100px; /* Callsign */
+}
+
+.cw-spots-table th:nth-child(6),
+.cw-spots-table td:nth-child(6) {
+    width: 200px; /* Country */
+}
+
+.cw-spots-table th:nth-child(7),
+.cw-spots-table td:nth-child(7) {
+    width: 80px; /* Distance */
+    text-align: right;
+}
+
+.cw-spots-table th:nth-child(8),
+.cw-spots-table td:nth-child(8) {
+    width: 60px; /* Bearing */
+    text-align: right;
+}
+
+.cw-spots-table th:nth-child(9),
+.cw-spots-table td:nth-child(9) {
+    width: 50px; /* SNR */
+    text-align: right;
+}
+
+.cw-spots-table th:nth-child(10),
+.cw-spots-table td:nth-child(10) {
+    width: 60px; /* WPM */
+    text-align: right;
+}
+
+.cw-spots-table th:nth-child(11),
+.cw-spots-table td:nth-child(11) {
+    width: auto; /* Comment - takes remaining space */
+}
+
+.cw-spots-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.cw-spots-table tbody tr {
+    transition: background-color 0.2s;
+}
+
+.cw-spots-table tbody tr:hover {
+    background: #2a2a2a;
+    cursor: pointer;
+}
+
+.cw-spots-table tbody tr.no-spots {
+    text-align: center;
+    color: #888;
+}
+
+.cw-spots-table tbody tr.no-spots:hover {
+    background: transparent;
+    cursor: default;
+}
+
+.cw-spots-table tbody tr.spot-new {
+    animation: highlight-cw-spot 0.5s ease-out;
+}
+
+@keyframes highlight-cw-spot {
+    0% {
+        background-color: #4a9eff;
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+.cw-spots-table .spot-time {
+    color: #888;
+    font-family: monospace;
+}
+
+.cw-spots-table .spot-age {
+    color: #666;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.cw-spots-table .spot-frequency {
+    font-family: monospace;
+    color: #4a9eff;
+    cursor: pointer;
+}
+
+.cw-spots-table .spot-frequency:hover {
+    text-decoration: underline;
+}
+
+.cw-spots-table .spot-callsign {
+    font-weight: bold;
+    color: #ffc107;
+    cursor: pointer;
+}
+
+.cw-spots-table .spot-callsign:hover {
+    text-decoration: underline;
+}
+
+.cw-spots-table .spot-band {
+    font-family: monospace;
+    color: #6c757d;
+    font-size: 11px;
+}
+
+.cw-spots-table .spot-country {
+    color: #aaa;
+}
+
+.cw-spots-table .spot-distance {
+    font-family: monospace;
+    color: #9c27b0;
+    text-align: right;
+    font-size: 11px;
+}
+
+.cw-spots-table .spot-bearing {
+    font-family: monospace;
+    color: #ff9800;
+    text-align: right;
+    font-size: 11px;
+}
+
+.cw-spots-table .spot-snr {
+    font-family: monospace;
+    text-align: right;
+}
+
+.cw-spots-table .spot-snr-positive {
+    color: #28a745;
+}
+
+.cw-spots-table .spot-snr-negative {
+    color: #dc3545;
+}
+
+.cw-spots-table .spot-wpm {
+    font-family: monospace;
+    color: #17a2b8;
+    text-align: right;
+    font-weight: bold;
+}
+
+.cw-spots-table .spot-comment {
+    color: #aaa;
+    font-size: 11px;
+    font-style: italic;
+}
+
+.cw-spots-table .show-more-row,
+.cw-spots-table .show-less-row {
+    background: #2a2a2a !important;
+}
+
+.cw-spots-table .show-more-row:hover,
+.cw-spots-table .show-less-row:hover {
+    background: #333 !important;
+}
+
+/* CW Country Spots Modal Table Column Widths */
+.country-spots-modal-table th:nth-child(1),
+.country-spots-modal-table td:nth-child(1) {
+    width: 120px; /* Callsign */
+}
+
+.country-spots-modal-table th:nth-child(2),
+.country-spots-modal-table td:nth-child(2) {
+    width: 200px; /* Country */
+}
+
+.country-spots-modal-table th:nth-child(3),
+.country-spots-modal-table td:nth-child(3) {
+    width: 70px; /* SNR */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(4),
+.country-spots-modal-table td:nth-child(4) {
+    width: 70px; /* WPM */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(5),
+.country-spots-modal-table td:nth-child(5) {
+    width: 110px; /* Distance */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(6),
+.country-spots-modal-table td:nth-child(6) {
+    width: 80px; /* Bearing */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(7),
+.country-spots-modal-table td:nth-child(7) {
+    width: 80px; /* Age */
+}
+
+.country-spots-modal-table th:nth-child(8),
+.country-spots-modal-table td:nth-child(8) {
+    width: 150px; /* Comment */
+}
+
+/* CW Modal Table Column Styles */
+.country-spots-modal-table .modal-country {
+    color: #17a2b8;
+}
+
+.country-spots-modal-table .modal-wpm {
+    font-family: monospace;
+    color: #17a2b8;
+    text-align: right;
+    font-weight: bold;
+}
+
+.country-spots-modal-table .modal-comment {
+    color: #aaa;
+    font-size: 11px;
+    font-style: italic;
+}

@@ -1,0 +1,36 @@
+# Binaries
+radio_client
+radio_client.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build directory
+build/
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Configuration file (contains user settings)
+client_config.json
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

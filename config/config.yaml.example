@@ -1,0 +1,723 @@
+# ka9q_ubersdr Configuration
+
+# Admin settings
+admin:
+  # Show setup wizard on first run (automatically set to false after completion)
+  wizard: true
+  # Admin password for configuration access
+  password: "mypassword"
+  # Description HTML to display in the top right of the page
+  # This can include HTML tags like links
+  description: 'Welcome! This SDR is running <a href="https://ubersdr.org" target="_blank">UberSDR</a>'
+  # Name - similar to description without any HTML
+  name: 'SDR with Active Loop'
+  # Admin email address
+  email: "me@example.com"
+  # Callsign (optional)
+  callsign: "N0CALL"
+  # GPS coordinates
+  gps:
+    lat: 51.507  # Latitude
+    lon: -0.128  # Longitude
+  # Height above sea level (meters)
+  asl: 30
+  # Location description
+  location: "London, England, UK"
+  
+  # Automatic version checking from GitHub
+  # When enabled, checks for new versions periodically and writes to /var/run/updater/latest
+  version_check_enabled: true
+  # Version check interval in minutes (default: 60)
+  # How often to check GitHub for new versions
+  # Minimum: 60 minutes
+  version_check_interval: 60
+
+  # Login rate limiting settings
+  # Protects against brute force password attacks by temporarily banning IPs
+  # after too many failed login attempts
+
+  # Maximum failed login attempts before temporary ban (default: 5)
+  # After this many failed attempts within the time window, the IP is banned
+  max_login_attempts: 5
+
+  # Time window for counting failed attempts in seconds (default: 900 = 15 minutes)
+  # Failed attempts are counted within this rolling time window
+  # If attempts are spread out beyond this window, the counter resets
+  login_attempt_window: 900
+
+  # Duration of temporary ban in seconds (default: 900 = 15 minutes)
+  # How long an IP is banned after exceeding max_login_attempts
+  # After this duration, the ban expires and the IP can try again
+  login_ban_duration: 900
+
+# Radiod connection settings
+radiod:
+  # Multicast group for status/control messages
+  status_group: "hf-status.local:5006"
+  # Multicast group for PCM audio data
+  data_group: "pcm.local:5004"
+  # Network interface to use (empty = auto-detect)
+  interface: "lo"
+
+# Web server settings
+server:
+  # Listen address and port
+  listen: ":8080"
+  # Maximum concurrent unique users (by user_session_id UUID)
+  # Each unique user can have multiple sessions (e.g., audio + spectrum)
+  # but they all count as one user toward this limit
+  max_sessions: 20
+  # Maximum concurrent unique users (UUIDs) per IP address (0 = unlimited)
+  # This limits the number of unique user_session_ids from a single IP
+  # Each unique user can have multiple sessions (e.g., audio + spectrum)
+  # For example, if set to 1, only one UUID can connect from an IP, but that
+  # UUID can establish both audio and spectrum channels
+  # Useful for preventing abuse from a single source
+  # Set to 0 to disable IP-based limiting
+  max_sessions_ip: 2
+  # Session idle timeout in seconds (0 = no timeout). This tracks a heartbeat message to websocket
+  # connections. The UI sends a ping every 10 seconds if the user is detected as being active.
+  # Client will show warning dialog 30 seconds before this timeout. If they do not interact
+  # with the UI within the 30 seconds the session UUID will be kicked.
+  session_timeout: 0
+  # Maximum session time in seconds (0 = unlimited)
+  # This is the maximum total time a user session can exist, regardless of activity
+  # After this time, the user will be automatically kicked and must reconnect
+  # Useful for ensuring fair access and preventing long-term monopolisation
+  # Set to 0 to disable time-based limiting
+  max_session_time: 3600
+  # Command rate limit per UUID (commands per second per channel)
+  # This limits how many commands (tune, zoom, pan, etc.) a user can send per second
+  # Applies separately to audio and spectrum channels (e.g., 20 means 20 audio commands/sec + 20 spectrum commands/sec)
+  # Set to 0 to disable rate limiting
+  # Recommended: 40 (allows smooth dragging while preventing abuse)
+  cmd_rate_limit: 40
+  # WebSocket connection rate limit per IP (connections per second)
+  # This limits how many new WebSocket connections can be established from a single IP per second
+  # Helps prevent connection flooding and DoS attacks
+  # Set to 0 to disable rate limiting
+  # Recommended: 1 (allows normal reconnections while preventing abuse)
+  conn_rate_limit: 1
+  # /connection endpoint rate limit per IP (requests per minute)
+  # This limits how many /connection pre-flight checks can be made from a single IP per minute
+  # Helps prevent abuse of the connection check endpoint
+  # Set to 0 to disable rate limiting
+  # Recommended: 10 (allows normal usage while preventing abuse)
+  sessions_per_minute: 10
+  # List of IP addresses or CIDR ranges that bypass all session limits
+  # Useful for trusted IPs like localhost, admin networks, or specific users
+  # Bypassed IPs are exempt from:
+  #   - session_timeout (idle timeout)
+  #   - max_session_time (maximum session duration)
+  #   - max_sessions (maximum unique users globally)
+  #   - max_sessions_ip (maximum unique users per IP)
+  #   - Wide IQ mode restrictions (iq48, iq96, iq192, iq384)
+  # Supports both IPv4 and IPv6 addresses with CIDR notation
+  # Examples:
+  #   - "127.0.0.1"           # Single IPv4 address
+  #   - "192.168.1.0/24"      # IPv4 CIDR range
+  #   - "::1"                 # Single IPv6 address (localhost)
+  #   - "2001:db8::/32"       # IPv6 CIDR range
+  # By default, localhost is bypassed. Add more IPs/ranges as needed.
+  timeout_bypass_ips:
+    - "127.0.0.1"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+  # Additional examples (uncomment to use):
+  #   - "::1"
+  #   - "192.168.1.0/24"
+  #   - "10.0.0.0/8"
+  # Password-based bypass authentication (optional)
+  # When set, clients can provide this password to gain the same bypass privileges
+  # as IPs in the timeout_bypass_ips list. This allows remote users to access
+  # wide IQ modes and bypass session limits without being on the IP whitelist.
+  #
+  # Usage:
+  #   - WebSocket: Add ?password=yourpassword to the WebSocket URL
+  #   - /connection endpoint: Include "password": "yourpassword" in the JSON body
+  #
+  # Security notes:
+  #   - Use a strong, unique password
+  #   - Password is transmitted in plain text, so use HTTPS/WSS in production
+  #   - Leave empty (or comment out) to disable password-based bypass
+  #   - This grants the same privileges as being in timeout_bypass_ips
+  #
+  # Example: bypass_password: "my-secret-bypass-password-123"
+  bypass_password: ""
+
+  # Public IQ modes configuration
+  # Controls which wide IQ modes can be accessed without bypass authentication
+  # By default, all wide IQ modes (iq48-iq384) require bypass (IP or password)
+  # Set any mode to 'true' to make it publicly accessible without authentication
+  #
+  # Available wide IQ modes:
+  #   - iq48: 48 kHz bandwidth (48 kHz sample rate)
+  #   - iq96: 96 kHz bandwidth (96 kHz sample rate)
+  #   - iq192: 192 kHz bandwidth (192 kHz sample rate)
+  #   - iq384: 384 kHz bandwidth (384 kHz sample rate)
+  #
+  # Note: Standard 'iq' mode (10 kHz) is always publicly accessible
+  #
+  # Use cases:
+  #   - Allow public access to lower bandwidth modes while restricting higher ones
+  #   - Enable iq48 publicly for general users, keep iq96+ for authenticated users
+  #   - Control server bandwidth usage by limiting public access
+  #
+  # Example: Allow iq48 publicly but keep others restricted
+  # public_iq_modes:
+  #   iq48: true
+  #   iq96: false
+  #   iq192: false
+  #   iq384: false
+  #
+  # Default: All false except 48 KHz (require bypass authentication)
+  public_iq_modes:
+    iq48: true
+    iq96: false
+    iq192: false
+    iq384: false
+
+  # Enable CORS
+  enable_cors: false
+  # HTTP request log file (Apache combined log format)
+  logfile: "web.log"
+
+# Audio settings
+audio:
+  # Audio buffer size in samples
+  buffer_size: 4096
+  # Default sample rate in Hz
+  default_sample_rate: 12000
+  # Sample rates per mode (must match radiod preset sample rates)
+  mode_sample_rates:
+    usb: 12000
+    lsb: 12000
+    cwu: 12000    # CW Upper (for USB bands) preset in radiod uses 12 kHz
+    cwl: 12000    # CW Lower (for LSB bands) preset in radiod uses 12 kHz
+    am: 12000     # AM preset in radiod uses 12 kHz
+    sam: 12000    # SAM (Synchronous AM) preset in radiod uses 12 kHz
+    fm: 24000     # FM preset in radiod uses 24 kHz
+    nfm: 24000    # NFM (Narrow FM) preset in radiod uses 24 kHz
+    iq: 10000     # Generic IQ mode
+    iq48: 48000   # Wide bandwidth IQ output for 48 kHz of real bandwidth
+    iq96: 96000  # Wide bandwidth IQ output for 96 kHz of real bandwidth
+    iq192: 192000 # Wide bandwidth IQ output for 192 kHz of real bandwidth
+    iq384: 384000 # Wide bandwidth IQ output for 384 kHz of real bandwidth
+  # Opus compression settings
+  opus:
+    # Enable Opus compression for audio streaming (reduces bandwidth significantly)
+    enabled: false
+    # Opus bitrate in bits per second (6000-510000, typical: 24000-64000)
+    # Lower = more compression but lower quality, Higher = better quality but more bandwidth
+    # 24000 = good for voice, 48000 = excellent for voice, 64000 = near-transparent
+    bitrate: 48000
+    # Opus complexity (0-10, higher = better quality but more CPU)
+    # 0 = fastest/lowest quality, 10 = slowest/highest quality
+    complexity: 5
+
+# Spectrum analyzer settings - per-user dynamic channels
+spectrum:
+  # Enable per-user spectrum channels
+  enabled: true
+  # Default parameters for new spectrum channels (users can zoom/pan)
+  default:
+    # Default center frequency (Hz) - 15 MHz for 0-30 MHz coverage
+    center_frequency: 15000000
+    # Default number of bins - kept constant for consistent display
+    bin_count: 1024
+    # Default bandwidth per bin (Hz) - calculated for exact 0-30 MHz coverage
+    # 30,000,000 Hz / 1024 bins = 29,296.875 Hz per bin
+    # Users can adjust this to zoom in/out:
+    #   29.3 kHz = 0-30 MHz (full HF band)
+    #   10 kHz = ~10 MHz view
+    #    1 kHz = ~1 MHz detailed view
+    bin_bandwidth: 29296.875
+  # Poll period in milliseconds (how often to request spectrum data)
+  # Lower values = faster updates but more CPU/network usage
+  poll_period_ms: 100
+  # Maximum spectrum sessions per user (to prevent abuse)
+  max_sessions_per_user: 2
+  # Gain adjustment in dB applied to all spectrum data
+  # Positive values increase displayed signal levels (brighten)
+  # Negative values decrease displayed signal levels (darken)
+  # Default: 0 (no adjustment)
+  # Example: 20 adds 20 dB to all spectrum values
+  gain_db: 0
+  
+  # Smoothing settings for waterfall display
+  # Reduces fuzziness and noise in the spectrum display
+  smoothing:
+    # Enable/disable smoothing (set to false to disable all smoothing)
+    enabled: true
+    
+    # Temporal smoothing (time domain) - Exponential Moving Average (EMA)
+    # Controls smoothing between consecutive waterfall frames
+    # Range: 0.0 to 1.0
+    #   0.1 = heavy smoothing (90% old data, 10% new) - very smooth but slower response
+    #   0.3 = moderate smoothing (70% old, 30% new) - good balance (recommended)
+    #   0.5 = light smoothing (50% old, 50% new) - faster response
+    #   1.0 = no temporal smoothing (100% new data)
+    # Default: 0.3
+    temporal_alpha: 0.3
+    
+    # Spatial smoothing (frequency domain) - Gaussian filter
+    # Controls smoothing across adjacent frequency bins
+    # Range: 0.0 to 5.0 (0 = disabled)
+    #   0.0 = no spatial smoothing
+    #   1.0 = light smoothing - subtle, preserves detail
+    #   1.5 = moderate smoothing - good balance (recommended)
+    #   2.0 = medium smoothing - smoother appearance
+    #   3.0+ = heavy smoothing - very smooth but may blur signals
+    # Default: 1.5
+    spatial_sigma: 1.5
+
+# Logging settings
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+  # Log format: text, json
+  format: "text"
+
+# DX Cluster settings
+dxcluster:
+  # Enable DX cluster connection
+  enabled: false
+  # DX cluster host (well-known public cluster - dxspider.co.uk is very active)
+  host: "dxspider.co.uk"
+  # DX cluster port (standard telnet port for DX clusters)
+  port: 7300
+  # Your amateur radio callsign (required for login - must be a valid callsign)
+  callsign: "N0CALL"
+  # Reconnection delay in seconds (time to wait before reconnecting after disconnect)
+  reconnect_delay: 30
+  # Keep-alive delay in seconds (time between keep-alive messages to prevent timeout)
+  keepalive_delay: 300
+
+# Space Weather settings
+spaceweather:
+  # Enable space weather monitoring from NOAA SWPC
+  # Provides solar flux, K-index, and propagation data for HF bands
+  enabled: true
+  
+  # Polling interval in seconds (how often to fetch data from NOAA)
+  # NOAA data updates approximately every 15 minutes
+  # Recommended: 900 seconds (15 minutes) to match NOAA update frequency
+  # Minimum recommended: 300 seconds (5 minutes) to avoid excessive API calls
+  poll_interval_sec: 900
+  
+  # Enable CSV logging of space weather data
+  # When enabled, stores all raw data to CSV files for historical analysis
+  log_to_csv: true
+  
+  # Directory to store CSV data files (one file per day)
+  # If relative path, will be created relative to config directory
+  # Default: "spaceweather" (creates <config_dir>/spaceweather/)
+  # Absolute paths are also supported
+  # Files are organized as: spaceweather/YYYY/MM/spaceweather-YYYY-MM-DD.csv
+  data_dir: "spaceweather"
+
+# Prometheus Metrics settings
+prometheus:
+  # Enable or disable Prometheus metrics endpoint
+  # When enabled, exposes metrics at /metrics endpoint for scraping
+  enabled: true
+  
+  # List of IP addresses or CIDR ranges allowed to access the metrics endpoint
+  # Only these IPs can scrape the /metrics endpoint
+  # Supports both IPv4 and IPv6 addresses with CIDR notation
+  # Examples:
+  #   - "127.0.0.1"           # Single IPv4 address (localhost)
+  #   - "192.168.1.0/24"      # IPv4 CIDR range
+  #   - "::1"                 # Single IPv6 address (localhost)
+  #   - "2001:db8::/32"       # IPv6 CIDR range
+  # By default, only localhost is allowed for security
+  allowed_hosts:
+    - "127.0.0.1"
+    - "::1"
+    - "172.20.0.1"
+  # Additional examples (uncomment to use):
+  #   - "192.168.1.0/24"      # Local network
+  #   - "10.0.0.0/8"          # Private network
+  
+  # UberSDR Pushgateway settings
+  # These settings are for sending metrics to the central ubersdr.org collector
+  pushgateway:
+    # Enable or disable pushing to Pushgateway
+    enabled: true
+    
+    # Pushgateway URL (required if enabled)
+    # Default: "https://push.ubersdr.org:9091"
+    url: "https://push.ubersdr.org:9091"
+    
+    # Instance UUID for basic auth username (required if enabled)
+    # This should be a unique UUID for this SDR instance
+    # Used as both the Prometheus instance label and basic auth username
+    # Generate with: uuidgen (Linux/Mac) or New-Guid (PowerShell)
+    # Example: "550e8400-e29b-41d4-a716-446655440000"
+    instance: ""
+    
+    # Token UUID for basic auth password (required if enabled)
+    # This should be a secret UUID used as the basic auth password
+    # Generate with: uuidgen (Linux/Mac) or New-Guid (PowerShell)
+    # Example: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+    token: ""
+  
+  # Metrics to expose (all enabled by default when prometheus.enabled = true)
+  #
+  # Noisefloor metrics (with 'band' label):
+  #   - noisefloor_p5_db: 5th percentile (noise floor estimate)
+  #   - noisefloor_p10_db: 10th percentile
+  #   - noisefloor_median_db: Median power level
+  #   - noisefloor_mean_db: Mean power level
+  #   - noisefloor_p95_db: 95th percentile (signal peaks)
+  #   - noisefloor_max_db: Maximum power level
+  #   - noisefloor_min_db: Minimum power level
+  #   - noisefloor_dynamic_range_db: Dynamic range (P95 - P5)
+  #   - noisefloor_occupancy_percent: Percentage of bins above noise + 10dB
+  #   - noisefloor_ft8_snr_db: FT8 SNR estimate
+  #   - noisefloor_last_update_timestamp: Unix timestamp of last measurement
+  #
+  # System metrics (no labels):
+  #   - ubersdr_active_sessions_total: Total active sessions (audio + spectrum)
+  #   - ubersdr_active_users_total: Total unique users (by UUID)
+  #   - ubersdr_active_audio_sessions_total: Active audio sessions only
+  #   - ubersdr_active_spectrum_sessions_total: Active spectrum sessions only
+  #
+  # Radiod channel metrics:
+  #   - ubersdr_radiod_channels_total: Total active radiod channels (audio + spectrum)
+  #   - ubersdr_radiod_audio_channels_total: Active audio radiod channels
+  #   - ubersdr_radiod_spectrum_channels_total: Active spectrum radiod channels
+  #
+  # WebSocket metrics:
+  #   - ubersdr_websocket_connections_total{type}: Total WebSocket connections by type (audio, spectrum, dxcluster)
+  #   - ubersdr_websocket_disconnects_total{type}: Total WebSocket disconnections by type
+  #   - ubersdr_websocket_active_connections{type}: Currently active WebSocket connections by type
+  #   - ubersdr_websocket_messages_received_total{type}: Messages received (by type: audio, spectrum, dxcluster)
+  #   - ubersdr_websocket_messages_sent_total{type}: Messages sent (by type)
+  #
+  # Data throughput metrics:
+  #   - ubersdr_audio_bytes_total: Total audio bytes sent to clients
+  #   - ubersdr_spectrum_packets_total: Total spectrum packets sent to clients
+  #
+  # DX Cluster metrics:
+  #   - ubersdr_dx_spots_total{band}: Total DX spots received from cluster by band (160m-10m, 6m, other)
+  #   - ubersdr_dx_cluster_connections_total: Total DX cluster connection attempts
+  #   - ubersdr_dx_cluster_disconnects_total: Total DX cluster disconnections
+  #   - ubersdr_dx_cluster_connected: Current DX cluster connection status (1=connected, 0=disconnected)
+  #
+  # Error metrics:
+  #   - ubersdr_session_creation_errors_total: Failed session creations
+  #   - ubersdr_radiod_errors_total: Radiod communication errors
+  #   - ubersdr_rate_limit_errors_total{type}: HTTP 429 rate limit errors by type (audio, spectrum, aggregate)
+  #   - ubersdr_idle_timeout_kicks_total{type}: Users kicked due to idle timeout by session type (audio, spectrum, mixed)
+  #
+  # Performance metrics:
+  #   - ubersdr_session_duration_seconds{type}: Session duration histogram (by type: audio, spectrum)
+  #   - ubersdr_aggregate_request_duration_seconds: Aggregate endpoint request latency histogram
+  #
+  # Resource metrics:
+  #   - ubersdr_goroutines_total: Current number of goroutines
+  #   - ubersdr_memory_alloc_bytes: Current memory allocated in bytes
+  #   - ubersdr_memory_total_bytes: Total memory allocated (cumulative) in bytes
+  #   - ubersdr_memory_heap_bytes: Current heap memory in bytes
+  #   - ubersdr_memory_stack_bytes: Current stack memory in bytes
+  #   - ubersdr_gc_pause_seconds: Last garbage collection pause duration in seconds
+  #
+  # Note: The Prometheus Go client also automatically exports standard process metrics:
+  #   - process_cpu_seconds_total: Total CPU time consumed
+  #   - process_resident_memory_bytes: Resident memory size
+  #   - process_virtual_memory_bytes: Virtual memory size
+  #   - process_open_fds: Number of open file descriptors
+  #   - go_memstats_*: Detailed Go runtime memory statistics
+  #
+  # Example Prometheus queries:
+  #   - avg(noisefloor_p5_db)                    # Average noise floor across all bands
+  #   - noisefloor_p5_db{band="20m"}             # 20m band noise floor
+  #   - noisefloor_occupancy_percent > 50        # Bands with high occupancy
+  #   - ubersdr_active_users_total               # Current number of users
+  #   - rate(ubersdr_active_sessions_total[5m])  # Session creation rate
+  #   - rate(ubersdr_audio_bytes_total[5m])      # Audio throughput (bytes/sec)
+  #   - ubersdr_websocket_active_connections{type="audio"}     # Active audio WebSocket connections
+  #   - ubersdr_websocket_active_connections{type="spectrum"}  # Active spectrum WebSocket connections
+  #   - ubersdr_websocket_active_connections{type="dxcluster"} # Active DX cluster WebSocket connections
+  #   - sum(ubersdr_websocket_active_connections)              # Total active WebSocket connections
+  #   - rate(ubersdr_websocket_messages_sent_total{type="audio"}[1m]) # Audio message rate
+  #   - histogram_quantile(0.95, rate(ubersdr_session_duration_seconds_bucket[5m])) # 95th percentile session duration
+  #   - histogram_quantile(0.99, rate(ubersdr_aggregate_request_duration_seconds_bucket[5m])) # 99th percentile aggregate latency
+  #   - ubersdr_rate_limit_errors_total{type="audio"}     # Audio command rate limit errors
+  #   - ubersdr_rate_limit_errors_total{type="spectrum"}  # Spectrum command rate limit errors
+  #   - ubersdr_rate_limit_errors_total{type="aggregate"} # Aggregate endpoint rate limit errors
+  #   - ubersdr_idle_timeout_kicks_total{type="audio"}    # Audio session idle timeout kicks
+  #   - ubersdr_idle_timeout_kicks_total{type="spectrum"} # Spectrum session idle timeout kicks
+  #   - ubersdr_idle_timeout_kicks_total{type="mixed"}    # Mixed (audio+spectrum) idle timeout kicks
+  #   - ubersdr_goroutines_total                 # Current goroutine count
+  #   - ubersdr_memory_heap_bytes / 1024 / 1024  # Heap memory in MB
+  #   - rate(process_cpu_seconds_total[1m])      # CPU usage rate
+# MQTT Metrics Publishing settings
+mqtt:
+  # Enable or disable MQTT metrics publishing
+  # When enabled, publishes metrics to an MQTT broker in JSON format
+  enabled: false
+  
+  # MQTT broker connection settings
+  broker: "tcp://mqtt.example.com:1883"  # MQTT broker URL (tcp:// or ssl://)
+  
+  # MQTT authentication (leave empty if not required)
+  username: ""
+  password: ""
+  
+  # Topic prefix for all metrics
+  # Metrics will be published to: {topic_prefix}/{category}/{band}
+  # Example: "ubersdr/metrics/noisefloor/40m"
+  # Spectrum data will be published to: {topic_prefix}/spectrum/{band}
+  topic_prefix: "ubersdr/metrics"
+  
+  # Publishing interval for aggregate metrics in seconds
+  # How often to publish Prometheus metrics to MQTT broker
+  # Recommended: 60 seconds (matches Pushgateway default)
+  publish_interval: 60
+  
+  # Spectrum data publishing settings
+  # Enable or disable spectrum FFT data publishing to MQTT
+  # When enabled, publishes raw FFT arrays as JSON to separate topics
+  # This is separate from aggregate metrics and uses a different interval
+  spectrum_publish_enabled: false
+  
+  # Publishing interval for spectrum data in seconds
+  # How often to publish spectrum FFT arrays to MQTT broker
+  # Recommended: 10 seconds (matches HTTP endpoint update rate)
+  # Lower values = more frequent updates but more bandwidth usage
+  spectrum_publish_interval: 10
+  
+  # MQTT Quality of Service level (0, 1, or 2)
+  # 0 = At most once (fire and forget)
+  # 1 = At least once (acknowledged delivery)
+  # 2 = Exactly once (assured delivery)
+  # Recommended: 1 for reliable delivery without overhead
+  qos: 1
+  
+  # Retain flag - if true, broker retains last message for new subscribers
+  # Recommended: false for time-series data
+  retain: false
+  
+  # TLS/SSL settings for secure connections
+  tls:
+    enabled: false
+    ca_cert: ""      # Path to CA certificate file
+    client_cert: ""  # Path to client certificate file (optional)
+    client_key: ""   # Path to client key file (optional)
+
+
+# Noise Floor Monitoring settings
+noisefloor:
+  # Enable or disable noise floor monitoring
+  # When enabled, creates SEPARATE spectrum sessions for each band (better resolution!)
+  enabled: true
+  
+  # Polling interval in seconds (how often to collect measurements)
+  # Lower values = more frequent updates but more CPU/disk usage
+  # Recommended: 60 seconds (1 minute) for good time resolution
+  poll_interval_sec: 60
+  
+  # Directory to store CSV data files (one file per day)
+  # If relative path, will be created relative to config directory
+  # Default: "noisefloor" (creates <config_dir>/noisefloor/)
+  # Absolute paths are also supported
+  data_dir: "noisefloor"
+  
+  # Amateur radio bands to monitor
+  # Each band gets its own dedicated spectrum channel with optimized resolution
+  # This provides much better frequency resolution than a single wide 0-30 MHz spectrum
+  #
+  # Each band has three parameters:
+  #   - center_frequency: Center frequency for this band's spectrum (Hz)
+  #   - bin_count: Number of FFT bins for this band
+  #   - bin_bandwidth: Bandwidth per bin in Hz (determines resolution)
+  #
+  # Example: 20m band with 350 Hz/bin can clearly see 50 Hz wide FT8 signals!
+  # Compare to old 3 kHz/bin where FT8 was averaged out.
+  #
+  # If you omit these parameters, sensible defaults will be calculated automatically.
+  bands:
+    - name: "160m"
+      start: 1800000          # 1.8 MHz
+      end: 2000000            # 2.0 MHz
+      center_frequency: 1900000
+      bin_count: 1000
+      bin_bandwidth: 200      # 200 Hz resolution
+      ft8_frequency: 1840000  # 1.840 MHz - FT8 calling frequency
+    
+    - name: "80m"
+      start: 3500000          # 3.5 MHz
+      end: 4000000            # 4.0 MHz
+      center_frequency: 3750000
+      bin_count: 1000
+      bin_bandwidth: 500      # 500 Hz resolution
+      ft8_frequency: 3573000  # 3.573 MHz - FT8 calling frequency
+    
+    - name: "60m"
+      start: 5250000          # 5.25 MHz
+      end: 5450000            # 5.45 MHz
+      center_frequency: 5350000
+      bin_count: 1000
+      bin_bandwidth: 200      # 200 Hz resolution
+      ft8_frequency: 5357000  # 5.357 MHz - FT8 calling frequency
+    
+    - name: "40m"
+      start: 7000000          # 7.0 MHz
+      end: 7200000            # 7.2 MHz
+      center_frequency: 7100000
+      bin_count: 1000
+      bin_bandwidth: 200      # 200 Hz resolution
+      ft8_frequency: 7074000  # 7.074 MHz - FT8 calling frequency
+    
+    - name: "30m"
+      start: 10100000         # 10.1 MHz
+      end: 10150000           # 10.15 MHz
+      center_frequency: 10125000
+      bin_count: 500
+      bin_bandwidth: 100      # 100 Hz resolution (narrow band)
+      ft8_frequency: 10136000 # 10.136 MHz - FT8 calling frequency
+    
+    - name: "20m"
+      start: 14000000         # 14.0 MHz
+      end: 14350000           # 14.35 MHz
+      center_frequency: 14175000
+      bin_count: 1000
+      bin_bandwidth: 350      # 350 Hz resolution
+      ft8_frequency: 14074000 # 14.074 MHz - FT8 calling frequency
+    
+    - name: "17m"
+      start: 18068000         # 18.068 MHz
+      end: 18168000           # 18.168 MHz
+      center_frequency: 18118000
+      bin_count: 500
+      bin_bandwidth: 200      # 200 Hz resolution
+      ft8_frequency: 18100000 # 18.100 MHz - FT8 calling frequency
+    
+    - name: "15m"
+      start: 21000000         # 21.0 MHz
+      end: 21450000           # 21.45 MHz
+      center_frequency: 21225000
+      bin_count: 1000
+      bin_bandwidth: 450      # 450 Hz resolution
+      ft8_frequency: 21074000 # 21.074 MHz - FT8 calling frequency
+    
+    - name: "12m"
+      start: 24890000         # 24.89 MHz
+      end: 24990000           # 24.99 MHz
+      center_frequency: 24940000
+      bin_count: 500
+      bin_bandwidth: 200      # 200 Hz resolution
+      ft8_frequency: 24915000 # 24.915 MHz - FT8 calling frequency
+    
+    - name: "10m"
+      start: 28000000         # 28.0 MHz
+      end: 29700000           # 29.7 MHz
+      center_frequency: 28850000
+      bin_count: 1000
+      bin_bandwidth: 1700     # 1.7 kHz resolution (wide band)
+      ft8_frequency: 28074000 # 28.074 MHz - FT8 calling frequency
+
+# Instance Reporting settings
+# Allows this UberSDR instance to report to a central registry
+instance_reporting:
+  # Enable or disable instance reporting (enabled by default)
+  # When enabled, this instance will periodically send information to the central server
+  # including: UUID, callsign, location, public URL, and basic statistics
+  enabled: false
+
+  # Create DNS subdomain for this instance (optional)
+  # When enabled, the collector will create a DNS A record pointing
+  # <callsign>.instance.ubersdr.org to your public IP address
+  # Requirements:
+  #   - host must be set to "<callsign>.instance.ubersdr.org" (lowercase)
+  #   - The collector will use your source IP for the DNS record
+  #   - TLS certificate errors are ignored during verification (no cert yet)
+  # Example: If callsign is "W1ABC", set host to "w1abc.instance.ubersdr.org"
+  # Default: false
+  create_domain: false
+
+  # Generate TLS certificate with Caddy (default: false)
+  # When true, Caddy will automatically generate a Let's Encrypt certificate
+  # When false, Caddy will not attempt to generate certificates (HTTP-only mode)
+  # Requirements for certificate generation:
+  #   - instance.host must be a valid domain name (not an IP address)
+  #   - instance.tls must be true
+  #   - admin.email must be set to a valid email (not @example.com)
+  # Default: false
+  generate_tls: false
+
+  # Use HTTPS (true) or HTTP (false) for connections to the central server
+  # Default: true (HTTPS)
+  # Set to false for local testing with HTTP-only collector
+  use_https: true
+
+  # Automatically use your public IP address for public access
+  # When enabled, the instance reporter will automatically detect and use your public IP
+  # Default: false
+  use_myip: false
+
+  # Central server hostname for instance reporting
+  # Default: instances.ubersdr.org
+  hostname: "instances.ubersdr.org"
+
+  # Central server port
+  # Default: 443 (HTTPS) or 8443 (HTTP for local testing)
+  port: 443
+
+  # Reporting interval in seconds (how often to send updates)
+  # Default: 600 (10 minutes)
+  # Minimum recommended: 120 (2 minutes)
+  report_interval_sec: 120
+
+  # Instance UUID (automatically generated on first run if enabled)
+  # This uniquely identifies your SDR instance in the registry
+  # Do not modify this value manually - it will be auto-generated
+  # Example: "550e8400-e29b-41d4-a716-446655440000"
+  instance_uuid: ""
+
+  # Instance connection information (optional)
+  # These fields tell clients how to connect to this UberSDR instance
+  # Leave empty if you don't want to report connection details
+  instance:
+    host: ""
+    port: 8080
+    tls: false
+
+  # Enable/disable tunnel server integration (default: false)
+  # When enabled, UberSDR will manage the tunnel client configuration
+  # and automatically configure the tunnel connection
+  # Requires the tunnel-client container to be running
+  # Default: false
+  tunnel_server_enabled: false
+
+  # Tunnel server WebSocket URI
+  # The WebSocket URL for connecting to the tunnel server
+  # The tunnel client will derive the registration URL from this
+  # Default: "wss://tunnel.ubersdr.org/tunnel/connect"
+  tunnel_server_uri: "wss://tunnel.ubersdr.org/tunnel/connect"
+
+  # Tunnel server hostname for X-Real-IP trust verification
+  # When using the UberSDR tunnel service, this hostname is used to verify
+  # that X-Real-IP headers come from the trusted tunnel server
+  # Only requests from this server will have their X-Real-IP header trusted
+  # This prevents clients from spoofing their IP address via headers
+  #
+  # How it works:
+  #   1. DNS lookup resolves tunnel_server_host to IP address(es)
+  #   2. Incoming requests are checked: does source IP match tunnel server?
+  #   3. If yes: trust X-Real-IP header (set by tunnel server with real client IP)
+  #   4. If no: use X-Forwarded-For header (standard Caddy proxy behavior)
+  #
+  # Leave empty if not using the tunnel service (will use X-Forwarded-For)
+  # If DNS lookup fails, a warning is logged and X-Forwarded-For is used as fallback
+  #
+  # Default: "tunnel.ubersdr.org" (official UberSDR tunnel service)
+  tunnel_server_host: "tunnel.ubersdr.org"
+
+  # Tunnel server port (for future use)
+  # Currently not used but reserved for future functionality
+  # Default: 443
+  tunnel_server_port: 443

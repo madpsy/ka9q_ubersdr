@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UberSDR Setup Wizard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .wizard-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .wizard-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .wizard-header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .wizard-header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .progress-bar {
+            display: flex;
+            justify-content: space-between;
+            padding: 30px 40px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .progress-step {
+            flex: 1;
+            text-align: center;
+            position: relative;
+        }
+
+        .progress-step:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            width: 100%;
+            height: 2px;
+            background: #dee2e6;
+            z-index: 0;
+        }
+
+        .progress-step.active:not(:last-child)::after {
+            background: #667eea;
+        }
+
+        .progress-step-circle {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: #dee2e6;
+            color: #6c757d;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            position: relative;
+            z-index: 1;
+            margin-bottom: 8px;
+        }
+
+        .progress-step.active .progress-step-circle {
+            background: #667eea;
+            color: white;
+        }
+
+        .progress-step.completed .progress-step-circle {
+            background: #28a745;
+            color: white;
+        }
+
+        .progress-step-label {
+            font-size: 12px;
+            color: #6c757d;
+            font-weight: 500;
+        }
+
+        .progress-step.active .progress-step-label {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .wizard-content {
+            padding: 40px;
+        }
+
+        .wizard-step {
+            display: none;
+        }
+
+        .wizard-step.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .step-title {
+            font-size: 24px;
+            color: #2d3748;
+            margin-bottom: 10px;
+        }
+
+        .step-description {
+            color: #718096;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        label .optional {
+            font-weight: normal;
+            color: #718096;
+            font-size: 12px;
+        }
+
+        #location-map {
+            height: 400px;
+            width: 100%;
+            margin: 15px 0;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            z-index: 1;
+        }
+
+        .map-container {
+            margin: 20px 0;
+        }
+
+        .map-help {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 8px;
+            font-style: italic;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="number"],
+        input[type="password"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+            font-family: inherit;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #718096;
+            margin-top: 5px;
+        }
+
+        .conditional-section {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+        }
+
+        .wizard-actions {
+            display: flex;
+            justify-content: space-between;
+            padding: 30px 40px;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #2d3748;
+        }
+
+        .btn-secondary:hover {
+            background: #cbd5e0;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn:disabled:hover {
+            transform: none;
+            box-shadow: none;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .password-generator {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .password-generator button {
+            padding: 8px 16px;
+            background: #667eea;
+        /* Leaflet tooltip styling */
+        .receiver-tooltip {
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #667eea;
+            border-radius: 4px;
+            color: white;
+            font-size: 12px;
+            padding: 6px 10px;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .receiver-tooltip::before {
+            border-top-color: #667eea;
+        }
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .password-generator button:hover {
+            background: #5568d3;
+        }
+
+        .generated-password {
+            flex: 1;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="wizard-container">
+        <div class="wizard-header">
+            <h1>🎉 Welcome to UberSDR!</h1>
+            <p>Let's get your SDR receiver configured in just a few steps</p>
+        </div>
+
+        <div class="progress-bar">
+            <div class="progress-step active" data-step="1">
+                <div class="progress-step-circle">1</div>
+                <div class="progress-step-label">Station Info</div>
+            </div>
+            <div class="progress-step" data-step="2">
+                <div class="progress-step-circle">2</div>
+                <div class="progress-step-label">Server</div>
+            </div>
+            <div class="progress-step" data-step="3">
+                <div class="progress-step-circle">3</div>
+                <div class="progress-step-label">DX Cluster</div>
+            </div>
+            <div class="progress-step" data-step="4">
+                <div class="progress-step-circle">4</div>
+                <div class="progress-step-label">Decoder</div>
+            </div>
+        </div>
+
+        <div class="wizard-content">
+            <div class="error-message" id="errorMessage"></div>
+            <div class="success-message" id="successMessage"></div>
+
+            <!-- Step 1: Station Information -->
+            <div class="wizard-step active" data-step="1">
+                <h2 class="step-title">Station Information</h2>
+                <p class="step-description">Tell us about your station and location</p>
+
+                <div class="form-group">
+                    <label for="callsign">Callsign *</label>
+                    <input type="text" id="callsign" name="callsign" required placeholder="e.g., W1ABC">
+                    <div class="help-text">Your amateur radio callsign</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="stationName">Station Name *</label>
+                    <input type="text" id="stationName" name="stationName" required placeholder="e.g., W1ABC SDR">
+                    <div class="help-text">A friendly name for your receiver</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Admin Email *</label>
+                    <input type="email" id="email" name="email" required placeholder="admin@example.com">
+                    <div class="help-text">Contact email for administrative purposes</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="location">Location *</label>
+                    <input type="text" id="location" name="location" required placeholder="e.g., Boston, MA, USA">
+                    <div class="help-text">City, state/province, country</div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="latitude">Latitude *</label>
+                        <input type="number" id="latitude" name="latitude" step="0.000001" required placeholder="42.3601">
+                        <div class="help-text">Decimal degrees (e.g., 42.3601)</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="longitude">Longitude *</label>
+                        <input type="number" id="longitude" name="longitude" step="0.000001" required placeholder="-71.0589">
+                        <div class="help-text">Decimal degrees (e.g., -71.0589)</div>
+                    </div>
+                </div>
+
+                <div class="map-container">
+                    <div id="location-map"></div>
+                    <p class="map-help">💡 Drag the marker to set your location, or enter coordinates above</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="asl">Altitude (ASL) *</label>
+                    <input type="number" id="asl" name="asl" required placeholder="10">
+                    <div class="help-text">Height above sea level in meters</div>
+                </div>
+            </div>
+
+            <!-- Step 2: Server Settings -->
+            <div class="wizard-step" data-step="2">
+                <h2 class="step-title">Server Settings</h2>
+                <p class="step-description">Configure access control and session limits</p>
+
+                <div class="form-group">
+                    <label for="bypassPassword">Bypass Password <span class="optional">(optional)</span></label>
+                    <input type="password" id="bypassPassword" name="bypassPassword" placeholder="Enter a secure password">
+                    <div class="help-text">Password for unlimited access (bypasses session limits). Leave empty to disable.</div>
+                    <div class="password-generator">
+                        <button type="button" id="generatePassword">Generate Secure Password</button>
+                        <div class="generated-password" id="generatedPassword" style="display: none;"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="maxSessionTime">Maximum Session Time (seconds) *</label>
+                    <input type="number" id="maxSessionTime" name="maxSessionTime" required value="3600" min="0">
+                    <div class="help-text">Maximum time a user's session can last (0 = unlimited)</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="maxSessions">Maximum Simultaneous Users *</label>
+                    <input type="number" id="maxSessions" name="maxSessions" required value="10" min="1">
+                    <div class="help-text">Maximum number of users that can connect at once</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="maxSessionsIP">Maximum Sessions Per IP *</label>
+                    <input type="number" id="maxSessionsIP" name="maxSessionsIP" required value="2" min="1">
+                    <div class="help-text">Maximum number of sessions from a single IP address</div>
+                </div>
+            </div>
+
+            <!-- Step 3: DX Cluster -->
+            <div class="wizard-step" data-step="3">
+                <h2 class="step-title">DX Cluster Integration</h2>
+                <p class="step-description">Connect to DX cluster for real-time spot information</p>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="dxclusterEnabled" name="dxclusterEnabled" checked>
+                    <label for="dxclusterEnabled">Enable DX Cluster integration</label>
+                </div>
+                <div class="help-text" style="margin-top: -10px; margin-bottom: 20px;">
+                    Receive real-time DX spots from the cluster network
+                </div>
+
+                <div id="dxclusterSettings" class="conditional-section">
+                    <div class="form-group">
+                        <label for="dxclusterCallsign">DX Cluster Callsign *</label>
+                        <input type="text" id="dxclusterCallsign" name="dxclusterCallsign" placeholder="e.g., W1ABC">
+                        <div class="help-text">Your callsign for DX cluster login</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Digital Decoder -->
+            <div class="wizard-step" data-step="4">
+                <h2 class="step-title">Digital Decoder Configuration</h2>
+                <p class="step-description">Set up automatic decoding of digital modes</p>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="decoderEnabled" name="decoderEnabled" checked>
+                    <label for="decoderEnabled">Enable digital decoder</label>
+                </div>
+                <div class="help-text" style="margin-top: -10px; margin-bottom: 20px;">
+                    Automatically decode FT8, FT4, and WSPR signals
+                </div>
+
+                <div id="decoderSettings" class="conditional-section">
+                    <div class="form-group">
+                        <label for="receiverCallsign">Receiver Callsign *</label>
+                        <input type="text" id="receiverCallsign" name="receiverCallsign" placeholder="e.g., W1ABC">
+                        <div class="help-text">Callsign for PSKReporter and WSPRNet reporting</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="receiverLocator">Maidenhead Locator *</label>
+                        <input type="text" id="receiverLocator" name="receiverLocator" placeholder="e.g., FN42">
+                        <div class="help-text">4 or 6-character grid square locator</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="receiverAntenna">Antenna Description <span class="optional">(optional)</span></label>
+                        <input type="text" id="receiverAntenna" name="receiverAntenna" placeholder="e.g., Dipole @ 10m">
+                        <div class="help-text">Brief description of your antenna setup</div>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 25px;">
+                        <label>Reporting Services</label>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="pskreporterEnabled" name="pskreporterEnabled" checked>
+                            <label for="pskreporterEnabled">Enable PSKReporter</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="wsprnetEnabled" name="wsprnetEnabled" checked>
+                            <label for="wsprnetEnabled">Enable WSPRNet</label>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 25px;">
+                        <label>Digital Modes to Decode</label>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="ft8Enabled" name="ft8Enabled" checked>
+                            <label for="ft8Enabled">FT8</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="ft4Enabled" name="ft4Enabled" checked>
+                            <label for="ft4Enabled">FT4</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="wsprEnabled" name="wsprEnabled" checked>
+                            <label for="wsprEnabled">WSPR</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loading State -->
+            <div class="loading" id="loadingState">
+                <div class="spinner"></div>
+                <p>Saving configuration...</p>
+            </div>
+        </div>
+
+        <div class="wizard-actions">
+            <button type="button" class="btn btn-secondary" id="prevBtn" style="visibility: hidden;">
+                ← Previous
+            </button>
+            <button type="button" class="btn btn-primary" id="nextBtn">
+                Next →
+            </button>
+        </div>
+    </div>
+
+    <!-- Restart Countdown Overlay -->
+    <div id="restartOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.9); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="text-align: center; color: white;">
+            <div style="font-size: 72px; font-weight: bold; margin-bottom: 20px;" id="countdownNumber">15</div>
+            <h2 style="margin-bottom: 10px;">Server is restarting...</h2>
+            <p style="font-size: 18px; color: #ccc;">You will be redirected automatically</p>
+            <div style="margin-top: 30px;">
+                <div class="spinner" style="border-color: #f3f3f3; border-top-color: #667eea;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="maidenhead.js"></script>
+    <script src="setup-wizard.js"></script>
+</body>
+</html>

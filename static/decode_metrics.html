@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decode Metrics</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .controls {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        .control-row {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            margin-bottom: 15px;
+        }
+
+        .control-group {
+            flex: 1;
+            min-width: 150px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .control-group input,
+        .control-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            font-size: 1em;
+        }
+
+        .control-group button {
+            width: 100%;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            background: #4CAF50;
+            color: white;
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .control-group button:hover {
+            background: #45a049;
+        }
+
+        .control-group button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .info-box {
+            background: rgba(33, 150, 243, 0.2);
+            border-left: 4px solid #2196F3;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+
+        .chart-container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            margin-bottom: 20px;
+        }
+
+        .chart-container h2 {
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .metric-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .metric-card h3 {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+            opacity: 0.9;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+            padding-bottom: 8px;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 0.9em;
+        }
+
+        .metric-label {
+            opacity: 0.8;
+        }
+
+        .metric-value {
+            font-weight: bold;
+        }
+
+        .status {
+            text-align: center;
+            padding: 10px;
+            margin-top: 20px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .status.error {
+            background: rgba(244, 67, 54, 0.3);
+        }
+
+        .status.success {
+            background: rgba(76, 175, 80, 0.3);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+        }
+
+        .site-footer {
+            text-align: center;
+            padding: 20px;
+            margin-top: 40px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .site-footer a {
+            color: #4CAF50;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .site-footer a:hover {
+            color: #45a049;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Decode Metrics Dashboard</h1>
+        <div class="subtitle" id="receiver-name">Digital Mode Decode Statistics</div>
+        
+        <div style="text-align: center; margin: 15px 0; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <a href="digitalspots_map.html" style="display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">🔴 Live</a>
+            <a href="decoder_spots_history.html" style="display: inline-block; padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📜 History</a>
+            <a href="decoder_spots_analytics.html" style="display: inline-block; padding: 10px 20px; background: #FF9800; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📊 Analytics</a>
+        </div>
+
+        <div class="info-box">
+            ℹ️ View comprehensive decode metrics including counts, rates, and activity scores. Time series graphs show decodes per hour and decoder execution times for each band and mode combination.
+        </div>
+
+        <!-- Summary Statistics Section -->
+        <div class="chart-container">
+            <h2>📈 Spot Summary Statistics</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h3>Today's Spots</h3>
+                    <div id="today-summary" class="loading">Loading...</div>
+                </div>
+                <div class="metric-card">
+                    <h3>This Month's Spots</h3>
+                    <div id="month-summary" class="loading">Loading...</div>
+                </div>
+                <div class="metric-card">
+                    <h3>This Year's Spots</h3>
+                    <div id="year-summary" class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary Charts Section -->
+        <div class="chart-container">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="margin: 0;">📊 Last 7 Days - Spots by Mode</h2>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="dashboard.toggleAllDatasets('weekChart', true)" style="padding: 5px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Show All</button>
+                    <button onclick="dashboard.toggleAllDatasets('weekChart', false)" style="padding: 5px 15px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Hide All</button>
+                </div>
+            </div>
+            <canvas id="week-chart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="margin: 0;">📊 Last 7 Days - Spots by Band</h2>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="dashboard.toggleAllDatasets('weekBandChart', true)" style="padding: 5px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Show All</button>
+                    <button onclick="dashboard.toggleAllDatasets('weekBandChart', false)" style="padding: 5px 15px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Hide All</button>
+                </div>
+            </div>
+            <canvas id="week-band-chart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="margin: 0;">📊 This Month - Spots by Mode</h2>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="dashboard.toggleAllDatasets('monthChart', true)" style="padding: 5px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Show All</button>
+                    <button onclick="dashboard.toggleAllDatasets('monthChart', false)" style="padding: 5px 15px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Hide All</button>
+                </div>
+            </div>
+            <canvas id="month-chart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="margin: 0;">📊 This Month - Spots by Band</h2>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="dashboard.toggleAllDatasets('monthBandChart', true)" style="padding: 5px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Show All</button>
+                    <button onclick="dashboard.toggleAllDatasets('monthBandChart', false)" style="padding: 5px 15px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Hide All</button>
+                </div>
+            </div>
+            <canvas id="month-band-chart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="margin: 0;">📊 This Year - Spots by Mode</h2>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="dashboard.toggleAllDatasets('yearChart', true)" style="padding: 5px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Show All</button>
+                    <button onclick="dashboard.toggleAllDatasets('yearChart', false)" style="padding: 5px 15px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Hide All</button>
+                </div>
+            </div>
+            <canvas id="year-chart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="margin: 0;">📊 This Year - Spots by Band</h2>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="dashboard.toggleAllDatasets('yearBandChart', true)" style="padding: 5px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Show All</button>
+                    <button onclick="dashboard.toggleAllDatasets('yearBandChart', false)" style="padding: 5px 15px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">Hide All</button>
+                </div>
+            </div>
+            <canvas id="year-band-chart"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-row">
+                <div class="control-group">
+                    <label>Decoder Name:</label>
+                    <select id="decoder-name">
+                        <option value="">All Decoders</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label>Date Range:</label>
+                    <select id="date-range-type">
+                        <option value="hours">Quick Select</option>
+                        <option value="custom">Custom Range</option>
+                    </select>
+                </div>
+                
+                
+                <div class="control-group" id="quick-select-controls">
+                    <label>Time Window:</label>
+                    <select id="hours">
+                        <option value="1">1 hour</option>
+                        <option value="3">3 hours</option>
+                        <option value="6">6 hours</option>
+                        <option value="12">12 hours</option>
+                        <option value="24" selected>24 hours</option>
+                        <option value="48">48 hours</option>
+                        <option value="72">3 days</option>
+                        <option value="168">7 days</option>
+                    </select>
+                </div>
+                
+                <div class="control-group" id="custom-range-controls" style="display: none;">
+                    <label>From:</label>
+                    <input type="datetime-local" id="date-from">
+                </div>
+                
+                <div class="control-group" id="custom-range-controls-to" style="display: none;">
+                    <label>To:</label>
+                    <input type="datetime-local" id="date-to">
+                </div>
+                
+                <div class="control-group">
+                    <label>Graph Interval:</label>
+                    <select id="interval">
+                        <option value="15m">15 minutes</option>
+                        <option value="30m">30 minutes</option>
+                        <option value="1h" selected>1 hour</option>
+                        <option value="2h">2 hours</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="control-row">
+                <div class="control-group">
+                    <button id="load-btn">Load Metrics</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">Loading metrics...</div>
+        <div id="status" class="status">Select filters and click "Load Metrics" to view detailed time-series data</div>
+        
+        <div id="results"></div>
+    </div>
+
+    <footer class="site-footer">
+        <p><a href="/" target="_blank">SDR Interface</a> • <a href="/bandconditions.html" target="_blank">Band Conditions</a> • <a href="/spaceweather_history.html" target="_blank">Space Weather</a> <span id="footer-version"></span></p>
+    </footer>
+
+    <script src="chart.umd.min.js"></script>
+    <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="decode_metrics.js"></script>
+</body>
+</html>

@@ -1,0 +1,328 @@
+/* UK CB Radio - Midland Car CB Style */
+
+.radio-body {
+    width: 700px;
+    max-width: 95vw;
+    height: 180px;
+    background: linear-gradient(145deg, #1a1a1a, #0a0a0a);
+    border: 2px solid #000;
+    border-radius: 3px;
+    padding: 0;
+    box-shadow: 
+        0 4px 15px rgba(0, 0, 0, 0.9),
+        inset 0 1px 2px rgba(255, 255, 255, 0.05);
+    position: relative;
+}
+
+.radio-header {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    text-align: center;
+}
+
+.radio-brand {
+    font-size: 18px;
+    font-weight: bold;
+    color: #666;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    letter-spacing: 4px;
+    margin: 0;
+}
+
+.radio-model {
+    font-size: 9px;
+    color: #444;
+    letter-spacing: 1px;
+    font-weight: normal;
+    opacity: 1;
+    margin-top: 2px;
+}
+
+/* CB Main Body - Horizontal Layout */
+.cb-main-body {
+    display: flex;
+    height: 100%;
+    background: #0a0a0a;
+    border-radius: 3px;
+    padding: 0;
+    padding-top: 35px;
+}
+
+/* Left Section - Display */
+.cb-display {
+    flex: 0 0 280px;
+    display: flex;
+    flex-direction: column;
+    padding: 10px 15px 10px 15px;
+    background: linear-gradient(145deg, #1a1a1a, #0a0a0a);
+    border-right: 1px solid #000;
+}
+
+.display-screen {
+    background: #001100;
+    border: 2px solid #000;
+    border-radius: 2px;
+    padding: 12px 15px;
+    box-shadow: 
+        inset 0 2px 8px rgba(0, 0, 0, 0.9),
+        0 0 15px rgba(0, 255, 0, 0.1);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.channel-display {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+}
+
+.channel-label {
+    color: #00ff00;
+    font-size: 14px;
+    font-weight: bold;
+    text-shadow: 0 0 5px rgba(0, 255, 0, 0.8);
+}
+
+.channel-number {
+    color: #00ff00;
+    font-size: 48px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    text-shadow: 0 0 15px rgba(0, 255, 0, 0.8);
+    line-height: 1;
+}
+
+.frequency-display-cb {
+    text-align: center;
+    margin: 5px 0;
+}
+
+.frequency-value-cb {
+    color: #ffff00;
+    font-size: 16px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    text-shadow: 0 0 8px rgba(255, 255, 0, 0.6);
+}
+
+.unit-cb {
+    color: #ffff00;
+    font-size: 12px;
+    margin-left: 3px;
+    opacity: 0.8;
+}
+
+.signal-bars {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    height: 16px;
+}
+
+.signal-bar {
+    width: 14px;
+    background: #002200;
+    border: 1px solid #004400;
+    transition: background 0.1s ease;
+}
+
+.signal-bar.active {
+    background: #00ff00;
+    box-shadow: 0 0 5px #00ff00;
+}
+
+/* Center Section - Speaker */
+.speaker-grille {
+    flex: 1;
+    background: linear-gradient(145deg, #0a0a0a, #000);
+    margin: 10px 0;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.9);
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    border-left: 1px solid #1a1a1a;
+    border-right: 1px solid #1a1a1a;
+}
+
+.speaker-grille:hover {
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 255, 0, 0.1);
+}
+
+.grille-pattern {
+    width: 100%;
+    height: 100%;
+    background-image:
+        repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0, 255, 0, 0.05) 3px, rgba(0, 255, 0, 0.05) 4px),
+        repeating-linear-gradient(90deg, transparent, transparent 3px, rgba(0, 255, 0, 0.05) 3px, rgba(0, 255, 0, 0.05) 4px);
+}
+
+/* Right Section - Controls */
+.cb-controls {
+    flex: 0 0 240px;
+    display: flex;
+    flex-direction: column;
+    padding: 10px 15px;
+    background: linear-gradient(145deg, #1a1a1a, #0a0a0a);
+    border-left: 1px solid #000;
+    gap: 12px;
+}
+
+.channel-selector {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.channel-btn {
+    background: linear-gradient(145deg, #2a2a2a, #1a1a1a);
+    border: 2px solid #00ff00;
+    color: #00ff00;
+    font-size: 14px;
+    font-weight: bold;
+    width: 100px;
+    height: 40px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+}
+
+.channel-btn span:first-child {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.btn-label {
+    font-size: 8px;
+    letter-spacing: 1px;
+}
+
+.channel-btn:hover {
+    background: linear-gradient(145deg, #3a3a3a, #2a2a2a);
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+}
+
+.channel-btn:active {
+    transform: translateY(1px);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* Knobs Container - Side by Side */
+.knobs-container {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    align-items: center;
+}
+
+.volume-control-cb,
+.squelch-control {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    position: relative;
+}
+
+.volume-label,
+.squelch-label {
+    color: #00ff00;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    text-shadow: 0 0 3px rgba(0, 255, 0, 0.3);
+}
+
+.knob {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #2a2a2a, #0a0a0a);
+    box-shadow:
+        0 3px 8px rgba(0, 0, 0, 0.8),
+        inset 0 1px 3px rgba(255, 255, 255, 0.05),
+        inset 0 -1px 3px rgba(0, 0, 0, 0.5);
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.1s ease;
+    z-index: 2;
+    border: 1px solid #000;
+}
+
+.knob:active {
+    transform: scale(0.98);
+}
+
+.knob-pointer {
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    width: 2px;
+    height: 24px;
+    background: #00ff00;
+    transform: translateX(-50%);
+    border-radius: 1px;
+    box-shadow: 0 0 5px rgba(0, 255, 0, 0.8);
+}
+
+/* Responsive Design */
+@media (max-width: 750px) {
+    .radio-body {
+        width: 100% !important;
+        height: auto;
+        min-height: 180px;
+    }
+
+    .cb-main-body {
+        flex-direction: column;
+    }
+
+    .cb-display {
+        flex: 0 0 auto;
+        border-right: none;
+        border-bottom: 1px solid #000;
+    }
+
+    .speaker-grille {
+        min-height: 80px;
+        border-left: none;
+        border-right: none;
+        border-top: 1px solid #1a1a1a;
+        border-bottom: 1px solid #1a1a1a;
+    }
+
+    .cb-controls {
+        flex: 0 0 auto;
+        border-left: none;
+        border-top: 1px solid #000;
+    }
+
+    .channel-selector {
+        flex-direction: row;
+    }
+}
+
+/* Change Radio Button - CB Style */
+.change-radio-floating {
+    background: linear-gradient(145deg, #2a2a2a, #1a1a1a) !important;
+    border: 2px solid #00ff00 !important;
+    color: #00ff00 !important;
+}
+
+.change-radio-floating:hover {
+    background: linear-gradient(145deg, #3a3a3a, #2a2a2a) !important;
+    border-color: #00ff00 !important;
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.3) !important;
+}

@@ -1,0 +1,263 @@
+# Multi-Decoder Configuration Example
+# This file shows how to configure the multi-band digital mode decoder
+# Copy this to decoder.yaml and customize for your station
+
+decoder:
+  # Enable/disable the decoder
+  enabled: false
+  
+  # Directory for WAV files and logs (absolute or relative path)
+  data_dir: "/dev/shm"
+  
+  # Decoder binary paths (absolute paths recommended)
+  jt9_path: "/usr/bin/jt9"      # Path to jt9 binary (for FT8/FT4)
+  wsprd_path: "/usr/bin/wsprd"  # Path to wsprd binary (for WSPR)
+  
+  # Keep WAV files after decoding (useful for debugging)
+  keep_wav: false
+  
+  # Keep decoder log files (useful for debugging)
+  keep_logs: false
+  
+  # Recording options
+  include_dead_time: false  # false = record only transmission time, true = record full cycle
+  
+  # Receiver information (required for reporting)
+  receiver_callsign: "N0CALL"
+  receiver_locator: "IO86ha"
+  receiver_antenna: "Loop"
+  
+  # Reporting services
+  pskreporter_enabled: false  # Enable PSKReporter spot reporting
+  wsprnet_enabled: false      # Enable WSPRNet spot reporting
+  wsprnet_callsign: ""        # Optional: Override callsign for WSPRNet (if empty, uses receiver_callsign)
+                              # Use this if you want different callsigns for PSKReporter and WSPRNet
+  
+  # CSV Logging (independent of reporting services)
+  # Logs all decoded spots to CSV files organized by mode/date/band
+  spots_log_enabled: true              # Enable CSV logging of all spots
+  spots_log_data_dir: "decoder_spots" # Directory for CSV files (relative or absolute, default: data_dir/spots)
+                                       # If relative: relative to current working directory
+                                       # If absolute: used as-is (e.g., /var/log/decoder_spots)
+                                       # Files organized as: decoder_spots/MODE/YYYY/MM/DD/bandname.csv
+                                       # Example: decoder_spots/FT8/2024/11/14/20m_FT8.csv
+  spots_log_locators_only: true        # Only log/show spots with valid grid locators (default: true)
+                                       # When false, logs and shows all spots including those without locators
+                                       # Applies to both CSV logging and history view
+  
+  # Metrics Logging (JSON Lines format for time-series data)
+  # Logs decoder performance metrics (decode counts, execution times, etc.)
+  metrics_log_enabled: true                # Enable JSON Lines logging of decoder metrics
+  metrics_log_data_dir: "decoder_metrics"  # Directory for metrics files (relative or absolute, default: data_dir/metrics)
+                                           # If relative: relative to current working directory
+                                           # If absolute: used as-is (e.g., /var/log/decoder_metrics)
+                                           # Files organized as: decoder_metrics/YYYY/MM/DD/MODE-BAND.jsonl
+                                           # Example: decoder_metrics/2024/11/14/FT8-20m.jsonl
+  metrics_log_interval_secs: 300           # Write interval in seconds (default: 300 = 5 minutes)
+                                           # Metrics snapshots written at this interval for all active bands
+
+  # Metrics Summary (Pre-aggregated time-series summaries)
+  # Aggregates metrics into daily/weekly/monthly/yearly summaries for fast retrieval
+  metrics_summary_data_dir: "decoder_summaries"  # Directory for summary files (relative or absolute, default: decoder_summaries)
+                                                 # If relative: relative to current working directory
+                                                 # If absolute: used as-is (e.g., /var/log/decoder_summaries)
+                                                 # Files organized as: decoder_summaries/{daily,weekly,monthly,yearly}/YYYY/MM/DD/MODE-BAND-summary.json
+                                                 # Example: decoder_summaries/daily/2024/11/14/FT8-20m-summary.json
+                                                 # Updated every minute for fast API responses
+
+  # Band configurations
+  # Each band creates a dedicated audio channel for decoding
+  bands:
+    # Example enabled bands (for testing)
+    - name: "20m-ft8"
+      mode: "FT8"
+      frequency: 14074000  # 14.074 MHz
+      enabled: true
+    
+    - name: "40m-ft8"
+      mode: "FT8"
+      frequency: 7074000   # 7.074 MHz
+      enabled: true
+    
+    # ========================================
+    # FT8 bands (160m - 10m)
+    # ========================================
+    - name: "160m-ft8"
+      mode: "FT8"
+      frequency: 1840000   # 1.840 MHz
+      enabled: false
+    
+    - name: "80m-ft8"
+      mode: "FT8"
+      frequency: 3573000   # 3.573 MHz
+      enabled: false
+    
+    - name: "60m-ft8"
+      mode: "FT8"
+      frequency: 5357000   # 5.357 MHz
+      enabled: false
+    
+    - name: "30m-ft8"
+      mode: "FT8"
+      frequency: 10136000  # 10.136 MHz
+      enabled: false
+    
+    - name: "17m-ft8"
+      mode: "FT8"
+      frequency: 18100000  # 18.100 MHz
+      enabled: false
+    
+    - name: "15m-ft8"
+      mode: "FT8"
+      frequency: 21074000  # 21.074 MHz
+      enabled: false
+    
+    - name: "12m-ft8"
+      mode: "FT8"
+      frequency: 24915000  # 24.915 MHz
+      enabled: false
+    
+    - name: "10m-ft8"
+      mode: "FT8"
+      frequency: 28074000  # 28.074 MHz
+      enabled: false
+    
+    # ========================================
+    # FT4 bands (160m - 10m)
+    # ========================================
+
+    - name: "80m-ft4"
+      mode: "FT4"
+      frequency: 3575000   # 3.575 MHz
+      enabled: false
+    
+    - name: "40m-ft4"
+      mode: "FT4"
+      frequency: 7047500   # 7.0475 MHz
+      enabled: false
+    
+    - name: "30m-ft4"
+      mode: "FT4"
+      frequency: 10140000  # 10.140 MHz
+      enabled: false
+    
+    - name: "20m-ft4"
+      mode: "FT4"
+      frequency: 14080000  # 14.080 MHz
+      enabled: false
+    
+    - name: "17m-ft4"
+      mode: "FT4"
+      frequency: 18104000  # 18.104 MHz
+      enabled: false
+    
+    - name: "15m-ft4"
+      mode: "FT4"
+      frequency: 21140000  # 21.140 MHz
+      enabled: false
+    
+    - name: "12m-ft4"
+      mode: "FT4"
+      frequency: 24919000  # 24.919 MHz
+      enabled: false
+    
+    - name: "10m-ft4"
+      mode: "FT4"
+      frequency: 28180000  # 28.180 MHz
+      enabled: false
+    
+    # ========================================
+    # WSPR bands (160m - 10m)
+    # ========================================
+    - name: "160m-wspr"
+      mode: "WSPR"
+      frequency: 1836600   # 1.8366 MHz
+      enabled: false
+    
+    - name: "80m-wspr"
+      mode: "WSPR"
+      frequency: 3568600   # 3.5686 MHz
+      enabled: false
+    
+    - name: "60m-wspr"
+      mode: "WSPR"
+      frequency: 5287200   # 5.2872 MHz
+      enabled: false
+    
+    - name: "40m-wspr"
+      mode: "WSPR"
+      frequency: 7038600   # 7.0386 MHz
+      enabled: false
+    
+    - name: "30m-wspr"
+      mode: "WSPR"
+      frequency: 10138700  # 10.1387 MHz
+      enabled: false
+    
+    - name: "20m-wspr"
+      mode: "WSPR"
+      frequency: 14095600  # 14.0956 MHz
+      enabled: false
+    
+    - name: "17m-wspr"
+      mode: "WSPR"
+      frequency: 18104600  # 18.1046 MHz
+      enabled: false
+    
+    - name: "15m-wspr"
+      mode: "WSPR"
+      frequency: 21094600  # 21.0946 MHz
+      enabled: false
+    
+    - name: "12m-wspr"
+      mode: "WSPR"
+      frequency: 24924600  # 24.9246 MHz
+      enabled: false
+    
+    - name: "10m-wspr"
+      mode: "WSPR"
+      frequency: 28124600  # 28.1246 MHz
+      enabled: false
+
+    - name: "60m-alt-wspr"
+      mode: "WSPR"
+      frequency: 5364700
+      enabled: false
+
+    - name: "630m-wspr"
+      mode: "WSPR"
+      frequency: 474200
+      enabled: false
+
+    - name: "2200m-wspr"
+      mode: "WSPR"
+      frequency: 136000
+      enabled: false
+
+    - name: "80m-EU-wspr"
+      mode: "WSPR"
+      frequency: 3592600
+      enabled: false
+
+# Notes:
+# 1. Requires external decoder binaries:
+#    - wsprd (for WSPR)
+#    - jt9 (for FT8/FT4, from WSJT-X package)
+#
+# 2. Each enabled band creates a dedicated audio channel
+#    consuming ~12 kHz bandwidth
+#
+# 3. CSV logging (if enabled):
+#    - Logs all spots to: spots_log_dir/YYYY/MM/DD/spots.csv
+#    - Independent of PSKReporter/WSPRNet reporting
+#    - Includes: timestamp, mode, callsign, locator, SNR, frequency, message, country, zones
+#
+# 4. WAV files are stored in:
+#    - decoder_data/<frequency>/YYMMDD_HHMMSS.wav
+#
+# 5. Reporting requires valid callsign and locator
+#
+# 6. Mode timing:
+#    - FT8: 15s cycle, 12.64s transmission
+#    - FT4: 7.5s cycle, 4.48s transmission
+#    - WSPR: 120s cycle, 114s transmission

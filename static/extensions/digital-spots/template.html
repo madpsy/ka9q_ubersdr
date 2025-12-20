@@ -1,0 +1,134 @@
+<div class="digital-spots-container">
+    <div class="digital-spots-header">
+        <div class="digital-spots-title">
+            <h3>Digital Spots</h3>
+            <span id="digital-spots-status-badge" class="status-badge status-disconnected">Disconnected</span>
+        </div>
+        <div class="digital-spots-info">
+            <span id="digital-spots-count">0 spots</span>
+            <span id="digital-spots-last-update"></span>
+        </div>
+    </div>
+
+    <div class="digital-spots-controls">
+        <div class="control-group">
+            <label for="digital-spots-mode-filter">Mode:</label>
+            <select id="digital-spots-mode-filter">
+                <option value="all">All Modes</option>
+                <option value="FT8">FT8</option>
+                <option value="FT4">FT4</option>
+                <option value="WSPR">WSPR</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="digital-spots-age-filter">Age:</label>
+            <select id="digital-spots-age-filter">
+                <option value="5">5 min</option>
+                <option value="10" selected>10 min</option>
+                <option value="15">15 min</option>
+                <option value="30">30 min</option>
+                <option value="60">1 hour</option>
+                <option value="none">No limit</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="digital-spots-band-filter">Band:</label>
+            <select id="digital-spots-band-filter">
+                <option value="all">All Bands</option>
+                <option value="160m">160m</option>
+                <option value="80m">80m</option>
+                <option value="60m">60m</option>
+                <option value="40m">40m</option>
+                <option value="30m">30m</option>
+                <option value="20m">20m</option>
+                <option value="17m">17m</option>
+                <option value="15m">15m</option>
+                <option value="12m">12m</option>
+                <option value="10m">10m</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="digital-spots-snr-filter">Min SNR:</label>
+            <select id="digital-spots-snr-filter">
+                <option value="none" selected>No limit</option>
+                <option value="20">+20 dB</option>
+                <option value="15">+15 dB</option>
+                <option value="10">+10 dB</option>
+                <option value="5">+5 dB</option>
+                <option value="0">0 dB</option>
+                <option value="-5">-5 dB</option>
+                <option value="-10">-10 dB</option>
+                <option value="-15">-15 dB</option>
+                <option value="-20">-20 dB</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="digital-spots-distance-filter">Min Distance:</label>
+            <select id="digital-spots-distance-filter">
+                <option value="none" selected>No limit</option>
+                <option value="100">100 km</option>
+                <option value="1000">1000 km</option>
+                <option value="2500">2500 km</option>
+                <option value="5000">5000 km</option>
+                <option value="10000">10000 km</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="digital-spots-country-filter">Country:</label>
+            <select id="digital-spots-country-filter">
+                <option value="all">All Countries</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="digital-spots-callsign-filter">Callsign:</label>
+            <input type="text" id="digital-spots-callsign-filter" placeholder="Filter..." />
+        </div>
+
+        <div class="control-group">
+            <label for="digital-spots-show-badges">
+                <input type="checkbox" id="digital-spots-show-badges" checked />
+                Show Badges
+            </label>
+        </div>
+
+        <div class="control-group">
+            <button id="digital-spots-clear" class="btn-clear">Clear</button>
+        </div>
+
+        <div class="control-group">
+            <button id="digital-spots-map-btn" class="btn-map">Digital Spot Map</button>
+        </div>
+    </div>
+
+    <div class="digital-spots-table-container">
+        <table class="digital-spots-table">
+            <thead>
+                <tr>
+                    <th>Time (UTC)</th>
+                    <th>Age</th>
+                    <th>Mode</th>
+                    <th>Freq (MHz)</th>
+                    <th>Band</th>
+                    <th>Callsign</th>
+                    <th>Country</th>
+                    <th>Grid</th>
+                    <th>Distance</th>
+                    <th>Bearing</th>
+                    <th>SNR</th>
+                    <th>Message</th>
+                </tr>
+            </thead>
+            <tbody id="digital-spots-tbody">
+                <tr class="no-spots">
+                    <td colspan="12">Waiting for spots...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decoder Spots History</title>
+    <link rel="stylesheet" href="decoder_spots_history.css">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+    <!-- Marker Cluster CSS -->
+    <link rel="stylesheet" href="MarkerCluster.css" />
+    <link rel="stylesheet" href="MarkerCluster.Default.css" />
+</head>
+<body>
+    <div class="container">
+        <h1>📡 Decoder Spots History</h1>
+        <div class="subtitle" id="receiver-name">Historical FT8/FT4/WSPR Spots</div>
+        
+        <div style="text-align: center; margin: 15px 0; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <a href="digitalspots_map.html" style="display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">🔴 Live</a>
+            <a href="decoder_spots_analytics.html" style="display: inline-block; padding: 10px 20px; background: #FF9800; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📊 Analytics</a>
+            <a href="decode_metrics.html" style="display: inline-block; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📈 Metrics</a>
+        </div>
+
+        <div class="controls">
+            <div class="control-row">
+                <div class="control-group">
+                    <label>Date:</label>
+                    <button id="datePickerBtn" style="background: #2196F3;">
+                        <span id="selectedDateText">Select Date</span>
+                    </button>
+                </div>
+
+                <div class="control-group">
+                    <label for="start-time-input">Start Time (UTC):</label>
+                    <input type="time" id="start-time-input" placeholder="HH:MM" style="padding: 8px;">
+                </div>
+
+                <div class="control-group">
+                    <label for="end-time-input">End Time (UTC):</label>
+                    <input type="time" id="end-time-input" placeholder="HH:MM" style="padding: 8px;">
+                </div>
+
+                <div class="control-group">
+                    <label for="mode-select">Mode:</label>
+                    <select id="mode-select">
+                        <option value="">All Modes</option>
+                        <option value="FT8">FT8</option>
+                        <option value="FT4">FT4</option>
+                        <option value="WSPR">WSPR</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="band-select">Band:</label>
+                    <select id="band-select">
+                        <option value="">All Bands</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="name-select">Name:</label>
+                    <select id="name-select">
+                        <option value="">All Names</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="callsign-input">Callsign:</label>
+                    <input type="text" id="callsign-input" placeholder="e.g., W1AW" maxlength="6" style="text-transform: uppercase;">
+                </div>
+
+                <div class="control-group">
+                    <label for="locator-input">Locator:</label>
+                    <input type="text" id="locator-input" placeholder="e.g., FN20" maxlength="6" style="text-transform: uppercase;">
+                </div>
+
+                <div class="control-group">
+                    <label for="continent-select">Continent:</label>
+                    <select id="continent-select">
+                        <option value="">All Continents</option>
+                        <option value="AF">Africa</option>
+                        <option value="AS">Asia</option>
+                        <option value="EU">Europe</option>
+                        <option value="NA">North America</option>
+                        <option value="OC">Oceania</option>
+                        <option value="SA">South America</option>
+                        <option value="AN">Antarctica</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="min-distance-select">Min Distance (km):</label>
+                    <select id="min-distance-select">
+                        <option value="0">No Minimum</option>
+                        <option value="100">100 km</option>
+                        <option value="500">500 km</option>
+                        <option value="1000">1,000 km</option>
+                        <option value="5000">5,000 km</option>
+                        <option value="10000">10,000 km</option>
+                        <option value="15000">15,000 km</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="min-snr-select">Min SNR (dB):</label>
+                    <select id="min-snr-select">
+                        <option value="-999">No Minimum</option>
+                        <option value="-20">-20 dB</option>
+                        <option value="-10">-10 dB</option>
+                        <option value="0">0 dB</option>
+                        <option value="10">+10 dB</option>
+                        <option value="20">+20 dB</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="direction-select">Direction:</label>
+                    <select id="direction-select">
+                        <option value="">All Directions</option>
+                        <option value="N">North (N)</option>
+                        <option value="NE">Northeast (NE)</option>
+                        <option value="E">East (E)</option>
+                        <option value="SE">Southeast (SE)</option>
+                        <option value="S">South (S)</option>
+                        <option value="SW">Southwest (SW)</option>
+                        <option value="W">West (W)</option>
+                        <option value="NW">Northwest (NW)</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <button id="clear-filters-btn" style="background: #FF9800;">Clear Filters</button>
+                </div>
+
+                <div class="control-group">
+                    <button id="load-btn">Load Spots</button>
+                </div>
+
+                <div class="control-group">
+                    <button id="download-csv-btn" style="background: #2196F3;">Download CSV</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="data-container" class="data-container" style="display: none;">
+            <h2 style="margin-bottom: 15px; font-size: 1.3em;" id="data-title">Decoder Spots</h2>
+            
+            <div class="stats-grid" id="stats-grid">
+                <!-- Stats will be inserted here -->
+            </div>
+
+            <!-- Map Section -->
+            <div id="map-section" class="map-section" style="display: none;">
+                <h2 style="margin-bottom: 10px;">📍 Spots Map</h2>
+                <div id="spots-map"></div>
+                <div class="map-legend">
+                    <h3>Band Legend</h3>
+                    <div class="band-legend-items" id="map-band-legend-items">
+                        <!-- Legend items will be inserted here -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label for="records-per-page">Records per page:</label>
+                    <select id="records-per-page" style="padding: 5px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white;">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="250">250</option>
+                        <option value="500">500</option>
+                        <option value="1000">1000</option>
+                        <option value="all">All</option>
+                    </select>
+                    <span id="pagination-info" style="color: rgba(255,255,255,0.7);"></span>
+                </div>
+                <div id="pagination-buttons" style="display: flex; gap: 5px;">
+                    <!-- Pagination buttons will be inserted here -->
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; flex-wrap: wrap; gap: 10px;">
+                <button id="filter-multiple-bands" style="padding: 8px 15px; background: rgba(76, 175, 80, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em;">Multiple Bands</button>
+                <button id="filter-multiple-modes" style="padding: 8px 15px; background: rgba(156, 39, 176, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em;">Multiple Modes</button>
+                <button id="filter-least-country" style="padding: 8px 15px; background: rgba(255, 152, 0, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em;">Least Common Country</button>
+                <button id="filter-least-continent" style="padding: 8px 15px; background: rgba(233, 30, 99, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em;">Least Common Continent</button>
+                <button id="filter-show-all" style="padding: 8px 15px; background: rgba(33, 150, 243, 0.8); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer; font-size: 0.95em; font-weight: bold;">Show All</button>
+            </div>
+
+            <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; flex-wrap: wrap; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label for="client-search-input" style="color: rgba(255,255,255,0.9); font-size: 0.95em;">Search:</label>
+                    <input type="text" id="client-search-input" placeholder="Callsign/Locator/Country/Continent/Message" style="padding: 6px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; min-width: 280px;">
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label for="client-country-filter" style="color: rgba(255,255,255,0.9); font-size: 0.95em;">Country:</label>
+                    <select id="client-country-filter" style="padding: 6px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; min-width: 150px;">
+                        <option value="">All</option>
+                    </select>
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; color: rgba(255,255,255,0.9); font-size: 0.95em;">
+                        <input type="checkbox" id="client-cq-only" style="cursor: pointer;">
+                        <span>CQ Only</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="spots-table-container">
+                <table class="spots-table" id="spots-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable" data-column="timestamp">Time <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="mode">Mode <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="band">Band <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="name">Name <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="callsign">Callsign <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="locator">Locator <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="snr">SNR <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="frequency">Frequency <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="distance_km">Distance <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="bearing_deg">Bearing <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="country">Country <span class="sort-arrows">⇅</span></th>
+                            <th class="sortable" data-column="continent">Continent <span class="sort-arrows">⇅</span></th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody id="spots-tbody">
+                        <!-- Spots will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="pagination-controls" style="display: flex; justify-content: center; align-items: center; margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                <div id="pagination-buttons-bottom" style="display: flex; gap: 5px;">
+                    <!-- Pagination buttons will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <div id="status" class="status">Select a date and click "Load Spots" to begin</div>
+    </div>
+
+    <!-- Date Picker Overlay -->
+    <div id="datePickerOverlay" class="date-picker-overlay">
+        <div class="date-picker">
+            <div class="date-picker-header">
+                <h3>Select Date</h3>
+                <button id="closeDatePicker" style="background: transparent; padding: 5px 10px;">✕</button>
+            </div>
+            <div class="date-picker-nav">
+                <button id="prevMonth">‹</button>
+                <div class="date-picker-month-year" id="monthYearDisplay"></div>
+                <button id="nextMonth">›</button>
+            </div>
+            <div class="date-picker-calendar" id="datePickerCalendar"></div>
+            <div class="date-picker-footer">
+                <button id="cancelDatePicker">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/bandconditions.html" target="_blank">Live Conditions</a> <span id="footer-version"></span></p>
+    </footer>
+
+    <!-- Leaflet JS -->
+    <script src="leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    <!-- Marker Cluster JS -->
+    <script src="leaflet.markercluster.js"></script>
+    <!-- SunCalc for greyline (optional, but used in digitalspots_map) -->
+    <script src="suncalc.js"></script>
+    <script src="date-picker.js"></script>
+    <script src="decoder_spots_history_map.js"></script>
+    <script src="decoder_spots_history.js"></script>
+</body>
+</html>

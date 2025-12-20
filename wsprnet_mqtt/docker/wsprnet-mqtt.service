@@ -1,0 +1,31 @@
+[Unit]
+Description=WSPR MQTT Aggregator
+Documentation=https://github.com/yourusername/wsprnet_mqtt
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wsprnet
+Group=wsprnet
+WorkingDirectory=/opt/wsprnet_mqtt
+ExecStart=/opt/wsprnet_mqtt/wsprnet_mqtt -config /opt/wsprnet_mqtt/config.yaml
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wsprnet-mqtt
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/wsprnet_mqtt
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=512
+
+[Install]
+WantedBy=multi-user.target

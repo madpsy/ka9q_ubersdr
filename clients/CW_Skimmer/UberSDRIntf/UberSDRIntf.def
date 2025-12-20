@@ -1,0 +1,8 @@
+LIBRARY "UberSDRIntf"
+EXPORTS
+    GetSdrInfo
+    StartRx
+    StopRx
+    SetRxFrequency
+    SetCtrlBits
+    ReadPort

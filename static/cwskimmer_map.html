@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CW Skimmer Map</title>
+    <link rel="stylesheet" href="leaflet.css" />
+    <link rel="stylesheet" href="MarkerCluster.css" />
+    <link rel="stylesheet" href="MarkerCluster.Default.css" />
+    <link rel="stylesheet" href="cwskimmer_map.css" />
+</head>
+<body>
+    <!-- Resolution Info Overlay -->
+    <div id="resolution-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.85); z-index: 10000; display: flex; align-items: center; justify-content: center;">
+        <div style="background: #2a2a2a; border: 2px solid #4a9eff; border-radius: 12px; padding: 30px 40px; max-width: 500px; text-align: center; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);">
+            <div style="font-size: 48px; margin-bottom: 20px;">📺</div>
+            <h2 style="color: #4a9eff; margin-bottom: 20px; font-size: 1.5em;">Optimal Viewing</h2>
+            <p style="color: #ccc; line-height: 1.6; margin-bottom: 25px; font-size: 1.1em;">
+                This page is best viewed <strong style="color: #fff;">full screen (F11)</strong> on a <strong style="color: #fff;">1080p monitor</strong> or <strong style="color: #fff;">4K scaled to 200%</strong>.
+            </p>
+            <button id="close-overlay-btn" style="background: #4a9eff; color: white; border: none; padding: 12px 30px; border-radius: 6px; font-size: 1.1em; font-weight: bold; cursor: pointer; transition: all 0.2s;">
+                OK
+            </button>
+        </div>
+    </div>
+
+    <div class="header">
+        <div class="header-left">
+            <span id="status-badge" class="status-badge status-disconnected">Disconnected</span>
+            <span id="spot-count" class="spot-count">0 spots</span>
+            <span class="spot-count">•</span>
+            <span id="spots-per-minute" class="spot-count">0/min</span>
+            <span class="spot-count">•</span>
+            <span id="last-spot-time" class="spot-count">-</span>
+        </div>
+        <div class="header-right">
+            <div class="filter-group" style="flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" id="show-stats-checkbox" checked style="margin: 0; cursor: pointer;">
+                    <span>Stats</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" id="show-summary-checkbox" checked style="margin: 0; cursor: pointer;">
+                    <span>Summary</span>
+                </label>
+            </div>
+            <div class="filter-group" style="flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" id="show-weather-checkbox" style="margin: 0; cursor: pointer;">
+                    <span>Weather</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer;">
+                    <input type="checkbox" id="show-legend-checkbox" checked style="margin: 0; cursor: pointer;">
+                    <span>Legend</span>
+                </label>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label" for="age-filter">Max Age:</label>
+                <select id="age-filter" class="filter-select">
+                    <option value="none">None</option>
+                    <option value="15">15 min</option>
+                    <option value="30">30 min</option>
+                    <option value="60" selected>1 hour</option>
+                    <option value="180">3 hours</option>
+                    <option value="360">6 hours</option>
+                    <option value="1440">24 hours</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label" for="band-filter">Band:</label>
+                <select id="band-filter" class="filter-select">
+                    <option value="all">All Bands</option>
+                    <option value="2200m">2200m</option>
+                    <option value="630m">630m</option>
+                    <option value="160m">160m</option>
+                    <option value="80m">80m</option>
+                    <option value="60m">60m</option>
+                    <option value="40m">40m</option>
+                    <option value="30m">30m</option>
+                    <option value="20m">20m</option>
+                    <option value="17m">17m</option>
+                    <option value="15m">15m</option>
+                    <option value="12m">12m</option>
+                    <option value="10m">10m</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label" for="country-filter">Country:</label>
+                <select id="country-filter" class="filter-select">
+                    <option value="all">All</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label" for="continent-filter">Continent:</label>
+                <select id="continent-filter" class="filter-select">
+                    <option value="all">All</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label class="filter-label" for="snr-filter">Min SNR:</label>
+                <select id="snr-filter" class="filter-select">
+                    <option value="none">None</option>
+                    <option value="20">+20 dB</option>
+                    <option value="10">+10 dB</option>
+                    <option value="0">0 dB</option>
+                    <option value="-10">-10 dB</option>
+                    <option value="-20">-20 dB</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="legend" id="band-legend">
+        <div class="legend-item">
+            <div class="legend-receiver"></div>
+            <span>Receiver</span>
+        </div>
+        <div id="band-legend-items" style="margin-top: 8px;"></div>
+    </div>
+
+    <div class="new-entities-legend">
+        <div class="new-entity-column">
+            <div style="font-size: 11px; color: #888; margin-bottom: 4px;">Latest Continent:</div>
+            <div id="new-continent-info" style="font-size: 12px; color: #4a9eff;">-</div>
+            <div style="font-size: 11px; color: #888; margin-top: 12px; margin-bottom: 4px;">Rarest Continent:</div>
+            <div id="rarest-continent-info" style="font-size: 12px; color: #ff9da7;">-</div>
+        </div>
+        <div class="new-entity-column">
+            <div style="font-size: 11px; color: #888; margin-bottom: 4px;">Latest Country:</div>
+            <div id="new-country-info" style="font-size: 12px; color: #4a9eff;">-</div>
+            <div style="font-size: 11px; color: #888; margin-top: 12px; margin-bottom: 4px;">Rarest Country:</div>
+            <div id="rarest-country-info" style="font-size: 12px; color: #ff9da7;">-</div>
+        </div>
+        <div style="min-width: auto; flex: 0 0 auto; white-space: nowrap;">
+            <div style="font-size: 11px; color: #888; margin-bottom: 4px;">UTC:</div>
+            <div id="utc-time" style="font-size: 14px; color: #fff; font-family: monospace; font-weight: bold;">--:--:--</div>
+            <div style="font-size: 11px; color: #888; margin-top: 8px; margin-bottom: 4px;">Local Time:</div>
+            <div id="local-time" style="font-size: 14px; color: #fff; font-family: monospace; font-weight: bold;">--:--:--</div>
+            <div id="local-date" style="font-size: 11px; color: #aaa; margin-top: 4px;">---</div>
+        </div>
+    </div>
+
+    <div class="space-weather-legend">
+        <div id="space-weather-content">
+            <div style="text-align: center; color: #666; padding: 10px;">Loading...</div>
+        </div>
+
+        <!-- Band Conditions Section -->
+        <div id="band-conditions-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2); display: none;">
+            <div id="band-conditions-badges">
+                <!-- Band badge rows will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <div class="distance-legend">
+        <div id="distance-ranges"></div>
+        <div id="bearing-stats" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;"></div>
+        <div class="distance-extremes" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;">
+            <div class="distance-extreme">
+                <span class="distance-extreme-label">Closest:</span>
+                <span id="closest-spot">-</span>
+            </div>
+            <div class="distance-extreme">
+                <span class="distance-extreme-label">Farthest:</span>
+                <span id="farthest-spot">-</span>
+            </div>
+        </div>
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333; display: flex; gap: 20px;">
+            <div id="top-countries" style="flex: 1;"></div>
+            <div style="flex: 1;">
+                <div id="top-bands"></div>
+            </div>
+        </div>
+    </div>
+    <div class="live-messages-panel" id="live-messages-panel">
+        <div class="live-messages-header" id="live-messages-header" style="padding: 8px 12px;">
+            <div class="live-messages-title" style="gap: 6px;">
+                <span>📡</span>
+                <span>Live CW Spots</span>
+                <span id="live-message-count" style="color: #888; font-size: 11px;">(0)</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <button id="history-btn" style="padding: 4px 10px; background: rgba(74, 158, 255, 0.2); border: 1px solid #4a9eff; border-radius: 4px; color: #4a9eff; cursor: pointer; font-size: 11px; font-weight: 500;" title="View spots history" onclick="window.open('cw_spots_history.html', '_blank')">History</button>
+                <button id="clear-messages-btn" style="padding: 4px 10px; background: rgba(220, 53, 69, 0.2); border: 1px solid #dc3545; border-radius: 4px; color: #dc3545; cursor: pointer; font-size: 11px; font-weight: 500;" title="Clear all messages">Clear</button>
+                <div class="live-messages-toggle" id="live-messages-toggle">▼</div>
+            </div>
+        </div>
+        <div class="live-messages-filter" style="padding: 10px; border-bottom: 1px solid #333;">
+            <input type="text" id="live-messages-callsign-filter" placeholder="Filter by callsign..."
+                   style="width: 100%; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border: 1px solid #444;
+                          border-radius: 4px; color: #fff; font-size: 12px; outline: none;">
+        </div>
+        <div class="live-messages-content" id="live-messages-content">
+            <div class="live-messages-empty">Waiting for CW spots...</div>
+        </div>
+        <div class="live-messages-pagination" id="live-messages-pagination" style="padding: 10px; border-top: 1px solid #333; display: none; justify-content: space-between; align-items: center;">
+            <button id="live-messages-prev" style="padding: 4px 12px; background: rgba(74, 158, 255, 0.2); border: 1px solid #4a9eff; border-radius: 4px; color: #4a9eff; cursor: pointer; font-size: 11px;">← Prev</button>
+            <span id="live-messages-page-info" style="font-size: 11px; color: #aaa;"></span>
+            <button id="live-messages-next" style="padding: 4px 12px; background: rgba(74, 158, 255, 0.2); border: 1px solid #4a9eff; border-radius: 4px; color: #4a9eff; cursor: pointer; font-size: 11px;">Next →</button>
+        </div>
+    </div>
+
+
+    <script src="leaflet.js"></script>
+    <script src="leaflet.markercluster.js"></script>
+    <script src="suncalc.js"></script>
+    <script src="cwskimmer_map.js"></script>
+</body>
+</html>

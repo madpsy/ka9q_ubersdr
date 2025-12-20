@@ -1,0 +1,19 @@
+{
+  "name": "radio-sync",
+  "displayName": "Radio Sync",
+  "icon": "📻",
+  "version": "1.0.0",
+  "description": "Synchronize frequency and mode with external radios via serial port",
+  "author": "UberSDR",
+  "files": {
+    "main": "main.js",
+    "styles": ["styles.css"],
+    "template": "template.html",
+    "scripts": ["protocols/yaesu-cat.js", "protocols/kenwood-cat.js"]
+  },
+  "config": {
+    "autoTune": false,
+    "requiresMode": null,
+    "preferredBandwidth": null
+  }
+}

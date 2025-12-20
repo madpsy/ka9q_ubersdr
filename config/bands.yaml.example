@@ -1,0 +1,56 @@
+# Amateur Radio Band configuration file for ka9q UberSDR
+# Each band has a label (name), start frequency, and end frequency (in Hz)
+# Optionally, bands can be assigned to a group for organization
+# Based on UK amateur radio band allocations from Ofcom
+
+bands:
+  # HF Amateur Radio Bands (UK Allocations)
+  - label: "160m"
+    start: 1810000
+    end: 2000000
+    group: "HF"
+
+  - label: "80m"
+    start: 3500000
+    end: 3800000
+    group: "HF"
+
+  - label: "60m"
+    start: 5258500
+    end: 5406500
+    group: "HF"
+
+  - label: "40m"
+    start: 7000000
+    end: 7200000
+    group: "HF"
+
+  - label: "30m"
+    start: 10100000
+    end: 10150000
+    group: "HF"
+
+  - label: "20m"
+    start: 14000000
+    end: 14350000
+    group: "HF"
+
+  - label: "17m"
+    start: 18068000
+    end: 18168000
+    group: "HF"
+
+  - label: "15m"
+    start: 21000000
+    end: 21450000
+    group: "HF"
+
+  - label: "12m"
+    start: 24890000
+    end: 24990000
+    group: "HF"
+
+  - label: "10m"
+    start: 28000000
+    end: 29700000
+    group: "HF"

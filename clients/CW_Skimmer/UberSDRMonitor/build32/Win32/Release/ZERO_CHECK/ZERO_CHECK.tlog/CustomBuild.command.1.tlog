@@ -1,0 +1,10 @@
+^C:\USERS\MADPSY\REPOS\HERMESINTF\UBERSDRMONITOR\BUILD32\CMAKEFILES\D2C5ED671CD5AC9BB340A84E40AF9825\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/HermesIntf/UberSDRMonitor -BC:/Users/MadPsy/Repos/HermesIntf/UberSDRMonitor/build32 --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/MadPsy/Repos/HermesIntf/UberSDRMonitor/build32/UberSDRMonitor.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

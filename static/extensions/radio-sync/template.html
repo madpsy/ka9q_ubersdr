@@ -1,0 +1,113 @@
+<div class="radio-sync-container">
+    <!-- Serial Port API Check -->
+    <div id="radio-sync-api-error" class="radio-sync-error" style="display: none;">
+        <strong>⚠️ Web Serial API Not Available</strong>
+        <p>This extension requires Chrome/Edge browser with the Web Serial API enabled.</p>
+    </div>
+
+    <!-- Two Column Layout for Controls -->
+    <div class="radio-sync-controls-grid">
+        <!-- Left Column: Radio Selection, Mute Toggle, Connect Button -->
+        <div class="radio-sync-left-column">
+            <!-- Radio Selection -->
+            <div class="radio-sync-section">
+                <select id="radio-sync-model" class="radio-sync-select">
+                    <option value="">Select Radio...</option>
+                    <optgroup label="Icom">
+                        <option value="icom-ic7300">IC-7300</option>
+                        <option value="icom-ic7610">IC-7610</option>
+                        <option value="icom-ic9700">IC-9700</option>
+                        <option value="icom-ic705">IC-705</option>
+                    </optgroup>
+                    <optgroup label="Yaesu">
+                        <option value="yaesu-ft991a">FT-991A</option>
+                        <option value="yaesu-ft710">FT-710</option>
+                        <option value="yaesu-ftdx10">FTDX10</option>
+                        <option value="yaesu-ftdx101d">FTDX101D</option>
+                        <option value="yaesu-ft818">FT-818</option>
+                    </optgroup>
+                    <optgroup label="Kenwood">
+                        <option value="kenwood-ts590sg">TS-590SG</option>
+                        <option value="kenwood-ts890s">TS-890S</option>
+                        <option value="kenwood-ts480">TS-480</option>
+                    </optgroup>
+                    <optgroup label="Elecraft">
+                        <option value="elecraft-k3">K3</option>
+                        <option value="elecraft-k4">K4</option>
+                        <option value="elecraft-kx3">KX3</option>
+                        <option value="elecraft-kx2">KX2</option>
+                    </optgroup>
+                    <optgroup label="Other">
+                        <option value="xiegu-g90">Xiegu G90</option>
+                        <option value="xiegu-x6100">Xiegu X6100</option>
+                    </optgroup>
+                </select>
+            </div>
+
+            <!-- Mute on TX Option -->
+            <div class="radio-sync-section">
+                <label style="display: flex; align-items: center; cursor: pointer; user-select: none;">
+                    <input type="checkbox" id="radio-sync-mute-on-tx" checked style="margin-right: 8px; cursor: pointer;">
+                    <span>Mute SDR on TX</span>
+                </label>
+            </div>
+
+            <!-- Connection Control and Baud Rate (Two Columns) -->
+            <div class="radio-sync-section">
+                <div class="radio-sync-connection-grid">
+                    <div>
+                        <button id="radio-sync-connect" class="radio-sync-btn radio-sync-btn-primary">Connect to Radio</button>
+                        <button id="radio-sync-disconnect" class="radio-sync-btn radio-sync-btn-danger" style="display: none;">Disconnect</button>
+                    </div>
+                    <div>
+                        <select id="radio-sync-baud-rate" class="radio-sync-select">
+                            <option value="4800">4800</option>
+                            <option value="9600">9600</option>
+                            <option value="19200">19200</option>
+                            <option value="38400" selected>38400</option>
+                            <option value="57600">57600</option>
+                            <option value="115200">115200</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Sync Direction Buttons (Vertically Stacked) -->
+        <div class="radio-sync-right-column">
+            <div class="radio-sync-section">
+                <div class="radio-sync-buttons-vertical">
+                    <button id="radio-sync-sdr-to-radio" class="radio-sync-btn">SDR → Radio</button>
+                    <button id="radio-sync-radio-to-sdr" class="radio-sync-btn">Radio → SDR</button>
+                    <button id="radio-sync-both" class="radio-sync-btn radio-sync-btn-active">Both Ways</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LED Frequency Display with Mode and TX/RX State -->
+    <div class="radio-sync-section">
+        <div class="led-display style-digital" id="radio-sync-display">
+            <div class="led-left-section">
+                <div id="radio-sync-mode-display" class="led-mode-indicator">---</div>
+            </div>
+            <div class="led-center-section">
+                <div id="radio-sync-freq-display" class="led-digits">--.---.---</div>
+                <div class="led-unit">MHz</div>
+            </div>
+            <div class="led-right-section">
+                <div id="radio-sync-state-display" class="led-state-indicator led-state-rx">--</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Messages (Collapsible) -->
+    <div class="radio-sync-section">
+        <details>
+            <summary style="cursor: pointer; font-weight: 600; color: #bdc3c7; margin-bottom: 8px;">
+                📋 Message Log
+            </summary>
+            <div id="radio-sync-messages" class="radio-sync-messages"></div>
+        </details>
+    </div>
+</div>

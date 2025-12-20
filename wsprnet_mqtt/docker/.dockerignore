@@ -1,0 +1,31 @@
+# Git
+.git
+.gitignore
+
+# Docker
+docker/
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Build artifacts
+wsprnet_mqtt
+*.exe
+
+# Data files
+*.jsonl
+*.json
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Documentation
+README.md
+
+# Config (will be mounted)
+config.yaml
+
+# Build scripts
+build.sh

@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noise Floor Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .controls {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .control-group label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        select, button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        select {
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+        }
+
+        button {
+            background: #4CAF50;
+            color: white;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+        }
+
+        button:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            padding: 10px 15px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            font-size: 0.9em;
+        }
+
+        .status.error {
+            background: rgba(244, 67, 54, 0.3);
+        }
+
+        .status.success {
+            background: rgba(76, 175, 80, 0.3);
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .dashboard.single-band {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .trends-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+
+        .trends-container.two-column {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            transition: transform 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card h3 {
+            font-size: 1.3em;
+            margin-bottom: 10px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+            padding-bottom: 5px;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .metric:last-child {
+            border-bottom: none;
+        }
+
+        .card.compact-view .metric {
+            display: none;
+        }
+
+        .metric-label {
+            opacity: 0.8;
+        }
+
+        .metric-value {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .noise-floor {
+            color: #4CAF50;
+        }
+
+        .signal-peak {
+            color: #FF9800;
+        }
+
+        .dynamic-range {
+            color: #2196F3;
+        }
+
+        .chart-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .chart-container h2 {
+            margin-bottom: 15px;
+            font-size: 1.5em;
+        }
+
+        canvas {
+            max-width: 100%;
+            height: auto !important;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .legend {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+            font-size: 0.9em;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.8em;
+            }
+
+            .controls {
+                flex-direction: column;
+            }
+
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .site-footer {
+            text-align: center;
+            padding: 20px;
+            margin-top: 40px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .site-footer a {
+            color: #4CAF50;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .site-footer a:hover {
+            color: #45a049;
+            text-decoration: underline;
+        }
+
+        .comparison-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        .comparison-controls label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .comparison-controls select {
+            padding: 5px 10px;
+            font-size: 0.9em;
+        }
+
+        /* Date Picker Styles */
+        .date-picker-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .date-picker-overlay.active {
+            display: flex;
+        }
+
+        .date-picker {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            max-width: 350px;
+            width: 90%;
+        }
+
+        .date-picker-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .date-picker-header h3 {
+            margin: 0;
+            font-size: 1.2em;
+        }
+
+        .date-picker-nav {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .date-picker-nav button {
+            padding: 5px 10px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 5px;
+            color: white;
+            cursor: pointer;
+            font-size: 1.2em;
+        }
+
+        .date-picker-nav button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .date-picker-nav button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .date-picker-month-year {
+            flex: 1;
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .date-picker-calendar {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+        }
+
+        .date-picker-day-header {
+            text-align: center;
+            font-weight: bold;
+            padding: 8px;
+            font-size: 0.9em;
+            opacity: 0.7;
+        }
+
+        .date-picker-day {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 5px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.1);
+            transition: all 0.2s;
+        }
+
+        .date-picker-day:hover:not(.disabled):not(.empty) {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.1);
+        }
+
+        .date-picker-day.disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .date-picker-day.empty {
+            background: transparent;
+            cursor: default;
+        }
+
+        .date-picker-day.selected {
+            background: #4CAF50;
+            font-weight: bold;
+        }
+
+        .date-picker-day.available {
+            background: rgba(76, 175, 80, 0.3);
+        }
+
+        .date-picker-footer {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .date-picker-footer button {
+            padding: 8px 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📡 Noise Floor Monitor</h1>
+            <p class="subtitle" id="receiver-name">Loading...</p>
+        </header>
+
+        <div style="text-align: center; margin: 15px 0; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <a href="bandconditions.html" style="display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">🌐 Band Conditions</a>
+            <a href="spaceweather_history.html" style="display: inline-block; padding: 10px 20px; background: #FF9800; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">☀️ Space Weather History</a>
+            <a href="noisefloor_aggregate.html" style="display: inline-block; padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📊 Aggregate Analysis</a>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label>Select Date:</label>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <select id="dateMode">
+                        <option value="live">Live Data</option>
+                        <option value="historical">Historical</option>
+                    </select>
+                    <button id="datePickerBtn" style="display: none; padding: 10px 15px;">
+                        <span id="selectedDateText">Select Date</span>
+                    </button>
+                </div>
+            </div>
+            <div class="control-group">
+                <label for="bandSelect">Select Band:</label>
+                <select id="bandSelect">
+                    <option value="all">All Bands</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button id="refreshBtn">🔄 Refresh</button>
+            </div>
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button id="allBandsBtn">📻 All Bands</button>
+            </div>
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button id="viewToggleBtn">📊 Compact View</button>
+            </div>
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button id="aggregatorBtn" onclick="window.location.href='/noisefloor_aggregate.html'">📈 Aggregator</button>
+            </div>
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <div class="status" id="status">Ready</div>
+            </div>
+        </div>
+
+        <div id="liveData">
+            <h2 style="margin-bottom: 20px; font-size: 1.8em;">📊 Current Conditions</h2>
+            <div class="dashboard" id="dashboard">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading noise floor data...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="trends-container" id="trendsContainer">
+            <div class="chart-container">
+                <h2>📈 Noise Floor (24 Hours)</h2>
+                <canvas id="trendChart"></canvas>
+                <div class="legend" id="legend"></div>
+            </div>
+
+            <div class="chart-container">
+                <h2>📊 Dynamic Range (24 Hours)</h2>
+                <canvas id="dynamicRangeChart"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <h2>📻 FT8 SNR (24 Hours)</h2>
+                <canvas id="ft8SnrChart"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <h2>📡 Band Conditions (24 Hours)</h2>
+                <canvas id="bandStateChart"></canvas>
+                <div class="legend" style="margin-top: 15px;">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: #ef4444;"></div>
+                        <span>Poor (&lt;6 dB)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: #ff9800;"></div>
+                        <span>Fair (6-20 dB)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: #fbbf24;"></div>
+                        <span>Good (20-30 dB)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: #22c55e;"></div>
+                        <span>Excellent (≥30 dB)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Date Picker Overlay -->
+    <div id="datePickerOverlay" class="date-picker-overlay">
+        <div class="date-picker">
+            <div class="date-picker-header">
+                <h3>Select Date</h3>
+                <button onclick="window.noiseFloorMonitor.closeDatePicker()" style="background: transparent; padding: 5px 10px;">✕</button>
+            </div>
+            <div class="date-picker-nav">
+                <button id="prevMonth">‹</button>
+                <div class="date-picker-month-year" id="monthYearDisplay"></div>
+                <button id="nextMonth">›</button>
+            </div>
+            <div class="date-picker-calendar" id="datePickerCalendar"></div>
+            <div class="date-picker-footer">
+                <button onclick="window.noiseFloorMonitor.closeDatePicker()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> <span id="footer-version"></span></p>
+    </footer>
+
+    <script src="chart.umd.min.js"></script>
+    <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="chartjs-plugin-annotation.min.js"></script>
+    <script src="date-picker.js"></script>
+    <script src="minimal-radio.js"></script>
+    <script src="noisefloor.js"></script>
+</body>
+</html>

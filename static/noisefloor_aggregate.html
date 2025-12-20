@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noise Floor Aggregate Analysis</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <script src="chart.umd.min.js"></script>
+    <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="chartjs-plugin-annotation.min.js"></script>
+    <script src="chartjs-plugin-zoom.min.js"></script>
+    <script src="date-picker.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .controls-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+
+        .control-section {
+            margin-bottom: 20px;
+        }
+
+        .control-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-section h3 {
+            font-size: 1.2em;
+            margin-bottom: 12px;
+            color: #ffd700;
+        }
+
+        .control-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 0.9em;
+            margin-bottom: 5px;
+            opacity: 0.9;
+        }
+
+        .date-time-input {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .date-time-display {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            font-size: 1em;
+            min-height: 42px;
+            display: flex;
+            align-items: center;
+        }
+
+        .date-time-display.empty {
+            color: #999;
+            font-style: italic;
+        }
+
+        .date-picker-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .date-picker-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        select {
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            font-size: 1em;
+        }
+
+        .checkbox-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            row-gap: 5px;
+            column-gap: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 2px;
+            white-space: nowrap;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+
+        .comparison-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .comparison-toggle input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .comparison-section {
+            display: none;
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border-left: 4px solid #ffd700;
+        }
+
+        .comparison-section.active {
+            display: block;
+        }
+
+        .chart-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+
+        .chart-container h2 {
+            margin-bottom: 20px;
+            color: #ffd700;
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 400px;
+        }
+
+        .status {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        .status.info {
+            background: rgba(33, 150, 243, 0.2);
+            border: 1px solid rgba(33, 150, 243, 0.5);
+        }
+
+        .status.success {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid rgba(76, 175, 80, 0.5);
+        }
+
+        .status.error {
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid rgba(244, 67, 54, 0.5);
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #ffd700;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-top: 5px;
+        }
+
+        .site-footer {
+            text-align: center;
+            padding: 20px;
+            margin-top: 40px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .site-footer a {
+            color: #4CAF50;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .site-footer a:hover {
+            color: #45a049;
+            text-decoration: underline;
+        }
+
+        /* Date Picker Overlay Styles */
+        .date-picker-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .date-picker-overlay.active {
+            display: flex;
+        }
+
+        .date-picker-container {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.5);
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .date-picker-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .date-picker-header button {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1.1em;
+        }
+
+        .date-picker-header button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .date-picker-header button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        #monthYearDisplay {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+
+        #datePickerCalendar {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+        }
+
+        .date-picker-day-header {
+            text-align: center;
+            padding: 10px;
+            font-weight: bold;
+            color: #ffd700;
+        }
+
+        .date-picker-day {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .date-picker-day.available {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .date-picker-day.available:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.1);
+        }
+
+        .date-picker-day.selected {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-weight: bold;
+        }
+
+        .date-picker-day.disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .date-picker-day.empty {
+            cursor: default;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Noise Floor Aggregate Analysis</h1>
+            <p class="subtitle" id="receiver-name">Loading...</p>
+        </header>
+
+        <div style="text-align: center; margin: 15px 0; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <a href="bandconditions.html" style="display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">🌐 Band Conditions</a>
+            <a href="spaceweather_history.html" style="display: inline-block; padding: 10px 20px; background: #FF9800; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">☀️ Space Weather History</a>
+            <a href="noisefloor.html" style="display: inline-block; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📡 Noise Floor</a>
+        </div>
+
+        <div class="controls-panel">
+            <div class="control-section">
+                <h3>📅 Primary Time Range</h3>
+                <div class="control-row">
+                    <div class="control-group">
+                        <label>From:</label>
+                        <div class="date-time-input">
+                            <div class="date-time-display empty" id="primaryFromDisplay">Select date and time...</div>
+                            <button class="date-picker-btn" onclick="openDatePicker('primaryFrom')">📅 Select</button>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label>To:</label>
+                        <div class="date-time-input">
+                            <div class="date-time-display empty" id="primaryToDisplay">Select date and time...</div>
+                            <button class="date-picker-btn" onclick="openDatePicker('primaryTo')">📅 Select</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <div class="comparison-toggle">
+                    <input type="checkbox" id="enableComparison">
+                    <label for="enableComparison"><strong>Enable Comparison Range</strong></label>
+                </div>
+                <div class="comparison-section" id="comparisonSection">
+                    <h3>📅 Comparison Time Range</h3>
+                    <div class="control-row">
+                        <div class="control-group">
+                            <label>From:</label>
+                            <div class="date-time-input">
+                                <div class="date-time-display empty" id="comparisonFromDisplay">Select date and time...</div>
+                                <button class="date-picker-btn" onclick="openDatePicker('comparisonFrom')">📅 Select</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label>To:</label>
+                            <div class="date-time-input">
+                                <div class="date-time-display empty" id="comparisonToDisplay">Select date and time...</div>
+                                <button class="date-picker-btn" onclick="openDatePicker('comparisonTo')">📅 Select</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>📻 Bands</h3>
+                <div class="checkbox-group" id="bandsCheckboxes">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>📈 Metrics</h3>
+                <div class="checkbox-group" id="fieldsCheckboxes">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>⏱️ Aggregation Interval</h3>
+                <div class="control-row">
+                    <div class="control-group">
+                        <label for="interval">Interval:</label>
+                        <select id="interval">
+                            <option value="minute">Minute</option>
+                            <option value="hour" selected>Hour</option>
+                            <option value="day">Day</option>
+                            <option value="week">Week</option>
+                            <option value="month">Month</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="btn-primary" onclick="fetchData()">🔍 Analyse Data</button>
+                <button class="btn-secondary" onclick="setPresetRange('yesterday')">Yesterday</button>
+                <button class="btn-secondary" onclick="setPresetRange('week')">Last Week</button>
+                <button class="btn-secondary" onclick="setPresetRange('month')">Last Month</button>
+                <button class="btn-success" onclick="exportData()">💾 Export CSV</button>
+            </div>
+        </div>
+
+        <div id="status"></div>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Loading data...</p>
+        </div>
+
+        <div id="statsContainer"></div>
+        <div id="chartsContainer"></div>
+
+        <footer class="site-footer">
+            <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/noisefloor.html">Live Monitor</a> <span id="footer-version"></span></p>
+        </footer>
+    </div>
+
+    <!-- Date Picker Overlay -->
+    <div class="date-picker-overlay" id="datePickerOverlay">
+        <div class="date-picker-container">
+            <div class="date-picker-header">
+                <button id="prevMonth">◀</button>
+                <div id="monthYearDisplay"></div>
+                <button id="nextMonth">▶</button>
+            </div>
+            <div id="datePickerCalendar"></div>
+        </div>
+    </div>
+
+    <script src="noisefloor_aggregate.js"></script>
+</body>
+</html>

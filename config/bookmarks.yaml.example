@@ -1,0 +1,112 @@
+# Bookmark configuration file for ka9q UberSDR
+# Each bookmark has a name, frequency (in Hz), and mode
+# Supported modes: usb, lsb, cwu, cwl, am, fm, nfm
+# Optional: extension - name of decoder extension to open (e.g., "stats")
+
+bookmarks:
+  # Time Standard Stations
+  - name: "WWV 5 MHz"
+    frequency: 5000000
+    mode: "am"
+    extension: "stats"  # Optional: opens Stats Monitor extension
+  
+  - name: "WWV 10 MHz"
+    frequency: 10000000
+    mode: "am"
+  
+  - name: "WWV 15 MHz"
+    frequency: 15000000
+    mode: "am"
+  
+  - name: "WWV 20 MHz"
+    frequency: 20000000
+    mode: "am"
+  
+  # FT8 Digital Mode Frequencies
+  - name: "FT8 80m"
+    frequency: 3573000
+    mode: "usb"
+  
+  - name: "FT8 40m"
+    frequency: 7074000
+    mode: "usb"
+  
+  - name: "FT8 30m"
+    frequency: 10136000
+    mode: "usb"
+  
+  - name: "FT8 20m"
+    frequency: 14074000
+    mode: "usb"
+    extension: "stats"  # Opens Stats Monitor extension
+  
+  - name: "FT8 17m"
+    frequency: 18100000
+    mode: "usb"
+  
+  - name: "FT8 15m"
+    frequency: 21074000
+    mode: "usb"
+  
+  - name: "FT8 12m"
+    frequency: 24915000
+    mode: "usb"
+  
+  - name: "FT8 10m"
+    frequency: 28074000
+    mode: "usb"
+  
+  # CW (Morse Code) Frequencies
+  - name: "CW 40m"
+    frequency: 7030000
+    mode: "cwu"
+  
+  - name: "CW 20m"
+    frequency: 14050000
+    mode: "cwu"
+  
+  - name: "CW 15m"
+    frequency: 21050000
+    mode: "cwu"
+  
+  # SSB Voice Frequencies
+  - name: "SSB 80m"
+    frequency: 3750000
+    mode: "lsb"
+  
+  - name: "SSB 40m"
+    frequency: 7200000
+    mode: "lsb"
+  
+  - name: "SSB 20m"
+    frequency: 14200000
+    mode: "usb"
+  
+  - name: "SSB 15m"
+    frequency: 21300000
+    mode: "usb"
+  
+  - name: "SSB 10m"
+    frequency: 28500000
+    mode: "usb"
+  
+  # Shortwave Broadcast Bands
+  - name: "SW 49m"
+    frequency: 6000000
+    mode: "am"
+  
+  - name: "SW 41m"
+    frequency: 7200000
+    mode: "am"
+  
+  - name: "SW 31m"
+    frequency: 9500000
+    mode: "am"
+  
+  - name: "SW 25m"
+    frequency: 11700000
+    mode: "am"
+  
+  - name: "SW 19m"
+    frequency: 15200000
+    mode: "am"

@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UberSDR Headless Client</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><img src="logo.png" alt="UberSDR Logo" class="header-logo">UberSDR Headless Client</h1>
+            <div class="status-bar">
+                <button id="theme-toggle" class="theme-toggle" title="Toggle dark mode">
+                    <span id="theme-icon">🌙</span>
+                </button>
+                <span id="connection-status" class="status-badge disconnected">Disconnected</span>
+                <span id="uptime"></span>
+            </div>
+        </header>
+
+        <main>
+            <!-- Connection Panel -->
+            <section class="panel">
+                <h2>Connection</h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="host">Host:</label>
+                        <input type="text" id="host" value="localhost" placeholder="localhost">
+                    </div>
+                    <div class="form-group">
+                        <label for="port">Port:</label>
+                        <input type="number" id="port" value="8080" placeholder="8080">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="ssl">
+                            <span>Use TLS</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password:</label>
+                        <input type="password" id="password" placeholder="Optional">
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;">
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="auto-connect">
+                            <span>Auto-connect on start (when client application is started, remains connected on browser close)</span>
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="connect-on-demand">
+                            <span>Connect on demand (only connect when web interface is opened, disconnects when browser closed)</span>
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group" id="stay-connected-group" style="margin-left: 30px; display: none;">
+                        <label>
+                            <input type="checkbox" id="stay-connected">
+                            <span>Stay connected (keep connection alive even when browser is closed)</span>
+                        </label>
+                    </div>
+                </div>
+                <div style="margin-top: 10px; display: flex; gap: 10px; align-items: flex-end;">
+                    <div class="form-group" style="flex: 1;">
+                        <select id="saved-instances">
+                            <option value="">-- Select Saved Instance --</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button id="save-instance-btn" class="btn btn-small">Save</button>
+                        <button id="delete-instance-btn" class="btn btn-small" disabled>Delete</button>
+                    </div>
+                </div>
+                <div id="instance-info" style="display: none; margin-top: 10px; margin-bottom: 15px; font-size: 14px; color: #2196F3; font-weight: 500;">
+                    <span id="instance-info-text"></span>
+                </div>
+                <div class="button-group" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; gap: 10px;">
+                        <button id="connect-btn" class="btn btn-primary">Connect</button>
+                        <button id="disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                        <button id="local-instances-btn" class="btn btn-secondary">🔍 Local Instances</button>
+                        <button id="public-instances-btn" class="btn btn-secondary">🌐 Public Instances</button>
+                    </div>
+                    <div id="session-timer" style="display: none; font-size: 14px; color: #666; font-weight: 500;">
+                        Session: <span id="session-time-remaining">--</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Frequency Control Panel -->
+            <section class="panel">
+                <h2>Frequency Control</h2>
+                <div class="form-group checkbox-group" style="margin-bottom: 10px;">
+                    <label>
+                        <input type="checkbox" id="frequency-locked">
+                        <span>🔒 Lock Frequency (prevent changes)</span>
+                    </label>
+                </div>
+                <div class="frequency-display">
+                    <div class="frequency-input-wrapper">
+                        <input type="text" id="frequency-input" value="14074000" placeholder="14074000">
+                        <span class="unit">Hz</span>
+                    </div>
+                    <button id="frequency-submit-btn" class="btn btn-submit" title="Apply frequency">▶</button>
+                </div>
+                <div class="frequency-buttons">
+                    <button class="btn btn-small" data-step="-10000">-10 kHz</button>
+                    <button class="btn btn-small" data-step="-1000">-1 kHz</button>
+                    <button class="btn btn-small" data-step="-500">-500 Hz</button>
+                    <button class="btn btn-small" data-step="-100">-100 Hz</button>
+                    <button class="btn btn-small" data-step="-10">-10 Hz</button>
+                    <button class="btn btn-small" data-step="10">+10 Hz</button>
+                    <button class="btn btn-small" data-step="100">+100 Hz</button>
+                    <button class="btn btn-small" data-step="500">+500 Hz</button>
+                    <button class="btn btn-small" data-step="1000">+1 kHz</button>
+                    <button class="btn btn-small" data-step="10000">+10 kHz</button>
+                </div>
+                <div class="band-buttons">
+                    <button class="btn btn-band" data-freq="1900000">160m</button>
+                    <button class="btn btn-band" data-freq="3573000">80m</button>
+                    <button class="btn btn-band" data-freq="7074000">40m</button>
+                    <button class="btn btn-band" data-freq="10136000">30m</button>
+                    <button class="btn btn-band" data-freq="14074000">20m</button>
+                    <button class="btn btn-band" data-freq="18100000">17m</button>
+                    <button class="btn btn-band" data-freq="21074000">15m</button>
+                    <button class="btn btn-band" data-freq="24915000">12m</button>
+                    <button class="btn btn-band" data-freq="28074000">10m</button>
+                </div>
+                <div class="bookmark-selector" style="margin-top: 15px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <button id="save-bookmark-btn" class="btn btn-small" disabled title="Save current frequency, mode, and bandwidth as a local bookmark">💾 Save</button>
+                        <select id="bookmark-select" disabled>
+                            <option value="">-- Select Bookmark --</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <button id="manage-local-bookmarks-btn" class="btn btn-small" disabled title="Manage your local bookmarks">📚 Local Bookmarks</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <select id="band-select" disabled style="min-width: 200px;">
+                            <option value="">-- Select Band --</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Mode and Bandwidth Panel -->
+            <section class="panel">
+                <h2>Mode & Bandwidth</h2>
+                <div class="form-group checkbox-group" style="margin-bottom: 10px;">
+                    <label>
+                        <input type="checkbox" id="mode-locked">
+                        <span>🔒 Lock Mode (prevent changes)</span>
+                    </label>
+                </div>
+                <div class="mode-buttons-container">
+                    <button class="btn-mode" data-mode="usb">USB</button>
+                    <button class="btn-mode" data-mode="lsb">LSB</button>
+                    <button class="btn-mode" data-mode="am">AM</button>
+                    <button class="btn-mode" data-mode="sam">SAM</button>
+                    <button class="btn-mode" data-mode="fm">FM</button>
+                    <button class="btn-mode" data-mode="nfm">NFM</button>
+                    <button class="btn-mode" data-mode="cwu">CW-U</button>
+                    <button class="btn-mode" data-mode="cwl">CW-L</button>
+                    <button class="btn-mode" data-mode="iq">IQ</button>
+                    <button class="btn-mode" data-mode="iq48">IQ-48</button>
+                    <button class="btn-mode" data-mode="iq96">IQ-96</button>
+                    <button class="btn-mode" data-mode="iq192">IQ-192</button>
+                    <button class="btn-mode" data-mode="iq384">IQ-384</button>
+                </div>
+                <div class="bandwidth-controls">
+                    <div class="bandwidth-group">
+                        <label for="bandwidth-low">Bandwidth Low: <span id="bandwidth-low-value">50</span> Hz</label>
+                        <input type="range" id="bandwidth-low" min="-10000" max="10000" value="50" step="10">
+                    </div>
+                    <div class="bandwidth-group">
+                        <label for="bandwidth-high">Bandwidth High: <span id="bandwidth-high-value">2700</span> Hz</label>
+                        <input type="range" id="bandwidth-high" min="-10000" max="10000" value="2700" step="10">
+                    </div>
+                </div>
+            </section>
+
+            <!-- RF Spectrum Display Panel -->
+            <section class="panel">
+                <h2>RF Spectrum Display</h2>
+                <div class="spectrum-controls-row">
+                    <div class="form-group checkbox-group" style="margin: 0;">
+                        <label>
+                            <input type="checkbox" id="spectrum-enabled">
+                            <span>Enable RF Spectrum Display</span>
+                        </label>
+                    </div>
+                    <button id="spectrum-audio-toggle" class="btn btn-small" style="display: none; min-width: 100px;">
+                        🔇 Audio Off
+                    </button>
+                </div>
+                <div id="spectrum-display-container" style="display: none;">
+                    <div class="spectrum-controls" style="margin: 10px 0; display: flex; gap: 15px; flex-wrap: wrap;">
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" id="spectrum-zoom-scroll" checked>
+                            <span>Zoom Scroll</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" id="spectrum-pan-scroll">
+                            <span>Pan Scroll</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" id="spectrum-click-tune" checked>
+                            <span>Click Tune</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" id="spectrum-center-tune">
+                            <span>Center Tune</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <span>Snap:</span>
+                            <select id="spectrum-snap">
+                                <option value="100">100 Hz</option>
+                                <option value="500" selected>500 Hz</option>
+                                <option value="1000">1 kHz</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div style="display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap;">
+                        <div id="spectrum-snr-display" style="display: none; font-weight: bold; font-size: 14px; padding: 4px 8px; color: #2196F3;">
+                            SNR: <span id="spectrum-snr-value" style="color: inherit;"><span id="spectrum-snr-number">--</span> dB</span>
+                        </div>
+                        <div id="spectrum-peak-display" style="display: none; font-weight: bold; font-size: 14px; padding: 4px 8px; color: #2196F3;">
+                            Peak: <span id="spectrum-peak-freq">--</span> MHz @ <span id="spectrum-peak-level">--</span> dB
+                        </div>
+                    </div>
+                    <div class="spectrum-visualizer">
+                        <canvas id="rf-spectrum-canvas" width="800" height="200"></canvas>
+                        <canvas id="rf-waterfall-canvas" width="800" height="300"></canvas>
+                    </div>
+                    <div class="spectrum-zoom-controls">
+                        <button id="spectrum-zoom-reset" class="btn btn-small">Reset</button>
+                        <button id="spectrum-zoom-out" class="btn btn-small">-</button>
+                        <button id="spectrum-zoom-in" class="btn btn-small">+</button>
+                        <button id="spectrum-zoom-max" class="btn btn-small">Max</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Audio Preview Panel -->
+            <section class="panel">
+                <h2>Audio Preview</h2>
+                <div class="audio-preview-controls-row">
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="audio-preview-enabled">
+                            <span>Enable Browser Audio Preview</span>
+                        </label>
+                    </div>
+                    <button id="audio-mute-btn" class="btn btn-small" disabled style="display: none;">
+                        🔊 Mute
+                    </button>
+                    <div style="display: none; gap: 15px; align-items: center; margin-left: 10px;" id="audio-preview-channel-controls">
+                        <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                            <input type="checkbox" id="audio-preview-left-channel" checked>
+                            <span>Left</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                            <input type="checkbox" id="audio-preview-right-channel" checked>
+                            <span>Right</span>
+                        </label>
+                    </div>
+                    <div id="audio-peak-display" style="display: none; font-weight: bold; font-size: 14px; padding: 4px 8px; color: #2196F3; margin-left: auto;">
+                        Peak: <span id="audio-peak-freq">--</span> Hz @ <span id="audio-peak-level">--</span> dB
+                    </div>
+                </div>
+                <div id="audio-preview-controls" style="display: none;">
+                    <div class="audio-visualizer">
+                        <canvas id="audio-spectrum-canvas" width="800" height="200"></canvas>
+                        <canvas id="audio-waterfall-canvas" width="800" height="200"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Dynamic Output Control Panel -->
+            <section class="panel">
+                <h2>Dynamic Output Control</h2>
+                <div class="info-box">
+                    <p><strong>Note:</strong> Enable or disable outputs while connected without reconnecting. Fields are locked when outputs are active.</p>
+                </div>
+                
+                <!-- PortAudio Output Control -->
+                <h3 style="margin-top: 15px;">Physical Audio Device (PortAudio)</h3>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="portaudio-output-enabled">
+                        <span>Enable PortAudio Output</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="portaudio-device-select">Audio Device:</label>
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        <select id="portaudio-device-select" style="flex: 1;">
+                            <option value="-1">Default Device</option>
+                        </select>
+                        <button id="portaudio-refresh-devices-btn" class="btn btn-small" title="Refresh audio devices" style="padding: 8px 12px;">
+                            🔄
+                        </button>
+                    </div>
+                </div>
+                <div class="form-grid" style="margin-top: 10px;">
+                    <div class="form-group">
+                        <label for="volume-slider">Volume: <span id="volume-value">100</span>%</label>
+                        <input type="range" id="volume-slider" min="0" max="100" value="100" step="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Channels:</label>
+                        <div style="display: flex; gap: 15px; align-items: center; margin-top: 5px;">
+                            <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                                <input type="checkbox" id="left-channel-enabled" checked>
+                                <span>Left</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; margin: 0;">
+                                <input type="checkbox" id="right-channel-enabled" checked>
+                                <span>Right</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- FIFO Output Control -->
+                <h3 style="margin-top: 20px;">FIFO Output (Named Pipe)</h3>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="fifo-output-enabled">
+                        <span>Enable FIFO Output</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="fifo-output-path">FIFO Path:</label>
+                    <input type="text" id="fifo-output-path" placeholder="/tmp/audio.fifo">
+                </div>
+                
+                <!-- UDP Output Control -->
+                <h3 style="margin-top: 20px;">UDP Output</h3>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="udp-output-enabled">
+                        <span>Enable UDP Output</span>
+                    </label>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="udp-output-host">UDP Host:</label>
+                        <input type="text" id="udp-output-host" value="127.0.0.1" placeholder="127.0.0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="udp-output-port">UDP Port:</label>
+                        <input type="number" id="udp-output-port" value="8888" placeholder="8888">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Radio Control Panel -->
+            <section class="panel">
+                <h2>Radio Control</h2>
+                <div class="info-box">
+                    <p><strong>Note:</strong> Connect to external radio control software (flrig) to synchronize frequency and mode between the SDR and your transceiver.</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="radio-control-type">Control Type:</label>
+                    <select id="radio-control-type">
+                        <option value="none">None</option>
+                        <option value="flrig">flrig</option>
+                        <option value="rigctl">rigctl (Hamlib)</option>
+                        <option value="serial">Serial CAT Server</option>
+                        <option value="tci">TCI</option>
+                    </select>
+                </div>
+
+                <div id="flrig-controls" style="display: none;">
+                    <h3 style="margin-top: 15px;">flrig Settings</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="flrig-host">Host:</label>
+                            <input type="text" id="flrig-host" value="localhost" placeholder="localhost">
+                        </div>
+                        <div class="form-group">
+                            <label for="flrig-port">Port:</label>
+                            <input type="number" id="flrig-port" value="12345" placeholder="12345">
+                        </div>
+                        <div class="form-group">
+                            <label for="flrig-vfo">VFO:</label>
+                            <select id="flrig-vfo">
+                                <option value="A">A</option>
+                                <option value="B">B</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <h4 style="margin-top: 15px;">Synchronization</h4>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="flrig-sync-to-rig" checked>
+                            <span>Sync SDR → Rig (SDR frequency changes update rig)</span>
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="flrig-sync-from-rig" checked>
+                            <span>Sync Rig → SDR (Rig frequency changes update SDR)</span>
+                        </label>
+                    </div>
+
+                    <div class="button-group" style="margin-top: 15px;">
+                        <button id="flrig-connect-btn" class="btn btn-primary">Connect to flrig</button>
+                        <button id="flrig-disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                    </div>
+
+                    <div id="flrig-status-display" style="display: none; margin-top: 15px;">
+                        <h4>flrig Status</h4>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="label">Connection:</span>
+                                <span id="flrig-connection-status" class="status-badge disconnected">Disconnected</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Rig Frequency:</span>
+                                <span id="flrig-frequency">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Rig Mode:</span>
+                                <span id="flrig-mode">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">VFO:</span>
+                                <span id="flrig-vfo-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">PTT:</span>
+                                <span id="flrig-ptt">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="rigctl-controls" style="display: none;">
+                    <h3 style="margin-top: 15px;">rigctl (Hamlib) Settings</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="rigctl-host">Host:</label>
+                            <input type="text" id="rigctl-host" value="localhost" placeholder="localhost">
+                        </div>
+                        <div class="form-group">
+                            <label for="rigctl-port">Port:</label>
+                            <input type="number" id="rigctl-port" value="4532" placeholder="4532">
+                        </div>
+                        <div class="form-group">
+                            <label for="rigctl-vfo">VFO:</label>
+                            <select id="rigctl-vfo">
+                                <option value="VFOA">VFO A</option>
+                                <option value="VFOB">VFO B</option>
+                                <option value="Main">Main</option>
+                                <option value="Sub">Sub</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <h4 style="margin-top: 15px;">Synchronization</h4>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="rigctl-sync-to-rig" checked>
+                            <span>Sync SDR → Rig (SDR frequency changes update rig)</span>
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="rigctl-sync-from-rig" checked>
+                            <span>Sync Rig → SDR (Rig frequency changes update SDR)</span>
+                        </label>
+                    </div>
+
+                    <div class="button-group" style="margin-top: 15px;">
+                        <button id="rigctl-connect-btn" class="btn btn-primary">Connect to rigctl</button>
+                        <button id="rigctl-disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                    </div>
+
+                    <div id="rigctl-status-display" style="display: none; margin-top: 15px;">
+                        <h4>rigctl Status</h4>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="label">Connection:</span>
+                                <span id="rigctl-connection-status" class="status-badge disconnected">Disconnected</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Rig Frequency:</span>
+                                <span id="rigctl-frequency">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Rig Mode:</span>
+                                <span id="rigctl-mode">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">VFO:</span>
+                                <span id="rigctl-vfo-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">PTT:</span>
+                                <span id="rigctl-ptt">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="serial-controls" style="display: none;">
+                    <h3 style="margin-top: 15px;">Serial CAT Server Settings</h3>
+                    <div class="info-box">
+                        <p><strong>Note:</strong> Starts a serial CAT server that emulates a Kenwood TS-480. External software (like WSJT-X) can connect to this virtual serial port to control the SDR. This is one-way only: external software → SDR.</p>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="serial-port">Serial Port:</label>
+                            <input type="text" id="serial-port" list="serial-port-list" placeholder="/dev/ttyUSB0 or COM3">
+                            <datalist id="serial-port-list">
+                            </datalist>
+                            <button id="serial-refresh-ports-btn" class="btn btn-small" style="margin-top: 5px;">Refresh Ports</button>
+                            <small style="display: block; margin-top: 5px; color: #666;">Enter port manually or select from detected ports</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="serial-baudrate">Baud Rate:</label>
+                            <select id="serial-baudrate">
+                                <option value="4800">4800</option>
+                                <option value="9600">9600</option>
+                                <option value="19200">19200</option>
+                                <option value="38400">38400</option>
+                                <option value="57600" selected>57600 (TS-480 default)</option>
+                                <option value="115200">115200</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="serial-vfo">VFO:</label>
+                            <select id="serial-vfo">
+                                <option value="A">A</option>
+                                <option value="B">B</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="button-group" style="margin-top: 15px;">
+                        <button id="serial-start-btn" class="btn btn-primary">Start CAT Server</button>
+                        <button id="serial-stop-btn" class="btn btn-secondary" disabled>Stop Server</button>
+                    </div>
+
+                    <div id="serial-status-display" style="display: none; margin-top: 15px;">
+                        <h4>Serial CAT Server Status</h4>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="label">Server Status:</span>
+                                <span id="serial-server-status" class="status-badge disconnected">Stopped</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Port:</span>
+                                <span id="serial-port-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Baud Rate:</span>
+                                <span id="serial-baudrate-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">VFO:</span>
+                                <span id="serial-vfo-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Cached Frequency:</span>
+                                <span id="serial-frequency">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Cached Mode:</span>
+                                <span id="serial-mode">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tci-controls" style="display: none;">
+                    <h3 style="margin-top: 15px;">TCI Server Settings</h3>
+                    <div class="info-box">
+                        <p><strong>Note:</strong> Starts a TCI server that allows applications like JTDX and SDC to connect and control the SDR. The TCI protocol supports both audio and IQ streaming.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="tci-port">TCI Port:</label>
+                        <input type="number" id="tci-port" value="40001" placeholder="40001">
+                        <small style="display: block; margin-top: 5px; color: #666;">Default TCI port is 40001</small>
+                    </div>
+
+                    <div class="form-group checkbox-group" style="margin-top: 10px;">
+                        <label>
+                            <input type="checkbox" id="tci-auto-start">
+                            <span>Auto-start TCI server when program starts (server will start automatically if enabled)</span>
+                        </label>
+                    </div>
+
+                    <div class="button-group" style="margin-top: 15px;">
+                        <button id="tci-start-btn" class="btn btn-primary">Start TCI Server</button>
+                        <button id="tci-stop-btn" class="btn btn-secondary" disabled>Stop Server</button>
+                    </div>
+
+                    <div id="tci-status-display" style="display: none; margin-top: 15px;">
+                        <h4>TCI Server Status</h4>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="label">Server Status:</span>
+                                <span id="tci-server-status" class="status-badge disconnected">Stopped</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Port:</span>
+                                <span id="tci-port-status">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Client Connected:</span>
+                                <span id="tci-client-status">No</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Client IP:</span>
+                                <span id="tci-client-ip">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Audio Streaming:</span>
+                                <span id="tci-audio-streaming">No</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">IQ Streaming:</span>
+                                <span id="tci-iq-streaming">No</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- MIDI Control Panel -->
+            <section class="panel">
+                <h2>MIDI Control</h2>
+                <div class="info-box">
+                    <p><strong>Note:</strong> Connect a MIDI controller to control the SDR with physical knobs, buttons, and faders. Map MIDI controls to radio functions using learn mode.</p>
+                </div>
+                
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="midi-enabled">
+                        <span>Enable MIDI Control</span>
+                    </label>
+                </div>
+
+                <div id="midi-controls" style="display: none;">
+                    <h3 style="margin-top: 15px;">MIDI Device</h3>
+                    <div class="form-group">
+                        <label for="midi-device-select">MIDI Input Device:</label>
+                        <select id="midi-device-select">
+                            <option value="">-- Select MIDI Device --</option>
+                        </select>
+                        <button id="midi-refresh-devices-btn" class="btn btn-small" style="margin-top: 5px;">Refresh Devices</button>
+                    </div>
+
+                    <div class="button-group" style="margin-top: 15px;">
+                        <button id="midi-connect-btn" class="btn btn-primary" disabled>Connect to MIDI</button>
+                        <button id="midi-disconnect-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                    </div>
+
+                    <div id="midi-status-display" style="display: none; margin-top: 15px;">
+                        <h4>MIDI Status</h4>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="label">Connection:</span>
+                                <span id="midi-connection-status" class="status-badge disconnected">Disconnected</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Device:</span>
+                                <span id="midi-device-name">-</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Mappings:</span>
+                                <span id="midi-mapping-count">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Learn Mode:</span>
+                                <span id="midi-learn-status" class="status-badge">Inactive</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="midi-mappings-section" style="display: none; margin-top: 20px;">
+                        <h4>MIDI Mappings</h4>
+                        <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
+                            <button id="midi-learn-btn" class="btn btn-primary">Learn New Mapping</button>
+                            <button id="midi-stop-learn-btn" class="btn btn-secondary" disabled style="display: none;">Stop Learning</button>
+                            <button id="midi-clear-mappings-btn" class="btn btn-secondary">Clear All Mappings</button>
+                        </div>
+
+                        <div id="midi-learn-panel" style="display: none; margin-bottom: 15px; padding: 15px; border-radius: 4px;">
+                            <h5 style="margin-top: 0;">Learn Mode Active</h5>
+                            <div class="form-group">
+                                <label for="midi-learn-function">Select Function to Map:</label>
+                                <select id="midi-learn-function">
+                                    <option value="">-- Select Function --</option>
+                                    <optgroup label="Frequency">
+                                        <option value="Frequency: Step Up">Step Up</option>
+                                        <option value="Frequency: Step Down">Step Down</option>
+                                        <option value="Frequency: Encoder (10 Hz)">Encoder (10 Hz)</option>
+                                        <option value="Frequency: Encoder (100 Hz)">Encoder (100 Hz)</option>
+                                        <option value="Frequency: Encoder (500 Hz)">Encoder (500 Hz)</option>
+                                        <option value="Frequency: Encoder (1 kHz)">Encoder (1 kHz)</option>
+                                        <option value="Frequency: Encoder (10 kHz)">Encoder (10 kHz)</option>
+                                        <option value="Frequency: Lock Toggle">🔒 Lock Toggle</option>
+                                    </optgroup>
+                                    <optgroup label="Mode">
+                                        <option value="Mode: USB">USB</option>
+                                        <option value="Mode: LSB">LSB</option>
+                                        <option value="Mode: AM">AM</option>
+                                        <option value="Mode: FM">FM</option>
+                                        <option value="Mode: CW">CW</option>
+                                        <option value="Mode: Next">Next Mode</option>
+                                        <option value="Mode: Previous">Previous Mode</option>
+                                        <option value="Mode: Lock Toggle">🔒 Lock Toggle</option>
+                                    </optgroup>
+                                    <optgroup label="Bands">
+                                        <option value="Band: 160m">160m</option>
+                                        <option value="Band: 80m">80m</option>
+                                        <option value="Band: 60m">60m</option>
+                                        <option value="Band: 40m">40m</option>
+                                        <option value="Band: 30m">30m</option>
+                                        <option value="Band: 20m">20m</option>
+                                        <option value="Band: 17m">17m</option>
+                                        <option value="Band: 15m">15m</option>
+                                        <option value="Band: 12m">12m</option>
+                                        <option value="Band: 10m">10m</option>
+                                    </optgroup>
+                                    <optgroup label="Bandwidth">
+                                        <option value="Bandwidth: Low">Bandwidth Low</option>
+                                        <option value="Bandwidth: High">Bandwidth High</option>
+                                    </optgroup>
+                                    <optgroup label="Other">
+                                        <option value="Volume">Volume</option>
+                                        <option value="Mute">Mute</option>
+                                        <option value="NR2: Toggle">NR2 Toggle</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label>
+                                    <input type="checkbox" id="midi-learn-map-both">
+                                    <span>Map both press and release (for buttons)</span>
+                                </label>
+                            </div>
+                            <p id="midi-learn-message" style="margin: 10px 0; font-weight: 500; color: #1976D2;">
+                                Select a function above, then press/turn a control on your MIDI device...
+                            </p>
+                        </div>
+
+                        <div class="table-container">
+                            <table id="midi-mappings-table" class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>MIDI Control</th>
+                                        <th>Function</th>
+                                        <th>Throttle</th>
+                                        <th>Mode</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="midi-mappings-tbody">
+                                    <tr>
+                                        <td colspan="5" style="text-align: center; color: #999;">No mappings configured. Use Learn Mode to add mappings.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Resampling Settings Panel -->
+            <section class="panel">
+                <h2>Audio Resampling</h2>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="resample-enabled">
+                        <span>Enable Resampling</span>
+                    </label>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="resample-rate">Output Sample Rate:</label>
+                        <select id="resample-rate">
+                            <option value="8000">8 kHz</option>
+                            <option value="11025">11.025 kHz</option>
+                            <option value="16000">16 kHz</option>
+                            <option value="22050">22.05 kHz</option>
+                            <option value="44100" selected>44.1 kHz</option>
+                            <option value="48000">48 kHz</option>
+                            <option value="96000">96 kHz</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="output-channels">Output Channels:</label>
+                        <select id="output-channels">
+                            <option value="0">Auto (Stereo when resampling)</option>
+                            <option value="1">Mono (1 channel)</option>
+                            <option value="2" selected>Stereo (2 channels)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="info-box">
+                    <p><strong>Note:</strong> Enable resampling if your audio device doesn't support the server's sample rate (typically 12 kHz). Most devices support 44.1 kHz or 48 kHz and require stereo (2 channels). Use --list-devices to see what your device supports. Resampling is automatically disabled for IQ modes.</p>
+                </div>
+            </section>
+
+            <!-- NR2 Settings Panel -->
+            <section class="panel">
+                <h2>NR2 Noise Reduction</h2>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="nr2-enabled">
+                        <span>Enable NR2</span>
+                    </label>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="nr2-strength">Strength (%):</label>
+                        <input type="number" id="nr2-strength" value="40" min="0" max="100" step="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="nr2-floor">Floor (%):</label>
+                        <input type="number" id="nr2-floor" value="10" min="0" max="10" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="nr2-adapt">Adapt Rate (%):</label>
+                        <input type="number" id="nr2-adapt" value="1.0" min="0.1" max="5.0" step="0.1">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Status Panel -->
+            <section class="panel">
+                <h2>Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="label">Frequency:</span>
+                        <span id="status-frequency">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Mode:</span>
+                        <span id="status-mode">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Sample Rate:</span>
+                        <span id="status-samplerate">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Channels:</span>
+                        <span id="status-channels">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Session ID:</span>
+                        <span id="status-session">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Audio Device:</span>
+                        <span id="status-audio-device">-</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>UberSDR Client | <a href="https://ubersdr.org" target="_blank">UberSDR</a></p>
+        </footer>
+    </div>
+
+    <!-- Local Instances Modal -->
+    <div id="local-instances-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🔍 Local UberSDR Instances</h2>
+                <span class="close" data-modal="local-instances-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p id="local-instances-status">Searching for local instances...</p>
+                <div id="local-instances-list" class="instances-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-modal="local-instances-modal">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Public Instances Modal -->
+    <div id="public-instances-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🌐 Public UberSDR Instances</h2>
+                <span class="close" data-modal="public-instances-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="filter-group">
+                    <label for="public-filter">Filter:</label>
+                    <input type="text" id="public-filter" placeholder="Search by name, callsign, or location...">
+                </div>
+                <p id="public-instances-status">Loading public instances...</p>
+                <div id="public-instances-list" class="instances-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-modal="public-instances-modal">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Local Bookmarks Management Modal -->
+    <div id="local-bookmarks-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📚 Local Bookmarks</h2>
+                <span class="close" data-modal="local-bookmarks-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 15px; color: #666;">Manage your personal bookmarks. These are stored locally on your device.</p>
+                <div class="table-container">
+                    <table id="local-bookmarks-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Frequency</th>
+                                <th>Mode</th>
+                                <th>Bandwidth</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="local-bookmarks-tbody">
+                            <tr>
+                                <td colspan="5" style="text-align: center; color: #999;">No local bookmarks saved yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-modal="local-bookmarks-modal">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Bookmark Modal -->
+    <div id="save-bookmark-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>💾 Save Bookmark</h2>
+                <span class="close" data-modal="save-bookmark-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="bookmark-name-input">Bookmark Name:</label>
+                    <input type="text" id="bookmark-name-input" placeholder="Enter bookmark name" autofocus>
+                </div>
+                <div style="margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                    <p style="margin: 5px 0; color: #333;"><strong>Frequency:</strong> <span id="save-bookmark-frequency" style="color: #333;">-</span></p>
+                    <p style="margin: 5px 0; color: #333;"><strong>Mode:</strong> <span id="save-bookmark-mode" style="color: #333;">-</span></p>
+                    <p style="margin: 5px 0; color: #333;"><strong>Bandwidth:</strong> <span id="save-bookmark-bandwidth" style="color: #333;">-</span></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="save-bookmark-confirm-btn" class="btn btn-primary">Save</button>
+                <button class="btn btn-secondary" data-modal="save-bookmark-modal">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Modal -->
+    <div id="error-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2 id="error-modal-title">Error</h2>
+                <span class="close" data-modal="error-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p id="error-modal-message" style="color: #ef4444; font-weight: 500;"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" data-modal="error-modal">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="audio-visualizer.js"></script>
+    <script src="spectrum-display.js"></script>
+    <script src="midi-control.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

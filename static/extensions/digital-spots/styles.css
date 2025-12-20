@@ -1,0 +1,817 @@
+/* Digital Spots Extension Styles */
+
+.digital-spots-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 10px;
+    background: #1a1a1a;
+    color: #e0e0e0;
+}
+
+.digital-spots-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #333;
+}
+
+.digital-spots-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.digital-spots-title h3 {
+    margin: 0;
+    font-size: 18px;
+    color: #4a9eff;
+}
+
+.digital-spots-info {
+    display: flex;
+    gap: 15px;
+    font-size: 12px;
+    color: #888;
+}
+
+.digital-spots-container .status-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.digital-spots-container .status-connected {
+    background: #28a745;
+    color: white;
+}
+
+.digital-spots-container .status-disconnected {
+    background: #dc3545;
+    color: white;
+}
+
+.digital-spots-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.digital-spots-container .control-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.digital-spots-container .control-group label {
+    font-size: 12px;
+    color: #aaa;
+}
+
+.digital-spots-container .control-group select,
+.digital-spots-container .control-group input[type="text"] {
+    padding: 4px 8px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 12px;
+}
+
+.digital-spots-container .control-group input[type="text"] {
+    width: 120px;
+}
+
+.digital-spots-container .control-group input[type="checkbox"] {
+    margin-right: 5px;
+    cursor: pointer;
+}
+
+.digital-spots-container .control-group label:has(input[type="checkbox"]) {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.digital-spots-container .btn-clear {
+    padding: 4px 12px;
+    background: #dc3545;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.digital-spots-container .btn-clear:hover {
+    background: #c82333;
+}
+
+.digital-spots-container .btn-map {
+    padding: 4px 12px;
+    background: #17a2b8;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.digital-spots-container .btn-map:hover {
+    background: #138496;
+}
+
+/* Push map button control group to far right */
+.digital-spots-container .control-group:has(#digital-spots-map-btn) {
+    margin-left: auto;
+}
+
+.digital-spots-badges-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 15px;
+    padding: 10px;
+    background: #222;
+    border-radius: 4px;
+    min-height: 40px;
+    align-items: center;
+}
+
+.digital-spots-badges-container.hidden {
+    display: none;
+}
+
+.digital-spots-badges-container.empty {
+    justify-content: center;
+    color: #666;
+    font-size: 12px;
+    font-style: italic;
+}
+
+.country-badge {
+    padding: 6px 12px;
+    background: #4a9eff;
+    color: white;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+    white-space: nowrap;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+}
+
+.country-badge:hover {
+    background: #3a8eef;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4);
+}
+
+.country-badge:active {
+    transform: translateY(0);
+}
+
+.digital-spots-table-container {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid #333;
+    border-radius: 4px;
+}
+
+.digital-spots-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.digital-spots-table thead {
+    position: sticky;
+    top: 0;
+    background: #2a2a2a;
+    z-index: 1;
+}
+
+.digital-spots-table th {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 2px solid #444;
+    color: #4a9eff;
+    font-weight: bold;
+}
+
+/* Column widths */
+.digital-spots-table th:nth-child(1),
+.digital-spots-table td:nth-child(1) {
+    width: 90px; /* Time */
+}
+
+.digital-spots-table th:nth-child(2),
+.digital-spots-table td:nth-child(2) {
+    width: 60px; /* Age */
+}
+
+.digital-spots-table th:nth-child(3),
+.digital-spots-table td:nth-child(3) {
+    width: 60px; /* Mode */
+}
+
+.digital-spots-table th:nth-child(4),
+.digital-spots-table td:nth-child(4) {
+    width: 100px; /* Frequency */
+}
+
+.digital-spots-table th:nth-child(5),
+.digital-spots-table td:nth-child(5) {
+    width: 50px; /* Band */
+}
+
+.digital-spots-table th:nth-child(6),
+.digital-spots-table td:nth-child(6) {
+    width: 100px; /* Callsign */
+}
+
+.digital-spots-table th:nth-child(7),
+.digital-spots-table td:nth-child(7) {
+    width: 200px; /* Country */
+}
+
+.digital-spots-table th:nth-child(8),
+.digital-spots-table td:nth-child(8) {
+    width: 70px; /* Grid */
+}
+
+.digital-spots-table th:nth-child(9),
+.digital-spots-table td:nth-child(9) {
+    width: 80px; /* Distance */
+    text-align: right;
+}
+
+.digital-spots-table th:nth-child(10),
+.digital-spots-table td:nth-child(10) {
+    width: 60px; /* Bearing */
+    text-align: right;
+}
+
+.digital-spots-table th:nth-child(11),
+.digital-spots-table td:nth-child(11) {
+    width: 50px; /* SNR */
+    text-align: right;
+}
+
+.digital-spots-table th:nth-child(12),
+.digital-spots-table td:nth-child(12) {
+    width: auto; /* Message - takes remaining space */
+}
+
+.digital-spots-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.digital-spots-table tbody tr {
+    transition: background-color 0.2s;
+}
+
+.digital-spots-table tbody tr:hover {
+    background: #2a2a2a;
+    cursor: pointer;
+}
+
+.digital-spots-table tbody tr.no-spots {
+    text-align: center;
+    color: #888;
+}
+
+.digital-spots-table tbody tr.no-spots:hover {
+    background: transparent;
+    cursor: default;
+}
+
+.digital-spots-table tbody tr.spot-new {
+    animation: highlight-spot 0.5s ease-out;
+}
+
+@keyframes highlight-spot {
+    0% {
+        background-color: #4a9eff;
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+.spot-time {
+    color: #888;
+    font-family: monospace;
+}
+
+.spot-age {
+    color: #666;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.spot-mode {
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+.spot-mode-FT8 {
+    background: #28a745;
+    color: white;
+}
+
+.spot-mode-FT4 {
+    background: #17a2b8;
+    color: white;
+}
+
+.spot-mode-WSPR {
+    background: #ffc107;
+    color: black;
+}
+
+.spot-frequency {
+    font-family: monospace;
+    color: #4a9eff;
+    cursor: pointer;
+}
+
+.spot-frequency:hover {
+    text-decoration: underline;
+}
+
+.spot-callsign {
+    font-weight: bold;
+    color: #ffc107;
+    cursor: pointer;
+}
+
+.spot-callsign:hover {
+    text-decoration: underline;
+}
+
+.spot-band {
+    font-family: monospace;
+    color: #6c757d;
+    font-size: 11px;
+}
+
+.spot-grid {
+    font-family: monospace;
+    color: #17a2b8;
+}
+
+.spot-distance {
+    font-family: monospace;
+    color: #9c27b0;
+    text-align: right;
+    font-size: 11px;
+}
+
+.spot-bearing {
+    font-family: monospace;
+    color: #ff9800;
+    text-align: right;
+    font-size: 11px;
+}
+
+.spot-snr {
+    font-family: monospace;
+    text-align: right;
+}
+
+.spot-snr-positive {
+    color: #28a745;
+}
+
+.spot-snr-negative {
+    color: #dc3545;
+}
+
+.spot-message {
+    color: #aaa;
+    font-size: 11px;
+}
+
+.current-spot-indicator {
+    color: #ffc107;
+    font-size: 14px;
+    margin-left: 4px;
+}
+
+/* Country Spots Modal */
+.country-spots-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.2s ease-out;
+}
+
+/* Modal Tabs */
+.country-spots-modal-tabs {
+    display: flex;
+    gap: 4px;
+    background: #222;
+    border-bottom: 2px solid #444;
+    padding: 0 20px;
+}
+
+.country-spots-tab {
+    padding: 12px 24px;
+    background: transparent;
+    border: none;
+    color: #888;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all 0.2s;
+    position: relative;
+    top: 2px;
+}
+
+.country-spots-tab:hover {
+    color: #4a9eff;
+    background: rgba(74, 158, 255, 0.1);
+}
+
+.country-spots-tab.active {
+    color: #4a9eff;
+    border-bottom-color: #4a9eff;
+}
+
+.country-spots-tab-content {
+    display: none;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.country-spots-tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.country-spots-modal-content {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 900px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.country-spots-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid #333;
+    background: #222;
+    border-radius: 8px 8px 0 0;
+}
+
+.country-spots-modal-header h3 {
+    margin: 0;
+    color: #4a9eff;
+    font-size: 18px;
+}
+
+.country-spots-modal-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.country-spots-modal-controls select {
+    padding: 4px 8px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.country-spots-modal-controls select:hover {
+    background: #333;
+}
+
+.modal-close-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 28px;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.modal-close-btn:hover {
+    background: #333;
+    color: #fff;
+}
+
+.country-spots-modal-body {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Graph Container */
+.country-spots-graphs-container {
+    padding: 20px;
+    overflow-y: auto;
+    height: 100%;
+}
+
+.country-spots-graph {
+    margin-bottom: 30px;
+    background: #222;
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid #333;
+}
+
+.country-spots-graph:last-child {
+    margin-bottom: 0;
+}
+
+.country-spots-graph-title {
+    color: #4a9eff;
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.country-spots-graph-canvas-container {
+    position: relative;
+    width: 100%;
+    height: 300px;
+    background: #1a1a1a;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.country-spots-graph-canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.country-spots-graph-no-data {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    color: #666;
+    font-style: italic;
+    font-size: 14px;
+}
+
+.country-spots-modal-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+    table-layout: fixed;
+}
+
+.country-spots-modal-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.country-spots-modal-table th {
+    padding: 10px 20px;
+    text-align: left;
+    border-bottom: 2px solid #444;
+    color: #4a9eff;
+    font-weight: bold;
+    background: #1a1a1a;
+    position: sticky;
+    top: 0;
+}
+
+.country-spots-modal-table th::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -2px;
+    height: 2px;
+    background: #444;
+}
+
+.country-spots-modal-table td {
+    padding: 8px 20px;
+    border-bottom: 1px solid #2a2a2a;
+    color: #e0e0e0;
+    background: #1a1a1a;
+}
+
+.country-spots-modal-table tbody tr {
+    transition: background-color 0.2s;
+}
+
+.country-spots-modal-table tbody tr:hover {
+    background: #2a2a2a;
+}
+
+/* Column widths for modal table */
+.country-spots-modal-table th:nth-child(1),
+.country-spots-modal-table td:nth-child(1) {
+    width: 120px; /* Callsign */
+}
+
+.country-spots-modal-table th:nth-child(2),
+.country-spots-modal-table td:nth-child(2) {
+    width: 200px; /* Country */
+}
+
+.country-spots-modal-table th:nth-child(3),
+.country-spots-modal-table td:nth-child(3) {
+    width: 70px; /* Mode */
+}
+
+.country-spots-modal-table th:nth-child(4),
+.country-spots-modal-table td:nth-child(4) {
+    width: 70px; /* SNR */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(5),
+.country-spots-modal-table td:nth-child(5) {
+    width: 80px; /* Grid */
+}
+
+.country-spots-modal-table th:nth-child(6),
+.country-spots-modal-table td:nth-child(6) {
+    width: 110px; /* Distance */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(7),
+.country-spots-modal-table td:nth-child(7) {
+    width: 80px; /* Bearing */
+    text-align: right;
+}
+
+.country-spots-modal-table th:nth-child(8),
+.country-spots-modal-table td:nth-child(8) {
+    width: 80px; /* Age */
+}
+
+.country-spots-modal-table th:nth-child(9),
+.country-spots-modal-table td:nth-child(9) {
+    width: 150px; /* Message */
+}
+
+/* Column-specific styles for modal table */
+.country-spots-modal-table .modal-callsign {
+    font-weight: bold;
+    color: #ffc107;
+    cursor: pointer;
+}
+
+.country-spots-modal-table .modal-callsign:hover {
+    text-decoration: underline;
+}
+
+.country-spots-modal-table .modal-mode {
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+.country-spots-modal-table .modal-mode-FT8 {
+    background: #28a745;
+    color: white;
+}
+
+.country-spots-modal-table .modal-mode-FT4 {
+    background: #17a2b8;
+    color: white;
+}
+
+.country-spots-modal-table .modal-mode-WSPR {
+    background: #ffc107;
+    color: black;
+}
+
+.country-spots-modal-table .modal-snr {
+    font-family: monospace;
+    text-align: right;
+}
+
+.country-spots-modal-table .modal-snr-positive {
+    color: #28a745;
+}
+
+.country-spots-modal-table .modal-snr-negative {
+    color: #dc3545;
+}
+
+.country-spots-modal-table .modal-grid {
+    font-family: monospace;
+    color: #17a2b8;
+}
+
+.country-spots-modal-table .modal-distance {
+    font-family: monospace;
+    color: #9c27b0;
+    text-align: right;
+}
+
+.country-spots-modal-table .modal-bearing {
+    font-family: monospace;
+    color: #ff9800;
+    text-align: right;
+}
+
+.country-spots-modal-table .modal-age {
+    font-family: monospace;
+    color: #666;
+    font-size: 11px;
+}
+
+.country-spots-modal-table .modal-country {
+    color: #17a2b8;
+}
+
+.country-spots-modal-table .modal-message {
+    color: #aaa;
+    font-size: 11px;
+}
+
+/* Graph Tooltip */
+.country-spots-graph-tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid #4a9eff;
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: #e0e0e0;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 1000;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
+}
+
+.country-spots-graph-tooltip .tooltip-row {
+    margin: 2px 0;
+}
+
+.country-spots-graph-tooltip .tooltip-row:first-child {
+    color: #ffc107;
+    font-size: 13px;
+    margin-bottom: 4px;
+}

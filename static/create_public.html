@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Make Instance Public - UberSDR</title>
+    <link rel="stylesheet" href="create_public.css">
+</head>
+<body>
+    <div class="wizard-container">
+        <div class="wizard-header">
+            <h1>🌐 Make Your Instance Public</h1>
+            <p>Configure your UberSDR instance to appear in the public registry</p>
+        </div>
+
+        <div class="progress-bar">
+            <div class="progress-step active" data-step="1">
+                <div class="step-number">1</div>
+                <div class="step-label">Introduction</div>
+            </div>
+            <div class="progress-step" data-step="2">
+                <div class="step-number">2</div>
+                <div class="step-label">Connection</div>
+            </div>
+            <div class="progress-step" data-step="3">
+                <div class="step-number">3</div>
+                <div class="step-label">Review</div>
+            </div>
+        </div>
+
+        <div class="wizard-content">
+            <!-- Step 1: Introduction -->
+            <div class="wizard-step active" data-step="1">
+                <h2>Welcome to the Public Instance Registry</h2>
+                
+                <div class="info-box">
+                    <h3>📡 What is Instance Reporting?</h3>
+                    <p>Instance reporting allows your UberSDR to be listed in the public registry at <a href="https://instances.ubersdr.org" target="_blank" rel="noopener noreferrer" style="color: #333; font-weight: bold; text-decoration: underline;"><strong>instances.ubersdr.org</strong></a>, making it discoverable by other radio enthusiasts worldwide.</p>
+                </div>
+
+                <div class="info-box">
+                    <h3>✅ Benefits</h3>
+                    <ul>
+                        <li>Share your SDR with the global amateur radio community</li>
+                        <li>Contribute to propagation studies and band condition monitoring</li>
+                        <li>Help others learn about SDR technology</li>
+                        <li>Join a network of public SDR receivers</li>
+                    </ul>
+                </div>
+
+                <div class="info-box">
+                    <h3>🌐 Ways to Make Your Instance Public</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 15px;">
+                        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; border-left: 4px solid #28a745;">
+                            <h4 style="margin-top: 0; color: #28a745;">🚀 UberSDR Tunnel Service (Easiest!)</h4>
+                            <p style="margin: 0; font-size: 14px; margin-bottom: 10px;">No port forwarding needed! Your instance will be accessible at:</p>
+                            <p style="margin: 5px 0; font-size: 16px; font-weight: bold; color: #28a745;">https://<span id="introCallsignTunnel">yourcallsign</span>.tunnel.ubersdr.org</p>
+                            <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">💡 <strong>Zero configuration:</strong> No router setup required! Automatic DNS and HTTPS included. Perfect for CGNAT or restrictive networks.</p>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; border-left: 4px solid #667eea;">
+                            <h4 style="margin-top: 0; color: #667eea;">🎯 Automatic DNS Subdomain</h4>
+                            <p style="margin: 0; font-size: 14px; margin-bottom: 10px;">Get a free subdomain automatically! Your instance will be accessible at:</p>
+                            <p style="margin: 5px 0; font-size: 16px; font-weight: bold; color: #667eea;">https://<span id="introCallsign">yourcallsign</span>.instance.ubersdr.org</p>
+                            <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">💡 <strong>Easy option:</strong> Just forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host. Automatic DNS and HTTPS certificates included!</p>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <h4 style="margin-top: 0; color: #667eea;">🔌 Port Forwarding with Your Own Domain</h4>
+                            <p style="margin: 0; font-size: 14px; margin-bottom: 10px;">Use your own domain name. Forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host.</p>
+                            <p style="margin: 0; font-size: 13px; color: #666;">💡 <strong>Automatic HTTPS:</strong> When TLS is enabled and a valid domain and email is specificed, UberSDR automatically obtains and renews Let's Encrypt certificates.</p>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6;">
+                            <h4 style="margin-top: 0; color: #667eea;">☁️ Cloudflare Tunnel</h4>
+                            <p style="margin: 0; font-size: 14px;">If you have your own domain configured in Cloudflare you can <a href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/" target="_blank" rel="noopener noreferrer">create a tunnel</a>. No port forwarding required!</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Connection Settings -->
+            <div class="wizard-step" data-step="2">
+                <h2>Public Connection Settings</h2>
+                <p class="step-description">Configure how users will connect to your UberSDR instance</p>
+
+                <!-- Admin Email Field - Always First -->
+                <div class="form-group" style="background: #f8f9fa; padding: 15px; border-radius: 5px; border-left: 4px solid #667eea; margin-bottom: 20px;">
+                    <label for="adminEmail" style="font-weight: bold; color: #667eea;">Admin Email Address *</label>
+                    <input type="email" id="adminEmail" placeholder="your.email@example.com" style="margin-top: 5px;">
+                    <small>This email is required for the instance registry and for Let's Encrypt certificate generation. It remains private and is not available to the public.</small>
+                    <div id="emailValidationError" style="display: none; margin-top: 10px; padding: 10px; background: #f8d7da; border-left: 4px solid #dc3545; border-radius: 5px; color: #721c24;">
+                        <strong>⚠️ Invalid Email Address</strong>
+                        <p id="emailErrorMessage" style="margin: 5px 0 0 0;"></p>
+                    </div>
+                </div>
+
+                <!-- Callsign Field - Always Second -->
+                <div class="form-group" style="background: #f8f9fa; padding: 15px; border-radius: 5px; border-left: 4px solid #667eea; margin-bottom: 20px;">
+                    <label for="adminCallsign" style="font-weight: bold; color: #667eea;">Callsign *</label>
+                    <input type="text" id="adminCallsign" placeholder="W1ABC" maxlength="10" style="margin-top: 5px; text-transform: uppercase;">
+                    <small>Your amateur radio callsign (max 10 characters, alphanumeric and hyphens only, no spaces)</small>
+                    <div id="callsignValidationError" style="display: none; margin-top: 10px; padding: 10px; background: #f8d7da; border-left: 4px solid #dc3545; border-radius: 5px; color: #721c24;">
+                        <strong>⚠️ Invalid Callsign</strong>
+                        <p id="callsignErrorMessage" style="margin: 5px 0 0 0;"></p>
+                    </div>
+                </div>
+
+                <div class="form-group" id="useTunnelField">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="useTunnel">
+                        <span>Use UberSDR Tunnel Service (<span id="tunnelPreview">yourcallsign</span>.tunnel.ubersdr.org)</span>
+                    </label>
+                    <small>When enabled, your instance will be accessible through the UberSDR tunnel service at <strong><span id="tunnelPreview2">yourcallsign</span>.tunnel.ubersdr.org</strong>. <strong>No port forwarding required!</strong> This is the easiest option and works even behind CGNAT or restrictive firewalls. Port will be set to 443 and TLS will be enabled.</small>
+                </div>
+
+                <div class="info-box" id="tunnelInfo" style="display: none; background: #d4edda; border-left: 4px solid #28a745;">
+                    <strong>✅ UberSDR Tunnel Service Enabled</strong>
+                    <p style="margin: 10px 0;">Your instance will be accessible at:</p>
+                    <p style="margin: 10px 0; font-size: 18px; font-weight: bold; color: #28a745;">
+                        https://<span id="tunnelPreview3">yourcallsign</span>.tunnel.ubersdr.org
+                    </p>
+                    <p style="margin: 10px 0 0 0;"><strong>🚀 Zero Configuration Required:</strong></p>
+                    <ul style="margin: 10px 0 0 20px; padding: 0;">
+                        <li><strong>No port forwarding needed</strong> - works behind any firewall or CGNAT</li>
+                        <li><strong>Automatic DNS</strong> - subdomain is created automatically</li>
+                        <li><strong>Automatic HTTPS</strong> - TLS certificates are managed for you</li>
+                        <li><strong>Instant setup</strong> - your instance will be online immediately</li>
+                    </ul>
+                    <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">💡 The tunnel client runs in a Docker container alongside UberSDR and securely connects to the tunnel server.</p>
+                </div>
+
+                <div class="form-group" id="createDomainField">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="createDomain">
+                        <span>Create DNS subdomain (<span id="domainPreview">yourcallsign</span>.instance.ubersdr.org)</span>
+                    </label>
+                    <small>When enabled, a DNS record will be automatically created pointing <strong><span id="domainPreview2">yourcallsign</span>.instance.ubersdr.org</strong> to your public IP address. This is the recommended option for most users. Port will default to 443 and TLS will be enabled.</small>
+                </div>
+
+                <div class="info-box" id="domainInfo" style="display: none; background: #e7f3ff; border-left: 4px solid #667eea;">
+                    <strong>✅ Automatic DNS Configuration Enabled</strong>
+                    <p style="margin: 10px 0;">Your instance will be accessible at:</p>
+                    <p style="margin: 10px 0; font-size: 18px; font-weight: bold; color: #667eea;">
+                        https://<span id="domainPreview3">yourcallsign</span>.instance.ubersdr.org
+                    </p>
+                    <p style="margin: 10px 0 0 0;"><strong>📡 Port Forwarding Required:</strong></p>
+                    <ul style="margin: 10px 0 0 20px; padding: 0;">
+                        <li>Forward port <strong>80</strong> (HTTP) to your UberSDR host IP address</li>
+                        <li>Forward port <strong>443</strong> (HTTPS) to your UberSDR host IP address</li>
+                        <li>Configure these in your router's port forwarding settings</li>
+                    </ul>
+                    <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">💡 UberSDR will automatically obtain and renew Let's Encrypt certificates for your subdomain.</p>
+                </div>
+
+                <div class="form-group" id="manualConfigSection">
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="useMyIP" checked>
+                            <span>Automatically use my public IP address</span>
+                        </label>
+                        <small>When enabled, the system will automatically detect and use your public IP address. Disable this if you have a custom domain.</small>
+                        <div id="detectedIP" style="margin-top: 10px; padding: 10px; background: #e7f3ff; border-radius: 5px; display: none;">
+                            <strong>Your IP is:</strong> <span id="ipAddress">Loading...</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="hostnameField" style="display: none;">
+                        <label for="instanceHost">Public fully qualified domain name *</label>
+                        <input type="text" id="instanceHost" placeholder="e.g., ubersdr.mydomain.com">
+                        <small>The hostname that users will use to connect to your SDR</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="instancePort">Public Port *</label>
+                        <input type="number" id="instancePort" value="8080" min="1" max="65535">
+                        <small>The port number users will connect to (typically 80 for HTTP or 443 for HTTPS)</small>
+                        <div id="portWarning" style="display: none; margin-top: 10px; padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 5px;">
+                            <strong>⚠️ Non-standard port detected</strong>
+                            <p style="margin: 5px 0 0 0;">Port 443 is recommended for DNS subdomain mode. Other ports will work but may require users to specify the port in the URL.</p>
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="tlsField">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="instanceTLS">
+                            <span>Use TLS/HTTPS for public connections</span>
+                        </label>
+                        <small>Enable if your public connection uses HTTPS/WSS (recommended for security)</small>
+                    </div>
+
+                    <div class="form-group" id="customIngressField" style="display: none;">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="customIngress">
+                            <span>Use Cloudflare Tunnel or my own ingress server (e.g. Nginx)</span>
+                        </label>
+                        <small>Enable if you're using Cloudflare Tunnel or managing TLS certificates yourself (e.g., with Nginx). UberSDR will not attempt to generate Let's Encrypt certificates.</small>
+                    </div>
+                </div>
+
+                <div class="info-box" id="portForwardingInfo">
+                    <strong>💡 Port Forwarding Setup</strong>
+                    <div id="portForwardingUseMyIP" style="display: none;">
+                        <ul style="margin: 10px 0 0 20px; padding: 0;">
+                            <li>Forward port <strong>80</strong> to your UberSDR host IP address in your router</li>
+                            <li>Users will connect via <code>http://your-public-ip</code></li>
+                            <li>Note: HTTPS/certificates are not available with IP addresses</li>
+                        </ul>
+                    </div>
+                    <div id="portForwardingNoTLS" style="display: none;">
+                        <ul style="margin: 10px 0 0 20px; padding: 0;">
+                            <li>Forward port <strong>80</strong> to your UberSDR host IP address in your router</li>
+                            <li>Users will connect via <code>http://your-domain-name</code></li>
+                        </ul>
+                    </div>
+                    <div id="portForwardingWithTLS" style="display: none;">
+                        <ul style="margin: 10px 0 0 20px; padding: 0;">
+                            <li>Enter your domain name (e.g., sdr.example.com) in the hostname field</li>
+                            <li>Enable "Use TLS/HTTPS for public connections"</li>
+                            <li>Forward ports <strong>80</strong> and <strong>443</strong> to your UberSDR host IP address</li>
+                            <li>UberSDR will automatically obtain and renew Let's Encrypt certificates</li>
+                        </ul>
+                    </div>
+                    <div id="portForwardingCustomIngress" style="display: none;">
+                        <ul style="margin: 10px 0 0 20px; padding: 0;">
+                            <li>Users will connect via <code>https://your-domain-name</code></li>
+                            <li>Ensure your ingress controller (Cloudflare Tunnel, Nginx, etc.) is proxying using HTTP to the UberSDR host on port <strong>8080</strong></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Review -->
+            <div class="wizard-step" data-step="3">
+                <h2>Review Your Settings</h2>
+                <p class="step-description">Please review your configuration before enabling public reporting</p>
+
+                <div class="review-section">
+                    <h3>Instance Identity</h3>
+                    <div class="review-item">
+                        <span class="review-label">Admin Email:</span>
+                        <span class="review-value" id="reviewEmail">Loading...</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Callsign:</span>
+                        <span class="review-value" id="reviewCallsign">Loading...</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Instance UUID:</span>
+                        <span class="review-value" id="reviewUUID">Loading...</span>
+                    </div>
+                </div>
+
+                <div class="review-section">
+                    <h3>Public Connection</h3>
+                    <div class="review-item">
+                        <span class="review-label">Auto-detect IP:</span>
+                        <span class="review-value" id="reviewUseMyIP">Yes</span>
+                    </div>
+                    <div class="review-item" id="reviewHostItem" style="display: none;">
+                        <span class="review-label">Hostname/IP:</span>
+                        <span class="review-value" id="reviewHost">-</span>
+                    </div>
+                    <div class="review-item" id="reviewPortItem" style="display: none;">
+                        <span class="review-label">Port:</span>
+                        <span class="review-value" id="reviewPort">-</span>
+                    </div>
+                    <div class="review-item" id="reviewTLSItem" style="display: none;">
+                        <span class="review-label">TLS/HTTPS:</span>
+                        <span class="review-value" id="reviewTLS">No</span>
+                    </div>
+                    <div class="review-item" id="reviewTunnelItem" style="display: none;">
+                        <span class="review-label">Use Tunnel Service:</span>
+                        <span class="review-value" id="reviewTunnel">No</span>
+                    </div>
+                    <div class="review-item" id="reviewDomainItem" style="display: none;">
+                        <span class="review-label">Create Subdomain:</span>
+                        <span class="review-value" id="reviewDomain">No</span>
+                    </div>
+                </div>
+
+                <!-- Test Button Section -->
+                <div class="review-section" id="testSection">
+                    <h3>⚠️ Test Configuration Required</h3>
+                    <p style="margin-bottom: 15px;"><strong>You must test your instance reporting configuration before enabling it.</strong> This ensures your instance will be properly registered in the public directory.</p>
+                    <button type="button" class="btn btn-secondary" id="testButton" onclick="testInstanceReporter()" style="margin-bottom: 15px;">
+                        🧪 Test Instance Reporter
+                    </button>
+                    <div id="testResult" style="display: none; padding: 15px; border-radius: 5px; margin-top: 10px;"></div>
+                </div>
+
+                <div class="info-box success" id="successInfo" style="display: none;">
+                    <strong>✅ Ready to Go!</strong> Click "Enable Public Reporting" below to save your settings and start reporting to the central registry.
+                </div>
+            </div>
+        </div>
+
+        <div class="wizard-navigation">
+            <button class="btn btn-secondary" id="prevBtn" onclick="previousStep()" style="display: none;">
+                ← Previous
+            </button>
+            <button class="btn btn-secondary" id="cancelBtn" onclick="cancelWizard()">
+                Cancel
+            </button>
+            <button class="btn btn-primary" id="nextBtn" onclick="nextStep()">
+                Next →
+            </button>
+            <button class="btn btn-success" id="finishBtn" onclick="finishWizard()" style="display: none;" disabled>
+                Enable Public Reporting
+            </button>
+        </div>
+
+        <div id="alertBox" class="alert" style="display: none;"></div>
+    </div>
+
+    <!-- Restart Countdown Overlay -->
+    <div id="restartOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.9); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="text-align: center; color: white; max-width: 600px; padding: 20px;">
+            <div style="font-size: 72px; font-weight: bold; margin-bottom: 20px;" id="countdownNumber">15</div>
+            <h2 style="margin-bottom: 10px;">Server is restarting...</h2>
+            <p style="font-size: 18px; color: #ccc;">You will be redirected to the admin panel</p>
+            
+            <!-- DNS Propagation Info Box -->
+            <div style="margin-top: 30px; padding: 20px; background: rgba(102, 126, 234, 0.2); border: 2px solid #667eea; border-radius: 8px; text-align: left;">
+                <h3 style="margin-top: 0; color: #667eea; font-size: 18px;">⏱️ DNS Propagation & Certificate Setup</h3>
+                <p style="margin: 10px 0; font-size: 14px; line-height: 1.6;">
+                    <strong>Please note:</strong> It may take several minutes for DNS records to propagate globally and for the TLS certificate to be validated and issued by Let's Encrypt.
+                </p>
+                <p style="margin: 10px 0; font-size: 14px; line-height: 1.6;">
+                    Your instance will appear in the public registry once the setup is complete. <strong>You will receive a confirmation email once your instance is successfully registered.</strong> You can view your instance at:
+                </p>
+                <p style="margin: 10px 0; text-align: center;">
+                    <a href="https://instances.ubersdr.org/" target="_blank" rel="noopener noreferrer" style="color: #667eea; font-weight: bold; font-size: 16px; text-decoration: underline;">
+                        https://instances.ubersdr.org/
+                    </a>
+                </p>
+            </div>
+            
+            <div style="margin-top: 30px;">
+                <div style="border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto;"></div>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+
+    <script src="create_public.js"></script>
+</body>
+</html>

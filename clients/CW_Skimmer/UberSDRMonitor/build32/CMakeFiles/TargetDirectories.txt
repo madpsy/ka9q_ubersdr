@@ -1,0 +1,3 @@
+C:/Users/MadPsy/Repos/HermesIntf/UberSDRMonitor/build32/CMakeFiles/UberSDRMonitor.dir
+C:/Users/MadPsy/Repos/HermesIntf/UberSDRMonitor/build32/CMakeFiles/ALL_BUILD.dir
+C:/Users/MadPsy/Repos/HermesIntf/UberSDRMonitor/build32/CMakeFiles/ZERO_CHECK.dir

@@ -1,0 +1,86 @@
+// UberSDRMonitor.rc - Resource script for dialog
+
+#include <windows.h>
+#include "resource.h"
+
+// Dialog
+IDD_MAIN DIALOGEX 0, 0, 520, 340
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "UberSDR Monitor"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    // Server status
+    LTEXT           "Server: Connecting...", IDC_SERVER_STATUS, 10, 10, 500, 10
+    LTEXT           "Sample Rate: -- Hz", IDC_SAMPLE_RATE, 10, 25, 500, 10
+    
+    // Separator
+    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 40, 500, 1
+    
+    // Receiver status header
+    LTEXT           "Receiver Status:", IDC_STATIC, 10, 45, 200, 10
+    LTEXT           "I", IDC_STATIC, 420, 45, 10, 10
+    LTEXT           "Q", IDC_STATIC, 470, 45, 10, 10
+    
+    // Receiver status lines with record buttons and level meters
+    PUSHBUTTON      "REC", IDC_RX0_RECORD, 385, 59, 20, 12
+    LTEXT           "Rx0: Inactive", IDC_RX0_STATUS, 10, 60, 370, 10
+    CONTROL         "", IDC_RX0_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 60, 40, 10
+    CONTROL         "", IDC_RX0_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 465, 60, 40, 10
+    
+    PUSHBUTTON      "REC", IDC_RX1_RECORD, 385, 74, 20, 12
+    LTEXT           "Rx1: Inactive", IDC_RX1_STATUS, 10, 75, 370, 10
+    CONTROL         "", IDC_RX1_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 75, 40, 10
+    CONTROL         "", IDC_RX1_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 465, 75, 40, 10
+    
+    PUSHBUTTON      "REC", IDC_RX2_RECORD, 385, 89, 20, 12
+    LTEXT           "Rx2: Inactive", IDC_RX2_STATUS, 10, 90, 370, 10
+    CONTROL         "", IDC_RX2_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 90, 40, 10
+    CONTROL         "", IDC_RX2_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 465, 90, 40, 10
+    
+    PUSHBUTTON      "REC", IDC_RX3_RECORD, 385, 104, 20, 12
+    LTEXT           "Rx3: Inactive", IDC_RX3_STATUS, 10, 105, 370, 10
+    CONTROL         "", IDC_RX3_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 105, 40, 10
+    CONTROL         "", IDC_RX3_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 465, 105, 40, 10
+    
+    PUSHBUTTON      "REC", IDC_RX4_RECORD, 385, 119, 20, 12
+    LTEXT           "Rx4: Inactive", IDC_RX4_STATUS, 10, 120, 370, 10
+    CONTROL         "", IDC_RX4_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 120, 40, 10
+    CONTROL         "", IDC_RX4_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 465, 120, 40, 10
+    
+    PUSHBUTTON      "REC", IDC_RX5_RECORD, 385, 134, 20, 12
+    LTEXT           "Rx5: Inactive", IDC_RX5_STATUS, 10, 135, 370, 10
+    CONTROL         "", IDC_RX5_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 135, 40, 10
+    CONTROL         "", IDC_RX5_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 465, 135, 40, 10
+    
+    PUSHBUTTON      "REC", IDC_RX6_RECORD, 385, 149, 20, 12
+    LTEXT           "Rx6: Inactive", IDC_RX6_STATUS, 10, 150, 370, 10
+    CONTROL         "", IDC_RX6_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 150, 40, 10
+    CONTROL         "", IDC_RX6_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 465, 150, 40, 10
+    
+    PUSHBUTTON      "REC", IDC_RX7_RECORD, 385, 164, 20, 12
+    LTEXT           "Rx7: Inactive", IDC_RX7_STATUS, 10, 165, 370, 10
+    CONTROL         "", IDC_RX7_LEVEL_I, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 415, 165, 40, 10
+    CONTROL         "", IDC_RX7_LEVEL_Q, "msctls_progress32", PBS_SMOOTH | WS_BORDER, 465, 165, 40, 10
+    
+    // Separator
+    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 180, 500, 1
+    
+    // Statistics
+    LTEXT           "Statistics:", IDC_STATIC, 10, 185, 500, 10
+    LTEXT           "Callbacks: 0", IDC_CALLBACKS, 10, 200, 500, 10
+    LTEXT           "Uptime: 00:00:00", IDC_UPTIME, 10, 215, 500, 10
+    LTEXT           "Total Throughput: 0.0 KB/s", IDC_TOTAL_THROUGHPUT, 10, 230, 500, 10
+    
+    // Separator
+    CONTROL         "", IDC_STATIC, "Static", SS_ETCHEDHORZ, 10, 245, 500, 1
+    
+    // Telnet output
+    LTEXT           "Telnet (localhost:7300):", IDC_STATIC, 10, 250, 200, 10
+    EDITTEXT        IDC_TELNET_OUTPUT, 10, 265, 500, 45, ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL
+    
+    // Recording format info
+    LTEXT           "Recording: WAV PCM, 192kHz, 16-bit stereo I/Q (L=I, R=Q), Big-endian", IDC_STATIC, 10, 315, 500, 10
+    
+    // Close button
+    DEFPUSHBUTTON   "Close", IDOK, 460, 320, 50, 14
+END

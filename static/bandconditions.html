@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Band Conditions</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .chart-container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        .chart-wrapper {
+            position: relative;
+        }
+
+        .status {
+            text-align: center;
+            padding: 10px;
+            margin-top: 20px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .status.error {
+            background: rgba(244, 67, 54, 0.3);
+        }
+
+        .status.success {
+            background: rgba(76, 175, 80, 0.3);
+        }
+
+        .legend {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+        }
+
+        .site-footer {
+            text-align: center;
+            padding: 20px;
+            margin-top: 40px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .site-footer a {
+            color: #4CAF50;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .site-footer a:hover {
+            color: #45a049;
+            text-decoration: underline;
+        }
+
+        .info-box {
+            background: rgba(33, 150, 243, 0.2);
+            border-left: 4px solid #2196F3;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+
+        .info-box strong {
+            color: #64B5F6;
+        }
+
+        .band-status-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .band-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9em;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s;
+        }
+
+        .band-badge:hover {
+            transform: translateY(-2px);
+        }
+
+        .band-badge.poor {
+            background: #ef4444;
+            color: white;
+        }
+
+        .band-badge.fair {
+            background: #ff9800;
+            color: white;
+        }
+
+        .band-badge.good {
+            background: #fbbf24;
+            color: white;
+        }
+
+        .band-badge.excellent {
+            background: #22c55e;
+            color: white;
+        }
+
+        .band-badge.unknown {
+            background: #9ca3af;
+            color: white;
+        }
+
+        .band-badge-snr {
+            font-size: 0.85em;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 Band Conditions</h1>
+        <div class="subtitle" id="receiver-name">Band Conditions Monitor</div>
+        
+        <div style="text-align: center; margin: 15px 0; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <a href="spaceweather_history.html" style="display: inline-block; padding: 10px 20px; background: #FF9800; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">☀️ Space Weather History</a>
+            <a href="noisefloor.html" style="display: inline-block; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📡 Noise Floor</a>
+            <a href="noisefloor_aggregate.html" style="display: inline-block; padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📊 Aggregate Analysis</a>
+        </div>
+
+        <!-- Space Weather Forecast Summary (compact) -->
+        <div id="spaceweather-forecast-summary" style="display: none; background: rgba(255, 152, 0, 0.15); padding: 10px; border-radius: 6px; border-left: 3px solid #ff9800; font-size: 0.9em; margin-bottom: 20px;">
+            <!-- Forecast summary will be inserted here -->
+        </div>
+
+        <div class="info-box">
+            ℹ️ This chart shows a rolling 24-hour window. Data to the <strong>left</strong> of the "Now" marker is from today, data to the <strong>right</strong> is from yesterday.
+        </div>
+
+        <div class="chart-container">
+            <h2 style="margin-bottom: 15px; font-size: 1.3em;">📡 Real-Time Data from SDR</h2>
+            <div id="chart-loading-message" class="loading" style="display: none;">
+                ⏳ Waiting for initial data from SDR... This may take a few minutes.
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="bandStateChart"></canvas>
+            </div>
+
+            <div id="bandStatusRow" class="band-status-row">
+                <!-- Band status badges will be inserted here -->
+            </div>
+
+            <div class="legend" id="legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #ef4444;"></div>
+                    <span>POOR (SNR &lt; 6 dB)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #ff9800;"></div>
+                    <span>FAIR (6-20 dB)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #fbbf24;"></div>
+                    <span>GOOD (20-30 dB)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #22c55e;"></div>
+                    <span>EXCELLENT (SNR &gt; 30 dB)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Space Weather Summary -->
+        <div id="spaceweather-summary" class="chart-container" style="margin-top: 20px; display: none;">
+            <h2 style="margin-bottom: 15px; font-size: 1.3em;">☀️ Space Weather Forecast</h2>
+            <div id="spaceweather-content" style="line-height: 1.8;">
+                <!-- Space weather data will be inserted here -->
+            </div>
+        </div>
+
+        <div id="status" class="status">Loading... <span id="countdown"></span></div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/noisefloor.html" target="_blank">Full Monitor</a> <span id="footer-version"></span></p>
+    </footer>
+
+    <script src="chart.umd.min.js"></script>
+    <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="chartjs-plugin-annotation.min.js"></script>
+    <script src="suncalc.js"></script>
+    <script src="bandconditions.js"></script>
+</body>
+</html>

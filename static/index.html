@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="UberSDR is a powerful, web-based SDR platform for amateur radio enthusiasts, providing real-time access to the entire HF spectrum and multi-band WSJT-X skimming. Support for third party software via SoapySDR as well as a native desktop client. Based on the affordable RX-888 MKII and generic PC hardware. Powered by ka9q-radio.">
+    <title>UberSDR - Web SDR Receiver</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Opus decoder for handling Opus-compressed audio -->
+    <script src="opus-decoder.min.js"></script>
+    <!-- JSZip for creating ZIP files -->
+    <script src="jszip.min.js"></script>
+    <!-- SunCalc for sunrise/sunset calculations -->
+    <script src="suncalc.js"></script>
+    <!-- FFT and NR2 libraries for noise reduction -->
+    <script src="fft.js"></script>
+    <script src="nr2.js"></script>
+    <script src="filters.js"></script>
+</head>
+<body>
+    <!-- Notification Toast -->
+    <div id="notification-toast" class="notification-toast"></div>
+    
+    <!-- Audio Start Overlay -->
+    <div id="audio-start-overlay" class="audio-start-overlay">
+        <div class="audio-start-content">
+            <div id="site-description" class="site-description"></div>
+            <button id="audio-start-button" class="audio-start-button">
+                <svg width="80" height="80" viewBox="0 0 80 80">
+                    <polygon points="25,15 25,65 65,40" fill="white"/>
+                </svg>
+                <span>Click to Start</span>
+            </button>
+            <!-- Password bypass UI (hidden by default) -->
+            <div id="password-bypass-container" class="password-bypass-container" style="display: none;">
+                <p style="color: #ecf0f1; margin-bottom: 10px; font-size: 16px;">Do you have a bypass password?</p>
+                <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
+                    <input type="password" id="bypass-password-input" placeholder="Enter password" style="padding: 10px; font-size: 14px; border: 2px solid #7f8c8d; background: #34495e; color: #ecf0f1; border-radius: 4px; width: 250px;">
+                    <button id="bypass-password-submit" onclick="submitBypassPassword()" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">Submit</button>
+                </div>
+                <p id="password-error-message" style="color: #dc3545; margin-top: 10px; font-size: 14px; display: none;"></p>
+            </div>
+            <div class="overlay-buttons-container">
+                <button id="band-conditions-button" class="band-conditions-button blue-button" style="display: none;" onclick="window.open('/bandconditions.html', '_blank')">
+                    <span>Band Conditions</span>
+                </button>
+                <button id="digital-spots-button" class="digital-spots-button orange-button" style="display: none;" onclick="window.open('/digitalspots_map.html', '_blank')">
+                    <span>Live Map</span>
+                </button>
+            </div>
+            <div class="overlay-buttons-container" style="margin-top: 10px;">
+                <button id="public-instances-button" class="public-instances-button green-button" onclick="window.open('https://instances.ubersdr.org/', '_blank')">
+                    <span>Public Instance Directory</span>
+                </button>
+                <button id="uuid-button" class="uuid-button green-button" style="display: none;" onclick="copyUUIDToClipboard()">
+                    <span>UUID</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+
+        <!-- Audio Buffer Display in bottom right -->
+        <div id="audio-buffer-display" class="audio-buffer-display" title="Click to configure buffer threshold" onclick="openBufferConfigModal()" style="cursor: pointer;">
+            <div id="audio-buffer-bar" class="audio-buffer-bar"></div>
+            <span id="audio-buffer-text" class="audio-buffer-text">--</span>
+        </div>
+
+        <!-- Space Weather Display under audio buffer -->
+        <div id="space-weather-display" class="space-weather-display" style="display: none;">
+            <span id="space-weather-text" class="space-weather-text">--</span>
+        </div>
+
+        <!-- Time Display in bottom left -->
+        <div id="time-display" class="time-display">
+            <div id="session-time" class="time-line">--:--:-- Session</div>
+            <div id="utc-time" class="time-line">--:--:--</div>
+            <div id="local-time" class="time-line">--:--:--</div>
+        </div>
+
+        <!-- Full-band Spectrum Display -->
+        <div class="spectrum-display-panel">
+            <div class="spectrum-display-container">
+                <canvas id="spectrum-line-graph-canvas" style="display: none;"></canvas>
+                <canvas id="spectrum-display-canvas"></canvas>
+                <!-- All controls overlay on bottom of spectrum -->
+                <div class="spectrum-display-controls">
+                    <div class="spectrum-control-group">
+                        <button onclick="spectrumResetZoom()" title="Reset Zoom (Q key)">Reset</button>
+                        <button onclick="spectrumZoomOut()" title="Zoom Out (S key)">−</button>
+                        <button onclick="spectrumZoomIn()" title="Zoom In (W key)">+</button>
+                        <button onclick="spectrumMaxZoom()" title="Maximum Zoom (E key)">Max</button>
+                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
+                            <input type="checkbox" id="spectrum-zoom-scroll-enable" checked>
+                            <span>Scroll</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
+                            <input type="checkbox" id="spectrum-smooth-enable">
+                            <span>Smooth</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;" id="spectrum-snap-label">
+                            <input type="checkbox" id="spectrum-snap-enable" checked>
+                            <span>Snap</span>
+                        </label>
+                    </div>
+                    <div class="spectrum-control-group">
+                        <label>Colour Scheme:</label>
+                        <select id="spectrum-colorscheme" onchange="updateSpectrumColorScheme()">
+                            <option value="viridis">Viridis</option>
+                            <option value="plasma">Plasma</option>
+                            <option value="jet" selected>Jet</option>
+                        </select>
+                    </div>
+                    <div class="spectrum-control-group">
+                        <label>Signal:</label>
+                        <div class="signal-meter">
+                            <div id="signal-meter-bar" class="signal-meter-bar"></div>
+                        </div>
+                        <span id="signal-meter-value">-- dB</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Country Badges Container (for Digital Spots Extension) -->
+        <div id="digital-spots-badges-main" class="digital-spots-badges-main" style="display: none;">
+            <!-- Country badges will be inserted here by the extension -->
+        </div>
+
+        <!-- Country Badges Container (for CW Spots Extension) -->
+        <div id="cw-spots-badges-main" class="cw-spots-badges-main" style="display: none;">
+            <!-- Country badges will be inserted here by the extension -->
+        </div>
+
+        <!-- Band Status Bar -->
+        <div class="band-status-bar">
+            <div class="band-status-container">
+                <div class="band-status-badge" data-band="160m" data-status="OPEN">160m</div>
+                <div class="band-status-badge" data-band="80m" data-status="OPEN">80m</div>
+                <div class="band-status-badge" data-band="60m" data-status="OPEN">60m</div>
+                <div class="band-status-badge" data-band="40m" data-status="OPEN">40m</div>
+                <div class="band-status-badge" data-band="30m" data-status="OPEN">30m</div>
+                <div class="band-status-badge" data-band="20m" data-status="OPEN">20m</div>
+                <div class="band-status-badge" data-band="17m" data-status="OPEN">17m</div>
+                <div class="band-status-badge" data-band="15m" data-status="OPEN">15m</div>
+                <div class="band-status-badge" data-band="12m" data-status="OPEN">12m</div>
+                <div class="band-status-badge" data-band="10m" data-status="OPEN">10m</div>
+            </div>
+        </div>
+
+
+        <div class="controls">
+            <div class="control-group">
+                <div style="display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: nowrap;">
+                    <div class="frequency-input-wrapper" style="width: 150px;">
+                        <input type="text" id="frequency" value="14175000" title="Frequency in Hz (F key to focus - Press Enter to apply)">
+                        <span class="frequency-unit">Hz</span>
+                    </div>
+                    <button onclick="handleFrequencyChange()" style="padding: 8px 12px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; display: flex; align-items: center; justify-content: center; min-width: 40px; height: 40px; flex-shrink: 0; margin-top: 12px;" title="Apply frequency (Enter)">►</button>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
+                            <input type="checkbox" id="spectrum-scroll-enable">
+                            <span>Scroll</span>
+                        </label>
+                        <select id="frequency-scroll-mode" style="padding: 2px 4px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.85em;" onchange="updateFrequencyScrollMode()">
+                            <option value="10-slow">10 Hz slow</option>
+                            <option value="10-fast">10 Hz fast</option>
+                            <option value="100-slow">100 Hz slow</option>
+                            <option value="100-fast">100 Hz fast</option>
+                            <option value="500-slow">500 Hz slow</option>
+                            <option value="500-fast" selected>500 Hz fast</option>
+                            <option value="1000-slow">1 kHz slow</option>
+                            <option value="1000-fast">1 kHz fast</option>
+                            <option value="10000-slow">10 kHz slow</option>
+                            <option value="10000-fast">10 kHz fast</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="tuning-buttons">
+                    <button onclick="adjustFrequency(-1000)" title="Down 1 kHz (Left Arrow ←)">◄◄</button>
+                    <button onclick="adjustFrequency(-100)" title="Down 100 Hz (A key)">◄</button>
+                    <button onclick="adjustFrequency(-10)" title="Down 10 Hz">◂</button>
+                    <button onclick="adjustFrequency(10)" title="Up 10 Hz">▸</button>
+                    <button onclick="adjustFrequency(100)" title="Up 100 Hz (D key)">►</button>
+                    <button onclick="adjustFrequency(1000)" title="Up 1 kHz (Right Arrow →)">►►</button>
+                </div>
+                <select id="band-selector" onchange="selectBandFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
+                    <option value="">Select Band...</option>
+                </select>
+                <select id="bookmark-selector" onchange="selectBookmarkFromDropdown(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
+                    <option value="">Select Bookmark...</option>
+                </select>
+                <select id="extensions-dropdown" onchange="toggleExtension(this.value)" style="padding: 5px 10px; background: #34495e; color: #ecf0f1; border: 1px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 5px; width: 100%;">
+                    <option value="">Extensions...</option>
+                    <!-- Extensions populated dynamically by extension-loader.js -->
+                </select>
+            </div>
+
+            <div class="control-group">
+                <div class="preset-buttons">
+                    <button onclick="setMode('usb')" id="mode-usb" class="mode-btn active" title="Upper Sideband (U key)">USB</button>
+                    <button onclick="setMode('lsb')" id="mode-lsb" class="mode-btn" title="Lower Sideband (L key)">LSB</button>
+                    <button onclick="setMode('cwu')" id="mode-cwu" class="mode-btn" title="CW Upper (C key to toggle)">CWU</button>
+                    <button onclick="setMode('cwl')" id="mode-cwl" class="mode-btn" title="CW Lower (C key to toggle)">CWL</button>
+                    <button onclick="setMode('am')" id="mode-am" class="mode-btn">AM</button>
+                    <button onclick="setMode('sam')" id="mode-sam" class="mode-btn" disabled style="opacity: 0.5; cursor: not-allowed;" title="SAM mode temporarily disabled due to known issues">SAM</button>
+                    <button onclick="setMode('fm')" id="mode-fm" class="mode-btn">FM</button>
+                    <button onclick="setMode('nfm')" id="mode-nfm" class="mode-btn">NFM</button>
+                </div>
+                <div class="bandwidth-controls">
+                    <div class="control-group">
+                        <label for="bandwidth-low">Low: <span id="bandwidth-low-value">50</span> Hz</label>
+                        <input type="range" id="bandwidth-low" min="-8000" max="500" value="50" step="10" oninput="updateBandwidthDisplay()" onchange="updateBandwidth()">
+                    </div>
+                    <div class="control-group">
+                        <label for="bandwidth-high">High: <span id="bandwidth-high-value">3000</span> Hz</label>
+                        <input type="range" id="bandwidth-high" min="500" max="6000" value="3000" step="100" oninput="updateBandwidthDisplay()" onchange="updateBandwidth()">
+                    </div>
+                </div>
+                <div class="current-settings-text">
+                    <span id="current-freq">-</span> • <span id="current-mode">-</span> • <span id="current-bandwidth">-</span> • <span id="current-band">-</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <div class="s-meter-container">
+                    <canvas id="s-meter-canvas" width="280" height="160"></canvas>
+                </div>
+                <div style="display: flex; justify-content: center; align-items: center; padding: 5px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 50px; background: #2c3e50; border-radius: 4px; margin-top: 5px; width: 280px; box-sizing: border-box;">
+                        <div id="s-meter-value-display" style="font-size: 18px; font-weight: bold; color: #ecf0f1; min-width: 80px; text-align: left;">
+                            S0
+                        </div>
+                        <div id="s-meter-peak-display" style="font-size: 18px; font-weight: bold; color: rgba(0, 255, 255, 0.9); min-width: 80px; text-align: right;">
+                            S0
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="audio-controls">
+            <div class="control-group">
+                <label for="volume">Volume</label>
+                <input type="range" id="volume" min="0" max="100" value="70" title="Volume (Up/Down arrows)">
+                <span id="volume-value">70%</span>
+            </div>
+            <div class="control-group" style="display: flex; flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="margin: 0;">
+                    <input type="checkbox" id="channel-left" checked onchange="updateChannelSelection()">
+                    Left
+                </label>
+                <label style="margin: 0;">
+                    <input type="checkbox" id="channel-right" checked onchange="updateChannelSelection()">
+                    Right
+                </label>
+            </div>
+            <div class="control-group">
+                <button id="mute-btn" onclick="toggleMute()" title="Toggle Mute (M key)">🔊 Mute</button>
+                <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 10px;" title="Toggle Noise Reduction (N key)">NR2</button>
+                <button id="rec-btn" onclick="openRecorderModal()" style="margin-left: 10px;" title="Open Recorder (R key)">⏺ Rec</button>
+            </div>
+            <div class="control-group vu-meter-compact-container" id="vu-meter-compact">
+                <div class="vu-meter">
+                    <div id="vu-meter-bar-compact" class="vu-meter-bar"></div>
+                    <div id="vu-meter-peak-compact" class="vu-meter-peak"></div>
+                    <div class="vu-meter-scale">
+                        <span>-60</span>
+                        <span>-40</span>
+                        <span>-20</span>
+                        <span>-10</span>
+                        <span>-5</span>
+                        <span>0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Generic Extension Panel (shared by all extensions) -->
+        <div id="extension-panel" class="decoder-extension-panel" style="display: none;">
+            <div class="decoder-extension-container">
+                <div class="decoder-extension-header">
+                    <h3 id="extension-panel-title">Extension</h3>
+                    <div class="decoder-header-buttons">
+                        <button class="decoder-modal-btn" onclick="openExtensionModal()" title="Open in full screen">⛶</button>
+                        <button class="decoder-close-btn" onclick="closeExtensionPanel()">×</button>
+                    </div>
+                </div>
+                <div id="extension-panel-content" class="decoder-extension-content">
+                    <!-- Extension content loaded dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Generic Extension Modal (shared by all extensions) -->
+        <div id="extension-modal" class="decoder-extension-modal">
+            <div class="decoder-extension-modal-content">
+                <div class="decoder-extension-modal-header">
+                    <h2 id="extension-modal-title">Extension</h2>
+                    <div class="decoder-extension-modal-controls">
+                        <div class="decoder-extension-modal-zoom">
+                            <button class="decoder-extension-modal-zoom-btn" onclick="zoomExtensionModal(-0.1)">−</button>
+                            <span class="decoder-extension-modal-zoom-display" id="extension-modal-zoom">100%</span>
+                            <button class="decoder-extension-modal-zoom-btn" onclick="zoomExtensionModal(0.1)">+</button>
+                        </div>
+                        <button class="decoder-extension-modal-close" onclick="closeExtensionModal()">×</button>
+                    </div>
+                </div>
+                <div class="decoder-extension-modal-body">
+                    <div class="modal-content-wrapper" id="extension-modal-content-wrapper">
+                        <div id="extension-modal-content">
+                            <!-- Extension content cloned here for modal view -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Visualization Section (Collapsible) -->
+        <div class="audio-visualization-section">
+            <div class="audio-visualization-header" onclick="toggleAudioVisualization()">
+                <h3>Audio Visualisation</h3>
+                <span id="audio-viz-toggle" class="toggle-icon">▼</span>
+            </div>
+            <div id="audio-visualization-content" class="audio-visualization-content" style="display: none;">
+                <div class="visualizer-panel">
+                    <div class="top-visualizers">
+                <div class="vu-meter-container">
+                    <div class="vu-meter">
+                        <div id="vu-meter-bar" class="vu-meter-bar"></div>
+                        <div id="vu-meter-peak" class="vu-meter-peak"></div>
+                        <div class="vu-meter-scale">
+                            <span>-60</span>
+                            <span>-40</span>
+                            <span>-20</span>
+                            <span>-10</span>
+                            <span>-5</span>
+                            <span>0</span>
+                        </div>
+                    </div>
+                    <div class="vu-meter-values">
+                        <div class="vu-value-item">
+                            <span class="vu-label">RMS:</span>
+                            <span id="vu-rms-value" class="vu-value">-∞ dB</span>
+                        </div>
+                        <div class="vu-value-item">
+                            <span class="vu-label">Peak:</span>
+                            <span id="vu-peak-value" class="vu-value">-∞ dB</span>
+                        </div>
+                        <div class="vu-value-item" style="display: flex; flex-direction: column; gap: 6px; font-size: 0.9em;">
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="save-filters-enable" onchange="toggleSaveFiltersEnabled()">
+                                <span>Save Filters</span>
+                            </label>
+                            <button onclick="clearFilterStorage()" style="padding: 4px 8px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; white-space: nowrap;">Clear Storage</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="oscilloscope-container">
+                    <canvas id="oscilloscope-canvas" width="400" height="140"></canvas>
+                    <div class="oscilloscope-controls" style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label for="oscilloscope-zoom">Timebase:</label>
+                            <input type="range" id="oscilloscope-zoom" min="1" max="200" value="200" step="1" oninput="updateOscilloscopeZoom()">
+                            <span id="oscilloscope-zoom-value">-- ms</span>
+                        </div>
+                        <div style="display: flex; gap: 5px;">
+                            <button id="auto-sync-btn" onclick="autoSyncOscilloscope()" style="padding: 4px 12px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" title="Toggle trigger lock for stable waveform">Auto Sync</button>
+                            <button id="auto-scale-btn" onclick="autoScaleOscilloscope()" style="padding: 4px 12px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" title="Toggle continuous auto-scaling of Y-axis">Auto Scale</button>
+                            <button id="set-1khz-btn" onclick="shiftFrequencyTo1kHz()" style="padding: 4px 12px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;" title="Shift detected signal to 1 kHz">Set 1 kHz</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="spectrum-container">
+                <canvas id="spectrum-canvas" width="2048" height="150"></canvas>
+            </div>
+            <div class="waterfall-container">
+                <div style="position: relative;">
+                    <canvas id="waterfall-canvas" width="2048" height="400"></canvas>
+                    <canvas id="waterfall-overlay-canvas" width="2048" height="400" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+                </div>
+                <div class="waterfall-controls">
+                    <div class="waterfall-control-group">
+                        <label for="fft-size">FFT Size:</label>
+                        <select id="fft-size" onchange="updateFFTSize()">
+                            <option value="2048">2048 (Fastest)</option>
+                            <option value="4096">4096 (Fast)</option>
+                            <option value="8192">8192 (Balanced)</option>
+                            <option value="16384" selected>16384 (High Detail)</option>
+                            <option value="32768">32768 (Maximum Detail)</option>
+                        </select>
+                    </div>
+                    <div class="waterfall-control-group">
+                        <label for="scroll-rate">Scroll Rate:</label>
+                        <select id="scroll-rate" onchange="updateScrollRate()">
+                            <option value="100">Slow (10 fps)</option>
+                            <option value="50">Medium (20 fps)</option>
+                            <option value="33" selected>Fast (30 fps)</option>
+                            <option value="16">Very Fast (60 fps)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters: 2x3 Grid for Notch, Bandpass, NR2, Squelch, Compressor, Stereo Virtualizer -->
+        <div class="filters-grid filters-grid-2x3">
+            <!-- Row 1, Column 1: Notch -->
+            <div class="notch-panel">
+                <div class="notch-container" style="position: relative;">
+                    <span id="notch-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
+                    <span id="notch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="notch-enable" onchange="toggleNotchFilter()">
+                            Notch Filters <span id="notch-count" style="color: #888;">(0/5)</span>
+                        </label>
+                    </div>
+                    <div id="notch-controls">
+                        <div style="margin-bottom: 15px;">
+                            <button onclick="addManualNotch()" class="notch-add-btn">+ Add Notch Filter</button>
+                        </div>
+                        <div id="notch-list">
+                            <p style="color: #888; font-style: italic; margin: 10px 0;">No notch filters added yet</p>
+                        </div>
+                        <button onclick="clearAllNotches()" class="eq-reset-btn" style="margin-top: 10px;">Clear All Notches</button>
+                    </div>
+                    <p class="help-text" style="font-size: 11px; margin-top: 8px; color: #888;">Right click on audio spectrum to add notches</p>
+                </div>
+            </div>
+
+            <!-- Row 1, Column 2: Bandpass -->
+            <div class="bandpass-panel">
+                <div class="bandpass-container" style="position: relative;">
+                    <span id="bandpass-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
+                    <span id="bandpass-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="bandpass-enable" onchange="toggleBandpassFilter()">
+                            Bandpass Filter
+                        </label>
+                    </div>
+                    <div id="bandpass-controls">
+                        <div class="control-group">
+                            <label for="bandpass-center">Center Frequency: <span id="bandpass-center-value">800 Hz</span></label>
+                            <input type="range" id="bandpass-center" min="100" max="3000" value="800" step="10" oninput="updateBandpassFilter()">
+                        </div>
+                        <div class="control-group">
+                            <label for="bandpass-width">Bandwidth: <span id="bandpass-width-value">200 Hz</span></label>
+                            <input type="range" id="bandpass-width" min="20" max="1000" value="200" step="10" oninput="updateBandpassFilter()">
+                        </div>
+                        <div class="control-group">
+                            <label for="bandpass-stages">Filter Stages: <span id="bandpass-stages-rolloff-value">4 (48 dB/oct)</span></label>
+                            <input type="range" id="bandpass-stages" min="1" max="6" value="4" step="1" oninput="updateBandpassFilter()">
+                        </div>
+                        <div class="control-group">
+                            <label>
+                                <input type="checkbox" id="bandpass-auto-q" checked onchange="updateBandpassFilter()">
+                                Auto Q Factor
+                            </label>
+                        </div>
+                        <div class="control-group" id="bandpass-q-control" style="display: none;">
+                            <label for="bandpass-q-multiplier">Q Multiplier: <span id="bandpass-q-multiplier-value">1.0x</span></label>
+                            <input type="range" id="bandpass-q-multiplier" min="0.5" max="2.0" value="1.0" step="0.1" oninput="updateBandpassFilter()">
+                        </div>
+                        <button onclick="resetBandpassFilter()" class="eq-reset-btn">Reset</button>
+                    </div>
+                    <p class="help-text" style="font-size: 11px; margin-top: 8px; color: #888;">Left click on audio spectrum to set bandpass filter. Double click to remove</p>
+                </div>
+            </div>
+
+            <!-- Row 1, Column 3: Noise Reduction (NR2) -->
+            <div class="noise-reduction-panel">
+                <div class="noise-reduction-container" style="position: relative;">
+                    <span id="noise-reduction-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
+                    <span id="noise-reduction-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <span id="noise-reduction-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="noise-reduction-enable" onchange="toggleNoiseReduction()">
+                            Noise Reduction (NR2)
+                        </label>
+                    </div>
+                    <div id="noise-reduction-controls">
+                        <div class="control-group">
+                            <label for="noise-reduction-strength">Strength: <span id="noise-reduction-strength-value">40%</span></label>
+                            <input type="range" id="noise-reduction-strength" min="0" max="100" value="40" step="5" oninput="updateNoiseReduction()">
+                        </div>
+                        <div class="control-group">
+                            <label for="noise-reduction-floor">Spectral Floor: <span id="noise-reduction-floor-value">10%</span></label>
+                            <input type="range" id="noise-reduction-floor" min="0" max="10" value="10" step="0.5" oninput="updateNoiseReduction()">
+                        </div>
+                        <div class="control-group">
+                            <label for="noise-reduction-adapt-rate">Adaptation Rate: <span id="noise-reduction-adapt-rate-value">1.0%</span></label>
+                            <input type="range" id="noise-reduction-adapt-rate" min="0.1" max="5.0" value="1.0" step="0.1" oninput="updateNoiseReduction()">
+                        </div>
+                        <div class="control-group">
+                            <label for="noise-reduction-makeup-gain">Makeup Gain: <span id="noise-reduction-makeup-gain-value">-3 dB</span></label>
+                            <input type="range" id="noise-reduction-makeup-gain" min="-12" max="12" value="-3" step="0.5" oninput="updateNoiseReduction()">
+                        </div>
+                        <p class="help-text" style="font-size: 11px; margin-top: 8px;">Auto-learns noise on startup and frequency changes. Continuously adapts to slow variations. Higher strength = more aggressive. Adaptation rate controls how quickly the filter tracks changing noise.</p>
+                        <button onclick="resetNoiseReduction()" class="eq-reset-btn">Reset</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2, Column 1: Squelch -->
+            <div class="squelch-panel">
+                <div class="squelch-container" style="position: relative;">
+                    <span id="squelch-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
+                    <span id="squelch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="squelch-enable" onchange="toggleSquelch()">
+                            Squelch (Audio Gate)
+                        </label>
+                    </div>
+                    <div id="squelch-controls">
+                        <div class="control-group">
+                            <label for="squelch-threshold">Threshold: <span id="squelch-threshold-value">-35 dB</span></label>
+                            <input type="range" id="squelch-threshold" min="-80" max="-10" value="-35" step="1" oninput="updateSquelch()">
+                        </div>
+                        <div class="control-group">
+                            <label for="squelch-hysteresis">Hysteresis: <span id="squelch-hysteresis-value">3 dB</span></label>
+                            <input type="range" id="squelch-hysteresis" min="1" max="10" value="3" step="0.5" oninput="updateSquelch()">
+                        </div>
+                        <div class="control-group">
+                            <label for="squelch-attack">Attack (Open): <span id="squelch-attack-value">20 ms</span></label>
+                            <input type="range" id="squelch-attack" min="5" max="200" value="20" step="5" oninput="updateSquelch()">
+                        </div>
+                        <div class="control-group">
+                            <label for="squelch-release">Release (Close): <span id="squelch-release-value">500 ms</span></label>
+                            <input type="range" id="squelch-release" min="10" max="1000" value="500" step="10" oninput="updateSquelch()">
+                        </div>
+                        <div class="squelch-status">
+                            <label>Status:</label>
+                            <span id="squelch-status" style="font-weight: bold; color: #28a745;">OPEN</span>
+                            <span id="squelch-level" style="margin-left: 15px; color: #888;">Level: -- dB</span>
+                        </div>
+                        <button onclick="resetSquelch()" class="eq-reset-btn">Reset</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2, Column 2: Compressor -->
+            <div class="compressor-panel">
+                <div class="compressor-container" style="position: relative;">
+                    <span id="compressor-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
+                    <span id="compressor-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <span id="compressor-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="compressor-enable" onchange="toggleCompressor()">
+                            Audio Compressor (AGC)
+                        </label>
+                    </div>
+                    <div id="compressor-controls">
+                        <div class="control-group">
+                            <label for="compressor-threshold">Threshold: <span id="compressor-threshold-value">-24 dB</span></label>
+                            <input type="range" id="compressor-threshold" min="-100" max="0" value="-24" step="1" oninput="updateCompressor()">
+                        </div>
+                        <div class="control-group">
+                            <label for="compressor-ratio">Ratio: <span id="compressor-ratio-value">12:1</span></label>
+                            <input type="range" id="compressor-ratio" min="1" max="20" value="12" step="1" oninput="updateCompressor()">
+                        </div>
+                        <div class="control-group">
+                            <label for="compressor-attack">Attack: <span id="compressor-attack-value">0.003 s</span></label>
+                            <input type="range" id="compressor-attack" min="0" max="1" value="0.003" step="0.001" oninput="updateCompressor()">
+                        </div>
+                        <div class="control-group">
+                            <label for="compressor-release">Release: <span id="compressor-release-value">0.25 s</span></label>
+                            <input type="range" id="compressor-release" min="0" max="1" value="0.25" step="0.01" oninput="updateCompressor()">
+                        </div>
+                        <div class="control-group">
+                            <label for="compressor-makeup-gain">Makeup Gain: <span id="compressor-makeup-gain-value">+0 dB</span></label>
+                            <input type="range" id="compressor-makeup-gain" min="0" max="40" value="0" step="1" oninput="updateCompressor()">
+                        </div>
+                        <button onclick="resetCompressor()" class="eq-reset-btn">Reset</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2, Column 3: Stereo Virtualizer -->
+            <div class="stereo-virtualizer-panel">
+                <div class="stereo-virtualizer-container" style="position: relative;">
+                    <span id="stereo-virtualizer-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
+                    <span id="stereo-virtualizer-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                    <span id="stereo-virtualizer-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="stereo-virtualizer-enable" onchange="toggleStereoVirtualizer()">
+                            Stereo Virtualiser
+                        </label>
+                    </div>
+                    <div id="stereo-virtualizer-controls">
+                        <div class="control-group">
+                            <label for="stereo-width">Width: <span id="stereo-width-value">50%</span></label>
+                            <input type="range" id="stereo-width" min="0" max="100" value="50" step="5" oninput="updateStereoVirtualizer()">
+                        </div>
+                        <div class="control-group">
+                            <label for="stereo-delay">Delay: <span id="stereo-delay-value">16 ms</span></label>
+                            <input type="range" id="stereo-delay" min="5" max="30" value="16" step="1" oninput="updateStereoVirtualizer()">
+                        </div>
+                        <div class="control-group">
+                            <label for="stereo-separation">Separation: <span id="stereo-separation-value">40%</span></label>
+                            <input type="range" id="stereo-separation" min="0" max="100" value="40" step="5" oninput="updateStereoVirtualizer()">
+                        </div>
+                        <div class="control-group">
+                            <label for="stereo-makeup-gain">Makeup Gain: <span id="stereo-makeup-gain-value">+0.0 dB</span></label>
+                            <input type="range" id="stereo-makeup-gain" min="0" max="12" value="0" step="0.5" oninput="updateStereoVirtualizer()">
+                        </div>
+                        <p class="help-text" style="font-size: 11px; margin-top: 8px;">Creates a wider stereo image from mono audio. Width controls overall effect, Delay adds spatial depth, Separation controls channel independence.</p>
+                        <button onclick="resetStereoVirtualizer()" class="eq-reset-btn">Reset</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- End 2x3 Filters Grid -->
+
+        <!-- Equalizer: Full Width Below Grid -->
+        <div class="equalizer-panel">
+            <div class="equalizer-container" style="position: relative;">
+                <span id="equalizer-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
+                <span id="equalizer-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
+                <span id="equalizer-clip-indicator" style="display: none; position: absolute; bottom: 8px; right: 15px; color: #ff0000; font-weight: bold; padding: 4px 10px; background-color: rgba(255, 0, 0, 0.15); border: 2px solid #ff0000; border-radius: 4px; z-index: 100; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">⚠ CLIPPING</span>
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="equalizer-enable" onchange="toggleEqualizer()">
+                        12-Band Equalizer
+                    </label>
+                </div>
+                <div id="equalizer-controls">
+                    <div class="control-group">
+                        <label for="equalizer-makeup-gain">Makeup Gain: <span id="equalizer-makeup-gain-value">+0 dB</span></label>
+                        <input type="range" id="equalizer-makeup-gain" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    </div>
+                    <div class="equalizer-bands">
+                        <div class="eq-band">
+                    <label class="eq-label">60 Hz</label>
+                    <input type="range" class="eq-slider" id="eq-60" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-60-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">170 Hz</label>
+                    <input type="range" class="eq-slider" id="eq-170" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-170-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">310 Hz</label>
+                    <input type="range" class="eq-slider" id="eq-310" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-310-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">600 Hz</label>
+                    <input type="range" class="eq-slider" id="eq-600" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-600-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">1 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-1000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-1000-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">1.5 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-1500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-1500-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">2 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-2000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-2000-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">2.5 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-2500" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-2500-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">3 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-3000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-3000-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">4 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-4000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-4000-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">6 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-6000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-6000-value">0 dB</span>
+                </div>
+                <div class="eq-band">
+                    <label class="eq-label">8 kHz</label>
+                    <input type="range" class="eq-slider" id="eq-8000" min="-12" max="12" value="0" step="0.5" oninput="updateEqualizer()">
+                    <span class="eq-value" id="eq-8000-value">0 dB</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px;">
+                        <button onclick="resetEqualizer()" class="eq-reset-btn">Reset</button>
+                        <button onclick="applyEQPreset('voice')" class="eq-reset-btn" style="margin-left: 20px;" title="Optimized for SSB voice communications">Voice</button>
+                        <button onclick="applyEQPreset('cw')" class="eq-reset-btn" title="Optimized for CW (Morse code) reception">CW</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Active Channels Display -->
+        <div class="active-channels-panel">
+            <div class="active-channels-container">
+                <h3>Active Channels</h3>
+                <div id="active-channels-list" class="active-channels-list">
+                    <p style="color: #888; font-style: italic;">Loading...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- End Filters Grid -->
+
+    </div>
+
+    <!-- Audio Recorder Modal -->
+    <div id="recorder-modal" class="modal" style="display: none;">
+        <div class="modal-content recorder-modal-content">
+            <div class="modal-header">
+                <h2>Audio Recorder</h2>
+                <button class="modal-close" onclick="closeRecorderModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="recorder-status">
+                    <div class="recorder-status-indicator" id="recorder-status-indicator"></div>
+                    <span id="recorder-status-text">Stopped</span>
+                </div>
+                <div class="recorder-time">
+                    <span id="recording-time">00:00</span>
+                </div>
+                <div class="recorder-controls">
+                    <button id="recorder-start-btn" onclick="startRecording()" class="recorder-btn recorder-start-btn" title="Start Recording (Spacebar)">
+                        <span>⏺</span> Start Recording
+                    </button>
+                    <button id="recorder-stop-btn" onclick="stopRecording()" class="recorder-btn recorder-stop-btn" disabled title="Stop Recording (Spacebar)">
+                        <span>⏹</span> Stop Recording
+                    </button>
+                </div>
+                <div class="recorder-actions">
+                    <button id="recorder-download-btn" onclick="downloadRecording()" class="recorder-btn recorder-download-btn" disabled>
+                        <span>⬇</span> Download Recording
+                    </button>
+                    <button id="recorder-clear-btn" onclick="clearRecording()" class="recorder-btn recorder-clear-btn" disabled>
+                        <span>🗑</span> Clear Recording
+                    </button>
+                </div>
+                <div class="recorder-info">
+                    <p><strong>Note:</strong> Recording captures the processed audio output including all active filters and effects.</p>
+                    <p>Recordings are saved in WebM format with Opus codec.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Frequency Offset Modal -->
+    <div id="offset-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2>Set Frequency Offset</h2>
+                <button class="modal-close" onclick="closeOffsetModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: #fff;">What frequency do you expect the tone to be at?</p>
+                <p style="font-size: 0.9em; color: #888; margin-bottom: 15px;">
+                    Enter the expected frequency in Hz (e.g., 0 for DC, 1000 for 1 kHz tone).<br>
+                    The system will adjust the dial so this signal appears at 1 kHz.
+                </p>
+                <input type="number" id="offset-input" value="1000" min="0" step="1" style="width: 100%; padding: 8px; font-size: 16px; border: 1px solid #444; background: #2c3e50; color: #ecf0f1; border-radius: 4px;">
+                <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+                    <button onclick="closeOffsetModal()" style="padding: 8px 20px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+                    <button onclick="applyOffset()" style="padding: 8px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clear Storage Confirmation Modal -->
+    <div id="clear-storage-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2>Clear Filter Settings</h2>
+                <button class="modal-close" onclick="closeClearStorageModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: #fff;">Are you sure you want to clear all saved filter settings?</p>
+                <p style="font-size: 0.9em; color: #888; margin-bottom: 15px;">
+                    This will remove all saved filter configurations from your browser. This action cannot be undone.
+                </p>
+                <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+                    <button onclick="closeClearStorageModal()" style="padding: 8px 20px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+                    <button onclick="confirmClearStorage()" style="padding: 8px 20px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">Clear Storage</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Buffer Configuration Modal -->
+    <div id="buffer-config-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>Audio Buffer Threshold</h2>
+                <button class="modal-close" onclick="closeBufferConfigModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: #fff; margin-bottom: 15px;">Select the maximum audio buffer before frames are dropped:</p>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px;">
+                    <button class="buffer-preset-btn" data-value="50" onclick="setBufferThreshold(50)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">50ms</button>
+                    <button class="buffer-preset-btn" data-value="100" onclick="setBufferThreshold(100)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">100ms</button>
+                    <button class="buffer-preset-btn" data-value="150" onclick="setBufferThreshold(150)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">150ms</button>
+                    <button class="buffer-preset-btn" data-value="200" onclick="setBufferThreshold(200)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">200ms</button>
+                    <button class="buffer-preset-btn" data-value="300" onclick="setBufferThreshold(300)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">300ms</button>
+                    <button class="buffer-preset-btn" data-value="500" onclick="setBufferThreshold(500)" style="padding: 15px; background: #34495e; color: #ecf0f1; border: 2px solid #7f8c8d; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; transition: all 0.2s;">500ms</button>
+                </div>
+                <p style="font-size: 0.9em; color: #888; margin-bottom: 10px;">
+                    <strong>Lower values (50-100ms):</strong> Minimal latency, may drop more frames on slow connections<br>
+                    <strong>Medium values (150-200ms):</strong> Balanced performance (recommended)<br>
+                    <strong>Higher values (300-500ms):</strong> More stable on poor connections, higher latency
+                </p>
+                <p style="font-size: 0.85em; color: #666; margin-bottom: 15px;">
+                    The buffer indicator colors adjust dynamically based on your selection.
+                </p>
+                <div style="border-top: 1px solid #444; padding-top: 15px; margin-top: 15px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ecf0f1;">
+                        <input type="checkbox" id="spectrum-sync-enable" onchange="toggleSpectrumSync()" style="cursor: pointer;">
+                        <span style="font-weight: bold;">Attempt Spectrum Sync</span>
+                    </label>
+                    <p style="font-size: 0.85em; color: #888; margin-top: 8px; margin-left: 28px;">
+                        When enabled, the spectrum waterfall will drop frames to stay synchronized with audio playback. Disable this if the spectrum appears to stall or freeze.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Country Spots Modal (for Digital Spots Extension) -->
+    <div id="country-spots-modal" class="country-spots-modal" style="display: none;">
+        <div class="country-spots-modal-content">
+            <div class="country-spots-modal-header">
+                <h3 id="country-spots-modal-title">Country Spots</h3>
+                <div class="country-spots-modal-controls">
+                    <select id="country-spots-modal-mode-filter">
+                        <option value="all">All Modes</option>
+                        <option value="FT8">FT8</option>
+                        <option value="FT4">FT4</option>
+                        <option value="WSPR">WSPR</option>
+                    </select>
+                    <button id="country-spots-modal-close" class="modal-close-btn">&times;</button>
+                </div>
+            </div>
+            <div class="country-spots-modal-tabs">
+                <button class="country-spots-tab active" data-tab="graph">Graph</button>
+                <button class="country-spots-tab" data-tab="table">Table</button>
+                <label style="margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 0 15px; color: #4a9eff; cursor: pointer;">
+                    <input type="checkbox" id="country-spots-show-all-countries">
+                    <span>Show All Countries</span>
+                </label>
+            </div>
+            <div class="country-spots-modal-body">
+                <!-- Graph Tab -->
+                <div id="country-spots-graph-tab" class="country-spots-tab-content active">
+                    <div id="country-spots-graphs-container" class="country-spots-graphs-container">
+                        <!-- Graphs will be inserted here dynamically -->
+                    </div>
+                </div>
+                <!-- Table Tab -->
+                <div id="country-spots-table-tab" class="country-spots-tab-content">
+                    <table class="country-spots-modal-table">
+                        <thead>
+                            <tr>
+                                <th>Callsign</th>
+                                <th>Country</th>
+                                <th>Mode</th>
+                                <th>SNR</th>
+                                <th>Grid</th>
+                                <th>Distance</th>
+                                <th>Bearing</th>
+                                <th>Age</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody id="country-spots-modal-tbody">
+                            <!-- Spots will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CW Country Spots Modal -->
+    <div id="cw-country-spots-modal" class="country-spots-modal" style="display: none;">
+        <div class="country-spots-modal-content">
+            <div class="country-spots-modal-header">
+                <h3 id="cw-country-spots-modal-title">Country Spots</h3>
+                <div class="country-spots-modal-controls">
+                    <button id="cw-country-spots-modal-close" class="modal-close-btn">&times;</button>
+                </div>
+            </div>
+            <div class="country-spots-modal-tabs">
+                <button class="cw-country-spots-tab active" data-tab="graph">Graph</button>
+                <button class="cw-country-spots-tab" data-tab="table">Table</button>
+                <div id="cw-country-spots-tuned-info" style="padding: 0 15px; color: #28a745; font-weight: bold; display: none; align-items: center;">
+                    <!-- Tuned frequency info will be displayed here -->
+                </div>
+                <label style="margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 0 15px; color: #4a9eff; cursor: pointer;">
+                    <input type="checkbox" id="cw-country-spots-show-all-countries">
+                    <span>Show All Countries</span>
+                </label>
+            </div>
+            <div class="country-spots-modal-body">
+                <!-- Graph Tab -->
+                <div id="cw-country-spots-graph-tab" class="country-spots-tab-content active">
+                    <div id="cw-country-spots-graphs-container" class="country-spots-graphs-container">
+                        <!-- Graphs will be inserted here dynamically -->
+                    </div>
+                </div>
+                <!-- Table Tab -->
+                <div id="cw-country-spots-table-tab" class="country-spots-tab-content">
+                    <table class="country-spots-modal-table">
+                        <thead>
+                            <tr>
+                                <th>Callsign</th>
+                                <th>Country</th>
+                                <th>SNR</th>
+                                <th>WPM</th>
+                                <th>Distance</th>
+                                <th>Bearing</th>
+                                <th>Age</th>
+                                <th>Comment</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cw-country-spots-modal-tbody">
+                            <!-- Spots will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/noisefloor.html" target="_blank">Noise Floor Graphs</a> • <a href="/bandconditions.html" target="_blank">Band Conditions</a><span id="footer-digitalspots-link" style="display: none;"> • <a href="/digitalspots_map.html" target="_blank">Live Map</a></span> <span id="footer-version"></span></p>
+    </footer>
+
+    <script src="bands_state.js"></script>
+    <script src="extensions.js"></script>
+    <script src="extension-loader.js"></script>
+    <script src="carrier-detector.js"></script>
+    <script src="signal-meter.js"></script>
+    <script src="s-meter-needle.js"></script>
+    <script src="spectrum-display.js"></script>
+    <script src="oscilloscope.js"></script>
+    <script src="recorder.js"></script>
+    <script src="idle-detector.js"></script>
+    <script src="dxcluster-client.js"></script>
+    <script src="time-display.js"></script>
+    <script src="space-weather-display.js"></script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>

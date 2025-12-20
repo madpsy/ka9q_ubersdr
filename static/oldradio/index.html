@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Old Radio - AM Receiver</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="" id="radio-style">
+</head>
+<body>
+    <!-- Radio Selector Overlay -->
+    <div id="radio-selector-overlay" class="radio-selector-overlay">
+        <div class="radio-selector-content">
+            <h2>Select Your Radio</h2>
+            <div id="radio-list" class="radio-list">
+                <!-- Radio options will be loaded dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio Start Overlay -->
+    <div id="audio-start-overlay" class="audio-start-overlay">
+        <div class="audio-start-content">
+            <button id="audio-start-button" class="audio-start-button">
+                <svg width="60" height="60" viewBox="0 0 60 60">
+                    <polygon points="20,12 20,48 48,30" fill="#fff"/>
+                </svg>
+                <span>Turn On Radio</span>
+            </button>
+            <button id="change-radio-button" class="change-radio-button">
+                Change Radio Model
+            </button>
+        </div>
+    </div>
+
+    <div class="radio-container">
+        <button id="change-radio-floating" class="change-radio-floating" style="display: none;">
+            Change Radio
+        </button>
+        <div class="radio-body" id="radio-body">
+            <!-- Radio content will be loaded dynamically -->
+        </div>
+    </div>
+
+    <script src="radio.js"></script>
+</body>
+</html>

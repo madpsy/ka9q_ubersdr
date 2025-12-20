@@ -1,0 +1,269 @@
+.dx-cluster-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: #1a1a1a;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+}
+
+.dx-cluster-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background: #2a2a2a;
+    border-bottom: 2px solid #3a3a3a;
+    flex-shrink: 0;
+}
+
+.dx-cluster-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#dx-cluster-callsign-filter {
+    background: #333;
+    color: #e0e0e0;
+    border: 1px solid #555;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    width: 150px;
+    font-family: 'Courier New', monospace;
+}
+
+#dx-cluster-callsign-filter::placeholder {
+    color: #888;
+}
+
+#dx-cluster-callsign-filter:focus {
+    outline: none;
+    border-color: #3498db;
+}
+
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.status-connected {
+    background: #28a745;
+    color: white;
+}
+
+.status-disconnected {
+    background: #dc3545;
+    color: white;
+}
+
+.status-connecting {
+    background: #ffc107;
+    color: black;
+}
+
+.server-info {
+    font-size: 12px;
+    color: #888;
+}
+
+.dx-cluster-controls {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.dx-cluster-controls label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+}
+
+.dx-cluster-controls select {
+    background: #333;
+    color: #e0e0e0;
+    border: 1px solid #555;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.btn-clear {
+    background: #dc3545;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.btn-clear:hover {
+    background: #c82333;
+}
+
+.dx-cluster-table-container {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.dx-cluster-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.dx-cluster-table thead {
+    position: sticky;
+    top: 0;
+    background: #2a2a2a;
+    z-index: 10;
+}
+
+.dx-cluster-table th {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 2px solid #3a3a3a;
+    font-weight: bold;
+    color: #ffc107;
+    text-transform: uppercase;
+    font-size: 11px;
+}
+
+.dx-cluster-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.dx-cluster-table tbody tr {
+    transition: background-color 0.2s;
+}
+
+.dx-cluster-table tbody tr:hover {
+    background: #2a2a2a;
+    cursor: pointer;
+}
+
+.dx-cluster-table tbody tr.spot-new {
+    animation: highlight 0.5s ease-out;
+}
+
+@keyframes highlight {
+    0% {
+        background: #ffc107;
+        color: black;
+    }
+    100% {
+        background: transparent;
+        color: inherit;
+    }
+}
+
+.dx-cluster-table tbody tr.no-spots {
+    text-align: center;
+    color: #888;
+    font-style: italic;
+}
+
+.dx-cluster-table tbody tr.no-spots:hover {
+    background: transparent;
+    cursor: default;
+}
+
+.spot-time {
+    color: #888;
+    font-size: 11px;
+    width: 90px;
+    max-width: 90px;
+}
+
+.spot-age {
+    color: #e0e0e0;
+    font-size: 10px;
+    font-style: italic;
+    white-space: nowrap;
+    padding-left: 8px;
+    width: 65px;
+    max-width: 65px;
+}
+
+.current-spot-indicator {
+    color: #00ff00;
+    font-size: 14px;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+.spot-frequency {
+    color: #4CAF50;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.spot-frequency:hover {
+    color: #66BB6A;
+}
+
+.spot-dx-call {
+    color: #2196F3;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.spot-dx-call:hover {
+    color: #42A5F5;
+    text-decoration: underline;
+}
+
+.spot-spotter {
+    color: #9C27B0;
+}
+
+.spot-comment {
+    color: #e0e0e0;
+    font-style: italic;
+}
+
+.dx-cluster-footer {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: #2a2a2a;
+    border-top: 2px solid #3a3a3a;
+    font-size: 11px;
+    color: #888;
+    flex-shrink: 0;
+}
+
+#dx-cluster-count {
+    font-weight: bold;
+}
+
+#dx-cluster-last-update {
+    font-style: italic;
+}
+
+/* Scrollbar styling */
+.dx-cluster-table-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.dx-cluster-table-container::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.dx-cluster-table-container::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
+}
+
+.dx-cluster-table-container::-webkit-scrollbar-thumb:hover {
+    background: #777;
+}

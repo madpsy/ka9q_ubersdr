@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\build32\CMakeFiles\d2c5ed671cd5ac9bb340a84e40af9825\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{9C9377BB-371F-305B-ADCF-32234A71D256}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

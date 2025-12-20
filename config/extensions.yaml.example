@@ -1,0 +1,14 @@
+# Extension configuration file for ka9q UberSDR
+# List the extensions that should be enabled in the frontend
+# Each extension must have a corresponding directory in static/extensions/
+
+extensions:
+  # Stats Monitor - displays signal statistics and metrics
+  - stats
+
+  # Radio Sync - syncs the SDR <-> Radio via serial CAT
+  - radio-sync
+
+# Default extension to load automatically (optional)
+# Set to the slug of an extension from the list above, or leave empty/commented for none
+# default_extension: ""

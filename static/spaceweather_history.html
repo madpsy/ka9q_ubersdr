@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Weather History</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .controls {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        .control-row {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            margin-bottom: 15px;
+        }
+
+        .control-group {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .control-group input,
+        .control-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            font-size: 1em;
+        }
+
+        .control-group button {
+            width: 100%;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            background: #4CAF50;
+            color: white;
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .control-group button:hover {
+            background: #45a049;
+        }
+
+        .control-group button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .info-box {
+            background: rgba(33, 150, 243, 0.2);
+            border-left: 4px solid #2196F3;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+
+        .info-box strong {
+            color: #64B5F6;
+        }
+
+        .chart-container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            margin-bottom: 20px;
+        }
+
+        .chart-wrapper {
+            position: relative;
+        }
+
+        .status {
+            text-align: center;
+            padding: 10px;
+            margin-top: 20px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .status.error {
+            background: rgba(244, 67, 54, 0.3);
+        }
+
+        .status.success {
+            background: rgba(76, 175, 80, 0.3);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+        }
+
+        .site-footer {
+            text-align: center;
+            padding: 20px;
+            margin-top: 40px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .site-footer a {
+            color: #4CAF50;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .site-footer a:hover {
+            color: #45a049;
+            text-decoration: underline;
+        }
+
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .data-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .data-card h3 {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+            opacity: 0.9;
+        }
+
+        .data-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .data-label {
+            font-size: 0.85em;
+            opacity: 0.7;
+        }
+
+        .band-conditions {
+            margin-top: 15px;
+        }
+
+        .band-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .band-badge {
+            padding: 6px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+
+        .band-badge.poor { background: #ef4444; }
+        .band-badge.fair { background: #ff9800; }
+        .band-badge.good { background: #fbbf24; }
+        .band-badge.excellent { background: #22c55e; }
+
+        .query-mode-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .query-mode-tab {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .query-mode-tab.active {
+            background: #4CAF50;
+        }
+
+        .query-mode-tab:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .query-mode-tab.active:hover {
+            background: #45a049;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Date Picker Styles */
+        .date-picker-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .date-picker-overlay.active {
+            display: flex;
+        }
+
+        .date-picker {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            max-width: 350px;
+            width: 90%;
+        }
+
+        .date-picker-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .date-picker-header h3 {
+            margin: 0;
+            font-size: 1.2em;
+        }
+
+        .date-picker-nav {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .date-picker-nav button {
+            padding: 5px 10px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 5px;
+            color: white;
+            cursor: pointer;
+            font-size: 1.2em;
+        }
+
+        .date-picker-nav button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .date-picker-nav button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .date-picker-month-year {
+            flex: 1;
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .date-picker-calendar {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+        }
+
+        .date-picker-day-header {
+            text-align: center;
+            font-weight: bold;
+            padding: 8px;
+            font-size: 0.9em;
+            opacity: 0.7;
+        }
+
+        .date-picker-day {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 5px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.1);
+            transition: all 0.2s;
+        }
+
+        .date-picker-day:hover:not(.disabled):not(.empty) {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.1);
+        }
+
+        .date-picker-day.disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .date-picker-day.empty {
+            background: transparent;
+            cursor: default;
+        }
+
+        .date-picker-day.selected {
+            background: #4CAF50;
+            font-weight: bold;
+        }
+
+        .date-picker-day.available {
+            background: rgba(76, 175, 80, 0.3);
+        }
+
+        .date-picker-footer {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .date-picker-footer button {
+            padding: 8px 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>☀️ Space Weather History</h1>
+        <div class="subtitle" id="receiver-name">Historical Space Weather Data</div>
+        
+        <div style="text-align: center; margin: 15px 0; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <a href="bandconditions.html" style="display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">🌐 Band Conditions</a>
+            <a href="noisefloor.html" style="display: inline-block; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📡 Noise Floor</a>
+            <a href="noisefloor_aggregate.html" style="display: inline-block; padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📊 Aggregate Analysis</a>
+        </div>
+
+        <div class="info-box">
+            ℹ️ View historical space weather data. Select a date and query mode to explore past conditions. Data is logged every 15 minutes.
+        </div>
+
+        <div class="controls">
+            <div class="query-mode-tabs">
+                <button class="query-mode-tab active" data-mode="all">All Records</button>
+                <button class="query-mode-tab" data-mode="single">Single Time</button>
+                <button class="query-mode-tab" data-mode="range">Time Range</button>
+            </div>
+
+            <div class="control-row">
+                <div class="control-group">
+                    <label id="date-label">Date:</label>
+                    <button id="datePickerBtn" style="background: #2196F3;">
+                        <span id="selectedDateText">Select Date</span>
+                    </button>
+                </div>
+
+                <div class="control-group hidden" id="to-date-control">
+                    <label>To Date:</label>
+                    <button id="toDatePickerBtn" style="background: #2196F3;">
+                        <span id="selectedToDateText">Select End Date</span>
+                    </button>
+                </div>
+
+                <div class="control-group hidden" id="time-control">
+                    <label for="time-input">Time (HH:MM):</label>
+                    <input type="time" id="time-input">
+                </div>
+
+                <div class="control-group hidden" id="from-time-control">
+                    <label for="from-time-input">From Time (HH:MM):</label>
+                    <input type="time" id="from-time-input" value="00:00">
+                </div>
+
+                <div class="control-group hidden" id="to-time-control">
+                    <label for="to-time-input">To Time (HH:MM):</label>
+                    <input type="time" id="to-time-input" value="23:59">
+                </div>
+
+                <div class="control-group">
+                    <button id="load-btn">Load Data</button>
+                </div>
+
+                <div class="control-group">
+                    <button id="download-csv-btn" style="background: #2196F3;">Download CSV</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="data-container" class="chart-container" style="display: none;">
+            <h2 style="margin-bottom: 15px; font-size: 1.3em;" id="data-title">Space Weather Data</h2>
+            <div id="data-content">
+                <!-- Data will be inserted here -->
+            </div>
+        </div>
+
+        <div id="status" class="status">Select a date and click "Load Data" to begin</div>
+    </div>
+
+    <!-- From Date Picker Overlay -->
+    <div id="datePickerOverlay" class="date-picker-overlay">
+        <div class="date-picker">
+            <div class="date-picker-header">
+                <h3 id="datePickerTitle">Select Date</h3>
+                <button id="closeDatePicker" style="background: transparent; padding: 5px 10px;">✕</button>
+            </div>
+            <div class="date-picker-nav">
+                <button id="prevMonth">‹</button>
+                <div class="date-picker-month-year" id="monthYearDisplay"></div>
+                <button id="nextMonth">›</button>
+            </div>
+            <div class="date-picker-calendar" id="datePickerCalendar"></div>
+            <div class="date-picker-footer">
+                <button id="cancelDatePicker">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- To Date Picker Overlay -->
+    <div id="toDatePickerOverlay" class="date-picker-overlay">
+        <div class="date-picker">
+            <div class="date-picker-header">
+                <h3>Select End Date</h3>
+                <button id="closeToDatePicker" style="background: transparent; padding: 5px 10px;">✕</button>
+            </div>
+            <div class="date-picker-nav">
+                <button id="toPrevMonth">‹</button>
+                <div class="date-picker-month-year" id="toMonthYearDisplay"></div>
+                <button id="toNextMonth">›</button>
+            </div>
+            <div class="date-picker-calendar" id="toDatePickerCalendar"></div>
+            <div class="date-picker-footer">
+                <button id="cancelToDatePicker">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> • <a href="/bandconditions.html" target="_blank">Live Conditions</a> <span id="footer-version"></span></p>
+    </footer>
+
+    <script src="chart.umd.min.js"></script>
+    <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="date-picker.js"></script>
+    <script src="spaceweather_history.js"></script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+# CW Skimmer Configuration Example
+# This file shows how to configure the CW Skimmer client
+# Copy this to cwskimmer.yaml and customize for your station
+
+# Enable/disable CW Skimmer client
+enabled: false
+
+# CW Skimmer server connection
+host: "localhost"
+port: 7300
+
+# Your callsign (required for identification)
+callsign: "N0CALL"
+
+# Connection settings
+reconnect_delay: 5  # Seconds between reconnection attempts
+keepalive_delay: 60 # Seconds between keep-alive messages (5 minutes)
+
+# CSV Logging
+# Logs all CW spots to CSV files organized by date/band
+spots_log_enabled: true
+spots_log_data_dir: "cwskimmer_spots"  # Directory for CSV files (relative or absolute)
+                                        # If relative: relative to current working directory
+                                        # If absolute: used as-is (e.g., /var/log/cwskimmer_spots)
+                                        # Files organized as: cwskimmer_spots/YYYY/MM/DD/bandname.csv
+                                        # Example: cwskimmer_spots/2024/11/24/20m.csv
+
+# Metrics Logging (JSON Lines format for time-series data)
+# Logs CW Skimmer performance metrics (spot counts, WPM stats, etc.)
+metrics_log_enabled: true
+metrics_log_data_dir: "cwskimmer_metrics"  # Directory for metrics files (relative or absolute)
+                                            # If relative: relative to current working directory
+                                            # If absolute: used as-is (e.g., /var/log/cwskimmer_metrics)
+                                            # Files organized as: cwskimmer_metrics/YYYY/MM/DD/BAND.jsonl
+                                            # Example: cwskimmer_metrics/2024/11/24/20m.jsonl
+metrics_log_interval_secs: 300              # Write interval in seconds (default: 300 = 5 minutes)
+                                            # Metrics snapshots written at this interval for all active bands
+
+# Metrics Summary (Pre-aggregated time-series summaries)
+# Aggregates metrics into daily/weekly/monthly/yearly summaries for fast retrieval
+metrics_summary_data_dir: "cwskimmer_summaries"  # Directory for summary files (relative or absolute)
+                                                  # If relative: relative to current working directory
+                                                  # If absolute: used as-is (e.g., /var/log/cwskimmer_summaries)
+                                                  # Files organized as: cwskimmer_summaries/{daily,weekly,monthly,yearly}/YYYY/MM/DD/BAND-summary.json
+                                                  # Example: cwskimmer_summaries/daily/2024/11/24/20m-summary.json
+                                                  # Updated every minute for fast API responses
+
+# PSKReporter configuration
+pskreporter_enabled: false
+pskreporter_callsign: "N0CALL"  # Defaults to main callsign if not specified
+pskreporter_locator: "IO86ha"   # Your grid locator (required for PSKReporter)
+pskreporter_antenna: "Loop"     # Antenna description (optional)
+
+# Notes:
+# 1. CW Skimmer must be running and configured to accept telnet connections
+#    on the specified host:port
+#
+# 2. CSV logging (if enabled):
+#    - Logs all spots to: spots_log_dir/YYYY/MM/DD/bandname.csv
+#    - Independent of PSKReporter reporting
+#    - Includes: timestamp, callsign, SNR, frequency, band, WPM, comment, country, zones, distance, bearing
+#
+# 3. Metrics logging (if enabled):
+#    - Logs performance metrics to: metrics_log_dir/YYYY/MM/DD/BAND.jsonl
+#    - JSON Lines format (one JSON object per line)
+#    - Includes: spot counts, unique callsigns, WPM statistics, activity scores
+#    - Written at configured interval (default: 5 minutes)
+#
+# 4. Metrics summaries (if enabled):
+#    - Pre-aggregated summaries for fast API responses
+#    - Updated every minute
+#    - Organized by period: daily, weekly, monthly, yearly
+#
+# 5. PSKReporter reporting requires valid callsign and locator
+#
+# 6. The client automatically extracts band information from spot frequencies
+#    and calculates WPM from CW Skimmer data

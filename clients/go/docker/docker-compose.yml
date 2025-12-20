@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  radio-client:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ubersdr-radio-client
+    
+    # Grant access to all devices (required for audio/MIDI on Raspberry Pi)
+    privileged: true
+
+    # Mount volumes
+    volumes:
+      - /dev:/dev
+      - /dev/shm:/dev/shm
+      - ./config:/home/radio/.config/ubersdr
+    
+    # Add user to audio group for device permissions
+    group_add:
+      - audio
+    
+    # Expose API port
+    ports:
+      - 8090:8090
+    
+    # Environment variables
+    environment:
+      - API_PORT=8090
+      - CONFIG_FILE=/home/radio/.config/ubersdr/config.json
+      - PULSE_SERVER=none
+      - JACK_NO_START_SERVER=1
+      - ALSA_CARD=0
+      - AUDIODEV=hw:0,0
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:8090/api/status]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3

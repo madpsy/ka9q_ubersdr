@@ -1,0 +1,65 @@
+# WSPR MQTT Aggregator Configuration
+
+# Receiver station information
+# This is the callsign and locator that will be reported to WSPRNet
+# as the receiving station for all aggregated spots
+receiver:
+  callsign: "G0ABC"      # Your callsign
+  locator: "IO91"        # Your Maidenhead locator (4 or 6 characters)
+
+# MQTT broker configuration
+mqtt:
+  broker: "tcp://localhost:1883"     # MQTT broker URL (tcp://host:port or ssl://host:port)
+  username: ""                        # MQTT username (leave empty if not required)
+  password: ""                        # MQTT password (leave empty if not required)
+  
+  # List of UberSDR instances to monitor
+  instances:
+    - name: "Main Receiver"           # Friendly name for this instance
+      topic_prefix: "ubersdr/metrics" # MQTT topic prefix for this instance
+    - name: "Remote Site"             # Second instance (example)
+      topic_prefix: "ubersdr2/metrics"
+    # Add more instances as needed
+  
+  qos: 0                              # MQTT QoS level (0, 1, or 2)
+
+# Web dashboard port (default: 9009)
+web_port: 9009
+
+# Dry run mode - if true, will log what would be sent but not actually submit to WSPRNet
+dry_run: false
+
+# Persistence file for statistics (default: wsprnet_stats.jsonl)
+# All statistics are saved after each window and fully restored on startup
+# This maintains the complete 24-hour rolling window across program restarts
+# Format: JSON Lines (one JSON object per line)
+persistence_file: "wsprnet_stats.jsonl"
+
+# Admin password for web interface (leave empty to disable admin access)
+# When set, enables the admin interface at http://localhost:9009/admin
+# The admin interface allows you to:
+#   - View and modify configuration
+#   - Add/remove/rename MQTT instances
+#   - Change receiver callsign and locator
+#   - Modify other settings and save changes to config file
+admin_password: ""
+
+# The application will subscribe to: {topic_prefix}/digital_modes/WSPR/+ for each instance
+# This will receive WSPR decodes from all bands published by multiple UberSDR instances
+#
+# Example topics for "Main Receiver" instance (ubersdr/metrics):
+#   ubersdr/metrics/digital_modes/WSPR/160m
+#   ubersdr/metrics/digital_modes/WSPR/80m
+#   ubersdr/metrics/digital_modes/WSPR/40m
+#   etc.
+#
+# Example topics for "Remote Site" instance (ubersdr2/metrics):
+#   ubersdr2/metrics/digital_modes/WSPR/160m
+#   ubersdr2/metrics/digital_modes/WSPR/80m
+#   etc.
+#
+# The friendly names will be used in the web dashboard and statistics,
+# making it easier to identify which receiver is which.
+#
+# Note: The old "topic_prefixes" format is still supported for backward compatibility,
+# but using the new "instances" format with names is recommended.

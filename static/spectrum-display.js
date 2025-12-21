@@ -533,6 +533,7 @@ class SpectrumDisplay {
             this.splitModeLogged = false;
             this.canvas.classList.add('split-view');
             this.canvas.height = this.waterfallHeight;
+            this.canvas.style.top = this.lineGraphHeight + 'px'; // Position below line graph
             this.height = this.waterfallHeight;
             this.canvasHeight = this.waterfallHeight;
 
@@ -720,9 +721,10 @@ class SpectrumDisplay {
             this.lineGraphCanvas.style.height = newLineGraphHeight + 'px';
         }
         
-        // Resize waterfall canvas
+        // Resize waterfall canvas and position it below line graph
         this.canvas.height = newWaterfallHeight;
         this.canvas.style.height = newWaterfallHeight + 'px';
+        this.canvas.style.top = newLineGraphHeight + 'px'; // CRITICAL: Position below line graph
         this.height = newWaterfallHeight;
         this.canvasHeight = newWaterfallHeight;
         

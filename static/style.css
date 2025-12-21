@@ -2158,10 +2158,10 @@ input[type="range"]::-moz-range-thumb {
     pointer-events: auto;
 }
 
-/* Line graph canvas in split mode - 300px height, overlays top of waterfall */
+/* Line graph canvas in split mode - 150px height (default), overlays top of waterfall */
 #spectrum-line-graph-canvas.split-mode {
     display: block !important;
-    height: 300px;
+    height: 150px;
 }
 
 /* Line graph canvas in graph-only mode - 600px height, covers entire waterfall */

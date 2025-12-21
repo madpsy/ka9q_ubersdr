@@ -12,6 +12,7 @@ import (
 // TunnelClientConfig represents the tunnel client configuration file format
 type TunnelClientConfig struct {
 	Enabled     bool   `json:"enabled"`
+	Version     string `json:"version"`
 	SecretUUID  string `json:"secret_uuid"`
 	Callsign    string `json:"callsign"`
 	Email       string `json:"email"`
@@ -43,6 +44,7 @@ func GenerateTunnelClientConfig(config *Config) error {
 		// Write a config file with enabled: false to stop the tunnel client
 		tunnelConfig := TunnelClientConfig{
 			Enabled:     false,
+			Version:     Version,
 			SecretUUID:  "",
 			Callsign:    "",
 			Email:       "",
@@ -78,7 +80,7 @@ func GenerateTunnelClientConfig(config *Config) error {
 			if err := os.WriteFile(restartTriggerPath, []byte{}, 0666); err != nil {
 				log.Printf("⚠️  Failed to create tunnel client restart trigger at %s: %v", restartTriggerPath, err)
 			} else {
-				log.Printf("✅ Created tunnel client restart trigger to disable tunnel", restartTriggerPath)
+				log.Printf("✅ Created tunnel client restart trigger to disable tunnel at %s", restartTriggerPath)
 			}
 		}
 
@@ -95,6 +97,7 @@ func GenerateTunnelClientConfig(config *Config) error {
 	// Build tunnel client configuration
 	tunnelConfig := TunnelClientConfig{
 		Enabled:     true, // Enable the tunnel client
+		Version:     Version,
 		SecretUUID:  config.InstanceReporting.InstanceUUID,
 		Callsign:    config.Admin.Callsign,
 		Email:       config.Admin.Email,

@@ -741,10 +741,13 @@ class SpectrumDisplay {
         // Update divider position
         this.updateDividerPosition();
         
-        // Clear waterfall and force recreation of image data
+        // CRITICAL: Clear waterfall completely and reset state
+        // This forces waterfall to rebuild from scratch at correct position
         this.ctx.fillStyle = '#000';
         this.ctx.fillRect(0, 0, this.width, this.waterfallHeight);
-        this.waterfallImageData = this.ctx.createImageData(this.width, 1);
+        this.waterfallImageData = null; // Force recreation on next draw
+        this.waterfallStartTime = null; // Reset timing
+        this.waterfallLineCount = 0; // Reset line counter
         
         // Redraw everything
         if (this.spectrumData && this.spectrumData.length > 0) {

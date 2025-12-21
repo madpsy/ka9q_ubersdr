@@ -21,7 +21,7 @@ The UberSDR website provides comprehensive installation instructions, setup guid
 Run this one-liner to install and start everything automatically:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hub.sh | bash
+curl -fsSL https://ubersdr.org/install.sh | bash
 ```
 
 This will install Docker, clone both repositories, build the images, and start the services.

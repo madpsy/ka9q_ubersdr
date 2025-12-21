@@ -47,6 +47,23 @@ class SpectrumDisplay {
         // Cache filter latency for synchronization (updated dynamically)
         this.cachedFilterLatency = 0; // milliseconds
 
+        // Height configuration variables (MUST be set BEFORE resizeCanvas)
+        this.lineGraphHeight = 300;
+        this.waterfallHeight = 300;
+        this.totalHeight = 600;
+        this.minLineGraphHeight = 150;  // Minimum 150px
+        this.minWaterfallHeight = 150;  // Minimum 150px
+
+        // Load saved heights from localStorage
+        const savedLineGraphHeight = localStorage.getItem('spectrumLineGraphHeight');
+        const savedWaterfallHeight = localStorage.getItem('spectrumWaterfallHeight');
+        if (savedLineGraphHeight && savedWaterfallHeight) {
+            this.lineGraphHeight = parseInt(savedLineGraphHeight);
+            this.waterfallHeight = parseInt(savedWaterfallHeight);
+            this.totalHeight = this.lineGraphHeight + this.waterfallHeight;
+            console.log(`Loaded saved heights: Line=${this.lineGraphHeight}px, Waterfall=${this.waterfallHeight}px`);
+        }
+
         // Setup mouse handlers for line graph canvas
         if (this.lineGraphCanvas) {
             this.setupLineGraphMouseHandlers();
@@ -161,14 +178,15 @@ class SpectrumDisplay {
         this.overlayCtx = this.overlayCanvas.getContext('2d', { alpha: true });
 
         // Create bandwidth lines overlay canvas (positioned over main canvas)
+        // Note: Height will be set properly after totalHeight is initialized
         this.bandwidthLinesCanvas = document.createElement('canvas');
         this.bandwidthLinesCanvas.width = this.width;
-        this.bandwidthLinesCanvas.height = 600;
+        this.bandwidthLinesCanvas.height = 600; // Temporary, will be updated in split mode init
         this.bandwidthLinesCanvas.style.position = 'absolute';
         this.bandwidthLinesCanvas.style.top = '0';
         this.bandwidthLinesCanvas.style.left = '0';
         this.bandwidthLinesCanvas.style.width = this.width + 'px';
-        this.bandwidthLinesCanvas.style.height = '600px';
+        this.bandwidthLinesCanvas.style.height = '600px'; // Temporary, will be updated in split mode init
         this.bandwidthLinesCanvas.style.pointerEvents = 'none'; // Allow clicks to pass through
         this.bandwidthLinesCanvas.style.zIndex = '10'; // Above waterfall but below cursor overlay
         this.bandwidthLinesCtx = this.bandwidthLinesCanvas.getContext('2d', { alpha: true });
@@ -507,23 +525,6 @@ class SpectrumDisplay {
         // Initialize S-meter needle display
         if (typeof initSMeterNeedle === 'function') {
             initSMeterNeedle();
-        }
-
-        // Height configuration variables (can be adjusted dynamically)
-        this.lineGraphHeight = 300;
-        this.waterfallHeight = 300;
-        this.totalHeight = 600;
-        this.minLineGraphHeight = 150;  // Minimum 150px
-        this.minWaterfallHeight = 150;  // Minimum 150px
-
-        // Load saved heights from localStorage
-        const savedLineGraphHeight = localStorage.getItem('spectrumLineGraphHeight');
-        const savedWaterfallHeight = localStorage.getItem('spectrumWaterfallHeight');
-        if (savedLineGraphHeight && savedWaterfallHeight) {
-            this.lineGraphHeight = parseInt(savedLineGraphHeight);
-            this.waterfallHeight = parseInt(savedWaterfallHeight);
-            this.totalHeight = this.lineGraphHeight + this.waterfallHeight;
-            console.log(`Loaded saved heights: Line=${this.lineGraphHeight}px, Waterfall=${this.waterfallHeight}px`);
         }
 
         // Initialize split mode if it's the default

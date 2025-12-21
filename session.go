@@ -800,7 +800,9 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 	}
 
 	// Signal session is done
-	close(session.Done)
+	if session.Done != nil {
+		close(session.Done)
+	}
 
 	// Disable radiod channel (set frequency to 0)
 	if err := sm.radiod.DisableChannel(session.ChannelName, session.SSRC); err != nil {

@@ -5460,8 +5460,14 @@
                 if (data.tunnel_up && data.source_ip) {
                     statusHTML += `<br>
                     <span style="color: #666; font-size: 14px;">Source IP: ${data.source_ip}</span><br>
-                    <span style="color: #667eea; font-size: 14px;">Throughput: ↑ ${(data.throughput_up_kbps || 0).toFixed(1)} kbps / ↓ ${(data.throughput_down_kbps || 0).toFixed(1)} kbps</span><br>
-                    <span style="color: #666; font-size: 14px;">Connected: ${formatTimestamp(data.connected_at)}</span><br>
+                    <span style="color: #667eea; font-size: 14px;">Throughput: ↑ ${(data.throughput_up_kbps || 0).toFixed(1)} kbps / ↓ ${(data.throughput_down_kbps || 0).toFixed(1)} kbps</span><br>`;
+
+                    // Add latency if available
+                    if (data.latency_ms !== undefined && data.latency_ms !== null) {
+                        statusHTML += `<span style="color: #667eea; font-size: 14px;">Latency: ${Math.round(data.latency_ms)}ms</span><br>`;
+                    }
+
+                    statusHTML += `<span style="color: #666; font-size: 14px;">Connected: ${formatTimestamp(data.connected_at)}</span><br>
                     <span style="color: #666; font-size: 14px;">Last Heartbeat: ${formatTimestamp(data.last_heartbeat)}</span>
                     `;
                 }

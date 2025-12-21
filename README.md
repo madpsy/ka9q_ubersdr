@@ -16,6 +16,8 @@ The UberSDR website provides comprehensive installation instructions, setup guid
 
 > **Note:** This installation script is designed for Debian/Ubuntu-based systems only.
 
+> **⚠️ Important:** Ensure your RX888 MKII is plugged in before running the installation.
+
 Run this one-liner to install and start everything automatically:
 
 ```bash

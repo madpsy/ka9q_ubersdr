@@ -1331,8 +1331,8 @@ class SpectrumDisplay {
         //     this.applyPredictedShift();
         // }
 
-        // Waterfall starts at halfway down the waterfall canvas in split mode
-        const waterfallStartY = this.waterfallHeight / 2;
+        // Waterfall starts at top of its canvas (no frequency scale on waterfall canvas)
+        const waterfallStartY = 0;
         const waterfallHeight = this.height - waterfallStartY - 1;
 
         // Initialize waterfall image data if needed
@@ -1361,7 +1361,7 @@ class SpectrumDisplay {
         // Source and destination dimensions must match exactly
         this.ctx.drawImage(this.canvas, 0, waterfallStartY, this.width, waterfallHeight - 1, 0, waterfallStartY + 1, this.width, waterfallHeight - 1);
 
-        // Create new line at top with current spectrum data (at y=30, below frequency scale)
+        // Create new line at top with current spectrum data
         const pixelData = this.waterfallImageData.data;
         const dbRange = this.actualMaxDb - this.actualMinDb;
 
@@ -1424,7 +1424,7 @@ class SpectrumDisplay {
             pixelData[offset + 3] = 255; // Alpha
         }
 
-        // Draw the new line at waterfallStartY (below frequency scale)
+        // Draw the new line at top of waterfall canvas
         this.ctx.putImageData(this.waterfallImageData, 0, waterfallStartY);
 
         this.waterfallLineCount++;
@@ -1434,10 +1434,7 @@ class SpectrumDisplay {
             console.log(`[drawWaterfall] Drew waterfall line #${this.waterfallLineCount} at y=${waterfallStartY}`);
         }
 
-        // Timestamps removed per user request
-
-        // Draw frequency scale at y=0 (bookmarks are in separate line graph canvas)
-        this.drawFrequencyScaleAtPosition(0);
+        // No frequency scale on waterfall canvas in split mode (line graph has it)
     }
 
     // Draw frequency scale at a specific Y position

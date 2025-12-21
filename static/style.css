@@ -2170,6 +2170,69 @@ input[type="range"]::-moz-range-thumb {
     height: 600px;
 }
 
+/* Draggable divider between line graph and waterfall */
+.spectrum-divider {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 8px;
+    background: linear-gradient(to bottom,
+        rgba(52, 73, 94, 0.9) 0%,
+        rgba(52, 73, 94, 1) 50%,
+        rgba(52, 73, 94, 0.9) 100%);
+    cursor: ns-resize;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, height 0.2s;
+    user-select: none;
+}
+
+.spectrum-divider:hover {
+    background: linear-gradient(to bottom,
+        rgba(102, 126, 234, 0.9) 0%,
+        rgba(102, 126, 234, 1) 50%,
+        rgba(102, 126, 234, 0.9) 100%);
+    height: 10px;
+}
+
+.spectrum-divider-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+}
+
+.spectrum-divider:hover .spectrum-divider-handle {
+    color: rgba(255, 255, 255, 1);
+}
+
+/* Active dragging state */
+.spectrum-divider.dragging {
+    background: linear-gradient(to bottom,
+        rgba(102, 126, 234, 1) 0%,
+        rgba(118, 75, 162, 1) 50%,
+        rgba(102, 126, 234, 1) 100%);
+    height: 12px;
+    box-shadow: 0 0 10px rgba(102, 126, 234, 0.8);
+}
+
+/* Prevent text selection during drag */
+body.spectrum-dragging {
+    user-select: none;
+    cursor: ns-resize !important;
+}
+
+body.spectrum-dragging * {
+    cursor: ns-resize !important;
+}
+
 .spectrum-display-controls {
     position: absolute;
     bottom: 0;

@@ -80,7 +80,7 @@ class SpectrumDisplay {
                 const container = this.canvas.parentElement;
                 const rect = container.getBoundingClientRect();
                 const newWidth = Math.floor(rect.width);
-                const newHeight = 600;
+                const newHeight = this.totalHeight;
 
                 // Check if width actually changed
                 if (oldWidth !== newWidth) {
@@ -509,25 +509,42 @@ class SpectrumDisplay {
             initSMeterNeedle();
         }
 
+        // Height configuration variables (can be adjusted dynamically)
+        this.lineGraphHeight = 300;
+        this.waterfallHeight = 300;
+        this.totalHeight = 600;
+        this.minLineGraphHeight = 150;  // Minimum 150px
+        this.minWaterfallHeight = 150;  // Minimum 150px
+
+        // Load saved heights from localStorage
+        const savedLineGraphHeight = localStorage.getItem('spectrumLineGraphHeight');
+        const savedWaterfallHeight = localStorage.getItem('spectrumWaterfallHeight');
+        if (savedLineGraphHeight && savedWaterfallHeight) {
+            this.lineGraphHeight = parseInt(savedLineGraphHeight);
+            this.waterfallHeight = parseInt(savedWaterfallHeight);
+            this.totalHeight = this.lineGraphHeight + this.waterfallHeight;
+            console.log(`Loaded saved heights: Line=${this.lineGraphHeight}px, Waterfall=${this.waterfallHeight}px`);
+        }
+
         // Initialize split mode if it's the default
         if (this.displayMode === 'split') {
             this.splitModeLogged = false;
             this.canvas.classList.add('split-view');
-            this.canvas.height = 300;
-            this.height = 300;
-            this.canvasHeight = 300;
+            this.canvas.height = this.waterfallHeight;
+            this.height = this.waterfallHeight;
+            this.canvasHeight = this.waterfallHeight;
 
             if (this.lineGraphCanvas) {
                 this.lineGraphCanvas.classList.add('split-mode');
                 this.lineGraphCanvas.style.display = 'block';
                 this.lineGraphCanvas.width = this.width;
-                this.lineGraphCanvas.height = 300;
+                this.lineGraphCanvas.height = this.lineGraphHeight;
                 this.lineGraphCanvas.style.width = this.width + 'px';
-                this.lineGraphCanvas.style.height = '300px';
+                this.lineGraphCanvas.style.height = this.lineGraphHeight + 'px';
             }
 
-            this.bandwidthLinesCanvas.height = 600;
-            this.bandwidthLinesCanvas.style.height = '600px';
+            this.bandwidthLinesCanvas.height = this.totalHeight;
+            this.bandwidthLinesCanvas.style.height = this.totalHeight + 'px';
 
             this.overlayDiv.style.position = 'absolute';
             this.overlayDiv.style.top = '0';
@@ -536,9 +553,22 @@ class SpectrumDisplay {
             this.overlayDiv.style.backgroundColor = '#adb5bd';
 
             this.ctx.fillStyle = '#000';
-            this.ctx.fillRect(0, 0, this.width, 300);
+            this.ctx.fillRect(0, 0, this.width, this.waterfallHeight);
 
             this.waterfallImageData = null;
+
+            // Setup draggable divider
+            this.divider = document.getElementById('spectrum-divider');
+            this.isDraggingDivider = false;
+            this.dragStartY = 0;
+            this.dragStartLineGraphHeight = 0;
+            this.dragStartWaterfallHeight = 0;
+
+            if (this.divider) {
+                this.divider.style.display = 'flex';
+                this.updateDividerPosition();
+                this.setupDividerDrag();
+            }
         }
 
         // Setup filter latency change listener for synchronization
@@ -559,6 +589,163 @@ class SpectrumDisplay {
         }
     }
 
+    // Update divider position based on line graph height
+    updateDividerPosition() {
+        if (!this.divider || this.displayMode !== 'split') return;
+        
+        // Position divider at the bottom of line graph
+        this.divider.style.top = this.lineGraphHeight + 'px';
+    }
+
+    // Setup draggable divider handlers
+    setupDividerDrag() {
+        if (!this.divider) return;
+        
+        // Mouse down on divider - start drag
+        this.divider.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            this.isDraggingDivider = true;
+            this.dragStartY = e.clientY;
+            this.dragStartLineGraphHeight = this.lineGraphHeight;
+            this.dragStartWaterfallHeight = this.waterfallHeight;
+            
+            // Add dragging class for cursor override
+            document.body.classList.add('spectrum-dragging');
+            this.divider.classList.add('dragging');
+            
+            console.log('Started dragging divider');
+        });
+        
+        // Mouse move - update heights
+        document.addEventListener('mousemove', (e) => {
+            if (!this.isDraggingDivider) return;
+            
+            e.preventDefault();
+            
+            // Calculate delta from drag start
+            const deltaY = e.clientY - this.dragStartY;
+            
+            // Calculate new heights
+            let newLineGraphHeight = this.dragStartLineGraphHeight + deltaY;
+            let newWaterfallHeight = this.dragStartWaterfallHeight - deltaY;
+            
+            // Enforce minimum heights
+            if (newLineGraphHeight < this.minLineGraphHeight) {
+                newLineGraphHeight = this.minLineGraphHeight;
+                newWaterfallHeight = this.dragStartLineGraphHeight + this.dragStartWaterfallHeight - this.minLineGraphHeight;
+            }
+            if (newWaterfallHeight < this.minWaterfallHeight) {
+                newWaterfallHeight = this.minWaterfallHeight;
+                newLineGraphHeight = this.dragStartLineGraphHeight + this.dragStartWaterfallHeight - this.minWaterfallHeight;
+            }
+            
+            // Apply new heights
+            this.resizeCanvases(newLineGraphHeight, newWaterfallHeight);
+        });
+        
+        // Mouse up - end drag
+        document.addEventListener('mouseup', (e) => {
+            if (!this.isDraggingDivider) return;
+            
+            this.isDraggingDivider = false;
+            document.body.classList.remove('spectrum-dragging');
+            this.divider.classList.remove('dragging');
+            
+            // Save to localStorage
+            localStorage.setItem('spectrumLineGraphHeight', this.lineGraphHeight);
+            localStorage.setItem('spectrumWaterfallHeight', this.waterfallHeight);
+            
+            console.log(`Divider drag complete: Line=${this.lineGraphHeight}px, Waterfall=${this.waterfallHeight}px`);
+        });
+
+        // Touch support for mobile
+        this.divider.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            this.isDraggingDivider = true;
+            this.dragStartY = touch.clientY;
+            this.dragStartLineGraphHeight = this.lineGraphHeight;
+            this.dragStartWaterfallHeight = this.waterfallHeight;
+            
+            document.body.classList.add('spectrum-dragging');
+            this.divider.classList.add('dragging');
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!this.isDraggingDivider) return;
+            e.preventDefault();
+            
+            const touch = e.touches[0];
+            const deltaY = touch.clientY - this.dragStartY;
+            
+            let newLineGraphHeight = this.dragStartLineGraphHeight + deltaY;
+            let newWaterfallHeight = this.dragStartWaterfallHeight - deltaY;
+            
+            if (newLineGraphHeight < this.minLineGraphHeight) {
+                newLineGraphHeight = this.minLineGraphHeight;
+                newWaterfallHeight = this.dragStartLineGraphHeight + this.dragStartWaterfallHeight - this.minLineGraphHeight;
+            }
+            if (newWaterfallHeight < this.minWaterfallHeight) {
+                newWaterfallHeight = this.minWaterfallHeight;
+                newLineGraphHeight = this.dragStartLineGraphHeight + this.dragStartWaterfallHeight - this.minWaterfallHeight;
+            }
+            
+            this.resizeCanvases(newLineGraphHeight, newWaterfallHeight);
+        });
+
+        document.addEventListener('touchend', (e) => {
+            if (!this.isDraggingDivider) return;
+            
+            this.isDraggingDivider = false;
+            document.body.classList.remove('spectrum-dragging');
+            this.divider.classList.remove('dragging');
+            
+            localStorage.setItem('spectrumLineGraphHeight', this.lineGraphHeight);
+            localStorage.setItem('spectrumWaterfallHeight', this.waterfallHeight);
+        });
+    }
+
+    // Resize canvases dynamically (called during drag)
+    resizeCanvases(newLineGraphHeight, newWaterfallHeight) {
+        // Update stored heights
+        this.lineGraphHeight = newLineGraphHeight;
+        this.waterfallHeight = newWaterfallHeight;
+        this.totalHeight = newLineGraphHeight + newWaterfallHeight;
+        
+        // Resize line graph canvas
+        if (this.lineGraphCanvas) {
+            this.lineGraphCanvas.height = newLineGraphHeight;
+            this.lineGraphCanvas.style.height = newLineGraphHeight + 'px';
+        }
+        
+        // Resize waterfall canvas
+        this.canvas.height = newWaterfallHeight;
+        this.canvas.style.height = newWaterfallHeight + 'px';
+        this.height = newWaterfallHeight;
+        this.canvasHeight = newWaterfallHeight;
+        
+        // Resize bandwidth lines overlay
+        this.bandwidthLinesCanvas.height = this.totalHeight;
+        this.bandwidthLinesCanvas.style.height = this.totalHeight + 'px';
+        
+        // Update container min-height
+        const container = this.canvas.parentElement;
+        container.style.minHeight = (this.totalHeight + 35) + 'px';
+        
+        // Update divider position
+        this.updateDividerPosition();
+        
+        // Clear waterfall (will be rebuilt)
+        this.ctx.fillStyle = '#000';
+        this.ctx.fillRect(0, 0, this.width, this.waterfallHeight);
+        this.waterfallImageData = null;
+        
+        // Redraw everything
+        if (this.spectrumData && this.spectrumData.length > 0) {
+            this.draw();
+        }
+    }
+
     // Resize canvas to match container
     resizeCanvas() {
         const container = this.canvas.parentElement;
@@ -566,7 +753,7 @@ class SpectrumDisplay {
 
         // Set CSS size first
         const cssWidth = Math.floor(rect.width);
-        const cssHeight = 600;
+        const cssHeight = this.totalHeight;
         this.canvas.style.width = cssWidth + 'px';
         this.canvas.style.height = cssHeight + 'px';
 
@@ -1142,8 +1329,8 @@ class SpectrumDisplay {
         //     this.applyPredictedShift();
         // }
 
-        // Waterfall starts at y=150 (halfway down the 300px canvas in split mode)
-        const waterfallStartY = 150;
+        // Waterfall starts at halfway down the waterfall canvas in split mode
+        const waterfallStartY = this.waterfallHeight / 2;
         const waterfallHeight = this.height - waterfallStartY - 1;
 
         // Initialize waterfall image data if needed
@@ -1346,9 +1533,9 @@ class SpectrumDisplay {
         // Set canvas size to match main canvas width
         if (this.lineGraphCanvas.width !== this.width) {
             this.lineGraphCanvas.width = this.width;
-            this.lineGraphCanvas.height = 300;
+            this.lineGraphCanvas.height = this.lineGraphHeight;
             this.lineGraphCanvas.style.width = this.width + 'px';
-            this.lineGraphCanvas.style.height = '300px';
+            this.lineGraphCanvas.style.height = this.lineGraphHeight + 'px';
         }
 
         // Apply client-side prediction: shift line graph if dragging AND mouse is actually moving
@@ -1358,7 +1545,7 @@ class SpectrumDisplay {
         }
 
         const ctx = this.lineGraphCtx;
-        const graphHeight = 300;
+        const graphHeight = this.lineGraphHeight;
         const graphWidth = this.width;
         const graphTopMargin = 70; // Space for frequency scale at top (35px) + bookmarks overlay (35px)
         const graphDrawHeight = graphHeight - graphTopMargin; // Actual drawing area height
@@ -2321,10 +2508,9 @@ class SpectrumDisplay {
         this.bandwidthLinesCtx.clearRect(0, 0, this.bandwidthLinesCanvas.width, this.bandwidthLinesCanvas.height);
 
         // Split mode: draw on line graph (from 70px where graph starts) and waterfall
-        // Line graph is 300px tall, waterfall is 300px tall
-        // Total height needed: 600px (to cover both)
+        // Total height covers both line graph and waterfall
         const startY = 70; // Start where line graph drawing area begins (after bookmarks + freq scale)
-        const height = 600; // Cover both line graph and waterfall
+        const height = this.totalHeight; // Cover both line graph and waterfall
 
         // Draw the bandwidth lines on the overlay canvas
         this.bandwidthLinesCtx.save();

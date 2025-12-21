@@ -12,8 +12,6 @@ The UberSDR website provides comprehensive installation instructions, setup guid
 
 > **Note:** This is currently designed for RX888 MKII SDR hardware to provide 0-30 MHz (full HF) coverage.
 
-**Important:** Ensure NTP (Network Time Protocol) is installed and running on your host system to maintain accurate time synchronization. This is critical for proper SDR operation and time-stamped data as well as digital mode decoders.
-
 ## Quick Start
 
 > **Note:** This installation script is designed for Debian/Ubuntu-based systems only.
@@ -24,7 +22,7 @@ Run this one-liner to install and start everything automatically:
 curl -fsSL https://ubersdr.org/install.sh | bash
 ```
 
-This will install Docker, clone both repositories, build the images, and start the services.
+This will install Docker, fetch prebuilt images, and perform automated installation tasks to get you up and running quickly.
 
 ## Manual Installation for Development ONLY
 

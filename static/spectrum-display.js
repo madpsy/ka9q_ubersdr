@@ -549,6 +549,11 @@ class SpectrumDisplay {
             this.bandwidthLinesCanvas.height = this.totalHeight;
             this.bandwidthLinesCanvas.style.height = this.totalHeight + 'px';
 
+            // Set container height explicitly (since canvases are absolutely positioned)
+            const container = this.canvas.parentElement;
+            container.style.height = this.totalHeight + 'px';
+            container.style.minHeight = this.totalHeight + 'px';
+
             this.overlayDiv.style.position = 'absolute';
             this.overlayDiv.style.top = '0';
             this.overlayDiv.style.left = '0';
@@ -736,9 +741,10 @@ class SpectrumDisplay {
         this.bandwidthLinesCanvas.height = this.totalHeight;
         this.bandwidthLinesCanvas.style.height = this.totalHeight + 'px';
         
-        // Update container min-height
+        // Update container height (since canvases are absolutely positioned, container needs explicit height)
         const container = this.canvas.parentElement;
-        container.style.minHeight = (this.totalHeight + 35) + 'px';
+        container.style.height = this.totalHeight + 'px';
+        container.style.minHeight = this.totalHeight + 'px';
         
         // Update divider position
         this.updateDividerPosition();

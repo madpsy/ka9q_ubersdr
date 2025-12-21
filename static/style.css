@@ -2117,7 +2117,7 @@ input[type="range"]::-moz-range-thumb {
 
 /* In split view, container needs to be tall enough for both line graph and waterfall */
 .spectrum-display-container:has(#spectrum-line-graph-canvas.split-mode) {
-    min-height: 635px; /* 300px line graph + 300px waterfall + 35px overlay */
+    min-height: 635px; /* 150px line graph + 450px waterfall + 35px overlay = 635px */
 }
 
 /* In graph-only view, container needs to be tall enough for the full-height line graph */
@@ -2144,7 +2144,8 @@ input[type="range"]::-moz-range-thumb {
     left: 0;
     height: 450px;
     border-radius: 0 0 0 0;
-    z-index: 0;
+    z-index: 5;
+    pointer-events: auto;
 }
 
 /* Line graph canvas - absolutely positioned within spectrum-display-container */
@@ -2158,7 +2159,7 @@ input[type="range"]::-moz-range-thumb {
     position: absolute;
     top: 0;
     left: 0;
-    z-index: 1;
+    z-index: 5;
     pointer-events: auto;
 }
 

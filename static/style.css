@@ -2137,10 +2137,14 @@ input[type="range"]::-moz-range-thumb {
     image-rendering: crisp-edges;
 }
 
-/* Split view mode - waterfall takes bottom half */
+/* Split view mode - waterfall takes bottom half and is absolutely positioned */
 #spectrum-display-canvas.split-view {
-    height: 300px;
+    position: absolute;
+    top: 150px;
+    left: 0;
+    height: 450px;
     border-radius: 0 0 0 0;
+    z-index: 2;
 }
 
 /* Line graph canvas - absolutely positioned within spectrum-display-container */

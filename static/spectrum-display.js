@@ -48,8 +48,9 @@ class SpectrumDisplay {
         this.cachedFilterLatency = 0; // milliseconds
 
         // Height configuration variables (MUST be set BEFORE resizeCanvas)
-        this.lineGraphHeight = 300;
-        this.waterfallHeight = 300;
+        // Default: small line graph (150px), large waterfall (450px)
+        this.lineGraphHeight = 150;
+        this.waterfallHeight = 450;
         this.totalHeight = 600;
         this.minLineGraphHeight = 150;  // Minimum 150px
         this.minWaterfallHeight = 150;  // Minimum 150px
@@ -532,6 +533,7 @@ class SpectrumDisplay {
             this.splitModeLogged = false;
             this.canvas.classList.add('split-view');
             this.canvas.height = this.waterfallHeight;
+            this.canvas.style.top = this.lineGraphHeight + 'px'; // Position below line graph
             this.height = this.waterfallHeight;
             this.canvasHeight = this.waterfallHeight;
 
@@ -719,9 +721,10 @@ class SpectrumDisplay {
             this.lineGraphCanvas.style.height = newLineGraphHeight + 'px';
         }
         
-        // Resize waterfall canvas
+        // Resize waterfall canvas and position it below line graph
         this.canvas.height = newWaterfallHeight;
         this.canvas.style.height = newWaterfallHeight + 'px';
+        this.canvas.style.top = newLineGraphHeight + 'px'; // Position below line graph
         this.height = newWaterfallHeight;
         this.canvasHeight = newWaterfallHeight;
         
@@ -1330,9 +1333,8 @@ class SpectrumDisplay {
         //     this.applyPredictedShift();
         // }
 
-        // Waterfall starts at top of waterfall canvas (y=0) with frequency scale
-        // The waterfall canvas is separate from line graph, positioned below it
-        const waterfallStartY = 30; // Start after 30px frequency scale
+        // Waterfall starts at halfway down the waterfall canvas in split mode
+        const waterfallStartY = this.waterfallHeight / 2;
         const waterfallHeight = this.height - waterfallStartY - 1;
 
         // Initialize waterfall image data if needed

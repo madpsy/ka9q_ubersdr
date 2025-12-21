@@ -1330,8 +1330,9 @@ class SpectrumDisplay {
         //     this.applyPredictedShift();
         // }
 
-        // Waterfall starts at halfway down the waterfall canvas in split mode
-        const waterfallStartY = this.waterfallHeight / 2;
+        // Waterfall starts at top of waterfall canvas (y=0) with frequency scale
+        // The waterfall canvas is separate from line graph, positioned below it
+        const waterfallStartY = 30; // Start after 30px frequency scale
         const waterfallHeight = this.height - waterfallStartY - 1;
 
         // Initialize waterfall image data if needed

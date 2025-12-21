@@ -726,6 +726,10 @@ class SpectrumDisplay {
         this.height = newWaterfallHeight;
         this.canvasHeight = newWaterfallHeight;
         
+        // CRITICAL: Reset context after canvas resize (canvas resize clears context)
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.imageSmoothingEnabled = true;
+        
         // Resize bandwidth lines overlay
         this.bandwidthLinesCanvas.height = this.totalHeight;
         this.bandwidthLinesCanvas.style.height = this.totalHeight + 'px';
@@ -737,10 +741,10 @@ class SpectrumDisplay {
         // Update divider position
         this.updateDividerPosition();
         
-        // Clear waterfall (will be rebuilt)
+        // Clear waterfall and force recreation of image data
         this.ctx.fillStyle = '#000';
         this.ctx.fillRect(0, 0, this.width, this.waterfallHeight);
-        this.waterfallImageData = null;
+        this.waterfallImageData = this.ctx.createImageData(this.width, 1);
         
         // Redraw everything
         if (this.spectrumData && this.spectrumData.length > 0) {

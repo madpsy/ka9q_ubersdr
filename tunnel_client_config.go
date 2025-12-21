@@ -11,14 +11,15 @@ import (
 
 // TunnelClientConfig represents the tunnel client configuration file format
 type TunnelClientConfig struct {
-	Enabled     bool   `json:"enabled"`
-	Version     string `json:"version"`
-	SecretUUID  string `json:"secret_uuid"`
-	Callsign    string `json:"callsign"`
-	Email       string `json:"email"`
-	TunnelURL   string `json:"tunnel_url"`
-	BackendHost string `json:"backend_host"`
-	BackendPort int    `json:"backend_port"`
+	Enabled      bool   `json:"enabled"`
+	Version      string `json:"version"`
+	SecretUUID   string `json:"secret_uuid"`
+	Callsign     string `json:"callsign"`
+	Email        string `json:"email"`
+	TunnelURL    string `json:"tunnel_url"`
+	BackendHost  string `json:"backend_host"`
+	BackendPort  int    `json:"backend_port"`
+	BetaFrontend bool   `json:"beta_frontend"`
 }
 
 // GenerateTunnelClientConfig generates the tunnel client configuration file
@@ -43,14 +44,15 @@ func GenerateTunnelClientConfig(config *Config) error {
 
 		// Write a config file with enabled: false to stop the tunnel client
 		tunnelConfig := TunnelClientConfig{
-			Enabled:     false,
-			Version:     Version,
-			SecretUUID:  "",
-			Callsign:    "",
-			Email:       "",
-			TunnelURL:   "",
-			BackendHost: "",
-			BackendPort: 0,
+			Enabled:      false,
+			Version:      Version,
+			SecretUUID:   "",
+			Callsign:     "",
+			Email:        "",
+			TunnelURL:    "",
+			BackendHost:  "",
+			BackendPort:  0,
+			BetaFrontend: false,
 		}
 
 		// Ensure directory exists
@@ -96,14 +98,15 @@ func GenerateTunnelClientConfig(config *Config) error {
 
 	// Build tunnel client configuration
 	tunnelConfig := TunnelClientConfig{
-		Enabled:     true, // Enable the tunnel client
-		Version:     Version,
-		SecretUUID:  config.InstanceReporting.InstanceUUID,
-		Callsign:    config.Admin.Callsign,
-		Email:       config.Admin.Email,
-		TunnelURL:   config.InstanceReporting.TunnelServerURI,
-		BackendHost: "ubersdr", // Docker service name
-		BackendPort: 8080,
+		Enabled:      true, // Enable the tunnel client
+		Version:      Version,
+		SecretUUID:   config.InstanceReporting.InstanceUUID,
+		Callsign:     config.Admin.Callsign,
+		Email:        config.Admin.Email,
+		TunnelURL:    config.InstanceReporting.TunnelServerURI,
+		BackendHost:  "ubersdr", // Docker service name
+		BackendPort:  8080,
+		BetaFrontend: config.InstanceReporting.BetaFrontend,
 	}
 
 	// Ensure directory exists

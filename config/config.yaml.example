@@ -699,6 +699,12 @@ instance_reporting:
   # Default: "wss://tunnel.ubersdr.org/tunnel/connect"
   tunnel_server_uri: "wss://tunnel.ubersdr.org/tunnel/connect"
 
+  # Enable beta frontend features (default: false)
+  # When enabled, this instance will use the beta version of the frontend
+  # This flag is passed to the tunnel client configuration
+  # Default: false
+  beta_frontend: false
+
   # Tunnel server hostname for X-Real-IP trust verification
   # When using the UberSDR tunnel service, this hostname is used to verify
   # that X-Real-IP headers come from the trusted tunnel server

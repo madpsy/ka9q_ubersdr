@@ -175,6 +175,7 @@ type InstanceReportingConfig struct {
 	TunnelServerPort    int                    `yaml:"tunnel_server_port"`    // Tunnel server port (for future use)
 	TunnelServerEnabled bool                   `yaml:"tunnel_server_enabled"` // Enable/disable tunnel server integration (default: false)
 	TunnelServerURI     string                 `yaml:"tunnel_server_uri"`     // Tunnel server WebSocket URI (default: wss://tunnel.ubersdr.org/tunnel/connect)
+	BetaFrontend        bool                   `yaml:"beta_frontend"`         // Enable beta frontend features (default: false)
 	tunnelServerIPs     []string               // Resolved IPs of tunnel server (internal use)
 }
 

@@ -26,7 +26,13 @@ curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/main/install-hu
 
 This will install Docker, clone both repositories, build the images, and start the services.
 
-## Manual Installation
+## Manual Installation for Development ONLY
+
+> **⚠️ WARNING: End users should NOT follow this method!**
+>
+> **If you just want to use UberSDR, use the [Quick Start one-line install command](#quick-start) above instead.**
+>
+> This manual installation method is intended for developers who need to modify the code or build custom images. Regular users should use the automated Quick Start installation, which includes additional features such as the tunnel service that are not available with this manual method.
 
 ### System Prerequisites
 

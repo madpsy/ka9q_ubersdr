@@ -3699,7 +3699,6 @@ class SpectrumDisplay {
             this.lineGraphCanvas.style.display = 'block';
             // Restore waterfall to split mode position (below line graph)
             this.canvas.classList.add('split-view');
-            this.canvas.style.position = 'absolute';
             this.canvas.style.top = '300px';
             console.log('Line graph (spectrum) enabled');
         } else {
@@ -3708,7 +3707,6 @@ class SpectrumDisplay {
             this.lineGraphCanvas.style.display = 'none';
             // Move waterfall to top (full height mode)
             this.canvas.classList.remove('split-view');
-            this.canvas.style.position = 'relative';
             this.canvas.style.top = '0px';
             console.log('Line graph (spectrum) disabled');
         }

@@ -124,6 +124,9 @@ class SpectrumDisplay {
                     this.bandwidthLinesCanvas.width = this.width;
                     this.bandwidthLinesCanvas.style.width = this.width + 'px';
 
+                    // Invalidate marker cache to force redraw at new width
+                    this.invalidateMarkerCache();
+
                     // Redraw the bandwidth indicator with new dimensions
                     this.drawTunedFrequencyCursor();
 

@@ -312,14 +312,12 @@ class RadioClient:
         self.use_opus = use_opus and OPUS_AVAILABLE and not is_iq_mode
         self.opus_decoder = None
         if self.use_opus:
-            try:
-                # Create Opus decoder (48 kHz, stereo for compatibility)
-                # Server will send at actual sample rate, we'll handle resampling if needed
-                self.opus_decoder = opuslib.Decoder(48000, 2)
-                print(f"Opus decoder initialized (bandwidth savings: ~90%)", file=sys.stderr)
-            except Exception as e:
-                print(f"Warning: Failed to initialize Opus decoder: {e}", file=sys.stderr)
-                self.use_opus = False
+            # Opus decoder will be created dynamically when first packet arrives
+            # This allows us to match the server's sample rate and channel count from packet header
+            self.opus_decoder = None
+            self.opus_sample_rate = None
+            self.opus_channels = None
+            print(f"Opus decoding enabled (decoder will initialize on first packet)", file=sys.stderr)
         elif use_opus and is_iq_mode:
             print("Warning: Opus not supported for IQ modes (lossless required)", file=sys.stderr)
 
@@ -955,15 +953,25 @@ class RadioClient:
         channels = binary_data[12]
         opus_data = binary_data[13:]
 
-        # Decode Opus data
-        if not self.opus_decoder:
-            print("Warning: Opus decoder not initialized", file=sys.stderr)
-            return b''
+        # Create decoder on first packet with correct sample rate and channels from server
+        if self.opus_decoder is None or self.opus_sample_rate != sample_rate or self.opus_channels != channels:
+            try:
+                import opuslib
+                self.opus_decoder = opuslib.Decoder(sample_rate, channels)
+                self.opus_sample_rate = sample_rate
+                self.opus_channels = channels
+                print(f"Opus decoder initialized: {sample_rate} Hz, {channels} channel(s)", file=sys.stderr)
+            except Exception as e:
+                print(f"Warning: Failed to initialize Opus decoder: {e}", file=sys.stderr)
+                return b''
 
         try:
-            # Decode Opus to PCM (returns int16 samples)
-            # Frame size is determined by Opus packet (typically 960 samples at 48kHz = 20ms)
-            pcm_data = self.opus_decoder.decode(opus_data, frame_size=960)
+            # Calculate frame size based on sample rate (20ms frame = sample_rate * 0.02)
+            # Opus typically uses 20ms frames
+            frame_size = int(sample_rate * 0.02)
+
+            # Decode Opus to PCM (returns int16 samples as bytes)
+            pcm_data = self.opus_decoder.decode(opus_data, frame_size=frame_size)
 
             # Convert to bytes (already little-endian int16)
             return pcm_data

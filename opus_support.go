@@ -24,7 +24,9 @@ func NewOpusEncoder(config *Config, sampleRate int) *OpusEncoderWrapper {
 func NewOpusEncoderForClient(sampleRate int, bitrate int, complexity int) (*OpusEncoderWrapper, error) {
 	wrapper := &OpusEncoderWrapper{enabled: false}
 
-	encoder, err := opus.NewEncoder(sampleRate, 1, opus.Application(2049)) // OPUS_APPLICATION_VOIP
+	// Opus encoder: use actual sample rate and mono (1 channel)
+	// The client will create a matching decoder from the packet header
+	encoder, err := opus.NewEncoder(sampleRate, 1, opus.AppVoIP)
 	if err != nil {
 		log.Printf("WARNING: Opus encoding requested but failed to initialize: %v", err)
 		log.Printf("To enable Opus support: sudo apt install libopus-dev libopusfile-dev pkg-config")
@@ -42,7 +44,7 @@ func NewOpusEncoderForClient(sampleRate int, bitrate int, complexity int) (*Opus
 
 	wrapper.encoder = encoder
 	wrapper.enabled = true
-	log.Printf("Opus encoder initialized for client: %d Hz, %d bps, complexity %d",
+	log.Printf("Opus encoder initialized for client: %d Hz, %d bps, complexity %d, 1 channel (mono)",
 		sampleRate, bitrate, complexity)
 
 	return wrapper, nil

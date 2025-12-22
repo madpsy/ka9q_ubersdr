@@ -1142,9 +1142,9 @@ class SpectrumDisplay {
         //     this.applyPredictedShift();
         // }
 
-        // Waterfall starts at y=35 (below bookmarks) when line graph is hidden, y=150 when visible (split mode)
+        // Waterfall starts at y=65 (below bookmarks + freq scale) when line graph is hidden, y=150 when visible (split mode)
         const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
-        const waterfallStartY = lineGraphVisible ? 150 : 35;
+        const waterfallStartY = lineGraphVisible ? 150 : 65;
         const waterfallHeight = this.height - waterfallStartY - 1;
 
         // Initialize waterfall image data if needed
@@ -1276,13 +1276,10 @@ class SpectrumDisplay {
         const graphTopMargin = 70; // Space for frequency scale at top (35px) + bookmarks overlay (35px)
         const graphDrawHeight = graphHeight - graphTopMargin; // Actual drawing area height
 
-        // Clear canvas and set background colors
-        // Top 35px: grey background for bookmarks area (matching waterfall mode)
-        ctx.fillStyle = '#adb5bd'; // Grey background color from body/container
-        ctx.fillRect(0, 0, graphWidth, 35);
-        // Rest: black background for graph
+        // Clear canvas - black background for entire graph
+        // (grey bookmark background is now in overlay)
         ctx.fillStyle = '#000';
-        ctx.fillRect(0, 35, graphWidth, graphHeight - 35);
+        ctx.fillRect(0, 0, graphWidth, graphHeight);
 
         // Apply temporal smoothing based on toggle
         const now = Date.now();
@@ -2163,7 +2160,11 @@ class SpectrumDisplay {
         const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
         const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
 
-        // Clear the frequency scale area (starts at 35px to leave room for bookmarks)
+        // Draw grey background for bookmark area (0-35px) - always visible
+        ctx.fillStyle = '#adb5bd';
+        ctx.fillRect(0, 0, this.width, 35);
+
+        // Draw black background for frequency scale area (35-65px)
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.fillRect(0, 35, this.width, 30);
 

@@ -120,6 +120,7 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 		sequence:           0,
 		compression:        true,
 		password:           "",
+		adpcmEncoder:       NewIMAAdpcmEncoder(),
 	}
 
 	// Handle the connection
@@ -141,6 +142,7 @@ type kiwiConn struct {
 	sequence           uint32
 	compression        bool
 	password           string
+	adpcmEncoder       *IMAAdpcmEncoder // ADPCM encoder for audio compression
 	mu                 sync.RWMutex
 }
 
@@ -395,10 +397,9 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 			kc.mu.RUnlock()
 
 			if useCompression {
-				// TODO: Implement IMA ADPCM encoding
-				// For now, send uncompressed
-				encodedData = pcmData
-				flags = 0x00
+				// Encode with IMA ADPCM
+				encodedData = kc.adpcmEncoder.Encode(pcmData)
+				flags = 0x10 // Compressed flag
 			} else {
 				encodedData = pcmData
 				flags = 0x00

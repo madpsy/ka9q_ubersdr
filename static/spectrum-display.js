@@ -1987,7 +1987,10 @@ class SpectrumDisplay {
             const originalCtx = this.overlayCtx;
             this.overlayCtx = this.markerCacheCtx;
 
-            // Draw bookmarks to cache
+            // Draw frequency scale FIRST (includes grey background for bookmarks)
+            this.drawFrequencyScaleOnOverlay(this.markerCacheCtx);
+
+            // Draw bookmarks on top of background
             if (typeof window.drawBookmarksOnSpectrum === 'function') {
                 window.drawBookmarksOnSpectrum(this, console.log);
             }
@@ -2001,9 +2004,6 @@ class SpectrumDisplay {
             if (typeof window.drawCWSpotsOnSpectrum === 'function') {
                 window.drawCWSpotsOnSpectrum(this, console.log);
             }
-
-            // Draw frequency scale to cache (always visible, below bookmarks)
-            this.drawFrequencyScaleOnOverlay(this.markerCacheCtx);
 
             // Restore original context
             this.overlayCtx = originalCtx;

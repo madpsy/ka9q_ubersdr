@@ -2898,6 +2898,140 @@ class SpectrumDisplay {
         this.tooltip.style.whiteSpace = 'nowrap';
         this.tooltip.style.border = '1px solid #fff';
         document.body.appendChild(this.tooltip);
+
+        // Add touch gesture support for mobile pinch-to-zoom
+        this.setupTouchHandlers();
+    }
+
+    // Setup touch event handlers for pinch-to-zoom and pan
+    setupTouchHandlers() {
+        let touchStartDistance = 0;
+        let touchStartCenterX = 0;
+        let touchStartFreq = 0;
+        let touchStartBinBandwidth = 0;
+        let isTouchPanning = false;
+        let touchPanStartX = 0;
+        let touchPanStartFreq = 0;
+
+        const getTouchDistance = (touch1, touch2) => {
+            const dx = touch2.clientX - touch1.clientX;
+            const dy = touch2.clientY - touch1.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        };
+
+        const getTouchCenter = (touch1, touch2) => {
+            return {
+                x: (touch1.clientX + touch2.clientX) / 2,
+                y: (touch1.clientY + touch2.clientY) / 2
+            };
+        };
+
+        const handleTouchStart = (e) => {
+            if (e.touches.length === 2) {
+                // Two-finger touch - prepare for pinch zoom
+                e.preventDefault();
+                touchStartDistance = getTouchDistance(e.touches[0], e.touches[1]);
+                const center = getTouchCenter(e.touches[0], e.touches[1]);
+                const rect = this.canvas.getBoundingClientRect();
+                touchStartCenterX = center.x - rect.left;
+                touchStartFreq = this.centerFreq;
+                touchStartBinBandwidth = this.binBandwidth;
+                isTouchPanning = false;
+            } else if (e.touches.length === 1) {
+                // Single finger - prepare for pan
+                const rect = this.canvas.getBoundingClientRect();
+                touchPanStartX = e.touches[0].clientX - rect.left;
+                touchPanStartFreq = this.centerFreq;
+                isTouchPanning = true;
+            }
+        };
+
+        const handleTouchMove = (e) => {
+            if (e.touches.length === 2 && touchStartDistance > 0) {
+                // Two-finger pinch zoom
+                e.preventDefault();
+                const currentDistance = getTouchDistance(e.touches[0], e.touches[1]);
+                const scale = currentDistance / touchStartDistance;
+
+                // Calculate new bin bandwidth (inverse of scale for zoom)
+                let newBinBandwidth = touchStartBinBandwidth / scale;
+
+                // Clamp to reasonable limits
+                newBinBandwidth = Math.max(1, Math.min(this.initialBinBandwidth || 1000, newBinBandwidth));
+
+                // Get touch center position
+                const center = getTouchCenter(e.touches[0], e.touches[1]);
+                const rect = this.canvas.getBoundingClientRect();
+                const centerX = center.x - rect.left;
+
+                // Calculate frequency at touch center
+                const startFreq = touchStartFreq - (touchStartBinBandwidth * this.binCount) / 2;
+                const touchFreq = startFreq + (touchStartCenterX / this.width) * (touchStartBinBandwidth * this.binCount);
+
+                // Calculate new center frequency to keep touch point at same position
+                const newTotalBW = newBinBandwidth * this.binCount;
+                const newCenterFreq = touchFreq;
+
+                // Constrain to 0-30 MHz
+                const halfBandwidth = newTotalBW / 2;
+                const minCenterFreq = 0 + halfBandwidth;
+                const maxCenterFreq = 30e6 - halfBandwidth;
+                const clampedCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
+
+                // Send zoom request
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: 'zoom',
+                        frequency: Math.round(clampedCenterFreq),
+                        binBandwidth: newBinBandwidth
+                    }));
+                }
+            } else if (e.touches.length === 1 && isTouchPanning) {
+                // Single finger pan
+                e.preventDefault();
+                const rect = this.canvas.getBoundingClientRect();
+                const currentX = e.touches[0].clientX - rect.left;
+                const deltaX = currentX - touchPanStartX;
+
+                // Calculate frequency change
+                const freqPerPixel = this.totalBandwidth / this.width;
+                const freqDelta = -deltaX * freqPerPixel;
+                let newCenterFreq = touchPanStartFreq + freqDelta;
+
+                // Apply boundary constraints
+                const halfBandwidth = this.totalBandwidth / 2;
+                const minCenterFreq = 0 + halfBandwidth;
+                const maxCenterFreq = 30e6 - halfBandwidth;
+                newCenterFreq = Math.max(minCenterFreq, Math.min(maxCenterFreq, newCenterFreq));
+
+                // Send pan request (throttled)
+                const now = Date.now();
+                if (now - this.lastPanTime >= this.panThrottleMs) {
+                    this.panTo(newCenterFreq);
+                    this.lastPanTime = now;
+                }
+            }
+        };
+
+        const handleTouchEnd = (e) => {
+            if (e.touches.length < 2) {
+                touchStartDistance = 0;
+            }
+            if (e.touches.length === 0) {
+                isTouchPanning = false;
+            }
+        };
+
+        // Add touch listeners to both canvases
+        this.canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+        this.canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+        this.canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+
+        if (this.lineGraphCanvas) {
+            this.lineGraphCanvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+            this.lineGraphCanvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+            this.lineGraphCanvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+        }
     }
 
     // Setup mouse wheel scroll handler

@@ -814,7 +814,7 @@ class SpectrumDisplay {
             // Continue with connection attempt even if check fails
         }
 
-        // Build WebSocket URL with session ID and password (if available)
+        // Build WebSocket URL with session ID, password, and binary mode
         const userSessionID = window.userSessionID || '';
         const wsUrlBase = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/user-spectrum`;
         let wsUrl = userSessionID ? `${wsUrlBase}?user_session_id=${encodeURIComponent(userSessionID)}` : wsUrlBase;
@@ -824,10 +824,18 @@ class SpectrumDisplay {
             wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
         }
 
+        // Request binary mode for reduced bandwidth
+        wsUrl += `&mode=binary`;
+
         console.log('Connecting to spectrum WebSocket:', wsUrl);
 
         try {
             this.ws = new WebSocket(wsUrl);
+            this.ws.binaryType = 'arraybuffer'; // Enable binary message handling
+
+            // Track if we've detected binary protocol
+            this.usingBinaryProtocol = false;
+            this.binarySpectrumData = null; // State for delta decoding
 
             this.ws.onopen = () => {
                 console.log('Spectrum WebSocket connected');
@@ -851,20 +859,47 @@ class SpectrumDisplay {
                     let msg;
                     let byteLength;
 
-                    // Check if message is binary (compressed) or text (uncompressed)
-                    if (event.data instanceof Blob) {
-                        // Binary message - decompress with gzip
+                    // Check if message is binary protocol (ArrayBuffer) or JSON
+                    if (event.data instanceof ArrayBuffer) {
+                        // Binary protocol - check magic header
+                        const view = new DataView(event.data);
+                        byteLength = event.data.byteLength;
+
+                        // Check for "SPEC" magic (0x53 0x50 0x45 0x43)
+                        if (byteLength >= 4 &&
+                            view.getUint8(0) === 0x53 &&
+                            view.getUint8(1) === 0x50 &&
+                            view.getUint8(2) === 0x45 &&
+                            view.getUint8(3) === 0x43) {
+
+                            // Binary spectrum protocol detected
+                            if (!this.usingBinaryProtocol) {
+                                this.usingBinaryProtocol = true;
+                                console.log('🚀 Binary spectrum protocol detected - bandwidth optimized!');
+                            }
+
+                            // Parse binary spectrum message
+                            msg = this.parseBinarySpectrum(view);
+                        } else {
+                            // Legacy binary (gzipped JSON) - decompress
+                            const decompressedStream = new Response(
+                                new Blob([event.data]).stream().pipeThrough(new DecompressionStream('gzip'))
+                            );
+                            const decompressedText = await decompressedStream.text();
+                            msg = JSON.parse(decompressedText);
+                        }
+                    } else if (event.data instanceof Blob) {
+                        // Blob message - decompress with gzip (legacy format)
                         const compressedData = await event.data.arrayBuffer();
                         byteLength = compressedData.byteLength;
 
-                        // Decompress using DecompressionStream (modern browsers)
                         const decompressedStream = new Response(
                             new Blob([compressedData]).stream().pipeThrough(new DecompressionStream('gzip'))
                         );
                         const decompressedText = await decompressedStream.text();
                         msg = JSON.parse(decompressedText);
                     } else {
-                        // Text message - parse directly
+                        // Text message - parse directly (JSON)
                         byteLength = event.data.length;
                         msg = JSON.parse(event.data);
                     }
@@ -993,6 +1028,66 @@ class SpectrumDisplay {
 
     stopPing() {
         // No-op: ping handled by idle detector
+    }
+
+    // Parse binary spectrum message
+    parseBinarySpectrum(view) {
+        // Parse header (22 bytes)
+        const version = view.getUint8(4);
+        const flags = view.getUint8(5);
+        const timestamp = Number(view.getBigUint64(6, true)); // little-endian
+        const frequency = Number(view.getBigUint64(14, true)); // little-endian
+
+        if (version !== 0x01) {
+            console.error('Unsupported binary protocol version:', version);
+            return null;
+        }
+
+        let spectrumData;
+
+        if (flags === 0x01) {
+            // Full frame
+            const binCount = (view.byteLength - 22) / 4;
+            spectrumData = new Float32Array(binCount);
+
+            for (let i = 0; i < binCount; i++) {
+                spectrumData[i] = view.getFloat32(22 + i * 4, true); // little-endian
+            }
+
+            // Store for delta decoding
+            this.binarySpectrumData = new Float32Array(spectrumData);
+
+        } else if (flags === 0x02) {
+            // Delta frame
+            if (!this.binarySpectrumData) {
+                console.error('Delta frame received before full frame');
+                return null;
+            }
+
+            const changeCount = view.getUint16(22, true); // little-endian
+            let offset = 24;
+
+            // Apply changes to previous data
+            for (let i = 0; i < changeCount; i++) {
+                const index = view.getUint16(offset, true); // little-endian
+                const value = view.getFloat32(offset + 2, true); // little-endian
+                this.binarySpectrumData[index] = value;
+                offset += 6;
+            }
+
+            spectrumData = this.binarySpectrumData;
+        } else {
+            console.error('Unknown binary frame flags:', flags);
+            return null;
+        }
+
+        // Return in same format as JSON messages
+        return {
+            type: 'spectrum',
+            data: Array.from(spectrumData),
+            frequency: frequency,
+            timestamp: timestamp
+        };
     }
 
     // Handle incoming WebSocket messages

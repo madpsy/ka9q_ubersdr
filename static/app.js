@@ -132,21 +132,29 @@ const wsManager = new WebSocketManager({
 
             // Open extensions from URL parameter if specified
             if (window.extensionsToOpen && window.extensionsToOpen.length > 0) {
-                setTimeout(() => {
-                    window.extensionsToOpen.forEach(extName => {
-                        // Skip if this extension was already auto-loaded by extension-loader
-                        if (window.extensionAutoLoaded === extName) {
-                            log(`Skipping URL extension (already auto-loaded): ${extName}`);
-                            return;
-                        }
-                        if (window.toggleExtension) {
-                            window.toggleExtension(extName);
-                            log(`Opened extension from URL: ${extName}`);
-                        }
-                    });
+                // Check if we're on a mobile/narrow screen
+                const isMobile = window.matchMedia('(max-width: 768px)').matches;
+                if (isMobile) {
+                    log('📱 Mobile device detected - skipping URL extension loading');
                     delete window.extensionsToOpen;
-                    delete window.extensionAutoLoaded; // Clean up flag
-                }, 100);
+                    delete window.extensionAutoLoaded;
+                } else {
+                    setTimeout(() => {
+                        window.extensionsToOpen.forEach(extName => {
+                            // Skip if this extension was already auto-loaded by extension-loader
+                            if (window.extensionAutoLoaded === extName) {
+                                log(`Skipping URL extension (already auto-loaded): ${extName}`);
+                                return;
+                            }
+                            if (window.toggleExtension) {
+                                window.toggleExtension(extName);
+                                log(`Opened extension from URL: ${extName}`);
+                            }
+                        });
+                        delete window.extensionsToOpen;
+                        delete window.extensionAutoLoaded; // Clean up flag
+                    }, 100);
+                }
             }
         }
     },

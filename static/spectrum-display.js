@@ -3002,6 +3002,14 @@ class SpectrumDisplay {
             });
         }
 
+        // Setup line graph (spectrum) visibility toggle
+        const lineGraphToggle = document.getElementById('spectrum-line-graph-enable');
+        if (lineGraphToggle) {
+            lineGraphToggle.addEventListener('change', (e) => {
+                this.toggleLineGraphVisibility(e.target.checked);
+            });
+        }
+
         // Store reference to snap checkbox and label for mode-based enable/disable
         this.snapCheckbox = snapCheckbox;
         this.snapLabel = document.getElementById('spectrum-snap-label');
@@ -3745,5 +3753,25 @@ class SpectrumDisplay {
         this.ws.send(JSON.stringify({
             type: 'get_status'
         }));
+    }
+
+    // Toggle line graph (spectrum) visibility
+    toggleLineGraphVisibility(visible) {
+        if (!this.lineGraphCanvas) return;
+
+        if (visible) {
+            // Show line graph
+            this.lineGraphCanvas.style.display = 'block';
+            console.log('Line graph (spectrum) enabled');
+        } else {
+            // Hide line graph
+            this.lineGraphCanvas.style.display = 'none';
+            console.log('Line graph (spectrum) disabled');
+        }
+
+        // Redraw to update display
+        if (this.spectrumData && this.spectrumData.length > 0) {
+            this.draw();
+        }
     }
 }

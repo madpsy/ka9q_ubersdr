@@ -1,10 +1,6 @@
-//go:build opus
-// +build opus
-
 package main
 
 import (
-	"encoding/base64"
 	"encoding/binary"
 	"log"
 
@@ -17,44 +13,46 @@ type OpusEncoderWrapper struct {
 	enabled bool
 }
 
-// NewOpusEncoder creates a new Opus encoder if enabled in config
+// NewOpusEncoder creates a new Opus encoder (always disabled - only used when client requests it)
 func NewOpusEncoder(config *Config, sampleRate int) *OpusEncoderWrapper {
-	wrapper := &OpusEncoderWrapper{enabled: false}
+	// Opus is now client-requested only, not server-configured
+	// Return disabled wrapper - will be enabled per-connection if client requests it
+	return &OpusEncoderWrapper{enabled: false}
+}
 
-	if !config.Audio.Opus.Enabled {
-		return wrapper
-	}
+// NewOpusEncoderForClient creates a new Opus encoder for a specific client request
+func NewOpusEncoderForClient(sampleRate int, bitrate int, complexity int) (*OpusEncoderWrapper, error) {
+	wrapper := &OpusEncoderWrapper{enabled: false}
 
 	encoder, err := opus.NewEncoder(sampleRate, 1, opus.Application(2049)) // OPUS_APPLICATION_VOIP
 	if err != nil {
 		log.Printf("WARNING: Opus encoding requested but failed to initialize: %v", err)
 		log.Printf("To enable Opus support: sudo apt install libopus-dev libopusfile-dev pkg-config")
 		log.Printf("Then rebuild with: go build -tags opus")
-		log.Printf("Falling back to PCM.")
-		return wrapper
+		return nil, err
 	}
 
-	// Configure encoder with settings from config
-	if err := encoder.SetBitrate(config.Audio.Opus.Bitrate); err != nil {
+	// Configure encoder with settings
+	if err := encoder.SetBitrate(bitrate); err != nil {
 		log.Printf("Warning: Failed to set Opus bitrate: %v", err)
 	}
-	if err := encoder.SetComplexity(config.Audio.Opus.Complexity); err != nil {
+	if err := encoder.SetComplexity(complexity); err != nil {
 		log.Printf("Warning: Failed to set Opus complexity: %v", err)
 	}
 
 	wrapper.encoder = encoder
 	wrapper.enabled = true
-	log.Printf("Opus encoder initialized: %d Hz, %d bps, complexity %d",
-		sampleRate, config.Audio.Opus.Bitrate, config.Audio.Opus.Complexity)
+	log.Printf("Opus encoder initialized for client: %d Hz, %d bps, complexity %d",
+		sampleRate, bitrate, complexity)
 
-	return wrapper
+	return wrapper, nil
 }
 
-// Encode encodes PCM data to Opus
-func (w *OpusEncoderWrapper) Encode(pcmData []byte) (encoded string, format string, err error) {
+// EncodeBinary encodes PCM data to Opus (returns raw binary bytes)
+func (w *OpusEncoderWrapper) EncodeBinary(pcmData []byte) (encoded []byte, err error) {
 	if !w.enabled || w.encoder == nil {
-		// Return PCM
-		return base64.StdEncoding.EncodeToString(pcmData), "pcm", nil
+		// Return PCM as-is
+		return pcmData, nil
 	}
 
 	// Convert PCM bytes to int16 samples for Opus
@@ -71,11 +69,11 @@ func (w *OpusEncoderWrapper) Encode(pcmData []byte) (encoded string, format stri
 	if err != nil {
 		log.Printf("Opus encoding error: %v, sending PCM", err)
 		// Fall back to PCM on error
-		return base64.StdEncoding.EncodeToString(pcmData), "pcm", err
+		return pcmData, err
 	}
 
-	// Successfully encoded with Opus
-	return base64.StdEncoding.EncodeToString(opusData[:n]), "opus", nil
+	// Successfully encoded with Opus - return raw bytes
+	return opusData[:n], nil
 }
 
 // IsEnabled returns whether Opus encoding is enabled

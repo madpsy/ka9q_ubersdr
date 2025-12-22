@@ -29,6 +29,15 @@ import numpy as np
 import subprocess
 import re
 
+# Import Opus decoder (optional)
+try:
+    import opuslib
+    OPUS_AVAILABLE = True
+except ImportError:
+    OPUS_AVAILABLE = False
+    print("Warning: opuslib not available, Opus decoding disabled", file=sys.stderr)
+    print("Install with: pip install opuslib", file=sys.stderr)
+
 # Import NR2 processor (optional, only if scipy is available)
 try:
     from nr2 import create_nr2_processor
@@ -269,7 +278,7 @@ class RadioClient:
                  audio_filter_high: float = 2700.0, pyaudio_device_index: Optional[int] = None,
                  sounddevice_device_index: Optional[int] = None, udp_host: Optional[str] = None,
                  udp_port: Optional[int] = None, output_channels: Optional[int] = None,
-                 udp_enabled: bool = False, udp_stereo: bool = False):
+                 udp_enabled: bool = False, udp_stereo: bool = False, use_opus: bool = False):
         self.url = url
         self.host = host
         self.port = port
@@ -297,6 +306,22 @@ class RadioClient:
         self.connection_start_time = None  # Time when connection was established
         self.connection_rejected = False  # Flag indicating if connection was rejected
         self.rejection_reason = ""  # Reason for connection rejection
+
+        # Opus support (disabled for IQ modes as they need lossless data)
+        is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+        self.use_opus = use_opus and OPUS_AVAILABLE and not is_iq_mode
+        self.opus_decoder = None
+        if self.use_opus:
+            try:
+                # Create Opus decoder (48 kHz, stereo for compatibility)
+                # Server will send at actual sample rate, we'll handle resampling if needed
+                self.opus_decoder = opuslib.Decoder(48000, 2)
+                print(f"Opus decoder initialized (bandwidth savings: ~90%)", file=sys.stderr)
+            except Exception as e:
+                print(f"Warning: Failed to initialize Opus decoder: {e}", file=sys.stderr)
+                self.use_opus = False
+        elif use_opus and is_iq_mode:
+            print("Warning: Opus not supported for IQ modes (lossless required)", file=sys.stderr)
 
         # FIFO (named pipe) output
         self.fifo_path = fifo_path
@@ -607,6 +632,10 @@ class RadioClient:
             if self.password:
                 params['password'] = self.password
             
+            # Add format parameter for Opus
+            if self.use_opus:
+                params['format'] = 'opus'
+
             return f"{base_url}?{urlencode(params)}"
         else:
             # Build URL from host/port/ssl
@@ -627,7 +656,11 @@ class RadioClient:
             if self.password:
                 from urllib.parse import quote
                 url += f"&password={quote(self.password)}"
-                
+            
+            # Add format parameter for Opus
+            if self.use_opus:
+                url += "&format=opus"
+
             return url
     
     def setup_wav_writer(self):
@@ -879,26 +912,64 @@ class RadioClient:
         """Decode base64 audio data to PCM bytes."""
         # Decode base64
         audio_bytes = base64.b64decode(base64_data)
-        
+
         # The data is big-endian signed 16-bit PCM
         # Convert to little-endian for most audio systems
         num_samples = len(audio_bytes) // 2
         pcm_data = bytearray()
-        
+
         for i in range(num_samples):
             # Read big-endian int16
             high_byte = audio_bytes[i * 2]
             low_byte = audio_bytes[i * 2 + 1]
             sample = (high_byte << 8) | low_byte
-            
+
             # Convert to signed
             if sample >= 0x8000:
                 sample -= 0x10000
-            
+
             # Write as little-endian int16
             pcm_data.extend(struct.pack('<h', sample))
-        
+
         return bytes(pcm_data)
+
+    def decode_opus_binary(self, binary_data: bytes) -> bytes:
+        """Decode binary Opus packet to PCM bytes.
+
+        Binary packet format from server:
+        - 8 bytes: timestamp (uint64, little-endian)
+        - 4 bytes: sample rate (uint32, little-endian)
+        - 1 byte: channels (uint8)
+        - remaining: Opus encoded data
+
+        Returns:
+            PCM data as bytes (int16, little-endian)
+        """
+        if len(binary_data) < 13:
+            print(f"Warning: Binary packet too short: {len(binary_data)} bytes", file=sys.stderr)
+            return b''
+
+        # Parse header
+        timestamp = struct.unpack('<Q', binary_data[0:8])[0]
+        sample_rate = struct.unpack('<I', binary_data[8:12])[0]
+        channels = binary_data[12]
+        opus_data = binary_data[13:]
+
+        # Decode Opus data
+        if not self.opus_decoder:
+            print("Warning: Opus decoder not initialized", file=sys.stderr)
+            return b''
+
+        try:
+            # Decode Opus to PCM (returns int16 samples)
+            # Frame size is determined by Opus packet (typically 960 samples at 48kHz = 20ms)
+            pcm_data = self.opus_decoder.decode(opus_data, frame_size=960)
+
+            # Convert to bytes (already little-endian int16)
+            return pcm_data
+        except Exception as e:
+            print(f"Warning: Opus decode error: {e}", file=sys.stderr)
+            return b''
     
     async def output_audio(self, pcm_data: bytes):
         """Output audio data based on selected mode."""
@@ -1560,8 +1631,24 @@ class RadioClient:
                 while self.running:
                     try:
                         message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
-                        data = json.loads(message)
-                        await self.handle_message(data)
+
+                        # Handle binary messages (Opus format)
+                        if isinstance(message, bytes):
+                            if self.use_opus:
+                                # Decode binary Opus packet
+                                pcm_data = self.decode_opus_binary(message)
+                                if pcm_data:
+                                    await self.output_audio(pcm_data)
+
+                                # Check duration limit
+                                if not self.check_duration():
+                                    self.running = False
+                            else:
+                                print("Warning: Received binary message but Opus not enabled", file=sys.stderr)
+                        else:
+                            # Handle JSON messages (standard format)
+                            data = json.loads(message)
+                            await self.handle_message(data)
                     except asyncio.TimeoutError:
                         continue
                     except websockets.exceptions.ConnectionClosed:
@@ -2089,6 +2176,9 @@ Examples:
     parser.add_argument('--audio-filter-high', type=float, default=2700.0, metavar='HZ',
                         help='Audio filter high cutoff frequency in Hz (default: 2700)')
 
+    parser.add_argument('--opus', action='store_true',
+                        help='Use Opus compression for audio (90-95%% bandwidth savings, not supported for IQ modes)')
+
     parser.add_argument('--channels', type=int, choices=[1, 2], metavar='N',
                         help='Number of output channels: 1 (mono) or 2 (stereo). Default: 1 for stdout/udp, 2 for audio devices. IQ modes always use 2 channels.')
 
@@ -2476,7 +2566,8 @@ Examples:
         udp_host=udp_host,
         udp_port=udp_port,
         output_channels=output_channels,
-        udp_stereo=False  # CLI default: mono (can be added as argument if needed)
+        udp_stereo=False,  # CLI default: mono (can be added as argument if needed)
+        use_opus=args.opus
     )
     
     # Initialize TCI server now that client exists

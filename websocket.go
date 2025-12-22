@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -335,6 +337,26 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	query := r.URL.Query()
 	password := query.Get("password")
 
+	// Get format from query string (optional): "json" (default) or "opus"
+	format := query.Get("format")
+	if format == "" {
+		format = "json" // Default to JSON for backward compatibility
+	}
+
+	// Validate format
+	if format != "json" && format != "opus" {
+		log.Printf("Rejected WebSocket connection: invalid format '%s' from %s (client IP: %s)", format, sourceIP, clientIP)
+		http.Error(w, fmt.Sprintf("Invalid format '%s'. Valid formats: json, opus", format), http.StatusBadRequest)
+		return
+	}
+
+	// Opus format is binary-only (no JSON wrapper)
+	useBinaryFormat := (format == "opus")
+
+	if useBinaryFormat {
+		log.Printf("Client requested binary Opus format")
+	}
+
 	// Check connection rate limit (unless IP is bypassed via IP list or password)
 	if !wsh.config.Server.IsIPTimeoutBypassed(clientIP, password) && !wsh.connRateLimiter.AllowConnection(clientIP) {
 		log.Printf("Connection rate limit exceeded for IP: %s (client IP: %s)", sourceIP, clientIP)
@@ -579,15 +601,17 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	// Subscribe to audio
 	wsh.audioReceiver.GetChannelAudio(session)
 
-	// Send initial status
-	wsh.sendStatus(conn, session)
+	// Send initial status (only for JSON format)
+	if !useBinaryFormat {
+		wsh.sendStatus(conn, session)
+	}
 
 	// Create a session holder that can be updated atomically
 	sessionHolder := &sessionHolder{session: session}
 
 	// Start audio streaming goroutine
 	done := make(chan struct{})
-	go wsh.streamAudio(conn, sessionHolder, done)
+	go wsh.streamAudio(conn, sessionHolder, done, useBinaryFormat)
 
 	// Handle incoming messages (this will manage session lifecycle)
 	wsh.handleMessages(conn, sessionHolder, done)
@@ -851,10 +875,30 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 }
 
 // streamAudio streams audio data to the client
-func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHolder, done <-chan struct{}) {
-	// Initialize Opus encoder (will be stub if not compiled with opus tag)
+func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHolder, done <-chan struct{}, useBinaryFormat bool) {
 	session := sessionHolder.getSession()
-	opusEncoder := NewOpusEncoder(wsh.config, session.SampleRate)
+
+	// Initialize Opus encoder if binary format requested
+	var opusEncoder *OpusEncoderWrapper
+	if useBinaryFormat {
+		// Create Opus encoder with config settings
+		bitrate := wsh.config.Audio.Opus.Bitrate
+		if bitrate == 0 {
+			bitrate = 24000 // Default 24 kbps for good quality
+		}
+		complexity := wsh.config.Audio.Opus.Complexity
+		if complexity == 0 {
+			complexity = 5 // Default medium complexity
+		}
+
+		var err error
+		opusEncoder, err = NewOpusEncoderForClient(session.SampleRate, bitrate, complexity)
+		if err != nil {
+			log.Printf("Failed to create Opus encoder: %v", err)
+			log.Printf("Falling back to PCM")
+			useBinaryFormat = false // Fall back to JSON/PCM
+		}
+	}
 
 	for {
 		session := sessionHolder.getSession()
@@ -875,32 +919,73 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				continue
 			}
 
-			// Encode audio (will return PCM if Opus not available/enabled)
-			encoded, audioFormat, _ := opusEncoder.Encode(audioPacket.PCMData)
+			if useBinaryFormat && opusEncoder != nil {
+				// Binary Opus format: send raw Opus frames as binary WebSocket messages
+				// Format: [timestamp:8][sampleRate:4][channels:1][opusData...]
+				opusData, err := opusEncoder.EncodeBinary(audioPacket.PCMData)
+				if err != nil {
+					log.Printf("Opus encoding error: %v", err)
+					continue
+				}
 
-			// Send audio message with both RTP and wall-clock timestamps
-			// RTP timestamp: Sample count from SDR capture (drift-free, but different per server)
-			// Wall-clock: NTP-synced time in ms (common reference for multi-server alignment)
-			// Client uses wall-clock for initial alignment, RTP deltas for drift-free tracking
-			msg := ServerMessage{
-				Type:        "audio",
-				Data:        encoded,
-				SampleRate:  session.SampleRate,
-				Channels:    session.Channels, // 1=mono, 2=stereo (for IQ mode)
-				AudioFormat: audioFormat,
-				Timestamp:   int64(audioPacket.RTPTimestamp), // RTP timestamp (uint32 sample count)
-				WallclockMs: time.Now().UnixMilli(),          // NTP-synced wall-clock time
-			}
+				// Build binary packet with header
+				packet := make([]byte, 13+len(opusData))
+				// Timestamp (8 bytes, little-endian uint64)
+				binary.LittleEndian.PutUint64(packet[0:8], uint64(audioPacket.RTPTimestamp))
+				// Sample rate (4 bytes, little-endian uint32)
+				binary.LittleEndian.PutUint32(packet[8:12], uint32(session.SampleRate))
+				// Channels (1 byte)
+				packet[12] = byte(session.Channels)
+				// Opus data
+				copy(packet[13:], opusData)
 
-			if err := wsh.sendMessage(conn, msg); err != nil {
-				log.Printf("Failed to send audio: %v", err)
-				return
-			}
+				// Send as binary WebSocket message
+				conn.writeMu.Lock()
+				conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				err = conn.conn.WriteMessage(websocket.BinaryMessage, packet)
+				conn.writeMu.Unlock()
 
-			// Record audio bytes sent in Prometheus
-			if wsh.prometheusMetrics != nil {
-				wsh.prometheusMetrics.RecordAudioBytes(len(encoded))
-				wsh.prometheusMetrics.RecordWSMessageSent("audio")
+				if err != nil {
+					log.Printf("Failed to send binary Opus: %v", err)
+					return
+				}
+
+				// Track bytes for statistics
+				if conn.aggregator != nil {
+					conn.aggregator.addBytes(int64(len(packet)))
+					conn.aggregator.addMessage()
+				}
+
+				// Record audio bytes sent in Prometheus
+				if wsh.prometheusMetrics != nil {
+					wsh.prometheusMetrics.RecordAudioBytes(len(packet))
+					wsh.prometheusMetrics.RecordWSMessageSent("audio")
+				}
+			} else {
+				// JSON format (legacy): send PCM as base64-encoded JSON
+				// This is the original format for backward compatibility
+				encoded := base64.StdEncoding.EncodeToString(audioPacket.PCMData)
+
+				msg := ServerMessage{
+					Type:        "audio",
+					Data:        encoded,
+					SampleRate:  session.SampleRate,
+					Channels:    session.Channels,
+					AudioFormat: "pcm",
+					Timestamp:   int64(audioPacket.RTPTimestamp),
+					WallclockMs: time.Now().UnixMilli(),
+				}
+
+				if err := wsh.sendMessage(conn, msg); err != nil {
+					log.Printf("Failed to send audio: %v", err)
+					return
+				}
+
+				// Record audio bytes sent in Prometheus
+				if wsh.prometheusMetrics != nil {
+					wsh.prometheusMetrics.RecordAudioBytes(len(encoded))
+					wsh.prometheusMetrics.RecordWSMessageSent("audio")
+				}
 			}
 		}
 	}

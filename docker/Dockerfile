@@ -1,6 +1,12 @@
 # Multi-stage build for ka9q_ubersdr on Ubuntu 24.04
 FROM golang:1.24-bookworm AS builder
 
+# Install build dependencies for Opus
+RUN apt-get update && apt-get install -y \
+    libopus-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set working directory
 WORKDIR /build
 
@@ -23,12 +29,13 @@ FROM ubuntu:24.04
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install runtime dependencies including yq for YAML merging and WSJT-X
+# Install runtime dependencies including yq for YAML merging, WSJT-X, and libopus
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     wget \
     iproute2 \
     wsjtx \
+    libopus0 \
     && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq \
     && chmod +x /usr/bin/yq \
     && rm -rf /var/lib/apt/lists/*

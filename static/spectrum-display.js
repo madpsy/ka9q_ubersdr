@@ -130,6 +130,11 @@ class SpectrumDisplay {
                     // Redraw the bandwidth indicator with new dimensions
                     this.drawTunedFrequencyCursor();
 
+                    // Force immediate redraw of spectrum if we have data
+                    if (this.spectrumData && this.spectrumData.length > 0) {
+                        this.draw();
+                    }
+
                     console.log(`Canvas width resized: ${oldWidth} -> ${this.width} CSS pixels`);
                 } else if (oldHeight !== newHeight) {
                     // Height-only change - just update CSS, don't touch canvas pixels

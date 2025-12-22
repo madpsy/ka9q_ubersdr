@@ -3695,6 +3695,12 @@ class SpectrumDisplay {
     toggleLineGraphVisibility(visible) {
         if (!this.lineGraphCanvas) return;
 
+        // Stop drawing temporarily
+        const wasRunning = this.animationLoopRunning;
+        if (wasRunning) {
+            this.stopFrameProcessing();
+        }
+
         if (visible) {
             // Show line graph - restore split mode class
             this.lineGraphCanvas.classList.add('split-mode');
@@ -3702,15 +3708,23 @@ class SpectrumDisplay {
             // Restore waterfall to split mode position (below line graph)
             this.canvas.classList.add('split-view');
 
+            // CRITICAL: Clear the canvas BEFORE resizing to remove all old content
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
             // Adjust waterfall canvas height to only occupy bottom half
+            // Set BOTH canvas pixel dimensions AND CSS height
+            this.canvas.width = this.width;
             this.canvas.height = 300;
+            this.canvas.style.width = this.width + 'px';
+            this.canvas.style.height = '300px';
             this.canvasHeight = 300;
             this.height = 300;
 
-            // CRITICAL: Reset context after height change
-            this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+            // CRITICAL: Get new context after resize (canvas resize clears context)
+            this.ctx = this.canvas.getContext('2d', { alpha: false });
+            this.ctx.imageSmoothingEnabled = true;
 
-            // Clear waterfall canvas completely with black background
+            // Fill with black
             this.ctx.fillStyle = '#000';
             this.ctx.fillRect(0, 0, this.width, 300);
 
@@ -3727,15 +3741,23 @@ class SpectrumDisplay {
             // Move waterfall to full height mode
             this.canvas.classList.remove('split-view');
 
+            // CRITICAL: Clear the canvas BEFORE resizing to remove all old content
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
             // Restore waterfall canvas to full height
+            // Set BOTH canvas pixel dimensions AND CSS height
+            this.canvas.width = this.width;
             this.canvas.height = 600;
+            this.canvas.style.width = this.width + 'px';
+            this.canvas.style.height = '600px';
             this.canvasHeight = 600;
             this.height = 600;
 
-            // CRITICAL: Reset context after height change
-            this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+            // CRITICAL: Get new context after resize (canvas resize clears context)
+            this.ctx = this.canvas.getContext('2d', { alpha: false });
+            this.ctx.imageSmoothingEnabled = true;
 
-            // Clear waterfall canvas completely with black background
+            // Fill with black
             this.ctx.fillStyle = '#000';
             this.ctx.fillRect(0, 0, this.width, 600);
 
@@ -3744,15 +3766,21 @@ class SpectrumDisplay {
             this.waterfallLineCount = 0;
             this.waterfallStartTime = null;
 
+            // Clear the line graph canvas when hiding
+            if (this.lineGraphCtx) {
+                this.lineGraphCtx.clearRect(0, 0, this.lineGraphCanvas.width, this.lineGraphCanvas.height);
+            }
+
             console.log('Line graph (spectrum) disabled - waterfall RESET to 600px');
+        }
+
+        // Restart frame processing if it was running
+        if (wasRunning) {
+            this.startFrameProcessing();
         }
 
         // Force redraw to update display
         if (this.spectrumData && this.spectrumData.length > 0) {
-            // Clear the line graph canvas when hiding
-            if (!visible && this.lineGraphCtx) {
-                this.lineGraphCtx.clearRect(0, 0, this.lineGraphCanvas.width, this.lineGraphCanvas.height);
-            }
             this.draw();
         }
     }

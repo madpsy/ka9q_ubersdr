@@ -116,6 +116,12 @@ class SpectrumDisplay {
                     // Recreate waterfall image data for new width
                     this.waterfallImageData = this.ctx.createImageData(this.width, 1);
 
+                    // Update line graph canvas dimensions if it exists
+                    if (this.lineGraphCanvas) {
+                        this.lineGraphCanvas.width = this.width;
+                        this.lineGraphCanvas.style.width = this.width + 'px';
+                    }
+
                     // Update overlay canvas dimensions to match new width
                     this.overlayDiv.style.width = this.width + 'px';
                     this.overlayCanvas.width = this.width;
@@ -127,8 +133,10 @@ class SpectrumDisplay {
                     // Invalidate marker cache to force redraw at new width
                     this.invalidateMarkerCache();
 
-                    // Redraw the bandwidth indicator with new dimensions
-                    this.drawTunedFrequencyCursor();
+                    // Force immediate redraw of overlay (bookmarks and frequency scale)
+                    if (this.totalBandwidth && this.centerFreq) {
+                        this.drawTunedFrequencyCursor();
+                    }
 
                     // Force immediate redraw of spectrum if we have data
                     if (this.spectrumData && this.spectrumData.length > 0) {

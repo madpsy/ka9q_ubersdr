@@ -633,6 +633,9 @@ func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 	}
 	h.clientsMu.RUnlock()
 
+	// Track failed connections for immediate cleanup
+	var failedConns []*websocket.Conn
+
 	// Now write to clients without holding clientsMu (prevents deadlock)
 	for i, conn := range clientList {
 		writeMu := writeMutexes[i]
@@ -640,16 +643,34 @@ func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 		// Lock this connection's write mutex
 		writeMu.Lock()
 
-		// Set write deadline to avoid blocking forever
-		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		// Set write deadline to avoid blocking forever (reduced from 10s to 5s)
+		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 
 		err := conn.WriteMessage(websocket.TextMessage, messageJSON)
 		writeMu.Unlock()
 
 		if err != nil {
-			// Just log the error - the read handler will detect and clean up dead connections
+			// Log the error and mark connection for cleanup
 			log.Printf("DX Cluster WebSocket: Failed to send message to client: %v", err)
+			failedConns = append(failedConns, conn)
 		}
+	}
+
+	// Clean up failed connections immediately
+	if len(failedConns) > 0 {
+		h.clientsMu.Lock()
+		for _, conn := range failedConns {
+			if _, exists := h.clients[conn]; exists {
+				delete(h.clients, conn)
+				conn.Close()
+				if h.prometheusMetrics != nil {
+					h.prometheusMetrics.RecordWSDisconnect("dxcluster")
+				}
+			}
+		}
+		remainingClients := len(h.clients)
+		h.clientsMu.Unlock()
+		log.Printf("DX Cluster WebSocket: Cleaned up %d failed connection(s) (remaining: %d)", len(failedConns), remainingClients)
 	}
 }
 
@@ -683,7 +704,8 @@ func (h *DXClusterWebSocketHandler) sendMessage(conn *websocket.Conn, message ma
 	writeMu.Lock()
 	defer writeMu.Unlock()
 
-	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	// Reduced timeout from 10s to 5s for faster failure detection
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	return conn.WriteMessage(websocket.TextMessage, messageJSON)
 }
 
@@ -710,6 +732,9 @@ func (h *DXClusterWebSocketHandler) BroadcastStatus() {
 	}
 	h.clientsMu.RUnlock()
 
+	// Track failed connections for immediate cleanup
+	var failedConns []*websocket.Conn
+
 	// Now write to clients without holding clientsMu (prevents deadlock)
 	for i, conn := range clientList {
 		writeMu := writeMutexes[i]
@@ -717,16 +742,34 @@ func (h *DXClusterWebSocketHandler) BroadcastStatus() {
 		// Lock this connection's write mutex
 		writeMu.Lock()
 
-		// Set write deadline to avoid blocking forever
-		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		// Set write deadline to avoid blocking forever (reduced from 10s to 5s)
+		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 
 		err := conn.WriteMessage(websocket.TextMessage, messageJSON)
 		writeMu.Unlock()
 
 		if err != nil {
-			// Just log the error - the read handler will detect and clean up dead connections
+			// Log the error and mark connection for cleanup
 			log.Printf("DX Cluster WebSocket: Failed to send status to client: %v", err)
+			failedConns = append(failedConns, conn)
 		}
+	}
+
+	// Clean up failed connections immediately
+	if len(failedConns) > 0 {
+		h.clientsMu.Lock()
+		for _, conn := range failedConns {
+			if _, exists := h.clients[conn]; exists {
+				delete(h.clients, conn)
+				conn.Close()
+				if h.prometheusMetrics != nil {
+					h.prometheusMetrics.RecordWSDisconnect("dxcluster")
+				}
+			}
+		}
+		remainingClients := len(h.clients)
+		h.clientsMu.Unlock()
+		log.Printf("DX Cluster WebSocket: Cleaned up %d failed connection(s) during status broadcast (remaining: %d)", len(failedConns), remainingClients)
 	}
 }
 

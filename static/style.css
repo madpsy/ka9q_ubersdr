@@ -1361,6 +1361,14 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
     
+    /* Hide all filter panels on mobile */
+    .filters-grid,
+    .filters-grid-2x3,
+    .equalizer-panel,
+    .active-channels-panel {
+        display: none !important;
+    }
+    
     /* Hide extension panel on mobile */
     .decoder-extension-panel,
     #extension-panel {

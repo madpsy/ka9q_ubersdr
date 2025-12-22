@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y \
     iproute2 \
     wsjtx \
     libopus0 \
+    libopusfile0 \
     && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq \
     && chmod +x /usr/bin/yq \
     && rm -rf /var/lib/apt/lists/*

@@ -1351,14 +1351,25 @@ input[type="range"]::-moz-range-thumb {
         grid-template-columns: 1fr;
     }
     
+    /* Hide audio controls on mobile */
     .audio-controls {
-        flex-direction: column;
-        align-items: stretch;
+        display: none !important;
     }
     
-    .audio-controls .control-group {
-        flex-direction: column;
-        align-items: stretch;
+    /* Hide audio visualization section on mobile */
+    .audio-visualization-section {
+        display: none !important;
+    }
+    
+    /* Hide extension panel on mobile */
+    .decoder-extension-panel,
+    #extension-panel {
+        display: none !important;
+    }
+    
+    /* Hide extensions dropdown on mobile */
+    #extensions-dropdown {
+        display: none !important;
     }
     
     input[type="range"] {

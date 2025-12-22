@@ -101,6 +101,13 @@
         
         // Auto-load default extension if specified AND no URL parameter overrides it
         if (defaultExtension) {
+            // Check if we're on a mobile/narrow screen
+            const isMobile = window.matchMedia('(max-width: 768px)').matches;
+            if (isMobile) {
+                console.log(`📱 Mobile device detected - skipping default extension auto-load`);
+                return; // Exit early, don't load extensions on mobile
+            }
+            
             // Check if URL parameters specify extensions to load instead
             const urlParams = new URLSearchParams(window.location.search);
             const urlExtensions = urlParams.has('ext') ? urlParams.get('ext').split(',').filter(e => e.trim()) : [];

@@ -749,7 +749,8 @@ func main() {
 	// Initialize WebSocket handlers
 	wsHandler := NewWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics)
 	// spectrumWsHandler := NewSpectrumWebSocketHandler(spectrumManager) // Old static spectrum - DISABLED
-	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics) // New per-user spectrum
+	userSpectrumWsHandler := NewUserSpectrumWebSocketHandler(sessions, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics)      // New per-user spectrum
+	kiwiHandler := NewKiwiWebSocketHandler(sessions, audioReceiver, config, ipBanManager, rateLimiterManager, connRateLimiter, prometheusMetrics) // KiwiSDR compatibility
 
 	// Initialize instance reporter (before admin handler so it can be passed in)
 	var instanceReporter *InstanceReporter
@@ -768,6 +769,14 @@ func main() {
 	// http.HandleFunc("/ws/spectrum", spectrumWsHandler.HandleWebSocket) // Old endpoint - DISABLED
 	http.HandleFunc("/ws/user-spectrum", userSpectrumWsHandler.HandleSpectrumWebSocket) // New endpoint
 	http.HandleFunc("/ws/dxcluster", dxClusterWsHandler.HandleWebSocket)                // DX cluster spots
+
+	// KiwiSDR compatibility endpoint (enabled by default)
+	if config.Server.EnableKiwiSDR {
+		http.HandleFunc("/kiwi/", kiwiHandler.HandleKiwiWebSocket)
+		log.Printf("KiwiSDR protocol compatibility enabled at /kiwi/<timestamp>/<type>")
+	} else {
+		log.Printf("KiwiSDR protocol compatibility disabled")
+	}
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
 		handleStats(w, r, sessions)

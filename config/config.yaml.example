@@ -180,6 +180,15 @@ server:
 
   # Enable CORS
   enable_cors: false
+
+  # Enable KiwiSDR protocol compatibility endpoint
+  # When enabled, allows KiwiSDR clients (like kiwirecorder.py) to connect
+  # to UberSDR using the KiwiSDR WebSocket protocol at /kiwi/<timestamp>/<type>
+  # This creates standard UberSDR sessions with full IP tracking and authentication
+  # Default: false (disabled)
+  # Set to true to enable compatibility with kiwirecorder.py and other KiwiSDR clients
+  enable_kiwisdr: false
+
   # HTTP request log file (Apache combined log format)
   logfile: "web.log"
 

@@ -1,0 +1,10 @@
+# UberSDR KiwiSDR Bridge Requirements
+
+# WebSocket support
+websockets>=10.0
+
+# HTTP client for connection checks
+aiohttp>=3.8.0
+
+# Audio processing
+numpy>=1.20.0

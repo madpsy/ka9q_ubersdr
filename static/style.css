@@ -1380,6 +1380,11 @@ input[type="range"]::-moz-range-thumb {
         display: none !important;
     }
     
+    /* Hide spectrum/waterfall tooltips on mobile */
+    .spectrum-frequency-overlay {
+        pointer-events: none !important;
+    }
+    
     input[type="range"] {
         width: 100%;
     }

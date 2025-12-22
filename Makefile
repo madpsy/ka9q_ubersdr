@@ -10,8 +10,8 @@ all: build
 
 # Build the binary
 build:
-	@echo "Building $(BINARY)..."
-	go build -o $(BINARY) .
+	@echo "Building $(BINARY) with Opus support..."
+	go build -tags opus -o $(BINARY) .
 	@echo "Build complete: ./$(BINARY)"
 
 # Run the application
@@ -59,11 +59,11 @@ lint:
 
 # Build for multiple platforms
 build-all:
-	@echo "Building for multiple platforms..."
-	GOOS=linux GOARCH=amd64 go build -o $(BINARY)-linux-amd64 .
-	GOOS=linux GOARCH=arm64 go build -o $(BINARY)-linux-arm64 .
-	GOOS=darwin GOARCH=amd64 go build -o $(BINARY)-darwin-amd64 .
-	GOOS=darwin GOARCH=arm64 go build -o $(BINARY)-darwin-arm64 .
+	@echo "Building for multiple platforms with Opus support..."
+	GOOS=linux GOARCH=amd64 go build -tags opus -o $(BINARY)-linux-amd64 .
+	GOOS=linux GOARCH=arm64 go build -tags opus -o $(BINARY)-linux-arm64 .
+	GOOS=darwin GOARCH=amd64 go build -tags opus -o $(BINARY)-darwin-amd64 .
+	GOOS=darwin GOARCH=arm64 go build -tags opus -o $(BINARY)-darwin-arm64 .
 	@echo "Multi-platform build complete"
 
 # Show help

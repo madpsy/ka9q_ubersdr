@@ -1628,6 +1628,8 @@ class RadioClient:
                         radio_poll_task = asyncio.create_task(poll_radio())
 
                 # Receive and process messages
+                opus_packet_count = 0
+                pcm_packet_count = 0
                 while self.running:
                     try:
                         message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
@@ -1639,6 +1641,10 @@ class RadioClient:
                                 pcm_data = self.decode_opus_binary(message)
                                 if pcm_data:
                                     await self.output_audio(pcm_data)
+                                    opus_packet_count += 1
+                                    # Log first Opus packet to confirm it's working
+                                    if opus_packet_count == 1:
+                                        print("✓ Receiving Opus-encoded audio packets from server", file=sys.stderr)
 
                                 # Check duration limit
                                 if not self.check_duration():
@@ -1649,6 +1655,12 @@ class RadioClient:
                             # Handle JSON messages (standard format)
                             data = json.loads(message)
                             await self.handle_message(data)
+                            # Track PCM packets to detect if server is sending PCM instead of Opus
+                            if data.get('type') == 'audio':
+                                pcm_packet_count += 1
+                                # Log if we're getting PCM when Opus was requested
+                                if pcm_packet_count == 1 and self.use_opus:
+                                    print("⚠ Server is sending PCM audio (not Opus) - check server Opus support", file=sys.stderr)
                     except asyncio.TimeoutError:
                         continue
                     except websockets.exceptions.ConnectionClosed:

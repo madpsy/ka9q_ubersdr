@@ -455,7 +455,8 @@ class RadioGUI:
                 'udp_enabled': self.udp_enabled_var.get(),
                 'udp_host': self.udp_host_var.get(),
                 'udp_port': self.udp_port_var.get(),
-                'udp_stereo': self.udp_stereo_var.get()
+                'udp_stereo': self.udp_stereo_var.get(),
+                'opus_enabled': self.opus_var.get()
             }
             
             # Get current radio control settings
@@ -522,6 +523,10 @@ class RadioGUI:
             self.udp_port_var.set(settings['udp_port'])
         if 'udp_stereo' in settings:
             self.udp_stereo_var.set(settings['udp_stereo'])
+
+        # Apply Opus settings (silently)
+        if 'opus_enabled' in settings:
+            self.opus_var.set(settings['opus_enabled'])
 
     def apply_saved_radio_control_settings(self):
         """Apply saved radio control settings to UI after it's created."""
@@ -1511,19 +1516,22 @@ class RadioGUI:
         self.level_label = ttk.Label(level_container, text="-∞ dB", width=8)
         self.level_label.pack(side=tk.LEFT)
 
-        # Channel selection (Left/Right) (row 3)
+        # Channel selection (Left/Right) (row 3) - use a frame to keep them together
         ttk.Label(audio_frame, text="Channels:").grid(row=3, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+
+        channels_frame = ttk.Frame(audio_frame)
+        channels_frame.grid(row=3, column=1, columnspan=2, sticky=tk.W, pady=(5, 0))
 
         self.channel_left_var = tk.BooleanVar(value=True)
         self.channel_right_var = tk.BooleanVar(value=True)
 
-        self.left_check = ttk.Checkbutton(audio_frame, text="Left", variable=self.channel_left_var,
+        self.left_check = ttk.Checkbutton(channels_frame, text="Left", variable=self.channel_left_var,
                                      command=self.update_channels)
-        self.left_check.grid(row=3, column=1, sticky=tk.W, pady=(5, 0))
+        self.left_check.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.right_check = ttk.Checkbutton(audio_frame, text="Right", variable=self.channel_right_var,
+        self.right_check = ttk.Checkbutton(channels_frame, text="Right", variable=self.channel_right_var,
                                       command=self.update_channels)
-        self.right_check.grid(row=3, column=2, sticky=tk.W, pady=(5, 0))
+        self.right_check.pack(side=tk.LEFT)
 
         # EQ button (same row as channels)
         if EQ_AVAILABLE:
@@ -1532,6 +1540,13 @@ class RadioGUI:
             self.eq_btn.grid(row=3, column=3, sticky=tk.W, padx=(20, 0), pady=(5, 0))
         else:
             self.eq_btn = None
+
+        # Opus compression checkbox (same row, after EQ button)
+        self.opus_var = tk.BooleanVar(value=False)
+        self.opus_check = ttk.Checkbutton(audio_frame, text="Opus (90% bandwidth savings)",
+                                         variable=self.opus_var,
+                                         command=self.on_opus_changed)
+        self.opus_check.grid(row=3, column=4, columnspan=2, sticky=tk.W, padx=(20, 0), pady=(5, 0))
 
         # NR2 Noise Reduction (row 4) - use a frame to avoid column weight issues
         nr2_container = ttk.Frame(audio_frame)
@@ -3195,11 +3210,17 @@ class RadioGUI:
             if self.audio_spectrum_btn:
                 self.audio_spectrum_btn.config(state='disabled')
 
+            # Disable Opus (not supported for IQ modes)
+            if self.opus_var.get():
+                self.opus_var.set(False)
+                self.log_status("Opus disabled (IQ mode)")
+            self.opus_check.config(state='disabled')
+
             self.log_status(f"IQ mode selected - audio output disabled (data still sent to FIFO)")
         else:
             # Non-IQ mode: re-enable audio controls
             self.volume_scale.config(state='normal')
-            
+
             # Re-enable audio controls for non-IQ modes
             if self.volume_var.get() == 0:
                 self.volume_var.set(70)
@@ -3226,6 +3247,9 @@ class RadioGUI:
             # Re-enable audio spectrum button
             if self.audio_spectrum_btn:
                 self.audio_spectrum_btn.config(state='normal')
+
+            # Re-enable Opus checkbox
+            self.opus_check.config(state='normal')
 
         # Always update bandwidth defaults and presets when mode changes
         self.adjust_bandwidth_for_mode(mode)
@@ -4620,6 +4644,44 @@ class RadioGUI:
         # Auto-save setting
         self.save_audio_settings()
 
+    def on_opus_changed(self):
+        """Handle Opus checkbox change."""
+        enabled = self.opus_var.get()
+
+        # Check if current mode is IQ
+        mode_display = self.mode_var.get()
+        mode = self._parse_mode_name(mode_display)
+        is_iq_mode = mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+
+        if enabled and is_iq_mode:
+            # Opus not supported for IQ modes
+            messagebox.showwarning("Opus Not Supported",
+                                  "Opus compression is not supported for IQ modes (lossless data required).\n\n"
+                                  "Please switch to a non-IQ mode to use Opus.")
+            self.opus_var.set(False)
+            return
+
+        if enabled:
+            # Check if opuslib is available
+            try:
+                import opuslib
+                self.log_status("Opus compression will be enabled on next connection (90% bandwidth savings)")
+                messagebox.showinfo("Opus Compression",
+                                  "Opus compression will be enabled on your next connection.\n\n"
+                                  "This will reduce bandwidth usage by approximately 90%.\n\n"
+                                  "Note: You must reconnect for this change to take effect.")
+            except ImportError:
+                messagebox.showerror("Opus Not Available",
+                                   "Opus compression requires the opuslib library.\n\n"
+                                   "Install it with: pip install opuslib")
+                self.opus_var.set(False)
+                return
+        else:
+            self.log_status("Opus compression will be disabled on next connection")
+
+        # Auto-save setting
+        self.save_audio_settings()
+
     def toggle_udp_output(self):
         """Toggle UDP output on/off."""
         # Always save settings when checkbox is toggled (even if not connected)
@@ -5819,6 +5881,7 @@ class RadioGUI:
                 'udp_host': udp_host,
                 'udp_port': udp_port,
                 'udp_stereo': udp_stereo,
+                'use_opus': self.opus_var.get(),  # Pass Opus setting to client
             }
 
             # Add device index parameter based on output mode

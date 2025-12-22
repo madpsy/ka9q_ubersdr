@@ -222,8 +222,6 @@ audio:
     iq384: 384000 # Wide bandwidth IQ output for 384 kHz of real bandwidth
   # Opus compression settings
   opus:
-    # Enable Opus compression for audio streaming (reduces bandwidth significantly)
-    enabled: false
     # Opus bitrate in bits per second (6000-510000, typical: 24000-64000)
     # Lower = more compression but lower quality, Higher = better quality but more bandwidth
     # 24000 = good for voice, 48000 = excellent for voice, 64000 = near-transparent

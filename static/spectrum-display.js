@@ -2921,8 +2921,19 @@ class SpectrumDisplay {
         // Setup line graph (spectrum) visibility toggle
         const lineGraphToggle = document.getElementById('spectrum-line-graph-enable');
         if (lineGraphToggle) {
+            // Load saved preference from localStorage (default to false/unchecked)
+            const savedState = localStorage.getItem('spectrumLineGraphEnabled');
+            const isEnabled = savedState === 'true'; // Only true if explicitly saved as 'true'
+            lineGraphToggle.checked = isEnabled;
+
+            // Apply the loaded state immediately
+            this.toggleLineGraphVisibility(isEnabled);
+
             lineGraphToggle.addEventListener('change', (e) => {
-                this.toggleLineGraphVisibility(e.target.checked);
+                const enabled = e.target.checked;
+                // Save preference to localStorage
+                localStorage.setItem('spectrumLineGraphEnabled', enabled.toString());
+                this.toggleLineGraphVisibility(enabled);
             });
         }
 

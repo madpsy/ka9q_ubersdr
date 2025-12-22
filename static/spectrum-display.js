@@ -1397,8 +1397,7 @@ class SpectrumDisplay {
         this.updatePeakHold(smoothedData, minDb, maxDb);
         this.drawPeakHold(ctx, graphWidth, graphHeight, graphDrawHeight, graphTopMargin, minDb, maxDb);
 
-        // Draw frequency scale at top
-        this.drawLineGraphFrequencyScale();
+        // Frequency scale is now drawn in overlay (always visible)
 
         // Draw dBFS scale on left side
         this.drawLineGraphDbScale(minDb, maxDb, graphHeight, graphTopMargin);
@@ -1600,79 +1599,6 @@ class SpectrumDisplay {
     }
 
     // Draw frequency scale for line graph
-    drawLineGraphFrequencyScale() {
-        if (!this.totalBandwidth || !this.lineGraphCtx) return;
-
-        const ctx = this.lineGraphCtx;
-        // Apply client-side prediction offset during dragging
-        const effectiveCenterFreq = this.centerFreq + this.predictedFreqOffset;
-        const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
-        const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
-
-        // Clear the frequency scale area (starts at 35px to leave room for bookmarks)
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(0, 35, this.width, 30);
-
-        // Calculate appropriate frequency step based on available width
-        // On narrow screens (mobile), show fewer markers to prevent overlap
-        const minLabelSpacing = 80; // Minimum pixels between labels
-        const calculatedMarkers = Math.floor(this.width / minLabelSpacing);
-        const maxMarkers = Math.min(10, Math.max(3, calculatedMarkers)); // Cap at 10, minimum 3
-        const targetStep = this.totalBandwidth / maxMarkers;
-        let freqStep;
-        if (targetStep >= 5e6) freqStep = 5e6;
-        else if (targetStep >= 2e6) freqStep = 2e6;
-        else if (targetStep >= 1e6) freqStep = 1e6;
-        else if (targetStep >= 500e3) freqStep = 500e3;
-        else if (targetStep >= 200e3) freqStep = 200e3;
-        else if (targetStep >= 100e3) freqStep = 100e3;
-        else if (targetStep >= 50e3) freqStep = 50e3;
-        else if (targetStep >= 20e3) freqStep = 20e3;
-        else if (targetStep >= 10e3) freqStep = 10e3;
-        else if (targetStep >= 5e3) freqStep = 5e3;
-        else if (targetStep >= 2e3) freqStep = 2e3;
-        else if (targetStep >= 1e3) freqStep = 1e3;
-        else if (targetStep >= 500) freqStep = 500;
-        else if (targetStep >= 200) freqStep = 200;
-        else freqStep = 100;
-
-        ctx.font = 'bold 13px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        // Draw major ticks and labels (offset by 35px for bookmarks)
-        const firstFreq = Math.ceil(startFreq / freqStep) * freqStep;
-        for (let freq = firstFreq; freq <= endFreq; freq += freqStep) {
-            const x = ((freq - startFreq) / this.totalBandwidth) * this.width;
-
-            // Draw tick mark (offset by 35px)
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(x - 1, 35, 2, 12);
-
-            // Draw label (offset by 35px)
-            ctx.fillStyle = '#ffffff';
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = 3;
-
-            const label = this.formatFrequencyScale(freq);
-            ctx.strokeText(label, x, 55);
-            ctx.fillText(label, x, 55);
-        }
-
-        // Draw minor ticks (at 1/5 of major step, offset by 35px)
-        const minorStep = freqStep / 5;
-        ctx.fillStyle = '#ffffff';
-        const firstMinor = Math.ceil(startFreq / minorStep) * minorStep;
-        for (let freq = firstMinor; freq <= endFreq; freq += minorStep) {
-            // Skip major ticks
-            if (Math.abs(freq % freqStep) < 1) continue;
-
-            const x = ((freq - startFreq) / this.totalBandwidth) * this.width;
-            // Draw minor tick (8 pixels tall, 1.5 pixels wide, offset by 35px)
-            ctx.fillRect(x - 0.75, 35, 1.5, 8);
-        }
-    }
-
 
     // Setup mouse handlers for line graph canvas
     setupLineGraphMouseHandlers() {
@@ -2079,6 +2005,9 @@ class SpectrumDisplay {
                 window.drawCWSpotsOnSpectrum(this, console.log);
             }
 
+            // Draw frequency scale to cache (always visible, below bookmarks)
+            this.drawFrequencyScaleOnOverlay(this.markerCacheCtx);
+
             // Restore original context
             this.overlayCtx = originalCtx;
 
@@ -2223,6 +2152,79 @@ class SpectrumDisplay {
 
         // Draw vertical bandwidth lines extending down over waterfall/graph
         this.drawBandwidthLines(xLow, xHigh);
+    }
+
+    // Draw frequency scale on overlay canvas (always visible)
+    drawFrequencyScaleOnOverlay(ctx) {
+        if (!this.totalBandwidth) return;
+
+        // Apply client-side prediction offset during dragging
+        const effectiveCenterFreq = this.centerFreq + this.predictedFreqOffset;
+        const startFreq = effectiveCenterFreq - this.totalBandwidth / 2;
+        const endFreq = effectiveCenterFreq + this.totalBandwidth / 2;
+
+        // Clear the frequency scale area (starts at 35px to leave room for bookmarks)
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 35, this.width, 30);
+
+        // Calculate appropriate frequency step based on available width
+        const minLabelSpacing = 80; // Minimum pixels between labels
+        const calculatedMarkers = Math.floor(this.width / minLabelSpacing);
+        const maxMarkers = Math.min(10, Math.max(3, calculatedMarkers));
+        const targetStep = this.totalBandwidth / maxMarkers;
+        
+        let freqStep;
+        if (targetStep >= 5e6) freqStep = 5e6;
+        else if (targetStep >= 2e6) freqStep = 2e6;
+        else if (targetStep >= 1e6) freqStep = 1e6;
+        else if (targetStep >= 500e3) freqStep = 500e3;
+        else if (targetStep >= 200e3) freqStep = 200e3;
+        else if (targetStep >= 100e3) freqStep = 100e3;
+        else if (targetStep >= 50e3) freqStep = 50e3;
+        else if (targetStep >= 20e3) freqStep = 20e3;
+        else if (targetStep >= 10e3) freqStep = 10e3;
+        else if (targetStep >= 5e3) freqStep = 5e3;
+        else if (targetStep >= 2e3) freqStep = 2e3;
+        else if (targetStep >= 1e3) freqStep = 1e3;
+        else if (targetStep >= 500) freqStep = 500;
+        else if (targetStep >= 200) freqStep = 200;
+        else freqStep = 100;
+
+        ctx.font = 'bold 13px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Draw major ticks and labels (offset by 35px for bookmarks)
+        const firstFreq = Math.ceil(startFreq / freqStep) * freqStep;
+        for (let freq = firstFreq; freq <= endFreq; freq += freqStep) {
+            const x = ((freq - startFreq) / this.totalBandwidth) * this.width;
+
+            // Draw tick mark (offset by 35px)
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(x - 1, 35, 2, 12);
+
+            // Draw label (offset by 35px)
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 3;
+
+            const label = this.formatFrequencyScale(freq);
+            ctx.strokeText(label, x, 55);
+            ctx.fillText(label, x, 55);
+        }
+
+        // Draw minor ticks (at 1/5 of major step, offset by 35px)
+        const minorStep = freqStep / 5;
+        ctx.fillStyle = '#ffffff';
+        const firstMinor = Math.ceil(startFreq / minorStep) * minorStep;
+        for (let freq = firstMinor; freq <= endFreq; freq += minorStep) {
+            // Skip major ticks
+            if (Math.abs(freq % freqStep) < 1) continue;
+
+            const x = ((freq - startFreq) / this.totalBandwidth) * this.width;
+            // Draw minor tick (8 pixels tall, 1.5 pixels wide, offset by 35px)
+            ctx.fillRect(x - 0.75, 35, 1.5, 8);
+        }
     }
 
     // Draw vertical green lines at bandwidth edges over waterfall/graph (split mode only)

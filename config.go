@@ -92,7 +92,8 @@ type ServerConfig struct {
 	BypassPassword    string          `yaml:"bypass_password"`     // Password that grants bypass privileges (empty = disabled)
 	PublicIQModes     map[string]bool `yaml:"public_iq_modes"`     // IQ modes accessible without bypass authentication
 	EnableCORS        bool            `yaml:"enable_cors"`
-	EnableKiwiSDR     bool            `yaml:"enable_kiwisdr"` // Enable KiwiSDR protocol compatibility endpoint at /kiwi/ (default: true)
+	EnableKiwiSDR     bool            `yaml:"enable_kiwisdr"` // Enable KiwiSDR protocol compatibility server (default: false)
+	KiwiSDRListen     string          `yaml:"kiwisdr_listen"` // KiwiSDR server listen address (e.g., ":8073", default: ":8073")
 	LogFile           string          `yaml:"logfile"`        // HTTP request log file path
 	timeoutBypassNets []*net.IPNet    // Parsed CIDR networks (internal use)
 }
@@ -313,8 +314,10 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Server.LogFile == "" {
 		config.Server.LogFile = "web.log"
 	}
-	// KiwiSDR compatibility is disabled by default (YAML bool defaults to false)
-	// Users must explicitly set enable_kiwisdr: true in config.yaml to enable it
+	// KiwiSDR compatibility defaults
+	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRListen == "" {
+		config.Server.KiwiSDRListen = ":8073" // Default port
+	}
 	if config.Audio.BufferSize == 0 {
 		config.Audio.BufferSize = 4096
 	}

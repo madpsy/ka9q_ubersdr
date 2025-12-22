@@ -181,13 +181,20 @@ server:
   # Enable CORS
   enable_cors: false
 
-  # Enable KiwiSDR protocol compatibility endpoint
-  # When enabled, allows KiwiSDR clients (like kiwirecorder.py) to connect
-  # to UberSDR using the KiwiSDR WebSocket protocol at /kiwi/<timestamp>/<type>
+  # KiwiSDR protocol compatibility
+  # Allows KiwiSDR clients (like kiwirecorder.py) to connect to UberSDR
+  # When enabled, starts a separate HTTP server on the configured port
   # This creates standard UberSDR sessions with full IP tracking and authentication
-  # Default: false (disabled)
-  # Set to true to enable compatibility with kiwirecorder.py and other KiwiSDR clients
+  #
+  # enable_kiwisdr: Enable/disable KiwiSDR compatibility (default: false)
+  # kiwisdr_listen: Listen address for KiwiSDR server (default: ":8073")
+  #   Format: ":port" (e.g., ":8073") or "address:port" (e.g., "0.0.0.0:8073")
+  #
+  # Usage with kiwirecorder.py:
+  #   python3 kiwirecorder.py -s your-host -p 8073 -f 14074 -m usb --tlimit 60
+  #
   enable_kiwisdr: false
+  kiwisdr_listen: ":8073"
 
   # HTTP request log file (Apache combined log format)
   logfile: "web.log"

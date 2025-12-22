@@ -769,14 +769,6 @@ func main() {
 	// http.HandleFunc("/ws/spectrum", spectrumWsHandler.HandleWebSocket) // Old endpoint - DISABLED
 	http.HandleFunc("/ws/user-spectrum", userSpectrumWsHandler.HandleSpectrumWebSocket) // New endpoint
 	http.HandleFunc("/ws/dxcluster", dxClusterWsHandler.HandleWebSocket)                // DX cluster spots
-
-	// KiwiSDR compatibility endpoint (enabled by default)
-	if config.Server.EnableKiwiSDR {
-		http.HandleFunc("/kiwi/", kiwiHandler.HandleKiwiWebSocket)
-		log.Printf("KiwiSDR protocol compatibility enabled at /kiwi/<timestamp>/<type>")
-	} else {
-		log.Printf("KiwiSDR protocol compatibility disabled")
-	}
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
 		handleStats(w, r, sessions)
@@ -986,6 +978,40 @@ func main() {
 			log.Printf("Error closing server: %v", err)
 		}
 	}()
+
+	// Start KiwiSDR compatibility server on separate port if enabled
+	var kiwiServer *http.Server
+	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRListen != "" {
+		// Create separate HTTP server for KiwiSDR protocol
+		kiwiMux := http.NewServeMux()
+		kiwiMux.HandleFunc("/", kiwiHandler.HandleKiwiWebSocket) // Accept any path
+
+		kiwiServer = &http.Server{
+			Addr:    config.Server.KiwiSDRListen,
+			Handler: kiwiMux,
+		}
+
+		go func() {
+			log.Printf("KiwiSDR protocol server listening on %s", config.Server.KiwiSDRListen)
+			log.Printf("KiwiSDR clients can connect to this port (e.g., kiwirecorder.py -s host -p %s)", strings.TrimPrefix(config.Server.KiwiSDRListen, ":"))
+			if err := kiwiServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("KiwiSDR server error: %v", err)
+			}
+		}()
+
+		// Add to shutdown handler
+		defer func() {
+			if kiwiServer != nil {
+				if err := kiwiServer.Close(); err != nil {
+					log.Printf("Error closing KiwiSDR server: %v", err)
+				}
+			}
+		}()
+	} else if config.Server.EnableKiwiSDR {
+		log.Printf("KiwiSDR protocol compatibility enabled but kiwisdr_listen not configured (will use default :8073)")
+	} else {
+		log.Printf("KiwiSDR protocol compatibility disabled")
+	}
 
 	// Start server
 	log.Printf("Server listening on %s", config.Server.Listen)

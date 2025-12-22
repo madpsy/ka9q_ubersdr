@@ -541,7 +541,7 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 //   - Changes: array of [index: uint16, value: float32] (6 bytes each)
 func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, session *Session, spectrumData []float32, state *spectrumState) error {
 	const (
-		deltaThreshold    = 3.0 // 3.0 dB change threshold (aggressive for HF radio - ignores noise variations)
+		deltaThreshold    = 6.0 // 6.0 dB change threshold (very aggressive - one S-unit, ignores noise and weak signals)
 		fullFrameInterval = 50  // Send full frame every N frames to prevent drift
 	)
 

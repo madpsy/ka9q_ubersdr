@@ -6,11 +6,12 @@ export class WebSocketManager {
         // Configuration
         this.userSessionID = config.userSessionID;
         this.onMessage = config.onMessage || (() => {});
+        this.onBinaryMessage = config.onBinaryMessage || (() => {});
         this.onConnect = config.onConnect || (() => {});
         this.onDisconnect = config.onDisconnect || (() => {});
         this.onError = config.onError || (() => {});
         this.log = config.log || console.log;
-        
+
         // WebSocket state
         this.ws = null;
         this.reconnectTimer = null;
@@ -20,10 +21,15 @@ export class WebSocketManager {
         this.userDisconnected = false;
         this.connectionFailureNotified = false;
         this.lastServerError = null;
-        
+
+        // Opus tracking
+        this.opusPacketCount = 0;
+        this.pcmPacketCount = 0;
+        this.opusConfirmed = false;
+
         // Periodic settings sync
         this.settingsSyncInterval = null;
-        
+
         // Expose ws globally for compatibility
         window.ws = null;
     }
@@ -69,7 +75,7 @@ export class WebSocketManager {
     // Connect to WebSocket
     async connect(params) {
         const { frequency, mode, bandwidthLow, bandwidthHigh } = params;
-        
+
         // Clear any pending reconnection timer
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
@@ -81,7 +87,7 @@ export class WebSocketManager {
 
         // Check if connection will be allowed
         const checkResult = await this.checkConnection();
-        
+
         if (!checkResult.allowed) {
             this.log(`Connection rejected: ${checkResult.reason}`, 'error');
             this.onError({
@@ -89,21 +95,21 @@ export class WebSocketManager {
                 reason: checkResult.reason,
                 status: checkResult.status
             });
-            
+
             // Store error for potential reconnection attempts
             this.lastServerError = checkResult.reason;
-            
+
             // Don't attempt reconnection if banned or kicked
             if (checkResult.reason.includes('banned') || checkResult.reason.includes('terminated')) {
                 this.lastConnectionParams = null;
                 return false;
             }
-            
+
             // For max sessions, schedule reconnection
             if (checkResult.reason.includes('Maximum')) {
                 this.scheduleReconnect();
             }
-            
+
             return false;
         }
 
@@ -117,6 +123,9 @@ export class WebSocketManager {
         if (window.bypassPassword) {
             wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
         }
+
+        // Always request Opus format (will gracefully fallback to PCM if server doesn't support it)
+        wsUrl += '&format=opus';
 
         this.log(`Connecting to ${wsUrl}...`);
 
@@ -145,32 +154,62 @@ export class WebSocketManager {
     handleOpen() {
         this.log('Connected!');
         this.onConnect();
-        
+
         // Don't reset reconnection attempts immediately - wait for first successful message
         // This prevents resetting the counter when server immediately kicks us
-        
+
         // Start periodic settings sync
         this.startSettingsSync();
     }
 
-    // Handle incoming messages
+    // Handle incoming messages (binary or JSON)
     handleMessage(event) {
+        // Check if this is a binary message (Opus format)
+        if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+            this.opusPacketCount++;
+
+            // Log confirmation on first Opus packet
+            if (this.opusPacketCount === 1) {
+                console.log('✓ Receiving Opus-encoded audio packets from server (binary WebSocket frames)');
+                this.opusConfirmed = true;
+            }
+
+            // Pass binary data to binary message handler
+            this.onBinaryMessage(event.data);
+
+            // Reset reconnection attempts on successful binary message
+            this.reconnectAttempts = 0;
+            this.connectionFailureNotified = false;
+            return;
+        }
+
+        // Handle JSON messages (PCM format or control messages)
         try {
             const msg = JSON.parse(event.data);
-            
+
             // Handle rate limit errors (status 429)
             if (msg.type === 'error' && msg.status === 429) {
                 console.warn('⚠️ Audio rate limit exceeded:', msg.error);
                 // Don't pass to onMessage, just log it
                 return;
             }
-            
+
+            // Track PCM audio packets
+            if (msg.type === 'audio') {
+                this.pcmPacketCount++;
+
+                // Warn if receiving PCM when Opus was requested
+                if (this.pcmPacketCount === 1 && !this.opusConfirmed) {
+                    console.warn('⚠ Server is sending PCM audio (not Opus) - server may not support Opus or format parameter');
+                }
+            }
+
             // Reset reconnection attempts on first successful message
             if (msg.type === 'status') {
                 this.reconnectAttempts = 0;
                 this.connectionFailureNotified = false;
             }
-            
+
             this.onMessage(msg);
         } catch (e) {
             console.error('Failed to parse message:', e);
@@ -191,12 +230,12 @@ export class WebSocketManager {
     handleClose(event) {
         console.log('WebSocket closed - Code:', event.code, 'Reason:', event.reason, 'Clean:', event.wasClean);
         this.log('Disconnected');
-        
+
         // Stop settings sync when connection closes
         this.stopSettingsSync();
-        
+
         this.onDisconnect();
-        
+
         this.ws = null;
         window.ws = null;
 
@@ -205,7 +244,7 @@ export class WebSocketManager {
         // Code 1001 = going away (page navigation)
         if (event.code !== 1000 && event.code !== 1001 && !this.connectionFailureNotified) {
             this.connectionFailureNotified = true;
-            
+
             let errorMessage;
             if (this.lastServerError) {
                 errorMessage = `Connection failed: ${this.lastServerError}. Attempting to reconnect...`;
@@ -214,14 +253,14 @@ export class WebSocketManager {
             } else {
                 errorMessage = 'Connection lost. Attempting to reconnect...';
             }
-            
+
             this.onError({
                 type: 'connection_closed',
                 message: errorMessage,
                 code: event.code,
                 reason: event.reason
             });
-            
+
             this.lastServerError = null;
         }
 
@@ -266,7 +305,7 @@ export class WebSocketManager {
 
             if (!checkResult.allowed) {
                 this.log(`Reconnection blocked: ${checkResult.reason}`, 'error');
-                
+
                 this.onError({
                     type: 'reconnection_blocked',
                     reason: checkResult.reason,
@@ -336,7 +375,7 @@ export class WebSocketManager {
     // Get connection state
     getState() {
         if (!this.ws) return 'disconnected';
-        
+
         switch (this.ws.readyState) {
             case WebSocket.CONNECTING: return 'connecting';
             case WebSocket.OPEN: return 'connected';

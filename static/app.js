@@ -50,6 +50,7 @@ window.bypassPassword = null;
 const wsManager = new WebSocketManager({
     userSessionID: userSessionID,
     onMessage: handleMessage,
+    onBinaryMessage: handleBinaryMessage,
     onConnect: () => {
         log('Connected!');
         updateConnectionStatus('connected');
@@ -964,7 +965,7 @@ async function checkConnectionOnLoad(audioStartButton, audioStartOverlay, origin
         const requestBody = {
             user_session_id: userSessionID
         };
-        
+
         // Add password if provided
         if (password) {
             requestBody.password = password;
@@ -1078,11 +1079,11 @@ window.submitBypassPassword = async function() {
     const errorMessage = document.getElementById('password-error-message');
     const submitButton = document.getElementById('bypass-password-submit');
     const audioStartButton = document.getElementById('audio-start-button');
-    
+
     if (!passwordInput || !submitButton) return;
-    
+
     const password = passwordInput.value.trim();
-    
+
     if (!password) {
         if (errorMessage) {
             errorMessage.textContent = 'Please enter a password';
@@ -1090,25 +1091,25 @@ window.submitBypassPassword = async function() {
         }
         return;
     }
-    
+
     // Disable submit button and show loading state
     submitButton.disabled = true;
     submitButton.textContent = 'Checking...';
-    
+
     if (errorMessage) {
         errorMessage.style.display = 'none';
     }
-    
+
     // Get the original HTML from the button's data attribute or reconstruct it
     const originalHTML = `<svg width="80" height="80" viewBox="0 0 80 80">
                     <polygon points="25,15 25,65 65,40" fill="white"/>
                 </svg>
                 <span>Click to Start</span>`;
-    
+
     // Retry connection check with password
     try {
         await checkConnectionOnLoad(audioStartButton, document.getElementById('audio-start-overlay'), originalHTML, password);
-        
+
         // Check if connection was successful
         if (bypassPassword === password) {
             // Success - password was accepted
@@ -1616,6 +1617,166 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
     }
 }
 
+// Handle incoming binary messages (Opus format)
+async function handleBinaryMessage(data) {
+    if (!audioContext) {
+        return;
+    }
+
+    try {
+        // Convert Blob to ArrayBuffer if needed
+        let arrayBuffer;
+        if (data instanceof Blob) {
+            arrayBuffer = await data.arrayBuffer();
+        } else {
+            arrayBuffer = data;
+        }
+
+        // Parse binary packet header (matching Python client format)
+        // 8 bytes: timestamp (uint64, little-endian)
+        // 4 bytes: sample rate (uint32, little-endian)
+        // 1 byte: channels (uint8)
+        // remaining: Opus encoded data
+        const view = new DataView(arrayBuffer);
+
+        if (arrayBuffer.byteLength < 13) {
+            console.error('Binary packet too short:', arrayBuffer.byteLength, 'bytes');
+            return;
+        }
+
+        const timestamp = view.getBigUint64(0, true); // little-endian
+        const sampleRate = view.getUint32(8, true); // little-endian
+        const channels = view.getUint8(12);
+        const opusData = new Uint8Array(arrayBuffer, 13);
+
+        // Initialize or reinitialize decoder if sample rate or channels changed
+        if (!opusDecoderInitialized ||
+            opusDecoderSampleRate !== sampleRate ||
+            opusDecoderChannels !== channels) {
+            const success = await initOpusDecoder(sampleRate, channels);
+            if (!success) {
+                console.error('Failed to initialize Opus decoder');
+                return;
+            }
+        }
+
+        // Check if AudioContext sample rate needs to change
+        if (audioContext && sampleRate !== currentAudioContextSampleRate) {
+            log(`Sample rate changed from ${currentAudioContextSampleRate} Hz to ${sampleRate} Hz - recreating AudioContext`);
+
+            // Close old context
+            audioContext.close();
+
+            // Create new context with matching sample rate
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                sampleRate: sampleRate
+            });
+            window.audioContext = audioContext;
+            currentAudioContextSampleRate = sampleRate;
+            nextPlayTime = audioContext.currentTime;
+            window.nextPlayTime = nextPlayTime;
+            audioStartTime = audioContext.currentTime;
+
+            // Reinitialize all audio nodes
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = getOptimalFFTSize();
+            analyser.smoothingTimeConstant = 0;
+            updateFFTSizeDropdown();
+
+            postFilterAnalyser = audioContext.createAnalyser();
+            postFilterAnalyser.fftSize = getOptimalFFTSize();
+            postFilterAnalyser.smoothingTimeConstant = 0;
+
+            vuAnalyser = audioContext.createAnalyser();
+            vuAnalyser.fftSize = getOptimalFFTSize();
+            vuAnalyser.smoothingTimeConstant = 0;
+
+            window.analyser = analyser;
+            window.postFilterAnalyser = postFilterAnalyser;
+            window.vuAnalyser = vuAnalyser;
+
+            // Reinitialize audio processing nodes
+            initializeStereoChannels();
+            initializeSquelch();
+            initializeCompressor();
+            initializeLowpassFilter();
+            initializeEqualizer();
+
+            // Restore filter settings
+            if (window.restoreFilterSettings) {
+                window.restoreFilterSettings();
+            }
+
+            // Reinitialize NR2 if it was enabled
+            if (noiseReductionEnabled) {
+                try {
+                    if (noiseReductionProcessor) noiseReductionProcessor.disconnect();
+                    if (noiseReductionMakeupGain) noiseReductionMakeupGain.disconnect();
+                    if (noiseReductionAnalyser) noiseReductionAnalyser.disconnect();
+                } catch (e) {
+                    // Ignore disconnect errors from closed context
+                }
+
+                noiseReductionProcessor = null;
+                noiseReductionMakeupGain = null;
+                noiseReductionAnalyser = null;
+                nr2 = null;
+
+                const success = initNoiseReduction();
+                if (success) {
+                    if (nr2) {
+                        nr2.enabled = true;
+                        nr2.setParameters(noiseReductionStrength, noiseReductionFloor, 1.0);
+                    }
+                    log('✅ NR2 reinitialized after AudioContext recreation');
+                } else {
+                    noiseReductionEnabled = false;
+                    const nr2Checkbox = document.getElementById('noise-reduction-enable');
+                    if (nr2Checkbox) nr2Checkbox.checked = false;
+                    log('❌ Failed to reinitialize NR2 - disabled', 'error');
+                }
+            }
+
+            log(`AudioContext recreated at ${sampleRate} Hz (eliminates Chrome resampling artifacts)`);
+        }
+
+        // Decode Opus packet to PCM
+        const decoded = await opusDecoder.decode(opusData);
+
+        if (!decoded || !decoded.channelData || decoded.channelData.length === 0) {
+            console.error('Opus decode returned empty data');
+            return;
+        }
+
+        // Create stereo audio buffer from decoded PCM data
+        const numChannels = Math.max(2, decoded.channelData.length);
+        const audioBuffer = audioContext.createBuffer(
+            numChannels,
+            decoded.channelData[0].length,
+            decoded.sampleRate
+        );
+
+        // Copy decoded data to audio buffer
+        if (decoded.channelData.length === 1) {
+            // Mono source - duplicate to both channels
+            audioBuffer.getChannelData(0).set(decoded.channelData[0]);
+            audioBuffer.getChannelData(1).set(decoded.channelData[0]);
+        } else {
+            // Stereo or multi-channel source
+            for (let channel = 0; channel < decoded.channelData.length && channel < 2; channel++) {
+                audioBuffer.getChannelData(channel).set(decoded.channelData[channel]);
+            }
+        }
+
+        // Play the decoded audio
+        playAudioBuffer(audioBuffer);
+
+    } catch (e) {
+        console.error('Failed to process binary Opus message:', e);
+        log('Opus decoding error: ' + e.message, 'error');
+    }
+}
+
 // Handle incoming messages
 function handleMessage(msg) {
     switch (msg.type) {
@@ -1645,6 +1806,8 @@ function handleMessage(msg) {
 let opusDecoder = null;
 let opusDecoderInitialized = false;
 let opusDecoderFailed = false;
+let opusDecoderSampleRate = null;
+let opusDecoderChannels = null;
 
 // Initialize Opus decoder
 async function initOpusDecoder(sampleRate, channels) {
@@ -1679,6 +1842,8 @@ async function initOpusDecoder(sampleRate, channels) {
         console.log('Waiting for decoder.ready...');
         await opusDecoder.ready;
         opusDecoderInitialized = true;
+        opusDecoderSampleRate = sampleRate;
+        opusDecoderChannels = channels;
         console.log('Opus decoder initialized successfully');
         log(`Opus decoder initialized for ${sampleRate} Hz, ${channels} channel(s)`);
         return true;
@@ -2393,7 +2558,7 @@ function validateFrequencyInput(input) {
     // Store cursor position before any changes
     const cursorPos = input.selectionStart;
     const oldValue = input.value;
-    
+
     // Remove any non-digit characters
     let value = oldValue.replace(/\D/g, '');
 
@@ -2405,7 +2570,7 @@ function validateFrequencyInput(input) {
     // Only update if value actually changed (prevents unnecessary cursor resets)
     if (value !== oldValue) {
         input.value = value;
-        
+
         // Calculate how many characters were removed before the cursor
         let removedBeforeCursor = 0;
         for (let i = 0; i < cursorPos && i < oldValue.length; i++) {
@@ -5977,7 +6142,7 @@ document.addEventListener('DOMContentLoaded', () => {
             freqInput.addEventListener('input', (e) => {
                 validateFrequencyInput(e.target);
             });
-            
+
             // Add Enter key handler to apply frequency
             freqInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
@@ -5985,7 +6150,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     handleFrequencyChange();
                 }
             });
-            
+
             // Add blur handler to apply frequency when focus is lost
             freqInput.addEventListener('blur', () => {
                 handleFrequencyChange();
@@ -6055,15 +6220,15 @@ function updateSpectrumAutoAdjust() {
     if (!spectrumDisplay || !spectrumDisplay.spectrumData || !spectrumDisplay.totalBandwidth) {
         return;
     }
-    
+
     const spectrumData = spectrumDisplay.spectrumData;
     const centerFreq = spectrumDisplay.centerFreq;
     const totalBandwidth = spectrumDisplay.totalBandwidth;
-    
+
     // Calculate frequency range
     const startFreq = centerFreq - totalBandwidth / 2;
     const endFreq = centerFreq + totalBandwidth / 2;
-    
+
     // Get all dB values in visible range
     const visibleValues = [];
     for (let i = 0; i < spectrumData.length; i++) {
@@ -6075,26 +6240,26 @@ function updateSpectrumAutoAdjust() {
             }
         }
     }
-    
+
     if (visibleValues.length === 0) {
         return;
     }
-    
+
     // Sort values for percentile calculation
     visibleValues.sort((a, b) => a - b);
-    
+
     // Calculate noise floor (5th percentile - lower to better identify true noise floor)
     const noiseFloorIndex = Math.floor(visibleValues.length * 0.05);
     const currentNoiseFloor = visibleValues[noiseFloorIndex];
-    
+
     // Calculate peak signal (98th percentile - higher to focus on actual strong signals)
     const peakIndex = Math.floor(visibleValues.length * 0.98);
     const currentPeak = visibleValues[peakIndex];
-    
+
     // Add to history for temporal smoothing
     spectrumNoiseFloorHistory.push(currentNoiseFloor);
     spectrumPeakHistory.push(currentPeak);
-    
+
     // Keep only last N samples
     if (spectrumNoiseFloorHistory.length > SPECTRUM_HISTORY_SIZE) {
         spectrumNoiseFloorHistory.shift();
@@ -6102,16 +6267,16 @@ function updateSpectrumAutoAdjust() {
     if (spectrumPeakHistory.length > SPECTRUM_HISTORY_SIZE) {
         spectrumPeakHistory.shift();
     }
-    
+
     // Need enough history before adjusting (prevents immediate changes when signals appear/disappear)
     if (spectrumNoiseFloorHistory.length < SPECTRUM_HISTORY_SIZE) {
         return;
     }
-    
+
     // Calculate smoothed values (average of history)
     const avgNoiseFloor = spectrumNoiseFloorHistory.reduce((sum, val) => sum + val, 0) / spectrumNoiseFloorHistory.length;
     const avgPeak = spectrumPeakHistory.reduce((sum, val) => sum + val, 0) / spectrumPeakHistory.length;
-    
+
     // Calculate dynamic range
     const dynamicRange = avgPeak - avgNoiseFloor;
 
@@ -6133,7 +6298,7 @@ function updateSpectrumAutoAdjust() {
     } else {
         targetIntensity = 0.1;   // Weak signals, slight boost
     }
-    
+
     // Apply intensity and contrast directly
     if (spectrumDisplay) {
         spectrumDisplay.updateConfig({
@@ -6596,11 +6761,11 @@ function selectBandFromDropdown(value) {
         let mode = null;
         console.log('selectBandFromDropdown: Looking for band:', bandData.label);
         console.log('selectBandFromDropdown: Available bands:', window.amateurBands);
-        
+
         if (window.amateurBands && window.amateurBands.length > 0) {
             const fullBandData = window.amateurBands.find(b => b.label === bandData.label);
             console.log('selectBandFromDropdown: Found band data:', fullBandData);
-            
+
             if (fullBandData && fullBandData.mode) {
                 mode = fullBandData.mode.toLowerCase(); // Ensure lowercase
                 console.log('selectBandFromDropdown: Using band mode:', mode);
@@ -6959,24 +7124,24 @@ function toggleFrequencyScrollDropdown() {
 function updateFrequencyScrollMode() {
     const dropdown = document.getElementById('frequency-scroll-mode');
     if (!dropdown) return;
-    
+
     frequencyScrollMode = dropdown.value;
-    
+
     // Parse the mode to get step and delay
     const [stepStr, speed] = frequencyScrollMode.split('-');
     const step = parseInt(stepStr);
-    
+
     frequencyScrollStep = step;
-    
+
     // Set delay based on speed
     // Optimized for 40 cmd/sec rate limit
     // "slow" = 50ms delay (20 updates/sec), "fast" = 25ms delay (40 updates/sec)
     frequencyScrollDelay = speed === 'slow' ? 50 : 25;
-    
+
     // Set global variables for spectrum-display.js to use
     window.frequencyScrollStep = step;
     window.frequencyScrollDelay = frequencyScrollDelay;
-    
+
     // Format step for display (show kHz for values >= 1000)
     const stepDisplay = step >= 1000 ? `${step / 1000} kHz` : `${step} Hz`;
     log(`Frequency scroll mode: ${stepDisplay} ${speed} (${frequencyScrollDelay}ms delay)`);

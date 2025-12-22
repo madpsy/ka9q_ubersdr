@@ -1740,8 +1740,8 @@ async function handleBinaryMessage(data) {
             log(`AudioContext recreated at ${sampleRate} Hz (eliminates Chrome resampling artifacts)`);
         }
 
-        // Decode Opus packet to PCM
-        const decoded = await opusDecoder.decode(opusData);
+        // Decode Opus packet to PCM using decodeFrame method
+        const decoded = await opusDecoder.decodeFrame(opusData);
 
         if (!decoded || !decoded.channelData || decoded.channelData.length === 0) {
             console.error('Opus decode returned empty data');
@@ -1749,11 +1749,12 @@ async function handleBinaryMessage(data) {
         }
 
         // Create stereo audio buffer from decoded PCM data
+        // Use the sample rate from the decoded result
         const numChannels = Math.max(2, decoded.channelData.length);
         const audioBuffer = audioContext.createBuffer(
             numChannels,
             decoded.channelData[0].length,
-            decoded.sampleRate
+            sampleRate  // Use sampleRate from packet header
         );
 
         // Copy decoded data to audio buffer

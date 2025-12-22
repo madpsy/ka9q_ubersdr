@@ -164,13 +164,13 @@ services:
     environment:
       - TZ=${TZ:-UTC}
 
-    # Healthcheck - just verify process is running
+    # Healthcheck - verify tunnel connection is active and healthy
     healthcheck:
-      test: [CMD, pgrep, -x, tunnel_client]
+      test: [CMD, wget, --no-verbose, --tries=1, --spider, http://localhost:8081/health]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 10s
 
 # Shared network between ka9q-radio and ubersdr containers
 # Docker Compose will create this automatically with the specified subnet

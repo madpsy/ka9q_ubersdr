@@ -884,6 +884,10 @@ class RadioGUI:
         style.map('MuteTX.Green.TCheckbutton', background=[('active', '#22c55e'), ('!active', '#22c55e')])
         style.map('MuteTX.Red.TCheckbutton', background=[('active', '#ef4444'), ('!active', '#ef4444')])
 
+        # Opus checkbox styles (default and active/blue)
+        style.configure('Opus.TCheckbutton', foreground='black')
+        style.configure('OpusActive.TCheckbutton', foreground='blue')
+
         # Status-based styles (background colors based on SNR, white bold text)
         style.configure('Poor.TButton', background=self.BAND_COLORS['POOR'], foreground='white', font=('TkDefaultFont', 9, 'bold'))
         style.configure('Fair.TButton', background=self.BAND_COLORS['FAIR'], foreground='white', font=('TkDefaultFont', 9, 'bold'))
@@ -1542,11 +1546,16 @@ class RadioGUI:
             self.eq_btn = None
 
         # Opus compression checkbox (same row, after EQ button)
-        self.opus_var = tk.BooleanVar(value=False)
-        self.opus_check = ttk.Checkbutton(audio_frame, text="Opus (90% bandwidth savings)",
+        self.opus_var = tk.BooleanVar(value=True)  # Enabled by default
+        self.opus_check = ttk.Checkbutton(audio_frame, text="Opus",
                                          variable=self.opus_var,
-                                         command=self.on_opus_changed)
+                                         command=self.on_opus_changed,
+                                         style='Opus.TCheckbutton')
         self.opus_check.grid(row=3, column=4, columnspan=2, sticky=tk.W, padx=(20, 0), pady=(5, 0))
+
+        # Store reference to checkbox label for color changes
+        # We'll update the text color when Opus packets are received
+        self.opus_active = False
 
         # NR2 Noise Reduction (row 4) - use a frame to avoid column weight issues
         nr2_container = ttk.Frame(audio_frame)
@@ -3211,9 +3220,12 @@ class RadioGUI:
                 self.audio_spectrum_btn.config(state='disabled')
 
             # Disable Opus (not supported for IQ modes)
+            # Save current state before disabling
+            if not hasattr(self, '_opus_saved_state'):
+                self._opus_saved_state = self.opus_var.get()
             if self.opus_var.get():
                 self.opus_var.set(False)
-                self.log_status("Opus disabled (IQ mode)")
+                self.log_status("Opus disabled (IQ mode - reconnect required to re-enable)")
             self.opus_check.config(state='disabled')
 
             self.log_status(f"IQ mode selected - audio output disabled (data still sent to FIFO)")
@@ -3248,8 +3260,15 @@ class RadioGUI:
             if self.audio_spectrum_btn:
                 self.audio_spectrum_btn.config(state='normal')
 
-            # Re-enable Opus checkbox
+            # Re-enable Opus checkbox and restore previous state
             self.opus_check.config(state='normal')
+            # Restore saved Opus state if it was saved
+            if hasattr(self, '_opus_saved_state'):
+                saved_state = self._opus_saved_state
+                self.opus_var.set(saved_state)
+                delattr(self, '_opus_saved_state')
+                if saved_state:
+                    self.log_status("Opus re-enabled (reconnect required to activate)")
 
         # Always update bandwidth defaults and presets when mode changes
         self.adjust_bandwidth_for_mode(mode)
@@ -4644,6 +4663,22 @@ class RadioGUI:
         # Auto-save setting
         self.save_audio_settings()
 
+    def on_opus_active(self, active: bool):
+        """Callback when Opus packets are received (called from client thread)."""
+        # Schedule GUI update in main thread
+        self.root.after(0, lambda: self._update_opus_indicator(active))
+
+    def _update_opus_indicator(self, active: bool):
+        """Update Opus checkbox color to indicate active status (runs in main thread)."""
+        if active and not self.opus_active:
+            # Opus is now active - change text color to blue using style
+            self.opus_check.configure(style='OpusActive.TCheckbutton')
+            self.opus_active = True
+        elif not active and self.opus_active:
+            # Opus is no longer active - reset to default style
+            self.opus_check.configure(style='Opus.TCheckbutton')
+            self.opus_active = False
+
     def on_opus_changed(self):
         """Handle Opus checkbox change."""
         enabled = self.opus_var.get()
@@ -5882,6 +5917,7 @@ class RadioGUI:
                 'udp_port': udp_port,
                 'udp_stereo': udp_stereo,
                 'use_opus': self.opus_var.get(),  # Pass Opus setting to client
+                'opus_active_callback': self.on_opus_active,  # Callback when Opus packets received
             }
 
             # Add device index parameter based on output mode
@@ -6072,6 +6108,11 @@ class RadioGUI:
         self.connect_btn.config(text="Connect")
         self.apply_freq_btn.state(['disabled'])
         self.rec_btn.state(['disabled'])
+
+        # Reset Opus indicator
+        if self.opus_active:
+            self.opus_check.configure(style='Opus.TCheckbutton')
+            self.opus_active = False
 
         # Hide receiver info and session timer
         self.receiver_info_frame.grid_remove()

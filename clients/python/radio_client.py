@@ -278,7 +278,8 @@ class RadioClient:
                  audio_filter_high: float = 2700.0, pyaudio_device_index: Optional[int] = None,
                  sounddevice_device_index: Optional[int] = None, udp_host: Optional[str] = None,
                  udp_port: Optional[int] = None, output_channels: Optional[int] = None,
-                 udp_enabled: bool = False, udp_stereo: bool = False, use_opus: bool = False):
+                 udp_enabled: bool = False, udp_stereo: bool = False, use_opus: bool = False,
+                 opus_active_callback=None):
         self.url = url
         self.host = host
         self.port = port
@@ -404,6 +405,7 @@ class RadioClient:
         self.audio_level_callback = audio_level_callback
         self.audio_level_update_counter = 0
         self.recording_callback = recording_callback
+        self.opus_active_callback = opus_active_callback
         
         # Audio bandpass filter
         self.audio_filter_enabled = audio_filter_enabled
@@ -1657,6 +1659,9 @@ class RadioClient:
                                     # Log first Opus packet to confirm it's working
                                     if opus_packet_count == 1:
                                         print("✓ Receiving Opus-encoded audio packets from server", file=sys.stderr)
+                                        # Notify GUI that Opus is active
+                                        if self.opus_active_callback:
+                                            self.opus_active_callback(True)
 
                                 # Check duration limit
                                 if not self.check_duration():

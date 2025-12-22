@@ -878,6 +878,9 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHolder, done <-chan struct{}, useBinaryFormat bool) {
 	session := sessionHolder.getSession()
 
+	// Track if Opus was originally requested (for re-enabling after IQ mode)
+	opusRequested := useBinaryFormat
+
 	// Initialize Opus encoder if binary format requested
 	var opusEncoder *OpusEncoderWrapper
 	if useBinaryFormat {
@@ -897,6 +900,7 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			log.Printf("Failed to create Opus encoder: %v", err)
 			log.Printf("Falling back to PCM")
 			useBinaryFormat = false // Fall back to JSON/PCM
+			opusRequested = false   // Don't try to re-enable if encoder failed
 		}
 	}
 
@@ -921,7 +925,10 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 
 			// Check if current mode is IQ - IQ modes should never use Opus (need lossless data)
 			isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
-			useOpusForThisPacket := useBinaryFormat && opusEncoder != nil && !isIQMode
+
+			// If Opus was originally requested and we're not in IQ mode, use Opus
+			// This allows switching back to Opus after leaving IQ mode
+			useOpusForThisPacket := opusRequested && opusEncoder != nil && !isIQMode
 
 			if useOpusForThisPacket {
 				// Binary Opus format: send raw Opus frames as binary WebSocket messages

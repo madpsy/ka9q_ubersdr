@@ -504,6 +504,7 @@ class SpectrumDisplay {
         this.hasPerformedInitialZoom = false; // Track if we've done initial zoom on first scroll
         this.setupMouseHandlers();
         this.setupScrollHandler();
+        this.setupTouchHandlers();
 
         // Periodic sync verification to prevent audio/spectrum drift
         this.lastSyncCheck = Date.now();

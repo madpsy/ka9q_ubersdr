@@ -41,17 +41,31 @@ func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioRecei
 }
 
 // HandleKiwiWebSocket handles KiwiSDR-compatible WebSocket connections
-// Path format: /kiwi/<timestamp>/<type> where type is "SND" or "W/F"
+// Path format: /<timestamp>/<type> where type is "SND" or "W/F"
+// When running on dedicated port, accepts paths like: /1234567890/SND
 func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Parse path: /kiwi/<timestamp>/<type>
+	// Parse path: /<timestamp>/<type> or /kiwi/<timestamp>/<type>
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) < 3 || parts[0] != "kiwi" {
-		http.Error(w, "Invalid path format. Expected: /kiwi/<timestamp>/SND or /kiwi/<timestamp>/W/F", http.StatusBadRequest)
+
+	// Support both formats:
+	// - /<timestamp>/SND (when on dedicated port)
+	// - /kiwi/<timestamp>/SND (when on main port with /kiwi/ prefix)
+	var timestamp, connType string
+
+	if len(parts) >= 2 {
+		if parts[0] == "kiwi" && len(parts) >= 3 {
+			// /kiwi/<timestamp>/<type> format
+			timestamp = parts[1]
+			connType = strings.Join(parts[2:], "/")
+		} else {
+			// /<timestamp>/<type> format (native KiwiSDR)
+			timestamp = parts[0]
+			connType = strings.Join(parts[1:], "/")
+		}
+	} else {
+		http.Error(w, "Invalid path format. Expected: /<timestamp>/SND or /<timestamp>/W/F", http.StatusBadRequest)
 		return
 	}
-
-	timestamp := parts[1]
-	connType := strings.Join(parts[2:], "/") // "SND" or "W/F"
 
 	log.Printf("KiwiSDR client connecting: timestamp=%s, type=%s", timestamp, connType)
 

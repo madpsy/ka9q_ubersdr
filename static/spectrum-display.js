@@ -3675,11 +3675,17 @@ class SpectrumDisplay {
             // Show line graph - restore split mode class
             this.lineGraphCanvas.classList.add('split-mode');
             this.lineGraphCanvas.style.display = 'block';
+            // Restore waterfall to split mode position (below line graph)
+            this.canvas.classList.add('split-view');
+            this.canvas.style.top = '300px';
             console.log('Line graph (spectrum) enabled');
         } else {
             // Hide line graph - remove split mode class and hide
             this.lineGraphCanvas.classList.remove('split-mode');
             this.lineGraphCanvas.style.display = 'none';
+            // Move waterfall to top (full height mode)
+            this.canvas.classList.remove('split-view');
+            this.canvas.style.top = '0px';
             console.log('Line graph (spectrum) disabled');
         }
 

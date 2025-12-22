@@ -1261,7 +1261,9 @@ class SpectrumDisplay {
 
     // Draw line graph in top half (split mode only)
     drawLineGraph() {
+        // Skip if line graph is not visible
         if (!this.lineGraphCanvas || !this.lineGraphCtx || !this.spectrumData) return;
+        if (this.lineGraphCanvas.style.display === 'none') return;
 
         // Set canvas size to match main canvas width
         if (this.lineGraphCanvas.width !== this.width) {

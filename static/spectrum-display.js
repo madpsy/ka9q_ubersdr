@@ -3699,16 +3699,40 @@ class SpectrumDisplay {
             this.lineGraphCanvas.style.display = 'block';
             // Restore waterfall to split mode position (below line graph)
             this.canvas.classList.add('split-view');
-            this.canvas.style.top = '300px';
-            console.log('Line graph (spectrum) enabled');
+            
+            // Adjust waterfall canvas height to only occupy bottom half
+            this.canvas.height = 300;
+            this.canvasHeight = 300;
+            this.height = 300;
+            
+            // Clear waterfall canvas with black background
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0, 0, this.width, 300);
+            
+            // Recreate waterfall image data for new height
+            this.waterfallImageData = this.ctx.createImageData(this.width, 1);
+            
+            console.log('Line graph (spectrum) enabled - waterfall height set to 300px');
         } else {
             // Hide line graph - remove split mode class and hide
             this.lineGraphCanvas.classList.remove('split-mode');
             this.lineGraphCanvas.style.display = 'none';
-            // Move waterfall to top (full height mode)
+            // Move waterfall to full height mode
             this.canvas.classList.remove('split-view');
-            this.canvas.style.top = '0px';
-            console.log('Line graph (spectrum) disabled');
+            
+            // Restore waterfall canvas to full height
+            this.canvas.height = 600;
+            this.canvasHeight = 600;
+            this.height = 600;
+            
+            // Clear waterfall canvas with black background
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0, 0, this.width, 600);
+            
+            // Recreate waterfall image data for new height
+            this.waterfallImageData = this.ctx.createImageData(this.width, 1);
+            
+            console.log('Line graph (spectrum) disabled - waterfall height restored to 600px');
         }
 
         // Force redraw to update display

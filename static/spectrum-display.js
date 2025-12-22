@@ -144,10 +144,10 @@ class SpectrumDisplay {
         this.overlayDiv.style.pointerEvents = 'none'; // Let clicks pass through to elements below
         // Position and size will be set dynamically based on canvas position
 
-        // Create canvas inside overlay div
+        // Create canvas inside overlay div (65px: 35px bookmarks + 30px frequency scale)
         this.overlayCanvas = document.createElement('canvas');
         this.overlayCanvas.width = this.width;
-        this.overlayCanvas.height = 35;
+        this.overlayCanvas.height = 65;
         this.overlayCanvas.style.pointerEvents = 'auto'; // Enable pointer events on canvas for bookmark clicks
         this.overlayCanvas.style.cursor = 'default';
         this.overlayDiv.appendChild(this.overlayCanvas);
@@ -1945,7 +1945,7 @@ class SpectrumDisplay {
         this.overlayDiv.style.top = rect.top + 'px';
         this.overlayDiv.style.left = rect.left + 'px';
         this.overlayDiv.style.width = rect.width + 'px';
-        this.overlayDiv.style.height = '35px';
+        this.overlayDiv.style.height = '65px'; // 35px bookmarks + 30px frequency scale
     }
 
     // Draw cursor showing currently tuned frequency and bandwidth on overlay canvas

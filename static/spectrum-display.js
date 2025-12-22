@@ -509,8 +509,12 @@ class SpectrumDisplay {
             initSMeterNeedle();
         }
 
-        // Initialize split mode if it's the default
-        if (this.displayMode === 'split') {
+        // Check localStorage preference for line graph visibility (default to false/unchecked)
+        const savedState = localStorage.getItem('spectrumLineGraphEnabled');
+        const lineGraphEnabled = savedState === 'true'; // Only true if explicitly saved as 'true'
+
+        // Initialize split mode only if line graph is enabled
+        if (this.displayMode === 'split' && lineGraphEnabled) {
             this.splitModeLogged = false;
             this.canvas.classList.add('split-view');
             this.canvas.height = 300;
@@ -539,6 +543,9 @@ class SpectrumDisplay {
             this.ctx.fillRect(0, 0, this.width, 300);
 
             this.waterfallImageData = null;
+        } else if (this.lineGraphCanvas) {
+            // Line graph is disabled by default - hide it
+            this.lineGraphCanvas.style.display = 'none';
         }
 
         // Setup filter latency change listener for synchronization

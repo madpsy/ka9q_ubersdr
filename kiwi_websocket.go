@@ -149,6 +149,9 @@ func (kc *kiwiConn) handle() {
 	// Generate user session ID
 	kc.userSessionID = generateUUID()
 
+	// Register User-Agent for this session (required by UberSDR)
+	kc.sessions.SetUserAgent(kc.userSessionID, "KiwiSDR Client")
+
 	// Send initial MSG responses
 	kc.sendMsg("version_maj", "1")
 	kc.sendMsg("version_min", "550")
@@ -379,6 +382,11 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 			// This is what KiwiSDR expects for uncompressed audio
 			pcmData := audioPacket.PCMData
 
+			// Debug: Log first packet details
+			if packetCount == 1 {
+				log.Printf("KiwiSDR: First audio packet - size=%d bytes, first 10 bytes: %v", len(pcmData), pcmData[:min(10, len(pcmData))])
+			}
+
 			var encodedData []byte
 			var flags byte
 
@@ -403,6 +411,12 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 			// S-meter: dummy value -50 dBm → ((-50 + 127) * 10) = 770
 			binary.BigEndian.PutUint16(packet[5:7], 770)
 			copy(packet[7:], encodedData)
+
+			// Debug: Log first packet structure
+			if packetCount == 1 {
+				log.Printf("KiwiSDR: First SND packet - total=%d bytes, flags=0x%02x, seq=%d, smeter=%d, audio=%d bytes",
+					len(packet)+3, flags, kc.sequence, 770, len(encodedData))
+			}
 
 			// Send with "SND" tag
 			fullPacket := append([]byte("SND"), packet...)

@@ -3760,17 +3760,23 @@ class SpectrumDisplay {
         if (!this.lineGraphCanvas) return;
 
         if (visible) {
-            // Show line graph
+            // Show line graph - restore split mode class
+            this.lineGraphCanvas.classList.add('split-mode');
             this.lineGraphCanvas.style.display = 'block';
             console.log('Line graph (spectrum) enabled');
         } else {
-            // Hide line graph
+            // Hide line graph - remove split mode class and hide
+            this.lineGraphCanvas.classList.remove('split-mode');
             this.lineGraphCanvas.style.display = 'none';
             console.log('Line graph (spectrum) disabled');
         }
 
-        // Redraw to update display
+        // Force redraw to update display
         if (this.spectrumData && this.spectrumData.length > 0) {
+            // Clear the line graph canvas when hiding
+            if (!visible && this.lineGraphCtx) {
+                this.lineGraphCtx.clearRect(0, 0, this.lineGraphCanvas.width, this.lineGraphCanvas.height);
+            }
             this.draw();
         }
     }

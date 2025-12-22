@@ -1247,8 +1247,11 @@ class SpectrumDisplay {
 
         // Timestamps removed per user request
 
-        // Draw frequency scale at y=0 (bookmarks are in separate line graph canvas)
-        this.drawFrequencyScaleAtPosition(0);
+        // Draw frequency scale at y=0 only if line graph is hidden
+        // (line graph has its own frequency scale when visible)
+        if (!this.lineGraphCanvas || this.lineGraphCanvas.style.display === 'none') {
+            this.drawFrequencyScaleAtPosition(0);
+        }
     }
 
     // Draw frequency scale at a specific Y position

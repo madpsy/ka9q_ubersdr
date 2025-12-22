@@ -1947,10 +1947,23 @@ class SpectrumDisplay {
 
     // Update overlay div position to match canvas position
     updateOverlayPosition() {
-        const rect = this.canvas.getBoundingClientRect();
-        this.overlayDiv.style.top = rect.top + 'px';
-        this.overlayDiv.style.left = rect.left + 'px';
-        this.overlayDiv.style.width = rect.width + 'px';
+        // In split mode, overlay should be at the top of the container, not the waterfall canvas
+        const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
+        
+        if (lineGraphVisible) {
+            // Use line graph canvas position (at top of container)
+            const rect = this.lineGraphCanvas.getBoundingClientRect();
+            this.overlayDiv.style.top = rect.top + 'px';
+            this.overlayDiv.style.left = rect.left + 'px';
+            this.overlayDiv.style.width = rect.width + 'px';
+        } else {
+            // Use waterfall canvas position
+            const rect = this.canvas.getBoundingClientRect();
+            this.overlayDiv.style.top = rect.top + 'px';
+            this.overlayDiv.style.left = rect.left + 'px';
+            this.overlayDiv.style.width = rect.width + 'px';
+        }
+        
         this.overlayDiv.style.height = '65px'; // 35px bookmarks + 30px frequency scale
     }
 

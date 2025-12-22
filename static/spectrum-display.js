@@ -2956,7 +2956,21 @@ class SpectrumDisplay {
                 // Save preference to localStorage
                 localStorage.setItem('spectrumLineGraphEnabled', enabled.toString());
                 this.toggleLineGraphVisibility(enabled);
+
+                // Enable/disable smooth checkbox based on spectrum visibility
+                if (smoothCheckbox) {
+                    smoothCheckbox.disabled = !enabled;
+                    if (!enabled) {
+                        smoothCheckbox.checked = false;
+                        this.smoothingEnabled = false;
+                    }
+                }
             });
+        }
+
+        // Initialize smooth checkbox state based on spectrum visibility
+        if (smoothCheckbox && lineGraphToggle) {
+            smoothCheckbox.disabled = !lineGraphToggle.checked;
         }
 
         // Store reference to snap checkbox and label for mode-based enable/disable

@@ -1824,18 +1824,25 @@ async function initOpusDecoder(sampleRate, channels) {
     }
 
     // Check if OpusDecoder library is available
-    console.log('Checking for OpusDecoder:', typeof OpusDecoder);
-    if (typeof OpusDecoder === 'undefined') {
-        console.error('OpusDecoder library not loaded');
-        log('ERROR: Opus decoder library failed to load from CDN', 'error');
-        log('Please disable Opus in config.yaml: set audio.opus.enabled: false', 'error');
-        opusDecoderFailed = true;
+    // The library exports to window["opus-decoder"].OpusDecoder
+    let OpusDecoderClass = null;
+    if (typeof OpusDecoder !== 'undefined') {
+        OpusDecoderClass = OpusDecoder;
+    } else if (window["opus-decoder"] && window["opus-decoder"].OpusDecoder) {
+        OpusDecoderClass = window["opus-decoder"].OpusDecoder;
+    }
+
+    console.log('Checking for OpusDecoder:', OpusDecoderClass ? 'found' : 'not found');
+    if (!OpusDecoderClass) {
+        console.error('OpusDecoder library not loaded - waiting for script to load');
+        // Don't mark as failed yet - library may still be loading
+        // Just return false and let it retry on next packet
         return false;
     }
 
     try {
         console.log('Creating OpusDecoder instance...');
-        opusDecoder = new OpusDecoder({
+        opusDecoder = new OpusDecoderClass({
             sampleRate: sampleRate,
             channels: channels
         });
@@ -1850,7 +1857,7 @@ async function initOpusDecoder(sampleRate, channels) {
     } catch (e) {
         console.error('Failed to initialize Opus decoder:', e);
         log('Opus decoder initialization failed: ' + e.message, 'error');
-        log('Please disable Opus in config.yaml: set audio.opus.enabled: false', 'error');
+        log('Falling back to PCM audio format', 'error');
         opusDecoderFailed = true;
         return false;
     }

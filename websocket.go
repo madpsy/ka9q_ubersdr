@@ -919,7 +919,11 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				continue
 			}
 
-			if useBinaryFormat && opusEncoder != nil {
+			// Check if current mode is IQ - IQ modes should never use Opus (need lossless data)
+			isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
+			useOpusForThisPacket := useBinaryFormat && opusEncoder != nil && !isIQMode
+
+			if useOpusForThisPacket {
 				// Binary Opus format: send raw Opus frames as binary WebSocket messages
 				// Format: [timestamp:8][sampleRate:4][channels:1][opusData...]
 				opusData, err := opusEncoder.EncodeBinary(audioPacket.PCMData)

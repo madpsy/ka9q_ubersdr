@@ -962,7 +962,11 @@ class RadioClient:
                 self.opus_channels = channels
                 print(f"Opus decoder initialized: {sample_rate} Hz, {channels} channel(s)", file=sys.stderr)
             except Exception as e:
-                print(f"Warning: Failed to initialize Opus decoder: {e}", file=sys.stderr)
+                print(f"ERROR: Failed to initialize Opus decoder ({sample_rate} Hz, {channels} ch): {e}", file=sys.stderr)
+                print(f"Disabling Opus decoding - please reconnect without Opus for this mode", file=sys.stderr)
+                # Disable Opus to prevent repeated errors
+                self.use_opus = False
+                self.opus_decoder = None
                 return b''
 
         try:

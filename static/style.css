@@ -2141,6 +2141,7 @@ input[type="range"]::-moz-range-thumb {
 #spectrum-display-canvas.split-view {
     height: 300px;
     border-radius: 0 0 0 0;
+    margin-top: 300px;
 }
 
 /* Line graph canvas - absolutely positioned within spectrum-display-container */

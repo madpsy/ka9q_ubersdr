@@ -3695,12 +3695,6 @@ class SpectrumDisplay {
     toggleLineGraphVisibility(visible) {
         if (!this.lineGraphCanvas) return;
 
-        // Stop drawing temporarily
-        const wasRunning = this.animationLoopRunning;
-        if (wasRunning) {
-            this.stopFrameProcessing();
-        }
-
         if (visible) {
             // Show line graph - restore split mode class
             this.lineGraphCanvas.classList.add('split-mode');
@@ -3708,11 +3702,14 @@ class SpectrumDisplay {
             // Restore waterfall to split mode position (below line graph)
             this.canvas.classList.add('split-view');
 
-            // CRITICAL: Clear the canvas BEFORE resizing to remove all old content
-            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            // Save current waterfall content before resize
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = this.canvas.width;
+            tempCanvas.height = this.canvas.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(this.canvas, 0, 0);
 
             // Adjust waterfall canvas height to only occupy bottom half
-            // Set BOTH canvas pixel dimensions AND CSS height
             this.canvas.width = this.width;
             this.canvas.height = 300;
             this.canvas.style.width = this.width + 'px';
@@ -3720,7 +3717,7 @@ class SpectrumDisplay {
             this.canvasHeight = 300;
             this.height = 300;
 
-            // CRITICAL: Get new context after resize (canvas resize clears context)
+            // Get context (canvas resize clears it)
             this.ctx = this.canvas.getContext('2d', { alpha: false });
             this.ctx.imageSmoothingEnabled = true;
 
@@ -3728,12 +3725,12 @@ class SpectrumDisplay {
             this.ctx.fillStyle = '#000';
             this.ctx.fillRect(0, 0, this.width, 300);
 
-            // Reset waterfall state completely
+            // Reset waterfall state to start fresh
             this.waterfallImageData = null;
             this.waterfallLineCount = 0;
             this.waterfallStartTime = null;
 
-            console.log('Line graph (spectrum) enabled - waterfall RESET to 300px');
+            console.log('Line graph (spectrum) enabled - waterfall canvas resized to 300px');
         } else {
             // Hide line graph - remove split mode class and hide
             this.lineGraphCanvas.classList.remove('split-mode');
@@ -3741,11 +3738,14 @@ class SpectrumDisplay {
             // Move waterfall to full height mode
             this.canvas.classList.remove('split-view');
 
-            // CRITICAL: Clear the canvas BEFORE resizing to remove all old content
-            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            // Save current waterfall content before resize
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = this.canvas.width;
+            tempCanvas.height = this.canvas.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(this.canvas, 0, 0);
 
             // Restore waterfall canvas to full height
-            // Set BOTH canvas pixel dimensions AND CSS height
             this.canvas.width = this.width;
             this.canvas.height = 600;
             this.canvas.style.width = this.width + 'px';
@@ -3753,7 +3753,7 @@ class SpectrumDisplay {
             this.canvasHeight = 600;
             this.height = 600;
 
-            // CRITICAL: Get new context after resize (canvas resize clears context)
+            // Get context (canvas resize clears it)
             this.ctx = this.canvas.getContext('2d', { alpha: false });
             this.ctx.imageSmoothingEnabled = true;
 
@@ -3761,7 +3761,7 @@ class SpectrumDisplay {
             this.ctx.fillStyle = '#000';
             this.ctx.fillRect(0, 0, this.width, 600);
 
-            // Reset waterfall state completely
+            // Reset waterfall state to start fresh
             this.waterfallImageData = null;
             this.waterfallLineCount = 0;
             this.waterfallStartTime = null;
@@ -3771,12 +3771,7 @@ class SpectrumDisplay {
                 this.lineGraphCtx.clearRect(0, 0, this.lineGraphCanvas.width, this.lineGraphCanvas.height);
             }
 
-            console.log('Line graph (spectrum) disabled - waterfall RESET to 600px');
-        }
-
-        // Restart frame processing if it was running
-        if (wasRunning) {
-            this.startFrameProcessing();
+            console.log('Line graph (spectrum) disabled - waterfall canvas resized to 600px');
         }
 
         // Force redraw to update display

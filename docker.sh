@@ -11,12 +11,19 @@ read -p "Press any key to continue..." -n1 -s
 echo ""
 
 # Build image with version tag
-docker build -t $IMAGE:$VERSION -f docker/Dockerfile .
+echo "Building Docker image..."
+if ! docker build -t $IMAGE:$VERSION -f docker/Dockerfile .; then
+    echo "ERROR: Docker build failed!"
+    exit 1
+fi
+
+echo "Build successful!"
 
 # Tag version as latest
 docker tag $IMAGE:$VERSION $IMAGE:latest
 
 # Push both tags
+echo "Pushing to Docker Hub..."
 docker push $IMAGE:$VERSION
 docker push $IMAGE:latest
 

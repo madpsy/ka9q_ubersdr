@@ -341,6 +341,8 @@ class MultiSpectrumGUI:
         self.audio_left_mute = tk.BooleanVar(value=False)  # Mute left channel
         self.audio_right_mute = tk.BooleanVar(value=False)  # Mute right channel
         self.audio_right_mono = tk.BooleanVar(value=False)  # Mono mode for right channel
+        self.audio_left_opus = tk.BooleanVar(value=True)  # Use Opus for left channel (default: enabled)
+        self.audio_right_opus = tk.BooleanVar(value=True)  # Use Opus for right channel (default: enabled)
         self.audio_preview_active = False
         # Cache audio instance lookups for performance
         self._audio_left_instance_cache = None
@@ -411,7 +413,7 @@ class MultiSpectrumGUI:
         row2_frame.pack(fill=tk.X)
 
         # Synchronization control
-        ttk.Checkbutton(row2_frame, text="Synchronize Pan/Zoom",
+        ttk.Checkbutton(row2_frame, text="Synchronise",
                        variable=self.sync_enabled).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Checkbutton(row2_frame, text="Throttle to Slowest",
                        variable=self.throttle_enabled).pack(side=tk.LEFT, padx=(0, 5))
@@ -480,6 +482,8 @@ class MultiSpectrumGUI:
             ttk.Checkbutton(row1_frame, text="Mono", variable=self.audio_left_mono,
                            command=self._on_left_mono_change).pack(side=tk.LEFT, padx=(0, 5))
 
+            ttk.Checkbutton(row1_frame, text="Opus", variable=self.audio_left_opus).pack(side=tk.LEFT, padx=(0, 5))
+
             ttk.Label(row1_frame, text="Vol:").pack(side=tk.LEFT, padx=(0, 5))
             self.left_volume_label = ttk.Label(row1_frame, text="100%", width=5)
             self.left_volume_label.pack(side=tk.LEFT, padx=(0, 5))
@@ -513,6 +517,8 @@ class MultiSpectrumGUI:
 
             ttk.Checkbutton(row2_frame, text="Mono", variable=self.audio_right_mono,
                            command=self._on_right_mono_change).pack(side=tk.LEFT, padx=(0, 5))
+
+            ttk.Checkbutton(row2_frame, text="Opus", variable=self.audio_right_opus).pack(side=tk.LEFT, padx=(0, 5))
 
             ttk.Label(row2_frame, text="Vol:").pack(side=tk.LEFT, padx=(0, 5))
             self.right_volume_label = ttk.Label(row2_frame, text="100%", width=5)
@@ -3180,7 +3186,8 @@ class MultiSpectrumGUI:
                 left_freq_hz,
                 left_mode,
                 left_instance.user_session_id,
-                left_bandwidth
+                left_bandwidth,
+                use_opus=self.audio_left_opus.get()
             )
 
             if not success:
@@ -3217,7 +3224,8 @@ class MultiSpectrumGUI:
                 right_freq_hz,
                 right_mode,
                 right_instance.user_session_id,
-                right_bandwidth
+                right_bandwidth,
+                use_opus=self.audio_right_opus.get()
             )
 
             if not success:
@@ -3327,7 +3335,8 @@ class MultiSpectrumGUI:
             freq_hz,
             mode,
             instance.user_session_id,
-            bandwidth
+            bandwidth,
+            use_opus=self.audio_left_opus.get() if channel == 'left' else self.audio_right_opus.get()
         )
 
         if success:
@@ -3595,9 +3604,10 @@ class MultiSpectrumGUI:
             import time
             if not hasattr(self, '_last_level_debug'):
                 self._last_level_debug = 0
-            if time.time() - self._last_level_debug > 2.0:
-                print(f"[LEVEL METERS] Left: {left_level:.3f}, Right: {right_level:.3f}")
-                self._last_level_debug = time.time()
+            # Debug logging disabled - uncomment if needed for troubleshooting
+            # if time.time() - self._last_level_debug > 2.0:
+            #     print(f"[LEVEL METERS] Left: {left_level:.3f}, Right: {right_level:.3f}")
+            #     self._last_level_debug = time.time()
 
             # Update meters
             self._update_level_meter('left', left_level)

@@ -1,5 +1,5 @@
 # Multi-Instance Spectrum Client Requirements
-# Minimal dependencies for spectrum display only (no audio)
+# Dependencies for spectrum display and audio preview
 
 # Core dependencies
 requests>=2.31
@@ -10,8 +10,13 @@ numpy>=1.24.0
 matplotlib>=3.7.0
 zeroconf>=0.132.0
 
+# Audio dependencies (required for audio preview)
+sounddevice>=0.4.6
+opuslib>=3.0.1
+zstandard>=0.22.0
+
 # Optional: MIDI controller support
 python-rtmidi>=1.5.0
 
 # Optional: For public instances display and local discovery
-# (same as main client, but audio libraries not needed)
+# (same as main client)

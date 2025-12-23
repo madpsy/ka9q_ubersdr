@@ -5,14 +5,30 @@ Handles audio streaming from up to 2 instances with left/right channel routing
 """
 
 import asyncio
+import base64
+import json
+import struct
 import threading
 import time
 import uuid
 from typing import Optional
 import numpy as np
 
-# Import audio decoders
-from audio_decoders import decode_opus_binary, decode_pcm_zstd_binary, OPUS_AVAILABLE, ZSTD_AVAILABLE
+# Import Opus decoder (optional)
+try:
+    import opuslib
+    OPUS_AVAILABLE = True
+except ImportError:
+    OPUS_AVAILABLE = False
+    print("Warning: opuslib not available, Opus decoding disabled")
+
+# Import zstandard for pcm-zstd (optional)
+try:
+    import zstandard as zstd
+    ZSTD_AVAILABLE = True
+except ImportError:
+    ZSTD_AVAILABLE = False
+    print("Warning: zstandard not available, will use uncompressed PCM")
 
 # Import real-time alignment system
 try:
@@ -64,7 +80,7 @@ class AudioChannel:
         self.mono = False  # If True, output to both speakers
         self.prebuffering = True  # Start in prebuffering mode
         self.current_level = 0.0  # Current audio level (0.0 to 1.0)
-
+        
         # Audio format settings
         self.use_opus = True  # Use Opus by default
         self.opus_decoder = None  # Opus decoder instance
@@ -462,10 +478,6 @@ class AudioPreviewManager:
             print("Error: Required libraries not available")
             return False
 
-        if not ZSTD_AVAILABLE:
-            print("Error: zstandard library required for audio support")
-            return False
-
         # Get the channel object
         ch = self.left_channel if channel == 'left' else self.right_channel
 
@@ -483,15 +495,17 @@ class AudioPreviewManager:
         ch.user_session_id = user_session_id  # Use instance's session ID
         ch.bandwidth = bandwidth  # Store bandwidth for reconnection
         ch.use_opus = use_opus and OPUS_AVAILABLE  # Enable Opus if requested and available
-
+        
         # Initialize decoders
         if ch.use_opus:
             ch.opus_decoder = None  # Will be created on first packet
             print(f"[{ch.channel_name.upper()}] Opus encoding enabled")
         else:
-            import zstandard as zstd
-            ch.zstd_decompressor = zstd.ZstdDecompressor()
-            print(f"[{ch.channel_name.upper()}] PCM-ZSTD encoding enabled")
+            if ZSTD_AVAILABLE:
+                ch.zstd_decompressor = zstd.ZstdDecompressor()
+                print(f"[{ch.channel_name.upper()}] PCM-ZSTD encoding enabled")
+            else:
+                print(f"[{ch.channel_name.upper()}] Uncompressed PCM (zstandard not available)")
 
         # Start event loop if not running
         if not self.is_running:
@@ -650,7 +664,7 @@ class AudioPreviewManager:
         # Calculate bandwidth based on mode and bandwidth setting
         bandwidth_low, bandwidth_high = self._calculate_bandwidth_edges(ch.mode, ch.bandwidth)
         url += f"&bandwidthLow={bandwidth_low}&bandwidthHigh={bandwidth_high}"
-
+        
         # Add format parameter: opus or pcm-zstd
         if ch.use_opus:
             url += "&format=opus"
@@ -665,81 +679,125 @@ class AudioPreviewManager:
                 ch.running = True
                 print(f"{ch.channel_name.capitalize()} channel connected")
 
-                # Receive and process audio messages (binary only - JSON deprecated)
+                # Receive and process audio messages
                 msg_count = 0
                 last_debug_time = time.time()
 
                 while ch.running:
                     try:
-                        # Check if event loop is still running before waiting
-                        if not self.is_running:
-                            break
                         message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
+                        data = json.loads(message)
 
-                        # Only handle binary messages (Opus or pcm-zstd)
-                        if not isinstance(message, bytes):
-                            print(f"[{ch.channel_name.upper()}] Warning: Received non-binary message, ignoring")
-                            continue
+                        if data.get('type') == 'audio':
+                            audio_data = data.get('data')
+                            # Extract both timestamps:
+                            # - RTP timestamp: uint32 sample count (drift-free but different per server)
+                            # - Wall-clock: NTP-synced time in ms (common reference across servers)
+                            rtp_timestamp = data.get('timestamp')  # RTP timestamp (sample count)
+                            wallclock_ms = data.get('wallclockMs')  # NTP-synced wall-clock time
 
-                        # Decode based on format
-                        if ch.use_opus:
-                            pcm_data, ch.opus_decoder, ch.opus_sample_rate, ch.opus_channels = decode_opus_binary(
-                                message, ch.opus_decoder, ch.opus_sample_rate, ch.opus_channels, ch.channel_name.upper()
-                            )
-                        else:
-                            pcm_data = decode_pcm_zstd_binary(message, ch.zstd_decompressor, ch.channel_name.upper())
+                            if audio_data:
+                                # Decode audio based on format
+                                pcm_data = self._decode_audio(audio_data)
+                                # Convert to int16 array
+                                audio_array = np.frombuffer(pcm_data, dtype=np.int16)
+                        
+                        elif isinstance(message, bytes):
+                            # Binary message - could be Opus or pcm-zstd
+                            if ch.use_opus:
+                                # Decode Opus binary packet
+                                pcm_data = self._decode_opus_binary(ch, message)
+                                if pcm_data:
+                                    audio_array = np.frombuffer(pcm_data, dtype=np.int16)
+                                    msg_count += 1
+                                else:
+                                    continue  # Skip if decode failed
+                            else:
+                                # Decode pcm-zstd binary packet
+                                pcm_data = self._decode_pcm_zstd_binary(ch, message)
+                                if pcm_data:
+                                    audio_array = np.frombuffer(pcm_data, dtype=np.int16)
+                                    msg_count += 1
+                                else:
+                                    continue  # Skip if decode failed
+                            
+                            # For binary packets, we don't have RTP/wallclock timestamps in the same way
+                            # The alignment will be handled differently
+                            rtp_timestamp = None
+                            wallclock_ms = None
 
-                        if not pcm_data:
-                            continue
+                                msg_count += 1
 
-                        # Convert PCM bytes to numpy array
-                        audio_array = np.frombuffer(pcm_data, dtype=np.int16)
+                                if self.use_realtime_alignment and self.alignment_thread:
+                                    # Real-time alignment mode: feed alignment thread
+                                    try:
+                                        self.alignment_thread.add_data(ch.instance_id, timestamp, audio_array)
+                                    except Exception as e:
+                                        print(f"[{ch.channel_name.upper()}] Error adding data to alignment thread: {e}")
+                                else:
+                                    # Legacy mode: add to buffer (with RTP-based alignment)
+                                    with self.buffer_lock:
+                                        # RTP-based sync: use RTP timestamps for drift-free tracking
+                                        if rtp_timestamp is not None and wallclock_ms is not None:
+                                            local_time = time.time()
 
-                        # Handle stereo to mono conversion if needed
-                        # Server sends mono audio for non-IQ modes, but check channel count
-                        if ch.use_opus and ch.opus_channels == 2:
-                            # Stereo Opus - convert to mono by averaging channels
-                            audio_array = audio_array.reshape(-1, 2)
-                            audio_array = np.mean(audio_array, axis=1).astype(np.int16)
-                        elif ch.use_opus and ch.opus_channels == 1:
-                            # Already mono - use as-is
-                            pass
-                        # For PCM-zstd, data is always mono for non-IQ modes
+                                            # Store current timestamps
+                                            self._audio_timestamps[ch.instance_id] = {
+                                                'rtp': rtp_timestamp,
+                                                'wallclock': wallclock_ms,
+                                                'local_time': local_time
+                                            }
 
-                        msg_count += 1
+                                            # Initialize RTP reference point on first packet
+                                            if ch.instance_id not in self._rtp_reference:
+                                                self._rtp_reference[ch.instance_id] = {
+                                                    'initial_rtp': rtp_timestamp,
+                                                    'initial_wallclock': wallclock_ms,
+                                                    'initial_local': local_time
+                                                }
+                                                print(f"[RTP SYNC] Instance {ch.instance_id} reference: RTP={rtp_timestamp}, "
+                                                      f"wallclock={wallclock_ms:.1f}ms")
 
-                        # Add to buffer
-                        with self.buffer_lock:
-                            # Apply simple alignment if enabled
-                            if self.use_simple_alignment and self.simple_aligner:
-                                try:
-                                    audio_array = self.simple_aligner.apply_alignment(ch.instance_id, audio_array)
-                                except Exception as e:
-                                    import traceback
-                                    print(f"[{ch.channel_name.upper()}] Error applying alignment: {e}")
-                                    print(f"[{ch.channel_name.upper()}] Traceback: {traceback.format_exc()}")
+                                            # Update offsets frequently (every 200ms) for responsive tracking
+                                            current_time = time.time()
+                                            if current_time - self._last_offset_update >= 0.2:
+                                                self._update_audio_offsets()
+                                                self._last_offset_update = current_time
 
-                            ch.buffer.extend(audio_array.tolist())
-                            new_size = len(ch.buffer)
+                                        # Apply simple alignment if enabled
+                                        if self.use_simple_alignment and self.simple_aligner:
+                                            try:
+                                                audio_array = self.simple_aligner.apply_alignment(ch.instance_id, audio_array)
+                                            except Exception as e:
+                                                import traceback
+                                                print(f"[{ch.channel_name.upper()}] Error applying alignment: {e}")
+                                                print(f"[{ch.channel_name.upper()}] Traceback: {traceback.format_exc()}")
 
-                            # Only limit buffer to prevent memory issues (very generous limit)
-                            max_buffer_size = self.sample_rate * 30  # 30 seconds absolute max (memory safety only)
-                            if new_size > max_buffer_size:
-                                ch.buffer = ch.buffer[-max_buffer_size:]
-                                print(f"[{ch.channel_name.upper()}] Memory safety trim: {new_size} -> {len(ch.buffer)} samples")
+                                        ch.buffer.extend(audio_array.tolist())
+                                        new_size = len(ch.buffer)
 
-                        # Periodic debug output
-                        now = time.time()
-                        if now - last_debug_time >= 5.0:
-                            with self.buffer_lock:
-                                print(f"[{ch.channel_name.upper()}] Buffer: {len(ch.buffer)} samples, Messages: {msg_count}")
-                            last_debug_time = now
-                            msg_count = 0
+                                        # Only limit buffer to prevent memory issues (very generous limit)
+                                        # Don't try to "fix" timing issues with buffer trimming - that causes choppiness
+                                        # Timing alignment should be handled by the alignment system, not buffer management
+                                        max_buffer_size = self.sample_rate * 30  # 30 seconds absolute max (memory safety only)
+                                        if new_size > max_buffer_size:
+                                            # Only trim if we hit the absolute memory limit
+                                            ch.buffer = ch.buffer[-max_buffer_size:]
+                                            print(f"[{ch.channel_name.upper()}] Memory safety trim: {new_size} -> {len(ch.buffer)} samples")
+
+                                        # Periodic debug output
+                                        now = time.time()
+                                        if now - last_debug_time >= 5.0:
+                                            print(f"[{ch.channel_name.upper()}] Buffer: {len(ch.buffer)} samples, Messages: {msg_count}, RTP: {rtp_timestamp}, Wall: {wallclock_ms}")
+                                            last_debug_time = now
+                                            msg_count = 0
+
+                        elif data.get('type') == 'error':
+                            error = data.get('error', 'Unknown error')
+                            print(f"[{ch.channel_name.upper()}] Error from server: {error}")
+                            break
 
                     except asyncio.TimeoutError:
-                        # Check if event loop is still running
-                        if not self.is_running:
-                            break
                         # Debug: Log timeout if we haven't received data in a while
                         now = time.time()
                         if now - last_debug_time >= 5.0:
@@ -749,10 +807,6 @@ class AudioPreviewManager:
                         continue
                     except websockets.exceptions.ConnectionClosed as e:
                         print(f"[{ch.channel_name.upper()}] Connection closed: {e}")
-                        break
-                    except (RuntimeError, GeneratorExit) as e:
-                        # Event loop closed or generator exit during shutdown
-                        print(f"[{ch.channel_name.upper()}] Shutdown detected: {e}")
                         break
                     except Exception as e:
                         print(f"[{ch.channel_name.upper()}] Unexpected error: {e}")
@@ -783,6 +837,35 @@ class AudioPreviewManager:
                 except Exception as callback_error:
                     print(f"Error in error callback: {callback_error}")
 
+    async def _send_tune_command(self, ch: AudioChannel, frequency: int, mode: str, bandwidth: int):
+        """Send tune command to change parameters without reconnecting.
+
+        Args:
+            ch: Audio channel
+            frequency: New frequency in Hz
+            mode: New mode
+            bandwidth: New bandwidth in Hz
+        """
+        if not ch.ws or not ch.running:
+            return
+
+        # Calculate bandwidth edges based on mode
+        bandwidth_low, bandwidth_high = self._calculate_bandwidth_edges(mode, bandwidth)
+
+        tune_msg = {
+            'type': 'tune',
+            'frequency': frequency,
+            'mode': mode,
+            'bandwidthLow': bandwidth_low,
+            'bandwidthHigh': bandwidth_high
+        }
+
+        try:
+            await ch.ws.send(json.dumps(tune_msg))
+            print(f"Sent tune command to {ch.channel_name} channel: {frequency/1e6:.6f} MHz, {mode}, {bandwidth_low}-{bandwidth_high} Hz")
+        except Exception as e:
+            print(f"Error sending tune command to {ch.channel_name} channel: {e}")
+
     async def _disconnect_channel(self, ch: AudioChannel):
         """Disconnect WebSocket for a channel."""
         if ch.ws:
@@ -793,63 +876,168 @@ class AudioPreviewManager:
         ch.ws = None
         ch.running = False
 
+def _decode_opus_binary(self, ch: AudioChannel, binary_data: bytes) -> bytes:
+    """Decode binary Opus packet to PCM bytes.
+    
+    Binary format (from radio_client.py):
+    - Header (13 bytes):
+      - Sample rate: uint32 (4 bytes, little-endian)
+      - Frame size: uint32 (4 bytes, little-endian)
+      - Channels: uint8 (1 byte)
+      - Padding: 4 bytes
+    - Opus data: remaining bytes
+    
+    Args:
+        ch: Audio channel
+        binary_data: Binary Opus packet
+        
+    Returns:
+        PCM bytes (little-endian int16) or empty bytes on error
+    """
+    try:
+        if len(binary_data) < 13:
+            print(f"[{ch.channel_name.upper()}] Opus packet too short: {len(binary_data)} bytes")
+            return b''
+        
+        # Parse header
+        sample_rate = struct.unpack('<I', binary_data[0:4])[0]
+        frame_size = struct.unpack('<I', binary_data[4:8])[0]
+        channels = binary_data[8]
+        # Skip 4 bytes padding (bytes 9-12)
+        opus_data = binary_data[13:]
+        
+        # Create decoder on first packet or if parameters changed
+        if (ch.opus_decoder is None or
+            ch.opus_sample_rate != sample_rate or
+            ch.opus_channels != channels):
+            try:
+                ch.opus_decoder = opuslib.Decoder(sample_rate, channels)
+                ch.opus_sample_rate = sample_rate
+                ch.opus_channels = channels
+                print(f"[{ch.channel_name.upper()}] Opus decoder initialized: {sample_rate} Hz, {channels} channel(s)")
+            except Exception as e:
+                print(f"[{ch.channel_name.upper()}] Failed to create Opus decoder: {e}")
+                return b''
+        
+        # Decode Opus to PCM
+        pcm_data = ch.opus_decoder.decode(opus_data, frame_size=frame_size)
+        return pcm_data
+        
+    except Exception as e:
+        print(f"[{ch.channel_name.upper()}] Error decoding Opus: {e}")
+        return b''
+
+def _decode_pcm_zstd_binary(self, ch: AudioChannel, binary_data: bytes) -> bytes:
+    """Decode binary pcm-zstd packet to PCM bytes.
+    
+    Binary format:
+    - If zstd available: zstd-compressed PCM data
+    - If zstd not available: uncompressed PCM data
+    
+    Args:
+        ch: Audio channel
+        binary_data: Binary pcm-zstd packet
+        
+    Returns:
+        PCM bytes (little-endian int16) or empty bytes on error
+    """
+    try:
+        if ch.zstd_decompressor:
+            # Decompress with zstandard
+            pcm_data = ch.zstd_decompressor.decompress(binary_data)
+        else:
+            # No compression available, assume uncompressed
+            pcm_data = binary_data
+        
+        return pcm_data
+        
+    except Exception as e:
+        print(f"[{ch.channel_name.upper()}] Error decoding pcm-zstd: {e}")
+        return b''
+
+def _decode_audio(self, base64_data: str) -> bytes:
+        """Decode base64 audio data to PCM bytes.
+
+        Args:
+            base64_data: Base64-encoded audio data
+
+        Returns:
+            PCM bytes (little-endian int16)
+        """
+        # Decode base64
+        audio_bytes = base64.b64decode(base64_data)
+
+        # The data is big-endian signed 16-bit PCM
+        # Convert to little-endian for most audio systems
+        num_samples = len(audio_bytes) // 2
+        pcm_data = bytearray()
+
+        for i in range(num_samples):
+            # Read big-endian int16
+            high_byte = audio_bytes[i * 2]
+            low_byte = audio_bytes[i * 2 + 1]
+            sample = (high_byte << 8) | low_byte
+
+            # Convert to signed
+            if sample >= 0x8000:
+                sample -= 0x10000
+
+            # Write as little-endian int16
+            pcm_data.extend(struct.pack('<h', sample))
+
+        return bytes(pcm_data)
+
     def update_frequency(self, channel: str, frequency: int):
-        """Update frequency for a channel using JSON tune command."""
+        """Update frequency for a channel without reconnecting."""
         ch = self.left_channel if channel == 'left' else self.right_channel
 
         if ch.is_active():
+            # Store new frequency
             old_freq = ch.frequency
             ch.frequency = frequency
-            # Send tune command via WebSocket
-            self._send_tune_command(ch)
+
+            # Don't clear buffer - let audio continue smoothly during frequency change
+            # The server will send audio for the new frequency immediately
+
+            # Send tune command over existing WebSocket
+            if self.event_loop:
+                asyncio.run_coroutine_threadsafe(
+                    self._send_tune_command(ch, ch.frequency, ch.mode, ch.bandwidth),
+                    self.event_loop
+                )
             print(f"Updated {channel} channel frequency: {old_freq/1e6:.6f} → {frequency/1e6:.6f} MHz")
 
     def update_mode(self, channel: str, mode: str):
-        """Update mode for a channel using JSON tune command."""
+        """Update mode for a channel without reconnecting."""
         ch = self.left_channel if channel == 'left' else self.right_channel
 
         if ch.is_active():
+            # Store new mode
             ch.mode = mode
-            # Send tune command via WebSocket
-            self._send_tune_command(ch)
+
+            # Send tune command over existing WebSocket
+            if self.event_loop:
+                asyncio.run_coroutine_threadsafe(
+                    self._send_tune_command(ch, ch.frequency, ch.mode, ch.bandwidth),
+                    self.event_loop
+                )
             print(f"Updated {channel} channel mode: {mode}")
 
     def update_bandwidth(self, channel: str, bandwidth: int):
-        """Update bandwidth for a channel using JSON tune command."""
+        """Update bandwidth for a channel without reconnecting."""
         ch = self.left_channel if channel == 'left' else self.right_channel
 
         if ch.is_active():
+            # Store new bandwidth
             ch.bandwidth = bandwidth
-            # Send tune command via WebSocket
-            self._send_tune_command(ch)
+
+            # Send tune command over existing WebSocket
+            if self.event_loop:
+                asyncio.run_coroutine_threadsafe(
+                    self._send_tune_command(ch, ch.frequency, ch.mode, ch.bandwidth),
+                    self.event_loop
+                )
             print(f"Updated {channel} channel bandwidth: {bandwidth} Hz")
-
-    def _send_tune_command(self, ch: AudioChannel):
-        """Send JSON tune command to update frequency/mode/bandwidth without reconnecting."""
-        if not ch.ws or not self.event_loop:
-            return
-
-        # Calculate bandwidth edges
-        bandwidth_low, bandwidth_high = self._calculate_bandwidth_edges(ch.mode, ch.bandwidth)
-
-        # Build tune message
-        tune_msg = {
-            'type': 'tune',
-            'frequency': ch.frequency,
-            'mode': ch.mode,
-            'bandwidthLow': bandwidth_low,
-            'bandwidthHigh': bandwidth_high
-        }
-
-        # Send via WebSocket in event loop
-        try:
-            import json
-            asyncio.run_coroutine_threadsafe(
-                ch.ws.send(json.dumps(tune_msg)),
-                self.event_loop
-            )
-        except Exception as e:
-            print(f"[{ch.channel_name.upper()}] Error sending tune command: {e}")
 
     def set_volume(self, channel: str, volume: float):
         """Set volume for a channel.

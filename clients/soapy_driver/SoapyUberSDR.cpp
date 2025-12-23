@@ -1,9 +1,9 @@
 /*
  * SoapySDR driver for KA9Q UberSDR
- * 
+ *
  * This driver provides access to KA9Q UberSDR's wide IQ modes via WebSocket.
  * Supports iq48, iq96, iq192, and iq384 modes (48-384 kHz bandwidth).
- * 
+ *
  * Copyright (c) 2024
  * SPDX-License-Identifier: BSL-1.0
  */
@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <set>
 #include <curl/curl.h>
+#include <zstd.h>
 
 // Base64 decoding
 static const std::string base64_chars = 
@@ -564,38 +565,93 @@ std::string SoapyUberSDR::sampleRateToMode(double rate) const
 void SoapyUberSDR::handleTLSMessage(websocketpp::connection_hdl hdl, tls_message_ptr msg)
 {
     try {
-        std::string payload = msg->get_payload();
-
-        size_t typePos = payload.find("\"type\"");
-        if (typePos == std::string::npos) return;
-
-        size_t audioPos = payload.find("\"audio\"", typePos);
-        if (audioPos == std::string::npos) return;
-
-        size_t dataPos = payload.find("\"data\"");
-        if (dataPos == std::string::npos) return;
-
-        size_t dataStart = payload.find("\"", dataPos + 6) + 1;
-        size_t dataEnd = payload.find("\"", dataStart);
-        if (dataStart == std::string::npos || dataEnd == std::string::npos) return;
-
-        std::string base64Data = payload.substr(dataStart, dataEnd - dataStart);
-
-        std::vector<uint8_t> pcmBytes = base64_decode(base64Data);
-
-        size_t numSamples = pcmBytes.size() / 4;
-        std::vector<std::complex<float>> iqSamples(numSamples);
-
-        for (size_t i = 0; i < numSamples; i++) {
-            int16_t I = (pcmBytes[i*4] << 8) | pcmBytes[i*4+1];
-            int16_t Q = (pcmBytes[i*4+2] << 8) | pcmBytes[i*4+3];
-            iqSamples[i] = std::complex<float>(I / 32768.0f, Q / 32768.0f);
+        const std::string& payload = msg->get_payload();
+        
+        // Log message type for debugging
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyUberSDR: Received message, opcode=%d, size=%zu",
+                      (int)msg->get_opcode(), payload.size());
+        
+        // Check if this is a binary message (pcm-zstd format)
+        if (msg->get_opcode() == websocketpp::frame::opcode::binary) {
+            const uint8_t* compressedData = reinterpret_cast<const uint8_t*>(payload.data());
+            size_t compressedSize = payload.size();
+            
+            // Decompress with zstd
+            size_t decompressedSize = ZSTD_getFrameContentSize(compressedData, compressedSize);
+            if (decompressedSize == ZSTD_CONTENTSIZE_ERROR || decompressedSize == ZSTD_CONTENTSIZE_UNKNOWN) {
+                SoapySDR::log(SOAPY_SDR_ERROR, "SoapyUberSDR: Invalid zstd frame");
+                return;
+            }
+            
+            std::vector<uint8_t> decompressed(decompressedSize);
+            size_t actualSize = ZSTD_decompress(decompressed.data(), decompressedSize,
+                                                compressedData, compressedSize);
+            if (ZSTD_isError(actualSize)) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Zstd decompression error: %s",
+                              ZSTD_getErrorName(actualSize));
+                return;
+            }
+            
+            // Parse binary header (little-endian)
+            if (actualSize < 13) {
+                SoapySDR::log(SOAPY_SDR_ERROR, "SoapyUberSDR: Packet too small");
+                return;
+            }
+            
+            const uint8_t* data = decompressed.data();
+            uint16_t magic = data[0] | (data[1] << 8);
+            
+            size_t headerSize;
+            size_t dataOffset;
+            
+            if (magic == 0x5043) {  // "PC" - Full header
+                headerSize = 29;
+                dataOffset = 29;
+            } else if (magic == 0x504D) {  // "PM" - Minimal header
+                headerSize = 13;
+                dataOffset = 13;
+            } else {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Invalid PCM magic: 0x%04x", magic);
+                return;
+            }
+            
+            if (actualSize < headerSize) {
+                SoapySDR::log(SOAPY_SDR_ERROR, "SoapyUberSDR: Packet too small for header");
+                return;
+            }
+            
+            // PCM data starts after header
+            const uint8_t* pcmData = data + dataOffset;
+            size_t pcmSize = actualSize - dataOffset;
+            
+            // Calculate sample count from PCM data size
+            // Each sample is 4 bytes (2 channels * 2 bytes per sample)
+            size_t sampleCount = pcmSize / 4;
+            
+            if (pcmSize % 4 != 0) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: PCM data size not multiple of 4: %zu", pcmSize);
+                return;
+            }
+            
+            // Convert big-endian PCM to complex float
+            std::vector<std::complex<float>> iqSamples(sampleCount);
+            for (size_t i = 0; i < sampleCount; i++) {
+                int16_t I = (pcmData[i*4] << 8) | pcmData[i*4+1];
+                int16_t Q = (pcmData[i*4+2] << 8) | pcmData[i*4+3];
+                iqSamples[i] = std::complex<float>(I / 32768.0f, Q / 32768.0f);
+            }
+            
+            std::lock_guard<std::mutex> lock(_bufferMutex);
+            _iqBuffers.push(std::move(iqSamples));
+            _bufferCV.notify_one();
+        } else {
+            // Log first few bytes of non-binary messages for debugging
+            if (payload.size() > 0) {
+                std::string preview = payload.substr(0, std::min(size_t(100), payload.size()));
+                SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyUberSDR: Non-binary message: %s", preview.c_str());
+            }
         }
-
-        std::lock_guard<std::mutex> lock(_bufferMutex);
-        _iqBuffers.push(std::move(iqSamples));
-        _bufferCV.notify_one();
-
+        
     } catch (const std::exception &e) {
         SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: TLS message handling error: %s", e.what());
     }
@@ -604,38 +660,93 @@ void SoapyUberSDR::handleTLSMessage(websocketpp::connection_hdl hdl, tls_message
 void SoapyUberSDR::handlePlainMessage(websocketpp::connection_hdl hdl, plain_message_ptr msg)
 {
     try {
-        std::string payload = msg->get_payload();
-
-        size_t typePos = payload.find("\"type\"");
-        if (typePos == std::string::npos) return;
-
-        size_t audioPos = payload.find("\"audio\"", typePos);
-        if (audioPos == std::string::npos) return;
-
-        size_t dataPos = payload.find("\"data\"");
-        if (dataPos == std::string::npos) return;
-
-        size_t dataStart = payload.find("\"", dataPos + 6) + 1;
-        size_t dataEnd = payload.find("\"", dataStart);
-        if (dataStart == std::string::npos || dataEnd == std::string::npos) return;
-
-        std::string base64Data = payload.substr(dataStart, dataEnd - dataStart);
-
-        std::vector<uint8_t> pcmBytes = base64_decode(base64Data);
-
-        size_t numSamples = pcmBytes.size() / 4;
-        std::vector<std::complex<float>> iqSamples(numSamples);
-
-        for (size_t i = 0; i < numSamples; i++) {
-            int16_t I = (pcmBytes[i*4] << 8) | pcmBytes[i*4+1];
-            int16_t Q = (pcmBytes[i*4+2] << 8) | pcmBytes[i*4+3];
-            iqSamples[i] = std::complex<float>(I / 32768.0f, Q / 32768.0f);
+        const std::string& payload = msg->get_payload();
+        
+        // Log message type for debugging
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyUberSDR: Received message, opcode=%d, size=%zu",
+                      (int)msg->get_opcode(), payload.size());
+        
+        // Check if this is a binary message (pcm-zstd format)
+        if (msg->get_opcode() == websocketpp::frame::opcode::binary) {
+            const uint8_t* compressedData = reinterpret_cast<const uint8_t*>(payload.data());
+            size_t compressedSize = payload.size();
+            
+            // Decompress with zstd
+            size_t decompressedSize = ZSTD_getFrameContentSize(compressedData, compressedSize);
+            if (decompressedSize == ZSTD_CONTENTSIZE_ERROR || decompressedSize == ZSTD_CONTENTSIZE_UNKNOWN) {
+                SoapySDR::log(SOAPY_SDR_ERROR, "SoapyUberSDR: Invalid zstd frame");
+                return;
+            }
+            
+            std::vector<uint8_t> decompressed(decompressedSize);
+            size_t actualSize = ZSTD_decompress(decompressed.data(), decompressedSize,
+                                                compressedData, compressedSize);
+            if (ZSTD_isError(actualSize)) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Zstd decompression error: %s",
+                              ZSTD_getErrorName(actualSize));
+                return;
+            }
+            
+            // Parse binary header (little-endian)
+            if (actualSize < 13) {
+                SoapySDR::log(SOAPY_SDR_ERROR, "SoapyUberSDR: Packet too small");
+                return;
+            }
+            
+            const uint8_t* data = decompressed.data();
+            uint16_t magic = data[0] | (data[1] << 8);
+            
+            size_t headerSize;
+            size_t dataOffset;
+            
+            if (magic == 0x5043) {  // "PC" - Full header
+                headerSize = 29;
+                dataOffset = 29;
+            } else if (magic == 0x504D) {  // "PM" - Minimal header
+                headerSize = 13;
+                dataOffset = 13;
+            } else {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Invalid PCM magic: 0x%04x", magic);
+                return;
+            }
+            
+            if (actualSize < headerSize) {
+                SoapySDR::log(SOAPY_SDR_ERROR, "SoapyUberSDR: Packet too small for header");
+                return;
+            }
+            
+            // PCM data starts after header
+            const uint8_t* pcmData = data + dataOffset;
+            size_t pcmSize = actualSize - dataOffset;
+            
+            // Calculate sample count from PCM data size
+            // Each sample is 4 bytes (2 channels * 2 bytes per sample)
+            size_t sampleCount = pcmSize / 4;
+            
+            if (pcmSize % 4 != 0) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: PCM data size not multiple of 4: %zu", pcmSize);
+                return;
+            }
+            
+            // Convert big-endian PCM to complex float
+            std::vector<std::complex<float>> iqSamples(sampleCount);
+            for (size_t i = 0; i < sampleCount; i++) {
+                int16_t I = (pcmData[i*4] << 8) | pcmData[i*4+1];
+                int16_t Q = (pcmData[i*4+2] << 8) | pcmData[i*4+3];
+                iqSamples[i] = std::complex<float>(I / 32768.0f, Q / 32768.0f);
+            }
+            
+            std::lock_guard<std::mutex> lock(_bufferMutex);
+            _iqBuffers.push(std::move(iqSamples));
+            _bufferCV.notify_one();
+        } else {
+            // Log first few bytes of non-binary messages for debugging
+            if (payload.size() > 0) {
+                std::string preview = payload.substr(0, std::min(size_t(100), payload.size()));
+                SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyUberSDR: Non-binary message: %s", preview.c_str());
+            }
         }
-
-        std::lock_guard<std::mutex> lock(_bufferMutex);
-        _iqBuffers.push(std::move(iqSamples));
-        _bufferCV.notify_one();
-
+        
     } catch (const std::exception &e) {
         SoapySDR::logf(SOAPY_SDR_ERROR, "SoapyUberSDR: Plain message handling error: %s", e.what());
     }
@@ -818,6 +929,7 @@ void SoapyUberSDR::connectWebSocket()
         ss << "&";
     ss << "frequency=" << _currentFrequency;
     ss << "&mode=" << _currentMode;
+    ss << "&format=pcm-zstd";  // Request binary PCM with zstd compression
     ss << "&user_session_id=" << _userSessionID;
     if (!_password.empty()) {
         // URL encode password (simple implementation for common characters)

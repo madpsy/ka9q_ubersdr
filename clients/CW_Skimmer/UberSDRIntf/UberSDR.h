@@ -10,7 +10,6 @@
 #include "IXWebSocket/ixwebsocket/IXWebSocket.h"
 
 #pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "crypt32.lib")
 
 #define MAX_RX_COUNT 8
 
@@ -179,9 +178,6 @@ namespace UberSDRIntf
         
         // HTTP operations
         bool HttpPost(const std::string& path, const std::string& body, std::string& response);
-        
-        // Data processing
-        std::vector<uint8_t> Base64Decode(const std::string& encoded);
         
     private:
         WSADATA wsaData;

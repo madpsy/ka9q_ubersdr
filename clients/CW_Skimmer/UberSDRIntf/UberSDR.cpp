@@ -20,13 +20,8 @@
 
 #pragma comment(lib, "rpcrt4.lib")
 
-// JSON parsing library
-#include "json.hpp"
-using json = nlohmann::json;
-
-// For Base64 encoding/decoding
-#include <wincrypt.h>
-#pragma comment(lib, "crypt32.lib")
+// For zstd decompression
+#include <zstd.h>
 
 namespace UberSDRIntf
 {
@@ -433,6 +428,7 @@ namespace UberSDRIntf
         url << serverHost << ":" << serverPort;
         url << "/ws?frequency=" << frequency;
         url << "&mode=" << mode;
+        url << "&format=pcm-zstd";  // Request binary PCM with zstd compression
         url << "&user_session_id=" << uuidString;
         
         return url.str();
@@ -1080,82 +1076,94 @@ namespace UberSDRIntf
     }
     
     ///////////////////////////////////////////////////////////////////////////////
-    // Handle WebSocket message with proper JSON parsing
+    // Handle WebSocket message - binary pcm-zstd format only
     void UberSDR::HandleWebSocketMessage(int receiverID, const std::string& message)
     {
         try {
-            // Parse JSON message
-            json j = json::parse(message);
-            
-            // Check if "type" field exists
-            if (!j.contains("type")) {
-                write_text_to_log_file("Received message without 'type' field");
+            // Check minimum message size
+            if (message.size() < 4) {
+                write_text_to_log_file("Message too small");
                 return;
             }
-            
-            std::string msgType = j["type"].get<std::string>();
-            
-            if (msgType == "audio") {
-                // Extract audio data
-                if (j.contains("data") && j["data"].is_string()) {
-                    std::string base64Data = j["data"].get<std::string>();
-                    
-                    // Decode Base64 and process IQ data
-                    std::vector<uint8_t> iqBytes = Base64Decode(base64Data);
-                    if (!iqBytes.empty()) {
-                        // Call the ProcessIQData function (defined in UberSDRIntf.cpp)
-                        extern void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes);
-                        ProcessIQData(receiverID, iqBytes);
-                    } else {
-                        write_text_to_log_file("Warning: Empty IQ data after Base64 decode");
-                    }
-                } else {
-                    write_text_to_log_file("Audio message missing 'data' field");
-                }
-            }
-            else if (msgType == "error") {
-                // Extract error message
-                std::string errorMsg = j.value("error", "Unknown error");
+
+            const uint8_t* compressedData = reinterpret_cast<const uint8_t*>(message.data());
+            size_t compressedSize = message.size();
+
+            // Check for zstd magic number (0x28B52FFD little-endian)
+            uint32_t magic = compressedData[0] | (compressedData[1] << 8) |
+                            (compressedData[2] << 16) | (compressedData[3] << 24);
+
+            if (magic != 0x28B52FFD) {
                 std::stringstream ss;
-                ss << "Server error for receiver " << receiverID << ": " << errorMsg;
+                ss << "Invalid message format - expected zstd compressed data, got magic: 0x"
+                   << std::hex << magic;
                 write_text_to_log_file(ss.str());
+                return;
             }
-            else if (msgType == "status") {
-                // Extract status information
-                std::string sessionId = j.value("sessionId", "");
-                int frequency = j.value("frequency", 0);
-                std::string mode = j.value("mode", "");
-                
+
+            // Get decompressed size
+            size_t decompressedSize = ZSTD_getFrameContentSize(compressedData, compressedSize);
+            if (decompressedSize == ZSTD_CONTENTSIZE_ERROR ||
+                decompressedSize == ZSTD_CONTENTSIZE_UNKNOWN) {
+                write_text_to_log_file("Invalid zstd frame");
+                return;
+            }
+
+            // Decompress
+            std::vector<uint8_t> decompressed(decompressedSize);
+            size_t actualSize = ZSTD_decompress(decompressed.data(), decompressedSize,
+                                               compressedData, compressedSize);
+            if (ZSTD_isError(actualSize)) {
                 std::stringstream ss;
-                ss << "Status for receiver " << receiverID
-                   << " - Session: " << sessionId
-                   << ", Freq: " << frequency
-                   << ", Mode: " << mode;
+                ss << "Zstd decompression error: " << ZSTD_getErrorName(actualSize);
                 write_text_to_log_file(ss.str());
+                return;
             }
-            else if (msgType == "pong") {
-                // Pong response to our ping - just log it
+
+            // Parse binary header (little-endian)
+            if (actualSize < 13) {
+                write_text_to_log_file("Packet too small");
+                return;
+            }
+
+            const uint8_t* data = decompressed.data();
+            uint16_t headerMagic = data[0] | (data[1] << 8);
+
+            size_t dataOffset;
+            if (headerMagic == 0x5043) {  // "PC" - Full header (29 bytes)
+                dataOffset = 29;
+            } else if (headerMagic == 0x504D) {  // "PM" - Minimal header (13 bytes)
+                dataOffset = 13;
+            } else {
                 std::stringstream ss;
-                ss << "Received pong from receiver " << receiverID;
+                ss << "Invalid PCM magic: 0x" << std::hex << headerMagic;
                 write_text_to_log_file(ss.str());
+                return;
             }
-            else {
-                // Unknown message type
+
+            if (actualSize < dataOffset) {
+                write_text_to_log_file("Packet too small for header");
+                return;
+            }
+
+            // Extract PCM data
+            const uint8_t* pcmData = data + dataOffset;
+            size_t pcmSize = actualSize - dataOffset;
+
+            // Validate PCM size (must be multiple of 4: 2 channels * 2 bytes)
+            if (pcmSize % 4 != 0) {
                 std::stringstream ss;
-                ss << "Unknown message type '" << msgType << "' for receiver " << receiverID;
+                ss << "PCM data size not multiple of 4: " << pcmSize;
                 write_text_to_log_file(ss.str());
+                return;
             }
-        }
-        catch (const json::parse_error& e) {
-            std::stringstream ss;
-            ss << "JSON parse error for receiver " << receiverID << ": " << e.what();
-            write_text_to_log_file(ss.str());
-            write_text_to_log_file("Raw message: " + message.substr(0, 200)); // Log first 200 chars
-        }
-        catch (const json::exception& e) {
-            std::stringstream ss;
-            ss << "JSON error for receiver " << receiverID << ": " << e.what();
-            write_text_to_log_file(ss.str());
+
+            // Convert to vector and process
+            std::vector<uint8_t> iqBytes(pcmData, pcmData + pcmSize);
+
+            // Call the ProcessIQData function (defined in UberSDRIntf.cpp)
+            extern void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes);
+            ProcessIQData(receiverID, iqBytes);
         }
         catch (const std::exception& e) {
             std::stringstream ss;
@@ -1163,7 +1171,7 @@ namespace UberSDRIntf
             write_text_to_log_file(ss.str());
         }
     }
-    
+
     ///////////////////////////////////////////////////////////////////////////////
     // Send keepalive ping
     void UberSDR::SendKeepalive(int receiverID)
@@ -1171,38 +1179,11 @@ namespace UberSDRIntf
         if (receiverID < 0 || receiverID >= MAX_RX_COUNT) {
             return;
         }
-        
+
         if (receivers[receiverID].wsClient != nullptr &&
             receivers[receiverID].state == CONNECTED) {
             std::string pingMsg = "{\"type\":\"ping\"}";
             receivers[receiverID].wsClient->send(pingMsg);
         }
-    }
-    
-    ///////////////////////////////////////////////////////////////////////////////
-    // Base64 decode using Windows CryptoAPI
-    std::vector<uint8_t> UberSDR::Base64Decode(const std::string& encoded)
-    {
-        std::vector<uint8_t> decoded;
-        
-        if (encoded.empty()) {
-            return decoded;
-        }
-        
-        // Get required buffer size
-        DWORD decodedSize = 0;
-        if (!CryptStringToBinaryA(encoded.c_str(), (DWORD)encoded.length(),
-                                  CRYPT_STRING_BASE64, NULL, &decodedSize, NULL, NULL)) {
-            return decoded;
-        }
-        
-        // Decode
-        decoded.resize(decodedSize);
-        if (!CryptStringToBinaryA(encoded.c_str(), (DWORD)encoded.length(),
-                                  CRYPT_STRING_BASE64, decoded.data(), &decodedSize, NULL, NULL)) {
-            decoded.clear();
-        }
-        
-        return decoded;
     }
 }

@@ -7,7 +7,6 @@ Connects to the WebSocket server and outputs audio to PipeWire, stdout, or WAV f
 import argparse
 import asyncio
 import atexit
-import base64
 import json
 import os
 import platform
@@ -37,6 +36,15 @@ except ImportError:
     OPUS_AVAILABLE = False
     print("Warning: opuslib not available, Opus decoding disabled", file=sys.stderr)
     print("Install with: pip install opuslib", file=sys.stderr)
+
+# Import zstd decompressor (optional)
+try:
+    import zstandard as zstd
+    ZSTD_AVAILABLE = True
+except ImportError:
+    ZSTD_AVAILABLE = False
+    print("Warning: zstandard not available, pcm-zstd decoding will use uncompressed PCM", file=sys.stderr)
+    print("Install with: pip install zstandard", file=sys.stderr)
 
 # Import NR2 processor (optional, only if scipy is available)
 try:
@@ -321,6 +329,15 @@ class RadioClient:
             print(f"Opus decoding enabled (decoder will initialize on first packet)", file=sys.stderr)
         elif use_opus and is_iq_mode:
             print("Warning: Opus not supported for IQ modes (lossless required)", file=sys.stderr)
+
+        # PCM-zstd support (for when Opus is not used)
+        self.zstd_decompressor = None
+        if ZSTD_AVAILABLE:
+            self.zstd_decompressor = zstd.ZstdDecompressor()
+
+        # Track PCM metadata for hybrid header strategy
+        self.pcm_last_sample_rate = None
+        self.pcm_last_channels = None
 
         # FIFO (named pipe) output
         self.fifo_path = fifo_path
@@ -632,9 +649,11 @@ class RadioClient:
             if self.password:
                 params['password'] = self.password
             
-            # Add format parameter for Opus
+            # Add format parameter: always specify format (opus or pcm-zstd)
             if self.use_opus:
                 params['format'] = 'opus'
+            else:
+                params['format'] = 'pcm-zstd'
 
             return f"{base_url}?{urlencode(params)}"
         else:
@@ -657,9 +676,11 @@ class RadioClient:
                 from urllib.parse import quote
                 url += f"&password={quote(self.password)}"
             
-            # Add format parameter for Opus
+            # Add format parameter: always specify format (opus or pcm-zstd)
             if self.use_opus:
                 url += "&format=opus"
+            else:
+                url += "&format=pcm-zstd"
 
             return url
     
@@ -908,31 +929,6 @@ class RadioClient:
             if self.status_callback:
                 self.status_callback("error", f"Failed to initialize sounddevice: {e}")
 
-    def decode_audio(self, base64_data: str) -> bytes:
-        """Decode base64 audio data to PCM bytes."""
-        # Decode base64
-        audio_bytes = base64.b64decode(base64_data)
-
-        # The data is big-endian signed 16-bit PCM
-        # Convert to little-endian for most audio systems
-        num_samples = len(audio_bytes) // 2
-        pcm_data = bytearray()
-
-        for i in range(num_samples):
-            # Read big-endian int16
-            high_byte = audio_bytes[i * 2]
-            low_byte = audio_bytes[i * 2 + 1]
-            sample = (high_byte << 8) | low_byte
-
-            # Convert to signed
-            if sample >= 0x8000:
-                sample -= 0x10000
-
-            # Write as little-endian int16
-            pcm_data.extend(struct.pack('<h', sample))
-
-        return bytes(pcm_data)
-
     def decode_opus_binary(self, binary_data: bytes) -> bytes:
         """Decode binary Opus packet to PCM bytes.
 
@@ -984,7 +980,114 @@ class RadioClient:
         except Exception as e:
             print(f"Warning: Opus decode error: {e}", file=sys.stderr)
             return b''
-    
+
+    def decode_pcm_binary(self, binary_data: bytes, is_zstd: bool = False) -> bytes:
+        """Decode binary PCM packet (with optional zstd compression) to PCM bytes.
+
+        Binary packet format from server (hybrid header strategy):
+        - If zstd compressed: decompress entire packet first
+        - Full header (29 bytes):
+          - 2 bytes: Magic (0x5043 = "PC")
+          - 1 byte: Version (1)
+          - 1 byte: Format type (0=PCM, 2=PCM-zstd)
+          - 8 bytes: RTP timestamp (uint64, little-endian)
+          - 8 bytes: Wall clock time (uint64, little-endian)
+          - 4 bytes: Sample rate (uint32, little-endian)
+          - 1 byte: Channels (uint8)
+          - 4 bytes: Reserved
+          - remaining: PCM data (big-endian int16)
+        - Minimal header (13 bytes):
+          - 2 bytes: Magic (0x504D = "PM")
+          - 1 byte: Version (1)
+          - 8 bytes: RTP timestamp (uint64, little-endian)
+          - 2 bytes: Reserved
+          - remaining: PCM data (big-endian int16)
+
+        Args:
+            binary_data: Raw binary packet from server (possibly zstd-compressed)
+            is_zstd: True if entire packet is zstd-compressed
+
+        Returns:
+            PCM data as bytes (int16, little-endian)
+        """
+        # Decompress entire packet first if zstd
+        if is_zstd:
+            if not ZSTD_AVAILABLE or self.zstd_decompressor is None:
+                print("Warning: Received zstd-compressed PCM but zstandard not available", file=sys.stderr)
+                return b''
+
+            try:
+                binary_data = self.zstd_decompressor.decompress(binary_data)
+            except Exception as e:
+                print(f"Warning: zstd decompression error: {e}", file=sys.stderr)
+                return b''
+
+        if len(binary_data) < 4:
+            print(f"Warning: Binary PCM packet too short: {len(binary_data)} bytes", file=sys.stderr)
+            return b''
+
+        # Check magic bytes (little-endian uint16)
+        magic = struct.unpack('<H', binary_data[0:2])[0]
+
+        if magic == 0x5043:  # "PC" - Full header
+            if len(binary_data) < 29:
+                print(f"Warning: Full header PCM packet too short: {len(binary_data)} bytes", file=sys.stderr)
+                return b''
+
+            # Parse full header (little-endian)
+            version = binary_data[2]
+            format_type = binary_data[3]
+            rtp_timestamp = struct.unpack('<Q', binary_data[4:12])[0]
+            wall_clock = struct.unpack('<Q', binary_data[12:20])[0]
+            sample_rate = struct.unpack('<I', binary_data[20:24])[0]
+            channels = binary_data[24]
+            # reserved = struct.unpack('<I', binary_data[25:29])[0]
+            pcm_data = binary_data[29:]
+
+            # Update tracked metadata
+            self.pcm_last_sample_rate = sample_rate
+            self.pcm_last_channels = channels
+
+            # Update client sample rate if changed
+            if self.sample_rate != sample_rate:
+                self.sample_rate = sample_rate
+                print(f"PCM sample rate updated: {sample_rate} Hz", file=sys.stderr)
+
+        elif magic == 0x504D:  # "PM" - Minimal header
+            if len(binary_data) < 13:
+                print(f"Warning: Minimal header PCM packet too short: {len(binary_data)} bytes", file=sys.stderr)
+                return b''
+
+            # Parse minimal header (little-endian)
+            version = binary_data[2]
+            rtp_timestamp = struct.unpack('<Q', binary_data[3:11])[0]
+            # reserved = struct.unpack('<H', binary_data[11:13])[0]
+            pcm_data = binary_data[13:]
+
+            # Use last known metadata
+            sample_rate = self.pcm_last_sample_rate
+            channels = self.pcm_last_channels
+
+            if sample_rate is None or channels is None:
+                print("Warning: Received minimal header before full header", file=sys.stderr)
+                return b''
+
+        else:
+            print(f"Warning: Invalid PCM magic bytes: {hex(magic)}", file=sys.stderr)
+            return b''
+
+        # Convert from big-endian to little-endian
+        # PCM data is int16, so convert in chunks of 2 bytes
+        try:
+            # Parse as big-endian int16 array
+            pcm_array = np.frombuffer(pcm_data, dtype='>i2')
+            # Convert to little-endian int16
+            pcm_array_le = pcm_array.astype('<i2')
+            return pcm_array_le.tobytes()
+        except Exception as e:
+            print(f"Warning: PCM byte order conversion error: {e}", file=sys.stderr)
+            return b''
+
     async def output_audio(self, pcm_data: bytes):
         """Output audio data based on selected mode."""
         # Send audio/IQ to TCI server if enabled (before any processing)
@@ -1314,84 +1417,7 @@ class RadioClient:
         """Handle incoming WebSocket message."""
         msg_type = message.get('type')
         
-        if msg_type == 'audio':
-            # Process audio data
-            audio_data = message.get('data')
-            sample_rate = message.get('sampleRate', self.sample_rate)
-            channels = message.get('channels', self.channels)
-            
-            # Check if sample rate or channels changed (requires restarting PipeWire)
-            sample_rate_changed = sample_rate != self.sample_rate
-            channels_changed = channels != self.channels
-
-            if sample_rate_changed:
-                self.sample_rate = sample_rate
-                print(f"Sample rate updated: {self.sample_rate} Hz", file=sys.stderr)
-
-                # Recalculate needs_resampling based on current mode
-                # IQ modes should never be resampled as they have fixed bandwidths
-                is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
-                self.needs_resampling = (self.output_mode == 'sounddevice' and SAMPLERATE_AVAILABLE and not is_iq_mode)
-
-                # Reinitialize audio filter with new sample rate
-                if self.audio_filter_enabled and SCIPY_AVAILABLE:
-                    self._init_audio_filter()
-                    print(f"Audio filter reinitialized for {self.sample_rate} Hz", file=sys.stderr)
-
-                # Reinitialize EQ with new sample rate
-                if self.eq_enabled and self.eq_band_gains and SCIPY_AVAILABLE:
-                    self.update_eq(self.eq_band_gains)
-                    print(f"EQ reinitialized for {self.sample_rate} Hz", file=sys.stderr)
-
-            if channels_changed:
-                self.channels = channels
-                print(f"Channels updated: {self.channels}", file=sys.stderr)
-
-            # Restart PipeWire if sample rate or channels changed
-            if (sample_rate_changed or channels_changed) and self.output_mode == 'pipewire' and self.pipewire_process:
-                print("Restarting PipeWire with new audio configuration...", file=sys.stderr)
-                if self.pipewire_process.stdin:
-                    self.pipewire_process.stdin.close()
-                try:
-                    await asyncio.wait_for(self.pipewire_process.wait(), timeout=2.0)
-                except asyncio.TimeoutError:
-                    self.pipewire_process.kill()
-                    await self.pipewire_process.wait()
-                await self.setup_pipewire()
-            
-            # Restart PyAudio if sample rate or channels changed
-            if (sample_rate_changed or channels_changed) and self.output_mode == 'pyaudio' and self.pyaudio_stream:
-                print("Restarting PyAudio with new audio configuration...", file=sys.stderr)
-                self.pyaudio_stream.stop_stream()
-                self.pyaudio_stream.close()
-                self.pyaudio_stream = None
-                await self.setup_pyaudio()
-
-            # Restart sounddevice if sample rate or channels changed
-            if (sample_rate_changed or channels_changed) and self.output_mode == 'sounddevice' and self.sounddevice_stream:
-                restart_start = time.time()
-                print("Restarting sounddevice with new audio configuration...", file=sys.stderr)
-                self.sounddevice_stream.stop()
-                self.sounddevice_stream.close()
-                self.sounddevice_stream = None
-                # Reset resamplers if sample rate changed
-                if sample_rate_changed and self.needs_resampling:
-                    # Reset resampler instances to reinitialize with new sample rate
-                    self.resampler_left = None
-                    self.resampler_right = None
-                await self.setup_sounddevice()
-                restart_time = (time.time() - restart_start) * 1000
-                print(f"Sounddevice restart took {restart_time:.1f}ms", file=sys.stderr)
-
-            if audio_data:
-                pcm_data = self.decode_audio(audio_data)
-                await self.output_audio(pcm_data)
-                
-                # Check duration limit
-                if not self.check_duration():
-                    self.running = False
-        
-        elif msg_type == 'status':
+        if msg_type == 'status':
             # Store session ID from server (like web UI does)
             session_id = message.get('sessionId', 'unknown')
             if session_id != 'unknown':
@@ -1648,7 +1674,7 @@ class RadioClient:
                     try:
                         message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
 
-                        # Handle binary messages (Opus format)
+                        # Handle binary messages (Opus or PCM-zstd format)
                         if isinstance(message, bytes):
                             if self.use_opus:
                                 # Decode binary Opus packet
@@ -1667,17 +1693,23 @@ class RadioClient:
                                 if not self.check_duration():
                                     self.running = False
                             else:
-                                print("Warning: Received binary message but Opus not enabled", file=sys.stderr)
+                                # Decode binary PCM-zstd packet
+                                pcm_data = self.decode_pcm_binary(message, is_zstd=True)
+                                if pcm_data:
+                                    await self.output_audio(pcm_data)
+                                    pcm_packet_count += 1
+                                    # Log first PCM packet to confirm it's working
+                                    if pcm_packet_count == 1:
+                                        compression_msg = "zstd-compressed" if ZSTD_AVAILABLE else "uncompressed"
+                                        print(f"✓ Receiving {compression_msg} PCM audio packets from server", file=sys.stderr)
+
+                                # Check duration limit
+                                if not self.check_duration():
+                                    self.running = False
                         else:
-                            # Handle JSON messages (standard format)
+                            # Handle JSON messages (control messages only - no audio)
                             data = json.loads(message)
                             await self.handle_message(data)
-                            # Track PCM packets to detect if server is sending PCM instead of Opus
-                            if data.get('type') == 'audio':
-                                pcm_packet_count += 1
-                                # Log if we're getting PCM when Opus was requested
-                                if pcm_packet_count == 1 and self.use_opus:
-                                    print("⚠ Server is sending PCM audio (not Opus) - check server Opus support", file=sys.stderr)
                     except asyncio.TimeoutError:
                         continue
                     except websockets.exceptions.ConnectionClosed:

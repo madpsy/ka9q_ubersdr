@@ -21,6 +21,7 @@ This is a SoapySDR driver that provides access to KA9Q UberSDR's wide IQ modes v
 - Boost (system library)
 - OpenSSL (for WSS support)
 - libcurl (for HTTP connection check)
+- zstd (for pcm-zstd decompression)
 
 ### Ubuntu/Debian Installation
 
@@ -32,7 +33,8 @@ sudo apt-get install \
     libwebsocketpp-dev \
     libboost-system-dev \
     libssl-dev \
-    libcurl4-openssl-dev
+    libcurl4-openssl-dev \
+    libzstd-dev
 ```
 
 ### Fedora/RHEL Installation
@@ -45,7 +47,8 @@ sudo dnf install \
     websocketpp-devel \
     boost-devel \
     openssl-devel \
-    libcurl-devel
+    libcurl-devel \
+    libzstd-devel
 ```
 
 ## Building
@@ -286,9 +289,20 @@ Contributions welcome! Please submit pull requests to the main ka9q_ubersdr repo
 
 1. **HTTP Connection Check**: Before connecting, the driver sends a POST request to `/connection` with the UUID and optional password
 2. **Server Authorization**: Server responds with `{"allowed":true}` or `{"allowed":false,"reason":"..."}`
-3. **WebSocket Connection**: If allowed, driver connects via WebSocket with UUID and optional password in query parameters
-4. **Audio Streaming**: Server sends base64-encoded I/Q audio data
+3. **WebSocket Connection**: If allowed, driver connects via WebSocket with UUID, mode, format (pcm-zstd), and optional password in query parameters
+4. **Audio Streaming**: Server sends binary I/Q data compressed with zstd (pcm-zstd format)
 5. **Frequency Control**: Driver sends JSON tune commands for frequency changes
+
+## Audio Format
+
+The driver uses the **pcm-zstd** format for efficient lossless I/Q data transmission:
+
+- **Binary format**: Hybrid header (full or minimal) + PCM data
+- **Compression**: zstd compression applied to entire packet (header + data)
+- **Header**: Little-endian binary header with magic bytes (0x5043 for full, 0x504D for minimal)
+- **PCM data**: Big-endian 16-bit signed integers (I/Q interleaved)
+- **Bandwidth savings**: 2.5-3.5x compression ratio vs uncompressed PCM
+- **Latency**: Low latency suitable for real-time streaming
 
 ## Password Authentication
 

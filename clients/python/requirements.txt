@@ -14,6 +14,7 @@ pyinstaller>=6.17.0
 zeroconf>=0.132.0
 pyserial>=3.5
 opuslib>=3.0.1
+zstandard>=0.22.0
 
 # Windows-only: OmniRig support
 pywin32>=306; platform_system=="Windows"

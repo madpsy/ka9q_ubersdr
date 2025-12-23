@@ -23,6 +23,13 @@ find_package(OpenSSL REQUIRED)
 # Find CURL (for HTTP connection check)
 find_package(CURL REQUIRED)
 
+# Find zstd (for pcm-zstd decompression)
+find_library(ZSTD_LIBRARY NAMES zstd)
+if(NOT ZSTD_LIBRARY)
+    message(FATAL_ERROR "zstd library not found. Install with: sudo apt-get install libzstd-dev")
+endif()
+message(STATUS "zstd library: ${ZSTD_LIBRARY}")
+
 # Build the driver module
 add_library(uberSDRSupport MODULE
     SoapyUberSDR.cpp
@@ -39,6 +46,7 @@ target_link_libraries(uberSDRSupport
     ${Boost_LIBRARIES}
     ${OPENSSL_LIBRARIES}
     ${CURL_LIBRARIES}
+    ${ZSTD_LIBRARY}
     pthread
 )
 

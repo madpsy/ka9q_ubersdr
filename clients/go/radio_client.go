@@ -99,6 +99,10 @@ type RadioClient struct {
 	opusSampleRate int
 	opusChannels   int
 
+	// PCM binary support (pcm-zstd)
+	usePCMZstd bool
+	pcmDecoder *PCMBinaryDecoder
+
 	// TCI audio resampling (stateful, persistent across packets)
 	tciResampler *LibsamplerateResampler // Mono resampler for TCI audio
 
@@ -382,6 +386,9 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		fmt.Fprintf(os.Stderr, "Warning: Opus not supported for IQ modes (lossless required)\n")
 	}
 
+	// PCM-zstd is the default format (unless Opus is explicitly requested)
+	usePCMZstdEnabled := !useOpusEnabled
+
 	client := &RadioClient{
 		url:                 urlStr,
 		host:                host,
@@ -419,10 +426,22 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		rightChannelEnabled: true,                           // Right channel enabled by default
 		previousBand:        GetBandForFrequency(frequency), // Initialize with current band
 		useOpus:             useOpusEnabled,
+		usePCMZstd:          usePCMZstdEnabled,
 	}
 
 	if client.useOpus {
 		fmt.Fprintf(os.Stderr, "Opus decoding enabled (decoder will initialize on first packet)\n")
+	}
+
+	// Initialize PCM binary decoder if using pcm-zstd
+	if client.usePCMZstd {
+		pcmDec, err := NewPCMBinaryDecoder()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to initialize PCM decoder: %v\n", err)
+		} else {
+			client.pcmDecoder = pcmDec
+			fmt.Fprintf(os.Stderr, "PCM-zstd decoding enabled\n")
+		}
 	}
 
 	// Initialize NR2 processor if enabled
@@ -489,9 +508,11 @@ func (c *RadioClient) BuildWebSocketURL() string {
 			params.Set("password", c.password)
 		}
 
-		// Add format parameter for Opus
+		// Add format parameter (opus or pcm-zstd)
 		if c.useOpus {
 			params.Set("format", "opus")
+		} else if c.usePCMZstd {
+			params.Set("format", "pcm-zstd")
 		}
 
 		return fmt.Sprintf("%s?%s", baseURL, params.Encode())
@@ -516,9 +537,11 @@ func (c *RadioClient) BuildWebSocketURL() string {
 		wsURL += fmt.Sprintf("&password=%s", url.QueryEscape(c.password))
 	}
 
-	// Add format parameter for Opus
+	// Add format parameter (opus or pcm-zstd)
 	if c.useOpus {
 		wsURL += "&format=opus"
+	} else if c.usePCMZstd {
+		wsURL += "&format=pcm-zstd"
 	}
 
 	return wsURL
@@ -1469,7 +1492,7 @@ func (c *RadioClient) runOnce() int {
 			break
 		}
 
-		// Handle binary messages (Opus format)
+		// Handle binary messages (Opus or PCM-zstd format)
 		if messageType == websocket.BinaryMessage {
 			if c.useOpus {
 				// Decode binary Opus packet
@@ -1495,8 +1518,45 @@ func (c *RadioClient) runOnce() int {
 						c.running = false
 					}
 				}
+			} else if c.usePCMZstd && c.pcmDecoder != nil {
+				// Decode binary PCM-zstd packet
+				pcmData, sampleRate, channels, err := c.pcmDecoder.DecodePCMBinary(message, true)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "PCM-zstd decode error: %v\n", err)
+					continue
+				}
+
+				// Update sample rate and channels if they changed
+				if sampleRate != c.sampleRate || channels != c.channels {
+					if sampleRate != c.sampleRate {
+						c.sampleRate = sampleRate
+						fmt.Fprintf(os.Stderr, "Sample rate updated: %d Hz\n", c.sampleRate)
+					}
+					if channels != c.channels {
+						c.channels = channels
+						fmt.Fprintf(os.Stderr, "Channels updated: %d\n", c.channels)
+					}
+				}
+
+				if len(pcmData) > 0 {
+					if err := c.OutputAudio(pcmData); err != nil {
+						fmt.Fprintf(os.Stderr, "Audio output error: %v\n", err)
+					}
+					pcmPacketCount++
+					// Log first PCM-zstd packet to confirm it's working
+					if pcmPacketCount == 1 {
+						fmt.Fprintf(os.Stderr, "✓ Receiving PCM-zstd compressed audio packets from server\n")
+						// Set audio format to PCM (what we're receiving from ubersdr)
+						c.audioFormat = "PCM"
+					}
+
+					// Check duration limit
+					if !c.CheckDuration() {
+						c.running = false
+					}
+				}
 			} else {
-				fmt.Fprintf(os.Stderr, "Warning: Received binary message but Opus not enabled\n")
+				fmt.Fprintf(os.Stderr, "Warning: Received binary message but no binary decoder enabled\n")
 			}
 		} else {
 			// Handle JSON messages (standard format)

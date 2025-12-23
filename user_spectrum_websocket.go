@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"log"
 	"math"
 	"net"
@@ -161,23 +160,8 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	query := r.URL.Query()
 	password := query.Get("password")
 
-	// Get mode from query string (optional): "json" (default) or "binary"
-	mode := query.Get("mode")
-	if mode == "" {
-		mode = "json" // Default to JSON for backward compatibility
-	}
-
-	// Validate mode
-	if mode != "json" && mode != "binary" {
-		log.Printf("Rejected Spectrum WebSocket connection: invalid mode '%s' from %s (client IP: %s)", mode, sourceIP, clientIP)
-		http.Error(w, fmt.Sprintf("Invalid mode '%s'. Valid modes: json, binary", mode), http.StatusBadRequest)
-		return
-	}
-
-	useBinaryMode := (mode == "binary")
-	if useBinaryMode {
-		log.Printf("Client requested binary spectrum mode with delta encoding")
-	}
+	// Binary mode is now the only supported mode (JSON removed)
+	log.Printf("Using binary spectrum mode with delta encoding")
 
 	// Check connection rate limit (unless IP is bypassed via IP list or password)
 	if !swsh.sessions.config.Server.IsIPTimeoutBypassed(clientIP, password) && !swsh.connRateLimiter.AllowConnection(clientIP) {
@@ -269,17 +253,14 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	// Send initial status
 	swsh.sendStatus(conn, session)
 
-	// Initialize spectrum state for delta encoding (if binary mode)
-	var state *spectrumState
-	if useBinaryMode {
-		state = &spectrumState{
-			previousData: make([]float32, session.BinCount),
-		}
+	// Initialize spectrum state for delta encoding (always used in binary mode)
+	state := &spectrumState{
+		previousData: make([]float32, session.BinCount),
 	}
 
 	// Start spectrum streaming goroutine
 	done := make(chan struct{})
-	go swsh.streamSpectrum(conn, session, done, useBinaryMode, state)
+	go swsh.streamSpectrum(conn, session, done, state)
 
 	// Handle incoming messages
 	swsh.handleMessages(conn, session, done)
@@ -463,7 +444,7 @@ func (swsh *UserSpectrumWebSocketHandler) handleMessages(conn *wsConn, session *
 }
 
 // streamSpectrum streams spectrum data to the client
-func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *Session, done <-chan struct{}, useBinaryMode bool, state *spectrumState) {
+func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *Session, done <-chan struct{}, state *spectrumState) {
 	for {
 		select {
 		case <-done:
@@ -492,27 +473,10 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 				// Removed debug logging
 			}
 
-			if useBinaryMode {
-				// Binary mode with delta encoding
-				if err := swsh.sendBinarySpectrum(conn, session, spectrumData, state); err != nil {
-					log.Printf("Failed to send binary spectrum data: %v", err)
-					return
-				}
-			} else {
-				// JSON mode (legacy)
-				msg := UserSpectrumServerMessage{
-					Type:         "spectrum",
-					Data:         spectrumData,
-					Frequency:    session.Frequency,
-					BinCount:     session.BinCount,
-					BinBandwidth: session.BinBandwidth,
-					Timestamp:    time.Now().UnixMilli(),
-				}
-
-				if err := swsh.sendMessage(conn, msg); err != nil {
-					log.Printf("Failed to send spectrum data: %v", err)
-					return
-				}
+			// Binary mode with delta encoding (only mode supported)
+			if err := swsh.sendBinarySpectrum(conn, session, spectrumData, state); err != nil {
+				log.Printf("Failed to send binary spectrum data: %v", err)
+				return
 			}
 
 			// Record spectrum packet sent in Prometheus

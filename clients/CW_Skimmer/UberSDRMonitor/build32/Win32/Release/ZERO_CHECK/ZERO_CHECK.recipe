@@ -2,7 +2,7 @@
 <Project>
   <ProjectOutputs>
     <ProjectOutput>
-      <FullPath>C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\build32\Release\ZERO_CHECK</FullPath>
+      <FullPath>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRMonitor\build32\Release\ZERO_CHECK</FullPath>
     </ProjectOutput>
   </ProjectOutputs>
   <ContentFiles />

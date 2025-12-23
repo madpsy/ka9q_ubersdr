@@ -1,4 +1,4 @@
-# Install script for directory: C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf
+# Install script for directory: C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -34,32 +34,32 @@ endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
   if(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Dd][Ee][Bb][Uu][Gg])$")
-    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY OPTIONAL FILES "C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/Debug/UberSDRIntf.lib")
+    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY OPTIONAL FILES "C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Debug/UberSDRIntf.lib")
   elseif(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Rr][Ee][Ll][Ee][Aa][Ss][Ee])$")
-    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY OPTIONAL FILES "C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/Release/UberSDRIntf.lib")
+    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY OPTIONAL FILES "C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Release/UberSDRIntf.lib")
   elseif(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Mm][Ii][Nn][Ss][Ii][Zz][Ee][Rr][Ee][Ll])$")
-    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY OPTIONAL FILES "C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.lib")
+    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY OPTIONAL FILES "C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.lib")
   elseif(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Rr][Ee][Ll][Ww][Ii][Tt][Hh][Dd][Ee][Bb][Ii][Nn][Ff][Oo])$")
-    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY OPTIONAL FILES "C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.lib")
+    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY OPTIONAL FILES "C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.lib")
   endif()
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
   if(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Dd][Ee][Bb][Uu][Gg])$")
-    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE SHARED_LIBRARY FILES "C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/Debug/UberSDRIntf.dll")
+    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE SHARED_LIBRARY FILES "C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Debug/UberSDRIntf.dll")
   elseif(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Rr][Ee][Ll][Ee][Aa][Ss][Ee])$")
-    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE SHARED_LIBRARY FILES "C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/Release/UberSDRIntf.dll")
+    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE SHARED_LIBRARY FILES "C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Release/UberSDRIntf.dll")
   elseif(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Mm][Ii][Nn][Ss][Ii][Zz][Ee][Rr][Ee][Ll])$")
-    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE SHARED_LIBRARY FILES "C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.dll")
+    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE SHARED_LIBRARY FILES "C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.dll")
   elseif(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Rr][Ee][Ll][Ww][Ii][Tt][Hh][Dd][Ee][Bb][Ii][Nn][Ff][Oo])$")
-    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE SHARED_LIBRARY FILES "C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.dll")
+    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE SHARED_LIBRARY FILES "C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.dll")
   endif()
 endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
 if(CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/install_local_manifest.txt"
+  file(WRITE "C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/install_local_manifest.txt"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()
 if(CMAKE_INSTALL_COMPONENT)
@@ -75,6 +75,6 @@ else()
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/${CMAKE_INSTALL_MANIFEST}"
+  file(WRITE "C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()

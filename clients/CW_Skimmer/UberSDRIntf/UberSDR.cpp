@@ -1088,12 +1088,23 @@ namespace UberSDRIntf
 
             const uint8_t* compressedData = reinterpret_cast<const uint8_t*>(message.data());
             size_t compressedSize = message.size();
+            
+            // Track compressed bytes received for accurate network bandwidth measurement
+            // This is called from ProcessIQData which tracks decompressed bytes
+            extern void TrackCompressedBytes(int receiverID, size_t compressedBytes);
+            TrackCompressedBytes(receiverID, compressedSize);
 
-            // Check for zstd magic number (0x28B52FFD little-endian)
+            // Check for zstd magic number (0xFD2FB528 in memory as bytes: 28 B5 2F FD)
+            // The zstd magic number is 0x184D2A28 to 0x184D2A2F (frame magic)
+            // or 0xFD2FB528 (skippable frame magic)
+            // We need to check the first 4 bytes match zstd format
             uint32_t magic = compressedData[0] | (compressedData[1] << 8) |
                             (compressedData[2] << 16) | (compressedData[3] << 24);
 
-            if (magic != 0x28B52FFD) {
+            // zstd magic number is 0x28B52FFD when read as little-endian uint32
+            // which appears as bytes: FD 2F B5 28 in memory (big-endian byte order)
+            // or as 0xFD2FB528 when displayed as hex
+            if (magic != 0xFD2FB528) {
                 std::stringstream ss;
                 ss << "Invalid message format - expected zstd compressed data, got magic: 0x"
                    << std::hex << magic;

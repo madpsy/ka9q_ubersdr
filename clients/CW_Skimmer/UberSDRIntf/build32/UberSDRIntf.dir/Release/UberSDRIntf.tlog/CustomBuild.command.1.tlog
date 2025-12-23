@@ -1,6 +1,6 @@
-^C:\USERS\MADPSY\REPOS\HERMESINTF\UBERSDRINTF\CMAKELISTS.TXT
+^C:\USERS\MADPSY\REPOS\KA9Q_UBERSDR\CLIENTS\CW_SKIMMER\UBERSDRINTF\CMAKELISTS.TXT
 setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf -BC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32 --check-stamp-file C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/CMakeFiles/generate.stamp
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf -BC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32 --check-stamp-file C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone

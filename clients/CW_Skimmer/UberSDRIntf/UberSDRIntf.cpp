@@ -321,6 +321,41 @@ namespace UberSDRIntf
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Track compressed bytes received (called from UberSDR.cpp before decompression)
+// This provides accurate network bandwidth measurement
+void TrackCompressedBytes(int receiverID, size_t compressedBytes)
+{
+    using namespace UberSDRIntf;
+    
+    if (receiverID < 0 || receiverID >= MAX_RX_COUNT) {
+        return;
+    }
+    
+    // Track compressed bytes for network bandwidth calculation
+    static int64_t compressedBytesReceived[MAX_RX_COUNT] = {0};
+    static int64_t lastCompressedBytesReceived[MAX_RX_COUNT] = {0};
+    static int64_t lastCompressedThroughputUpdate[MAX_RX_COUNT] = {0};
+    
+    compressedBytesReceived[receiverID] += compressedBytes;
+    
+    // Update compressed throughput every second
+    int64_t now = GetCurrentTimeMs();
+    if (now - lastCompressedThroughputUpdate[receiverID] >= 1000) {
+        if (gpSharedStatus != NULL && receiverID < MAX_RX_COUNT) {
+            int64_t bytesDelta = compressedBytesReceived[receiverID] - lastCompressedBytesReceived[receiverID];
+            float elapsed = (float)(now - lastCompressedThroughputUpdate[receiverID]) / 1000.0f;
+            
+            // Store compressed throughput in bytesReceived field (repurposing for network bandwidth)
+            gpSharedStatus->receivers[receiverID].bytesReceived = compressedBytesReceived[receiverID];
+            gpSharedStatus->receivers[receiverID].throughputKBps = (float)bytesDelta / 1024.0f / elapsed;
+            
+            lastCompressedBytesReceived[receiverID] = compressedBytesReceived[receiverID];
+        }
+        lastCompressedThroughputUpdate[receiverID] = now;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Process IQ data from WebSocket (called from UberSDR.cpp)
 // This must be outside the namespace to be accessible
 void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes)
@@ -337,15 +372,11 @@ void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes)
     static float peakI[MAX_RX_COUNT] = {0};
     static float peakQ[MAX_RX_COUNT] = {0};
     static int64_t lastPeakUpdate[MAX_RX_COUNT] = {0};
-    static int64_t lastThroughputUpdate[MAX_RX_COUNT] = {0};
-    static int64_t lastBytesReceived[MAX_RX_COUNT] = {0};
     
-    // Update bytes received for throughput calculation (outside critical section)
-    if (gpSharedStatus != NULL && receiverID < MAX_RX_COUNT) {
-        gpSharedStatus->receivers[receiverID].bytesReceived += iqBytes.size();
-    }
+    // Note: Compressed bytes are now tracked in TrackCompressedBytes() called from HandleWebSocketMessage
+    // This gives us accurate network bandwidth instead of decompressed data size
     
-    // Check if it's time to update throughput and peak levels (every 100ms)
+    // Check if it's time to update peak levels (every 100ms)
     int64_t now = GetCurrentTimeMs();
     if (now - lastPeakUpdate[receiverID] >= 100) {
         // Update peak levels in shared memory
@@ -358,17 +389,6 @@ void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes)
         peakI[receiverID] *= 0.7f;
         peakQ[receiverID] *= 0.7f;
         lastPeakUpdate[receiverID] = now;
-    }
-    
-    // Update throughput every second
-    if (now - lastThroughputUpdate[receiverID] >= 1000) {
-        if (gpSharedStatus != NULL && receiverID < MAX_RX_COUNT) {
-            int64_t bytesDelta = gpSharedStatus->receivers[receiverID].bytesReceived - lastBytesReceived[receiverID];
-            float elapsed = (float)(now - lastThroughputUpdate[receiverID]) / 1000.0f;
-            gpSharedStatus->receivers[receiverID].throughputKBps = (float)bytesDelta / 1024.0f / elapsed;
-            lastBytesReceived[receiverID] = gpSharedStatus->receivers[receiverID].bytesReceived;
-        }
-        lastThroughputUpdate[receiverID] = now;
     }
     
     // IQ data format: interleaved I/Q samples, big-endian int16

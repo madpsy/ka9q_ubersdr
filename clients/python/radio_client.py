@@ -28,7 +28,20 @@ import numpy as np
 import subprocess
 import re
 
+# For PyInstaller: Add the temporary directory to DLL search path
+# This ensures opuslib can find opus.dll when running from frozen executable
+if getattr(sys, 'frozen', False):
+    # Running in PyInstaller bundle
+    bundle_dir = sys._MEIPASS
+    # Add bundle directory to DLL search path (Windows)
+    if hasattr(os, 'add_dll_directory'):
+        os.add_dll_directory(bundle_dir)
+    # Also add to PATH for older Python versions
+    os.environ['PATH'] = bundle_dir + os.pathsep + os.environ.get('PATH', '')
+
 # Import Opus decoder (optional)
+# Note: opuslib tries to load the native DLL during import, so we need to catch
+# both ImportError (package not installed) and Exception (DLL not found)
 try:
     import opuslib
     OPUS_AVAILABLE = True
@@ -36,6 +49,12 @@ except ImportError:
     OPUS_AVAILABLE = False
     print("Warning: opuslib not available, Opus decoding disabled", file=sys.stderr)
     print("Install with: pip install opuslib", file=sys.stderr)
+except Exception as e:
+    # This catches the case where opuslib is installed but the native DLL is missing
+    OPUS_AVAILABLE = False
+    print("Warning: opuslib installed but Opus DLL not found", file=sys.stderr)
+    print(f"Error: {e}", file=sys.stderr)
+    print("Opus decoding disabled. Ensure opus.dll is in the same directory as the executable.", file=sys.stderr)
 
 # Import zstd decompressor (optional)
 try:

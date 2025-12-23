@@ -295,14 +295,12 @@ void UpdateDisplay()
               g_pStatus->activeReceiverCount);
     SetDlgItemTextA(g_hDlg, IDC_UPTIME, buffer);
     
-    // Total throughput with network overhead estimate
-    // Estimate 1.5x overhead for WebSocket + TCP/IP + TLS
-    float estimatedNetworkThroughput = totalThroughput * 1.5f;
-    sprintf_s(buffer, sizeof(buffer), "Total Throughput: %.1f KB/s (%.2f Mbps) | Est. Network: %.1f KB/s (%.2f Mbps)",
+    // Total throughput - now shows ACTUAL compressed network bandwidth (not decompressed)
+    // The DLL tracks compressed bytes received, so this is the real network usage
+    sprintf_s(buffer, sizeof(buffer), "Network Bandwidth: %.1f KB/s (%.2f Mbps) | Active Receivers: %d",
               totalThroughput,
               (totalThroughput * 8.0f) / 1024.0f,
-              estimatedNetworkThroughput,
-              (estimatedNetworkThroughput * 8.0f) / 1024.0f);
+              g_pStatus->activeReceiverCount);
     SetDlgItemTextA(g_hDlg, IDC_TOTAL_THROUGHPUT, buffer);
     
     // Process any active recordings

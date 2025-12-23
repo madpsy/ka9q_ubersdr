@@ -1,32 +1,32 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\UberSDRMonitor.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRMonitor\UberSDRMonitor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\resource.h">
+    <ClInclude Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRMonitor\resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDRShared.h">
+    <ClInclude Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDRShared.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\CMakeLists.txt" />
+    <CustomBuild Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRMonitor\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\UberSDRMonitor.rc">
+    <ResourceCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRMonitor\UberSDRMonitor.rc">
       <Filter>Source Files</Filter>
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Header Files">
-      <UniqueIdentifier>{1AD4F072-87A2-3543-973B-FF2F91DCB93C}</UniqueIdentifier>
+      <UniqueIdentifier>{594F7012-AF95-3494-8573-B9E69CAC4C1B}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files">
-      <UniqueIdentifier>{6ABD8FE7-D098-3B09-8051-928D04EC20AD}</UniqueIdentifier>
+      <UniqueIdentifier>{A8EBE7B7-32BD-3141-A7CF-CCA601262BDC}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

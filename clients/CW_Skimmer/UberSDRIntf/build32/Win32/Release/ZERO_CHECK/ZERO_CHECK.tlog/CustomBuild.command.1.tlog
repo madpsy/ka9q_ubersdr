@@ -1,6 +1,6 @@
-^C:\USERS\MADPSY\REPOS\HERMESINTF\UBERSDRINTF\BUILD32\CMAKEFILES\7BDD6C32A86B7657C133B6DDC673D766\GENERATE.STAMP.RULE
+^C:\USERS\MADPSY\REPOS\KA9Q_UBERSDR\CLIENTS\CW_SKIMMER\UBERSDRINTF\BUILD32\CMAKEFILES\A75322CF58CF37EE3D801322F08BE15E\GENERATE.STAMP.RULE
 setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf -BC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32 --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/UberSDRIntf.sln
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf -BC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32 --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/UberSDRIntf.slnx
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone

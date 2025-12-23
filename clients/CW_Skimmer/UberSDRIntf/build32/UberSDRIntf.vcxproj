@@ -22,8 +22,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{0D876A09-C69A-37F2-A87B-B699C23F3638}</ProjectGuid>
+    <ProjectGuid>{C5BD9077-BA84-3739-8C5E-222C90C04933}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
+    <VcpkgEnabled>false</VcpkgEnabled>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
     <Platform>Win32</Platform>
     <ProjectName>UberSDRIntf</ProjectName>
@@ -54,30 +55,30 @@
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
   <ImportGroup Label="PropertySheets">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="do_not_import_user.props" Condition="exists('do_not_import_user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\Debug\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\Debug\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">UberSDRIntf.dir\Debug\</IntDir>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">UberSDRIntf</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">.dll</TargetExt>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</GenerateManifest>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\Release\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\Release\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">UberSDRIntf.dir\Release\</IntDir>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">UberSDRIntf</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">.dll</TargetExt>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</GenerateManifest>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\MinSizeRel\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\MinSizeRel\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">UberSDRIntf.dir\MinSizeRel\</IntDir>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">UberSDRIntf</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">.dll</TargetExt>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">false</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">true</GenerateManifest>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\RelWithDebInfo\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\RelWithDebInfo\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">UberSDRIntf.dir\RelWithDebInfo\</IntDir>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">UberSDRIntf</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">.dll</TargetExt>
@@ -87,11 +88,16 @@
   <PropertyGroup />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/vcpkg/installed/x86-windows-static/include"</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -110,10 +116,10 @@
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;UBERSDRINTF_EXPORTS;IXWEBSOCKET_USE_TLS=0;IXWEBSOCKET_USE_OPEN_SSL=0;CMAKE_INTDIR=\"Debug\";UberSDRIntf_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;C:\vcpkg\installed\x86-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;C:\vcpkg\installed\x86-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -121,9 +127,18 @@
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
     <PostBuildEvent>
-      <Message>Copying DLL to build directory</Message>
+      <Message>	Copying DLL to build directory</Message>
       <Command>setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/Debug/UberSDRIntf.dll C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -noprofile -executionpolicy Bypass -file C:/vcpkg/scripts/buildsystems/msbuild/applocal.ps1 -targetBinary C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Debug/UberSDRIntf.dll -installedDir C:/vcpkg/installed/x86-windows-static/debug/bin -OutVariable out
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Debug/UberSDRIntf.dll C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -133,17 +148,17 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalDependencies>ws2_32.lib;crypt32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;crypt32.lib;C:\vcpkg\installed\x86-windows-static\debug\lib\zstd.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:X86</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
-      <ImportLibrary>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/Debug/UberSDRIntf.lib</ImportLibrary>
+      <ImportLibrary>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Debug/UberSDRIntf.lib</ImportLibrary>
       <LinkErrorReporting></LinkErrorReporting>
-      <ModuleDefinitionFile>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/UberSDRIntf.def</ModuleDefinitionFile>
-      <ProgramDataBaseFile>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/Debug/UberSDRIntf.pdb</ProgramDataBaseFile>
+      <ModuleDefinitionFile>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/UberSDRIntf.def</ModuleDefinitionFile>
+      <ProgramDataBaseFile>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Debug/UberSDRIntf.pdb</ProgramDataBaseFile>
       <RandomizedBaseAddress></RandomizedBaseAddress>
       <SubSystem></SubSystem>
     </Link>
@@ -153,10 +168,15 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/vcpkg/installed/x86-windows-static/include"</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -177,10 +197,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;UBERSDRINTF_EXPORTS;IXWEBSOCKET_USE_TLS=0;IXWEBSOCKET_USE_OPEN_SSL=0;CMAKE_INTDIR=\"Release\";UberSDRIntf_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;C:\vcpkg\installed\x86-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;C:\vcpkg\installed\x86-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -188,9 +208,18 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
     <PostBuildEvent>
-      <Message>Copying DLL to build directory</Message>
+      <Message>	Copying DLL to build directory</Message>
       <Command>setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/Release/UberSDRIntf.dll C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -noprofile -executionpolicy Bypass -file C:/vcpkg/scripts/buildsystems/msbuild/applocal.ps1 -targetBinary C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Release/UberSDRIntf.dll -installedDir C:/vcpkg/installed/x86-windows-static/bin -OutVariable out
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Release/UberSDRIntf.dll C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -200,17 +229,17 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalDependencies>ws2_32.lib;crypt32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;crypt32.lib;C:\vcpkg\installed\x86-windows-static\lib\zstd.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:X86</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
-      <ImportLibrary>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/Release/UberSDRIntf.lib</ImportLibrary>
+      <ImportLibrary>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Release/UberSDRIntf.lib</ImportLibrary>
       <LinkErrorReporting></LinkErrorReporting>
-      <ModuleDefinitionFile>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/UberSDRIntf.def</ModuleDefinitionFile>
-      <ProgramDataBaseFile>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/Release/UberSDRIntf.pdb</ProgramDataBaseFile>
+      <ModuleDefinitionFile>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/UberSDRIntf.def</ModuleDefinitionFile>
+      <ProgramDataBaseFile>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/Release/UberSDRIntf.pdb</ProgramDataBaseFile>
       <RandomizedBaseAddress></RandomizedBaseAddress>
       <SubSystem></SubSystem>
     </Link>
@@ -220,10 +249,15 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/vcpkg/installed/x86-windows-static/include"</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -244,10 +278,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;UBERSDRINTF_EXPORTS;IXWEBSOCKET_USE_TLS=0;IXWEBSOCKET_USE_OPEN_SSL=0;CMAKE_INTDIR=\"MinSizeRel\";UberSDRIntf_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;C:\vcpkg\installed\x86-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;C:\vcpkg\installed\x86-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -255,9 +289,18 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
     <PostBuildEvent>
-      <Message>Copying DLL to build directory</Message>
+      <Message>	Copying DLL to build directory</Message>
       <Command>setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.dll C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -noprofile -executionpolicy Bypass -file C:/vcpkg/scripts/buildsystems/msbuild/applocal.ps1 -targetBinary C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.dll -installedDir C:/vcpkg/installed/x86-windows-static/bin -OutVariable out
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.dll C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -267,17 +310,17 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalDependencies>ws2_32.lib;crypt32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;crypt32.lib;C:\vcpkg\installed\x86-windows-static\lib\zstd.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:X86</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
-      <ImportLibrary>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.lib</ImportLibrary>
+      <ImportLibrary>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.lib</ImportLibrary>
       <LinkErrorReporting></LinkErrorReporting>
-      <ModuleDefinitionFile>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/UberSDRIntf.def</ModuleDefinitionFile>
-      <ProgramDataBaseFile>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.pdb</ProgramDataBaseFile>
+      <ModuleDefinitionFile>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/UberSDRIntf.def</ModuleDefinitionFile>
+      <ProgramDataBaseFile>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/MinSizeRel/UberSDRIntf.pdb</ProgramDataBaseFile>
       <RandomizedBaseAddress></RandomizedBaseAddress>
       <SubSystem></SubSystem>
     </Link>
@@ -287,11 +330,16 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/vcpkg/installed/x86-windows-static/include"</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -310,10 +358,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;UBERSDRINTF_EXPORTS;IXWEBSOCKET_USE_TLS=0;IXWEBSOCKET_USE_OPEN_SSL=0;CMAKE_INTDIR=\"RelWithDebInfo\";UberSDRIntf_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;C:\vcpkg\installed\x86-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket;C:\vcpkg\installed\x86-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -321,9 +369,18 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
     <PostBuildEvent>
-      <Message>Copying DLL to build directory</Message>
+      <Message>	Copying DLL to build directory</Message>
       <Command>setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.dll C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -noprofile -executionpolicy Bypass -file C:/vcpkg/scripts/buildsystems/msbuild/applocal.ps1 -targetBinary C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.dll -installedDir C:/vcpkg/installed/x86-windows-static/bin -OutVariable out
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E copy C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.dll C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -333,17 +390,17 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalDependencies>ws2_32.lib;crypt32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;crypt32.lib;C:\vcpkg\installed\x86-windows-static\lib\zstd.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:X86</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
-      <ImportLibrary>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.lib</ImportLibrary>
+      <ImportLibrary>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.lib</ImportLibrary>
       <LinkErrorReporting></LinkErrorReporting>
-      <ModuleDefinitionFile>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/UberSDRIntf.def</ModuleDefinitionFile>
-      <ProgramDataBaseFile>C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.pdb</ProgramDataBaseFile>
+      <ModuleDefinitionFile>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/UberSDRIntf.def</ModuleDefinitionFile>
+      <ProgramDataBaseFile>C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/RelWithDebInfo/UberSDRIntf.pdb</ProgramDataBaseFile>
       <RandomizedBaseAddress></RandomizedBaseAddress>
       <SubSystem></SubSystem>
     </Link>
@@ -352,11 +409,11 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ProjectReference>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CustomBuild Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\CMakeLists.txt">
+    <CustomBuild Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\CMakeLists.txt">
       <UseUtf8Encoding>Always</UseUtf8Encoding>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Building Custom Rule C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/CMakeLists.txt</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Building Custom Rule C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf -BC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32 --check-stamp-file C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/CMakeFiles/generate.stamp
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf -BC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32 --check-stamp-file C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -364,12 +421,12 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeCXXInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeGenericSystem.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeLanguageInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeRCInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Linker\MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\WindowsPaths.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeCXXCompiler.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeRCCompiler.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\generate.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeFindDependencyMacro.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeCXXCompiler.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeRCCompiler.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeSystem.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdConfig.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdConfigVersion.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets-debug.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets-release.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets.cmake;C:\vcpkg\scripts\buildsystems\vcpkg.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\generate.stamp</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Building Custom Rule C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/CMakeLists.txt</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Building Custom Rule C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf -BC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32 --check-stamp-file C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/CMakeFiles/generate.stamp
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf -BC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32 --check-stamp-file C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -377,12 +434,12 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeCXXInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeGenericSystem.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeLanguageInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeRCInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Linker\MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\WindowsPaths.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeCXXCompiler.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeRCCompiler.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\generate.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeFindDependencyMacro.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeCXXCompiler.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeRCCompiler.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeSystem.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdConfig.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdConfigVersion.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets-debug.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets-release.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets.cmake;C:\vcpkg\scripts\buildsystems\vcpkg.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\generate.stamp</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">Building Custom Rule C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/CMakeLists.txt</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">Building Custom Rule C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf -BC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32 --check-stamp-file C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/CMakeFiles/generate.stamp
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf -BC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32 --check-stamp-file C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -390,12 +447,12 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeCXXInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeGenericSystem.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeLanguageInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeRCInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Linker\MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\WindowsPaths.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeCXXCompiler.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeRCCompiler.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\generate.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeFindDependencyMacro.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeCXXCompiler.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeRCCompiler.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeSystem.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdConfig.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdConfigVersion.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets-debug.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets-release.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets.cmake;C:\vcpkg\scripts\buildsystems\vcpkg.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\generate.stamp</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|Win32'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">Building Custom Rule C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/CMakeLists.txt</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">Building Custom Rule C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf -BC:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32 --check-stamp-file C:/Users/MadPsy/Repos/HermesIntf/UberSDRIntf/build32/CMakeFiles/generate.stamp
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf -BC:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32 --check-stamp-file C:/Users/MadPsy/Repos/ka9q_ubersdr/clients/CW_Skimmer/UberSDRIntf/build32/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -403,56 +460,56 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeCXXInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeGenericSystem.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeLanguageInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeRCInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Compiler\MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Linker\MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\Windows.cmake;C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\share\cmake-4.1\Modules\Platform\WindowsPaths.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeCXXCompiler.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeRCCompiler.cmake;C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\4.1.1-msvc1\CMakeSystem.cmake;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\generate.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeFindDependencyMacro.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.2\Modules\Platform\WindowsPaths.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeCXXCompiler.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeRCCompiler.cmake;C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\4.2.0-rc4\CMakeSystem.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdConfig.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdConfigVersion.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets-debug.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets-release.cmake;C:\vcpkg\installed\x86-windows-static\share\zstd\zstdTargets.cmake;C:\vcpkg\scripts\buildsystems\vcpkg.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\generate.stamp</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|Win32'">false</LinkObjects>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDRIntf.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDR.cpp" />
-    <None Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDRIntf.def" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXBench.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXCancellationRequest.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXConnectionState.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXDNSLookup.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXExponentialBackoff.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXGetFreePort.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXGzipCodec.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttp.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttpClient.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttpServer.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXNetSystem.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterrupt.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptEvent.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptFactory.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptPipe.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSetThreadName.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocket.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketConnect.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketServer.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketTLSOptions.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXStrCaseCompare.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXUdpSocket.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXUrlParser.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXUuid.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocket.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketCloseConstants.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketHandshake.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketHttpHeaders.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflate.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflateCodec.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflateOptions.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketProxyServer.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketServer.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketTransport.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXSocketFactoryStub.cpp" />
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXUserAgentStub.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDRIntf.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDR.cpp" />
+    <None Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDRIntf.def" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXBench.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXCancellationRequest.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXConnectionState.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXDNSLookup.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXExponentialBackoff.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXGetFreePort.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXGzipCodec.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttp.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttpClient.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttpServer.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXNetSystem.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterrupt.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptEvent.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptFactory.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptPipe.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSetThreadName.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocket.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketConnect.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketServer.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketTLSOptions.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXStrCaseCompare.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXUdpSocket.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXUrlParser.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXUuid.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocket.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketCloseConstants.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketHandshake.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketHttpHeaders.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflate.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflateCodec.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflateOptions.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketProxyServer.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketServer.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketTransport.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXSocketFactoryStub.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXUserAgentStub.cpp" />
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>
-    <ProjectReference Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\ZERO_CHECK.vcxproj">
-      <Project>{673138B5-F578-385F-9789-51815FF81776}</Project>
+    <ProjectReference Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\ZERO_CHECK.vcxproj">
+      <Project>{40885B1A-A401-3028-9C59-3DBDA733049C}</Project>
       <Name>ZERO_CHECK</Name>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>

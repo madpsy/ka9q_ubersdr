@@ -1,13 +1,13 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <CustomBuild Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\build32\CMakeFiles\7bdd6c32a86b7657c133b6ddc673d766\generate.stamp.rule">
+    <CustomBuild Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\build32\CMakeFiles\a75322cf58cf37ee3d801322f08be15e\generate.stamp.rule">
       <Filter>CMake Rules</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="CMake Rules">
-      <UniqueIdentifier>{C5D0E8A4-78D6-3A33-8073-C6ACE0F8C6A8}</UniqueIdentifier>
+      <UniqueIdentifier>{8B591FC5-D7E7-3626-BBE1-85D4B32463C6}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

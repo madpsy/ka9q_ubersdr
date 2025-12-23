@@ -1,132 +1,132 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDRIntf.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDRIntf.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDR.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDR.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXBench.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXBench.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXCancellationRequest.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXCancellationRequest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXConnectionState.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXConnectionState.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXDNSLookup.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXDNSLookup.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXExponentialBackoff.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXExponentialBackoff.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXGetFreePort.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXGetFreePort.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXGzipCodec.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXGzipCodec.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttp.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttp.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttpClient.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttpClient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttpServer.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXHttpServer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXNetSystem.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXNetSystem.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterrupt.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterrupt.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptEvent.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptEvent.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptFactory.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptFactory.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptPipe.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSelectInterruptPipe.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSetThreadName.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSetThreadName.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocket.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocket.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketConnect.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketConnect.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketServer.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketServer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketTLSOptions.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXSocketTLSOptions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXStrCaseCompare.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXStrCaseCompare.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXUdpSocket.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXUdpSocket.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXUrlParser.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXUrlParser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXUuid.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXUuid.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocket.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocket.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketCloseConstants.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketCloseConstants.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketHandshake.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketHandshake.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketHttpHeaders.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketHttpHeaders.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflate.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflate.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflateCodec.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflateCodec.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflateOptions.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketPerMessageDeflateOptions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketProxyServer.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketProxyServer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketServer.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketServer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketTransport.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXWebSocketTransport.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXSocketFactoryStub.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXSocketFactoryStub.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\IXUserAgentStub.cpp">
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXUserAgentStub.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\CMakeLists.txt" />
+    <CustomBuild Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="C:\Users\MadPsy\Repos\HermesIntf\UberSDRIntf\UberSDRIntf.def">
+    <None Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDRIntf.def">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
-      <UniqueIdentifier>{E81AE4E6-179B-36F8-BB40-0E30CACCFFD6}</UniqueIdentifier>
+      <UniqueIdentifier>{79A29D33-C0DA-3E52-A49E-9386E849D637}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

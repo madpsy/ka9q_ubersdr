@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -337,27 +336,25 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	query := r.URL.Query()
 	password := query.Get("password")
 
-	// Get format from query string (optional): "json" (default), "opus", "pcm", or "pcm-zstd"
+	// Get format from query string (optional): "pcm-zstd" (default) or "opus"
 	format := query.Get("format")
 	if format == "" {
-		format = "json" // Default to JSON for backward compatibility
+		format = "pcm-zstd" // Default to PCM with zstd compression
 	}
 
 	// Validate format
 	validFormats := map[string]bool{
-		"json":     true, // JSON with base64-encoded PCM (legacy)
 		"opus":     true, // Binary Opus codec (lossy, bandwidth-efficient)
-		"pcm":      true, // Binary PCM (lossless, uncompressed)
 		"pcm-zstd": true, // Binary PCM with zstd compression (lossless, compressed)
 	}
 	if !validFormats[format] {
 		log.Printf("Rejected WebSocket connection: invalid format '%s' from %s (client IP: %s)", format, sourceIP, clientIP)
-		http.Error(w, fmt.Sprintf("Invalid format '%s'. Valid formats: json, opus, pcm, pcm-zstd", format), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("Invalid format '%s'. Valid formats: opus, pcm-zstd", format), http.StatusBadRequest)
 		return
 	}
 
-	// Binary formats (non-JSON)
-	useBinaryFormat := (format == "opus" || format == "pcm" || format == "pcm-zstd")
+	// Binary formats (all remaining formats are binary)
+	useBinaryFormat := true
 
 	if useBinaryFormat {
 		log.Printf("Client requested binary format: %s", format)
@@ -607,10 +604,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	// Subscribe to audio
 	wsh.audioReceiver.GetChannelAudio(session)
 
-	// Send initial status (only for JSON format)
-	if !useBinaryFormat {
-		wsh.sendStatus(conn, session)
-	}
+	// Note: Binary formats don't need initial status message
 
 	// Create a session holder that can be updated atomically
 	sessionHolder := &sessionHolder{session: session}
@@ -906,20 +900,16 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 		opusEncoder, err = NewOpusEncoderForClient(session.SampleRate, bitrate, complexity)
 		if err != nil {
 			log.Printf("Failed to create Opus encoder: %v", err)
-			log.Printf("Falling back to JSON/PCM")
-			format = "json" // Fall back to JSON/PCM
+			log.Printf("Falling back to pcm-zstd")
+			format = "pcm-zstd" // Fall back to pcm-zstd
 		}
-	} else if format == "pcm" || format == "pcm-zstd" {
-		// Create PCM binary encoder with optional compression
-		useCompression := (format == "pcm-zstd")
-		pcmBinaryEncoder = NewPCMBinaryEncoder(useCompression)
-		defer pcmBinaryEncoder.Close()
+	}
 
-		if useCompression {
-			log.Printf("PCM binary encoder initialized with zstd compression")
-		} else {
-			log.Printf("PCM binary encoder initialized (uncompressed)")
-		}
+	if format == "pcm-zstd" {
+		// Create PCM binary encoder with zstd compression
+		pcmBinaryEncoder = NewPCMBinaryEncoder(true)
+		defer pcmBinaryEncoder.Close()
+		log.Printf("PCM binary encoder initialized with zstd compression")
 	}
 
 	for {
@@ -945,24 +935,24 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 			isIQMode := session.Mode == "iq" || session.Mode == "iq48" || session.Mode == "iq96" || session.Mode == "iq192" || session.Mode == "iq384"
 
 			// Determine which format to use for this packet
-			// If in IQ mode, fall back to lossless formats (JSON or PCM binary)
+			// If in IQ mode, fall back to lossless pcm-zstd
 			currentFormat := format
 			if isIQMode && originalFormat == "opus" {
-				// IQ mode requires lossless - fall back to JSON
-				currentFormat = "json"
+				// IQ mode requires lossless - fall back to pcm-zstd
+				currentFormat = "pcm-zstd"
 			}
 
 			// Route to appropriate encoder based on format
+			// Handle Opus encoder fallback to pcm-zstd if not available
+			if currentFormat == "opus" && opusEncoder == nil {
+				log.Printf("Opus encoder not available, falling back to pcm-zstd")
+				currentFormat = "pcm-zstd"
+			}
+
 			switch currentFormat {
 			case "opus":
 				// Binary Opus format: send raw Opus frames as binary WebSocket messages
 				// Format: [timestamp:8][sampleRate:4][channels:1][opusData...]
-				if opusEncoder == nil {
-					log.Printf("Opus encoder not available, falling back to JSON")
-					currentFormat = "json"
-					break
-				}
-
 				opusData, err := opusEncoder.EncodeBinary(audioPacket.PCMData)
 				if err != nil {
 					log.Printf("Opus encoding error: %v", err)
@@ -1003,13 +993,11 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 					wsh.prometheusMetrics.RecordWSMessageSent("audio")
 				}
 
-			case "pcm", "pcm-zstd":
-				// Binary PCM format with hybrid headers (full/minimal)
-				// Supports optional zstd compression for bandwidth efficiency
+			case "pcm-zstd":
+				// Binary PCM format with hybrid headers (full/minimal) and zstd compression
 				if pcmBinaryEncoder == nil {
-					log.Printf("PCM binary encoder not available, falling back to JSON")
-					currentFormat = "json"
-					break
+					log.Printf("PCM binary encoder not available, cannot continue")
+					return
 				}
 
 				// Encode PCM packet with hybrid header strategy
@@ -1050,30 +1038,8 @@ func (wsh *WebSocketHandler) streamAudio(conn *wsConn, sessionHolder *sessionHol
 				}
 
 			default:
-				// JSON format (legacy): send PCM as base64-encoded JSON
-				// This is the original format for backward compatibility
-				encoded := base64.StdEncoding.EncodeToString(audioPacket.PCMData)
-
-				msg := ServerMessage{
-					Type:        "audio",
-					Data:        encoded,
-					SampleRate:  session.SampleRate,
-					Channels:    session.Channels,
-					AudioFormat: "pcm",
-					Timestamp:   int64(audioPacket.RTPTimestamp),
-					WallclockMs: time.Now().UnixMilli(),
-				}
-
-				if err := wsh.sendMessage(conn, msg); err != nil {
-					log.Printf("Failed to send audio: %v", err)
-					return
-				}
-
-				// Record audio bytes sent in Prometheus
-				if wsh.prometheusMetrics != nil {
-					wsh.prometheusMetrics.RecordAudioBytes(len(encoded))
-					wsh.prometheusMetrics.RecordWSMessageSent("audio")
-				}
+				log.Printf("Unknown audio format: %s", currentFormat)
+				return
 			}
 		}
 	}

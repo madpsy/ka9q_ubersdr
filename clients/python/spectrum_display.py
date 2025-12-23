@@ -7,6 +7,7 @@ Displays RF spectrum as a line chart with 200 KHz bandwidth centered on current 
 import asyncio
 import gzip
 import json
+import struct
 import time
 import tkinter as tk
 from tkinter import Canvas
@@ -78,6 +79,10 @@ class SpectrumDisplay:
         self.initial_bin_bandwidth: float = 0  # Store initial for zoom calculations
         self.last_spectrum_timestamp: Optional[float] = None  # Track last timestamp
         self.instance_id: Optional[int] = None  # Instance ID for multi-instance sync
+
+        # Binary protocol support
+        self.using_binary_protocol: bool = False
+        self.binary_spectrum_data: Optional[np.ndarray] = None  # State for delta decoding
         
         # Current tuned frequency and bandwidth (for filter visualization)
         self.tuned_freq: float = 0
@@ -183,7 +188,9 @@ class SpectrumDisplay:
             params['user_session_id'] = user_session_id
         if password:
             params['password'] = password
-        
+        # Request binary mode for reduced bandwidth
+        params['mode'] = 'binary'
+
         # Add query parameters if any
         if params:
             ws_url = f'{ws_url}?{urlencode(params)}'
@@ -247,16 +254,28 @@ class SpectrumDisplay:
     
     async def _handle_message(self, message):
         """Handle incoming WebSocket message.
-        
+
         Args:
-            message: JSON message string or binary (gzip compressed)
+            message: JSON message string, binary (gzip compressed), or binary spectrum protocol
         """
         try:
-            # Check if message is binary (gzip compressed) or text
+            # Check if message is binary protocol or JSON
             if isinstance(message, bytes):
-                # Binary message - decompress with gzip
-                decompressed = gzip.decompress(message)
-                data = json.loads(decompressed.decode('utf-8'))
+                # Check for binary spectrum protocol magic header "SPEC"
+                if len(message) >= 4 and message[0:4] == b'SPEC':
+                    # Binary spectrum protocol detected
+                    if not self.using_binary_protocol:
+                        self.using_binary_protocol = True
+                        print('🚀 Binary spectrum protocol detected - bandwidth optimized!')
+
+                    # Parse binary spectrum message
+                    data = self._parse_binary_spectrum(message)
+                    if data is None:
+                        return  # Parse error, skip this message
+                else:
+                    # Legacy binary (gzip compressed JSON)
+                    decompressed = gzip.decompress(message)
+                    data = json.loads(decompressed.decode('utf-8'))
             else:
                 # Text message - parse directly
                 data = json.loads(message)
@@ -322,7 +341,94 @@ class SpectrumDisplay:
                     
         except json.JSONDecodeError as e:
             print(f"Failed to parse spectrum message: {e}")
-    
+
+    def _parse_binary_spectrum(self, message: bytes) -> Optional[dict]:
+        """Parse binary spectrum protocol message.
+
+        Binary format:
+        - Header (22 bytes):
+          - Magic: 0x53 0x50 0x45 0x43 (4 bytes) "SPEC"
+          - Version: 0x01 (1 byte)
+          - Flags: 0x01=full, 0x02=delta (1 byte)
+          - Timestamp: uint64 milliseconds (8 bytes, little-endian)
+          - Frequency: uint64 Hz (8 bytes, little-endian)
+        - For full frame: all bins as float32 (binCount * 4 bytes, little-endian)
+        - For delta frame:
+          - ChangeCount: uint16 (2 bytes, little-endian)
+          - Changes: array of [index: uint16, value: float32] (6 bytes each, little-endian)
+
+        Args:
+            message: Binary message bytes
+
+        Returns:
+            Dictionary with 'type', 'data', 'frequency', 'timestamp' or None on error
+        """
+        try:
+            if len(message) < 22:
+                print(f"Binary message too short: {len(message)} bytes")
+                return None
+
+            # Parse header
+            magic = message[0:4]
+            if magic != b'SPEC':
+                print(f"Invalid magic: {magic}")
+                return None
+
+            version = message[4]
+            if version != 0x01:
+                print(f"Unsupported version: {version}")
+                return None
+
+            flags = message[5]
+            timestamp = struct.unpack('<Q', message[6:14])[0]  # little-endian uint64
+            frequency = struct.unpack('<Q', message[14:22])[0]  # little-endian uint64
+
+            if flags == 0x01:
+                # Full frame
+                bin_count = (len(message) - 22) // 4
+                spectrum_data = np.zeros(bin_count, dtype=np.float32)
+
+                for i in range(bin_count):
+                    offset = 22 + i * 4
+                    spectrum_data[i] = struct.unpack('<f', message[offset:offset+4])[0]  # little-endian float32
+
+                # Store for delta decoding
+                self.binary_spectrum_data = spectrum_data.copy()
+
+            elif flags == 0x02:
+                # Delta frame
+                if self.binary_spectrum_data is None:
+                    print("Delta frame received before full frame")
+                    return None
+
+                change_count = struct.unpack('<H', message[22:24])[0]  # little-endian uint16
+                offset = 24
+
+                # Apply changes to previous data
+                for i in range(change_count):
+                    index = struct.unpack('<H', message[offset:offset+2])[0]  # little-endian uint16
+                    value = struct.unpack('<f', message[offset+2:offset+6])[0]  # little-endian float32
+                    self.binary_spectrum_data[index] = value
+                    offset += 6
+
+                spectrum_data = self.binary_spectrum_data
+
+            else:
+                print(f"Unknown flags: {flags}")
+                return None
+
+            # Return in same format as JSON messages
+            return {
+                'type': 'spectrum',
+                'data': spectrum_data.tolist(),
+                'frequency': frequency,
+                'timestamp': timestamp
+            }
+
+        except Exception as e:
+            print(f"Error parsing binary spectrum: {e}")
+            return None
+
     async def _send_zoom_command(self, frequency: float, bandwidth: float):
         """Send zoom command to set bandwidth.
         

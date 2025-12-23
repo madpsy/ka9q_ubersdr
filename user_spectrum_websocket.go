@@ -541,9 +541,11 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 //   - Changes: array of [index: uint16, value: float32] (6 bytes each)
 func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, session *Session, spectrumData []float32, state *spectrumState) error {
 	const (
-		deltaThreshold    = 6.0 // 6.0 dB change threshold (very aggressive - one S-unit, ignores noise and weak signals)
-		fullFrameInterval = 50  // Send full frame every N frames to prevent drift
+		fullFrameInterval = 50 // Send full frame every N frames to prevent drift
 	)
+
+	// Get delta threshold from config (validated to be between 1.0 and 10.0 dB)
+	deltaThreshold := swsh.sessions.config.Spectrum.DeltaThresholdDB
 
 	state.mu.Lock()
 	defer state.mu.Unlock()

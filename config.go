@@ -119,8 +119,9 @@ type SpectrumConfig struct {
 	Default            SpectrumDefaultConfig `yaml:"default"`
 	PollPeriodMs       int                   `yaml:"poll_period_ms"`
 	MaxSessionsPerUser int                   `yaml:"max_sessions_per_user"`
-	GainDB             float64               `yaml:"gain_db"`   // Gain adjustment in dB applied to spectrum data
-	Smoothing          SmoothingConfig       `yaml:"smoothing"` // Smoothing settings for waterfall display
+	GainDB             float64               `yaml:"gain_db"`            // Gain adjustment in dB applied to spectrum data
+	DeltaThresholdDB   float64               `yaml:"delta_threshold_db"` // Delta encoding threshold in dB for binary mode
+	Smoothing          SmoothingConfig       `yaml:"smoothing"`          // Smoothing settings for waterfall display
 }
 
 // SmoothingConfig contains smoothing parameters for spectrum data
@@ -399,6 +400,20 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if config.Spectrum.MaxSessionsPerUser == 0 {
 		config.Spectrum.MaxSessionsPerUser = 2
+	}
+
+	// Set delta threshold default and validate
+	if config.Spectrum.DeltaThresholdDB == 0 {
+		config.Spectrum.DeltaThresholdDB = 3.0 // Default 3.0 dB
+	}
+	// Validate delta threshold range (1.0 to 10.0 dB)
+	if config.Spectrum.DeltaThresholdDB < 1.0 {
+		fmt.Printf("Warning: spectrum.delta_threshold_db (%f) is below minimum (1.0), setting to 1.0\n", config.Spectrum.DeltaThresholdDB)
+		config.Spectrum.DeltaThresholdDB = 1.0
+	}
+	if config.Spectrum.DeltaThresholdDB > 10.0 {
+		fmt.Printf("Warning: spectrum.delta_threshold_db (%f) is above maximum (10.0), setting to 10.0\n", config.Spectrum.DeltaThresholdDB)
+		config.Spectrum.DeltaThresholdDB = 10.0
 	}
 
 	// Set smoothing defaults if not specified

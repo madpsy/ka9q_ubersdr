@@ -258,13 +258,25 @@ spectrum:
   # Default: 0 (no adjustment)
   # Example: 20 adds 20 dB to all spectrum values
   gain_db: 0
-  
+
+  # Binary protocol delta encoding threshold in dB
+  # When using binary mode (mode=binary), only bins that change by more than this threshold
+  # are transmitted in delta frames, significantly reducing bandwidth
+  # Range: 1.0 to 10.0 dB
+  #   1.0 = very sensitive - transmits small noise variations (higher bandwidth)
+  #   3.0 = balanced - ignores noise, captures signal changes (recommended)
+  #   6.0 = aggressive - one S-unit, only major signal changes (lower bandwidth)
+  #   10.0 = very aggressive - only very large signal changes (lowest bandwidth)
+  # Default: 3.0 dB
+  # Note: Higher values reduce bandwidth but may miss weak signal variations
+  delta_threshold_db: 3.0
+
   # Smoothing settings for waterfall display
   # Reduces fuzziness and noise in the spectrum display
   smoothing:
     # Enable/disable smoothing (set to false to disable all smoothing)
     enabled: true
-    
+
     # Temporal smoothing (time domain) - Exponential Moving Average (EMA)
     # Controls smoothing between consecutive waterfall frames
     # Range: 0.0 to 1.0
@@ -274,7 +286,7 @@ spectrum:
     #   1.0 = no temporal smoothing (100% new data)
     # Default: 0.3
     temporal_alpha: 0.3
-    
+
     # Spatial smoothing (frequency domain) - Gaussian filter
     # Controls smoothing across adjacent frequency bins
     # Range: 0.0 to 5.0 (0 = disabled)

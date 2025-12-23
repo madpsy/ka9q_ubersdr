@@ -232,7 +232,23 @@ class SpectrumDisplay:
                 self.ws = ws
                 self.connected = True
                 print(f"Spectrum connected to {self.ws_url}")
-                
+
+                # Check if server negotiated WebSocket compression
+                # Check the response headers for Sec-WebSocket-Extensions
+                if hasattr(ws, 'response_headers'):
+                    extensions = ws.response_headers.get('Sec-WebSocket-Extensions', '')
+                    if 'permessage-deflate' in extensions.lower():
+                        print("Server using native WebSocket compression (permessage-deflate)")
+                    else:
+                        print("Server NOT using native WebSocket compression (manual gzip for JSON messages)")
+                else:
+                    # Fallback: check if compression was negotiated
+                    compression_enabled = getattr(ws, 'compression', None) is not None
+                    if compression_enabled:
+                        print("Server using native WebSocket compression")
+                    else:
+                        print("Server NOT using native WebSocket compression (manual gzip for JSON messages)")
+
                 # Don't send zoom command immediately - wait for server's default config first
                 # Then we'll send zoom command after receiving the first config message
                 

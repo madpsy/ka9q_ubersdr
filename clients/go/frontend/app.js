@@ -143,6 +143,8 @@ class UberSDRClient {
         this.statusChannels = document.getElementById('status-channels');
         this.statusSession = document.getElementById('status-session');
         this.statusAudioDevice = document.getElementById('status-audio-device');
+        this.statusAudioFormat = document.getElementById('status-audio-format');
+        this.statusSpectrumFormat = document.getElementById('status-spectrum-format');
 
         // Session timer elements
         this.sessionTimerDiv = document.getElementById('session-timer');
@@ -222,6 +224,10 @@ class UberSDRClient {
         this.audioStreamActive = false;
         this.audioQueue = [];
         this.audioMuted = true; // Muted by default
+
+        // Format detection
+        this.audioFormat = null; // 'PCM' or 'Opus'
+        this.spectrumFormat = null; // 'JSON' or 'Binary'
 
         // Audio visualizer
         this.audioVisualizer = null;
@@ -664,17 +670,27 @@ class UberSDRClient {
 
         this.ws = new WebSocket(wsUrl);
 
+        // Set binary type to arraybuffer for proper binary message handling
+        this.ws.binaryType = 'arraybuffer';
+
         this.ws.onopen = () => {
             console.log('WebSocket connected');
             this.reconnectAttempts = 0;
         };
 
         this.ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                this.handleWebSocketMessage(data);
-            } catch (e) {
-                console.error('Failed to parse WebSocket message:', e);
+            // Check if this is a binary message
+            if (event.data instanceof ArrayBuffer) {
+                console.log('Received binary message:', event.data.byteLength, 'bytes');
+                this.handleBinaryMessage(event.data);
+            } else {
+                // JSON message
+                try {
+                    const data = JSON.parse(event.data);
+                    this.handleWebSocketMessage(data);
+                } catch (e) {
+                    console.error('Failed to parse WebSocket message:', e);
+                }
             }
         };
 
@@ -694,6 +710,94 @@ class UberSDRClient {
         };
     }
 
+    handleBinaryMessage(data) {
+        // Data should already be ArrayBuffer due to binaryType setting
+        this.processBinaryMessage(data);
+    }
+
+    processBinaryMessage(buffer) {
+        const view = new DataView(buffer);
+
+        // Check for binary spectrum data (SPEC magic header: 0x53 0x50 0x45 0x43)
+        if (buffer.byteLength >= 4) {
+            const magic = view.getUint32(0, false); // Big-endian
+            console.log('Binary message magic header:', magic.toString(16), 'expected: 53504543');
+            if (magic === 0x53504543) { // "SPEC"
+                // Binary spectrum data detected
+                if (this.spectrumFormat !== 'Binary') {
+                    this.spectrumFormat = 'Binary';
+                    this.updateFormatDisplay();
+                    console.log('Detected binary spectrum format');
+                }
+
+                // Parse and forward to spectrum display as JSON format
+                // The spectrum display expects JSON messages with type: 'spectrum'
+                if (this.spectrumDisplay) {
+                    // Parse the binary spectrum data
+                    const parsedData = this.parseBinarySpectrum(buffer);
+                    if (parsedData) {
+                        // Send as JSON message to spectrum display
+                        this.spectrumDisplay.handleMessage(parsedData);
+                    }
+                }
+                return;
+            }
+        }
+
+        // Otherwise, assume it's Opus audio data
+        if (this.audioFormat !== 'Opus') {
+            this.audioFormat = 'Opus';
+            this.updateFormatDisplay();
+            console.log('Detected Opus audio format');
+        }
+
+        // Handle Opus audio (would need Opus decoder integration)
+        // For now, just log it
+        console.log('Received Opus audio packet:', buffer.byteLength, 'bytes');
+    }
+
+    parseBinarySpectrum(buffer) {
+        try {
+            const view = new DataView(buffer);
+            let offset = 4; // Skip magic header
+
+            // Read header fields (all big-endian)
+            const centerFreq = Number(view.getBigUint64(offset, false));
+            offset += 8;
+            const binCount = view.getUint32(offset, false);
+            offset += 4;
+            const binBandwidth = view.getFloat64(offset, false);
+            offset += 8;
+            const totalBandwidth = view.getFloat64(offset, false);
+            offset += 8;
+
+            console.log('Binary spectrum header:', { centerFreq, binCount, binBandwidth, totalBandwidth });
+
+            // Read spectrum data (delta-encoded float32 values)
+            const data = [];
+            let lastValue = 0;
+            for (let i = 0; i < binCount; i++) {
+                const delta = view.getFloat32(offset, false);
+                offset += 4;
+                lastValue += delta;
+                data.push(lastValue);
+            }
+
+            // Return in the format expected by spectrum display
+            return {
+                type: 'spectrum',
+                centerFreq: centerFreq,
+                binCount: binCount,
+                binBandwidth: binBandwidth,
+                totalBandwidth: totalBandwidth,
+                data: data
+            };
+        } catch (error) {
+            console.error('Error parsing binary spectrum:', error);
+            return null;
+        }
+    }
+
     handleWebSocketMessage(data) {
         if (data.type === 'status') {
             this.updateStatusDisplay(data);
@@ -702,11 +806,24 @@ class UberSDRClient {
         } else if (data.type === 'error') {
             this.showError(data.error, data.message);
         } else if (data.type === 'audio') {
+            // JSON audio data (PCM)
+            if (this.audioFormat !== 'PCM') {
+                this.audioFormat = 'PCM';
+                this.updateFormatDisplay();
+                console.log('Detected PCM audio format');
+            }
             this.handleAudioData(data);
         } else if (data.type === 'config_update') {
             // Handle real-time config updates from backend (e.g., MIDI volume changes)
             this.handleConfigUpdate(data.config);
         } else if (data.type === 'config' || data.type === 'spectrum') {
+            // JSON spectrum data
+            if (data.type === 'spectrum' && this.spectrumFormat !== 'JSON') {
+                this.spectrumFormat = 'JSON';
+                this.updateFormatDisplay();
+                console.log('Detected JSON spectrum format');
+            }
+
             // Forward to spectrum display
             if (this.spectrumDisplay) {
                 this.spectrumDisplay.handleMessage(data);
@@ -719,6 +836,18 @@ class UberSDRClient {
         } else if (data.connected !== undefined) {
             // Initial status message
             this.updateStatusDisplay(data);
+        }
+    }
+
+    updateFormatDisplay() {
+        // Update audio format display
+        if (this.statusAudioFormat) {
+            this.statusAudioFormat.textContent = this.audioFormat || '-';
+        }
+
+        // Update spectrum format display
+        if (this.statusSpectrumFormat) {
+            this.statusSpectrumFormat.textContent = this.spectrumFormat || '-';
         }
     }
 
@@ -1007,6 +1136,14 @@ class UberSDRClient {
         if (status.modeLocked !== undefined && this.modeLockedCheckbox) {
             this.modeLockedCheckbox.checked = status.modeLocked;
             this.updateModeLockState();
+        }
+
+        // Update format displays from backend status (what backend receives from ubersdr)
+        if (status.audioFormat !== undefined && this.statusAudioFormat) {
+            this.statusAudioFormat.textContent = status.audioFormat || '-';
+        }
+        if (status.spectrumFormat !== undefined && this.statusSpectrumFormat) {
+            this.statusSpectrumFormat.textContent = status.spectrumFormat || '-';
         }
 
         if (status.frequency) {

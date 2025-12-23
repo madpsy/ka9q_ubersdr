@@ -93,6 +93,12 @@ type RadioClient struct {
 	audioCallback    func([]byte, int, int) // Callback for audio data streaming (data, sampleRate, channels)
 	tciServer        *TCIServer             // TCI server instance
 
+	// Opus support
+	useOpus        bool
+	opusDecoder    *OpusDecoder
+	opusSampleRate int
+	opusChannels   int
+
 	// TCI audio resampling (stateful, persistent across packets)
 	tciResampler *LibsamplerateResampler // Mono resampler for TCI audio
 
@@ -128,6 +134,9 @@ type RadioClient struct {
 
 	// Band tracking for automatic LSB/USB mode switching
 	previousBand string // Track previous band to detect band changes
+
+	// Format tracking - what format we're receiving from the ubersdr instance
+	audioFormat string // "PCM" or "Opus" - format received from UberSDR instance
 }
 
 // Output control methods for dynamic enable/disable
@@ -345,7 +354,7 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 	bandwidthLow, bandwidthHigh *int, outputMode, wavFile string,
 	duration *float64, ssl bool, password string, audioDeviceIndex int, nr2Enabled bool, nr2Strength, nr2Floor, nr2AdaptRate float64,
 	autoReconnect bool, resampleEnabled bool, resampleOutputRate int, outputChannels int,
-	fifoPath string, udpHost string, udpPort int, udpEnabled bool) *RadioClient {
+	fifoPath string, udpHost string, udpPort int, udpEnabled bool, useOpus bool) *RadioClient {
 
 	// Determine default channels based on mode
 	// IQ modes are stereo (I and Q channels), others are mono
@@ -364,6 +373,13 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		} else {
 			outputChannels = defaultChannels // Match input channels
 		}
+	}
+
+	// Opus support (disabled for IQ modes as they need lossless data)
+	isIQMode := modeStr == "iq" || modeStr == "iq48" || modeStr == "iq96" || modeStr == "iq192" || modeStr == "iq384"
+	useOpusEnabled := useOpus && !isIQMode
+	if useOpus && isIQMode {
+		fmt.Fprintf(os.Stderr, "Warning: Opus not supported for IQ modes (lossless required)\n")
 	}
 
 	client := &RadioClient{
@@ -402,6 +418,11 @@ func NewRadioClient(urlStr, host string, port, frequency int, mode string,
 		leftChannelEnabled:  true,                           // Left channel enabled by default
 		rightChannelEnabled: true,                           // Right channel enabled by default
 		previousBand:        GetBandForFrequency(frequency), // Initialize with current band
+		useOpus:             useOpusEnabled,
+	}
+
+	if client.useOpus {
+		fmt.Fprintf(os.Stderr, "Opus decoding enabled (decoder will initialize on first packet)\n")
 	}
 
 	// Initialize NR2 processor if enabled
@@ -468,6 +489,11 @@ func (c *RadioClient) BuildWebSocketURL() string {
 			params.Set("password", c.password)
 		}
 
+		// Add format parameter for Opus
+		if c.useOpus {
+			params.Set("format", "opus")
+		}
+
 		return fmt.Sprintf("%s?%s", baseURL, params.Encode())
 	}
 
@@ -488,6 +514,11 @@ func (c *RadioClient) BuildWebSocketURL() string {
 	}
 	if c.password != "" {
 		wsURL += fmt.Sprintf("&password=%s", url.QueryEscape(c.password))
+	}
+
+	// Add format parameter for Opus
+	if c.useOpus {
+		wsURL += "&format=opus"
 	}
 
 	return wsURL
@@ -1424,9 +1455,11 @@ func (c *RadioClient) runOnce() int {
 	go c.SendKeepalive(ctx, conn)
 
 	// Receive and process messages
+	opusPacketCount := 0
+	pcmPacketCount := 0
 	for c.running {
-		var msg WebSocketMessage
-		err := conn.ReadJSON(&msg)
+		// Read message (could be JSON or binary)
+		messageType, message, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				fmt.Fprintf(os.Stderr, "Connection closed by server\n")
@@ -1436,8 +1469,59 @@ func (c *RadioClient) runOnce() int {
 			break
 		}
 
-		if err := c.HandleMessage(msg); err != nil {
-			fmt.Fprintf(os.Stderr, "Message handling error: %v\n", err)
+		// Handle binary messages (Opus format)
+		if messageType == websocket.BinaryMessage {
+			if c.useOpus {
+				// Decode binary Opus packet
+				pcmData, err := c.DecodeOpusBinary(message)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Opus decode error: %v\n", err)
+					continue
+				}
+				if len(pcmData) > 0 {
+					if err := c.OutputAudio(pcmData); err != nil {
+						fmt.Fprintf(os.Stderr, "Audio output error: %v\n", err)
+					}
+					opusPacketCount++
+					// Log first Opus packet to confirm it's working
+					if opusPacketCount == 1 {
+						fmt.Fprintf(os.Stderr, "✓ Receiving Opus-encoded audio packets from server\n")
+						// Set audio format to Opus (what we're receiving from ubersdr)
+						c.audioFormat = "Opus"
+					}
+
+					// Check duration limit
+					if !c.CheckDuration() {
+						c.running = false
+					}
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: Received binary message but Opus not enabled\n")
+			}
+		} else {
+			// Handle JSON messages (standard format)
+			var msg WebSocketMessage
+			if err := json.Unmarshal(message, &msg); err != nil {
+				fmt.Fprintf(os.Stderr, "JSON parse error: %v\n", err)
+				continue
+			}
+
+			if err := c.HandleMessage(msg); err != nil {
+				fmt.Fprintf(os.Stderr, "Message handling error: %v\n", err)
+			}
+
+			// Track PCM packets to detect if server is sending PCM instead of Opus
+			if msg.Type == "audio" {
+				pcmPacketCount++
+				// Log if we're getting PCM when Opus was requested
+				if pcmPacketCount == 1 {
+					if c.useOpus {
+						fmt.Fprintf(os.Stderr, "⚠ Server is sending PCM audio (not Opus) - check server Opus support\n")
+					}
+					// Set audio format to PCM (what we're receiving from ubersdr)
+					c.audioFormat = "PCM"
+				}
+			}
 		}
 	}
 
@@ -1756,6 +1840,7 @@ func main() {
 			config.ResampleEnabled, config.ResampleOutputRate,
 			config.OutputChannels,
 			config.FIFOPath, config.UDPHost, config.UDPPort, config.UDPEnabled,
+			false, // useOpus - disabled by default for now
 		)
 
 		// Attempt to connect in background

@@ -3,10 +3,12 @@ package main
 import (
 	"compress/gzip"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/url"
 	"sync"
 	"time"
@@ -37,6 +39,13 @@ type SpectrumClient struct {
 	lastCommandTime time.Time
 	commandMu       sync.Mutex
 	minCommandDelay time.Duration
+
+	// Binary protocol support
+	usingBinaryProtocol bool
+	binarySpectrumData  []float32 // State for delta decoding
+
+	// Format tracking - what format we're receiving from the ubersdr instance
+	spectrumFormat string // "JSON" or "Binary" - format received from UberSDR instance
 }
 
 // NewSpectrumClient creates a new spectrum client
@@ -77,16 +86,16 @@ func (s *SpectrumClient) Connect() error {
 
 	// Build WebSocket URL with query parameters
 	wsURL := fmt.Sprintf("%s://%s/ws/user-spectrum", scheme, u.Host)
-	if s.userSessionID != "" || s.password != "" {
-		query := url.Values{}
-		if s.userSessionID != "" {
-			query.Set("user_session_id", s.userSessionID)
-		}
-		if s.password != "" {
-			query.Set("password", s.password)
-		}
-		wsURL = fmt.Sprintf("%s?%s", wsURL, query.Encode())
+	query := url.Values{}
+	if s.userSessionID != "" {
+		query.Set("user_session_id", s.userSessionID)
 	}
+	if s.password != "" {
+		query.Set("password", s.password)
+	}
+	// Request binary mode for reduced bandwidth
+	query.Set("mode", "binary")
+	wsURL = fmt.Sprintf("%s?%s", wsURL, query.Encode())
 
 	log.Printf("Connecting to spectrum WebSocket: %s", wsURL)
 
@@ -133,6 +142,13 @@ func (s *SpectrumClient) IsConnected() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.connected
+}
+
+// GetSpectrumFormat returns the detected spectrum format ("JSON" or "Binary")
+func (s *SpectrumClient) GetSpectrumFormat() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.spectrumFormat
 }
 
 // SetDataCallback sets the callback for spectrum data
@@ -250,10 +266,28 @@ func (s *SpectrumClient) handleMessages() {
 
 		// Handle message based on type
 		if messageType == websocket.BinaryMessage {
-			// Binary message - decompress with gzip
-			s.handleBinaryMessage(message)
+			// Check for binary spectrum protocol magic header "SPEC"
+			if len(message) >= 4 && string(message[0:4]) == "SPEC" {
+				// Binary spectrum protocol detected
+				if !s.usingBinaryProtocol {
+					s.usingBinaryProtocol = true
+					log.Printf("🚀 Binary spectrum protocol detected - bandwidth optimized!")
+					// Set spectrum format to Binary (what we're receiving from ubersdr)
+					s.spectrumFormat = "Binary"
+				}
+				// Parse binary spectrum message
+				s.handleBinarySpectrumMessage(message)
+			} else {
+				// Legacy binary message - decompress with gzip
+				s.handleBinaryMessage(message)
+			}
 		} else if messageType == websocket.TextMessage {
 			// Text message - parse JSON directly
+			// Set spectrum format to JSON on first text message
+			if s.spectrumFormat == "" {
+				s.spectrumFormat = "JSON"
+				log.Printf("JSON spectrum protocol detected")
+			}
 			s.handleTextMessage(message)
 		}
 	}
@@ -373,4 +407,118 @@ func (r *bytesReader) Read(p []byte) (n int, err error) {
 	n = copy(p, r.b[r.i:])
 	r.i += n
 	return n, nil
+}
+
+// handleBinarySpectrumMessage handles binary spectrum protocol messages
+// Binary format:
+// - Header (22 bytes):
+//   - Magic: 0x53 0x50 0x45 0x43 (4 bytes) "SPEC"
+//   - Version: 0x01 (1 byte)
+//   - Flags: 0x01=full, 0x02=delta (1 byte)
+//   - Timestamp: uint64 milliseconds (8 bytes, little-endian)
+//   - Frequency: uint64 Hz (8 bytes, little-endian)
+//
+// - For full frame: all bins as float32 (binCount * 4 bytes, little-endian)
+// - For delta frame:
+//   - ChangeCount: uint16 (2 bytes, little-endian)
+//   - Changes: array of [index: uint16, value: float32] (6 bytes each, little-endian)
+func (s *SpectrumClient) handleBinarySpectrumMessage(message []byte) {
+	if len(message) < 22 {
+		log.Printf("Binary message too short: %d bytes", len(message))
+		return
+	}
+
+	// Parse header
+	magic := string(message[0:4])
+	if magic != "SPEC" {
+		log.Printf("Invalid magic: %s", magic)
+		return
+	}
+
+	version := message[4]
+	if version != 0x01 {
+		log.Printf("Unsupported version: %d", version)
+		return
+	}
+
+	flags := message[5]
+	timestamp := binary.LittleEndian.Uint64(message[6:14])
+	frequency := binary.LittleEndian.Uint64(message[14:22])
+
+	var spectrumData []float32
+
+	if flags == 0x01 {
+		// Full frame
+		binCount := (len(message) - 22) / 4
+		spectrumData = make([]float32, binCount)
+
+		for i := 0; i < binCount; i++ {
+			offset := 22 + i*4
+			bits := binary.LittleEndian.Uint32(message[offset : offset+4])
+			spectrumData[i] = math.Float32frombits(bits)
+		}
+
+		// Store for delta decoding
+		s.mu.Lock()
+		s.binarySpectrumData = make([]float32, len(spectrumData))
+		copy(s.binarySpectrumData, spectrumData)
+		s.mu.Unlock()
+
+	} else if flags == 0x02 {
+		// Delta frame
+		s.mu.Lock()
+		if s.binarySpectrumData == nil {
+			s.mu.Unlock()
+			log.Printf("Delta frame received before full frame")
+			return
+		}
+
+		changeCount := binary.LittleEndian.Uint16(message[22:24])
+		offset := 24
+
+		// Apply changes to previous data
+		for i := 0; i < int(changeCount); i++ {
+			index := binary.LittleEndian.Uint16(message[offset : offset+2])
+			bits := binary.LittleEndian.Uint32(message[offset+2 : offset+6])
+			value := math.Float32frombits(bits)
+			if int(index) < len(s.binarySpectrumData) {
+				s.binarySpectrumData[index] = value
+			}
+			offset += 6
+		}
+
+		spectrumData = s.binarySpectrumData
+		s.mu.Unlock()
+
+	} else {
+		log.Printf("Unknown flags: %d", flags)
+		return
+	}
+
+	// Convert to JSON format for frontend compatibility
+	data := map[string]interface{}{
+		"type":      "spectrum",
+		"data":      spectrumData,
+		"frequency": frequency,
+		"timestamp": timestamp,
+	}
+
+	// Add config data if available
+	s.mu.RLock()
+	if s.centerFreq > 0 && s.totalBandwidth > 0 {
+		data["centerFreq"] = s.centerFreq
+		data["totalBandwidth"] = s.totalBandwidth
+	}
+	callback := s.dataCallback
+	s.mu.RUnlock()
+
+	if callback != nil {
+		// Encode as JSON to send to frontend
+		jsonData, err := json.Marshal(data)
+		if err != nil {
+			log.Printf("Failed to marshal binary spectrum data: %v", err)
+			return
+		}
+		callback(jsonData)
+	}
 }

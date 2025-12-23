@@ -514,6 +514,7 @@ func (m *WebSocketManager) reconnectLoop(ctx context.Context, savedConfig *Radio
 			savedConfig.udpHost,
 			savedConfig.udpPort,
 			savedConfig.udpEnabled,
+			true, // useOpus - enabled for bandwidth optimization
 		)
 
 		// Temporarily disable auto-reconnect to avoid recursive reconnection
@@ -935,6 +936,9 @@ func (m *WebSocketManager) GetStatus() StatusResponse {
 		// Add current band information for UI band button highlighting
 		status.CurrentBand = m.client.previousBand // previousBand tracks the current band
 
+		// Add format information - what format we're receiving from the ubersdr instance
+		status.AudioFormat = m.client.audioFormat
+
 		if m.connected {
 			status.ConnectedAt = m.connectedAt
 			status.Uptime = time.Since(m.connectedAt).Round(time.Second).String()
@@ -945,6 +949,11 @@ func (m *WebSocketManager) GetStatus() StatusResponse {
 		if m.client.audioDeviceIndex >= 0 {
 			status.AudioDevice = fmt.Sprintf("Device %d", m.client.audioDeviceIndex)
 		}
+	}
+
+	// Add spectrum format information if spectrum client is connected
+	if m.spectrumClient != nil && m.spectrumClient.IsConnected() {
+		status.SpectrumFormat = m.spectrumClient.GetSpectrumFormat()
 	}
 
 	return status
@@ -3429,6 +3438,7 @@ func (m *WebSocketManager) StartTCIServer(port int) error {
 							config.ResampleEnabled, config.ResampleOutputRate,
 							config.OutputChannels,
 							config.FIFOPath, config.UDPHost, config.UDPPort, config.UDPEnabled,
+							true, // useOpus - enabled for bandwidth optimization
 						)
 
 						// Attempt to connect

@@ -11,6 +11,7 @@ require (
 	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12
 	gitlab.com/gomidi/midi/v2 v2.1.7
 	go.bug.st/serial v1.6.2
+	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 )
 
 require (

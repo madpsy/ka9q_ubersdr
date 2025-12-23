@@ -341,6 +341,7 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
 		resampleEnabled, resampleRate,
 		req.OutputChannels, // 0 = auto (2 when resampling, otherwise match input)
 		req.FIFOPath, req.UDPHost, req.UDPPort, req.UDPEnabled,
+		true, // useOpus - enabled for bandwidth optimization
 	)
 	log.Printf("DEBUG handleConnect: RadioClient created")
 

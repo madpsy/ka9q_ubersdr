@@ -247,6 +247,8 @@ type StatusResponse struct {
 	CurrentBand        string                 `json:"currentBand,omitempty"` // Current amateur radio band (e.g., "20m", "40m", or "" if not in a band)
 	FrequencyLocked    bool                   `json:"frequencyLocked"`
 	ModeLocked         bool                   `json:"modeLocked"`
+	AudioFormat        string                 `json:"audioFormat,omitempty"`    // "PCM" or "Opus" - format received from UberSDR instance
+	SpectrumFormat     string                 `json:"spectrumFormat,omitempty"` // "JSON" or "Binary" - format received from UberSDR instance
 }
 
 // AudioDevice represents an audio output device

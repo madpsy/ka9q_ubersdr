@@ -3504,7 +3504,7 @@ function pixelToFrequency(pixel, canvasWidth) {
 
 // VU meter throttling
 let lastVUMeterUpdate = 0;
-const vuMeterUpdateInterval = 100; // 10 fps (1000ms / 10 = 100ms)
+const vuMeterUpdateInterval = 33; // 30 fps (1000ms / 30 = 33ms) - matches oscilloscope
 
 
 function startVisualization() {

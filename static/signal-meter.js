@@ -8,9 +8,9 @@ class SignalMeter {
         
         // Peak history for smoothing
         this.peakHistory = [];
-        this.peakHistoryMaxAge = 500; // 500ms window
+        this.peakHistoryMaxAge = 100; // 100ms window - reduced for faster response
         this.lastMeterUpdate = 0;
-        this.meterUpdateInterval = 100; // Update display every 100ms
+        this.meterUpdateInterval = 33; // Update display every 33ms (30 fps) - matches oscilloscope
         
         // Noise floor tracking (same as line graph)
         this.noiseFloorHistory = [];

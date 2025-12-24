@@ -3518,11 +3518,8 @@ function startVisualization() {
         // Always check for clipping (independent of visualization state)
         checkClipping();
 
-        // Update VU meter at 30 fps (for compact version when visualization is hidden)
-        if (now - lastVUMeterUpdate >= vuMeterUpdateInterval) {
-            updateVUMeter();
-            lastVUMeterUpdate = now;
-        }
+        // Update VU meter every frame (no throttling) to match oscilloscope responsiveness
+        updateVUMeter();
 
         // Only update other visualizations if the section is expanded (performance optimization)
         if (audioVisualizationEnabled) {

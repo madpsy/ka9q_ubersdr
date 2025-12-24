@@ -353,9 +353,6 @@ class TCIServer:
                 cmd_name = cmd
                 args = []
 
-            # Log all commands for debugging
-            print(f"DEBUG TCI: Received command: {cmd_name} {args}", file=sys.stderr)
-
             # Process command
             await self._process_command(websocket, cmd_name.lower(), args)
 

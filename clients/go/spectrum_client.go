@@ -42,10 +42,11 @@ type SpectrumClient struct {
 
 	// Binary protocol support
 	usingBinaryProtocol bool
-	binarySpectrumData  []float32 // State for delta decoding
+	binarySpectrumData  []float32 // State for delta decoding (float32)
+	binarySpectrumData8 []uint8   // State for delta decoding (uint8)
 
 	// Format tracking - what format we're receiving from the ubersdr instance
-	spectrumFormat string // "JSON" or "Binary" - format received from UberSDR instance
+	spectrumFormat string // "JSON", "Binary", or "Binary8" - format received from UberSDR instance
 }
 
 // NewSpectrumClient creates a new spectrum client
@@ -93,8 +94,8 @@ func (s *SpectrumClient) Connect() error {
 	if s.password != "" {
 		query.Set("password", s.password)
 	}
-	// Request binary mode for reduced bandwidth
-	query.Set("mode", "binary")
+	// Request binary8 mode for maximum bandwidth reduction (8-bit encoding)
+	query.Set("mode", "binary8")
 	wsURL = fmt.Sprintf("%s?%s", wsURL, query.Encode())
 
 	log.Printf("Connecting to spectrum WebSocket: %s", wsURL)
@@ -272,8 +273,7 @@ func (s *SpectrumClient) handleMessages() {
 				if !s.usingBinaryProtocol {
 					s.usingBinaryProtocol = true
 					log.Printf("🚀 Binary spectrum protocol detected - bandwidth optimized!")
-					// Set spectrum format to Binary (what we're receiving from ubersdr)
-					s.spectrumFormat = "Binary"
+					// Format will be set in handleBinarySpectrumMessage based on flags
 				}
 				// Parse binary spectrum message
 				s.handleBinarySpectrumMessage(message)
@@ -414,14 +414,19 @@ func (r *bytesReader) Read(p []byte) (n int, err error) {
 // - Header (22 bytes):
 //   - Magic: 0x53 0x50 0x45 0x43 (4 bytes) "SPEC"
 //   - Version: 0x01 (1 byte)
-//   - Flags: 0x01=full, 0x02=delta (1 byte)
+//   - Flags: 0x01=full (float32), 0x02=delta (float32), 0x03=full (uint8), 0x04=delta (uint8) (1 byte)
 //   - Timestamp: uint64 milliseconds (8 bytes, little-endian)
 //   - Frequency: uint64 Hz (8 bytes, little-endian)
 //
-// - For full frame: all bins as float32 (binCount * 4 bytes, little-endian)
-// - For delta frame:
+// - For full frame (float32): all bins as float32 (binCount * 4 bytes, little-endian)
+// - For delta frame (float32):
 //   - ChangeCount: uint16 (2 bytes, little-endian)
 //   - Changes: array of [index: uint16, value: float32] (6 bytes each, little-endian)
+//
+// - For full frame (uint8): all bins as uint8 (binCount * 1 byte)
+// - For delta frame (uint8):
+//   - ChangeCount: uint16 (2 bytes, little-endian)
+//   - Changes: array of [index: uint16, value: uint8] (3 bytes each, little-endian)
 func (s *SpectrumClient) handleBinarySpectrumMessage(message []byte) {
 	if len(message) < 22 {
 		log.Printf("Binary message too short: %d bytes", len(message))
@@ -448,7 +453,7 @@ func (s *SpectrumClient) handleBinarySpectrumMessage(message []byte) {
 	var spectrumData []float32
 
 	if flags == 0x01 {
-		// Full frame
+		// Full frame (float32)
 		binCount := (len(message) - 22) / 4
 		spectrumData = make([]float32, binCount)
 
@@ -462,10 +467,11 @@ func (s *SpectrumClient) handleBinarySpectrumMessage(message []byte) {
 		s.mu.Lock()
 		s.binarySpectrumData = make([]float32, len(spectrumData))
 		copy(s.binarySpectrumData, spectrumData)
+		s.spectrumFormat = "Binary"
 		s.mu.Unlock()
 
 	} else if flags == 0x02 {
-		// Delta frame
+		// Delta frame (float32)
 		s.mu.Lock()
 		if s.binarySpectrumData == nil {
 			s.mu.Unlock()
@@ -488,6 +494,57 @@ func (s *SpectrumClient) handleBinarySpectrumMessage(message []byte) {
 		}
 
 		spectrumData = s.binarySpectrumData
+		s.mu.Unlock()
+
+	} else if flags == 0x03 {
+		// Full frame (uint8) - binary8 format
+		binCount := len(message) - 22
+		spectrumData = make([]float32, binCount)
+
+		// Read uint8 values and convert to dBFS
+		for i := 0; i < binCount; i++ {
+			uint8Value := message[22+i]
+			// Convert: 0 = -256 dB, 255 = -1 dB
+			spectrumData[i] = float32(uint8Value) - 256.0
+		}
+
+		// Store uint8 data for delta decoding
+		s.mu.Lock()
+		s.binarySpectrumData8 = make([]uint8, binCount)
+		copy(s.binarySpectrumData8, message[22:])
+		s.spectrumFormat = "Binary8"
+		s.mu.Unlock()
+
+		// Log first binary8 frame
+		log.Printf("🚀 Binary8 protocol active - 75%% bandwidth reduction vs float32!")
+
+	} else if flags == 0x04 {
+		// Delta frame (uint8) - binary8 format
+		s.mu.Lock()
+		if s.binarySpectrumData8 == nil {
+			s.mu.Unlock()
+			log.Printf("Binary8 delta frame received before full frame")
+			return
+		}
+
+		changeCount := binary.LittleEndian.Uint16(message[22:24])
+		offset := 24
+
+		// Apply changes to previous uint8 data
+		for i := 0; i < int(changeCount); i++ {
+			index := binary.LittleEndian.Uint16(message[offset : offset+2])
+			value := message[offset+2] // uint8 value
+			if int(index) < len(s.binarySpectrumData8) {
+				s.binarySpectrumData8[index] = value
+			}
+			offset += 3 // 2 bytes index + 1 byte value
+		}
+
+		// Convert uint8 array to float32 for display
+		spectrumData = make([]float32, len(s.binarySpectrumData8))
+		for i := 0; i < len(s.binarySpectrumData8); i++ {
+			spectrumData[i] = float32(s.binarySpectrumData8[i]) - 256.0
+		}
 		s.mu.Unlock()
 
 	} else {

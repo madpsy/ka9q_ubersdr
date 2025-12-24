@@ -82,7 +82,9 @@ class SpectrumDisplay:
 
         # Binary protocol support
         self.using_binary_protocol: bool = False
-        self.binary_spectrum_data: Optional[np.ndarray] = None  # State for delta decoding
+        self.binary_spectrum_data: Optional[np.ndarray] = None  # State for delta decoding (float32)
+        self.binary_spectrum_data8: Optional[np.ndarray] = None  # State for delta decoding (uint8)
+        self.binary8_logged: bool = False  # Track if we've logged binary8 activation
         
         # Current tuned frequency and bandwidth (for filter visualization)
         self.tuned_freq: float = 0
@@ -188,8 +190,8 @@ class SpectrumDisplay:
             params['user_session_id'] = user_session_id
         if password:
             params['password'] = password
-        # Request binary mode for reduced bandwidth
-        params['mode'] = 'binary'
+        # Request binary8 mode for maximum bandwidth reduction (8-bit encoding)
+        params['mode'] = 'binary8'
 
         # Add query parameters if any
         if params:
@@ -365,13 +367,17 @@ class SpectrumDisplay:
         - Header (22 bytes):
           - Magic: 0x53 0x50 0x45 0x43 (4 bytes) "SPEC"
           - Version: 0x01 (1 byte)
-          - Flags: 0x01=full, 0x02=delta (1 byte)
+          - Flags: 0x01=full (float32), 0x02=delta (float32), 0x03=full (uint8), 0x04=delta (uint8) (1 byte)
           - Timestamp: uint64 milliseconds (8 bytes, little-endian)
           - Frequency: uint64 Hz (8 bytes, little-endian)
-        - For full frame: all bins as float32 (binCount * 4 bytes, little-endian)
-        - For delta frame:
+        - For full frame (float32): all bins as float32 (binCount * 4 bytes, little-endian)
+        - For delta frame (float32):
           - ChangeCount: uint16 (2 bytes, little-endian)
           - Changes: array of [index: uint16, value: float32] (6 bytes each, little-endian)
+        - For full frame (uint8): all bins as uint8 (binCount * 1 byte)
+        - For delta frame (uint8):
+          - ChangeCount: uint16 (2 bytes, little-endian)
+          - Changes: array of [index: uint16, value: uint8] (3 bytes each, little-endian)
 
         Args:
             message: Binary message bytes
@@ -400,7 +406,7 @@ class SpectrumDisplay:
             frequency = struct.unpack('<Q', message[14:22])[0]  # little-endian uint64
 
             if flags == 0x01:
-                # Full frame
+                # Full frame (float32)
                 bin_count = (len(message) - 22) // 4
                 spectrum_data = np.zeros(bin_count, dtype=np.float32)
 
@@ -412,7 +418,7 @@ class SpectrumDisplay:
                 self.binary_spectrum_data = spectrum_data.copy()
 
             elif flags == 0x02:
-                # Delta frame
+                # Delta frame (float32)
                 if self.binary_spectrum_data is None:
                     print("Delta frame received before full frame")
                     return None
@@ -428,6 +434,44 @@ class SpectrumDisplay:
                     offset += 6
 
                 spectrum_data = self.binary_spectrum_data
+
+            elif flags == 0x03:
+                # Full frame (uint8) - binary8 format
+                bin_count = len(message) - 22
+                spectrum_data = np.zeros(bin_count, dtype=np.float32)
+
+                # Read uint8 values and convert to dBFS
+                for i in range(bin_count):
+                    uint8_value = message[22 + i]
+                    # Convert: 0 = -256 dB, 255 = -1 dB
+                    spectrum_data[i] = float(uint8_value) - 256.0
+
+                # Store uint8 data for delta decoding
+                self.binary_spectrum_data8 = np.frombuffer(message[22:], dtype=np.uint8).copy()
+
+                # Log first binary8 frame
+                if not self.binary8_logged:
+                    self.binary8_logged = True
+                    print('🚀 Binary8 protocol active - 75% bandwidth reduction vs float32!')
+
+            elif flags == 0x04:
+                # Delta frame (uint8) - binary8 format
+                if self.binary_spectrum_data8 is None:
+                    print("Binary8 delta frame received before full frame")
+                    return None
+
+                change_count = struct.unpack('<H', message[22:24])[0]  # little-endian uint16
+                offset = 24
+
+                # Apply changes to previous uint8 data
+                for i in range(change_count):
+                    index = struct.unpack('<H', message[offset:offset+2])[0]  # little-endian uint16
+                    value = message[offset + 2]  # uint8 value
+                    self.binary_spectrum_data8[index] = value
+                    offset += 3  # 2 bytes index + 1 byte value
+
+                # Convert uint8 array to float32 for display
+                spectrum_data = self.binary_spectrum_data8.astype(np.float32) - 256.0
 
             else:
                 print(f"Unknown flags: {flags}")

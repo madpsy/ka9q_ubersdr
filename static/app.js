@@ -5481,9 +5481,9 @@ function getOptimalFFTSize() {
     } else if (bandwidth < 600) {
         return 16384;  // CW modes: High Detail (1.46 Hz/bin)
     } else if (bandwidth < 1500) {
-        return 8192;   // Narrow modes (USB/LSB): Balanced (2.93 Hz/bin)
+        return 4096;   // Narrow modes (USB/LSB): Fast (5.86 Hz/bin) - Reduced for faster VU response
     } else if (bandwidth < 4000) {
-        return 8192;   // Medium modes: Balanced (2.93 Hz/bin)
+        return 4096;   // Medium modes: Fast (5.86 Hz/bin) - Reduced for faster VU response
     } else {
         return 4096;   // Wide modes (AM/FM): Fast (5.86 Hz/bin)
     }

@@ -78,10 +78,9 @@ const wsManager = new WebSocketManager({
             postFilterAnalyser.fftSize = getOptimalFFTSize();
             postFilterAnalyser.smoothingTimeConstant = 0;
 
-            // Create dedicated analyser for VU meter with fixed small FFT for instant response
-            // Small FFT = short averaging window = low latency (2048 samples = 43ms at 48kHz)
+            // Create dedicated analyser for VU meter and visualizations
             vuAnalyser = audioContext.createAnalyser();
-            vuAnalyser.fftSize = 2048;
+            vuAnalyser.fftSize = getOptimalFFTSize();
             vuAnalyser.smoothingTimeConstant = 0;
 
             // Expose analysers globally for extensions
@@ -1689,7 +1688,7 @@ async function handleBinaryMessage(data) {
             postFilterAnalyser.smoothingTimeConstant = 0;
 
             vuAnalyser = audioContext.createAnalyser();
-            vuAnalyser.fftSize = 2048; // Fixed small FFT for instant VU meter response
+            vuAnalyser.fftSize = getOptimalFFTSize();
             vuAnalyser.smoothingTimeConstant = 0;
 
             window.analyser = analyser;
@@ -1990,7 +1989,7 @@ function handlePCMAudio(msg) {
         postFilterAnalyser.smoothingTimeConstant = 0;
 
         vuAnalyser = audioContext.createAnalyser();
-        vuAnalyser.fftSize = 2048; // Fixed small FFT for instant VU meter response
+        vuAnalyser.fftSize = getOptimalFFTSize();
         vuAnalyser.smoothingTimeConstant = 0;
 
         window.analyser = analyser;
@@ -3043,7 +3042,9 @@ function setMode(mode, preserveBandwidth = false) {
             if (postFilterAnalyser) {
                 postFilterAnalyser.fftSize = newFFTSize;
             }
-            // Don't change vuAnalyser FFT size - keep it fixed at 2048 for instant VU response
+            if (vuAnalyser) {
+                vuAnalyser.fftSize = newFFTSize;
+            }
             updateFFTSizeDropdown();
             log(`FFT size auto-adjusted to ${newFFTSize} for ${Math.abs(currentBandwidthHigh - currentBandwidthLow)} Hz bandwidth`);
         }
@@ -3132,7 +3133,9 @@ function updateBandwidthDisplay() {
                 if (postFilterAnalyser) {
                     postFilterAnalyser.fftSize = newFFTSize;
                 }
-                // Don't change vuAnalyser FFT size - keep it fixed at 2048 for instant VU response
+                if (vuAnalyser) {
+                    vuAnalyser.fftSize = newFFTSize;
+                }
                 updateFFTSizeDropdown();
             }
         }
@@ -3195,7 +3198,9 @@ function updateBandwidth() {
             if (postFilterAnalyser) {
                 postFilterAnalyser.fftSize = newFFTSize;
             }
-            // Don't change vuAnalyser FFT size - keep it fixed at 2048 for instant VU response
+            if (vuAnalyser) {
+                vuAnalyser.fftSize = newFFTSize;
+            }
             updateFFTSizeDropdown();
             log(`FFT size auto-adjusted to ${newFFTSize} for ${Math.abs(bandwidthHigh - bandwidthLow)} Hz bandwidth`);
         }
@@ -3695,9 +3700,8 @@ function checkClipping() {
 }
 
 function updateVUMeter() {
-    // Use pre-buffer analyser for real-time response (same as oscilloscope)
-    // This eliminates the ~200ms+ lag from the audio buffer queue
-    const activeAnalyser = analyser;
+    // Use dedicated VU analyser (after all processing) if available, otherwise fall back to main analyser
+    const activeAnalyser = vuAnalyser || analyser;
     if (!activeAnalyser) return;
 
     const dataArray = new Uint8Array(activeAnalyser.frequencyBinCount);

@@ -2178,6 +2178,14 @@ function playAudioBuffer(buffer) {
         return;
     }
 
+    // Resume AudioContext if suspended (iOS Safari fix)
+    // This ensures audio can play even if context was suspended after initial resume
+    if (audioContext.state === 'suspended') {
+        audioContext.resume().catch(err => {
+            console.error('Failed to resume AudioContext during playback:', err);
+        });
+    }
+
     // Safety check: ensure analysers belong to current context
     if (!analyser || analyser.context !== audioContext) {
         console.warn('Analyser belongs to old context, skipping buffer');

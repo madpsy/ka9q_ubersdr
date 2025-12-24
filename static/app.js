@@ -78,9 +78,10 @@ const wsManager = new WebSocketManager({
             postFilterAnalyser.fftSize = getOptimalFFTSize();
             postFilterAnalyser.smoothingTimeConstant = 0;
 
-            // Create dedicated analyser for VU meter and visualizations
+            // Create dedicated analyser for VU meter with fixed small FFT for instant response
+            // Small FFT = short averaging window = low latency (2048 samples = 43ms at 48kHz)
             vuAnalyser = audioContext.createAnalyser();
-            vuAnalyser.fftSize = getOptimalFFTSize();
+            vuAnalyser.fftSize = 2048;
             vuAnalyser.smoothingTimeConstant = 0;
 
             // Expose analysers globally for extensions
@@ -1688,7 +1689,7 @@ async function handleBinaryMessage(data) {
             postFilterAnalyser.smoothingTimeConstant = 0;
 
             vuAnalyser = audioContext.createAnalyser();
-            vuAnalyser.fftSize = getOptimalFFTSize();
+            vuAnalyser.fftSize = 2048; // Fixed small FFT for instant VU meter response
             vuAnalyser.smoothingTimeConstant = 0;
 
             window.analyser = analyser;
@@ -1989,7 +1990,7 @@ function handlePCMAudio(msg) {
         postFilterAnalyser.smoothingTimeConstant = 0;
 
         vuAnalyser = audioContext.createAnalyser();
-        vuAnalyser.fftSize = getOptimalFFTSize();
+        vuAnalyser.fftSize = 2048; // Fixed small FFT for instant VU meter response
         vuAnalyser.smoothingTimeConstant = 0;
 
         window.analyser = analyser;
@@ -3042,9 +3043,7 @@ function setMode(mode, preserveBandwidth = false) {
             if (postFilterAnalyser) {
                 postFilterAnalyser.fftSize = newFFTSize;
             }
-            if (vuAnalyser) {
-                vuAnalyser.fftSize = newFFTSize;
-            }
+            // Don't change vuAnalyser FFT size - keep it fixed at 2048 for instant VU response
             updateFFTSizeDropdown();
             log(`FFT size auto-adjusted to ${newFFTSize} for ${Math.abs(currentBandwidthHigh - currentBandwidthLow)} Hz bandwidth`);
         }
@@ -3133,9 +3132,7 @@ function updateBandwidthDisplay() {
                 if (postFilterAnalyser) {
                     postFilterAnalyser.fftSize = newFFTSize;
                 }
-                if (vuAnalyser) {
-                    vuAnalyser.fftSize = newFFTSize;
-                }
+                // Don't change vuAnalyser FFT size - keep it fixed at 2048 for instant VU response
                 updateFFTSizeDropdown();
             }
         }
@@ -3198,9 +3195,7 @@ function updateBandwidth() {
             if (postFilterAnalyser) {
                 postFilterAnalyser.fftSize = newFFTSize;
             }
-            if (vuAnalyser) {
-                vuAnalyser.fftSize = newFFTSize;
-            }
+            // Don't change vuAnalyser FFT size - keep it fixed at 2048 for instant VU response
             updateFFTSizeDropdown();
             log(`FFT size auto-adjusted to ${newFFTSize} for ${Math.abs(bandwidthHigh - bandwidthLow)} Hz bandwidth`);
         }

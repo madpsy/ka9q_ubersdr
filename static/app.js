@@ -3703,8 +3703,9 @@ function checkClipping() {
 }
 
 function updateVUMeter() {
-    // Use dedicated VU analyser (after all processing) if available, otherwise fall back to main analyser
-    const activeAnalyser = vuAnalyser || analyser;
+    // Use main analyser (pre-buffer, real-time) for instant response matching oscilloscope
+    // This reads audio as it arrives, not as it plays (which is buffered)
+    const activeAnalyser = analyser || vuAnalyser;
     if (!activeAnalyser) return;
 
     const dataArray = new Uint8Array(activeAnalyser.frequencyBinCount);

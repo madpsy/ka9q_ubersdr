@@ -563,6 +563,17 @@ document.addEventListener('DOMContentLoaded', () => {
             // Hide overlay
             audioStartOverlay.classList.add('hidden');
 
+            // Resume AudioContext if suspended (required for iOS Safari)
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume().then(() => {
+                    console.log('AudioContext resumed for iOS/Safari');
+                    log('Audio context activated');
+                }).catch(err => {
+                    console.error('Failed to resume AudioContext:', err);
+                    log('Failed to activate audio context', 'error');
+                });
+            }
+
             // Start audio by triggering the current mode (from URL or default)
             // This will initialize audio context and connect
             // Preserve bandwidth values loaded from URL

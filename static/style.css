@@ -988,7 +988,7 @@ input[type="range"]::-moz-range-thumb {
     height: 100%;
     width: 0%;
     /* Gradient will be set dynamically by JavaScript to show correct portion */
-    transition: width 0.05s ease-out;
+    transition: none;
     border-radius: 6px 0 0 6px;
 }
 
@@ -999,7 +999,7 @@ input[type="range"]::-moz-range-thumb {
     background: #ffffff;
     left: 0%;
     box-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
-    transition: left 0.05s ease-out;
+    transition: none;
 }
 
 .vu-meter-scale {

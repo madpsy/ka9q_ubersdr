@@ -559,19 +559,21 @@ document.addEventListener('DOMContentLoaded', () => {
         // Check if connection will be allowed
         checkConnectionOnLoad(audioStartButton, audioStartOverlay, originalHTML);
 
-        audioStartButton.addEventListener('click', () => {
+        audioStartButton.addEventListener('click', async () => {
             // Hide overlay
             audioStartOverlay.classList.add('hidden');
 
             // Resume AudioContext if suspended (required for iOS Safari)
+            // MUST await this to ensure it completes before audio playback
             if (audioContext && audioContext.state === 'suspended') {
-                audioContext.resume().then(() => {
-                    console.log('AudioContext resumed for iOS/Safari');
-                    log('Audio context activated');
-                }).catch(err => {
+                try {
+                    await audioContext.resume();
+                    console.log('AudioContext resumed for iOS/Safari - state:', audioContext.state);
+                    log('Audio context activated for iOS');
+                } catch (err) {
                     console.error('Failed to resume AudioContext:', err);
                     log('Failed to activate audio context', 'error');
-                });
+                }
             }
 
             // Start audio by triggering the current mode (from URL or default)
@@ -2180,10 +2182,18 @@ function playAudioBuffer(buffer) {
 
     // Resume AudioContext if suspended (iOS Safari fix)
     // This ensures audio can play even if context was suspended after initial resume
+    // Use await to ensure resume completes before scheduling audio
     if (audioContext.state === 'suspended') {
-        audioContext.resume().catch(err => {
+        console.warn('AudioContext suspended during playback - resuming...');
+        // Don't await here as it would block the audio chain
+        // Just trigger resume and let it complete asynchronously
+        audioContext.resume().then(() => {
+            console.log('AudioContext resumed during playback - state:', audioContext.state);
+        }).catch(err => {
             console.error('Failed to resume AudioContext during playback:', err);
         });
+        // Return early to skip this buffer - next buffer will play after resume
+        return;
     }
 
     // Safety check: ensure analysers belong to current context

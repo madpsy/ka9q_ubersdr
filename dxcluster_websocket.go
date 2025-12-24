@@ -75,8 +75,9 @@ func NewDXClusterWebSocketHandler(dxCluster *DXClusterClient, sessions *SessionM
 		maxCWSpots:        100,
 		receiverLocator:   receiverLocator,
 		upgrader: websocket.Upgrader{
-			ReadBufferSize:  1024,
-			WriteBufferSize: 1024,
+			ReadBufferSize:    1024,
+			WriteBufferSize:   1024,
+			EnableCompression: true, // Enable per-message-deflate compression
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for now
 			},

@@ -1036,7 +1036,12 @@ class RadioClient:
                 return b''
 
             try:
+                compressed_size = len(binary_data)
                 binary_data = self.zstd_decompressor.decompress(binary_data)
+                # Log first decompression only
+                if not hasattr(self, '_zstd_logged'):
+                    print(f"DEBUG: PCM-zstd decompression OK (compressed: {compressed_size} -> decompressed: {len(binary_data)} bytes)", file=sys.stderr)
+                    self._zstd_logged = True
             except Exception as e:
                 print(f"Warning: zstd decompression error: {e}", file=sys.stderr)
                 return b''
@@ -1114,13 +1119,13 @@ class RadioClient:
             try:
                 # Check if this is an IQ mode
                 is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
-                
+
                 # Convert PCM int16 to float32 for TCI
                 audio_array = np.frombuffer(pcm_data, dtype=np.int16)
-                
+
                 # Convert to float32 normalized to [-1.0, 1.0]
                 audio_float32 = audio_array.astype(np.float32) / 32768.0
-                
+
                 if is_iq_mode:
                     # IQ MODE: Send as IQ stream (type 0)
                     # IQ data is already stereo (I and Q channels) and at the correct sample rate
@@ -1131,8 +1136,17 @@ class RadioClient:
                     audio_float32_le = audio_float32.astype('<f4')  # Little-endian float32
                     tci_iq_bytes = audio_float32_le.tobytes()
 
-                    # Send to TCI server as IQ stream (receiver 0, at current sample rate)
-                    self.tci_server.send_iq_data(0, tci_iq_bytes, self.sample_rate)
+                    # Get the actual IQ sample rate from TCI server (not audio sample rate)
+                    # For IQ modes, TCI server tracks the correct IQ sample rate
+                    tci_iq_rate = self.tci_server.iq_sample_rate
+
+                    # Log first IQ packet sent to TCI
+                    if not hasattr(self, '_tci_iq_logged'):
+                        print(f"DEBUG: Sending IQ data to TCI (samples: {len(audio_array)//2}, rate: {tci_iq_rate} Hz)", file=sys.stderr)
+                        self._tci_iq_logged = True
+
+                    # Send to TCI server as IQ stream (receiver 0, at IQ sample rate)
+                    self.tci_server.send_iq_data(0, tci_iq_bytes, tci_iq_rate)
                 else:
                     # AUDIO MODE: Send as audio stream (type 1)
                     # TCI expects float32 stereo audio at 48 kHz
@@ -1695,6 +1709,10 @@ class RadioClient:
 
                         # Handle binary messages (Opus or PCM-zstd format)
                         if isinstance(message, bytes):
+                            # Log first binary message received
+                            if pcm_packet_count == 0 and opus_packet_count == 0:
+                                print(f"DEBUG: First binary message received (size: {len(message)} bytes, format: {'opus' if self.use_opus else 'pcm-zstd'})", file=sys.stderr)
+
                             if self.use_opus:
                                 # Decode binary Opus packet
                                 pcm_data = self.decode_opus_binary(message)
@@ -1721,6 +1739,13 @@ class RadioClient:
                                     if pcm_packet_count == 1:
                                         compression_msg = "zstd-compressed" if ZSTD_AVAILABLE else "uncompressed"
                                         print(f"✓ Receiving {compression_msg} PCM audio packets from server", file=sys.stderr)
+                                        # Log if this is IQ mode for TCI
+                                        is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
+                                        if is_iq_mode and hasattr(self, 'tci_server') and self.tci_server:
+                                            print(f"DEBUG: IQ mode detected, TCI server active", file=sys.stderr)
+                                elif pcm_packet_count == 0:
+                                    # Log if first packet decode fails
+                                    print(f"DEBUG: First PCM packet decode failed (size: {len(message)} bytes)", file=sys.stderr)
 
                                 # Check duration limit
                                 if not self.check_duration():

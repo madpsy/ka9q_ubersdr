@@ -142,7 +142,7 @@ except ImportError:
 
 def find_next_fifo_path() -> str:
     """Find the next available FIFO path (/tmp/ubersdr.fifo, ubersdr1.fifo, etc.).
-    
+
     Returns empty string on Windows (FIFO not supported).
     """
     import os
@@ -253,7 +253,7 @@ class RadioGUI:
 
         # Configuration
         self.config = initial_config
-        
+
         # Server configurations storage
         self.servers = []  # List of saved server configurations
         self.config_file = self._get_config_file_path()
@@ -286,7 +286,7 @@ class RadioGUI:
         self.radio_control_last_mode = None  # Track last known rig mode
         self.radio_control_last_ptt = False  # Track last known PTT state
         self.radio_control_saved_channels = None  # Store channel states before muting
-        
+
         # Legacy aliases for backward compatibility
         self.rigctl = None
         self.rigctl_connected = False
@@ -400,7 +400,7 @@ class RadioGUI:
         # If using default localhost and not auto-connecting, check for local instances first
         elif self.config.get('host') == 'localhost' and not self.config.get('url') and not self.config.get('auto_connect'):
             self.root.after(200, self.check_and_open_instances_window)  # Delay to ensure UI is ready
-    
+
     def _get_config_file_path(self) -> str:
         """Get platform-appropriate config file path for server configurations."""
         if platform.system() == 'Windows':
@@ -411,29 +411,29 @@ class RadioGUI:
         else:
             # Use home directory on Unix-like systems
             return os.path.expanduser("~/.ubersdr_servers.json")
-    
+
     def load_servers(self):
         """Load saved server configurations, audio settings, and radio control settings from file."""
         if not os.path.exists(self.config_file):
             return
-        
+
         try:
             with open(self.config_file, 'r') as f:
                 data = json.load(f)
                 self.servers = data.get('servers', [])
-                
+
                 # Load audio settings if they exist
                 audio_settings = data.get('audio_settings', {})
                 if audio_settings:
                     # Store for later use (after UI is created)
                     self._saved_audio_settings = audio_settings
-                
+
                 # Load radio control settings if they exist
                 radio_control_settings = data.get('radio_control_settings', {})
                 if radio_control_settings:
                     # Store for later use (after UI is created)
                     self._saved_radio_control_settings = radio_control_settings
-                
+
                 # Only log if status_text exists (after UI is created)
                 if hasattr(self, 'status_text'):
                     self.log_status(f"Loaded {len(self.servers)} saved server(s)")
@@ -442,7 +442,7 @@ class RadioGUI:
             self.servers = []
             self._saved_audio_settings = {}
             self._saved_radio_control_settings = {}
-    
+
     def save_servers(self):
         """Save server configurations, audio settings, and radio control settings to file."""
         try:
@@ -458,7 +458,7 @@ class RadioGUI:
                 'udp_stereo': self.udp_stereo_var.get(),
                 'opus_enabled': self.opus_var.get()
             }
-            
+
             # Get current radio control settings
             radio_control_settings = {
                 'type': self.radio_control_type_var.get(),
@@ -471,13 +471,13 @@ class RadioGUI:
                 'sync_direction': self.radio_sync_direction_var.get(),
                 'mute_tx': self.radio_mute_tx_var.get()
             }
-            
+
             data = {
                 'servers': self.servers,
                 'audio_settings': audio_settings,
                 'radio_control_settings': radio_control_settings
             }
-            
+
             with open(self.config_file, 'w') as f:
                 json.dump(data, f, indent=2)
             # Only log when explicitly saving servers (not during auto-save)
@@ -487,7 +487,7 @@ class RadioGUI:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save configurations: {e}")
             self.log_status(f"ERROR: Failed to save configurations - {e}")
-    
+
     def apply_saved_audio_settings(self):
         """Apply saved audio settings to UI after it's created."""
         if not hasattr(self, '_saved_audio_settings'):
@@ -573,12 +573,12 @@ class RadioGUI:
         # Apply mute TX setting (silently)
         if 'mute_tx' in settings:
             self.radio_mute_tx_var.set(settings['mute_tx'])
-    
+
     def save_audio_settings(self):
         """Save audio settings automatically (called when settings change)."""
         # Use the existing save_servers method which now includes audio settings
         self.save_servers()
-    
+
     def add_current_server(self):
         """Add current server configuration to saved servers."""
         # Get current server details from separate fields
@@ -586,28 +586,28 @@ class RadioGUI:
         if not hostname:
             messagebox.showerror("Error", "Please enter a server hostname")
             return
-        
+
         # Get port from port field
         port_str = self.port_var.get().strip()
         if not port_str:
             messagebox.showerror("Error", "Please enter a port number")
             return
-        
+
         try:
             port = int(port_str)
         except ValueError:
             messagebox.showerror("Error", "Invalid port number")
             return
-        
+
         tls_enabled = self.tls_var.get()
-        
+
         # Ask for a name for this server
         name = tk.simpledialog.askstring("Save Server",
                                          "Enter a name for this server:",
                                          initialvalue=hostname)
         if not name:
             return  # User cancelled
-        
+
         # Check if server with this name already exists
         for i, server in enumerate(self.servers):
             if server['name'] == name:
@@ -624,7 +624,7 @@ class RadioGUI:
                     self.populate_server_dropdown()
                     messagebox.showinfo("Success", f"Server '{name}' updated")
                 return
-        
+
         # Add new server
         self.servers.append({
             'name': name,
@@ -636,13 +636,13 @@ class RadioGUI:
         self.save_servers()
         self.populate_server_dropdown()
         messagebox.showinfo("Success", f"Server '{name}' saved")
-    
+
     def load_selected_server(self):
         """Load the selected server from dropdown."""
         selected = self.server_dropdown_var.get()
         if not selected or selected == "Select saved server...":
             return
-        
+
         # Find the server
         for server in self.servers:
             if server['name'] == selected:
@@ -652,18 +652,18 @@ class RadioGUI:
                 self.tls_var.set(server['tls'])
                 self.log_status(f"Loaded server: {server['name']}")
                 break
-    
+
     def delete_selected_server(self):
         """Delete the selected server from saved servers."""
         selected = self.server_dropdown_var.get()
         if not selected or selected == "Select saved server...":
             messagebox.showinfo("Info", "Please select a server to delete")
             return
-        
+
         if not messagebox.askyesno("Confirm Delete",
                                    f"Are you sure you want to delete server '{selected}'?"):
             return
-        
+
         # Remove the server
         self.servers = [s for s in self.servers if s['name'] != selected]
         self.save_servers()
@@ -710,15 +710,15 @@ class RadioGUI:
         local_uuids = self._get_local_uuids()
 
         self.public_instances_window = create_public_instances_window(self.root, on_connect, local_uuids)
-    
+
     def _get_local_uuids(self):
         """Get UUIDs from discovered local instances.
-        
+
         Returns:
             Set of public UUIDs from local instances
         """
         local_uuids = set()
-        
+
         # If we already have a local instances display, use it
         if self.local_instances_display:
             for service_name, info in self.local_instances_display.instances.items():
@@ -731,13 +731,13 @@ class RadioGUI:
                 from zeroconf import Zeroconf, ServiceBrowser
                 import threading
                 import time
-                
+
                 discovered_uuids = []
-                
+
                 class QuickUUIDListener:
                     def __init__(self):
                         self.zc = None
-                    
+
                     def add_service(self, zc, type_, name):
                         self.zc = zc
                         info = zc.get_service_info(type_, name)
@@ -757,30 +757,30 @@ class RadioGUI:
                                         discovered_uuids.append(public_uuid)
                                 except:
                                     pass
-                    
+
                     def remove_service(self, zc, type_, name):
                         pass
-                    
+
                     def update_service(self, zc, type_, name):
                         pass
-                
+
                 # Quick discovery (2 second timeout)
                 zc = Zeroconf()
                 listener = QuickUUIDListener()
                 browser = ServiceBrowser(zc, "_ubersdr._tcp.local.", listener)
-                
+
                 # Wait up to 2 seconds for discovery
                 time.sleep(2.0)
-                
+
                 # Cleanup
                 browser.cancel()
                 zc.close()
-                
+
                 # Add discovered UUIDs
                 local_uuids.update(discovered_uuids)
             except Exception as e:
                 pass  # Silently fail if discovery doesn't work
-        
+
         return local_uuids
 
     def open_local_instances_window(self):
@@ -864,7 +864,7 @@ class RadioGUI:
             except Exception as e:
                 # If discovery fails, just log it (public window already open)
                 self.log_status(f"Local discovery failed: {e}")
-    
+
     def populate_server_dropdown(self):
         """Populate the server dropdown with saved servers."""
         server_names = ["Select saved server..."] + [s['name'] for s in self.servers]
@@ -927,13 +927,13 @@ class RadioGUI:
         conn_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
 
         ttk.Label(conn_frame, text="Server:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        
+
         # Initialize server field - handle both URL and host:port formats
         initial_server = self.config.get('url')
         if not initial_server:
             # Use just the hostname, not host:port
             initial_server = self.config.get('host', 'localhost')
-        
+
         self.server_var = tk.StringVar(value=initial_server)
         server_entry = ttk.Entry(conn_frame, textvariable=self.server_var, width=30)
         server_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
@@ -958,19 +958,19 @@ class RadioGUI:
         self.cancel_btn = ttk.Button(conn_frame, text="Cancel", command=self.cancel_connection_attempt)
         self.cancel_btn.grid(row=0, column=6)
         self.cancel_btn.grid_remove()  # Hide initially
-        
+
         # Server dropdown and management buttons (second row)
         ttk.Label(conn_frame, text="Saved:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
-        
+
         self.server_dropdown_var = tk.StringVar(value="Select saved server...")
         self.server_dropdown = ttk.Combobox(conn_frame, textvariable=self.server_dropdown_var,
                                            state='readonly', width=28)
         self.server_dropdown.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 5), pady=(5, 0))
         self.server_dropdown.bind('<<ComboboxSelected>>', lambda e: self.load_selected_server())
-        
+
         # Populate dropdown with saved servers
         self.populate_server_dropdown()
-        
+
         # Save button
         save_btn = ttk.Button(conn_frame, text="Save", width=6, command=self.add_current_server)
         save_btn.grid(row=1, column=2, sticky=tk.W, padx=(0, 5), pady=(5, 0))
@@ -989,34 +989,34 @@ class RadioGUI:
 
         # Receiver info label (third row, initially hidden) - shows name, version, and map link
         ttk.Label(conn_frame, text="Receiver:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5))
-        
+
         # Create a frame to hold all receiver info on one line
         receiver_info_frame = ttk.Frame(conn_frame)
         receiver_info_frame.grid(row=2, column=1, columnspan=5, sticky=tk.W)
-        
+
         # Receiver name (truncated to 50 chars)
         self.receiver_name_var = tk.StringVar(value="")
         self.receiver_name_label = ttk.Label(receiver_info_frame, textvariable=self.receiver_name_var, foreground='blue')
         self.receiver_name_label.pack(side=tk.LEFT)
-        
+
         # Delimiter
         self.receiver_delimiter1 = ttk.Label(receiver_info_frame, text=" | ", foreground='gray')
         self.receiver_delimiter1.pack(side=tk.LEFT)
-        
+
         # Version
         self.receiver_version_var = tk.StringVar(value="")
         self.receiver_version_label = ttk.Label(receiver_info_frame, textvariable=self.receiver_version_var, foreground='blue')
         self.receiver_version_label.pack(side=tk.LEFT)
-        
+
         # Delimiter
         self.receiver_delimiter2 = ttk.Label(receiver_info_frame, text=" | ", foreground='gray')
         self.receiver_delimiter2.pack(side=tk.LEFT)
-        
+
         # Map link (clickable)
         self.receiver_map_link = ttk.Label(receiver_info_frame, text="Open Map", foreground='blue', cursor='hand2')
         self.receiver_map_link.pack(side=tk.LEFT)
         self.receiver_map_link.bind('<Button-1>', self.open_receiver_map)
-        
+
         # Hide entire frame initially until connected
         receiver_info_frame.grid_remove()
         self.receiver_info_frame = receiver_info_frame
@@ -1055,20 +1055,20 @@ class RadioGUI:
             default_type = 'flrig'
         elif RIGCTL_AVAILABLE:
             default_type = 'rigctl'
-        
+
         self.radio_control_type_var = tk.StringVar(value=default_type)
         radio_type_combo = ttk.Combobox(radio_controls, textvariable=self.radio_control_type_var,
                                        values=available_types, state='readonly', width=8)
         radio_type_combo.pack(side=tk.LEFT, padx=(0, 5))
         radio_type_combo.bind('<<ComboboxSelected>>', lambda e: self.on_radio_control_type_changed())
-        
+
         # Store reference for later use
         self.radio_type_combo = radio_type_combo
 
         # Host/Port fields (for rigctl and flrig)
         self.radio_host_label = ttk.Label(radio_controls, text="Host:")
         self.radio_host_label.pack(side=tk.LEFT, padx=(5, 5))
-        
+
         # Default to rigctl port, but will be updated when type changes
         default_host = self.config.get('rigctl_host', self.config.get('flrig_host', '127.0.0.1'))
         self.radio_host_var = tk.StringVar(value=default_host)
@@ -1102,7 +1102,7 @@ class RadioGUI:
         self.omnirig_rig_var = tk.StringVar(value='1')
         self.omnirig_rig_combo = ttk.Combobox(radio_controls, textvariable=self.omnirig_rig_var,
                                              values=['1', '2'], state='readonly', width=5)
-        
+
         # Serial port selector (for Serial only)
         self.serial_port_label = ttk.Label(radio_controls, text="Port:")
         self.serial_port_var = tk.StringVar(value='')
@@ -1131,7 +1131,7 @@ class RadioGUI:
 
         self.radio_connect_btn = ttk.Button(radio_controls, text="Connect", command=self.toggle_radio_control_connection)
         self.radio_connect_btn.pack(side=tk.LEFT, padx=(0, 5))
-        
+
         # Legacy aliases for backward compatibility
         self.rigctl_host_var = self.radio_host_var
         self.rigctl_port_var = self.radio_port_var
@@ -1157,7 +1157,7 @@ class RadioGUI:
         self.radio_mute_tx_check = ttk.Checkbutton(radio_controls, text="Mute TX",
                                                      variable=self.radio_mute_tx_var)
         self.radio_mute_tx_check.pack(side=tk.LEFT)
-        
+
         # Legacy aliases for backward compatibility
         self.rigctl_sync_direction_var = self.radio_sync_direction_var
         self.rigctl_sdr_to_rig_radio = self.radio_sdr_to_rig_radio
@@ -1503,9 +1503,9 @@ class RadioGUI:
         # Audio level meter - put label and meter in a container frame to eliminate gap
         level_container = ttk.Frame(audio_frame)
         level_container.grid(row=2, column=3, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 5), pady=(5, 0))
-        
+
         ttk.Label(level_container, text="Level:").pack(side=tk.LEFT, padx=(0, 5))
-        
+
         # Create a frame for the level meter bar
         meter_frame = ttk.Frame(level_container, relief=tk.SUNKEN, borderwidth=1)
         meter_frame.pack(side=tk.LEFT, padx=(0, 5))
@@ -1746,7 +1746,7 @@ class RadioGUI:
 
         # Start audio level meter updates
         self.update_audio_level()
-        
+
         # Update radio control UI based on default selection
         self.on_radio_control_type_changed()
 
@@ -2129,7 +2129,7 @@ class RadioGUI:
 
         try:
             from datetime import datetime, timedelta
-            
+
             # Get server URL
             hostname = self.server_var.get().strip()
             port = self.port_var.get().strip()
@@ -2152,7 +2152,7 @@ class RadioGUI:
             now = datetime.utcnow()
             to_time = now.isoformat() + 'Z'
             from_time = (now - timedelta(minutes=10)).isoformat() + 'Z'
-            
+
             # Build request body (matching bands_state.js format)
             # Always use hardcoded BAND_RANGES for band button updates
             request_body = {
@@ -3061,7 +3061,7 @@ class RadioGUI:
             # Sync to radio control if enabled
             if self.radio_control_sync_enabled:
                 self.sync_frequency_to_radio_control()
-            
+
             # Sync to TCI server if active (but don't create feedback loop)
             if self.radio_control_type == 'tci' and self.radio_control:
                 # Pass skip_callback=True to prevent feedback loop
@@ -3098,20 +3098,20 @@ class RadioGUI:
         """Handle mode button click."""
         # Update mode variable
         self.mode_var.set(mode_value)
-        
+
         # Update button states
         self.update_mode_buttons()
-        
+
         # Trigger mode change handler
         self.on_mode_changed()
 
     def update_mode_buttons(self):
         """Update mode button styles based on current selection."""
         current_mode = self.mode_var.get().upper()
-        
+
         for mode_value, button in self.mode_buttons.items():
             is_active = mode_value.upper() == current_mode
-            
+
             # Apply style based on button type (tk.Button on Windows, ttk.Button on Linux)
             if platform.system() == 'Windows':
                 # tk.Button: use bg, fg
@@ -3159,12 +3159,12 @@ class RadioGUI:
                         int(self.audio_filter_low_var.get()),
                         int(self.audio_filter_high_var.get()))
                 self.log_status("Audio filter disabled (mode changed)")
-        
-        # Update last mode
-        self.last_mode = mode
 
         # Check if this is an IQ mode
         is_iq_mode = mode in ['iq', 'iq48', 'iq96', 'iq192', 'iq384']
+
+        # Update last mode
+        self.last_mode = mode
 
         if is_iq_mode:
             # IQ mode: mute audio and disable audio controls
@@ -3225,7 +3225,13 @@ class RadioGUI:
                 self._opus_saved_state = self.opus_var.get()
             if self.opus_var.get():
                 self.opus_var.set(False)
-                self.log_status("Opus disabled (IQ mode - reconnect required to re-enable)")
+                # Warn if connected with Opus - IQ won't work
+                if self.connected and self.client and self.client.use_opus:
+                    self.log_status("⚠ IQ mode requires pcm-zstd format - please disconnect and reconnect")
+                    messagebox.showwarning("Reconnection Required",
+                                         "IQ modes require lossless pcm-zstd format.\n\n"
+                                         "You are currently connected with Opus compression.\n\n"
+                                         "Please disconnect and reconnect to use IQ modes properly.")
             self.opus_check.config(state='disabled')
 
             self.log_status(f"IQ mode selected - audio output disabled (data still sent to FIFO)")
@@ -3267,8 +3273,8 @@ class RadioGUI:
                 saved_state = self._opus_saved_state
                 self.opus_var.set(saved_state)
                 delattr(self, '_opus_saved_state')
-                if saved_state:
-                    self.log_status("Opus re-enabled (reconnect required to activate)")
+                if saved_state and self.connected and self.client and not self.client.use_opus:
+                    self.log_status("⚠ Opus enabled - please disconnect and reconnect to activate")
 
         # Always update bandwidth defaults and presets when mode changes
         self.adjust_bandwidth_for_mode(mode)
@@ -3312,6 +3318,7 @@ class RadioGUI:
         # Sync mode to radio control if enabled and direction is SDR→Rig
         if self.radio_control_sync_enabled and self.radio_sync_direction_var.get() == "SDR→Rig":
             self.sync_mode_to_radio_control()
+
     def on_radio_control_type_changed(self):
         """Handle radio control type change - show/hide appropriate controls."""
         control_type = self.radio_control_type_var.get()
@@ -3445,7 +3452,7 @@ class RadioGUI:
             self.tci_port_label.pack_forget()
             self.tci_port_entry.pack_forget()
             self.tci_client_ip_label.pack_forget()
-    
+
     def on_radio_vfo_changed(self):
         """Handle VFO selection change for flrig, OmniRig, or Serial."""
         if self.radio_control_connected and self.radio_control:
@@ -3479,44 +3486,44 @@ class RadioGUI:
         except Exception as e:
             self.log_status(f"Error refreshing serial ports: {e}")
             self.serial_port_combo['values'] = []
-    
+
     def toggle_radio_control_connection(self):
         """Connect or disconnect from radio control (rigctl or OmniRig)."""
         if not self.radio_control_connected:
             self.connect_radio_control()
         else:
             self.disconnect_radio_control()
-    
+
     def connect_radio_control(self):
         """Connect to radio control (rigctl or OmniRig)."""
         control_type = self.radio_control_type_var.get()
-        
+
         self.log_status(f"DEBUG: connect_radio_control called, type={control_type}")
-        
+
         if control_type == 'None':
             messagebox.showinfo("Info", "Please select a radio control type")
             return
-        
+
         try:
             if control_type == 'rigctl':
                 # Connect to rigctl
                 host = self.radio_host_var.get().strip()
                 port_str = self.radio_port_var.get().strip()
-                
+
                 if not host or not port_str:
                     messagebox.showerror("Error", "Please enter rigctl host and port")
                     return
-                
+
                 try:
                     port = int(port_str)
                 except ValueError:
                     messagebox.showerror("Error", "Invalid port number")
                     return
-                
+
                 # Create and connect threaded rigctl client
                 self.radio_control = ThreadedRigctlClient(host, port)
                 self.radio_control_type = 'rigctl'
-                
+
                 # Set up callbacks
                 self.radio_control.set_callbacks(
                     frequency_callback=self.on_radio_control_frequency_changed,
@@ -3524,30 +3531,30 @@ class RadioGUI:
                     ptt_callback=self.on_radio_control_ptt_changed,
                     error_callback=lambda err: self.log_status(f"Radio control error: {err}")
                 )
-                
+
                 self.radio_control.connect()
                 self.log_status(f"✓ Connected to rigctld at {host}:{port}")
-                
+
             elif control_type == 'flrig':
                 # Connect to flrig
                 host = self.radio_host_var.get().strip()
                 port_str = self.radio_port_var.get().strip()
                 vfo = self.radio_vfo_var.get()
-                
+
                 if not host or not port_str:
                     messagebox.showerror("Error", "Please enter flrig host and port")
                     return
-                
+
                 try:
                     port = int(port_str)
                 except ValueError:
                     messagebox.showerror("Error", "Invalid port number")
                     return
-                
+
                 # Create and connect threaded flrig client
                 self.radio_control = ThreadedFlrigClient(host, port, vfo)
                 self.radio_control_type = 'flrig'
-                
+
                 # Set up callbacks
                 self.radio_control.set_callbacks(
                     frequency_callback=self.on_radio_control_frequency_changed,
@@ -3555,10 +3562,10 @@ class RadioGUI:
                     ptt_callback=self.on_radio_control_ptt_changed,
                     error_callback=lambda err: self.log_status(f"flrig: {err}")
                 )
-                
+
                 self.radio_control.connect()
                 self.log_status(f"✓ Connected to flrig at {host}:{port} VFO-{vfo}")
-                
+
             elif control_type == 'OmniRig':
                 # Connect to OmniRig
                 rig_num = int(self.omnirig_rig_var.get())
@@ -3655,10 +3662,10 @@ class RadioGUI:
                 # Create and start TCI server with GUI callback and WebSocket manager for spot injection
                 self.radio_control = TCIServer(self.client, port=port, gui_callback=tci_gui_callback, websocket_manager=websocket_manager)
                 self.radio_control_type = 'tci'
-                
+
                 # Attach TCI server to client for audio forwarding
                 self.client.tci_server = self.radio_control
-                
+
                 # Link spectrum display for S-meter updates
                 if self.spectrum:
                     self.radio_control.set_spectrum_display(self.spectrum)
@@ -3693,7 +3700,7 @@ class RadioGUI:
                                   f"• Port: {port}\n\n"
                                   f"The TCI server will forward frequency/mode changes\n"
                                   f"and stream demodulated audio.")
-            
+
             # Update state BEFORE starting periodic updates
             self.radio_control_connected = True
             self.radio_connect_btn.config(text="Disconnect")
@@ -3752,7 +3759,7 @@ class RadioGUI:
                 # Then enable sync with selected direction
                 self.log_status("DEBUG: Enabling radio control sync...")
                 self.start_radio_control_sync()
-                
+
         except Exception as e:
             messagebox.showerror("Error", f"Failed to connect to radio control: {e}")
             self.log_status(f"ERROR: Failed to connect to radio control - {e}")
@@ -3762,7 +3769,7 @@ class RadioGUI:
                     self.radio_control.stop()
                 else:
                     self.radio_control.disconnect()
-    
+
     def disconnect_radio_control(self):
         """Disconnect from radio control."""
         if self.radio_control:
@@ -3788,24 +3795,24 @@ class RadioGUI:
             else:
                 self.radio_control.disconnect()
             self.radio_control = None
-        
+
         self.radio_control_connected = False
         self.radio_control_sync_enabled = False
         self.radio_control_type = 'none'
-        
+
         # Update legacy aliases
         self.rigctl = None
         self.rigctl_connected = False
         self.rigctl_sync_enabled = False
-        
+
         # Stop polling if active
         if self.radio_control_poll_job:
             self.root.after_cancel(self.radio_control_poll_job)
             self.radio_control_poll_job = None
-        
+
         self.radio_connect_btn.config(text="Connect")
         self.log_status("Disconnected from radio control")
-    
+
     def on_radio_control_frequency_changed(self, freq_hz: int):
         """Callback when radio control frequency changes (called from worker thread)."""
         # Check if frequency actually changed
@@ -3814,11 +3821,11 @@ class RadioGUI:
             if self.radio_control_sync_enabled and self.radio_sync_direction_var.get() == "Rig→SDR":
                 # Schedule GUI update in main thread
                 self.root.after(0, lambda: self._apply_radio_control_frequency(freq_hz))
-        
+
         self.radio_control_last_freq = freq_hz
         # Update legacy alias
         self.rigctl_last_freq = freq_hz
-    
+
     def on_radio_control_mode_changed(self, mode: str):
         """Callback when radio control mode changes (called from worker thread)."""
         # Check if mode actually changed
@@ -3827,25 +3834,25 @@ class RadioGUI:
             if self.radio_control_sync_enabled and self.radio_sync_direction_var.get() == "Rig→SDR":
                 # Schedule GUI update in main thread
                 self.root.after(0, lambda: self._apply_radio_control_mode(mode))
-        
+
         self.radio_control_last_mode = mode
         # Update legacy alias
         self.rigctl_last_mode = mode
-    
+
     def on_radio_control_ptt_changed(self, ptt_state: bool):
         """Callback when radio control PTT changes (called from worker thread).
-        
+
         PTT detection works in both sync directions for audio muting.
         """
         # Check if PTT state actually changed
         if ptt_state != self.radio_control_last_ptt:
             # Schedule GUI update in main thread (always, regardless of sync direction)
             self.root.after(0, lambda: self._apply_radio_control_ptt(ptt_state))
-        
+
         self.radio_control_last_ptt = ptt_state
         # Update legacy alias
         self.rigctl_last_ptt = ptt_state
-    
+
     def _apply_radio_control_frequency(self, freq_hz: int):
         """Apply frequency change from radio (runs in main thread)."""
         # Check if frequency is locked
@@ -3857,7 +3864,7 @@ class RadioGUI:
         if self.connected:
             self.apply_frequency()
         self.log_status(f"Synced from radio: {freq_hz/1e6:.6f} MHz")
-    
+
     def _apply_radio_control_mode(self, rig_mode: str):
         """Apply mode change from radio (runs in main thread)."""
         # Map radio mode to SDR mode
@@ -3870,7 +3877,7 @@ class RadioGUI:
             'FM': 'FM'
         }
         sdr_mode = mode_map.get(rig_mode, 'USB')
-        
+
         # Only update if mode lock is not enabled
         if not self.mode_lock_var.get():
             self.mode_var.set(sdr_mode)
@@ -3878,7 +3885,7 @@ class RadioGUI:
             if self.connected:
                 self.apply_mode()
             self.log_status(f"Synced mode from radio: {rig_mode}")
-    
+
     def _apply_radio_control_ptt(self, ptt_state: bool):
         """Apply PTT state change (runs in main thread)."""
         if ptt_state:
@@ -3908,7 +3915,7 @@ class RadioGUI:
                 self.client.channel_left = left_state
                 self.client.channel_right = right_state
                 self.radio_control_saved_channels = None
-    
+
     def on_radio_sync_direction_changed(self):
         """Handle sync direction change - restart sync if active."""
         # Auto-save radio control settings when sync direction changes
@@ -3926,18 +3933,18 @@ class RadioGUI:
                 # Initialize last known values from cache
                 self.radio_control_last_freq = self.radio_control.get_frequency()
                 self.radio_control_last_mode = self.radio_control.get_mode()
-    
+
     def start_radio_control_sync(self):
         """Start syncing frequency with radio control."""
         if not self.radio_control_connected or not self.radio_control:
             return
-        
+
         self.radio_control_sync_enabled = True
         # Update legacy alias
         self.rigctl_sync_enabled = True
-        
+
         direction = self.radio_sync_direction_var.get()
-        
+
         if direction == "SDR→Rig":
             self.log_status("Radio sync enabled - radio will follow SDR frequency")
             # Immediately sync current SDR frequency to radio
@@ -3947,41 +3954,41 @@ class RadioGUI:
             # Initialize last known values from cache
             self.radio_control_last_freq = self.radio_control.get_frequency()
             self.radio_control_last_mode = self.radio_control.get_mode()
-        
+
         # Note: Polling is already running from connect_radio_control()
         # No need to start it here
-    
+
     def stop_radio_control_sync(self):
         """Stop syncing frequency with radio control."""
         self.radio_control_sync_enabled = False
         # Update legacy alias
         self.rigctl_sync_enabled = False
-        
+
         # Don't stop polling - we still need it for PTT detection
         # Polling continues but frequency/mode sync is disabled
-        
+
         self.log_status("Radio sync disabled")
-    
+
     def sync_frequency_to_radio_control(self):
         """Sync current SDR frequency to radio control."""
         if not self.radio_control_sync_enabled or not self.radio_control_connected or not self.radio_control:
             return
-        
+
         # Only sync if direction is SDR→Rig
         if self.radio_sync_direction_var.get() != "SDR→Rig":
             return
-        
+
         try:
             # Get current SDR frequency
             freq_hz = self.get_frequency_hz()
-            
+
             # Queue frequency change (non-blocking)
             self.radio_control.set_frequency(freq_hz)
-            
+
             # Get current mode and sync it too
             mode_display = self.mode_var.get()
             mode = self._parse_mode_name(mode_display)
-            
+
             # Map SDR modes to radio control modes
             mode_map = {
                 'usb': 'USB',
@@ -3993,28 +4000,28 @@ class RadioGUI:
                 'fm': 'FM',
                 'nfm': 'FM'
             }
-            
+
             radio_mode = mode_map.get(mode, 'USB')
             # Queue mode change (non-blocking)
             self.radio_control.set_mode(radio_mode)
-            
+
         except Exception as e:
             self.log_status(f"Radio sync error: {e}")
-    
+
     def sync_mode_to_radio_control(self):
         """Sync current SDR mode to radio control."""
         if not self.radio_control_sync_enabled or not self.radio_control_connected or not self.radio_control:
             return
-        
+
         # Only sync if direction is SDR→Rig
         if self.radio_sync_direction_var.get() != "SDR→Rig":
             return
-        
+
         try:
             # Get current mode
             mode_display = self.mode_var.get()
             mode = self._parse_mode_name(mode_display)
-            
+
             # Map SDR modes to radio control modes
             mode_map = {
                 'usb': 'USB',
@@ -4026,14 +4033,14 @@ class RadioGUI:
                 'fm': 'FM',
                 'nfm': 'FM'
             }
-            
+
             radio_mode = mode_map.get(mode, 'USB')
             # Queue mode change (non-blocking)
             self.radio_control.set_mode(radio_mode)
-            
+
         except Exception as e:
             self.log_status(f"Radio mode sync error: {e}")
-    
+
     def poll_radio_control_frequency(self):
         """Poll radio control for frequency/mode/PTT changes."""
         if not self.radio_control_connected or not self.radio_control:
@@ -4041,11 +4048,11 @@ class RadioGUI:
             # Update legacy alias
             self.rigctl_poll_job = None
             return
-        
+
         # For OmniRig, poll() processes COM events and command queue
         # For rigctl, poll() just queues a poll command
         self.radio_control.poll()
-        
+
         # Schedule next poll (20ms = 50 Hz for fast TX detection and COM event processing)
         self.radio_control_poll_job = self.root.after(20, self.poll_radio_control_frequency)
         # Update legacy alias
@@ -4109,7 +4116,7 @@ class RadioGUI:
         # Sync mode to rigctl if enabled and direction is SDR→Rig
         if self.rigctl_sync_enabled and self.rigctl_sync_direction_var.get() == "SDR→Rig":
             self.sync_mode_to_rigctl()
-        
+
         # Sync to TCI server if active (but don't create feedback loop)
         if self.radio_control_type == 'tci' and self.radio_control:
             # Set flag to prevent callback loop
@@ -4158,7 +4165,7 @@ class RadioGUI:
             # Convert percentage (0-100) to gain (0.0-2.0)
             # 100% = 1.0 gain, 200% = 2.0 gain
             self.client.volume = volume / 100.0
-        
+
         # Auto-save volume setting
         self.save_audio_settings()
 
@@ -4183,7 +4190,7 @@ class RadioGUI:
             self.log_status(f"Audio output: {' + '.join(channels)}")
         else:
             self.log_status("Audio output: Muted (no channels selected)")
-        
+
         # Auto-save channel settings
         self.save_audio_settings()
 
@@ -4197,7 +4204,7 @@ class RadioGUI:
         try:
             # Get output mode from config
             output_mode = self.config.get('output_mode', 'sounddevice')
-            
+
             # Determine default device label with API info
             default_label = "(default)"
             if output_mode == 'sounddevice':
@@ -4213,12 +4220,12 @@ class RadioGUI:
 
             # Always include default as first option
             device_list = [default_label]
-            
+
             if output_mode == 'pyaudio':
                 # Use PyAudio device listing
                 from radio_client import get_pyaudio_devices
                 self.pyaudio_devices = get_pyaudio_devices()
-                
+
                 for device_index, device_name in self.pyaudio_devices:
                     device_list.append(f"{device_name}")
             elif output_mode == 'sounddevice':
@@ -4236,7 +4243,7 @@ class RadioGUI:
                 # Use PipeWire device listing
                 from radio_client import get_pipewire_sinks
                 self.pipewire_devices = get_pipewire_sinks()
-                
+
                 for node_name, description in self.pipewire_devices:
                     device_list.append(f"{description} ({node_name})")
 
@@ -4253,7 +4260,7 @@ class RadioGUI:
 
     def get_selected_device(self) -> Optional[int]:
         """Get the selected device index, or None for default.
-        
+
         Returns:
             Device index for PyAudio/sounddevice, or node name for PipeWire, or None for default device
         """
@@ -4263,7 +4270,7 @@ class RadioGUI:
 
         # Get output mode from config
         output_mode = self.config.get('output_mode', 'sounddevice')
-        
+
         if output_mode == 'pyaudio':
             # Extract device index from PyAudio device list
             if hasattr(self, 'pyaudio_devices'):
@@ -4369,19 +4376,19 @@ class RadioGUI:
             # Log errors silently (don't spam console)
             import traceback
             traceback.print_exc()
-    
+
     def _apply_tci_frequency(self, freq_hz: int):
         """Apply frequency change from TCI server (runs in main thread)."""
         # Check if frequency is locked
         if self.freq_lock_var.get():
             self.log_status("Frequency is locked - TCI change blocked")
             return
-        
+
         self.log_status(f"TCI: Frequency change: {freq_hz/1e6:.6f} MHz")
         self.set_frequency_hz(freq_hz)
         if self.connected:
             self.apply_frequency()
-    
+
     def _apply_tci_mode(self, mode: str):
         """Apply mode change from TCI server (runs in main thread)."""
         # Only update if mode lock is not enabled
@@ -4700,11 +4707,14 @@ class RadioGUI:
             # Check if opuslib is available
             try:
                 import opuslib
-                self.log_status("Opus compression will be enabled on next connection (90% bandwidth savings)")
-                messagebox.showinfo("Opus Compression",
-                                  "Opus compression will be enabled on your next connection.\n\n"
-                                  "This will reduce bandwidth usage by approximately 90%.\n\n"
-                                  "Note: You must reconnect for this change to take effect.")
+                if self.connected:
+                    self.log_status("⚠ Opus will be enabled on next connection")
+                    messagebox.showinfo("Reconnection Required",
+                                      "Opus compression will be enabled on your next connection.\n\n"
+                                      "This will reduce bandwidth usage by approximately 90%.\n\n"
+                                      "Please disconnect and reconnect for this change to take effect.")
+                else:
+                    self.log_status("Opus compression enabled (90% bandwidth savings)")
             except ImportError:
                 messagebox.showerror("Opus Not Available",
                                    "Opus compression requires the opuslib library.\n\n"
@@ -4712,7 +4722,13 @@ class RadioGUI:
                 self.opus_var.set(False)
                 return
         else:
-            self.log_status("Opus compression will be disabled on next connection")
+            if self.connected:
+                self.log_status("⚠ Opus will be disabled on next connection")
+                messagebox.showinfo("Reconnection Required",
+                                  "Opus compression will be disabled on your next connection.\n\n"
+                                  "Please disconnect and reconnect for this change to take effect.")
+            else:
+                self.log_status("Opus compression disabled")
 
         # Auto-save setting
         self.save_audio_settings()
@@ -4871,14 +4887,14 @@ class RadioGUI:
 
     def on_spectrum_mode_change(self, mode: str):
         """Handle mode change from spectrum bookmark click.
-        
+
         Args:
             mode: Mode string from bookmark (e.g., 'USB', 'LSB', 'CW')
         """
         # Only change mode if not locked
         if self.mode_lock_var.get():
             return
-        
+
         # Map mode names (bookmark might use different case)
         mode_map = {
             'USB': 'USB', 'LSB': 'LSB', 'AM': 'AM', 'SAM': 'SAM',
@@ -4889,7 +4905,7 @@ class RadioGUI:
         mapped_mode = mode_map.get(mode.upper(), 'USB')
         self.mode_var.set(mapped_mode)
         self.on_mode_changed()
-        
+
         # Apply mode change if connected
         if self.connected:
             self.apply_mode()
@@ -5445,7 +5461,7 @@ class RadioGUI:
                 """Tune to another user's channel."""
                 # Set frequency
                 self.set_frequency_hz(int(freq_hz))
-                
+
                 # Set mode if not locked
                 if not self.mode_lock_var.get():
                     # Map mode names
@@ -5458,18 +5474,18 @@ class RadioGUI:
                     mapped_mode = mode_map.get(mode.upper(), 'USB')
                     self.mode_var.set(mapped_mode)
                     self.on_mode_changed()
-                
+
                 # Set bandwidth
                 self.bw_low_var.set(bw_low)
                 self.bw_high_var.set(bw_high)
                 self.bw_low_label.config(text=f"{bw_low} Hz")
                 self.bw_high_label.config(text=f"{bw_high} Hz")
-                
+
                 # Update client bandwidth values
                 if self.client:
                     self.client.bandwidth_low = bw_low
                     self.client.bandwidth_high = bw_high
-                
+
                 # Update spectrum displays
                 if self.spectrum:
                     self.spectrum.update_bandwidth(bw_low, bw_high, self.mode_var.get().lower())
@@ -5477,11 +5493,11 @@ class RadioGUI:
                     self.waterfall_display.update_bandwidth(bw_low, bw_high, self.mode_var.get().lower())
                 if self.audio_spectrum_display:
                     self.audio_spectrum_display.update_bandwidth(bw_low, bw_high, self.mode_var.get().lower())
-                
+
                 # Apply changes if connected (this will send tune message with new bandwidth)
                 if self.connected:
                     self.apply_frequency()
-                
+
                 self.log_status(f"Tuned to user channel: {freq_hz/1e6:.6f} MHz, {mode}, {bw_low}-{bw_high} Hz")
 
             # Create users window
@@ -5834,13 +5850,13 @@ class RadioGUI:
             if not hostname:
                 messagebox.showerror("Error", "Please enter a server hostname")
                 return
-            
+
             try:
                 port = int(self.port_var.get().strip())
             except ValueError:
                 messagebox.showerror("Error", "Invalid port number")
                 return
-            
+
             # Check if full URL was provided in hostname field
             if '://' in hostname:
                 url = hostname
@@ -5927,7 +5943,7 @@ class RadioGUI:
                 client_kwargs['pyaudio_device_index'] = device_index
 
             self.client = RadioClient(**client_kwargs)
-            
+
             # Log the output mode being used
             self.log_status(f"Audio output mode: {output_mode}")
 
@@ -6246,7 +6262,7 @@ class RadioGUI:
                         # Update receiver info (name, version, map link) and session timer
                         if self.client and hasattr(self.client, 'server_description'):
                             desc = self.client.server_description
-                            
+
                             # Get receiver callsign, name, and location
                             callsign = desc.get('receiver', {}).get('callsign', '')
                             receiver_name = desc.get('receiver', {}).get('name', '')
@@ -6266,22 +6282,22 @@ class RadioGUI:
                             # Truncate to 80 chars if needed
                             if receiver_display and len(receiver_display) > 80:
                                 receiver_display = receiver_display[:77] + '...'
-                            
+
                             # Get version from root of JSON
                             version = desc.get('version', '')
-                            
+
                             # Get public_url from receiver object in JSON
                             public_url = desc.get('receiver', {}).get('public_url', '')
-                            
+
                             # Get GPS coordinates
                             gps = desc.get('receiver', {}).get('gps', {})
                             has_gps = gps.get('lat') is not None and gps.get('lon') is not None
-                            
+
                             # Update display if we have any info
                             if receiver_display or version or has_gps:
                                 if receiver_display:
                                     self.receiver_name_var.set(receiver_display)
-                                    
+
                                     # Make receiver name clickable if public_url is not default
                                     if public_url and public_url != 'https://example.com':
                                         self.receiver_name_label.config(foreground='blue', cursor='hand2')
@@ -6289,10 +6305,10 @@ class RadioGUI:
                                     else:
                                         self.receiver_name_label.config(foreground='black', cursor='')
                                         self.receiver_name_label.unbind('<Button-1>')
-                                
+
                                 if version:
                                     self.receiver_version_var.set(f"v{version}")
-                                
+
                                 # Show/hide map link based on GPS availability
                                 if has_gps:
                                     self.receiver_map_link.pack(side=tk.LEFT)
@@ -6300,14 +6316,14 @@ class RadioGUI:
                                 else:
                                     self.receiver_map_link.pack_forget()
                                     self.receiver_delimiter2.pack_forget()
-                                
+
                                 # Show the receiver info frame
                                 self.receiver_info_frame.grid()
 
                         # Check allowed IQ modes and show/hide second row of mode buttons
                         if self.client and hasattr(self.client, 'allowed_iq_modes'):
                             allowed_iq_modes = self.client.allowed_iq_modes
-                            
+
                             # Show/hide each IQ mode button based on allowed list
                             for mode_value, btn in self.mode_buttons.items():
                                 if mode_value in ['IQ48', 'IQ96', 'IQ192', 'IQ384']:
@@ -6317,7 +6333,7 @@ class RadioGUI:
                                         btn.grid()
                                     else:
                                         btn.grid_remove()
-                            
+
                             # Log which modes are available
                             if allowed_iq_modes:
                                 modes_str = ', '.join([m.upper() for m in allowed_iq_modes])
@@ -6829,7 +6845,7 @@ if __name__ == '__main__':
     # It detects if this is a spawned child process in a frozen executable and exits
     import multiprocessing
     multiprocessing.freeze_support()
-    
+
     import argparse
 
     parser = argparse.ArgumentParser(description='ka9q_ubersdr Radio GUI Client')

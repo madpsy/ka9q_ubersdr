@@ -824,8 +824,8 @@ class SpectrumDisplay {
             wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
         }
 
-        // Request binary mode for reduced bandwidth
-        wsUrl += `&mode=binary`;
+        // Request binary8 mode for maximum bandwidth reduction (8-bit encoding)
+        wsUrl += `&mode=binary8`;
 
         console.log('Connecting to spectrum WebSocket:', wsUrl);
 
@@ -1046,7 +1046,7 @@ class SpectrumDisplay {
         let spectrumData;
 
         if (flags === 0x01) {
-            // Full frame
+            // Full frame (float32)
             const binCount = (view.byteLength - 22) / 4;
             spectrumData = new Float32Array(binCount);
 
@@ -1058,7 +1058,7 @@ class SpectrumDisplay {
             this.binarySpectrumData = new Float32Array(spectrumData);
 
         } else if (flags === 0x02) {
-            // Delta frame
+            // Delta frame (float32)
             if (!this.binarySpectrumData) {
                 console.error('Delta frame received before full frame');
                 return null;
@@ -1076,6 +1076,54 @@ class SpectrumDisplay {
             }
 
             spectrumData = this.binarySpectrumData;
+
+        } else if (flags === 0x03) {
+            // Full frame (uint8) - binary8 format
+            const binCount = view.byteLength - 22;
+            spectrumData = new Float32Array(binCount);
+
+            for (let i = 0; i < binCount; i++) {
+                // Convert uint8 to dBFS: 0 = -256 dB, 255 = -1 dB
+                const uint8Value = view.getUint8(22 + i);
+                spectrumData[i] = uint8Value - 256;
+            }
+
+            // Store for delta decoding (as uint8)
+            this.binarySpectrumData8 = new Uint8Array(binCount);
+            for (let i = 0; i < binCount; i++) {
+                this.binarySpectrumData8[i] = view.getUint8(22 + i);
+            }
+
+            // Log first binary8 frame
+            if (!this.binary8Logged) {
+                this.binary8Logged = true;
+                console.log('🚀 Binary8 protocol active - 75% bandwidth reduction vs float32!');
+            }
+
+        } else if (flags === 0x04) {
+            // Delta frame (uint8) - binary8 format
+            if (!this.binarySpectrumData8) {
+                console.error('Binary8 delta frame received before full frame');
+                return null;
+            }
+
+            const changeCount = view.getUint16(22, true); // little-endian
+            let offset = 24;
+
+            // Apply changes to previous uint8 data
+            for (let i = 0; i < changeCount; i++) {
+                const index = view.getUint16(offset, true); // little-endian
+                const value = view.getUint8(offset + 2); // uint8 value
+                this.binarySpectrumData8[index] = value;
+                offset += 3; // 2 bytes index + 1 byte value
+            }
+
+            // Convert uint8 array to float32 for display
+            spectrumData = new Float32Array(this.binarySpectrumData8.length);
+            for (let i = 0; i < this.binarySpectrumData8.length; i++) {
+                spectrumData[i] = this.binarySpectrumData8[i] - 256;
+            }
+
         } else {
             console.error('Unknown binary frame flags:', flags);
             return null;

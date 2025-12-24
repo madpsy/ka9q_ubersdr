@@ -25,8 +25,10 @@ type UserSpectrumWebSocketHandler struct {
 
 // spectrumState tracks previous spectrum data for delta encoding
 type spectrumState struct {
-	previousData []float32
-	mu           sync.RWMutex
+	previousData   []float32
+	previousData8  []uint8 // For binary8 mode
+	useBinary8Mode bool    // Whether to use 8-bit encoding
+	mu             sync.RWMutex
 }
 
 // NewUserSpectrumWebSocketHandler creates a new per-user spectrum WebSocket handler
@@ -160,8 +162,15 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	query := r.URL.Query()
 	password := query.Get("password")
 
-	// Binary mode is now the only supported mode (JSON removed)
-	log.Printf("Using binary spectrum mode with delta encoding")
+	// Check for binary8 mode (8-bit encoding)
+	mode := query.Get("mode")
+	useBinary8 := mode == "binary8"
+
+	if useBinary8 {
+		log.Printf("Using binary8 spectrum mode (8-bit) with delta encoding")
+	} else {
+		log.Printf("Using binary spectrum mode (32-bit float) with delta encoding")
+	}
 
 	// Check connection rate limit (unless IP is bypassed via IP list or password)
 	if !swsh.sessions.config.Server.IsIPTimeoutBypassed(clientIP, password) && !swsh.connRateLimiter.AllowConnection(clientIP) {
@@ -255,7 +264,9 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 
 	// Initialize spectrum state for delta encoding (always used in binary mode)
 	state := &spectrumState{
-		previousData: make([]float32, session.BinCount),
+		previousData:   make([]float32, session.BinCount),
+		previousData8:  make([]uint8, session.BinCount),
+		useBinary8Mode: useBinary8,
 	}
 
 	// Start spectrum streaming goroutine
@@ -473,8 +484,15 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 				// Removed debug logging
 			}
 
-			// Binary mode with delta encoding (only mode supported)
-			if err := swsh.sendBinarySpectrum(conn, session, spectrumData, state); err != nil {
+			// Binary mode with delta encoding - choose format based on state
+			var err error
+			if state.useBinary8Mode {
+				err = swsh.sendBinary8Spectrum(conn, session, spectrumData, state)
+			} else {
+				err = swsh.sendBinarySpectrum(conn, session, spectrumData, state)
+			}
+
+			if err != nil {
 				log.Printf("Failed to send binary spectrum data: %v", err)
 				return
 			}
@@ -488,16 +506,14 @@ func (swsh *UserSpectrumWebSocketHandler) streamSpectrum(conn *wsConn, session *
 	}
 }
 
-// sendBinarySpectrum sends spectrum data in binary format with delta encoding
+// sendBinarySpectrum sends spectrum data in binary format (float32) with delta encoding
 // Binary format:
-// - Header (25 bytes):
+// - Header (22 bytes):
 //   - Magic: 0x53 0x50 0x45 0x43 (4 bytes) "SPEC"
 //   - Version: 0x01 (1 byte)
-//   - Flags: 0x01=full, 0x02=delta (1 byte)
+//   - Flags: 0x01=full (float32), 0x02=delta (float32), 0x03=full (uint8), 0x04=delta (uint8) (1 byte)
 //   - Timestamp: uint64 milliseconds (8 bytes)
 //   - Frequency: uint64 Hz (8 bytes)
-//   - BinBandwidth: float32 Hz (4 bytes) - removed from header, sent in config
-//   - Reserved: 0x00 (1 byte)
 //
 // - For full frame: all bins as float32 (binCount * 4 bytes)
 // - For delta frame:
@@ -626,6 +642,179 @@ func (swsh *UserSpectrumWebSocketHandler) sendBinarySpectrum(conn *wsConn, sessi
 		// Update previous data with changes
 		for _, ch := range changes {
 			state.previousData[ch.index] = ch.value
+		}
+	}
+
+	// Send as binary WebSocket message
+	conn.writeMu.Lock()
+	conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	err := conn.conn.WriteMessage(websocket.BinaryMessage, packet)
+	conn.writeMu.Unlock()
+
+	if err != nil {
+		return err
+	}
+
+	// Track bytes for statistics
+	if conn.aggregator != nil {
+		conn.aggregator.addBytes(int64(len(packet)))
+		conn.aggregator.addMessage()
+	}
+
+	return nil
+}
+
+// sendBinary8Spectrum sends spectrum data in binary8 format (8-bit) with delta encoding
+// Binary8 format:
+// - Header (22 bytes): Same as binary format
+//   - Magic: 0x53 0x50 0x45 0x43 (4 bytes) "SPEC"
+//   - Version: 0x01 (1 byte)
+//   - Flags: 0x03=full (uint8), 0x04=delta (uint8) (1 byte)
+//   - Timestamp: uint64 milliseconds (8 bytes)
+//   - Frequency: uint64 Hz (8 bytes)
+//
+// - For full frame: all bins as uint8 (binCount * 1 byte)
+//   - uint8 value represents dBFS: 0 = -256 dB, 255 = -1 dB (or 0 dB clamped)
+//
+// - For delta frame:
+//   - ChangeCount: uint16 (2 bytes)
+//   - Changes: array of [index: uint16, value: uint8] (3 bytes each)
+func (swsh *UserSpectrumWebSocketHandler) sendBinary8Spectrum(conn *wsConn, session *Session, spectrumData []float32, state *spectrumState) error {
+	const (
+		fullFrameInterval = 50 // Send full frame every N frames to prevent drift
+	)
+
+	// Get delta threshold from config (validated to be between 1.0 and 10.0 dB)
+	deltaThreshold := swsh.sessions.config.Spectrum.DeltaThresholdDB
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	// Convert float32 dBFS to uint8 (0 = -256 dB, 255 = -1 dB)
+	spectrumData8 := make([]uint8, len(spectrumData))
+	for i, val := range spectrumData {
+		// Clamp to range [-256, 0] and convert to [0, 255]
+		dbValue := val
+		if dbValue < -256 {
+			dbValue = -256
+		} else if dbValue > 0 {
+			dbValue = 0
+		}
+		// Convert: -256 dB -> 0, 0 dB -> 255
+		spectrumData8[i] = uint8(dbValue + 256)
+	}
+
+	// Determine if we should send full or delta frame
+	sendFullFrame := false
+	if len(state.previousData8) != len(spectrumData8) {
+		// Bin count changed, send full frame
+		sendFullFrame = true
+		state.previousData8 = make([]uint8, len(spectrumData8))
+	} else if len(state.previousData8) == 0 {
+		// First frame, send full
+		sendFullFrame = true
+		state.previousData8 = make([]uint8, len(spectrumData8))
+	}
+
+	// Calculate changes for delta encoding
+	type change struct {
+		index uint16
+		value uint8
+	}
+	var changes []change
+
+	if !sendFullFrame {
+		for i := 0; i < len(spectrumData8); i++ {
+			// Calculate difference in dB (convert back to compare)
+			oldDB := float64(state.previousData8[i]) - 256
+			newDB := float64(spectrumData8[i]) - 256
+			diff := math.Abs(newDB - oldDB)
+
+			if diff > deltaThreshold {
+				changes = append(changes, change{
+					index: uint16(i),
+					value: spectrumData8[i],
+				})
+			}
+		}
+
+		// If too many changes (>80% of bins), send full frame instead
+		if len(changes) > (len(spectrumData8)*4)/5 {
+			sendFullFrame = true
+		}
+	}
+
+	timestamp := time.Now().UnixMilli()
+
+	var packet []byte
+	if sendFullFrame {
+		// Full frame format (uint8)
+		headerSize := 22
+		packet = make([]byte, headerSize+len(spectrumData8))
+
+		// Magic
+		packet[0] = 0x53 // 'S'
+		packet[1] = 0x50 // 'P'
+		packet[2] = 0x45 // 'E'
+		packet[3] = 0x43 // 'C'
+
+		// Version
+		packet[4] = 0x01
+
+		// Flags: 0x03 = full frame (uint8)
+		packet[5] = 0x03
+
+		// Timestamp (8 bytes, little-endian)
+		binary.LittleEndian.PutUint64(packet[6:14], uint64(timestamp))
+
+		// Frequency (8 bytes, little-endian)
+		binary.LittleEndian.PutUint64(packet[14:22], session.Frequency)
+
+		// Spectrum data (uint8 array)
+		copy(packet[headerSize:], spectrumData8)
+
+		// Update previous data
+		copy(state.previousData8, spectrumData8)
+	} else {
+		// Delta frame format (uint8)
+		headerSize := 22
+		changesSize := 2 + len(changes)*3 // changeCount (2 bytes) + changes (3 bytes each)
+		packet = make([]byte, headerSize+changesSize)
+
+		// Magic
+		packet[0] = 0x53 // 'S'
+		packet[1] = 0x50 // 'P'
+		packet[2] = 0x45 // 'E'
+		packet[3] = 0x43 // 'C'
+
+		// Version
+		packet[4] = 0x01
+
+		// Flags: 0x04 = delta frame (uint8)
+		packet[5] = 0x04
+
+		// Timestamp (8 bytes, little-endian)
+		binary.LittleEndian.PutUint64(packet[6:14], uint64(timestamp))
+
+		// Frequency (8 bytes, little-endian)
+		binary.LittleEndian.PutUint64(packet[14:22], session.Frequency)
+
+		// Change count (2 bytes, little-endian)
+		binary.LittleEndian.PutUint16(packet[headerSize:headerSize+2], uint16(len(changes)))
+
+		// Changes array
+		offset := headerSize + 2
+		for _, ch := range changes {
+			// Index (2 bytes, little-endian)
+			binary.LittleEndian.PutUint16(packet[offset:offset+2], ch.index)
+			// Value (1 byte, uint8)
+			packet[offset+2] = ch.value
+			offset += 3
+		}
+
+		// Update previous data with changes
+		for _, ch := range changes {
+			state.previousData8[ch.index] = ch.value
 		}
 	}
 

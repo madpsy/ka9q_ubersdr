@@ -676,25 +676,47 @@ class SpectrumDisplay:
         # Draw dB scale
         self._draw_db_scale()
         
-        # Draw spectrum line
-        points = []
-        for i, db in enumerate(self.spectrum_data):
+        # Draw spectrum with Jet color gradient
+        # Draw as thin vertical colored rectangles for efficiency
+        for i in range(len(self.spectrum_data)):
+            db = self.spectrum_data[i]
             if not np.isfinite(db):
                 continue
-            
+
             x = self.margin_left + (i / len(self.spectrum_data)) * self.graph_width
             normalized = (db - self.min_db) / db_range
+            normalized = max(0.0, min(1.0, normalized))
             y = self.margin_top + self.graph_height - (normalized * self.graph_height)
-            points.extend([x, y])
-        
-        if len(points) >= 4:
-            # Draw filled area
-            fill_points = [self.margin_left, self.margin_top + self.graph_height] + points + \
-                         [self.margin_left + self.graph_width, self.margin_top + self.graph_height]
-            self.canvas.create_polygon(fill_points, fill='#1e90ff', outline='', stipple='gray50')
+
+            # Calculate color based on Y position (height) - vertical gradient
+            y_normalized = normalized  # 0 at bottom, 1 at top
             
-            # Draw line
-            self.canvas.create_line(points, fill='#00ff00', width=1)
+            # Jet color scheme
+            if y_normalized < 0.2:
+                t = y_normalized / 0.2
+                r, g, b = 0, 0, int(143 + (255 - 143) * t)
+            elif y_normalized < 0.4:
+                t = (y_normalized - 0.2) / 0.2
+                r, g, b = 0, int(255 * t), 255
+            elif y_normalized < 0.6:
+                t = (y_normalized - 0.4) / 0.2
+                r, g, b = int(255 * t), 255, int(255 * (1 - t))
+            elif y_normalized < 0.8:
+                t = (y_normalized - 0.6) / 0.2
+                r, g, b = 255, int(255 * (1 - t)), 0
+            else:
+                t = (y_normalized - 0.8) / 0.2
+                r, g, b = int(255 - (255 - 128) * t), 0, 0
+
+            color = f'#{r:02x}{g:02x}{b:02x}'
+
+            # Draw thin vertical rectangle from bottom to signal level
+            rect_width = max(1, self.graph_width / len(self.spectrum_data))
+            self.canvas.create_rectangle(
+                x, y,
+                x + rect_width, self.margin_top + self.graph_height,
+                fill=color, outline=''
+            )
         
         # Draw band backgrounds (behind bookmarks)
         self._draw_band_backgrounds()

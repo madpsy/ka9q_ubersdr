@@ -80,7 +80,9 @@ class SpectrumDisplay {
                 const container = this.canvas.parentElement;
                 const rect = container.getBoundingClientRect();
                 const newWidth = Math.floor(rect.width);
-                const newHeight = 600;
+                // Check if line graph (spectrum) is visible to determine waterfall height
+                const lineGraphVisible = this.lineGraphCanvas && this.lineGraphCanvas.style.display !== 'none';
+                const newHeight = lineGraphVisible ? 300 : 600;
 
                 // Check if width actually changed
                 if (oldWidth !== newWidth) {

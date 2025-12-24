@@ -3700,8 +3700,9 @@ function checkClipping() {
 }
 
 function updateVUMeter() {
-    // Use dedicated VU analyser (after all processing) if available, otherwise fall back to main analyser
-    const activeAnalyser = vuAnalyser || analyser;
+    // Use pre-buffer analyser for real-time response (same as oscilloscope)
+    // This eliminates the ~200ms+ lag from the audio buffer queue
+    const activeAnalyser = analyser;
     if (!activeAnalyser) return;
 
     const dataArray = new Uint8Array(activeAnalyser.frequencyBinCount);

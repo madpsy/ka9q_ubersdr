@@ -145,6 +145,25 @@ services:
       retries: 3
       start_period: 10s
 
+  # Autoheal - Automatically restart unhealthy containers
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: autoheal
+    restart: unless-stopped
+    
+    networks:
+      - sdr-network
+    
+    volumes:
+      # Access to Docker socket to monitor and restart containers
+      - /var/run/docker.sock:/var/run/docker.sock
+    
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=all
+      - AUTOHEAL_INTERVAL=10  # Check every 10 seconds
+      - AUTOHEAL_START_PERIOD=30  # Wait 30 seconds before monitoring
+      - AUTOHEAL_DEFAULT_STOP_TIMEOUT=10  # Timeout for stopping containers
+
 # Shared network between ka9q-radio and ubersdr containers
 # Docker Compose will create this automatically with the specified subnet
 networks:

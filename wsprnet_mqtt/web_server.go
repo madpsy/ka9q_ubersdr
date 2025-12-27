@@ -1998,6 +1998,131 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             });
         }
 
+        function updateTiedRelationships(instances) {
+            const container = document.getElementById('tiedRelationships');
+            
+            if (!instances || Object.keys(instances).length === 0) {
+                container.innerHTML = '<p style="color: #94a3b8; text-align: center;">No tie data available yet</p>';
+                return;
+            }
+
+            // Collect all bands and tie relationships
+            const bandTies = {}; // band -> array of tie relationships
+            
+            Object.values(instances).forEach(inst => {
+                Object.entries(inst.BandStats || {}).forEach(([band, stats]) => {
+                    if (!bandTies[band]) {
+                        bandTies[band] = {};
+                    }
+                    
+                    // Process TiedWith relationships
+                    if (stats.TiedWith) {
+                        Object.entries(stats.TiedWith).forEach(([otherInstance, count]) => {
+                            // Create a sorted pair key to avoid duplicates (A-B and B-A)
+                            const pair = [inst.Name, otherInstance].sort().join(' ↔ ');
+                            
+                            if (!bandTies[band][pair]) {
+                                bandTies[band][pair] = {
+                                    instance1: inst.Name < otherInstance ? inst.Name : otherInstance,
+                                    instance2: inst.Name < otherInstance ? otherInstance : inst.Name,
+                                    count: 0
+                                };
+                            }
+                            // Add count (will be counted from both sides, so we'll divide by 2 later)
+                            bandTies[band][pair].count += count;
+                        });
+                    }
+                });
+            });
+
+            // Calculate total duplicates per band for percentage
+            const bandDuplicates = {};
+            Object.values(instances).forEach(inst => {
+                Object.entries(inst.BandStats || {}).forEach(([band, stats]) => {
+                    if (!bandDuplicates[band]) {
+                        bandDuplicates[band] = 0;
+                    }
+                    // Total duplicates = total spots - unique spots
+                    bandDuplicates[band] += (stats.TotalSpots - stats.UniqueSpots);
+                });
+            });
+
+            // Sort bands properly
+            const bands = sortBands(Object.keys(bandTies));
+            
+            if (bands.length === 0) {
+                container.innerHTML = '<p style="color: #94a3b8; text-align: center;">No tied SNR relationships found yet</p>';
+                return;
+            }
+
+            container.innerHTML = '';
+
+            bands.forEach(band => {
+                const ties = Object.values(bandTies[band]);
+                
+                if (ties.length === 0) return;
+
+                // Since ties are counted from both sides, divide by 2
+                ties.forEach(tie => {
+                    tie.count = Math.round(tie.count / 2);
+                });
+
+                // Sort by count descending
+                ties.sort((a, b) => b.count - a.count);
+
+                const totalDups = bandDuplicates[band] || 1; // Avoid division by zero
+
+                const tableHTML = ` + "`" + `
+                    <div style="margin-bottom: 30px;">
+                        <h3 style="color: #60a5fa; margin-bottom: 15px;">
+                            <span class="badge badge-warning" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
+                            <span style="font-size: 0.9em; color: #94a3b8; margin-left: 10px;">Total Duplicates: ${totalDups}</span>
+                        </h3>
+                        <table style="width: 100%;">
+                            <thead>
+                                <tr>
+                                    <th>Instance Pair</th>
+                                    <th>Tie Count</th>
+                                    <th>% of Band Duplicates</th>
+                                    <th>Relationship</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${ties.map(tie => {
+                                    const percentage = ((tie.count / totalDups) * 100).toFixed(1);
+                                    const barWidth = Math.min(percentage, 100);
+                                    return ` + "`" + `
+                                        <tr>
+                                            <td>
+                                                <span class="instance-name">${tie.instance1}</span>
+                                                <span style="color: #f59e0b; margin: 0 8px;">↔</span>
+                                                <span class="instance-name">${tie.instance2}</span>
+                                            </td>
+                                            <td><span class="badge badge-warning">${tie.count}</span></td>
+                                            <td>
+                                                ${percentage}%
+                                                <div class="progress-bar">
+                                                    <div class="progress-fill" style="width: ${barWidth}%; background: linear-gradient(90deg, #f59e0b, #d97706);"></div>
+                                                </div>
+                                            </td>
+                                            <td style="color: #94a3b8; font-size: 0.9em;">
+                                                ${tie.count === 1 ? 'Rare tie' :
+                                                  tie.count < 5 ? 'Occasional ties' :
+                                                  tie.count < 15 ? 'Frequent ties' :
+                                                  'Very similar performance'}
+                                            </td>
+                                        </tr>
+                                    ` + "`" + `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                ` + "`" + `;
+
+                container.innerHTML += tableHTML;
+            });
+        }
+
         function sortCountryTable(band, column, type, ascending) {
             const countryList = [...countryData[band]];
             

@@ -2001,8 +2001,16 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         function updateTiedRelationships(instances) {
             const container = document.getElementById('tiedRelationships');
             
+            if (!container) {
+                console.error('tiedRelationships container not found');
+                return;
+            }
+            
+            // Set default message initially
+            container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">Loading tie relationship data...</p>';
+            
             if (!instances || Object.keys(instances).length === 0) {
-                container.innerHTML = '<p style="color: #94a3b8; text-align: center;">No tie data available yet</p>';
+                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">No instance data available yet. Waiting for WSPR decodes...</p>';
                 return;
             }
 
@@ -2051,11 +2059,26 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             const bands = sortBands(Object.keys(bandTies));
             
             if (bands.length === 0) {
-                container.innerHTML = '<p style="color: #94a3b8; text-align: center;">No tied SNR relationships found yet</p>';
+                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">✓ No tied SNR relationships found yet.<br><span style="font-size: 0.9em; opacity: 0.8;">All duplicates have clear SNR winners. Ties will appear here when instances report identical SNR values.</span></p>';
                 return;
             }
 
             container.innerHTML = '';
+            
+            // Add summary header
+            let totalTies = 0;
+            bands.forEach(band => {
+                const ties = Object.values(bandTies[band]);
+                ties.forEach(tie => {
+                    totalTies += Math.round(tie.count / 2);
+                });
+            });
+            
+            if (totalTies > 0) {
+                container.innerHTML = ` + "`" + `<p style="color: #10b981; text-align: center; padding: 10px; margin-bottom: 20px; background: rgba(16, 185, 129, 0.1); border-radius: 8px;">
+                    <strong>Found ${totalTies} tied SNR relationship${totalTies !== 1 ? 's' : ''} across ${bands.length} band${bands.length !== 1 ? 's' : ''}</strong>
+                </p>` + "`" + `;
+            }
 
             bands.forEach(band => {
                 const ties = Object.values(bandTies[band]);

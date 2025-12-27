@@ -682,6 +682,7 @@ func (st *StatisticsTracker) GetInstanceStats() map[string]*InstanceStats {
 			TotalSpots:      v.TotalSpots,
 			UniqueSpots:     v.UniqueSpots,
 			BestSNRWins:     v.BestSNRWins,
+			TiedSNR:         v.TiedSNR,
 			LastReportTime:  v.LastReportTime,
 			LastWindowTime:  v.LastWindowTime,
 			RecentCallsigns: make([]string, len(v.RecentCallsigns)),

@@ -157,11 +157,21 @@ func (sa *SpotAggregator) addToWindow(report *WSPRReportWithSource) {
 				log.Printf("Aggregator: Updated spot for %s (better SNR: %d > %d)",
 					report.Callsign, report.SNR, existing.SNR)
 			}
-		} else {
-			// Existing is better or equal - track the new one as rejected
+		} else if report.SNR == existing.SNR {
+			// Tied SNR - track both instances as having tied
 			sa.trackDuplicate(windowKey, report)
+			sa.stats.RecordTiedSNR(report.InstanceName, band)
+			sa.stats.RecordTiedSNR(existing.InstanceName, band)
 			if DebugMode {
-				log.Printf("Aggregator: Duplicate spot for %s (keeping existing SNR: %d >= %d)",
+				log.Printf("Aggregator: Tied spot for %s (SNR: %d = %d) - [%s] vs [%s]",
+					report.Callsign, report.SNR, existing.SNR, existing.InstanceName, report.InstanceName)
+			}
+		} else {
+			// Existing is better - track the new one as rejected
+			sa.trackDuplicate(windowKey, report)
+			sa.stats.RecordBestSNR(existing.InstanceName, band)
+			if DebugMode {
+				log.Printf("Aggregator: Duplicate spot for %s (keeping existing SNR: %d > %d)",
 					report.Callsign, existing.SNR, report.SNR)
 			}
 		}

@@ -544,7 +544,12 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
     </div>
 
     <div class="chart-container">
-        <div class="chart-title">Instance Performance</div>
+        <div class="chart-title">Instance Performance Comparison</div>
+        <canvas id="instanceComparisonChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <div class="chart-title">Instance Performance Details</div>
         <table id="instanceTable">
             <thead>
                 <tr>
@@ -552,6 +557,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                     <th>Total Spots</th>
                     <th>Unique</th>
                     <th>Best SNR Wins</th>
+                    <th>Tied SNR</th>
                     <th>Win Rate</th>
                     <th>Last Report</th>
                 </tr>
@@ -615,7 +621,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
     </div>
 
     <script>
-        let spotsChart, bandChart, instancePerformanceChart, instancePerformanceRawChart, map, markerClusterGroup, receiverMarker;
+        let spotsChart, bandChart, instancePerformanceChart, instancePerformanceRawChart, instanceComparisonChart, map, markerClusterGroup, receiverMarker;
         let allSpots = []; // Store all spots for filtering
         let activeBands = new Set(); // Track which bands are active
         let snrSmoothingEnabled = true; // Track SNR smoothing state (default enabled)
@@ -963,6 +969,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
                 updateStats(stats, aggregator, wsprnet);
                 updateCharts(windows);
+                updateInstanceComparisonChart(instances);
                 updateInstanceTable(instances);
                 updateInstancePerformanceRawChart(instancePerformanceRaw);
                 updateInstancePerformanceChart(instancePerformance);
@@ -1124,6 +1131,101 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             }
         }
 
+        function updateInstanceComparisonChart(instances) {
+            if (!instances || Object.keys(instances).length === 0) return;
+
+            // Sort instances alphabetically by name
+            const sortedInstances = Object.values(instances).sort((a, b) =>
+                a.Name.localeCompare(b.Name)
+            );
+
+            const labels = sortedInstances.map(inst => inst.Name);
+            const bestSNRData = sortedInstances.map(inst => inst.BestSNRWins || 0);
+            const tiedSNRData = sortedInstances.map(inst => inst.TiedSNR || 0);
+            const uniqueData = sortedInstances.map(inst => inst.UniqueSpots || 0);
+
+            if (instanceComparisonChart) {
+                instanceComparisonChart.data.labels = labels;
+                instanceComparisonChart.data.datasets[0].data = bestSNRData;
+                instanceComparisonChart.data.datasets[1].data = tiedSNRData;
+                instanceComparisonChart.data.datasets[2].data = uniqueData;
+                instanceComparisonChart.update();
+            } else {
+                const ctx = document.getElementById('instanceComparisonChart').getContext('2d');
+                instanceComparisonChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Best SNR Wins',
+                            data: bestSNRData,
+                            backgroundColor: '#3b82f6',
+                            borderColor: '#2563eb',
+                            borderWidth: 1
+                        }, {
+                            label: 'Tied SNR',
+                            data: tiedSNRData,
+                            backgroundColor: '#f59e0b',
+                            borderColor: '#d97706',
+                            borderWidth: 1
+                        }, {
+                            label: 'Unique Spots',
+                            data: uniqueData,
+                            backgroundColor: '#10b981',
+                            borderColor: '#059669',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: {
+                                labels: { color: '#e2e8f0' },
+                                position: 'top'
+                            },
+                            title: {
+                                display: true,
+                                text: 'Instance Performance Breakdown (24 hours)',
+                                color: '#f1f5f9',
+                                font: { size: 16 }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.dataset.label + ': ' + context.parsed.y + ' spots';
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                stacked: false,
+                                ticks: { color: '#94a3b8' },
+                                grid: { color: '#334155' }
+                            },
+                            y: {
+                                stacked: false,
+                                beginAtZero: true,
+                                ticks: {
+                                    color: '#94a3b8',
+                                    callback: function(value) {
+                                        return value + ' spots';
+                                    }
+                                },
+                                grid: { color: '#334155' },
+                                title: {
+                                    display: true,
+                                    text: 'Spot Count',
+                                    color: '#94a3b8'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
         function updateInstanceTable(instances) {
             const tbody = document.getElementById('instanceTableBody');
             tbody.innerHTML = '';
@@ -1134,11 +1236,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             );
 
             sortedInstances.forEach(inst => {
-                const winRate = inst.TotalSpots > 0 
+                const winRate = inst.TotalSpots > 0
                     ? ((inst.BestSNRWins / inst.TotalSpots) * 100).toFixed(1)
                     : '0.0';
                 
-                const lastReport = inst.LastReportTime 
+                const lastReport = inst.LastReportTime
                     ? new Date(inst.LastReportTime).toLocaleTimeString()
                     : 'Never';
 
@@ -1148,6 +1250,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                         <td>${inst.TotalSpots}</td>
                         <td><span class="badge badge-success">${inst.UniqueSpots}</span></td>
                         <td><span class="badge badge-primary">${inst.BestSNRWins}</span></td>
+                        <td><span class="badge badge-warning">${inst.TiedSNR || 0}</span></td>
                         <td>
                             ${winRate}%
                             <div class="progress-bar">
@@ -1463,6 +1566,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                                     <th>Total Spots</th>
                                     <th>Unique</th>
                                     <th>Best SNR Wins</th>
+                                    <th>Tied SNR</th>
                                     <th>Win Rate</th>
                                     <th>Avg SNR</th>
                                     <th>Min Dist</th>
@@ -1484,6 +1588,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                                             <td>${item.stats.TotalSpots}</td>
                                             <td><span class="badge badge-success">${item.stats.UniqueSpots}</span></td>
                                             <td><span class="badge badge-primary">${item.stats.BestSNRWins}</span></td>
+                                            <td><span class="badge badge-warning">${item.stats.TiedSNR || 0}</span></td>
                                             <td>
                                                 ${winRate}%
                                                 <div class="progress-bar">

@@ -16,6 +16,7 @@ type InstanceStats struct {
 	TotalSpots      int                           `json:"TotalSpots"`
 	UniqueSpots     int                           `json:"UniqueSpots"` // Spots only this instance reported
 	BestSNRWins     int                           `json:"BestSNRWins"` // Times this instance had the best SNR
+	TiedSNR         int                           `json:"TiedSNR"`     // Times this instance tied for best SNR
 	BandStats       map[string]*BandInstanceStats `json:"BandStats"`
 	LastReportTime  time.Time                     `json:"LastReportTime"`
 	LastWindowTime  time.Time                     `json:"LastWindowTime"`
@@ -27,6 +28,7 @@ type BandInstanceStats struct {
 	TotalSpots      int     `json:"TotalSpots"`
 	UniqueSpots     int     `json:"UniqueSpots"`
 	BestSNRWins     int     `json:"BestSNRWins"`
+	TiedSNR         int     `json:"TiedSNR"`
 	AverageSNR      float64 `json:"AverageSNR"`
 	TotalSNR        int     `json:"TotalSNR"`
 	SNRCount        int     `json:"SNRCount"`
@@ -64,6 +66,7 @@ type WindowStats struct {
 	DuplicateCount    int
 	UniqueByInstance  map[string][]string // instance -> callsigns unique to that instance
 	BestSNRByInstance map[string]int      // instance -> count of best SNR wins
+	TiedSNRByInstance map[string]int      // instance -> count of tied SNR
 	BandBreakdown     map[string]int      // band -> spot count
 	SubmittedAt       time.Time
 }
@@ -314,6 +317,7 @@ func (st *StatisticsTracker) StartWindow(windowTime time.Time) {
 		WindowTime:        windowTime,
 		UniqueByInstance:  make(map[string][]string),
 		BestSNRByInstance: make(map[string]int),
+		TiedSNRByInstance: make(map[string]int),
 		BandBreakdown:     make(map[string]int),
 	}
 
@@ -514,6 +518,24 @@ func (st *StatisticsTracker) RecordBestSNR(instanceName, band string) {
 	st.currentWindowMu.Unlock()
 }
 
+// RecordTiedSNR records when an instance tied for the best SNR
+func (st *StatisticsTracker) RecordTiedSNR(instanceName, band string) {
+	st.instancesMu.Lock()
+	if st.instances[instanceName] != nil {
+		st.instances[instanceName].TiedSNR++
+		if st.instances[instanceName].BandStats[band] != nil {
+			st.instances[instanceName].BandStats[band].TiedSNR++
+		}
+	}
+	st.instancesMu.Unlock()
+
+	st.currentWindowMu.Lock()
+	if st.currentWindow != nil {
+		st.currentWindow.TiedSNRByInstance[instanceName]++
+	}
+	st.currentWindowMu.Unlock()
+}
+
 // FinishWindow completes the current window and adds it to history
 func (st *StatisticsTracker) FinishWindow(totalSpots, duplicates int, bandBreakdown map[string]int) {
 	st.currentWindowMu.Lock()
@@ -664,6 +686,7 @@ func (st *StatisticsTracker) GetInstanceStats() map[string]*InstanceStats {
 				TotalSpots:      stats.TotalSpots,
 				UniqueSpots:     stats.UniqueSpots,
 				BestSNRWins:     stats.BestSNRWins,
+				TiedSNR:         stats.TiedSNR,
 				AverageSNR:      stats.AverageSNR,
 				TotalSNR:        stats.TotalSNR,
 				SNRCount:        stats.SNRCount,
@@ -1016,6 +1039,11 @@ func (st *StatisticsTracker) GetInstancePerformance() map[string][]InstancePerfo
 
 		// Count best SNR wins (these are also spots)
 		for instance, count := range window.BestSNRByInstance {
+			instanceSpots[instance] += count
+		}
+
+		// Count tied SNR (these are also spots)
+		for instance, count := range window.TiedSNRByInstance {
 			instanceSpots[instance] += count
 		}
 

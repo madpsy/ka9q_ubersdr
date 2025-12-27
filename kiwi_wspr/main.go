@@ -36,6 +36,7 @@ func main() {
 		configFile = pflag.String("config", "config.yaml", "Configuration file for WSPR decoder mode")
 		webPort    = pflag.Int("web-port", 8080, "Web interface port")
 		webOnly    = pflag.Bool("web-only", false, "Run web interface only (no decoding)")
+		oneShot    = pflag.Bool("one-shot", false, "Record and decode one cycle then exit (keeps WAV files)")
 
 		version = pflag.BoolP("version", "v", false, "Print version and exit")
 	)
@@ -60,8 +61,8 @@ func main() {
 		runStandaloneMode(*serverHost, *serverPort, *frequency, *modulation, *user, *password,
 			*duration, *outputDir, *filename, *lpCut, *hpCut, *agcGain, *compression, *quiet)
 	} else {
-		// WSPR decoder mode with config file
-		runWSPRDecoderMode(*configFile, *webPort, *webOnly)
+		// WSPR decoder mode with config file (default mode)
+		runWSPRDecoderMode(*configFile, *webPort, *webOnly, *oneShot)
 	}
 }
 
@@ -120,7 +121,7 @@ func runStandaloneMode(serverHost string, serverPort int, frequency float64, mod
 }
 
 // runWSPRDecoderMode runs the WSPR decoder with config file
-func runWSPRDecoderMode(configFile string, webPort int, webOnly bool) {
+func runWSPRDecoderMode(configFile string, webPort int, webOnly bool, oneShot bool) {
 	log.Printf("WSPR Decoder mode: Loading config from %s", configFile)
 
 	// Load configuration
@@ -132,23 +133,31 @@ func runWSPRDecoderMode(configFile string, webPort int, webOnly bool) {
 	log.Printf("Loaded configuration: %d instances, %d bands",
 		len(appConfig.KiwiInstances), len(appConfig.GetEnabledBands()))
 
+	// Verify wsprd binary is accessible
+	if appConfig.Decoder.WSPRDPath == "" {
+		log.Fatal("wsprd_path not configured in config file")
+	}
+	fileInfo, err := os.Stat(appConfig.Decoder.WSPRDPath)
+	if os.IsNotExist(err) {
+		log.Fatalf("wsprd binary not found at: %s", appConfig.Decoder.WSPRDPath)
+	}
+	if err != nil {
+		log.Fatalf("Error accessing wsprd binary at %s: %v", appConfig.Decoder.WSPRDPath, err)
+	}
+	// Check if it's a regular file (not a directory)
+	if fileInfo.IsDir() {
+		log.Fatalf("wsprd path is a directory, not a file: %s", appConfig.Decoder.WSPRDPath)
+	}
+	// Check if file has execute permissions (Unix-like systems)
+	if fileInfo.Mode()&0111 == 0 {
+		log.Fatalf("wsprd binary at %s is not executable (check file permissions)", appConfig.Decoder.WSPRDPath)
+	}
+	log.Printf("Verified wsprd binary at: %s", appConfig.Decoder.WSPRDPath)
+
 	// Load CTY database
 	log.Println("Loading CTY database...")
 	if err := InitCTYDatabase("cty/cty.dat"); err != nil {
 		log.Fatalf("Failed to load CTY database: %v", err)
-	}
-
-	// Start web server
-	webServer := NewWebServer(appConfig, configFile, webPort)
-	go func() {
-		if err := webServer.Start(); err != nil {
-			log.Fatalf("Web server error: %v", err)
-		}
-	}()
-
-	if webOnly {
-		log.Println("Running in web-only mode (no decoding)")
-		select {} // Block forever
 	}
 
 	// Initialize MQTT publisher
@@ -161,62 +170,45 @@ func runWSPRDecoderMode(configFile string, webPort int, webOnly bool) {
 		defer mqttPublisher.Disconnect()
 	}
 
-	// Start WSPR coordinators for each enabled band
-	enabledBands := appConfig.GetEnabledBands()
-	if len(enabledBands) == 0 {
-		log.Println("No enabled bands configured")
+	// Create coordinator manager
+	coordinatorManager := NewCoordinatorManager(appConfig, mqttPublisher)
+
+	// Set one-shot mode if requested
+	if oneShot {
+		coordinatorManager.SetOneShot(true)
+		log.Println("One-shot mode: Will record one cycle and exit (keeping WAV files)")
+	}
+
+	// Start web server with coordinator manager
+	webServer := NewWebServer(appConfig, configFile, webPort, coordinatorManager)
+	go func() {
+		if err := webServer.Start(); err != nil {
+			log.Fatalf("Web server error: %v", err)
+		}
+	}()
+
+	if webOnly {
+		log.Println("Running in web-only mode (no decoding)")
 		select {} // Block forever
 	}
 
-	log.Printf("Starting WSPR coordinators for %d bands...", len(enabledBands))
-
-	coordinators := make([]*WSPRCoordinator, 0, len(enabledBands))
-	for _, band := range enabledBands {
-		instance := appConfig.GetInstance(band.Instance)
-		if instance == nil {
-			log.Printf("Warning: Band %s references unknown instance %s, skipping", band.Name, band.Instance)
-			continue
-		}
-
-		// Create config for this band
-		bandConfig := &Config{
-			ServerHost:  instance.Host,
-			ServerPort:  instance.Port,
-			Frequency:   band.Frequency,
-			Modulation:  "usb",
-			User:        instance.User,
-			Password:    instance.Password,
-			Duration:    120 * time.Second,
-			OutputDir:   appConfig.Decoder.WorkDir,
-			LowCut:      300,
-			HighCut:     2700,
-			AGCGain:     -1,
-			Compression: appConfig.Decoder.Compression,
-			Quiet:       appConfig.Logging.Quiet,
-		}
-
-		// Create coordinator
-		coordinator := NewWSPRCoordinator(
-			bandConfig,
-			appConfig.Decoder.WSPRDPath,
-			appConfig.Receiver.Locator,
-			appConfig.Receiver.Callsign,
-			appConfig.Decoder.WorkDir,
-			band.Name,
-			mqttPublisher,
-		)
-
-		if err := coordinator.Start(); err != nil {
-			log.Printf("Failed to start coordinator for %s: %v", band.Name, err)
-			continue
-		}
-
-		coordinators = append(coordinators, coordinator)
-		log.Printf("Started WSPR coordinator for %s (%.3f MHz on %s)", band.Name, band.Frequency, instance.Name)
+	// Start all coordinators
+	if err := coordinatorManager.StartAll(); err != nil {
+		log.Fatalf("Failed to start coordinators: %v", err)
 	}
 
-	if len(coordinators) == 0 {
-		log.Fatal("No coordinators started")
+	enabledBands := appConfig.GetEnabledBands()
+	if len(enabledBands) == 0 {
+		log.Println("No enabled bands configured, waiting for configuration via web interface...")
+		// Don't exit, allow configuration via web interface
+	}
+
+	// In one-shot mode, wait for all coordinators to complete one cycle
+	if oneShot {
+		log.Println("Waiting for one-shot cycle to complete...")
+		coordinatorManager.WaitForOneShotComplete()
+		log.Println("One-shot cycle complete, exiting...")
+		return
 	}
 
 	// Setup signal handling
@@ -228,9 +220,7 @@ func runWSPRDecoderMode(configFile string, webPort int, webOnly bool) {
 	log.Printf("Received signal %v, shutting down...", sig)
 
 	// Stop all coordinators
-	for _, coord := range coordinators {
-		coord.Stop()
-	}
+	coordinatorManager.StopAll()
 
 	log.Println("Shutdown complete")
 }

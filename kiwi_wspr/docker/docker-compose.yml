@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  kiwi-wspr:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: kiwi-wspr:latest
+    container_name: kiwi-wspr
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Use named volume for persistent data
+      - kiwi-wspr-data:/app/data
+    environment:
+      - TZ=UTC
+    networks:
+      - kiwi-wspr
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  kiwi-wspr-data:
+    driver: local
+
+networks:
+  kiwi-wspr:
+    driver: bridge

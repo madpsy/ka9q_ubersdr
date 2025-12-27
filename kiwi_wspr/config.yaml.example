@@ -1,19 +1,16 @@
 # KiwiSDR WSPR Decoder Configuration
 
-# Receiver information
-receiver:
-  callsign: "N0CALL"      # Your callsign
-  locator: "FN20"         # Your Maidenhead locator
-
 # MQTT Configuration
 mqtt:
-  enabled: true
-  broker: "tcp://localhost:1883"
-  username: ""            # Optional
-  password: ""            # Optional
-  topic_prefix: "kiwi_wspr"
-  qos: 0
-  retain: false
+  enabled: false                   # Set to true when MQTT broker is available
+  host: "localhost"                # MQTT broker hostname or IP address
+  port: 1883                       # MQTT broker port (1883 for TCP, 8883 for TLS)
+  use_tls: false                   # Enable TLS/SSL encryption
+  username: ""                     # Optional - MQTT username for authentication
+  password: ""                     # Optional - MQTT password for authentication
+  topic_prefix: "kiwi_wspr/metrics" # Prefix for all MQTT topics
+  qos: 0                           # Quality of Service: 0 (at most once), 1 (at least once), 2 (exactly once)
+  retain: false                    # Retain messages on broker
 
 # KiwiSDR Instances
 kiwi_instances:
@@ -22,44 +19,102 @@ kiwi_instances:
     port: 8073
     password: ""          # Optional
     user: "kiwi_wspr"
-  
-  - name: "kiwi2"
-    host: "kiwisdr.example.com"
-    port: 8073
-    password: ""
-    user: "kiwi_wspr"
+    enabled: true         # Enable/disable this instance
+    mqtt_topic_prefix: "" # Optional - Override global MQTT topic prefix for this instance
 
 # WSPR Bands Configuration
 # Each band will be decoded using the specified KiwiSDR instance
+# Note: The 'name' field is for GUI display only. MQTT topics will use
+#       auto-calculated band names based on frequency (e.g., "40m", "20m")
+#       for consistency with the main ubersdr application.
+# Frequencies are in kHz. Bands are ordered from lowest to highest frequency.
 wspr_bands:
-  - name: "20m"
-    frequency: 14.097     # MHz
+  # 2200m band
+  - name: "2200m"
+    frequency: 136.0
     instance: "kiwi1"
-    enabled: true
-  
+    enabled: false
+
+  # 630m band
+  - name: "630m"
+    frequency: 474.2
+    instance: "kiwi1"
+    enabled: false
+
+  # 160m band
+  - name: "160m"
+    frequency: 1836.6
+    instance: "kiwi1"
+    enabled: false
+
+  # 80m band
+  - name: "80m"
+    frequency: 3568.6
+    instance: "kiwi1"
+    enabled: false
+
+  # 80m EU allocation
+  - name: "80m-EU"
+    frequency: 3592.6
+    instance: "kiwi1"
+    enabled: false
+
+  # 60m band
+  - name: "60m"
+    frequency: 5287.2
+    instance: "kiwi1"
+    enabled: false
+
+  # 60m alternate
+  - name: "60m-alt"
+    frequency: 5364.7
+    instance: "kiwi1"
+    enabled: false
+
+  # 40m band
   - name: "40m"
-    frequency: 7.040
+    frequency: 7038.6
     instance: "kiwi1"
-    enabled: true
-  
+    enabled: false
+
+  # 30m band
   - name: "30m"
-    frequency: 10.140
-    instance: "kiwi2"
+    frequency: 10138.7
+    instance: "kiwi1"
     enabled: false
-  
+
+  # 20m band
+  - name: "20m"
+    frequency: 14095.6
+    instance: "kiwi1"
+    enabled: false
+
+  # 17m band
   - name: "17m"
-    frequency: 18.106
-    instance: "kiwi2"
+    frequency: 18104.6
+    instance: "kiwi1"
     enabled: false
 
-# Decoder settings
-decoder:
-  wsprd_path: "/usr/local/bin/wsprd"
-  work_dir: "/dev/shm/kiwi_wspr"  # Use RAM disk for temporary files
-  keep_wav: false                  # Keep WAV files after decoding
-  compression: false               # Use audio compression (IMA ADPCM)
+  # 15m band
+  - name: "15m"
+    frequency: 21094.6
+    instance: "kiwi1"
+    enabled: false
 
-# Logging
-logging:
-  level: "info"           # debug, info, warn, error
-  quiet: false
+  # 12m band
+  - name: "12m"
+    frequency: 24924.6
+    instance: "kiwi1"
+    enabled: false
+
+  # 10m band
+  - name: "10m"
+    frequency: 28124.6
+    instance: "kiwi1"
+    enabled: false
+
+# Decoder Configuration
+decoder:
+  wsprd_path: "/usr/bin/wsprd"    # Path to wsprd binary
+  work_dir: "/dev/shm/kiwi_wspr"        # Working directory for temporary files (using /dev/shm for faster I/O)
+  keep_wav: false                        # Keep WAV files after decoding (for debugging)

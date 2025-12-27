@@ -16,24 +16,9 @@
         <div class="content">
             <div id="alert"></div>
 
-            <!-- Receiver Configuration -->
-            <div class="section">
-                <h2>📡 Receiver Configuration</h2>
-                <div class="grid">
-                    <div class="form-group">
-                        <label>Callsign</label>
-                        <input type="text" id="callsign" placeholder="N0CALL">
-                    </div>
-                    <div class="form-group">
-                        <label>Locator</label>
-                        <input type="text" id="locator" placeholder="FN20">
-                    </div>
-                </div>
-            </div>
-
             <!-- MQTT Configuration -->
             <div class="section">
-                <h2>📨 MQTT Configuration</h2>
+                <h2>📨 MQTT Configuration <span id="mqtt-status-indicator" style="font-size: 14px; margin-left: 15px;"></span></h2>
                 <div class="form-group">
                     <label>
                         <input type="checkbox" id="mqtt-enabled"> Enable MQTT
@@ -41,35 +26,77 @@
                 </div>
                 <div class="grid">
                     <div class="form-group">
-                        <label>Broker</label>
-                        <input type="text" id="mqtt-broker" placeholder="tcp://localhost:1883">
+                        <label>Broker Host</label>
+                        <input type="text" id="mqtt-host" placeholder="localhost">
+                    </div>
+                    <div class="form-group">
+                        <label>Broker Port</label>
+                        <input type="number" id="mqtt-port" placeholder="1883" value="1883">
+                    </div>
+                </div>
+                <div class="grid">
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="mqtt-use-tls"> Use TLS/SSL Encryption
+                        </label>
+                        <small style="color: #666;">Standard ports: 1883 (TCP), 8883 (TLS)</small>
                     </div>
                     <div class="form-group">
                         <label>Topic Prefix</label>
                         <input type="text" id="mqtt-prefix" placeholder="kiwi_wspr">
                     </div>
                 </div>
+                <div class="grid">
+                    <div class="form-group">
+                        <label>Username (optional)</label>
+                        <input type="text" id="mqtt-username" placeholder="">
+                    </div>
+                    <div class="form-group">
+                        <label>Password (optional)</label>
+                        <input type="password" id="mqtt-password" placeholder="">
+                    </div>
+                </div>
+                <div class="grid">
+                    <div class="form-group">
+                        <label>QoS Level</label>
+                        <select id="mqtt-qos">
+                            <option value="0">0 - At most once</option>
+                            <option value="1">1 - At least once</option>
+                            <option value="2">2 - Exactly once</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="mqtt-retain"> Retain Messages
+                        </label>
+                    </div>
+                </div>
+                <div style="margin-top: 15px;">
+                    <button class="btn btn-secondary" onclick="testMQTT()" style="padding: 10px 20px;">
+                        🔌 Test MQTT Connection
+                    </button>
+                </div>
             </div>
 
-            <!-- KiwiSDR Instances -->
+            <!-- KiwiSDR Instances with their Bands -->
             <div class="section">
-                <h2>🌐 KiwiSDR Instances</h2>
-                <ul class="item-list" id="instances-list"></ul>
+                <h2>🌐 KiwiSDR Instances & Bands</h2>
+                <div id="instances-container"></div>
                 <button class="btn btn-success" onclick="addInstance()">+ Add Instance</button>
             </div>
 
-            <!-- WSPR Bands -->
-            <div class="section">
-                <h2>📻 WSPR Bands</h2>
-                <ul class="item-list" id="bands-list"></ul>
-                <button class="btn btn-success" onclick="addBand()">+ Add Band</button>
-            </div>
-
-            <!-- Save Button -->
+            <!-- Action Buttons -->
             <div style="text-align: center; margin-top: 30px;">
-                <button class="btn btn-primary" onclick="saveConfig()" style="padding: 15px 40px; font-size: 16px;">
+                <button class="btn btn-primary" onclick="saveConfig()" style="padding: 15px 40px; font-size: 16px; margin-right: 10px;">
                     💾 Save Configuration
                 </button>
+                <button class="btn btn-secondary" onclick="exportConfig()" style="padding: 15px 30px; font-size: 16px; margin-right: 10px;">
+                    📥 Export Config
+                </button>
+                <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()" style="padding: 15px 30px; font-size: 16px;">
+                    📤 Import Config
+                </button>
+                <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importConfig(event)">
             </div>
         </div>
     </div>

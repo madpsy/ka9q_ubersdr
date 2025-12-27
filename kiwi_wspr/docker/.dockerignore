@@ -1,0 +1,29 @@
+# Ignore build artifacts
+kiwi_wspr
+*.exe
+
+# Ignore data directories
+wspr_data/
+data/
+
+# Ignore config files (use example instead)
+config.yaml
+
+# Ignore git
+.git/
+.gitignore
+
+# Ignore docker files from context
+docker/
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore test files
+*_test.go
+
+# Ignore documentation
+README.md

@@ -9,7 +9,6 @@ import (
 
 // AppConfig represents the application configuration
 type AppConfig struct {
-	Receiver      ReceiverConfig `yaml:"receiver"`
 	MQTT          MQTTConfig     `yaml:"mqtt"`
 	KiwiInstances []KiwiInstance `yaml:"kiwi_instances"`
 	WSPRBands     []WSPRBand     `yaml:"wspr_bands"`
@@ -17,16 +16,12 @@ type AppConfig struct {
 	Logging       LoggingConfig  `yaml:"logging"`
 }
 
-// ReceiverConfig holds receiver information
-type ReceiverConfig struct {
-	Callsign string `yaml:"callsign"`
-	Locator  string `yaml:"locator"`
-}
-
 // MQTTConfig holds MQTT broker configuration
 type MQTTConfig struct {
 	Enabled     bool   `yaml:"enabled"`
-	Broker      string `yaml:"broker"`
+	Host        string `yaml:"host"`
+	Port        int    `yaml:"port"`
+	UseTLS      bool   `yaml:"use_tls"`
 	Username    string `yaml:"username"`
 	Password    string `yaml:"password"`
 	TopicPrefix string `yaml:"topic_prefix"`
@@ -36,11 +31,13 @@ type MQTTConfig struct {
 
 // KiwiInstance represents a KiwiSDR instance
 type KiwiInstance struct {
-	Name     string `yaml:"name"`
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	Password string `yaml:"password"`
-	User     string `yaml:"user"`
+	Name            string `yaml:"name"`
+	Host            string `yaml:"host"`
+	Port            int    `yaml:"port"`
+	Password        string `yaml:"password"`
+	User            string `yaml:"user"`
+	Enabled         bool   `yaml:"enabled"`
+	MQTTTopicPrefix string `yaml:"mqtt_topic_prefix"` // Optional: Override global MQTT topic prefix for this instance
 }
 
 // WSPRBand represents a WSPR band configuration
@@ -87,16 +84,12 @@ func LoadConfig(filename string) (*AppConfig, error) {
 
 // Validate checks if the configuration is valid
 func (c *AppConfig) Validate() error {
-	if c.Receiver.Callsign == "" {
-		return fmt.Errorf("receiver callsign is required")
-	}
-	if c.Receiver.Locator == "" {
-		return fmt.Errorf("receiver locator is required")
-	}
-
 	if c.MQTT.Enabled {
-		if c.MQTT.Broker == "" {
-			return fmt.Errorf("MQTT broker is required when MQTT is enabled")
+		if c.MQTT.Host == "" {
+			return fmt.Errorf("MQTT host is required when MQTT is enabled")
+		}
+		if c.MQTT.Port == 0 {
+			return fmt.Errorf("MQTT port is required when MQTT is enabled")
 		}
 		if c.MQTT.TopicPrefix == "" {
 			return fmt.Errorf("MQTT topic prefix is required")

@@ -48,7 +48,8 @@ func NewKiwiClient(config *Config) (*KiwiClient, error) {
 
 // Connect establishes a WebSocket connection to the KiwiSDR
 func (c *KiwiClient) Connect() error {
-	timestamp := time.Now().Unix()
+	// Use nanoseconds to ensure unique timestamps for multiple simultaneous connections
+	timestamp := time.Now().UnixNano() / 1000000 // Convert to milliseconds
 	wsURL := url.URL{
 		Scheme: "ws",
 		Host:   fmt.Sprintf("%s:%d", c.config.ServerHost, c.config.ServerPort),
@@ -74,10 +75,6 @@ func (c *KiwiClient) sendMessage(msg string) error {
 
 	if c.conn == nil {
 		return fmt.Errorf("connection not established")
-	}
-
-	if !c.config.Quiet {
-		log.Printf("TX: %s", msg)
 	}
 
 	return c.conn.WriteMessage(websocket.TextMessage, []byte(msg))
@@ -157,6 +154,9 @@ func (c *KiwiClient) Run() error {
 	// Process messages
 	go c.messageLoop()
 
+	// Start keepalive sender
+	go c.keepaliveLoop()
+
 	// Wait for duration or stop signal
 	if c.config.Duration > 0 {
 		timer := time.NewTimer(c.config.Duration)
@@ -173,6 +173,26 @@ func (c *KiwiClient) Run() error {
 	}
 
 	return nil
+}
+
+// keepaliveLoop sends periodic keepalive messages
+func (c *KiwiClient) keepaliveLoop() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.stopChan:
+			return
+		case <-ticker.C:
+			if err := c.sendMessage("SET keepalive"); err != nil {
+				if !c.config.Quiet {
+					log.Printf("Keepalive send error: %v", err)
+				}
+				return
+			}
+		}
+	}
 }
 
 // messageLoop processes incoming WebSocket messages
@@ -264,7 +284,9 @@ func (c *KiwiClient) handleMSG(body string) {
 					log.Printf("Gen error: %v", err)
 				}
 				if err := c.sendMessage("SET keepalive"); err != nil {
-					log.Printf("Keepalive error: %v", err)
+					if !c.config.Quiet {
+						log.Printf("Keepalive error: %v", err)
+					}
 				}
 			}()
 		case "audio_rate":
@@ -361,15 +383,9 @@ func (c *KiwiClient) processAudioData(data []byte) {
 
 	// Parse SND packet header
 	flags := data[0]
-	seq := binary.LittleEndian.Uint32(data[1:5])
-	smeter := binary.BigEndian.Uint16(data[5:7])
+	_ = binary.LittleEndian.Uint32(data[1:5]) // seq - not used
+	_ = binary.BigEndian.Uint16(data[5:7])    // smeter - not used
 	audioData := data[7:]
-
-	rssi := float64(smeter)*0.1 - 127.0
-
-	if !c.config.Quiet && seq%100 == 0 {
-		log.Printf("Block: %08x, RSSI: %.1f dB, len: %d", seq, rssi, len(audioData))
-	}
 
 	// Decode audio based on compression flag
 	var samples []int16

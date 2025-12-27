@@ -61,6 +61,12 @@ input, select {
     transition: border-color 0.3s;
 }
 
+input[type="checkbox"] {
+    width: auto;
+    margin-right: 8px;
+    cursor: pointer;
+}
+
 input:focus, select:focus {
     outline: none;
     border-color: #667eea;

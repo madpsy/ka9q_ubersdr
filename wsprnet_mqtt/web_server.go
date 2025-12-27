@@ -2026,6 +2026,12 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                     // Process TiedWith relationships
                     if (stats.TiedWith) {
                         Object.entries(stats.TiedWith).forEach(([otherInstance, count]) => {
+                            // Skip self-ties (shouldn't happen, but filter just in case)
+                            if (inst.Name === otherInstance) {
+                                console.warn(` + "`" + `Self-tie detected for ${inst.Name} on ${band} - skipping` + "`" + `);
+                                return;
+                            }
+                            
                             // Create a sorted pair key to avoid duplicates (A-B and B-A)
                             const pair = [inst.Name, otherInstance].sort().join(' ↔ ');
                             

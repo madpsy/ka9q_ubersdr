@@ -25,18 +25,19 @@ type InstanceStats struct {
 
 // BandInstanceStats tracks per-band statistics for an instance
 type BandInstanceStats struct {
-	TotalSpots      int     `json:"TotalSpots"`
-	UniqueSpots     int     `json:"UniqueSpots"`
-	BestSNRWins     int     `json:"BestSNRWins"`
-	TiedSNR         int     `json:"TiedSNR"`
-	AverageSNR      float64 `json:"AverageSNR"`
-	TotalSNR        int     `json:"TotalSNR"`
-	SNRCount        int     `json:"SNRCount"`
-	MinDistance     float64 `json:"MinDistance"`     // km
-	MaxDistance     float64 `json:"MaxDistance"`     // km
-	TotalDistance   float64 `json:"TotalDistance"`   // km
-	DistanceCount   int     `json:"DistanceCount"`   // number of spots with valid distance
-	AverageDistance float64 `json:"AverageDistance"` // km
+	TotalSpots      int                `json:"TotalSpots"`
+	UniqueSpots     int                `json:"UniqueSpots"`
+	BestSNRWins     int                `json:"BestSNRWins"`
+	TiedSNR         int                `json:"TiedSNR"`
+	TiedWith        map[string]int     `json:"TiedWith"` // instance name -> tie count
+	AverageSNR      float64            `json:"AverageSNR"`
+	TotalSNR        int                `json:"TotalSNR"`
+	SNRCount        int                `json:"SNRCount"`
+	MinDistance     float64            `json:"MinDistance"`     // km
+	MaxDistance     float64            `json:"MaxDistance"`     // km
+	TotalDistance   float64            `json:"TotalDistance"`   // km
+	DistanceCount   int                `json:"DistanceCount"`   // number of spots with valid distance
+	AverageDistance float64            `json:"AverageDistance"` // km
 }
 
 // CountryStats tracks statistics for a country on a specific band
@@ -345,7 +346,9 @@ func (st *StatisticsTracker) RecordSpot(instanceName, band, callsign, country, l
 
 	// Update band stats
 	if instance.BandStats[band] == nil {
-		instance.BandStats[band] = &BandInstanceStats{}
+		instance.BandStats[band] = &BandInstanceStats{
+			TiedWith: make(map[string]int),
+		}
 	}
 	bandStats := instance.BandStats[band]
 	bandStats.TotalSpots++
@@ -518,13 +521,18 @@ func (st *StatisticsTracker) RecordBestSNR(instanceName, band string) {
 	st.currentWindowMu.Unlock()
 }
 
-// RecordTiedSNR records when an instance tied for the best SNR
-func (st *StatisticsTracker) RecordTiedSNR(instanceName, band string) {
+// RecordTiedSNR records when an instance tied for the best SNR with another instance
+func (st *StatisticsTracker) RecordTiedSNR(instanceName, band, tiedWithInstance string) {
 	st.instancesMu.Lock()
 	if st.instances[instanceName] != nil {
 		st.instances[instanceName].TiedSNR++
 		if st.instances[instanceName].BandStats[band] != nil {
 			st.instances[instanceName].BandStats[band].TiedSNR++
+			// Track which instance this one tied with
+			if st.instances[instanceName].BandStats[band].TiedWith == nil {
+				st.instances[instanceName].BandStats[band].TiedWith = make(map[string]int)
+			}
+			st.instances[instanceName].BandStats[band].TiedWith[tiedWithInstance]++
 		}
 	}
 	st.instancesMu.Unlock()
@@ -682,11 +690,18 @@ func (st *StatisticsTracker) GetInstanceStats() map[string]*InstanceStats {
 		copy(instanceCopy.RecentCallsigns, v.RecentCallsigns)
 
 		for band, stats := range v.BandStats {
+			// Copy TiedWith map
+			tiedWithCopy := make(map[string]int)
+			for k, v := range stats.TiedWith {
+				tiedWithCopy[k] = v
+			}
+			
 			instanceCopy.BandStats[band] = &BandInstanceStats{
 				TotalSpots:      stats.TotalSpots,
 				UniqueSpots:     stats.UniqueSpots,
 				BestSNRWins:     stats.BestSNRWins,
 				TiedSNR:         stats.TiedSNR,
+				TiedWith:        tiedWithCopy,
 				AverageSNR:      stats.AverageSNR,
 				TotalSNR:        stats.TotalSNR,
 				SNRCount:        stats.SNRCount,

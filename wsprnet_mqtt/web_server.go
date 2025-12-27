@@ -601,6 +601,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
     </div>
 
     <div class="chart-container">
+        <div class="chart-title">Tied SNR Relationships by Band</div>
+        <div id="tiedRelationships"></div>
+    </div>
+
+    <div class="chart-container">
         <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center;">
             <span>SNR History by Band</span>
             <label style="font-size: 0.9em; font-weight: normal; cursor: pointer; user-select: none;">
@@ -974,6 +979,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 updateInstancePerformanceRawChart(instancePerformanceRaw);
                 updateInstancePerformanceChart(instancePerformance);
                 updateBandInstanceTable(instances, snrHistory);
+                updateTiedRelationships(instances);
                 updateSNRHistoryCharts(snrHistory);
                 updateCountryTables(countries);
                 updateMap(spots);
@@ -1831,6 +1837,8 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
                     const labels = instanceList.map(item => item.name);
                     const totalData = instanceList.map(item => item.stats.TotalSpots);
+                    const bestSNRData = instanceList.map(item => item.stats.BestSNRWins || 0);
+                    const tiedSNRData = instanceList.map(item => item.stats.TiedSNR || 0);
                     const uniqueData = instanceList.map(item => item.stats.UniqueSpots);
 
                     // Destroy existing chart if it exists
@@ -1847,6 +1855,18 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                                 data: totalData,
                                 backgroundColor: '#3b82f6',
                                 borderColor: '#2563eb',
+                                borderWidth: 1
+                            }, {
+                                label: 'Best SNR Wins',
+                                data: bestSNRData,
+                                backgroundColor: '#8b5cf6',
+                                borderColor: '#7c3aed',
+                                borderWidth: 1
+                            }, {
+                                label: 'Tied SNR',
+                                data: tiedSNRData,
+                                backgroundColor: '#f59e0b',
+                                borderColor: '#d97706',
                                 borderWidth: 1
                             }, {
                                 label: 'Unique Spots',

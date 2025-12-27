@@ -158,10 +158,10 @@ func (sa *SpotAggregator) addToWindow(report *WSPRReportWithSource) {
 					report.Callsign, report.SNR, existing.SNR)
 			}
 		} else if report.SNR == existing.SNR {
-			// Tied SNR - track both instances as having tied
+			// Tied SNR - track both instances as having tied with each other
 			sa.trackDuplicate(windowKey, report)
-			sa.stats.RecordTiedSNR(report.InstanceName, band)
-			sa.stats.RecordTiedSNR(existing.InstanceName, band)
+			sa.stats.RecordTiedSNR(report.InstanceName, band, existing.InstanceName)
+			sa.stats.RecordTiedSNR(existing.InstanceName, band, report.InstanceName)
 			if DebugMode {
 				log.Printf("Aggregator: Tied spot for %s (SNR: %d = %d) - [%s] vs [%s]",
 					report.Callsign, report.SNR, existing.SNR, existing.InstanceName, report.InstanceName)

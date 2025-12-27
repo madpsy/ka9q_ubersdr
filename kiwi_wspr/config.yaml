@@ -1,0 +1,65 @@
+# KiwiSDR WSPR Decoder Configuration
+
+# Receiver information
+receiver:
+  callsign: "N0CALL"      # Your callsign
+  locator: "FN20"         # Your Maidenhead locator
+
+# MQTT Configuration
+mqtt:
+  enabled: true
+  broker: "tcp://localhost:1883"
+  username: ""            # Optional
+  password: ""            # Optional
+  topic_prefix: "kiwi_wspr"
+  qos: 0
+  retain: false
+
+# KiwiSDR Instances
+kiwi_instances:
+  - name: "kiwi1"
+    host: "44.31.241.9"
+    port: 8073
+    password: ""          # Optional
+    user: "kiwi_wspr"
+  
+  - name: "kiwi2"
+    host: "kiwisdr.example.com"
+    port: 8073
+    password: ""
+    user: "kiwi_wspr"
+
+# WSPR Bands Configuration
+# Each band will be decoded using the specified KiwiSDR instance
+wspr_bands:
+  - name: "20m"
+    frequency: 14.097     # MHz
+    instance: "kiwi1"
+    enabled: true
+  
+  - name: "40m"
+    frequency: 7.040
+    instance: "kiwi1"
+    enabled: true
+  
+  - name: "30m"
+    frequency: 10.140
+    instance: "kiwi2"
+    enabled: false
+  
+  - name: "17m"
+    frequency: 18.106
+    instance: "kiwi2"
+    enabled: false
+
+# Decoder settings
+decoder:
+  wsprd_path: "/usr/local/bin/wsprd"
+  work_dir: "/dev/shm/kiwi_wspr"  # Use RAM disk for temporary files
+  keep_wav: false                  # Keep WAV files after decoding
+  compression: false               # Use audio compression (IMA ADPCM)
+
+# Logging
+logging:
+  level: "info"           # debug, info, warn, error
+  quiet: false

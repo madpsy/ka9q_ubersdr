@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KiwiSDR WSPR Decoder - Configuration</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛰️ KiwiSDR WSPR Decoder</h1>
+            <p>Configuration Management Interface</p>
+        </div>
+        
+        <div class="content">
+            <div id="alert"></div>
+
+            <!-- Receiver Configuration -->
+            <div class="section">
+                <h2>📡 Receiver Configuration</h2>
+                <div class="grid">
+                    <div class="form-group">
+                        <label>Callsign</label>
+                        <input type="text" id="callsign" placeholder="N0CALL">
+                    </div>
+                    <div class="form-group">
+                        <label>Locator</label>
+                        <input type="text" id="locator" placeholder="FN20">
+                    </div>
+                </div>
+            </div>
+
+            <!-- MQTT Configuration -->
+            <div class="section">
+                <h2>📨 MQTT Configuration</h2>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="mqtt-enabled"> Enable MQTT
+                    </label>
+                </div>
+                <div class="grid">
+                    <div class="form-group">
+                        <label>Broker</label>
+                        <input type="text" id="mqtt-broker" placeholder="tcp://localhost:1883">
+                    </div>
+                    <div class="form-group">
+                        <label>Topic Prefix</label>
+                        <input type="text" id="mqtt-prefix" placeholder="kiwi_wspr">
+                    </div>
+                </div>
+            </div>
+
+            <!-- KiwiSDR Instances -->
+            <div class="section">
+                <h2>🌐 KiwiSDR Instances</h2>
+                <ul class="item-list" id="instances-list"></ul>
+                <button class="btn btn-success" onclick="addInstance()">+ Add Instance</button>
+            </div>
+
+            <!-- WSPR Bands -->
+            <div class="section">
+                <h2>📻 WSPR Bands</h2>
+                <ul class="item-list" id="bands-list"></ul>
+                <button class="btn btn-success" onclick="addBand()">+ Add Band</button>
+            </div>
+
+            <!-- Save Button -->
+            <div style="text-align: center; margin-top: 30px;">
+                <button class="btn btn-primary" onclick="saveConfig()" style="padding: 15px 40px; font-size: 16px;">
+                    💾 Save Configuration
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

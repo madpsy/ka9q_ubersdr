@@ -206,11 +206,49 @@ fi
 
 # Trigger radiod restart on ubersdr startup
 if [ "$1" = "ka9q_ubersdr" ]; then
-    echo "Triggering radiod restart..."
+    echo "Triggering radiod restart for clean state..."
     mkdir -p /var/run/restart-trigger
+    
+    # Record our startup time
+    MY_START_TIME=$(date +%s)
+    echo "$MY_START_TIME" > /var/run/restart-trigger/ubersdr-startup-time
+    
+    # Trigger radiod restart
     touch /var/run/restart-trigger/restart
     echo "Waiting 5 seconds for radiod to restart..."
     sleep 5
+    
+    # Start background watcher for radiod restarts
+    (
+        while true; do
+            if [ -f /var/run/restart-trigger/restart-ubersdr ]; then
+                # Read radiod's startup time
+                if [ -f /var/run/restart-trigger/radiod-startup-time ]; then
+                    RADIOD_START_TIME=$(cat /var/run/restart-trigger/radiod-startup-time)
+                    
+                    # Calculate time difference (in seconds)
+                    TIME_DIFF=$((RADIOD_START_TIME - MY_START_TIME))
+                    
+                    # If radiod started within 2 minutes (120 seconds) of us, ignore it
+                    # Use absolute value for comparison
+                    if [ "$TIME_DIFF" -ge -120 ] && [ "$TIME_DIFF" -le 120 ]; then
+                        echo "Radiod restart within 2 minutes of ubersdr startup (${TIME_DIFF}s), ignoring"
+                        rm -f /var/run/restart-trigger/restart-ubersdr
+                    else
+                        # Radiod restarted independently (outside the 2-minute window)
+                        echo "Radiod restarted independently (${TIME_DIFF}s difference), restarting ubersdr..."
+                        rm -f /var/run/restart-trigger/restart-ubersdr
+                        kill -TERM 1 || kill -KILL 1
+                        exit 0
+                    fi
+                else
+                    # No timestamp file, just remove trigger
+                    rm -f /var/run/restart-trigger/restart-ubersdr
+                fi
+            fi
+            sleep 0.5
+        done
+    ) &
 fi
 
 # If the command is ka9q_ubersdr, add the -config-dir flag

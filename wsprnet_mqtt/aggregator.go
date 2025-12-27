@@ -394,9 +394,28 @@ func (sa *SpotAggregator) flushWindow(windowKey int64, spots map[string]*WSPRRep
 
 			for _, callsign := range callsigns {
 				dupReports := dups[callsign]
-				log.Printf("    %s: %d duplicate(s)", callsign, len(dupReports))
-				for _, dup := range dupReports {
-					log.Printf("      SNR: %3d dB (rejected, kept best)", dup.SNR)
+				
+				// Find the winning report for this callsign
+				var winner *WSPRReportWithSource
+				for _, report := range reports {
+					if report.Callsign == callsign {
+						winner = report
+						break
+					}
+				}
+				
+				if winner != nil {
+					log.Printf("    %s: %d duplicate(s) - Winner: [%s] SNR: %d dB",
+						callsign, len(dupReports), winner.InstanceName, winner.SNR)
+					for _, dup := range dupReports {
+						log.Printf("      Rejected: [%s] SNR: %3d dB", dup.InstanceName, dup.SNR)
+					}
+				} else {
+					// Fallback if winner not found (shouldn't happen)
+					log.Printf("    %s: %d duplicate(s)", callsign, len(dupReports))
+					for _, dup := range dupReports {
+						log.Printf("      Rejected: [%s] SNR: %3d dB", dup.InstanceName, dup.SNR)
+					}
 				}
 			}
 		}

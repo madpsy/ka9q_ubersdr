@@ -1711,34 +1711,14 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 btn.style.borderColor = bandColors[band] || '#475569';
                 btn.style.color = bandColors[band] || '#e2e8f0';
                 btn.onclick = () => {
-                    // Find the section for this band - search within the active tab
-                    const activeTab = document.querySelector('.tab-content.active');
-                    if (!activeTab) return;
+                    // Create the ID for this band section
+                    const bandId = sectionPrefix + band.replace(/[^a-zA-Z0-9]/g, '_');
+                    const targetElement = document.getElementById(bandId);
                     
-                    // Look for h3 elements containing the band name
-                    const allHeadings = activeTab.querySelectorAll('h3');
-                    for (let heading of allHeadings) {
-                        // Check if this heading contains a badge with the band name
-                        const badge = heading.querySelector('.badge');
-                        if (badge && badge.textContent.trim() === band) {
-                            // Scroll to the parent container
-                            const container = heading.closest('.chart-container') || heading.parentElement;
-                            if (container) {
-                                container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                // Add offset for sticky nav
-                                setTimeout(() => window.scrollBy(0, -100), 100);
-                                return;
-                            }
-                        }
-                        // Fallback: check if heading text contains the band
-                        if (heading.textContent.includes(band)) {
-                            const container = heading.closest('.chart-container') || heading.parentElement;
-                            if (container) {
-                                container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                setTimeout(() => window.scrollBy(0, -100), 100);
-                                return;
-                            }
-                        }
+                    if (targetElement) {
+                        targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        // Add offset for sticky nav
+                        setTimeout(() => window.scrollBy(0, -100), 100);
                     }
                 };
                 container.appendChild(btn);
@@ -1791,8 +1771,9 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 const timeChartId = ` + "`" + `bandTimeChart_${band.replace(/[^a-zA-Z0-9]/g, '_')}` + "`" + `;
                 const distanceChartId = ` + "`" + `bandDistanceChart_${band.replace(/[^a-zA-Z0-9]/g, '_')}` + "`" + `;
 
+                const bandId = 'band_' + band.replace(/[^a-zA-Z0-9]/g, '_');
                 const sectionHTML = ` + "`" + `
-                    <div style="margin-bottom: 30px;">
+                    <div id="${bandId}" style="margin-bottom: 30px;">
                         <h3 style="color: #60a5fa; margin-bottom: 15px;">
                             <span class="badge badge-warning" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
                         </h3>
@@ -2300,8 +2281,9 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
                 const tableId = ` + "`" + `countryTable_${band.replace(/[^a-zA-Z0-9]/g, '_')}` + "`" + `;
 
+                const bandId = 'country_' + band.replace(/[^a-zA-Z0-9]/g, '_');
                 const tableHTML = ` + "`" + `
-                    <div style="margin-bottom: 30px;">
+                    <div id="${bandId}" style="margin-bottom: 30px;">
                         <h3 style="color: #60a5fa; margin-bottom: 15px;">${band}</h3>
                         <table id="${tableId}" style="width: 100%;">
                             <thead>
@@ -2466,8 +2448,9 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
                 const totalDups = bandDuplicates[band] || 1; // Avoid division by zero
 
+                const bandId = 'tied_' + band.replace(/[^a-zA-Z0-9]/g, '_');
                 const tableHTML = ` + "`" + `
-                    <div style="margin-bottom: 30px;">
+                    <div id="${bandId}" style="margin-bottom: 30px;">
                         <h3 style="color: #60a5fa; margin-bottom: 15px;">
                             <span class="badge badge-warning" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
                             <span style="font-size: 0.9em; color: #94a3b8; margin-left: 10px;">Total Duplicates: ${totalDups}</span>
@@ -2516,10 +2499,9 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 container.innerHTML += tableHTML;
             });
             
-            // Create band navigation for Relationships tab (tied relationships)
-            if (bands.length > 0) {
-                createBandNavigation(bands, 'relationshipsBandNav', 'tied_');
-            }
+            // Store bands for navigation (will be combined with duplicate relationships)
+            window.tiedBands = bands;
+            updateRelationshipsBandNav();
         }
 
         function updateDuplicateRelationships(instances) {
@@ -2631,8 +2613,9 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
                 const totalSpots = bandTotalSpots[band] || 1; // Avoid division by zero
 
+                const bandId = 'duplicate_' + band.replace(/[^a-zA-Z0-9]/g, '_');
                 const tableHTML = ` + "`" + `
-                    <div style="margin-bottom: 30px;">
+                    <div id="${bandId}" style="margin-bottom: 30px;">
                         <h3 style="color: #60a5fa; margin-bottom: 15px;">
                             <span class="badge badge-primary" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
                             <span style="font-size: 0.9em; color: #94a3b8; margin-left: 10px;">Total Spots: ${totalSpots}</span>
@@ -2681,6 +2664,52 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
                 container.innerHTML += tableHTML;
             });
+            
+            // Store bands for navigation (will be combined with tied relationships)
+            window.duplicateBands = bands;
+            updateRelationshipsBandNav();
+        }
+        
+        // Update relationships band navigation with combined bands from both sections
+        function updateRelationshipsBandNav() {
+            const tiedBands = window.tiedBands || [];
+            const duplicateBands = window.duplicateBands || [];
+            
+            // Combine and deduplicate bands
+            const allBands = [...new Set([...tiedBands, ...duplicateBands])];
+            
+            if (allBands.length > 0) {
+                const sortedBands = sortBands(allBands);
+                
+                // Create navigation with both tied and duplicate sections
+                const container = document.getElementById('relationshipsBandNav');
+                if (!container) return;
+                
+                container.innerHTML = '';
+                sortedBands.forEach(band => {
+                    const btn = document.createElement('button');
+                    btn.className = 'band-nav-btn';
+                    btn.textContent = band;
+                    btn.style.borderColor = bandColors[band] || '#475569';
+                    btn.style.color = bandColors[band] || '#e2e8f0';
+                    btn.onclick = () => {
+                        // Try tied first, then duplicate
+                        const tiedId = 'tied_' + band.replace(/[^a-zA-Z0-9]/g, '_');
+                        const duplicateId = 'duplicate_' + band.replace(/[^a-zA-Z0-9]/g, '_');
+                        
+                        let targetElement = document.getElementById(tiedId);
+                        if (!targetElement) {
+                            targetElement = document.getElementById(duplicateId);
+                        }
+                        
+                        if (targetElement) {
+                            targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            setTimeout(() => window.scrollBy(0, -100), 100);
+                        }
+                    };
+                    container.appendChild(btn);
+                });
+            }
         }
 
         function updateMultiInstanceAnalysis(instances) {
@@ -2818,8 +2847,9 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 const metrics = bandMetrics[band];
                 const gainPercent = ((metrics.coverageGain - 1.0) * 100).toFixed(1);
                 
+                const bandId = 'value_' + band.replace(/[^a-zA-Z0-9]/g, '_');
                 html += ` + "`" + `
-                    <div style="margin-bottom: 30px; border: 2px solid #334155; border-radius: 12px; overflow: hidden;">
+                    <div id="${bandId}" style="margin-bottom: 30px; border: 2px solid #334155; border-radius: 12px; overflow: hidden;">
                         <div style="background: #334155; padding: 15px;">
                             <h3 style="color: #60a5fa; margin: 0;">
                                 <span class="badge badge-warning" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
@@ -3030,8 +3060,9 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
                 const chartId = ` + "`" + `snrChart_${band.replace(/[^a-zA-Z0-9]/g, '_')}` + "`" + `;
 
+                const bandId = 'snr_' + band.replace(/[^a-zA-Z0-9]/g, '_');
                 const chartHTML = ` + "`" + `
-                    <div style="margin-bottom: 40px;">
+                    <div id="${bandId}" style="margin-bottom: 40px;">
                         <h3 style="color: #60a5fa; margin-bottom: 15px;">
                             <span class="badge badge-warning" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
                             <span style="font-size: 0.8em; color: #94a3b8; margin-left: 10px;">Average SNR Over Time</span>

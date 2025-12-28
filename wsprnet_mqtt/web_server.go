@@ -2166,6 +2166,8 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 return;
             }
             
+            console.log('updateDuplicateRelationships called with instances:', instances);
+            
             // Set default message initially
             container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">Loading duplicate relationship data...</p>';
             
@@ -2220,8 +2222,12 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 });
             });
 
+            console.log('bandDuplicates:', bandDuplicates);
+
             // Sort bands properly
             const bands = sortBands(Object.keys(bandDuplicates));
+            
+            console.log('bands with duplicates:', bands);
             
             if (bands.length === 0) {
                 container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">✓ No duplicate relationships found yet.<br><span style="font-size: 0.9em; opacity: 0.8;">All spots are unique to individual instances. Duplicates will appear here when multiple instances decode the same callsign.</span></p>';

@@ -756,6 +756,12 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         <div class="band-nav-title">Jump to Band:</div>
         <div class="band-nav-buttons" id="countriesBandNav"></div>
     </div>
+    
+    <div class="chart-container">
+        <div class="chart-title">📊 Country Statistics Summary</div>
+        <div id="countrySummary"></div>
+    </div>
+    
     <div class="chart-container">
         <div class="chart-title">Country Statistics by Band</div>
         <div id="countryTables"></div>
@@ -1705,14 +1711,33 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 btn.style.borderColor = bandColors[band] || '#475569';
                 btn.style.color = bandColors[band] || '#e2e8f0';
                 btn.onclick = () => {
-                    // Find the section for this band
-                    const allSections = document.querySelectorAll('h3, .chart-title');
-                    for (let el of allSections) {
-                        if (el.textContent.includes(band)) {
-                            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                            // Add offset for sticky nav
-                            window.scrollBy(0, -80);
-                            break;
+                    // Find the section for this band - search within the active tab
+                    const activeTab = document.querySelector('.tab-content.active');
+                    if (!activeTab) return;
+                    
+                    // Look for h3 elements containing the band name
+                    const allHeadings = activeTab.querySelectorAll('h3');
+                    for (let heading of allHeadings) {
+                        // Check if this heading contains a badge with the band name
+                        const badge = heading.querySelector('.badge');
+                        if (badge && badge.textContent.trim() === band) {
+                            // Scroll to the parent container
+                            const container = heading.closest('.chart-container') || heading.parentElement;
+                            if (container) {
+                                container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                // Add offset for sticky nav
+                                setTimeout(() => window.scrollBy(0, -100), 100);
+                                return;
+                            }
+                        }
+                        // Fallback: check if heading text contains the band
+                        if (heading.textContent.includes(band)) {
+                            const container = heading.closest('.chart-container') || heading.parentElement;
+                            if (container) {
+                                container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                setTimeout(() => window.scrollBy(0, -100), 100);
+                                return;
+                            }
                         }
                     }
                 };
@@ -2144,17 +2169,124 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         // Store country data for sorting
         let countryData = {};
 
+        function updateCountrySummary(countries) {
+            const summaryContainer = document.getElementById('countrySummary');
+            if (!summaryContainer) return;
+            
+            let totalCallsigns = 0;
+            let totalSpots = 0;
+            let highestSNR = { value: -999, country: '', band: '' };
+            let lowestSNR = { value: 999, country: '', band: '' };
+            let mostCommonCountry = { country: '', callsigns: 0, band: '' };
+            let leastCommonCountry = { country: '', callsigns: 999999, band: '' };
+            const bandCountryCounts = {};
+            
+            // Analyze all bands
+            Object.entries(countries).forEach(([band, countryList]) => {
+                bandCountryCounts[band] = countryList.length;
+                
+                countryList.forEach(c => {
+                    totalCallsigns += c.unique_callsigns;
+                    totalSpots += c.total_spots;
+                    
+                    if (c.max_snr > highestSNR.value) {
+                        highestSNR = { value: c.max_snr, country: c.country, band: band };
+                    }
+                    
+                    if (c.min_snr < lowestSNR.value) {
+                        lowestSNR = { value: c.min_snr, country: c.country, band: band };
+                    }
+                    
+                    if (c.unique_callsigns > mostCommonCountry.callsigns) {
+                        mostCommonCountry = { country: c.country, callsigns: c.unique_callsigns, band: band };
+                    }
+                    
+                    if (c.unique_callsigns < leastCommonCountry.callsigns) {
+                        leastCommonCountry = { country: c.country, callsigns: c.unique_callsigns, band: band };
+                    }
+                });
+            });
+            
+            const sortedBands = Object.entries(bandCountryCounts).sort((a, b) => b[1] - a[1]);
+            const mostCountriesBand = sortedBands[0];
+            const fewestCountriesBand = sortedBands[sortedBands.length - 1];
+            
+            summaryContainer.innerHTML = ` + "`" + `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 20px;">
+                    <div style="background: #1e293b; padding: 20px; border-radius: 8px; border: 1px solid #334155;">
+                        <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 8px; text-transform: uppercase;">Most Active Country</div>
+                        <div style="font-size: 1.5em; font-weight: bold; color: #10b981; margin-bottom: 5px;">${mostCommonCountry.country}</div>
+                        <div style="color: #64748b; font-size: 0.9em;">${mostCommonCountry.callsigns} unique callsigns on ${mostCommonCountry.band}</div>
+                    </div>
+                    
+                    <div style="background: #1e293b; padding: 20px; border-radius: 8px; border: 1px solid #334155;">
+                        <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 8px; text-transform: uppercase;">Least Active Country</div>
+                        <div style="font-size: 1.5em; font-weight: bold; color: #f59e0b; margin-bottom: 5px;">${leastCommonCountry.country}</div>
+                        <div style="color: #64748b; font-size: 0.9em;">${leastCommonCountry.callsigns} unique callsign${leastCommonCountry.callsigns !== 1 ? 's' : ''} on ${leastCommonCountry.band}</div>
+                    </div>
+                    
+                    <div style="background: #1e293b; padding: 20px; border-radius: 8px; border: 1px solid #334155;">
+                        <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 8px; text-transform: uppercase;">Highest SNR</div>
+                        <div style="font-size: 1.5em; font-weight: bold; color: #3b82f6; margin-bottom: 5px;">${highestSNR.value} dB</div>
+                        <div style="color: #64748b; font-size: 0.9em;">${highestSNR.country} on ${highestSNR.band}</div>
+                    </div>
+                    
+                    <div style="background: #1e293b; padding: 20px; border-radius: 8px; border: 1px solid #334155;">
+                        <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 8px; text-transform: uppercase;">Lowest SNR</div>
+                        <div style="font-size: 1.5em; font-weight: bold; color: #ef4444; margin-bottom: 5px;">${lowestSNR.value} dB</div>
+                        <div style="color: #64748b; font-size: 0.9em;">${lowestSNR.country} on ${lowestSNR.band}</div>
+                    </div>
+                    
+                    <div style="background: #1e293b; padding: 20px; border-radius: 8px; border: 1px solid #334155;">
+                        <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 8px; text-transform: uppercase;">Most Diverse Band</div>
+                        <div style="font-size: 1.5em; font-weight: bold; color: #8b5cf6; margin-bottom: 5px;">${mostCountriesBand[0]}</div>
+                        <div style="color: #64748b; font-size: 0.9em;">${mostCountriesBand[1]} countries heard</div>
+                    </div>
+                    
+                    <div style="background: #1e293b; padding: 20px; border-radius: 8px; border: 1px solid #334155;">
+                        <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 8px; text-transform: uppercase;">Least Diverse Band</div>
+                        <div style="font-size: 1.5em; font-weight: bold; color: #ec4899; margin-bottom: 5px;">${fewestCountriesBand[0]}</div>
+                        <div style="color: #64748b; font-size: 0.9em;">${fewestCountriesBand[1]} countries heard</div>
+                    </div>
+                </div>
+                
+                <div style="background: rgba(59, 130, 246, 0.1); padding: 15px; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.3);">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; text-align: center;">
+                        <div>
+                            <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 5px;">Active Bands</div>
+                            <div style="font-size: 1.8em; font-weight: bold; color: #60a5fa;">${Object.keys(countries).length}</div>
+                            <div style="color: #64748b; font-size: 0.85em;">with activity</div>
+                        </div>
+                        <div>
+                            <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 5px;">Total Callsigns</div>
+                            <div style="font-size: 1.8em; font-weight: bold; color: #60a5fa;">${totalCallsigns}</div>
+                            <div style="color: #64748b; font-size: 0.85em;">unique stations</div>
+                        </div>
+                        <div>
+                            <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 5px;">Total Spots</div>
+                            <div style="font-size: 1.8em; font-weight: bold; color: #60a5fa;">${totalSpots}</div>
+                            <div style="color: #64748b; font-size: 0.85em;">across all bands</div>
+                        </div>
+                    </div>
+                </div>
+            ` + "`" + `;
+        }
+
         function updateCountryTables(countries) {
             const container = document.getElementById('countryTables');
             container.innerHTML = '';
 
             if (!countries || Object.keys(countries).length === 0) {
                 container.innerHTML = '<p style="color: #94a3b8; text-align: center;">No country data available yet</p>';
+                document.getElementById('countrySummary').innerHTML = '<p style="color: #94a3b8; text-align: center;">No country data available yet</p>';
                 return;
             }
 
             // Store data globally for sorting
             countryData = countries;
+            
+            // Generate summary statistics
+            updateCountrySummary(countries);
 
             // Sort bands properly
             const bands = sortBands(Object.keys(countries));

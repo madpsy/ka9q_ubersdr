@@ -611,6 +611,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
     </div>
 
     <div class="chart-container">
+        <div class="chart-title">📊 Multi-Instance Value Analysis</div>
+        <div id="multiInstanceAnalysis"></div>
+    </div>
+
+    <div class="chart-container">
         <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center;">
             <span>SNR History by Band</span>
             <label style="font-size: 0.9em; font-weight: normal; cursor: pointer; user-select: none;">
@@ -986,6 +991,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 updateBandInstanceTable(instances, snrHistory);
                 updateTiedRelationships(instances);
                 updateDuplicateRelationships(instances);
+                updateMultiInstanceAnalysis(instances);
                 updateSNRHistoryCharts(snrHistory);
                 updateCountryTables(countries);
                 updateMap(spots);
@@ -2317,6 +2323,254 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
                 container.innerHTML += tableHTML;
             });
+        }
+
+        function updateMultiInstanceAnalysis(instances) {
+            const container = document.getElementById('multiInstanceAnalysis');
+            
+            if (!container) {
+                console.error('multiInstanceAnalysis container not found');
+                return;
+            }
+            
+            if (!instances || Object.keys(instances).length === 0) {
+                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">No instance data available yet.</p>';
+                return;
+            }
+
+            // Collect per-band analysis data
+            const bandAnalysis = {};
+            
+            // Organize data by band
+            Object.values(instances).forEach(inst => {
+                Object.entries(inst.BandStats || {}).forEach(([band, stats]) => {
+                    if (!bandAnalysis[band]) {
+                        bandAnalysis[band] = {
+                            instances: [],
+                            totalSpots: 0,
+                            totalUnique: 0,
+                            totalDuplicates: 0
+                        };
+                    }
+                    
+                    bandAnalysis[band].instances.push({
+                        name: inst.Name,
+                        totalSpots: stats.TotalSpots,
+                        uniqueSpots: stats.UniqueSpots,
+                        bestSNRWins: stats.BestSNRWins,
+                        tiedSNR: stats.TiedSNR || 0,
+                        duplicatesWith: stats.DuplicatesWith || {}
+                    });
+                    
+                    bandAnalysis[band].totalSpots += stats.TotalSpots;
+                    bandAnalysis[band].totalUnique += stats.UniqueSpots;
+                });
+            });
+
+            // Calculate metrics for each band
+            const bandMetrics = {};
+            Object.entries(bandAnalysis).forEach(([band, data]) => {
+                if (data.instances.length === 0) return;
+                
+                // Find best single instance
+                const bestInstance = data.instances.reduce((best, inst) =>
+                    inst.totalSpots > best.totalSpots ? inst : best
+                );
+                
+                // Calculate total unique spots across all instances
+                const totalUniqueAcrossAll = data.totalUnique;
+                
+                // Coverage gain = total unique / best single instance
+                const coverageGain = bestInstance.totalSpots > 0
+                    ? totalUniqueAcrossAll / bestInstance.totalSpots
+                    : 1.0;
+                
+                // Calculate average overlap (duplicates / total spots)
+                const totalDuplicates = data.totalSpots - totalUniqueAcrossAll;
+                const overlapPercentage = data.totalSpots > 0
+                    ? (totalDuplicates / data.totalSpots) * 100
+                    : 0;
+                
+                // Calculate unique contribution percentage for each instance
+                const instanceContributions = data.instances.map(inst => ({
+                    name: inst.name,
+                    uniquePercent: inst.totalSpots > 0 ? (inst.uniqueSpots / inst.totalSpots) * 100 : 0,
+                    winRate: inst.totalSpots > 0 ? (inst.bestSNRWins / inst.totalSpots) * 100 : 0
+                }));
+                
+                // Determine recommendation
+                let recommendation, recommendationColor, recommendationIcon;
+                if (data.instances.length === 1) {
+                    recommendation = 'Single instance - no multi-instance analysis available';
+                    recommendationColor = '#94a3b8';
+                    recommendationIcon = 'ℹ️';
+                } else if (coverageGain >= 1.5) {
+                    recommendation = 'Excellent diversity! Multiple instances provide significant coverage gain.';
+                    recommendationColor = '#10b981';
+                    recommendationIcon = '✅';
+                } else if (coverageGain >= 1.3) {
+                    recommendation = 'Good setup. Multiple instances provide valuable additional coverage.';
+                    recommendationColor = '#22c55e';
+                    recommendationIcon = '👍';
+                } else if (coverageGain >= 1.15) {
+                    recommendation = 'Moderate benefit. Consider optimizing weaker instances for better diversity.';
+                    recommendationColor = '#f59e0b';
+                    recommendationIcon = '⚠️';
+                } else if (coverageGain >= 1.05) {
+                    recommendation = 'Limited benefit. High overlap suggests redundancy - consider redeploying resources.';
+                    recommendationColor = '#f97316';
+                    recommendationIcon = '⚠️';
+                } else {
+                    recommendation = 'Minimal benefit. Instances are highly redundant - optimization recommended.';
+                    recommendationColor = '#ef4444';
+                    recommendationIcon = '❌';
+                }
+                
+                bandMetrics[band] = {
+                    coverageGain,
+                    overlapPercentage,
+                    bestInstance: bestInstance.name,
+                    bestInstanceSpots: bestInstance.totalSpots,
+                    totalUniqueAcrossAll,
+                    instanceCount: data.instances.length,
+                    instanceContributions,
+                    recommendation,
+                    recommendationColor,
+                    recommendationIcon
+                };
+            });
+
+            // Sort bands properly
+            const bands = sortBands(Object.keys(bandMetrics));
+            
+            if (bands.length === 0) {
+                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">No band data available yet.</p>';
+                return;
+            }
+
+            // Create summary section
+            let html = '<div style="margin-bottom: 30px; padding: 20px; background: rgba(59, 130, 246, 0.1); border-radius: 12px; border: 1px solid rgba(59, 130, 246, 0.3);">';
+            html += '<h3 style="color: #60a5fa; margin-bottom: 15px;">📈 Coverage Gain Analysis</h3>';
+            html += '<p style="color: #cbd5e1; margin-bottom: 10px;">This analysis shows how much additional coverage you gain by running multiple instances per band.</p>';
+            html += '<p style="color: #cbd5e1; font-size: 0.9em;"><strong>Coverage Gain</strong> = Total unique spots across all instances ÷ Best single instance spots</p>';
+            html += '</div>';
+
+            // Create per-band analysis
+            bands.forEach(band => {
+                const metrics = bandMetrics[band];
+                const gainPercent = ((metrics.coverageGain - 1.0) * 100).toFixed(1);
+                
+                html += ` + "`" + `
+                    <div style="margin-bottom: 30px; border: 2px solid #334155; border-radius: 12px; overflow: hidden;">
+                        <div style="background: #334155; padding: 15px;">
+                            <h3 style="color: #60a5fa; margin: 0;">
+                                <span class="badge badge-warning" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
+                                <span style="font-size: 0.9em; color: #94a3b8; margin-left: 10px;">${metrics.instanceCount} instance${metrics.instanceCount !== 1 ? 's' : ''}</span>
+                            </h3>
+                        </div>
+                        
+                        <div style="padding: 20px;">
+                            <!-- Key Metrics -->
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                                <div style="background: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155;">
+                                    <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 5px;">COVERAGE GAIN</div>
+                                    <div style="font-size: 1.8em; font-weight: bold; color: ${metrics.coverageGain >= 1.3 ? '#10b981' : metrics.coverageGain >= 1.15 ? '#f59e0b' : '#ef4444'};">
+                                        ${metrics.coverageGain.toFixed(2)}x
+                                    </div>
+                                    <div style="color: #64748b; font-size: 0.85em; margin-top: 5px;">+${gainPercent}% more spots</div>
+                                </div>
+                                
+                                <div style="background: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155;">
+                                    <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 5px;">OVERLAP</div>
+                                    <div style="font-size: 1.8em; font-weight: bold; color: ${metrics.overlapPercentage < 50 ? '#10b981' : metrics.overlapPercentage < 70 ? '#f59e0b' : '#ef4444'};">
+                                        ${metrics.overlapPercentage.toFixed(1)}%
+                                    </div>
+                                    <div style="color: #64748b; font-size: 0.85em; margin-top: 5px;">${metrics.overlapPercentage < 50 ? 'Good diversity' : metrics.overlapPercentage < 70 ? 'Moderate' : 'High redundancy'}</div>
+                                </div>
+                                
+                                <div style="background: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155;">
+                                    <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 5px;">BEST INSTANCE</div>
+                                    <div style="font-size: 1.2em; font-weight: bold; color: #60a5fa; margin-bottom: 5px;">
+                                        ${metrics.bestInstance}
+                                    </div>
+                                    <div style="color: #64748b; font-size: 0.85em;">${metrics.bestInstanceSpots} spots</div>
+                                </div>
+                                
+                                <div style="background: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155;">
+                                    <div style="color: #94a3b8; font-size: 0.85em; margin-bottom: 5px;">TOTAL UNIQUE</div>
+                                    <div style="font-size: 1.8em; font-weight: bold; color: #3b82f6;">
+                                        ${metrics.totalUniqueAcrossAll}
+                                    </div>
+                                    <div style="color: #64748b; font-size: 0.85em; margin-top: 5px;">Combined coverage</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Recommendation -->
+                            <div style="background: rgba(${metrics.recommendationColor === '#10b981' ? '16, 185, 129' : metrics.recommendationColor === '#22c55e' ? '34, 197, 94' : metrics.recommendationColor === '#f59e0b' ? '245, 158, 11' : metrics.recommendationColor === '#f97316' ? '249, 115, 22' : '239, 68, 68'}, 0.1); padding: 15px; border-radius: 8px; border: 2px solid ${metrics.recommendationColor}; margin-bottom: 20px;">
+                                <div style="font-size: 1.1em; font-weight: 600; color: ${metrics.recommendationColor}; margin-bottom: 8px;">
+                                    ${metrics.recommendationIcon} ${metrics.recommendation}
+                                </div>
+                            </div>
+                            
+                            <!-- Instance Contributions -->
+                            ${metrics.instanceCount > 1 ? ` + "`" + `
+                            <div style="margin-top: 20px;">
+                                <h4 style="color: #cbd5e1; margin-bottom: 15px; font-size: 1em;">Instance Contributions</h4>
+                                <table style="width: 100%; font-size: 0.9em;">
+                                    <thead>
+                                        <tr>
+                                            <th style="text-align: left; padding: 10px; background: #1e293b;">Instance</th>
+                                            <th style="text-align: center; padding: 10px; background: #1e293b;">Unique %</th>
+                                            <th style="text-align: center; padding: 10px; background: #1e293b;">SNR Win Rate</th>
+                                            <th style="text-align: left; padding: 10px; background: #1e293b;">Assessment</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${metrics.instanceContributions.map(inst => {
+                                            let assessment, assessmentColor;
+                                            if (inst.uniquePercent >= 25) {
+                                                assessment = 'Excellent contribution';
+                                                assessmentColor = '#10b981';
+                                            } else if (inst.uniquePercent >= 15) {
+                                                assessment = 'Good contribution';
+                                                assessmentColor = '#22c55e';
+                                            } else if (inst.uniquePercent >= 10) {
+                                                assessment = 'Moderate contribution';
+                                                assessmentColor = '#f59e0b';
+                                            } else {
+                                                assessment = 'Limited contribution';
+                                                assessmentColor = '#ef4444';
+                                            }
+                                            
+                                            return ` + "`" + `
+                                                <tr style="border-top: 1px solid #334155;">
+                                                    <td style="padding: 10px;"><span class="instance-name">${inst.name}</span></td>
+                                                    <td style="padding: 10px; text-align: center;">
+                                                        <span style="font-weight: 600; color: ${inst.uniquePercent >= 20 ? '#10b981' : inst.uniquePercent >= 10 ? '#f59e0b' : '#ef4444'};">
+                                                            ${inst.uniquePercent.toFixed(1)}%
+                                                        </span>
+                                                    </td>
+                                                    <td style="padding: 10px; text-align: center;">
+                                                        <span style="font-weight: 600; color: #3b82f6;">
+                                                            ${inst.winRate.toFixed(1)}%
+                                                        </span>
+                                                    </td>
+                                                    <td style="padding: 10px; color: ${assessmentColor}; font-size: 0.9em;">
+                                                        ${assessment}
+                                                    </td>
+                                                </tr>
+                                            ` + "`" + `;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                            ` + "`" + ` : ''}
+                        </div>
+                    </div>
+                ` + "`" + `;
+            });
+
+            container.innerHTML = html;
         }
 
         function sortCountryTable(band, column, type, ascending) {

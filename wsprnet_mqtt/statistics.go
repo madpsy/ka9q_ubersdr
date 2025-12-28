@@ -29,7 +29,8 @@ type BandInstanceStats struct {
 	UniqueSpots     int                `json:"UniqueSpots"`
 	BestSNRWins     int                `json:"BestSNRWins"`
 	TiedSNR         int                `json:"TiedSNR"`
-	TiedWith        map[string]int     `json:"TiedWith"` // instance name -> tie count
+	TiedWith        map[string]int     `json:"TiedWith"`        // instance name -> tie count
+	DuplicatesWith  map[string]int     `json:"DuplicatesWith"`  // instance name -> duplicate count (all duplicates, not just ties)
 	AverageSNR      float64            `json:"AverageSNR"`
 	TotalSNR        int                `json:"TotalSNR"`
 	SNRCount        int                `json:"SNRCount"`
@@ -347,7 +348,8 @@ func (st *StatisticsTracker) RecordSpot(instanceName, band, callsign, country, l
 	// Update band stats
 	if instance.BandStats[band] == nil {
 		instance.BandStats[band] = &BandInstanceStats{
-			TiedWith: make(map[string]int),
+			TiedWith:       make(map[string]int),
+			DuplicatesWith: make(map[string]int),
 		}
 	}
 	bandStats := instance.BandStats[band]
@@ -544,6 +546,22 @@ func (st *StatisticsTracker) RecordTiedSNR(instanceName, band, tiedWithInstance 
 	st.currentWindowMu.Unlock()
 }
 
+// RecordDuplicate records when an instance had a duplicate with another instance (regardless of SNR)
+func (st *StatisticsTracker) RecordDuplicate(instanceName, band, duplicateWithInstance string) {
+	st.instancesMu.Lock()
+	defer st.instancesMu.Unlock()
+	
+	if st.instances[instanceName] != nil {
+		if st.instances[instanceName].BandStats[band] != nil {
+			// Track which instance this one had a duplicate with
+			if st.instances[instanceName].BandStats[band].DuplicatesWith == nil {
+				st.instances[instanceName].BandStats[band].DuplicatesWith = make(map[string]int)
+			}
+			st.instances[instanceName].BandStats[band].DuplicatesWith[duplicateWithInstance]++
+		}
+	}
+}
+
 // FinishWindow completes the current window and adds it to history
 func (st *StatisticsTracker) FinishWindow(totalSpots, duplicates int, bandBreakdown map[string]int) {
 	st.currentWindowMu.Lock()
@@ -697,12 +715,19 @@ func (st *StatisticsTracker) GetInstanceStats() map[string]*InstanceStats {
 				tiedWithCopy[k] = v
 			}
 			
+			// Copy DuplicatesWith map
+			duplicatesWithCopy := make(map[string]int)
+			for k, v := range stats.DuplicatesWith {
+				duplicatesWithCopy[k] = v
+			}
+			
 			instanceCopy.BandStats[band] = &BandInstanceStats{
 				TotalSpots:      stats.TotalSpots,
 				UniqueSpots:     stats.UniqueSpots,
 				BestSNRWins:     stats.BestSNRWins,
 				TiedSNR:         stats.TiedSNR,
 				TiedWith:        tiedWithCopy,
+				DuplicatesWith:  duplicatesWithCopy,
 				AverageSNR:      stats.AverageSNR,
 				TotalSNR:        stats.TotalSNR,
 				SNRCount:        stats.SNRCount,

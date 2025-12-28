@@ -153,6 +153,9 @@ func (sa *SpotAggregator) addToWindow(report *WSPRReportWithSource) {
 			sa.windows[windowKey][dedupKey] = report
 			// Record that this instance won
 			sa.stats.RecordBestSNR(report.InstanceName, band)
+			// Record duplicate relationship (both directions)
+			sa.stats.RecordDuplicate(report.InstanceName, band, existing.InstanceName)
+			sa.stats.RecordDuplicate(existing.InstanceName, band, report.InstanceName)
 			if DebugMode {
 				log.Printf("Aggregator: Updated spot for %s (better SNR: %d > %d)",
 					report.Callsign, report.SNR, existing.SNR)
@@ -162,6 +165,9 @@ func (sa *SpotAggregator) addToWindow(report *WSPRReportWithSource) {
 			sa.trackDuplicate(windowKey, report)
 			sa.stats.RecordTiedSNR(report.InstanceName, band, existing.InstanceName)
 			sa.stats.RecordTiedSNR(existing.InstanceName, band, report.InstanceName)
+			// Also record as general duplicate relationship
+			sa.stats.RecordDuplicate(report.InstanceName, band, existing.InstanceName)
+			sa.stats.RecordDuplicate(existing.InstanceName, band, report.InstanceName)
 			if DebugMode {
 				log.Printf("Aggregator: Tied spot for %s (SNR: %d = %d) - [%s] vs [%s]",
 					report.Callsign, report.SNR, existing.SNR, existing.InstanceName, report.InstanceName)
@@ -170,6 +176,9 @@ func (sa *SpotAggregator) addToWindow(report *WSPRReportWithSource) {
 			// Existing is better - track the new one as rejected
 			sa.trackDuplicate(windowKey, report)
 			sa.stats.RecordBestSNR(existing.InstanceName, band)
+			// Record duplicate relationship (both directions)
+			sa.stats.RecordDuplicate(report.InstanceName, band, existing.InstanceName)
+			sa.stats.RecordDuplicate(existing.InstanceName, band, report.InstanceName)
 			if DebugMode {
 				log.Printf("Aggregator: Duplicate spot for %s (keeping existing SNR: %d > %d)",
 					report.Callsign, existing.SNR, report.SNR)

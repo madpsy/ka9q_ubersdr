@@ -606,6 +606,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
     </div>
 
     <div class="chart-container">
+        <div class="chart-title">All Duplicate Relationships by Band</div>
+        <div id="duplicateRelationships"></div>
+    </div>
+
+    <div class="chart-container">
         <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center;">
             <span>SNR History by Band</span>
             <label style="font-size: 0.9em; font-weight: normal; cursor: pointer; user-select: none;">
@@ -980,6 +985,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 updateInstancePerformanceChart(instancePerformance);
                 updateBandInstanceTable(instances, snrHistory);
                 updateTiedRelationships(instances);
+                updateDuplicateRelationships(instances);
                 updateSNRHistoryCharts(snrHistory);
                 updateCountryTables(countries);
                 updateMap(spots);
@@ -2139,6 +2145,161 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                                                   tie.count < 5 ? 'Occasional ties' :
                                                   tie.count < 15 ? 'Frequent ties' :
                                                   'Very similar performance'}
+                                            </td>
+                                        </tr>
+                                    ` + "`" + `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                ` + "`" + `;
+
+                container.innerHTML += tableHTML;
+            });
+        }
+
+        function updateDuplicateRelationships(instances) {
+            const container = document.getElementById('duplicateRelationships');
+            
+            if (!container) {
+                console.error('duplicateRelationships container not found');
+                return;
+            }
+            
+            // Set default message initially
+            container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">Loading duplicate relationship data...</p>';
+            
+            if (!instances || Object.keys(instances).length === 0) {
+                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">No instance data available yet. Waiting for WSPR decodes...</p>';
+                return;
+            }
+
+            // Collect all bands and duplicate relationships
+            const bandDuplicates = {}; // band -> array of duplicate relationships
+            
+            Object.values(instances).forEach(inst => {
+                Object.entries(inst.BandStats || {}).forEach(([band, stats]) => {
+                    if (!bandDuplicates[band]) {
+                        bandDuplicates[band] = {};
+                    }
+                    
+                    // Process DuplicatesWith relationships
+                    if (stats.DuplicatesWith) {
+                        Object.entries(stats.DuplicatesWith).forEach(([otherInstance, count]) => {
+                            // Skip self-duplicates (shouldn't happen, but filter just in case)
+                            if (inst.Name === otherInstance) {
+                                console.warn(` + "`" + `Self-duplicate detected for ${inst.Name} on ${band} - skipping` + "`" + `);
+                                return;
+                            }
+                            
+                            // Create a sorted pair key to avoid duplicates (A-B and B-A)
+                            const pair = [inst.Name, otherInstance].sort().join(' ↔ ');
+                            
+                            if (!bandDuplicates[band][pair]) {
+                                bandDuplicates[band][pair] = {
+                                    instance1: inst.Name < otherInstance ? inst.Name : otherInstance,
+                                    instance2: inst.Name < otherInstance ? otherInstance : inst.Name,
+                                    count: 0
+                                };
+                            }
+                            // Add count (will be counted from both sides, so we'll divide by 2 later)
+                            bandDuplicates[band][pair].count += count;
+                        });
+                    }
+                });
+            });
+
+            // Calculate total spots per band for percentage
+            const bandTotalSpots = {};
+            Object.values(instances).forEach(inst => {
+                Object.entries(inst.BandStats || {}).forEach(([band, stats]) => {
+                    if (!bandTotalSpots[band]) {
+                        bandTotalSpots[band] = 0;
+                    }
+                    bandTotalSpots[band] += stats.TotalSpots;
+                });
+            });
+
+            // Sort bands properly
+            const bands = sortBands(Object.keys(bandDuplicates));
+            
+            if (bands.length === 0) {
+                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">✓ No duplicate relationships found yet.<br><span style="font-size: 0.9em; opacity: 0.8;">All spots are unique to individual instances. Duplicates will appear here when multiple instances decode the same callsign.</span></p>';
+                return;
+            }
+
+            container.innerHTML = '';
+            
+            // Add summary header
+            let totalDuplicates = 0;
+            bands.forEach(band => {
+                const dups = Object.values(bandDuplicates[band]);
+                dups.forEach(dup => {
+                    totalDuplicates += Math.round(dup.count / 2);
+                });
+            });
+            
+            if (totalDuplicates > 0) {
+                container.innerHTML = ` + "`" + `<p style="color: #3b82f6; text-align: center; padding: 10px; margin-bottom: 20px; background: rgba(59, 130, 246, 0.1); border-radius: 8px;">
+                    <strong>Found ${totalDuplicates} duplicate relationship${totalDuplicates !== 1 ? 's' : ''} across ${bands.length} band${bands.length !== 1 ? 's' : ''}</strong><br>
+                    <span style="font-size: 0.9em; opacity: 0.8;">This includes all duplicates, regardless of SNR values (ties and non-ties)</span>
+                </p>` + "`" + `;
+            }
+
+            bands.forEach(band => {
+                const dups = Object.values(bandDuplicates[band]);
+                
+                if (dups.length === 0) return;
+
+                // Since duplicates are counted from both sides, divide by 2
+                dups.forEach(dup => {
+                    dup.count = Math.round(dup.count / 2);
+                });
+
+                // Sort by count descending
+                dups.sort((a, b) => b.count - a.count);
+
+                const totalSpots = bandTotalSpots[band] || 1; // Avoid division by zero
+
+                const tableHTML = ` + "`" + `
+                    <div style="margin-bottom: 30px;">
+                        <h3 style="color: #60a5fa; margin-bottom: 15px;">
+                            <span class="badge badge-primary" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
+                            <span style="font-size: 0.9em; color: #94a3b8; margin-left: 10px;">Total Spots: ${totalSpots}</span>
+                        </h3>
+                        <table style="width: 100%;">
+                            <thead>
+                                <tr>
+                                    <th>Instance Pair</th>
+                                    <th>Duplicate Count</th>
+                                    <th>% of Band Spots</th>
+                                    <th>Relationship</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${dups.map(dup => {
+                                    const percentage = ((dup.count / totalSpots) * 100).toFixed(1);
+                                    const barWidth = Math.min(percentage, 100);
+                                    return ` + "`" + `
+                                        <tr>
+                                            <td>
+                                                <span class="instance-name">${dup.instance1}</span>
+                                                <span style="color: #3b82f6; margin: 0 8px;">↔</span>
+                                                <span class="instance-name">${dup.instance2}</span>
+                                            </td>
+                                            <td><span class="badge badge-primary">${dup.count}</span></td>
+                                            <td>
+                                                ${percentage}%
+                                                <div class="progress-bar">
+                                                    <div class="progress-fill" style="width: ${barWidth}%; background: linear-gradient(90deg, #3b82f6, #2563eb);"></div>
+                                                </div>
+                                            </td>
+                                            <td style="color: #94a3b8; font-size: 0.9em;">
+                                                ${dup.count === 1 ? 'Rare overlap' :
+                                                  dup.count < 5 ? 'Occasional overlap' :
+                                                  dup.count < 15 ? 'Frequent overlap' :
+                                                  dup.count < 50 ? 'High overlap' :
+                                                  'Very high overlap'}
                                             </td>
                                         </tr>
                                     ` + "`" + `;

@@ -635,7 +635,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
     <div id="instances" class="tab-content">
     <div class="chart-container">
         <div class="chart-title">Instance Performance Comparison</div>
-        <canvas id="instanceComparisonChart"></canvas>
+        <canvas id="instanceComparisonChart" style="max-height: 300px;"></canvas>
     </div>
 
     <div class="chart-container">
@@ -657,26 +657,28 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         </table>
     </div>
 
-    <div class="chart-container">
-        <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>Instance Performance Over Time (Before Deduplication)</span>
-            <label style="font-size: 0.9em; font-weight: normal; cursor: pointer; user-select: none;">
-                <input type="checkbox" id="instanceRawSmoothingToggle" checked style="margin-right: 8px; cursor: pointer;">
-                Apply Smoothing (Moving Average)
-            </label>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
+        <div class="chart-container" style="margin-bottom: 0;">
+            <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <span style="font-size: 1em;">Before Deduplication</span>
+                <label style="font-size: 0.85em; font-weight: normal; cursor: pointer; user-select: none;">
+                    <input type="checkbox" id="instanceRawSmoothingToggle" checked style="margin-right: 8px; cursor: pointer;">
+                    Smoothing
+                </label>
+            </div>
+            <canvas id="instancePerformanceRawChart" style="max-height: 300px;"></canvas>
         </div>
-        <canvas id="instancePerformanceRawChart"></canvas>
-    </div>
 
-    <div class="chart-container">
-        <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>Instance Performance Over Time (After Deduplication - Highest SNR)</span>
-            <label style="font-size: 0.9em; font-weight: normal; cursor: pointer; user-select: none;">
-                <input type="checkbox" id="instanceSmoothingToggle" checked style="margin-right: 8px; cursor: pointer;">
-                Apply Smoothing (Moving Average)
-            </label>
+        <div class="chart-container" style="margin-bottom: 0;">
+            <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <span style="font-size: 1em;">After Deduplication (Highest SNR)</span>
+                <label style="font-size: 0.85em; font-weight: normal; cursor: pointer; user-select: none;">
+                    <input type="checkbox" id="instanceSmoothingToggle" checked style="margin-right: 8px; cursor: pointer;">
+                    Smoothing
+                </label>
+            </div>
+            <canvas id="instancePerformanceChart" style="max-height: 300px;"></canvas>
         </div>
-        <canvas id="instancePerformanceChart"></canvas>
     </div>
     </div>
     <!-- End Instances Tab -->

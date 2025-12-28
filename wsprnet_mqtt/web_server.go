@@ -218,6 +218,42 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             color: #e2e8f0;
             padding: 20px;
         }
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #334155;
+            overflow-x: auto;
+            flex-wrap: wrap;
+        }
+        .tab {
+            padding: 12px 24px;
+            background: #1e293b;
+            border: 2px solid #334155;
+            border-bottom: none;
+            border-radius: 8px 8px 0 0;
+            cursor: pointer;
+            color: #94a3b8;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            user-select: none;
+        }
+        .tab:hover {
+            background: #2d3748;
+            color: #e2e8f0;
+        }
+        .tab.active {
+            background: #334155;
+            color: #60a5fa;
+            border-color: #60a5fa;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             padding: 30px;
@@ -492,6 +528,18 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         <div class="subtitle">Real-time monitoring and statistics</div>
     </div>
 
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('overview')">📊 Overview</div>
+        <div class="tab" onclick="switchTab('instances')">🖥️ Instances</div>
+        <div class="tab" onclick="switchTab('perband')">📡 Per Band</div>
+        <div class="tab" onclick="switchTab('relationships')">🔗 Relationships</div>
+        <div class="tab" onclick="switchTab('value')">💎 Value</div>
+        <div class="tab" onclick="switchTab('snr')">📈 SNR</div>
+        <div class="tab" onclick="switchTab('countries')">🌍 Countries</div>
+    </div>
+
+    <!-- Overview Tab -->
+    <div id="overview" class="tab-content active">
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-label">Successfully Sent</div>
@@ -542,7 +590,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         </div>
         <div id="map"></div>
     </div>
+    </div>
+    <!-- End Overview Tab -->
 
+    <!-- Instances Tab -->
+    <div id="instances" class="tab-content">
     <div class="chart-container">
         <div class="chart-title">Instance Performance Comparison</div>
         <canvas id="instanceComparisonChart"></canvas>
@@ -588,7 +640,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         </div>
         <canvas id="instancePerformanceChart"></canvas>
     </div>
+    </div>
+    <!-- End Instances Tab -->
 
+    <!-- Per Band Tab -->
+    <div id="perband" class="tab-content">
     <div class="chart-container">
         <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center;">
             <span>Per-Band Instance Performance</span>
@@ -599,7 +655,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         </div>
         <div id="bandInstanceTables"></div>
     </div>
+    </div>
+    <!-- End Per Band Tab -->
 
+    <!-- Relationships Tab -->
+    <div id="relationships" class="tab-content">
     <div class="chart-container">
         <div class="chart-title">Tied SNR Relationships by Band</div>
         <div id="tiedRelationships"></div>
@@ -609,12 +669,20 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         <div class="chart-title">All Duplicate Relationships by Band</div>
         <div id="duplicateRelationships"></div>
     </div>
+    </div>
+    <!-- End Relationships Tab -->
 
+    <!-- Value Tab -->
+    <div id="value" class="tab-content">
     <div class="chart-container">
         <div class="chart-title">📊 Multi-Instance Value Analysis</div>
         <div id="multiInstanceAnalysis"></div>
     </div>
+    </div>
+    <!-- End Value Tab -->
 
+    <!-- SNR Tab -->
+    <div id="snr" class="tab-content">
     <div class="chart-container">
         <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center;">
             <span>SNR History by Band</span>
@@ -625,17 +693,74 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         </div>
         <div id="snrHistoryCharts"></div>
     </div>
+    </div>
+    <!-- End SNR Tab -->
 
+    <!-- Countries Tab -->
+    <div id="countries" class="tab-content">
     <div class="chart-container">
         <div class="chart-title">Country Statistics by Band</div>
         <div id="countryTables"></div>
     </div>
+    </div>
+    <!-- End Countries Tab -->
 
     <div class="last-update">
         Last updated: <span id="lastUpdate">-</span> | Auto-refresh every 120 seconds
     </div>
 
     <script>
+        // Tab switching function
+        function switchTab(tabName) {
+            // Hide all tab contents
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all tabs
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            const selectedContent = document.getElementById(tabName);
+            if (selectedContent) {
+                selectedContent.classList.add('active');
+            }
+            
+            // Add active class to clicked tab
+            const clickedTab = event.target;
+            if (clickedTab) {
+                clickedTab.classList.add('active');
+            }
+            
+            // Store active tab in localStorage
+            localStorage.setItem('activeTab', tabName);
+        }
+        
+        // Restore last active tab on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            const savedTab = localStorage.getItem('activeTab');
+            if (savedTab) {
+                // Find and click the saved tab
+                const tabs = document.querySelectorAll('.tab');
+                tabs.forEach(tab => {
+                    if (tab.textContent.toLowerCase().includes(savedTab.toLowerCase()) ||
+                        tab.getAttribute('onclick').includes(savedTab)) {
+                        // Simulate click to activate the tab
+                        const tabContents = document.querySelectorAll('.tab-content');
+                        tabContents.forEach(content => content.classList.remove('active'));
+                        tabs.forEach(t => t.classList.remove('active'));
+                        
+                        document.getElementById(savedTab).classList.add('active');
+                        tab.classList.add('active');
+                    }
+                });
+            }
+        });
+
         let spotsChart, bandChart, instancePerformanceChart, instancePerformanceRawChart, instanceComparisonChart, map, markerClusterGroup, receiverMarker;
         let allSpots = []; // Store all spots for filtering
         let activeBands = new Set(); // Track which bands are active

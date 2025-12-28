@@ -707,13 +707,8 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         <div class="band-nav-buttons" id="relationshipsBandNav"></div>
     </div>
     <div class="chart-container">
-        <div class="chart-title">Tied SNR Relationships by Band</div>
-        <div id="tiedRelationships"></div>
-    </div>
-
-    <div class="chart-container">
-        <div class="chart-title">All Duplicate Relationships by Band</div>
-        <div id="duplicateRelationships"></div>
+        <div class="chart-title">Instance Relationships by Band</div>
+        <div id="relationshipsContainer"></div>
     </div>
     </div>
     <!-- End Relationships Tab -->
@@ -1178,8 +1173,7 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                 updateInstancePerformanceRawChart(instancePerformanceRaw);
                 updateInstancePerformanceChart(instancePerformance);
                 updateBandInstanceTable(instances, snrHistory);
-                updateTiedRelationships(instances);
-                updateDuplicateRelationships(instances);
+                updateRelationships(instances);
                 updateMultiInstanceAnalysis(instances);
                 updateSNRHistoryCharts(snrHistory);
                 updateCountryTables(countries);
@@ -2345,43 +2339,42 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             }
         }
 
-        function updateTiedRelationships(instances) {
-            const container = document.getElementById('tiedRelationships');
+        function updateRelationships(instances) {
+            const container = document.getElementById('relationshipsContainer');
             
             if (!container) {
-                console.error('tiedRelationships container not found');
+                console.error('relationshipsContainer not found');
                 return;
             }
-            
-            // Set default message initially
-            container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">Loading tie relationship data...</p>';
             
             if (!instances || Object.keys(instances).length === 0) {
                 container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">No instance data available yet. Waiting for WSPR decodes...</p>';
                 return;
             }
 
-            // Collect all bands and tie relationships
+            // Collect all bands with both tied and duplicate relationships
             const bandTies = {}; // band -> array of tie relationships
+            const bandDuplicates = {}; // band -> array of duplicate relationships
+            const bandTotalDuplicates = {}; // band -> total duplicates count
+            const bandTotalSpots = {}; // band -> total spots count
             
             Object.values(instances).forEach(inst => {
                 Object.entries(inst.BandStats || {}).forEach(([band, stats]) => {
-                    if (!bandTies[band]) {
-                        bandTies[band] = {};
-                    }
+                    // Initialize band data structures
+                    if (!bandTies[band]) bandTies[band] = {};
+                    if (!bandDuplicates[band]) bandDuplicates[band] = {};
+                    if (!bandTotalDuplicates[band]) bandTotalDuplicates[band] = 0;
+                    if (!bandTotalSpots[band]) bandTotalSpots[band] = 0;
+                    
+                    // Calculate totals
+                    bandTotalDuplicates[band] += (stats.TotalSpots - stats.UniqueSpots);
+                    bandTotalSpots[band] += stats.TotalSpots;
                     
                     // Process TiedWith relationships
                     if (stats.TiedWith) {
                         Object.entries(stats.TiedWith).forEach(([otherInstance, count]) => {
-                            // Skip self-ties (shouldn't happen, but filter just in case)
-                            if (inst.Name === otherInstance) {
-                                console.warn(` + "`" + `Self-tie detected for ${inst.Name} on ${band} - skipping` + "`" + `);
-                                return;
-                            }
-                            
-                            // Create a sorted pair key to avoid duplicates (A-B and B-A)
+                            if (inst.Name === otherInstance) return;
                             const pair = [inst.Name, otherInstance].sort().join(' ↔ ');
-                            
                             if (!bandTies[band][pair]) {
                                 bandTies[band][pair] = {
                                     instance1: inst.Name < otherInstance ? inst.Name : otherInstance,
@@ -2389,79 +2382,86 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                                     count: 0
                                 };
                             }
-                            // Add count (will be counted from both sides, so we'll divide by 2 later)
                             bandTies[band][pair].count += count;
+                        });
+                    }
+                    
+                    // Process DuplicatesWith relationships
+                    if (stats.DuplicatesWith) {
+                        Object.entries(stats.DuplicatesWith).forEach(([otherInstance, count]) => {
+                            if (inst.Name === otherInstance) return;
+                            const pair = [inst.Name, otherInstance].sort().join(' ↔ ');
+                            if (!bandDuplicates[band][pair]) {
+                                bandDuplicates[band][pair] = {
+                                    instance1: inst.Name < otherInstance ? inst.Name : otherInstance,
+                                    instance2: inst.Name < otherInstance ? otherInstance : inst.Name,
+                                    count: 0
+                                };
+                            }
+                            bandDuplicates[band][pair].count += count;
                         });
                     }
                 });
             });
 
-            // Calculate total duplicates per band for percentage
-            const bandDuplicates = {};
-            Object.values(instances).forEach(inst => {
-                Object.entries(inst.BandStats || {}).forEach(([band, stats]) => {
-                    if (!bandDuplicates[band]) {
-                        bandDuplicates[band] = 0;
-                    }
-                    // Total duplicates = total spots - unique spots
-                    bandDuplicates[band] += (stats.TotalSpots - stats.UniqueSpots);
-                });
-            });
-
-            // Sort bands properly
-            const bands = sortBands(Object.keys(bandTies));
+            // Get all bands that have either ties or duplicates
+            const allBands = [...new Set([...Object.keys(bandTies), ...Object.keys(bandDuplicates)])];
+            const bands = sortBands(allBands);
             
             if (bands.length === 0) {
-                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">✓ No tied SNR relationships found yet.<br><span style="font-size: 0.9em; opacity: 0.8;">All duplicates have clear SNR winners. Ties will appear here when instances report identical SNR values.</span></p>';
+                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">✓ No relationships found yet.<br><span style="font-size: 0.9em; opacity: 0.8;">All spots are unique to individual instances.</span></p>';
                 return;
             }
 
             container.innerHTML = '';
             
-            // Add summary header
-            let totalTies = 0;
+            // Create per-band sections with side-by-side tables
             bands.forEach(band => {
-                const ties = Object.values(bandTies[band]);
-                ties.forEach(tie => {
-                    totalTies += Math.round(tie.count / 2);
-                });
-            });
-            
-            if (totalTies > 0) {
-                container.innerHTML = ` + "`" + `<p style="color: #10b981; text-align: center; padding: 10px; margin-bottom: 20px; background: rgba(16, 185, 129, 0.1); border-radius: 8px;">
-                    <strong>Found ${totalTies} tied SNR relationship${totalTies !== 1 ? 's' : ''} across ${bands.length} band${bands.length !== 1 ? 's' : ''}</strong>
-                </p>` + "`" + `;
-            }
-
-            bands.forEach(band => {
-                const ties = Object.values(bandTies[band]);
+                const ties = Object.values(bandTies[band] || {});
+                const dups = Object.values(bandDuplicates[band] || {});
                 
-                if (ties.length === 0) return;
-
-                // Since ties are counted from both sides, divide by 2
-                ties.forEach(tie => {
-                    tie.count = Math.round(tie.count / 2);
-                });
-
+                // Divide counts by 2 (counted from both sides)
+                ties.forEach(tie => tie.count = Math.round(tie.count / 2));
+                dups.forEach(dup => dup.count = Math.round(dup.count / 2));
+                
                 // Sort by count descending
                 ties.sort((a, b) => b.count - a.count);
-
-                const totalDups = bandDuplicates[band] || 1; // Avoid division by zero
-
-                const bandId = 'tied_' + band.replace(/[^a-zA-Z0-9]/g, '_');
-                const tableHTML = ` + "`" + `
-                    <div id="${bandId}" style="margin-bottom: 30px;">
+                dups.sort((a, b) => b.count - a.count);
+                
+                const totalDups = bandTotalDuplicates[band] || 1;
+                const totalSpots = bandTotalSpots[band] || 1;
+                
+                const bandId = 'relationship_' + band.replace(/[^a-zA-Z0-9]/g, '_');
+                
+                let html = ` + "`" + `
+                    <div id="${bandId}" style="margin-bottom: 40px;">
                         <h3 style="color: #60a5fa; margin-bottom: 15px;">
                             <span class="badge badge-warning" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
-                            <span style="font-size: 0.9em; color: #94a3b8; margin-left: 10px;">Total Duplicates: ${totalDups}</span>
+                            <span style="font-size: 0.9em; color: #94a3b8; margin-left: 10px;">
+                                Total Spots: ${totalSpots} | Duplicates: ${totalDups}
+                            </span>
                         </h3>
-                        <table style="width: 100%;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                ` + "`" + `;
+                
+                // Left column: Tied SNR Relationships
+                html += ` + "`" + `
+                    <div style="background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155;">
+                        <h4 style="color: #f59e0b; margin-bottom: 15px; font-size: 1.1em;">
+                            🤝 Tied SNR Relationships
+                        </h4>
+                ` + "`" + `;
+                
+                if (ties.length === 0) {
+                    html += ` + "`" + `<p style="color: #94a3b8; text-align: center; padding: 20px; font-size: 0.9em;">No tied SNR relationships on this band</p>` + "`" + `;
+                } else {
+                    html += ` + "`" + `
+                        <table style="width: 100%; font-size: 0.9em;">
                             <thead>
                                 <tr>
-                                    <th>Instance Pair</th>
-                                    <th>Tie Count</th>
-                                    <th>% of Band Duplicates</th>
-                                    <th>Relationship</th>
+                                    <th style="font-size: 0.85em;">Instance Pair</th>
+                                    <th style="font-size: 0.85em;">Count</th>
+                                    <th style="font-size: 0.85em;">% of Dups</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -2470,163 +2470,46 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                                     const barWidth = Math.min(percentage, 100);
                                     return ` + "`" + `
                                         <tr>
-                                            <td>
-                                                <span class="instance-name">${tie.instance1}</span>
-                                                <span style="color: #f59e0b; margin: 0 8px;">↔</span>
-                                                <span class="instance-name">${tie.instance2}</span>
+                                            <td style="padding: 8px;">
+                                                <span class="instance-name" style="font-size: 0.9em;">${tie.instance1}</span>
+                                                <span style="color: #f59e0b; margin: 0 4px;">↔</span>
+                                                <span class="instance-name" style="font-size: 0.9em;">${tie.instance2}</span>
                                             </td>
-                                            <td><span class="badge badge-warning">${tie.count}</span></td>
-                                            <td>
+                                            <td style="padding: 8px;"><span class="badge badge-warning">${tie.count}</span></td>
+                                            <td style="padding: 8px;">
                                                 ${percentage}%
-                                                <div class="progress-bar">
+                                                <div class="progress-bar" style="height: 6px;">
                                                     <div class="progress-fill" style="width: ${barWidth}%; background: linear-gradient(90deg, #f59e0b, #d97706);"></div>
                                                 </div>
-                                            </td>
-                                            <td style="color: #94a3b8; font-size: 0.9em;">
-                                                ${tie.count === 1 ? 'Rare tie' :
-                                                  tie.count < 5 ? 'Occasional ties' :
-                                                  tie.count < 15 ? 'Frequent ties' :
-                                                  'Very similar performance'}
                                             </td>
                                         </tr>
                                     ` + "`" + `;
                                 }).join('')}
                             </tbody>
                         </table>
-                    </div>
-                ` + "`" + `;
-
-                container.innerHTML += tableHTML;
-            });
-            
-            // Store bands for navigation (will be combined with duplicate relationships)
-            window.tiedBands = bands;
-            updateRelationshipsBandNav();
-        }
-
-        function updateDuplicateRelationships(instances) {
-            const container = document.getElementById('duplicateRelationships');
-            
-            if (!container) {
-                console.error('duplicateRelationships container not found');
-                return;
-            }
-            
-            console.log('updateDuplicateRelationships called with instances:', instances);
-            
-            // Set default message initially
-            container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">Loading duplicate relationship data...</p>';
-            
-            if (!instances || Object.keys(instances).length === 0) {
-                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">No instance data available yet. Waiting for WSPR decodes...</p>';
-                return;
-            }
-
-            // Collect all bands and duplicate relationships
-            const bandDuplicates = {}; // band -> array of duplicate relationships
-            
-            Object.values(instances).forEach(inst => {
-                Object.entries(inst.BandStats || {}).forEach(([band, stats]) => {
-                    if (!bandDuplicates[band]) {
-                        bandDuplicates[band] = {};
-                    }
-                    
-                    // Process DuplicatesWith relationships
-                    if (stats.DuplicatesWith) {
-                        Object.entries(stats.DuplicatesWith).forEach(([otherInstance, count]) => {
-                            // Skip self-duplicates (shouldn't happen, but filter just in case)
-                            if (inst.Name === otherInstance) {
-                                console.warn(` + "`" + `Self-duplicate detected for ${inst.Name} on ${band} - skipping` + "`" + `);
-                                return;
-                            }
-                            
-                            // Create a sorted pair key to avoid duplicates (A-B and B-A)
-                            const pair = [inst.Name, otherInstance].sort().join(' ↔ ');
-                            
-                            if (!bandDuplicates[band][pair]) {
-                                bandDuplicates[band][pair] = {
-                                    instance1: inst.Name < otherInstance ? inst.Name : otherInstance,
-                                    instance2: inst.Name < otherInstance ? otherInstance : inst.Name,
-                                    count: 0
-                                };
-                            }
-                            // Add count (will be counted from both sides, so we'll divide by 2 later)
-                            bandDuplicates[band][pair].count += count;
-                        });
-                    }
-                });
-            });
-
-            // Calculate total spots per band for percentage
-            const bandTotalSpots = {};
-            Object.values(instances).forEach(inst => {
-                Object.entries(inst.BandStats || {}).forEach(([band, stats]) => {
-                    if (!bandTotalSpots[band]) {
-                        bandTotalSpots[band] = 0;
-                    }
-                    bandTotalSpots[band] += stats.TotalSpots;
-                });
-            });
-
-            console.log('bandDuplicates:', bandDuplicates);
-
-            // Sort bands properly
-            const bands = sortBands(Object.keys(bandDuplicates));
-            
-            console.log('bands with duplicates:', bands);
-            
-            if (bands.length === 0) {
-                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">✓ No duplicate relationships found yet.<br><span style="font-size: 0.9em; opacity: 0.8;">All spots are unique to individual instances. Duplicates will appear here when multiple instances decode the same callsign.</span></p>';
-                return;
-            }
-
-            container.innerHTML = '';
-            
-            // Add summary header
-            let totalDuplicates = 0;
-            bands.forEach(band => {
-                const dups = Object.values(bandDuplicates[band]);
-                dups.forEach(dup => {
-                    totalDuplicates += Math.round(dup.count / 2);
-                });
-            });
-            
-            if (totalDuplicates > 0) {
-                container.innerHTML = ` + "`" + `<p style="color: #3b82f6; text-align: center; padding: 10px; margin-bottom: 20px; background: rgba(59, 130, 246, 0.1); border-radius: 8px;">
-                    <strong>Found ${totalDuplicates} duplicate relationship${totalDuplicates !== 1 ? 's' : ''} across ${bands.length} band${bands.length !== 1 ? 's' : ''}</strong><br>
-                    <span style="font-size: 0.9em; opacity: 0.8;">This includes all duplicates, regardless of SNR values (ties and non-ties)</span>
-                </p>` + "`" + `;
-            }
-
-            bands.forEach(band => {
-                const dups = Object.values(bandDuplicates[band]);
+                    ` + "`" + `;
+                }
                 
-                if (dups.length === 0) return;
-
-                // Since duplicates are counted from both sides, divide by 2
-                dups.forEach(dup => {
-                    dup.count = Math.round(dup.count / 2);
-                });
-
-                // Sort by count descending
-                dups.sort((a, b) => b.count - a.count);
-
-                const totalSpots = bandTotalSpots[band] || 1; // Avoid division by zero
-
-                const bandId = 'duplicate_' + band.replace(/[^a-zA-Z0-9]/g, '_');
-                const tableHTML = ` + "`" + `
-                    <div id="${bandId}" style="margin-bottom: 30px;">
-                        <h3 style="color: #60a5fa; margin-bottom: 15px;">
-                            <span class="badge badge-primary" style="font-size: 1.1em; padding: 6px 14px;">${band}</span>
-                            <span style="font-size: 0.9em; color: #94a3b8; margin-left: 10px;">Total Spots: ${totalSpots}</span>
-                        </h3>
-                        <table style="width: 100%;">
+                html += ` + "`" + `</div>` + "`" + `;
+                
+                // Right column: All Duplicate Relationships
+                html += ` + "`" + `
+                    <div style="background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155;">
+                        <h4 style="color: #3b82f6; margin-bottom: 15px; font-size: 1.1em;">
+                            🔗 All Duplicate Relationships
+                        </h4>
+                ` + "`" + `;
+                
+                if (dups.length === 0) {
+                    html += ` + "`" + `<p style="color: #94a3b8; text-align: center; padding: 20px; font-size: 0.9em;">No duplicate relationships on this band</p>` + "`" + `;
+                } else {
+                    html += ` + "`" + `
+                        <table style="width: 100%; font-size: 0.9em;">
                             <thead>
                                 <tr>
-                                    <th>Instance Pair</th>
-                                    <th>Duplicate Count</th>
-                                    <th>% of Band Spots</th>
-                                    <th>Relationship</th>
+                                    <th style="font-size: 0.85em;">Instance Pair</th>
+                                    <th style="font-size: 0.85em;">Count</th>
+                                    <th style="font-size: 0.85em;">% of Spots</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -2635,80 +2518,38 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                                     const barWidth = Math.min(percentage, 100);
                                     return ` + "`" + `
                                         <tr>
-                                            <td>
-                                                <span class="instance-name">${dup.instance1}</span>
-                                                <span style="color: #3b82f6; margin: 0 8px;">↔</span>
-                                                <span class="instance-name">${dup.instance2}</span>
+                                            <td style="padding: 8px;">
+                                                <span class="instance-name" style="font-size: 0.9em;">${dup.instance1}</span>
+                                                <span style="color: #3b82f6; margin: 0 4px;">↔</span>
+                                                <span class="instance-name" style="font-size: 0.9em;">${dup.instance2}</span>
                                             </td>
-                                            <td><span class="badge badge-primary">${dup.count}</span></td>
-                                            <td>
+                                            <td style="padding: 8px;"><span class="badge badge-primary">${dup.count}</span></td>
+                                            <td style="padding: 8px;">
                                                 ${percentage}%
-                                                <div class="progress-bar">
+                                                <div class="progress-bar" style="height: 6px;">
                                                     <div class="progress-fill" style="width: ${barWidth}%; background: linear-gradient(90deg, #3b82f6, #2563eb);"></div>
                                                 </div>
-                                            </td>
-                                            <td style="color: #94a3b8; font-size: 0.9em;">
-                                                ${dup.count === 1 ? 'Rare overlap' :
-                                                  dup.count < 5 ? 'Occasional overlap' :
-                                                  dup.count < 15 ? 'Frequent overlap' :
-                                                  dup.count < 50 ? 'High overlap' :
-                                                  'Very high overlap'}
                                             </td>
                                         </tr>
                                     ` + "`" + `;
                                 }).join('')}
                             </tbody>
                         </table>
+                    ` + "`" + `;
+                }
+                
+                html += ` + "`" + `
+                        </div>
                     </div>
+                </div>
                 ` + "`" + `;
-
-                container.innerHTML += tableHTML;
+                
+                container.innerHTML += html;
             });
             
-            // Store bands for navigation (will be combined with tied relationships)
-            window.duplicateBands = bands;
-            updateRelationshipsBandNav();
-        }
-        
-        // Update relationships band navigation with combined bands from both sections
-        function updateRelationshipsBandNav() {
-            const tiedBands = window.tiedBands || [];
-            const duplicateBands = window.duplicateBands || [];
-            
-            // Combine and deduplicate bands
-            const allBands = [...new Set([...tiedBands, ...duplicateBands])];
-            
-            if (allBands.length > 0) {
-                const sortedBands = sortBands(allBands);
-                
-                // Create navigation with both tied and duplicate sections
-                const container = document.getElementById('relationshipsBandNav');
-                if (!container) return;
-                
-                container.innerHTML = '';
-                sortedBands.forEach(band => {
-                    const btn = document.createElement('button');
-                    btn.className = 'band-nav-btn';
-                    btn.textContent = band;
-                    btn.style.borderColor = bandColors[band] || '#475569';
-                    btn.style.color = bandColors[band] || '#e2e8f0';
-                    btn.onclick = () => {
-                        // Try tied first, then duplicate
-                        const tiedId = 'tied_' + band.replace(/[^a-zA-Z0-9]/g, '_');
-                        const duplicateId = 'duplicate_' + band.replace(/[^a-zA-Z0-9]/g, '_');
-                        
-                        let targetElement = document.getElementById(tiedId);
-                        if (!targetElement) {
-                            targetElement = document.getElementById(duplicateId);
-                        }
-                        
-                        if (targetElement) {
-                            targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                            setTimeout(() => window.scrollBy(0, -100), 100);
-                        }
-                    };
-                    container.appendChild(btn);
-                });
+            // Create band navigation
+            if (bands.length > 0) {
+                createBandNavigation(bands, 'relationshipsBandNav', 'relationship_');
             }
         }
 

@@ -254,6 +254,44 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         .tab-content.active {
             display: block;
         }
+        .band-nav {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #334155;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .band-nav-title {
+            font-size: 0.9em;
+            color: #94a3b8;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        .band-nav-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .band-nav-btn {
+            padding: 6px 12px;
+            background: #334155;
+            color: #e2e8f0;
+            border: 1px solid #475569;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+        .band-nav-btn:hover {
+            background: #475569;
+            border-color: #64748b;
+            transform: translateY(-1px);
+        }
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             padding: 30px;
@@ -645,6 +683,10 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
     <!-- Per Band Tab -->
     <div id="perband" class="tab-content">
+    <div class="band-nav">
+        <div class="band-nav-title">Jump to Band:</div>
+        <div class="band-nav-buttons" id="perbandBandNav"></div>
+    </div>
     <div class="chart-container">
         <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center;">
             <span>Per-Band Instance Performance</span>
@@ -660,6 +702,10 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
     <!-- Relationships Tab -->
     <div id="relationships" class="tab-content">
+    <div class="band-nav">
+        <div class="band-nav-title">Jump to Band:</div>
+        <div class="band-nav-buttons" id="relationshipsBandNav"></div>
+    </div>
     <div class="chart-container">
         <div class="chart-title">Tied SNR Relationships by Band</div>
         <div id="tiedRelationships"></div>
@@ -674,6 +720,10 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
     <!-- Value Tab -->
     <div id="value" class="tab-content">
+    <div class="band-nav">
+        <div class="band-nav-title">Jump to Band:</div>
+        <div class="band-nav-buttons" id="valueBandNav"></div>
+    </div>
     <div class="chart-container">
         <div class="chart-title">📊 Multi-Instance Value Analysis</div>
         <div id="multiInstanceAnalysis"></div>
@@ -683,6 +733,10 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
     <!-- SNR Tab -->
     <div id="snr" class="tab-content">
+    <div class="band-nav">
+        <div class="band-nav-title">Jump to Band:</div>
+        <div class="band-nav-buttons" id="snrBandNav"></div>
+    </div>
     <div class="chart-container">
         <div class="chart-title" style="display: flex; justify-content: space-between; align-items: center;">
             <span>SNR History by Band</span>
@@ -698,6 +752,10 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
     <!-- Countries Tab -->
     <div id="countries" class="tab-content">
+    <div class="band-nav">
+        <div class="band-nav-title">Jump to Band:</div>
+        <div class="band-nav-buttons" id="countriesBandNav"></div>
+    </div>
     <div class="chart-container">
         <div class="chart-title">Country Statistics by Band</div>
         <div id="countryTables"></div>
@@ -1634,6 +1692,34 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
         // Store band charts globally
         const bandCharts = {};
 
+        // Function to create band navigation buttons
+        function createBandNavigation(bands, containerId, sectionPrefix) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            container.innerHTML = '';
+            bands.forEach(band => {
+                const btn = document.createElement('button');
+                btn.className = 'band-nav-btn';
+                btn.textContent = band;
+                btn.style.borderColor = bandColors[band] || '#475569';
+                btn.style.color = bandColors[band] || '#e2e8f0';
+                btn.onclick = () => {
+                    // Find the section for this band
+                    const allSections = document.querySelectorAll('h3, .chart-title');
+                    for (let el of allSections) {
+                        if (el.textContent.includes(band)) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            // Add offset for sticky nav
+                            window.scrollBy(0, -80);
+                            break;
+                        }
+                    }
+                };
+                container.appendChild(btn);
+            });
+        }
+
         function updateBandInstanceTable(instances, snrHistory) {
             // Store raw data for re-rendering when smoothing is toggled
             rawBandData = { instances, snrHistory };
@@ -2048,6 +2134,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             } else {
                 container.appendChild(gridContainer);
             }
+            
+            // Create band navigation for Per Band tab
+            if (bands.length > 0) {
+                createBandNavigation(bands, 'perbandBandNav', 'band_');
+            }
         }
 
         // Store country data for sorting
@@ -2133,6 +2224,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
                     sortCountryTable(band, column, type, !isAsc);
                 });
             });
+            
+            // Create band navigation for Countries tab
+            if (bands.length > 0) {
+                createBandNavigation(bands, 'countriesBandNav', 'country_');
+            }
         }
 
         function updateTiedRelationships(instances) {
@@ -2287,6 +2383,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
                 container.innerHTML += tableHTML;
             });
+            
+            // Create band navigation for Relationships tab (tied relationships)
+            if (bands.length > 0) {
+                createBandNavigation(bands, 'relationshipsBandNav', 'tied_');
+            }
         }
 
         function updateDuplicateRelationships(instances) {
@@ -2696,6 +2797,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
             });
 
             container.innerHTML = html;
+            
+            // Create band navigation for Value tab
+            if (bands.length > 0) {
+                createBandNavigation(bands, 'valueBandNav', 'value_');
+            }
         }
 
         function sortCountryTable(band, column, type, ascending) {
@@ -2919,6 +3025,11 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
             if (bands.length === 0) {
                 container.innerHTML = '<p style="color: #94a3b8; text-align: center;">No SNR history data available yet</p>';
+            }
+            
+            // Create band navigation for SNR tab
+            if (bands.length > 0) {
+                createBandNavigation(bands, 'snrBandNav', 'snr_');
             }
         }
 

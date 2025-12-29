@@ -14,18 +14,25 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo "=== Installing Avahi (mDNS/Bonjour) support ==="
-apt update && apt install -y avahi-daemon avahi-utils
+# Check if Avahi is already configured (service file exists)
+if [ -f "$SERVICE_FILE" ]; then
+  echo "=== Avahi already configured ==="
+  echo "⚠ Avahi service file already exists at $SERVICE_FILE"
+  echo "  Skipping Avahi setup to preserve existing configuration."
+  echo "  If you want to reconfigure, delete the file and re-run this script."
+else
+  echo "=== Installing Avahi (mDNS/Bonjour) support ==="
+  apt update && apt install -y avahi-daemon avahi-utils
 
-echo "=== Configuring Avahi daemon ==="
-# Configure hostname and domain in avahi-daemon.conf
-sed -i 's/^#*host-name=.*/host-name=ubersdr/' /etc/avahi/avahi-daemon.conf
-sed -i 's/^#*domain-name=.*/domain-name=local/' /etc/avahi/avahi-daemon.conf
+  echo "=== Configuring Avahi daemon ==="
+  # Configure hostname and domain in avahi-daemon.conf
+  sed -i 's/^#*host-name=.*/host-name=ubersdr/' /etc/avahi/avahi-daemon.conf
+  sed -i 's/^#*domain-name=.*/domain-name=local/' /etc/avahi/avahi-daemon.conf
 
-echo "=== Creating mDNS service advertisement ==="
-mkdir -p /etc/avahi/services
-
-cat > "$SERVICE_FILE" <<EOF
+  echo "=== Creating mDNS service advertisement ==="
+  mkdir -p /etc/avahi/services
+  
+  cat > "$SERVICE_FILE" <<EOF
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
@@ -46,8 +53,9 @@ cat > "$SERVICE_FILE" <<EOF
 </service-group>
 EOF
 
-echo "=== Restarting Avahi daemon ==="
-systemctl restart avahi-daemon
+  echo "=== Restarting Avahi daemon ==="
+  systemctl restart avahi-daemon
+fi
 
 sleep 1
 

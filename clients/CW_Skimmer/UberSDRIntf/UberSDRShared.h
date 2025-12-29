@@ -4,7 +4,19 @@
 
 #include <stdint.h>
 
-#define UBERSDR_SHARED_MEMORY_NAME L"UberSDRIntf_Status_v1"
+// Multi-instance support: Each DLL instance creates unique shared memory
+// Format: UberSDRIntf_Status_v1_{ProcessID}
+#define UBERSDR_SHARED_MEMORY_PREFIX L"UberSDRIntf_Status_v1"
+#define UBERSDR_SHARED_MEMORY_NAME L"UberSDRIntf_Status_v1"  // Legacy name for backward compatibility
+
+// Registry paths for instance tracking
+#define UBERSDR_REGISTRY_ROOT L"Software\\UberSDR"
+#define UBERSDR_REGISTRY_INSTANCES L"Software\\UberSDR\\Instances"
+
+// Heartbeat interval (milliseconds)
+#define UBERSDR_HEARTBEAT_INTERVAL 10000  // 10 seconds
+#define UBERSDR_HEARTBEAT_TIMEOUT 30000   // 30 seconds (consider stale after this)
+
 #define MAX_RX_COUNT 8
 #define IQ_BUFFER_SIZE 384000  // Buffer for ~2 seconds at 192kHz (2 samples per I/Q pair)
 
@@ -59,6 +71,39 @@ struct UberSDRSharedStatus {
     // Version info
     int structVersion;  // For future compatibility
     int64_t lastUpdateTime;  // Last time any field was updated
+    
+    // Multi-instance support
+    DWORD processID;  // Process ID of the DLL instance
 };
+
+// Instance information structure (for monitor enumeration)
+struct UberSDRInstanceInfo {
+    DWORD processID;
+    wchar_t serverHost[64];
+    int serverPort;
+    int64_t startTime;
+    int64_t lastHeartbeat;
+    wchar_t sharedMemoryName[128];
+    bool isValid;  // Set to false if process no longer exists
+};
+
+// Helper functions for multi-instance support (implemented in UberSDRIntf.cpp)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Build shared memory name for a given process ID
+void BuildSharedMemoryName(DWORD processID, wchar_t* buffer, size_t bufferSize);
+
+// Registry functions for instance tracking
+BOOL RegisterInstance(DWORD processID, const char* serverHost, int serverPort, int64_t startTime);
+BOOL UnregisterInstance(DWORD processID);
+BOOL UpdateInstanceHeartbeat(DWORD processID);
+int EnumerateInstances(UberSDRInstanceInfo* instances, int maxInstances);
+void CleanupStaleInstances();
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // UBERSDRSHARED_H

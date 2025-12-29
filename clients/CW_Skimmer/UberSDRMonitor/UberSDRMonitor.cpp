@@ -52,6 +52,11 @@ UINT_PTR g_timerId = 0;
 RecordingState g_recording[MAX_RX_COUNT] = {0};
 WNDPROC g_originalButtonProc[MAX_RX_COUNT] = {0};
 
+// Multi-instance support
+UberSDRInstanceInfo g_instances[16];  // Support up to 16 instances
+int g_instanceCount = 0;
+int g_selectedInstance = -1;
+
 // Telnet connection state
 SOCKET g_telnetSocket = INVALID_SOCKET;
 bool g_telnetConnected = false;
@@ -125,37 +130,78 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 // Initialize shared memory connection
 BOOL InitSharedMemory()
 {
-    // Try UberSDR first
-    g_hSharedMemory = OpenFileMappingW(
-        FILE_MAP_READ,
-        FALSE,
-        UBERSDR_SHARED_MEMORY_NAME);
+    // Clean up stale instances first
+    CleanupStaleInstances();
     
-    // If not found, try Hermes
-    if (g_hSharedMemory == NULL) {
+    // Enumerate all available instances
+    g_instanceCount = EnumerateInstances(g_instances, 16);
+    
+    if (g_instanceCount == 0) {
+        // No instances found - try legacy shared memory name for backward compatibility
         g_hSharedMemory = OpenFileMappingW(
             FILE_MAP_READ,
             FALSE,
-            L"HermesIntf_Status_v1");
+            UBERSDR_SHARED_MEMORY_NAME);
+        
+        // If not found, try Hermes
+        if (g_hSharedMemory == NULL) {
+            g_hSharedMemory = OpenFileMappingW(
+                FILE_MAP_READ,
+                FALSE,
+                L"HermesIntf_Status_v1");
+        }
+        
+        if (g_hSharedMemory == NULL) {
+            return FALSE;
+        }
+        
+        g_pStatus = (const UberSDRSharedStatus*)MapViewOfFile(
+            g_hSharedMemory,
+            FILE_MAP_READ,
+            0, 0,
+            sizeof(UberSDRSharedStatus));
+        
+        if (g_pStatus == NULL) {
+            CloseHandle(g_hSharedMemory);
+            g_hSharedMemory = NULL;
+            return FALSE;
+        }
+        
+        g_selectedInstance = -1;  // Legacy mode
+        return TRUE;
     }
-    
-    if (g_hSharedMemory == NULL) {
-        return FALSE;
+    else if (g_instanceCount == 1) {
+        // Single instance - auto-connect
+        g_selectedInstance = 0;
+        
+        g_hSharedMemory = OpenFileMappingW(
+            FILE_MAP_READ,
+            FALSE,
+            g_instances[0].sharedMemoryName);
+        
+        if (g_hSharedMemory == NULL) {
+            return FALSE;
+        }
+        
+        g_pStatus = (const UberSDRSharedStatus*)MapViewOfFile(
+            g_hSharedMemory,
+            FILE_MAP_READ,
+            0, 0,
+            sizeof(UberSDRSharedStatus));
+        
+        if (g_pStatus == NULL) {
+            CloseHandle(g_hSharedMemory);
+            g_hSharedMemory = NULL;
+            return FALSE;
+        }
+        
+        return TRUE;
     }
-    
-    g_pStatus = (const UberSDRSharedStatus*)MapViewOfFile(
-        g_hSharedMemory,
-        FILE_MAP_READ,
-        0, 0,
-        sizeof(UberSDRSharedStatus));
-    
-    if (g_pStatus == NULL) {
-        CloseHandle(g_hSharedMemory);
-        g_hSharedMemory = NULL;
-        return FALSE;
+    else {
+        // Multiple instances - need user selection
+        // This will be handled by showing a selection dialog
+        return FALSE;  // Indicate selection needed
     }
-    
-    return TRUE;
 }
 
 // Cleanup shared memory
@@ -645,6 +691,87 @@ void ProcessTelnet()
     }
 }
 
+// Show instance selection dialog
+int ShowInstanceSelectionDialog(HWND hParent)
+{
+    // Build message with instance list
+    char message[2048];
+    strcpy_s(message, sizeof(message), "Multiple UberSDR instances detected. Select one:\n\n");
+    
+    for (int i = 0; i < g_instanceCount; i++) {
+        char line[256];
+        char serverHost[128];
+        WideCharToMultiByte(CP_UTF8, 0, g_instances[i].serverHost, -1, serverHost, 128, NULL, NULL);
+        
+        // Format start time
+        FILETIME ft;
+        ULARGE_INTEGER uli;
+        uli.QuadPart = (g_instances[i].startTime + 11644473600000ULL) * 10000ULL;
+        ft.dwLowDateTime = uli.LowPart;
+        ft.dwHighDateTime = uli.HighPart;
+        
+        SYSTEMTIME st;
+        FileTimeToSystemTime(&ft, &st);
+        
+        sprintf_s(line, sizeof(line), "[%d] %s:%d (PID %u, started %02d:%02d:%02d)\n",
+                 i + 1, serverHost, g_instances[i].serverPort, g_instances[i].processID,
+                 st.wHour, st.wMinute, st.wSecond);
+        strcat_s(message, sizeof(message), line);
+    }
+    
+    strcat_s(message, sizeof(message), "\nAuto-selecting first instance...");
+    
+    MessageBoxA(hParent, message, "Select UberSDR Instance", MB_OK | MB_ICONINFORMATION);
+    
+    // Auto-select first instance for now
+    // TODO: Implement proper selection dialog with radio buttons
+    return 0;
+}
+
+// Connect to selected instance
+BOOL ConnectToInstance(int instanceIndex)
+{
+    if (instanceIndex < 0 || instanceIndex >= g_instanceCount) {
+        return FALSE;
+    }
+    
+    // Close existing connection if any
+    if (g_pStatus != NULL) {
+        UnmapViewOfFile((LPVOID)g_pStatus);
+        g_pStatus = NULL;
+    }
+    
+    if (g_hSharedMemory != NULL) {
+        CloseHandle(g_hSharedMemory);
+        g_hSharedMemory = NULL;
+    }
+    
+    // Open shared memory for selected instance
+    g_hSharedMemory = OpenFileMappingW(
+        FILE_MAP_READ,
+        FALSE,
+        g_instances[instanceIndex].sharedMemoryName);
+    
+    if (g_hSharedMemory == NULL) {
+        return FALSE;
+    }
+    
+    g_pStatus = (const UberSDRSharedStatus*)MapViewOfFile(
+        g_hSharedMemory,
+        FILE_MAP_READ,
+        0, 0,
+        sizeof(UberSDRSharedStatus));
+    
+    if (g_pStatus == NULL) {
+        CloseHandle(g_hSharedMemory);
+        g_hSharedMemory = NULL;
+        return FALSE;
+    }
+    
+    g_selectedInstance = instanceIndex;
+    return TRUE;
+}
+
 // Dialog procedure
 INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -677,7 +804,16 @@ INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
             
             // Try to connect to shared memory
             if (!InitSharedMemory()) {
-                SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, "Waiting for DLL to load...");
+                // Check if we need to show instance selection
+                if (g_instanceCount > 1) {
+                    // Show selection dialog and connect to selected instance
+                    int selected = ShowInstanceSelectionDialog(hDlg);
+                    if (!ConnectToInstance(selected)) {
+                        SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, "Failed to connect to selected instance");
+                    }
+                } else {
+                    SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, "Waiting for DLL to load...");
+                }
             }
             
             // Connect to telnet server

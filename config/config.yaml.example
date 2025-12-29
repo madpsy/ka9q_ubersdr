@@ -179,7 +179,7 @@ server:
     iq384: false
 
   # Enable CORS
-  enable_cors: false
+  enable_cors: true
 
   # KiwiSDR protocol compatibility
   # Allows KiwiSDR clients (like kiwirecorder.py) to connect to UberSDR

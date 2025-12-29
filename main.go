@@ -179,6 +179,26 @@ func gzipHandler(fn http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// corsMiddleware adds CORS headers to all responses if enabled in config
+func corsMiddleware(config *Config, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if config.Server.EnableCORS {
+			// Set CORS headers before any other processing
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Max-Age", "86400") // Cache preflight for 24 hours
+			
+			// Handle preflight OPTIONS requests
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent) // 204 is more appropriate than 200 for OPTIONS
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	// Record start time for uptime tracking
 	StartTime = time.Now()
@@ -953,13 +973,15 @@ func main() {
 	fs := http.FileServer(http.Dir("static"))
 	http.Handle("/", fs)
 
-	// Wrap the default ServeMux with logging middleware
-	loggedHandler := httpLogger(logFile, http.DefaultServeMux)
+	// Wrap the default ServeMux with CORS middleware (if enabled), then logging middleware
+	var handler http.Handler = http.DefaultServeMux
+	handler = corsMiddleware(config, handler)
+	handler = httpLogger(logFile, handler)
 
 	// Start HTTP server
 	server := &http.Server{
 		Addr:    config.Server.Listen,
-		Handler: loggedHandler,
+		Handler: handler,
 	}
 
 	// Handle graceful shutdown

@@ -113,11 +113,61 @@ Time Elapsed 00:00:01.03
 UberSDRMonitor.vcxproj -> C:\Users\MadPsy\Repos\HermesIntf\UberSDRMonitor\build32\Release\UberSDRMonitor.exe
 ```
 
+## Multi-Instance Support
+
+The UberSDR DLL and Monitor support running multiple instances simultaneously. Each DLL instance registers itself in the Windows Registry, and the monitor can connect to any running instance.
+
+### Checking Registry Entries
+
+To view all registered UberSDR instances, use this PowerShell command:
+
+```powershell
+Get-ChildItem "HKCU:\Software\UberSDR\Instances" | ForEach-Object {
+    $processId = $_.PSChildName
+    $props = Get-ItemProperty $_.PSPath
+    Write-Host "Instance PID: $processId"
+    Write-Host "  Server: $($props.ServerHost):$($props.ServerPort)"
+    Write-Host "  Start Time: $($props.StartTime)"
+    Write-Host "  Last Heartbeat: $($props.LastHeartbeat)"
+    Write-Host "  Shared Memory: $($props.SharedMemoryName)"
+    Write-Host ""
+}
+```
+
+This will display all active instances with their:
+- **Process ID (PID)** - Unique identifier for each DLL instance
+- **Server** - Host and port the instance is connected to
+- **Start Time** - When the instance was started (Unix timestamp in milliseconds)
+- **Last Heartbeat** - Last update time (updated every 10 seconds)
+- **Shared Memory Name** - Name of the shared memory segment
+
+### Instance Selection
+
+When you run UberSDRMonitor.exe:
+- **Single instance**: Automatically connects
+- **Multiple instances**: Shows a dialog with a list of all instances
+  - Each entry displays: `ServerHost:Port (PID: 12345, Started: HH:MM:SS)`
+  - Double-click or select and click OK to connect
+  - Cancel defaults to the first instance
+
+### Registry Cleanup
+
+The monitor automatically cleans up stale registry entries (from terminated processes) when it starts. You can also manually clean the registry:
+
+```powershell
+# Remove all UberSDR instance entries
+Remove-Item -Path "HKCU:\Software\UberSDR\Instances" -Recurse -Force
+
+# Remove a specific instance by PID
+Remove-Item -Path "HKCU:\Software\UberSDR\Instances\12345" -Force
+```
+
 ## Usage
 
 1. **Start CW Skimmer Server** with the UberSDR DLL loaded
 2. **Run UberSDRMonitor.exe**
-3. The monitor will automatically:
+3. If multiple instances are running, select the desired instance from the dialog
+4. The monitor will automatically:
    - Connect to the DLL's shared memory
    - Connect to telnet server on localhost:7300
    - Send "N0CALL" when prompted for callsign

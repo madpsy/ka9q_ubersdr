@@ -87,10 +87,13 @@ struct UberSDRInstanceInfo {
     bool isValid;  // Set to false if process no longer exists
 };
 
-// Helper functions for multi-instance support (implemented in UberSDRIntf.cpp)
+// Helper functions for multi-instance support (implemented in UberSDRShared.cpp)
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Get current time in milliseconds (Unix timestamp)
+int64_t GetCurrentTimeMs();
 
 // Build shared memory name for a given process ID
 void BuildSharedMemoryName(DWORD processID, wchar_t* buffer, size_t bufferSize);

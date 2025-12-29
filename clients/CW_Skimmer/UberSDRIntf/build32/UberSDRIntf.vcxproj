@@ -468,6 +468,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   <ItemGroup>
     <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDRIntf.cpp" />
     <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDR.cpp" />
+    <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDRShared.cpp" />
     <None Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\UberSDRIntf.def" />
     <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXBench.cpp" />
     <ClCompile Include="C:\Users\MadPsy\Repos\ka9q_ubersdr\clients\CW_Skimmer\UberSDRIntf\IXWebSocket\ixwebsocket\IXCancellationRequest.cpp" />

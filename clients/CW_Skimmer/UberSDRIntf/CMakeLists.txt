@@ -15,6 +15,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(UberSDRIntf SHARED
     UberSDRIntf.cpp
     UberSDR.cpp
+    UberSDRShared.cpp
     UberSDRIntf.def
 )
 

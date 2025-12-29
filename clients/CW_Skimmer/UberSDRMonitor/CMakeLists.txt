@@ -11,6 +11,7 @@ add_executable(UberSDRMonitor WIN32
     UberSDRMonitor.rc
     resource.h
     ../UberSDRIntf/UberSDRShared.h
+    ../UberSDRIntf/UberSDRShared.cpp
 )
 
 # Link libraries

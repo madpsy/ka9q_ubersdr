@@ -7,6 +7,7 @@
 #include <ws2tcpip.h>
 #include <commctrl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include "../UberSDRIntf/UberSDRShared.h"
 #include "resource.h"
@@ -46,9 +47,11 @@ struct RecordingState {
 // Global variables
 HINSTANCE g_hInst = NULL;
 HWND g_hDlg = NULL;
+HWND g_hInstanceList = NULL;  // Instance listbox control
 HANDLE g_hSharedMemory = NULL;
 const UberSDRSharedStatus* g_pStatus = NULL;
 UINT_PTR g_timerId = 0;
+UINT_PTR g_instanceTimerId = 0;
 RecordingState g_recording[MAX_RX_COUNT] = {0};
 WNDPROC g_originalButtonProc[MAX_RX_COUNT] = {0};
 
@@ -65,27 +68,15 @@ char g_telnetBuffer[4096] = {0};
 int g_telnetBufferLen = 0;
 DWORD g_lastReconnectAttempt = 0;
 
-// Control IDs
-#define IDC_SERVER_STATUS    1001
-#define IDC_SAMPLE_RATE      1002
-#define IDC_MODE             1003
-#define IDC_RX0_STATUS       1010
-#define IDC_RX1_STATUS       1011
-#define IDC_RX2_STATUS       1012
-#define IDC_RX3_STATUS       1013
-#define IDC_RX4_STATUS       1014
-#define IDC_RX5_STATUS       1015
-#define IDC_RX6_STATUS       1016
-#define IDC_RX7_STATUS       1017
-#define IDC_CALLBACKS        1020
-#define IDC_UPTIME           1021
-#define IDC_TOTAL_THROUGHPUT 1022
+// Timer IDs
 #define TIMER_UPDATE         1
+#define TIMER_INSTANCE_CHECK 2
 
 // Function prototypes
 BOOL InitSharedMemory();
 void CleanupSharedMemory();
 void UpdateDisplay();
+void UpdateInstanceList();
 void FormatUptime(int64_t startTime, char* buffer, size_t bufferSize);
 void FormatFrequency(int frequency, char* buffer, size_t bufferSize);
 bool StartRecording(int receiverID);
@@ -170,36 +161,9 @@ BOOL InitSharedMemory()
         g_selectedInstance = -1;  // Legacy mode
         return TRUE;
     }
-    else if (g_instanceCount == 1) {
-        // Single instance - auto-connect
-        g_selectedInstance = 0;
-        
-        g_hSharedMemory = OpenFileMappingW(
-            FILE_MAP_READ,
-            FALSE,
-            g_instances[0].sharedMemoryName);
-        
-        if (g_hSharedMemory == NULL) {
-            return FALSE;
-        }
-        
-        g_pStatus = (const UberSDRSharedStatus*)MapViewOfFile(
-            g_hSharedMemory,
-            FILE_MAP_READ,
-            0, 0,
-            sizeof(UberSDRSharedStatus));
-        
-        if (g_pStatus == NULL) {
-            CloseHandle(g_hSharedMemory);
-            g_hSharedMemory = NULL;
-            return FALSE;
-        }
-        
-        return TRUE;
-    }
     else {
-        // Multiple instances - need user selection
-        // This will be handled by showing a selection dialog
+        // One or more instances found - show selection dialog
+        // This allows user to see instance details even with single instance
         return FALSE;  // Indicate selection needed
     }
 }
@@ -250,6 +214,60 @@ void FormatFrequency(int frequency, char* buffer, size_t bufferSize)
         sprintf_s(buffer, bufferSize, "%.1f kHz", frequency / 1000.0);
     } else {
         sprintf_s(buffer, bufferSize, "%d Hz", frequency);
+    }
+}
+
+// Update instance list
+void UpdateInstanceList()
+{
+    if (g_hInstanceList == NULL) return;
+    
+    // Save current selection
+    int currentSelection = (int)SendMessage(g_hInstanceList, LB_GETCURSEL, 0, 0);
+    
+    // Clean up stale instances
+    CleanupStaleInstances();
+    
+    // Enumerate instances
+    g_instanceCount = EnumerateInstances(g_instances, 16);
+    
+    // Clear listbox
+    SendMessage(g_hInstanceList, LB_RESETCONTENT, 0, 0);
+    
+    if (g_instanceCount == 0) {
+        // Show "No instances found"
+        SendMessageA(g_hInstanceList, LB_ADDSTRING, 0, (LPARAM)"No instances found - waiting for DLL...");
+    } else {
+        // Add each instance to listbox
+        for (int i = 0; i < g_instanceCount; i++) {
+            char serverHost[128];
+            WideCharToMultiByte(CP_UTF8, 0, g_instances[i].serverHost, -1, serverHost, 128, NULL, NULL);
+            
+            // Format start time
+            FILETIME ft;
+            ULARGE_INTEGER uli;
+            uli.QuadPart = (g_instances[i].startTime + 11644473600000ULL) * 10000ULL;
+            ft.dwLowDateTime = uli.LowPart;
+            ft.dwHighDateTime = uli.HighPart;
+            
+            SYSTEMTIME st;
+            FileTimeToSystemTime(&ft, &st);
+            
+            char itemText[256];
+            sprintf_s(itemText, sizeof(itemText),
+                     "%s:%d (PID: %u, Started: %02d:%02d:%02d)",
+                     serverHost, g_instances[i].serverPort, g_instances[i].processID,
+                     st.wHour, st.wMinute, st.wSecond);
+            
+            SendMessageA(g_hInstanceList, LB_ADDSTRING, 0, (LPARAM)itemText);
+        }
+        
+        // Restore previous selection if valid, otherwise select connected instance
+        if (currentSelection >= 0 && currentSelection < g_instanceCount) {
+            SendMessage(g_hInstanceList, LB_SETCURSEL, currentSelection, 0);
+        } else if (g_selectedInstance >= 0 && g_selectedInstance < g_instanceCount) {
+            SendMessage(g_hInstanceList, LB_SETCURSEL, g_selectedInstance, 0);
+        }
     }
 }
 
@@ -533,6 +551,15 @@ bool ConnectTelnet()
         g_telnetSocket = INVALID_SOCKET;
     }
     
+    // Get port from input field
+    char portStr[16];
+    GetDlgItemTextA(g_hDlg, IDC_TELNET_PORT, portStr, sizeof(portStr));
+    int port = atoi(portStr);
+    if (port <= 0 || port > 65535) {
+        AppendTelnetText("Invalid port number\r\n");
+        return false;
+    }
+    
     // Create socket
     g_telnetSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (g_telnetSocket == INVALID_SOCKET) {
@@ -552,7 +579,7 @@ bool ConnectTelnet()
     // Setup address
     sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(7300);
+    addr.sin_port = htons((u_short)port);
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
     
     // Attempt connection (non-blocking, so may return WSAEWOULDBLOCK)
@@ -564,7 +591,14 @@ bool ConnectTelnet()
     g_telnetBufferLen = 0;
     memset(g_telnetBuffer, 0, sizeof(g_telnetBuffer));
     
-    AppendTelnetText("Connecting to localhost:7300...\r\n");
+    char msg[128];
+    sprintf_s(msg, sizeof(msg), "Connecting to localhost:%d...\r\n", port);
+    AppendTelnetText(msg);
+    
+    // Disable Connect button, enable Disconnect button
+    EnableWindow(GetDlgItem(g_hDlg, IDC_TELNET_CONNECT), FALSE);
+    EnableWindow(GetDlgItem(g_hDlg, IDC_TELNET_DISCONNECT), TRUE);
+    
     return true;
 }
 
@@ -601,12 +635,8 @@ void ProcessTelnet()
 {
     DWORD currentTime = GetTickCount();
     
-    // If no socket, try to connect (with 5 second delay between attempts)
+    // If no socket, don't auto-reconnect (user must click Connect button)
     if (g_telnetSocket == INVALID_SOCKET) {
-        if (currentTime - g_lastReconnectAttempt > 5000) {
-            ConnectTelnet();
-            g_lastReconnectAttempt = currentTime;
-        }
         return;
     }
     
@@ -673,7 +703,9 @@ void ProcessTelnet()
         closesocket(g_telnetSocket);
         g_telnetSocket = INVALID_SOCKET;
         g_telnetConnected = false;
-        g_lastReconnectAttempt = currentTime;
+        // Re-enable Connect button
+        EnableWindow(GetDlgItem(g_hDlg, IDC_TELNET_CONNECT), TRUE);
+        EnableWindow(GetDlgItem(g_hDlg, IDC_TELNET_DISCONNECT), FALSE);
     }
     else {
         // Check for error
@@ -686,20 +718,134 @@ void ProcessTelnet()
             closesocket(g_telnetSocket);
             g_telnetSocket = INVALID_SOCKET;
             g_telnetConnected = false;
-            g_lastReconnectAttempt = currentTime;
+            // Re-enable Connect button
+            EnableWindow(GetDlgItem(g_hDlg, IDC_TELNET_CONNECT), TRUE);
+            EnableWindow(GetDlgItem(g_hDlg, IDC_TELNET_DISCONNECT), FALSE);
         }
     }
+}
+
+// Dialog procedure for instance selection
+INT_PTR CALLBACK InstanceSelectionDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    static HWND hListBox = NULL;
+    
+    switch (message)
+    {
+    case WM_INITDIALOG:
+        {
+            // Set dialog title
+            SetWindowTextA(hDlg, "Select UberSDR Instance");
+            
+            // Create listbox
+            hListBox = CreateWindowExA(
+                WS_EX_CLIENTEDGE,
+                "LISTBOX",
+                "",
+                WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS,
+                10, 10, 460, 150,
+                hDlg,
+                (HMENU)IDC_INSTANCE_LIST,
+                g_hInst,
+                NULL);
+            
+            // Create OK button
+            CreateWindowA(
+                "BUTTON",
+                "OK",
+                WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                190, 170, 80, 25,
+                hDlg,
+                (HMENU)IDOK,
+                g_hInst,
+                NULL);
+            
+            // Create Cancel button
+            CreateWindowA(
+                "BUTTON",
+                "Cancel",
+                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                280, 170, 80, 25,
+                hDlg,
+                (HMENU)IDCANCEL,
+                g_hInst,
+                NULL);
+            
+            // Add instances to listbox
+            for (int i = 0; i < g_instanceCount; i++) {
+                char serverHost[128];
+                WideCharToMultiByte(CP_UTF8, 0, g_instances[i].serverHost, -1, serverHost, 128, NULL, NULL);
+                
+                // Format start time
+                FILETIME ft;
+                ULARGE_INTEGER uli;
+                uli.QuadPart = (g_instances[i].startTime + 11644473600000ULL) * 10000ULL;
+                ft.dwLowDateTime = uli.LowPart;
+                ft.dwHighDateTime = uli.HighPart;
+                
+                SYSTEMTIME st;
+                FileTimeToSystemTime(&ft, &st);
+                
+                char itemText[256];
+                sprintf_s(itemText, sizeof(itemText),
+                         "%s:%d (PID: %u, Started: %02d:%02d:%02d)",
+                         serverHost, g_instances[i].serverPort, g_instances[i].processID,
+                         st.wHour, st.wMinute, st.wSecond);
+                
+                SendMessageA(hListBox, LB_ADDSTRING, 0, (LPARAM)itemText);
+            }
+            
+            // Select first item by default
+            SendMessage(hListBox, LB_SETCURSEL, 0, 0);
+            
+            return TRUE;
+        }
+    
+    case WM_COMMAND:
+        {
+            int wmId = LOWORD(wParam);
+            int wmEvent = HIWORD(wParam);
+            
+            if (wmId == IDC_INSTANCE_LIST && wmEvent == LBN_DBLCLK) {
+                // Double-click on list item - same as OK
+                int selectedIndex = (int)SendMessage(hListBox, LB_GETCURSEL, 0, 0);
+                if (selectedIndex != LB_ERR) {
+                    EndDialog(hDlg, selectedIndex);
+                }
+                return TRUE;
+            }
+            else if (wmId == IDOK) {
+                // OK button clicked
+                int selectedIndex = (int)SendMessage(hListBox, LB_GETCURSEL, 0, 0);
+                if (selectedIndex == LB_ERR) {
+                    selectedIndex = 0;  // Default to first if none selected
+                }
+                EndDialog(hDlg, selectedIndex);
+                return TRUE;
+            }
+            else if (wmId == IDCANCEL) {
+                // Cancel - return first instance
+                EndDialog(hDlg, 0);
+                return TRUE;
+            }
+        }
+        break;
+    
+    case WM_CLOSE:
+        EndDialog(hDlg, 0);
+        return TRUE;
+    }
+    
+    return FALSE;
 }
 
 // Show instance selection dialog
 int ShowInstanceSelectionDialog(HWND hParent)
 {
-    // Build message with instance list
-    char message[2048];
-    strcpy_s(message, sizeof(message), "Multiple UberSDR instances detected. Select one:\n\n");
+    // Build message text with all instances
+    char message[2048] = "Select an instance:\n\n";
     
     for (int i = 0; i < g_instanceCount; i++) {
-        char line[256];
         char serverHost[128];
         WideCharToMultiByte(CP_UTF8, 0, g_instances[i].serverHost, -1, serverHost, 128, NULL, NULL);
         
@@ -713,18 +859,30 @@ int ShowInstanceSelectionDialog(HWND hParent)
         SYSTEMTIME st;
         FileTimeToSystemTime(&ft, &st);
         
-        sprintf_s(line, sizeof(line), "[%d] %s:%d (PID %u, started %02d:%02d:%02d)\n",
-                 i + 1, serverHost, g_instances[i].serverPort, g_instances[i].processID,
+        char line[256];
+        sprintf_s(line, sizeof(line),
+                 "[%d] %s:%d (PID: %u, Started: %02d:%02d:%02d)\n",
+                 i + 1,
+                 serverHost, g_instances[i].serverPort, g_instances[i].processID,
                  st.wHour, st.wMinute, st.wSecond);
+        
         strcat_s(message, sizeof(message), line);
     }
     
-    strcat_s(message, sizeof(message), "\nAuto-selecting first instance...");
+    strcat_s(message, sizeof(message), "\nEnter selection (1-");
+    char numStr[16];
+    sprintf_s(numStr, sizeof(numStr), "%d", g_instanceCount);
+    strcat_s(message, sizeof(message), numStr);
+    strcat_s(message, sizeof(message), "):");
     
+    // Show input dialog
+    char input[16] = "1";  // Default to first
+    
+    // Use a simple message box for now - we can improve this later
     MessageBoxA(hParent, message, "Select UberSDR Instance", MB_OK | MB_ICONINFORMATION);
     
-    // Auto-select first instance for now
-    // TODO: Implement proper selection dialog with radio buttons
+    // For now, just return 0 (first instance)
+    // TODO: Create proper input dialog
     return 0;
 }
 
@@ -788,6 +946,21 @@ INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
             int y = (GetSystemMetrics(SM_CYSCREEN) - (rc.bottom - rc.top)) / 2;
             SetWindowPos(hDlg, NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
             
+            // Get handle to instance listbox (defined in resource file)
+            g_hInstanceList = GetDlgItem(hDlg, IDC_INSTANCE_LIST);
+            
+            // Start instance list update timer (1 second interval)
+            g_instanceTimerId = SetTimer(hDlg, TIMER_INSTANCE_CHECK, 1000, NULL);
+            
+            // Initial instance list update
+            UpdateInstanceList();
+            
+            // Set default telnet port
+            SetDlgItemTextA(hDlg, IDC_TELNET_PORT, "7300");
+            
+            // Initially disable Disconnect button
+            EnableWindow(GetDlgItem(hDlg, IDC_TELNET_DISCONNECT), FALSE);
+            
             // Initialize progress bars (range 0-100 for percentage)
             for (int i = 0; i < MAX_RX_COUNT; i++) {
                 SendDlgItemMessage(hDlg, IDC_RX0_LEVEL_I + (i * 2), PBM_SETRANGE, 0, MAKELPARAM(0, 100));
@@ -802,22 +975,17 @@ INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
                 }
             }
             
-            // Try to connect to shared memory
+            // Try to connect to shared memory (legacy mode for backward compatibility)
+            // If instances are found, user will use the instance list to connect
             if (!InitSharedMemory()) {
-                // Check if we need to show instance selection
-                if (g_instanceCount > 1) {
-                    // Show selection dialog and connect to selected instance
-                    int selected = ShowInstanceSelectionDialog(hDlg);
-                    if (!ConnectToInstance(selected)) {
-                        SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, "Failed to connect to selected instance");
-                    }
-                } else {
+                if (g_instanceCount == 0) {
                     SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, "Waiting for DLL to load...");
+                } else {
+                    SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, "Select an instance from the list above and click Connect");
                 }
             }
             
-            // Connect to telnet server
-            ConnectTelnet();
+            // Don't auto-connect to telnet - user must click Connect button
             
             // Start update timer (100ms interval for smooth level meters)
             g_timerId = SetTimer(hDlg, TIMER_UPDATE, 100, NULL);
@@ -832,11 +1000,66 @@ INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
         if (wParam == TIMER_UPDATE) {
             UpdateDisplay();
         }
+        else if (wParam == TIMER_INSTANCE_CHECK) {
+            UpdateInstanceList();
+        }
         return TRUE;
     
     case WM_COMMAND:
         {
             int wmId = LOWORD(wParam);
+            int wmEvent = HIWORD(wParam);
+            
+            // Handle double-click on instance list
+            if (wmId == IDC_INSTANCE_LIST && wmEvent == LBN_DBLCLK) {
+                int selectedIndex = (int)SendMessage(g_hInstanceList, LB_GETCURSEL, 0, 0);
+                if (selectedIndex != LB_ERR && selectedIndex < g_instanceCount) {
+                    if (ConnectToInstance(selectedIndex)) {
+                        char msg[128];
+                        sprintf_s(msg, sizeof(msg), "Connected to instance %d", selectedIndex);
+                        SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, msg);
+                    } else {
+                        SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, "Failed to connect to selected instance");
+                    }
+                }
+                return TRUE;
+            }
+            
+            // Handle telnet Connect button
+            if (wmId == IDC_TELNET_CONNECT) {
+                ConnectTelnet();
+                return TRUE;
+            }
+            
+            // Handle telnet Disconnect button
+            if (wmId == IDC_TELNET_DISCONNECT) {
+                if (g_telnetSocket != INVALID_SOCKET) {
+                    AppendTelnetText("Disconnecting...\r\n");
+                    closesocket(g_telnetSocket);
+                    g_telnetSocket = INVALID_SOCKET;
+                    g_telnetConnected = false;
+                    EnableWindow(GetDlgItem(hDlg, IDC_TELNET_CONNECT), TRUE);
+                    EnableWindow(GetDlgItem(hDlg, IDC_TELNET_DISCONNECT), FALSE);
+                }
+                return TRUE;
+            }
+            
+            // Handle instance Connect button
+            if (wmId == IDC_CONNECT_BUTTON) {
+                int selectedIndex = (int)SendMessage(g_hInstanceList, LB_GETCURSEL, 0, 0);
+                if (selectedIndex != LB_ERR && selectedIndex < g_instanceCount) {
+                    if (ConnectToInstance(selectedIndex)) {
+                        char msg[128];
+                        sprintf_s(msg, sizeof(msg), "Connected to instance %d", selectedIndex);
+                        SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, msg);
+                    } else {
+                        SetDlgItemTextA(hDlg, IDC_SERVER_STATUS, "Failed to connect to selected instance");
+                    }
+                } else {
+                    MessageBoxA(hDlg, "Please select an instance from the list", "No Selection", MB_OK | MB_ICONINFORMATION);
+                }
+                return TRUE;
+            }
             
             if (wmId == IDOK || wmId == IDCANCEL) {
                 // Stop all recordings
@@ -869,6 +1092,10 @@ INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
         if (g_timerId != 0) {
             KillTimer(hDlg, g_timerId);
             g_timerId = 0;
+        }
+        if (g_instanceTimerId != 0) {
+            KillTimer(hDlg, g_instanceTimerId);
+            g_instanceTimerId = 0;
         }
         CleanupTelnet();
         CleanupSharedMemory();

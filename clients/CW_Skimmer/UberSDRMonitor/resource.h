@@ -51,7 +51,15 @@
 #define IDC_RX6_RECORD                  1056
 #define IDC_RX7_RECORD                  1057
 
-// Telnet output control
+// Telnet controls
 #define IDC_TELNET_OUTPUT               1060
+#define IDC_TELNET_PORT                 1061
+#define IDC_TELNET_CONNECT              1062
+#define IDC_TELNET_DISCONNECT           1063
+
+// Instance list controls
+#define IDC_INSTANCE_LIST               1070
+#define IDC_INSTANCE_LABEL              1071
+#define IDC_CONNECT_BUTTON              1072
 
 #endif // RESOURCE_H

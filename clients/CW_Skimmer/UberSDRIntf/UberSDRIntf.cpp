@@ -88,151 +88,9 @@ namespace UberSDRIntf
     DWORD gidHeartbeatThread = 0;
     volatile bool gHeartbeatStopFlag = false;
     
-    ///////////////////////////////////////////////////////////////////////////////
-    // Get current time in milliseconds
-    int64_t GetCurrentTimeMs()
-    {
-        FILETIME ft;
-        GetSystemTimeAsFileTime(&ft);
-        ULARGE_INTEGER uli;
-        uli.LowPart = ft.dwLowDateTime;
-        uli.HighPart = ft.dwHighDateTime;
-        // Convert from 100-nanosecond intervals to milliseconds
-        return (int64_t)(uli.QuadPart / 10000ULL - 11644473600000ULL);
-    }
-    
-    ///////////////////////////////////////////////////////////////////////////////
-    // Build shared memory name for a given process ID
-    void BuildSharedMemoryName(DWORD processID, wchar_t* buffer, size_t bufferSize)
-    {
-        swprintf_s(buffer, bufferSize, L"%s_%u", UBERSDR_SHARED_MEMORY_PREFIX, processID);
-    }
-    
-    ///////////////////////////////////////////////////////////////////////////////
-    // Register instance in registry
-    BOOL RegisterInstance(DWORD processID, const char* serverHost, int serverPort, int64_t startTime)
-    {
-        HKEY hKey = NULL;
-        HKEY hInstanceKey = NULL;
-        LONG result;
-        
-        // Create or open the Instances key
-        result = RegCreateKeyExW(HKEY_CURRENT_USER, UBERSDR_REGISTRY_INSTANCES,
-                                 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL);
-        if (result != ERROR_SUCCESS) {
-            write_text_to_log_file("Failed to create registry key for instances");
-            return FALSE;
-        }
-        
-        // Create subkey for this process ID
-        wchar_t subkeyName[32];
-        swprintf_s(subkeyName, 32, L"%u", processID);
-        result = RegCreateKeyExW(hKey, subkeyName, 0, NULL, 0, KEY_WRITE, NULL, &hInstanceKey, NULL);
-        RegCloseKey(hKey);
-        
-        if (result != ERROR_SUCCESS) {
-            write_text_to_log_file("Failed to create registry subkey for instance");
-            return FALSE;
-        }
-        
-        // Write process ID
-        RegSetValueExW(hInstanceKey, L"ProcessID", 0, REG_DWORD, (BYTE*)&processID, sizeof(DWORD));
-        
-        // Write server host (convert to wide string)
-        wchar_t wServerHost[64];
-        MultiByteToWideChar(CP_UTF8, 0, serverHost, -1, wServerHost, 64);
-        RegSetValueExW(hInstanceKey, L"ServerHost", 0, REG_SZ, (BYTE*)wServerHost,
-                      (DWORD)((wcslen(wServerHost) + 1) * sizeof(wchar_t)));
-        
-        // Write server port
-        RegSetValueExW(hInstanceKey, L"ServerPort", 0, REG_DWORD, (BYTE*)&serverPort, sizeof(DWORD));
-        
-        // Write start time
-        RegSetValueExW(hInstanceKey, L"StartTime", 0, REG_QWORD, (BYTE*)&startTime, sizeof(int64_t));
-        
-        // Write shared memory name
-        wchar_t memName[128];
-        BuildSharedMemoryName(processID, memName, 128);
-        RegSetValueExW(hInstanceKey, L"SharedMemoryName", 0, REG_SZ, (BYTE*)memName,
-                      (DWORD)((wcslen(memName) + 1) * sizeof(wchar_t)));
-        
-        // Write initial heartbeat
-        int64_t now = GetCurrentTimeMs();
-        RegSetValueExW(hInstanceKey, L"LastHeartbeat", 0, REG_QWORD, (BYTE*)&now, sizeof(int64_t));
-        
-        RegCloseKey(hInstanceKey);
-        
-        std::stringstream ss;
-        ss << "Registered instance in registry: PID=" << processID
-           << ", Server=" << serverHost << ":" << serverPort;
-        write_text_to_log_file(ss.str());
-        
-        return TRUE;
-    }
-    
-    ///////////////////////////////////////////////////////////////////////////////
-    // Unregister instance from registry
-    BOOL UnregisterInstance(DWORD processID)
-    {
-        HKEY hKey = NULL;
-        LONG result;
-        
-        // Open the Instances key
-        result = RegOpenKeyExW(HKEY_CURRENT_USER, UBERSDR_REGISTRY_INSTANCES,
-                              0, KEY_WRITE, &hKey);
-        if (result != ERROR_SUCCESS) {
-            return FALSE;  // Key doesn't exist, nothing to clean up
-        }
-        
-        // Delete subkey for this process ID
-        wchar_t subkeyName[32];
-        swprintf_s(subkeyName, 32, L"%u", processID);
-        result = RegDeleteKeyW(hKey, subkeyName);
-        RegCloseKey(hKey);
-        
-        if (result == ERROR_SUCCESS) {
-            std::stringstream ss;
-            ss << "Unregistered instance from registry: PID=" << processID;
-            write_text_to_log_file(ss.str());
-            return TRUE;
-        }
-        
-        return FALSE;
-    }
-    
-    ///////////////////////////////////////////////////////////////////////////////
-    // Update instance heartbeat in registry
-    BOOL UpdateInstanceHeartbeat(DWORD processID)
-    {
-        HKEY hKey = NULL;
-        HKEY hInstanceKey = NULL;
-        LONG result;
-        
-        // Open the Instances key
-        result = RegOpenKeyExW(HKEY_CURRENT_USER, UBERSDR_REGISTRY_INSTANCES,
-                              0, KEY_READ, &hKey);
-        if (result != ERROR_SUCCESS) {
-            return FALSE;
-        }
-        
-        // Open subkey for this process ID
-        wchar_t subkeyName[32];
-        swprintf_s(subkeyName, 32, L"%u", processID);
-        result = RegOpenKeyExW(hKey, subkeyName, 0, KEY_WRITE, &hInstanceKey);
-        RegCloseKey(hKey);
-        
-        if (result != ERROR_SUCCESS) {
-            return FALSE;
-        }
-        
-        // Update heartbeat
-        int64_t now = GetCurrentTimeMs();
-        result = RegSetValueExW(hInstanceKey, L"LastHeartbeat", 0, REG_QWORD,
-                               (BYTE*)&now, sizeof(int64_t));
-        RegCloseKey(hInstanceKey);
-        
-        return (result == ERROR_SUCCESS);
-    }
+    // Note: Registry functions (RegisterInstance, UnregisterInstance, UpdateInstanceHeartbeat)
+    // and helper functions (GetCurrentTimeMs, BuildSharedMemoryName) are now in UberSDRShared.cpp
+    // and used by both DLL and monitor. The namespace versions have been removed to avoid duplication.
     
     ///////////////////////////////////////////////////////////////////////////////
     // Heartbeat thread - updates registry every 10 seconds
@@ -253,197 +111,7 @@ namespace UberSDRIntf
         return 0;
     }
     
-    ///////////////////////////////////////////////////////////////////////////////
-    // Enumerate all instances from registry
-    int EnumerateInstances(UberSDRInstanceInfo* instances, int maxInstances)
-    {
-        HKEY hKey = NULL;
-        LONG result;
-        int count = 0;
-        
-        // Open the Instances key
-        result = RegOpenKeyExW(HKEY_CURRENT_USER, UBERSDR_REGISTRY_INSTANCES,
-                              0, KEY_READ, &hKey);
-        if (result != ERROR_SUCCESS) {
-            return 0;  // No instances registered
-        }
-        
-        // Enumerate subkeys
-        DWORD index = 0;
-        wchar_t subkeyName[256];
-        DWORD subkeyNameSize;
-        
-        while (count < maxInstances)
-        {
-            subkeyNameSize = 256;
-            result = RegEnumKeyExW(hKey, index, subkeyName, &subkeyNameSize,
-                                  NULL, NULL, NULL, NULL);
-            if (result != ERROR_SUCCESS) {
-                break;  // No more subkeys
-            }
-            
-            index++;
-            
-            // Open this instance's subkey
-            HKEY hInstanceKey = NULL;
-            result = RegOpenKeyExW(hKey, subkeyName, 0, KEY_READ, &hInstanceKey);
-            if (result != ERROR_SUCCESS) {
-                continue;
-            }
-            
-            // Read instance information
-            UberSDRInstanceInfo info;
-            ZeroMemory(&info, sizeof(info));
-            info.isValid = false;
-            
-            DWORD dataSize;
-            DWORD dataType;
-            
-            // Read ProcessID
-            dataSize = sizeof(DWORD);
-            if (RegQueryValueExW(hInstanceKey, L"ProcessID", NULL, &dataType,
-                               (BYTE*)&info.processID, &dataSize) != ERROR_SUCCESS) {
-                RegCloseKey(hInstanceKey);
-                continue;
-            }
-            
-            // Read ServerHost
-            dataSize = sizeof(info.serverHost);
-            if (RegQueryValueExW(hInstanceKey, L"ServerHost", NULL, &dataType,
-                               (BYTE*)info.serverHost, &dataSize) != ERROR_SUCCESS) {
-                RegCloseKey(hInstanceKey);
-                continue;
-            }
-            
-            // Read ServerPort
-            dataSize = sizeof(DWORD);
-            if (RegQueryValueExW(hInstanceKey, L"ServerPort", NULL, &dataType,
-                               (BYTE*)&info.serverPort, &dataSize) != ERROR_SUCCESS) {
-                RegCloseKey(hInstanceKey);
-                continue;
-            }
-            
-            // Read StartTime
-            dataSize = sizeof(int64_t);
-            if (RegQueryValueExW(hInstanceKey, L"StartTime", NULL, &dataType,
-                               (BYTE*)&info.startTime, &dataSize) != ERROR_SUCCESS) {
-                RegCloseKey(hInstanceKey);
-                continue;
-            }
-            
-            // Read LastHeartbeat
-            dataSize = sizeof(int64_t);
-            if (RegQueryValueExW(hInstanceKey, L"LastHeartbeat", NULL, &dataType,
-                               (BYTE*)&info.lastHeartbeat, &dataSize) != ERROR_SUCCESS) {
-                RegCloseKey(hInstanceKey);
-                continue;
-            }
-            
-            // Read SharedMemoryName
-            dataSize = sizeof(info.sharedMemoryName);
-            if (RegQueryValueExW(hInstanceKey, L"SharedMemoryName", NULL, &dataType,
-                               (BYTE*)info.sharedMemoryName, &dataSize) != ERROR_SUCCESS) {
-                RegCloseKey(hInstanceKey);
-                continue;
-            }
-            
-            RegCloseKey(hInstanceKey);
-            
-            // Verify process still exists
-            HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, info.processID);
-            if (hProcess != NULL) {
-                CloseHandle(hProcess);
-                
-                // Check heartbeat freshness
-                int64_t now = GetCurrentTimeMs();
-                if ((now - info.lastHeartbeat) < UBERSDR_HEARTBEAT_TIMEOUT) {
-                    info.isValid = true;
-                    instances[count++] = info;
-                }
-            }
-        }
-        
-        RegCloseKey(hKey);
-        return count;
-    }
-    
-    ///////////////////////////////////////////////////////////////////////////////
-    // Cleanup stale instances from registry
-    void CleanupStaleInstances()
-    {
-        HKEY hKey = NULL;
-        LONG result;
-        
-        // Open the Instances key
-        result = RegOpenKeyExW(HKEY_CURRENT_USER, UBERSDR_REGISTRY_INSTANCES,
-                              0, KEY_READ | KEY_WRITE, &hKey);
-        if (result != ERROR_SUCCESS) {
-            return;  // No instances to clean up
-        }
-        
-        // Enumerate subkeys and collect stale ones
-        std::vector<std::wstring> staleKeys;
-        DWORD index = 0;
-        wchar_t subkeyName[256];
-        DWORD subkeyNameSize;
-        
-        while (true)
-        {
-            subkeyNameSize = 256;
-            result = RegEnumKeyExW(hKey, index, subkeyName, &subkeyNameSize,
-                                  NULL, NULL, NULL, NULL);
-            if (result != ERROR_SUCCESS) {
-                break;
-            }
-            
-            index++;
-            
-            // Open this instance's subkey
-            HKEY hInstanceKey = NULL;
-            result = RegOpenKeyExW(hKey, subkeyName, 0, KEY_READ, &hInstanceKey);
-            if (result != ERROR_SUCCESS) {
-                continue;
-            }
-            
-            // Read ProcessID
-            DWORD processID = 0;
-            DWORD dataSize = sizeof(DWORD);
-            DWORD dataType;
-            if (RegQueryValueExW(hInstanceKey, L"ProcessID", NULL, &dataType,
-                               (BYTE*)&processID, &dataSize) == ERROR_SUCCESS) {
-                
-                // Check if process exists
-                HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processID);
-                if (hProcess == NULL) {
-                    // Process doesn't exist - mark for cleanup
-                    staleKeys.push_back(subkeyName);
-                } else {
-                    CloseHandle(hProcess);
-                    
-                    // Check heartbeat
-                    int64_t lastHeartbeat = 0;
-                    dataSize = sizeof(int64_t);
-                    if (RegQueryValueExW(hInstanceKey, L"LastHeartbeat", NULL, &dataType,
-                                       (BYTE*)&lastHeartbeat, &dataSize) == ERROR_SUCCESS) {
-                        int64_t now = GetCurrentTimeMs();
-                        if ((now - lastHeartbeat) >= UBERSDR_HEARTBEAT_TIMEOUT) {
-                            // Heartbeat too old - mark for cleanup
-                            staleKeys.push_back(subkeyName);
-                        }
-                    }
-                }
-            }
-            
-            RegCloseKey(hInstanceKey);
-        }
-        
-        // Delete stale keys
-        for (const auto& keyName : staleKeys) {
-            RegDeleteKeyW(hKey, keyName.c_str());
-        }
-        
-        RegCloseKey(hKey);
-    }
+    // Note: EnumerateInstances and CleanupStaleInstances are now in UberSDRShared.cpp
     
     ///////////////////////////////////////////////////////////////////////////////
     // Initialize shared memory
@@ -455,6 +123,11 @@ namespace UberSDRIntf
             gCriticalSectionInitialized = true;
             write_text_to_log_file("Critical section initialized");
         }
+        
+        // Clean up stale instances from previous crashes/exits
+        // This ensures the registry doesn't accumulate dead entries even if monitor is never run
+        CleanupStaleInstances();
+        write_text_to_log_file("Cleaned up stale registry instances");
         
         // Get process ID for multi-instance support
         gProcessID = GetCurrentProcessId();
@@ -496,8 +169,8 @@ namespace UberSDRIntf
         ZeroMemory(gpSharedStatus, sizeof(UberSDRSharedStatus));
         gpSharedStatus->structVersion = 1;
         gpSharedStatus->dllLoaded = true;
-        gpSharedStatus->startTime = GetCurrentTimeMs();
-        gpSharedStatus->lastUpdateTime = GetCurrentTimeMs();
+        gpSharedStatus->startTime = ::GetCurrentTimeMs();
+        gpSharedStatus->lastUpdateTime = ::GetCurrentTimeMs();
         gpSharedStatus->processID = gProcessID;
         
         // Copy server info
@@ -552,7 +225,7 @@ namespace UberSDRIntf
         
         if (gpSharedStatus != NULL) {
             gpSharedStatus->dllLoaded = false;
-            gpSharedStatus->lastUpdateTime = GetCurrentTimeMs();
+            gpSharedStatus->lastUpdateTime = ::GetCurrentTimeMs();
             UnmapViewOfFile(gpSharedStatus);
             gpSharedStatus = NULL;
         }
@@ -582,7 +255,7 @@ namespace UberSDRIntf
         gpSharedStatus->blockSize = gBlockInSamples;
         gpSharedStatus->rxStarted = (gSet.RecvCount > 0);
         gpSharedStatus->activeReceiverCount = myUberSDR.activeReceivers;
-        gpSharedStatus->lastUpdateTime = GetCurrentTimeMs();
+        gpSharedStatus->lastUpdateTime = ::GetCurrentTimeMs();
     }
     
     ///////////////////////////////////////////////////////////////////////////////
@@ -860,7 +533,7 @@ void ProcessIQData(int receiverID, const std::vector<uint8_t>& iqBytes)
         // Update shared memory sample count (for received samples, not processed)
         if (gpSharedStatus != NULL && receiverID < MAX_RX_COUNT) {
             gpSharedStatus->receivers[receiverID].samplesReceived++;
-            gpSharedStatus->receivers[receiverID].lastUpdateTime = GetCurrentTimeMs();
+            gpSharedStatus->receivers[receiverID].lastUpdateTime = ::GetCurrentTimeMs();
         }
     }
 }
@@ -943,9 +616,9 @@ void ConsumeRingBuffers()
             
             // CRITICAL: Enter critical section for ALL buffer management
             // This ensures atomic buffer switching and prevents race conditions
-            int64_t lockWaitStart = GetCurrentTimeMs();
+            int64_t lockWaitStart = ::GetCurrentTimeMs();
             EnterCriticalSection(&gDataCriticalSection);
-            int64_t lockWaitTime = GetCurrentTimeMs() - lockWaitStart;
+            int64_t lockWaitTime = ::GetCurrentTimeMs() - lockWaitStart;
             
             // MATCH HERMES EXACTLY: Check if not already filled, then mark and toggle
             // This prevents double-toggling when a receiver fills again before callback
@@ -1424,7 +1097,7 @@ namespace UberSDRIntf
                 // Update shared memory
                 if (gpSharedStatus != NULL && Receiver < MAX_RX_COUNT) {
                     gpSharedStatus->receivers[Receiver].frequency = Frequency;
-                    gpSharedStatus->lastUpdateTime = GetCurrentTimeMs();
+                    gpSharedStatus->lastUpdateTime = ::GetCurrentTimeMs();
                 }
             }
             catch (const std::exception& e) {

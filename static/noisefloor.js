@@ -1391,42 +1391,38 @@ class NoiseFloorMonitor {
                                 padding: 4
                             }
                         },
-                        minMarker: {
-                            type: 'point',
-                            xValue: minFreqMHz,
-                            yValue: dataMin,
-                            backgroundColor: 'rgba(33, 150, 243, 0.8)',
-                            borderColor: 'rgba(33, 150, 243, 1)',
+                        minLine: {
+                            type: 'line',
+                            xMin: minFreqMHz,
+                            xMax: minFreqMHz,
+                            borderColor: 'rgba(33, 150, 243, 0.8)',
                             borderWidth: 2,
-                            radius: 6,
+                            borderDash: [5, 5],
                             label: {
                                 display: true,
-                                content: `Min: ${dataMin.toFixed(1)} dB`,
-                                position: 'top',
+                                content: `${minFreqMHz.toFixed(3)} MHz`,
+                                position: 'start',
                                 backgroundColor: 'rgba(33, 150, 243, 0.9)',
                                 color: '#fff',
                                 font: { size: 10, weight: 'bold' },
-                                padding: 4,
-                                yAdjust: -10
+                                padding: 4
                             }
                         },
-                        maxMarker: {
-                            type: 'point',
-                            xValue: maxFreqMHz,
-                            yValue: dataMax,
-                            backgroundColor: 'rgba(255, 152, 0, 0.8)',
-                            borderColor: 'rgba(255, 152, 0, 1)',
+                        maxLine: {
+                            type: 'line',
+                            xMin: maxFreqMHz,
+                            xMax: maxFreqMHz,
+                            borderColor: 'rgba(255, 152, 0, 0.8)',
                             borderWidth: 2,
-                            radius: 6,
+                            borderDash: [5, 5],
                             label: {
                                 display: true,
-                                content: `Max: ${dataMax.toFixed(1)} dB`,
-                                position: 'top',
+                                content: `${maxFreqMHz.toFixed(3)} MHz`,
+                                position: 'start',
                                 backgroundColor: 'rgba(255, 152, 0, 0.9)',
                                 color: '#fff',
                                 font: { size: 10, weight: 'bold' },
-                                padding: 4,
-                                yAdjust: -10
+                                padding: 4
                             }
                         }
                     };
@@ -1459,50 +1455,46 @@ class NoiseFloorMonitor {
                         padding: 4
                     }
                 },
-                // Min marker
-                minMarker: {
-                    type: 'point',
-                    xValue: minFreqMHz,
-                    yValue: dataMin,
-                    backgroundColor: 'rgba(33, 150, 243, 0.8)', // Blue
-                    borderColor: 'rgba(33, 150, 243, 1)',
+                // Min vertical line
+                minLine: {
+                    type: 'line',
+                    xMin: minFreqMHz,
+                    xMax: minFreqMHz,
+                    borderColor: 'rgba(33, 150, 243, 0.8)', // Blue
                     borderWidth: 2,
-                    radius: 6,
+                    borderDash: [5, 5],
                     label: {
                         display: true,
-                        content: `Min: ${dataMin.toFixed(1)} dB`,
-                        position: 'top',
+                        content: `${minFreqMHz.toFixed(3)} MHz`,
+                        position: 'start',
                         backgroundColor: 'rgba(33, 150, 243, 0.9)',
                         color: '#fff',
                         font: {
                             size: 10,
                             weight: 'bold'
                         },
-                        padding: 4,
-                        yAdjust: -10
+                        padding: 4
                     }
                 },
-                // Max marker
-                maxMarker: {
-                    type: 'point',
-                    xValue: maxFreqMHz,
-                    yValue: dataMax,
-                    backgroundColor: 'rgba(255, 152, 0, 0.8)', // Orange
-                    borderColor: 'rgba(255, 152, 0, 1)',
+                // Max vertical line
+                maxLine: {
+                    type: 'line',
+                    xMin: maxFreqMHz,
+                    xMax: maxFreqMHz,
+                    borderColor: 'rgba(255, 152, 0, 0.8)', // Orange
                     borderWidth: 2,
-                    radius: 6,
+                    borderDash: [5, 5],
                     label: {
                         display: true,
-                        content: `Max: ${dataMax.toFixed(1)} dB`,
-                        position: 'top',
+                        content: `${maxFreqMHz.toFixed(3)} MHz`,
+                        position: 'start',
                         backgroundColor: 'rgba(255, 152, 0, 0.9)',
                         color: '#fff',
                         font: {
                             size: 10,
                             weight: 'bold'
                         },
-                        padding: 4,
-                        yAdjust: -10
+                        padding: 4
                     }
                 }
             };

@@ -324,10 +324,6 @@ class MinimalRadio {
     
     // Handle binary Opus audio messages
     async handleBinaryMessage(data) {
-        if (!this.audioContext) {
-            return;
-        }
-
         try {
             // Convert Blob to ArrayBuffer if needed
             let arrayBuffer;
@@ -354,6 +350,21 @@ class MinimalRadio {
             const channels = view.getUint8(12);
             const opusData = new Uint8Array(arrayBuffer, 13);
 
+            console.log('Binary audio packet received:', {
+                sampleRate,
+                channels,
+                opusDataSize: opusData.length,
+                hasAudioContext: !!this.audioContext
+            });
+
+            // Initialize audio context on first binary packet if not already done
+            if (!this.audioContext) {
+                this.serverSampleRate = sampleRate;
+                this.audioBufferCount = 0;
+                console.log('Initializing audio context from binary packet:', sampleRate, 'Hz');
+                await this.initializeAudio(sampleRate);
+            }
+
             // Initialize or reinitialize decoder if sample rate or channels changed
             if (!this.opusDecoderInitialized ||
                 this.opusDecoderSampleRate !== sampleRate ||
@@ -372,6 +383,11 @@ class MinimalRadio {
                 console.error('Opus decode returned empty data');
                 return;
             }
+
+            console.log('Opus decoded successfully:', {
+                channels: decoded.channelData.length,
+                samples: decoded.channelData[0].length
+            });
 
             // Create stereo audio buffer from decoded PCM data
             const numChannels = Math.max(2, decoded.channelData.length);

@@ -3434,7 +3434,7 @@ class NoiseFloorMonitor {
             clearTimeout(this.tuneDebounceTimer);
         }
 
-        // Set new timer for 250ms
+        // Set new timer for 50ms (fast response for hover tuning)
         this.tuneDebounceTimer = setTimeout(() => {
             if (this.pendingTuneFrequency !== null && this.audioPreview) {
                 try {
@@ -3447,7 +3447,7 @@ class NoiseFloorMonitor {
                 this.pendingTuneFrequency = null;
             }
             this.tuneDebounceTimer = null;
-        }, 250);
+        }, 50);
     }
 
     updatePreviewIndicator(band, frequency) {

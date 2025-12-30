@@ -350,13 +350,6 @@ class MinimalRadio {
             const channels = view.getUint8(12);
             const opusData = new Uint8Array(arrayBuffer, 13);
 
-            console.log('Binary audio packet received:', {
-                sampleRate,
-                channels,
-                opusDataSize: opusData.length,
-                hasAudioContext: !!this.audioContext
-            });
-
             // Initialize audio context on first binary packet if not already done
             if (!this.audioContext) {
                 this.serverSampleRate = sampleRate;
@@ -383,11 +376,6 @@ class MinimalRadio {
                 console.error('Opus decode returned empty data');
                 return;
             }
-
-            console.log('Opus decoded successfully:', {
-                channels: decoded.channelData.length,
-                samples: decoded.channelData[0].length
-            });
 
             // Create stereo audio buffer from decoded PCM data
             const numChannels = Math.max(2, decoded.channelData.length);
@@ -664,8 +652,6 @@ class MinimalRadio {
                             view.getUint8(3) === 0x43) {
 
                             // Binary spectrum protocol detected
-                            console.log('Binary spectrum protocol detected');
-
                             // Parse binary spectrum message
                             msg = this.parseBinarySpectrum(view);
                         } else {
@@ -769,8 +755,6 @@ class MinimalRadio {
             for (let i = 0; i < binCount; i++) {
                 this.binarySpectrumData8[i] = view.getUint8(22 + i);
             }
-
-            console.log('Binary8 spectrum frame received:', binCount, 'bins');
 
         } else if (flags === 0x04) {
             // Delta frame (uint8) - binary8 format

@@ -3395,7 +3395,7 @@ class NoiseFloorMonitor {
 
             // Convert MHz to Hz and round to nearest 1 kHz
             const freq = freqMHz * 1e6;
-            const roundedFreq = Math.round(freq / 1000) * 1000;
+            const roundedFreq = Math.round(freq / 500) * 500;
 
             // Always update visual indicator to follow cursor exactly
             this.audioPreviewVisualFrequency = roundedFreq;

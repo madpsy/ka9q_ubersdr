@@ -1303,27 +1303,40 @@ class NoiseFloorMonitor {
             }
 
             // Calculate Y-axis range from actual data with small padding
-            // Filter out invalid values (NaN, Infinity, extremely low values)
-            const validData = fftData.data.filter(v => isFinite(v) && v > -200);
-            const dataMin = validData.length > 0 ? Math.min(...validData) : -100;
-            const dataMax = validData.length > 0 ? Math.max(...validData) : 0;
+            const dataMin = Math.min(...fftData.data);
+            const dataMax = Math.max(...fftData.data);
             const range = dataMax - dataMin;
             const padding = Math.max(2, range * 0.05); // At least 2 dB padding, or 5% of range
             const yMin = dataMin - padding;
             const yMax = dataMax + padding;
 
+            console.log(`Wide-band spectrum Y-axis: min=${dataMin.toFixed(1)} dB, max=${dataMax.toFixed(1)} dB, range=${range.toFixed(1)} dB, yMin=${yMin.toFixed(1)}, yMax=${yMax.toFixed(1)}`);
+
             // Check if chart already exists
             if (this.wideBandChart) {
-                // Update existing chart data (no flicker)
-                this.wideBandChart.data.labels = frequencies;
-                this.wideBandChart.data.datasets[0].data = fftData.data;
+                // Check if Y-axis range changed significantly (>10 dB) - if so, destroy and recreate
+                const currentMin = this.wideBandChart.options.scales.y.min;
+                const currentMax = this.wideBandChart.options.scales.y.max;
+                const minChanged = Math.abs(currentMin - yMin) > 10;
+                const maxChanged = Math.abs(currentMax - yMax) > 10;
 
-                // Update Y-axis scaling to fit data tightly
-                this.wideBandChart.options.scales.y.min = yMin;
-                this.wideBandChart.options.scales.y.max = yMax;
+                if (minChanged || maxChanged) {
+                    console.log(`Wide-band Y-axis range changed significantly, recreating chart`);
+                    this.wideBandChart.destroy();
+                    this.wideBandChart = null;
+                    // Fall through to create new chart
+                } else {
+                    // Update existing chart data (no flicker)
+                    this.wideBandChart.data.labels = frequencies;
+                    this.wideBandChart.data.datasets[0].data = fftData.data;
 
-                this.wideBandChart.update('none');
-                return;
+                    // Update Y-axis scaling to fit data tightly
+                    this.wideBandChart.options.scales.y.min = yMin;
+                    this.wideBandChart.options.scales.y.max = yMax;
+
+                    this.wideBandChart.update('none');
+                    return;
+                }
             }
 
             // Create new chart and store reference

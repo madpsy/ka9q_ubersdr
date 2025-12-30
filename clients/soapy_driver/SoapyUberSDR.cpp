@@ -1414,14 +1414,38 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
         } else {
             SoapySDR::logf(SOAPY_SDR_INFO, "SoapyUberSDR: Found %zu public instance(s)", instances.size());
             
+            // Helper function to sanitize strings for device string format
+            // Removes/replaces characters that break SoapySDR's comma-separated key=value format
+            auto sanitizeForDeviceString = [](const std::string& str) -> std::string {
+                std::string result;
+                for (char c : str) {
+                    if (c == ',') {
+                        // Replace commas with semicolons to avoid breaking device string parsing
+                        result += ';';
+                    } else if (c == '=' || c == '\n' || c == '\r' || c == '\t') {
+                        // Skip characters that break key=value format or are control characters
+                        continue;
+                    } else {
+                        result += c;
+                    }
+                }
+                // Trim leading/trailing whitespace
+                size_t start = result.find_first_not_of(" ");
+                size_t end = result.find_last_not_of(" ");
+                if (start != std::string::npos && end != std::string::npos) {
+                    return result.substr(start, end - start + 1);
+                }
+                return result;
+            };
+
             // Create devices for each public instance
             for (const auto& instance : instances) {
                 std::string host = instance.at("host");
                 std::string port = instance.at("port");
                 bool tls = (instance.count("tls") && instance.at("tls") == "true");
-                std::string name = instance.count("name") ? instance.at("name") : host;
-                std::string callsign = instance.count("callsign") ? instance.at("callsign") : "";
-                std::string location = instance.count("location") ? instance.at("location") : "";
+                std::string name = sanitizeForDeviceString(instance.count("name") ? instance.at("name") : host);
+                std::string callsign = sanitizeForDeviceString(instance.count("callsign") ? instance.at("callsign") : "");
+                std::string location = sanitizeForDeviceString(instance.count("location") ? instance.at("location") : "");
                 
                 // Parse public_iq_modes
                 std::vector<std::string> publicModes;
@@ -1448,27 +1472,33 @@ static SoapySDR::KwargsList findUberSDR(const SoapySDR::Kwargs &args)
                 std::string protocol = tls ? "wss" : "ws";
                 std::string serverURL = protocol + "://" + host + ":" + port + "/ws";
                 
-                // Create label with station info - prepend callsign if available
+                // Create label with station info - keep it concise for dropdown display
                 std::string stationInfo;
                 if (!callsign.empty()) {
-                    stationInfo = "(" + callsign + ") ";
-                }
-                stationInfo += name;
-                if (!location.empty()) {
-                    stationInfo += " - " + location;
+                    // Use callsign as primary identifier if available
+                    stationInfo = callsign;
+                } else if (!name.empty()) {
+                    // Otherwise use name
+                    stationInfo = name;
+                } else {
+                    // Fallback to host
+                    stationInfo = host;
                 }
                 
                 // Only create devices for public IQ modes
                 for (const auto& mode : publicModes) {
                     // Convert mode to bandwidth display (e.g., "iq48" -> "48 kHz")
                     std::string bandwidth = mode.substr(2) + " kHz"; // Remove "iq" prefix and add " kHz"
-                    
+
+                    // Create a short serial number for display (just identifier + mode)
+                    std::string shortSerial = stationInfo + ":" + mode;
+
                     SoapySDR::Kwargs dev;
                     dev["driver"] = "ubersdr";
                     dev["server"] = serverURL;
                     dev["mode"] = mode;
                     dev["label"] = stationInfo + " " + bandwidth;
-                    dev["serial"] = serverURL + ":" + mode;
+                    dev["serial"] = shortSerial;
                     if (!callsign.empty()) {
                         dev["callsign"] = callsign;
                     }

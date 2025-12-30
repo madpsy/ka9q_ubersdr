@@ -1303,8 +1303,10 @@ class NoiseFloorMonitor {
             }
 
             // Calculate Y-axis range from actual data with small padding
-            const dataMin = Math.min(...fftData.data);
-            const dataMax = Math.max(...fftData.data);
+            // Filter out invalid values (NaN, Infinity, extremely low values)
+            const validData = fftData.data.filter(v => isFinite(v) && v > -200);
+            const dataMin = validData.length > 0 ? Math.min(...validData) : -100;
+            const dataMax = validData.length > 0 ? Math.max(...validData) : 0;
             const range = dataMax - dataMin;
             const padding = Math.max(2, range * 0.05); // At least 2 dB padding, or 5% of range
             const yMin = dataMin - padding;

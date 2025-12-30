@@ -1598,15 +1598,15 @@ func (nfm *NoiseFloorMonitor) GetAveragedFFT(band string, duration time.Duration
 	return nil
 }
 
-// GetWideBandFFT returns the max-hold FFT data for the wide-band spectrum (0-30 MHz) over 10 seconds
-// Uses 10-second max hold to match the per-band statistics calculation
+// GetWideBandFFT returns the averaged FFT data for the wide-band spectrum (0-30 MHz) over 10 seconds
+// Uses averaging instead of max-hold to reject lightning spikes and other brief transients
 func (nfm *NoiseFloorMonitor) GetWideBandFFT() *BandFFT {
 	nfm.fftMu.RLock()
 	defer nfm.fftMu.RUnlock()
 
 	if nfm.wideBandFFTBuffer != nil {
-		// Return 10-second max hold for wide-band display (preserves peaks, matches per-band stats)
-		fft := nfm.wideBandFFTBuffer.GetMaxHoldFFT(10 * time.Second)
+		// Return 10-second average for wide-band display (rejects lightning spikes)
+		fft := nfm.wideBandFFTBuffer.GetAveragedFFT(10 * time.Second)
 		if fft == nil && DebugMode {
 			log.Printf("DEBUG: Wide-band FFT max hold returned nil (may need more samples)")
 		}

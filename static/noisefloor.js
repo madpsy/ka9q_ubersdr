@@ -1313,8 +1313,24 @@ class NoiseFloorMonitor {
                 }
             }
             
-            const dataMin = Math.min(...validValues);
-            const dataMax = Math.max(...validValues);
+            // Find min and max with their frequencies
+            let dataMin = Infinity;
+            let dataMax = -Infinity;
+            let minFreqMHz = 0;
+            let maxFreqMHz = 0;
+            
+            for (let i = 0; i < validIndices.length; i++) {
+                const idx = validIndices[i];
+                const value = validValues[i];
+                if (value < dataMin) {
+                    dataMin = value;
+                    minFreqMHz = frequencies[idx];
+                }
+                if (value > dataMax) {
+                    dataMax = value;
+                    maxFreqMHz = frequencies[idx];
+                }
+            }
             
             // Calculate P5 (noise floor estimate)
             const sortedValues = [...validValues].sort((a, b) => a - b);
@@ -1326,9 +1342,9 @@ class NoiseFloorMonitor {
             const yMin = dataMin - padding;
             const yMax = dataMax + padding;
 
-            // Update statistics display
-            document.getElementById('wideband-min').textContent = `${dataMin.toFixed(1)} dB`;
-            document.getElementById('wideband-max').textContent = `${dataMax.toFixed(1)} dB`;
+            // Update statistics display with frequencies
+            document.getElementById('wideband-min').textContent = `${dataMin.toFixed(1)} dB @ ${minFreqMHz.toFixed(3)} MHz`;
+            document.getElementById('wideband-max').textContent = `${dataMax.toFixed(1)} dB @ ${maxFreqMHz.toFixed(3)} MHz`;
             document.getElementById('wideband-p5').textContent = `${p5.toFixed(1)} dB`;
             document.getElementById('wideband-range').textContent = `${dynamicRange.toFixed(1)} dB`;
 
@@ -1356,10 +1372,140 @@ class NoiseFloorMonitor {
                     this.wideBandChart.options.scales.y.min = yMin;
                     this.wideBandChart.options.scales.y.max = yMax;
 
+                    // Update annotations with new min/max/P5 values
+                    this.wideBandChart.options.plugins.annotation.annotations = {
+                        p5Line: {
+                            type: 'line',
+                            yMin: p5,
+                            yMax: p5,
+                            borderColor: 'rgba(76, 175, 80, 0.8)',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            label: {
+                                display: true,
+                                content: `P5: ${p5.toFixed(1)} dB`,
+                                position: 'end',
+                                backgroundColor: 'rgba(76, 175, 80, 0.9)',
+                                color: '#fff',
+                                font: { size: 10, weight: 'bold' },
+                                padding: 4
+                            }
+                        },
+                        minMarker: {
+                            type: 'point',
+                            xValue: minFreqMHz,
+                            yValue: dataMin,
+                            backgroundColor: 'rgba(33, 150, 243, 0.8)',
+                            borderColor: 'rgba(33, 150, 243, 1)',
+                            borderWidth: 2,
+                            radius: 6,
+                            label: {
+                                display: true,
+                                content: `Min: ${dataMin.toFixed(1)} dB`,
+                                position: 'top',
+                                backgroundColor: 'rgba(33, 150, 243, 0.9)',
+                                color: '#fff',
+                                font: { size: 10, weight: 'bold' },
+                                padding: 4,
+                                yAdjust: -10
+                            }
+                        },
+                        maxMarker: {
+                            type: 'point',
+                            xValue: maxFreqMHz,
+                            yValue: dataMax,
+                            backgroundColor: 'rgba(255, 152, 0, 0.8)',
+                            borderColor: 'rgba(255, 152, 0, 1)',
+                            borderWidth: 2,
+                            radius: 6,
+                            label: {
+                                display: true,
+                                content: `Max: ${dataMax.toFixed(1)} dB`,
+                                position: 'top',
+                                backgroundColor: 'rgba(255, 152, 0, 0.9)',
+                                color: '#fff',
+                                font: { size: 10, weight: 'bold' },
+                                padding: 4,
+                                yAdjust: -10
+                            }
+                        }
+                    };
+
                     this.wideBandChart.update('none');
                     return;
                 }
             }
+
+            // Create annotations for min, max, and P5
+            const annotations = {
+                // P5 horizontal line (noise floor)
+                p5Line: {
+                    type: 'line',
+                    yMin: p5,
+                    yMax: p5,
+                    borderColor: 'rgba(76, 175, 80, 0.8)', // Green
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    label: {
+                        display: true,
+                        content: `P5: ${p5.toFixed(1)} dB`,
+                        position: 'end',
+                        backgroundColor: 'rgba(76, 175, 80, 0.9)',
+                        color: '#fff',
+                        font: {
+                            size: 10,
+                            weight: 'bold'
+                        },
+                        padding: 4
+                    }
+                },
+                // Min marker
+                minMarker: {
+                    type: 'point',
+                    xValue: minFreqMHz,
+                    yValue: dataMin,
+                    backgroundColor: 'rgba(33, 150, 243, 0.8)', // Blue
+                    borderColor: 'rgba(33, 150, 243, 1)',
+                    borderWidth: 2,
+                    radius: 6,
+                    label: {
+                        display: true,
+                        content: `Min: ${dataMin.toFixed(1)} dB`,
+                        position: 'top',
+                        backgroundColor: 'rgba(33, 150, 243, 0.9)',
+                        color: '#fff',
+                        font: {
+                            size: 10,
+                            weight: 'bold'
+                        },
+                        padding: 4,
+                        yAdjust: -10
+                    }
+                },
+                // Max marker
+                maxMarker: {
+                    type: 'point',
+                    xValue: maxFreqMHz,
+                    yValue: dataMax,
+                    backgroundColor: 'rgba(255, 152, 0, 0.8)', // Orange
+                    borderColor: 'rgba(255, 152, 0, 1)',
+                    borderWidth: 2,
+                    radius: 6,
+                    label: {
+                        display: true,
+                        content: `Max: ${dataMax.toFixed(1)} dB`,
+                        position: 'top',
+                        backgroundColor: 'rgba(255, 152, 0, 0.9)',
+                        color: '#fff',
+                        font: {
+                            size: 10,
+                            weight: 'bold'
+                        },
+                        padding: 4,
+                        yAdjust: -10
+                    }
+                }
+            };
 
             // Create gradient fill (similar to main spectrum line graph)
             // Gradient from bottom (weak signal) to top (strong signal)
@@ -1416,6 +1562,9 @@ class NoiseFloorMonitor {
                                     return `${item.parsed.y.toFixed(1)} dB`;
                                 }
                             }
+                        },
+                        annotation: {
+                            annotations: annotations
                         }
                     },
                     scales: {

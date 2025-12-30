@@ -1302,11 +1302,11 @@ class NoiseFloorMonitor {
                 frequencies.push(freqMHz);
             }
 
-            // Calculate Y-axis scaling
+            // Calculate Y-axis scaling with minimal padding
             const dataMin = Math.min(...fftData.data);
             const dataMax = Math.max(...fftData.data);
             const range = dataMax - dataMin;
-            const padding = range * 0.05;
+            const padding = range * 0.02; // Reduced padding to 2%
             const yMin = Math.floor(dataMin - padding);
             const yMax = Math.ceil(dataMax + padding);
 

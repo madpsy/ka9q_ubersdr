@@ -188,7 +188,7 @@ func corsMiddleware(config *Config, next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Max-Age", "86400") // Cache preflight for 24 hours
-			
+
 			// Handle preflight OPTIONS requests
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent) // 204 is more appropriate than 200 for OPTIONS
@@ -848,6 +848,9 @@ func main() {
 	}))
 	http.HandleFunc("/api/noisefloor/fft", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorFFT(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
+	}))
+	http.HandleFunc("/api/noisefloor/fft/wideband", gzipHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleNoiseFloorWideBandFFT(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
 	http.HandleFunc("/api/noisefloor/config", func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorConfig(w, r, config, ipBanManager)
@@ -2001,6 +2004,53 @@ func handleNoiseFloorFFT(w http.ResponseWriter, r *http.Request, nfm *NoiseFloor
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(fft); err != nil {
 		log.Printf("Error encoding FFT data: %v", err)
+	}
+}
+
+// handleNoiseFloorWideBandFFT serves the latest wide-band FFT data (0-30 MHz)
+func handleNoiseFloorWideBandFFT(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, ipBanManager *IPBanManager, rateLimiter *FFTRateLimiter) {
+	// Check if IP is banned
+	if checkIPBan(w, r, ipBanManager) {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if nfm == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Noise floor monitoring is not enabled",
+		})
+		return
+	}
+
+	// Check rate limit (1 request per 2 seconds per IP for wide-band)
+	clientIP := getClientIP(r)
+	if !rateLimiter.AllowRequest(clientIP, "wideband") {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded for wide-band spectrum. Please wait 2 seconds between requests.",
+		})
+		log.Printf("Wide-band FFT rate limit exceeded for IP: %s", clientIP)
+		return
+	}
+
+	fft := nfm.GetWideBandFFT()
+	if fft == nil {
+		// Return 204 No Content - data not available yet but will be soon
+		w.WriteHeader(http.StatusNoContent)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "No wide-band FFT data available yet. Data will be available after the first spectrum samples are collected.",
+		})
+		if DebugMode {
+			log.Printf("DEBUG: Wide-band FFT request returned no data (buffer may be empty or averaging window too short)")
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(fft); err != nil {
+		log.Printf("Error encoding wide-band FFT data: %v", err)
 	}
 }
 

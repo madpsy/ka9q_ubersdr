@@ -40,6 +40,10 @@ type NoiseFloorMonitor struct {
 	bandSpectrums  map[string]*BandSpectrum
 	spectrumsReady bool
 
+	// Wide-band spectrum (0-30 MHz full HF coverage)
+	wideBandSpectrum  *BandSpectrum
+	wideBandFFTBuffer *FFTBuffer
+
 	// CSV logging (one file per band)
 	currentFiles map[string]*os.File
 	csvWriters   map[string]*csv.Writer
@@ -312,11 +316,21 @@ func NewNoiseFloorMonitor(config *Config, radiod *RadiodController, sessions *Se
 		)
 	}
 
+	// Initialize wide-band FFT buffer (0-30 MHz full HF coverage)
+	// Uses same parameters as main spectrum display: 1024 bins @ 30 kHz/bin
+	nfm.wideBandFFTBuffer = NewFFTBuffer(
+		"wideband",
+		0,              // 0 Hz start
+		30000000,       // 30 MHz end
+		30000.0,        // 30 kHz bin width (matches default spectrum config)
+		60*time.Second, // Keep 1 minute of samples
+	)
+
 	return nfm, nil
 }
 
 // Start begins noise floor monitoring
-// Creates a separate spectrum channel for each band
+// Creates a separate spectrum channel for each band plus a wide-band channel
 func (nfm *NoiseFloorMonitor) Start() error {
 	if nfm == nil {
 		return nil // Disabled
@@ -324,7 +338,82 @@ func (nfm *NoiseFloorMonitor) Start() error {
 
 	nfm.running = true
 
-	log.Printf("Creating noise floor spectrum sessions for %d bands", len(nfm.config.NoiseFloor.Bands))
+	log.Printf("Creating noise floor spectrum sessions for %d bands + wide-band", len(nfm.config.NoiseFloor.Bands))
+
+	// Create wide-band spectrum session (0-30 MHz full HF coverage)
+	// Uses same parameters as main spectrum display
+	wideBandSSRC := uint32(rand.Int31())
+	if wideBandSSRC == 0 || wideBandSSRC == 0xffffffff {
+		wideBandSSRC = 1
+	}
+
+	// Ensure SSRC is unique
+	nfm.sessions.mu.RLock()
+	for {
+		if _, exists := nfm.sessions.ssrcToSession[wideBandSSRC]; !exists {
+			break
+		}
+		wideBandSSRC = uint32(rand.Int31())
+		if wideBandSSRC == 0 || wideBandSSRC == 0xffffffff {
+			wideBandSSRC = 1
+		}
+	}
+	nfm.sessions.mu.RUnlock()
+
+	// Create wide-band spectrum channel
+	// Parameters match default spectrum config: 15 MHz center, 1024 bins, 30 kHz/bin
+	if DebugMode {
+		log.Printf("DEBUG: Creating wide-band spectrum - freq: 15000000 Hz, bins: 1024, bw: 30000.0 Hz")
+	}
+
+	if err := nfm.radiod.CreateSpectrumChannel(
+		"noisefloor-wideband",
+		15000000, // 15 MHz center (covers 0-30 MHz)
+		1024,     // 1024 bins
+		30000.0,  // 30 kHz per bin (~30.72 MHz total bandwidth)
+		wideBandSSRC,
+	); err != nil {
+		return fmt.Errorf("failed to create wide-band spectrum channel: %w", err)
+	}
+
+	// Create spectrum channel for receiving wide-band data
+	wideBandSpectrumChan := make(chan []float32, 10)
+
+	// Register wide-band spectrum session
+	wideBandSessionID := fmt.Sprintf("noisefloor-wideband-%08x", wideBandSSRC)
+	wideBandSession := &Session{
+		ID:           wideBandSessionID,
+		SSRC:         wideBandSSRC,
+		IsSpectrum:   true,
+		Frequency:    15000000,
+		BinCount:     1024,
+		BinBandwidth: 30000.0,
+		SpectrumChan: wideBandSpectrumChan,
+		CreatedAt:    time.Now(),
+		LastActive:   time.Now(),
+	}
+
+	nfm.sessions.mu.Lock()
+	nfm.sessions.sessions[wideBandSessionID] = wideBandSession
+	nfm.sessions.ssrcToSession[wideBandSSRC] = wideBandSession
+	nfm.sessions.mu.Unlock()
+
+	// Store wide-band spectrum info
+	nfm.wideBandSpectrum = &BandSpectrum{
+		Band: NoiseFloorBand{
+			Name:            "wideband",
+			Start:           0,
+			End:             30000000,
+			CenterFrequency: 15000000,
+			BinCount:        1024,
+			BinBandwidth:    30000.0,
+		},
+		SSRC:         wideBandSSRC,
+		SessionID:    wideBandSessionID,
+		SpectrumChan: wideBandSpectrumChan,
+	}
+
+	log.Printf("Created wide-band spectrum session (SSRC: 0x%08x, 30 kHz resolution, 0-30 MHz)", wideBandSSRC)
 
 	// Create a spectrum session for each band
 	for _, band := range nfm.config.NoiseFloor.Bands {
@@ -405,7 +494,7 @@ func (nfm *NoiseFloorMonitor) Start() error {
 	nfm.wg.Add(1)
 	go nfm.monitorLoop()
 
-	log.Printf("Noise floor monitor started (poll interval: %d seconds, %d bands)",
+	log.Printf("Noise floor monitor started (poll interval: %d seconds, %d bands + wide-band)",
 		nfm.config.NoiseFloor.PollIntervalSec, len(nfm.config.NoiseFloor.Bands))
 
 	// Give radiod a moment to set up the spectrum channels
@@ -438,6 +527,23 @@ func (nfm *NoiseFloorMonitor) Stop() {
 
 	// Disable and remove all band spectrum channels
 	if nfm.spectrumsReady {
+		// Disable wide-band spectrum channel
+		if nfm.wideBandSpectrum != nil {
+			if err := nfm.radiod.DisableChannel("noisefloor-wideband", nfm.wideBandSpectrum.SSRC); err != nil {
+				log.Printf("Warning: failed to disable wide-band channel: %v", err)
+			}
+
+			// Remove from session manager
+			nfm.sessions.mu.Lock()
+			delete(nfm.sessions.sessions, nfm.wideBandSpectrum.SessionID)
+			delete(nfm.sessions.ssrcToSession, nfm.wideBandSpectrum.SSRC)
+			nfm.sessions.mu.Unlock()
+
+			// Close spectrum channel
+			close(nfm.wideBandSpectrum.SpectrumChan)
+		}
+
+		// Disable per-band spectrum channels
 		for bandName, bandSpectrum := range nfm.bandSpectrums {
 			// Disable radiod channel
 			channelName := fmt.Sprintf("noisefloor-%s", bandName)
@@ -456,7 +562,7 @@ func (nfm *NoiseFloorMonitor) Stop() {
 		}
 	}
 
-	log.Printf("Noise floor monitor stopped (%d bands cleaned up)", len(nfm.bandSpectrums))
+	log.Printf("Noise floor monitor stopped (%d bands + wide-band cleaned up)", len(nfm.bandSpectrums))
 }
 
 // monitorLoop receives and processes spectrum data from multiple band channels
@@ -465,12 +571,35 @@ func (nfm *NoiseFloorMonitor) monitorLoop() {
 	defer nfm.wg.Done()
 
 	if DebugMode {
-		log.Printf("DEBUG: Noise floor monitor loop started for %d bands", len(nfm.bandSpectrums))
+		log.Printf("DEBUG: Noise floor monitor loop started for %d bands + wide-band", len(nfm.bandSpectrums))
 	}
 
 	// Track time for periodic measurements
 	ticker := time.NewTicker(time.Duration(nfm.config.NoiseFloor.PollIntervalSec) * time.Second)
 	defer ticker.Stop()
+
+	// Start goroutine for wide-band spectrum data
+	if nfm.wideBandSpectrum != nil {
+		nfm.wg.Add(1)
+		go func() {
+			defer nfm.wg.Done()
+
+			for {
+				select {
+				case <-nfm.stopChan:
+					return
+				case spectrum := <-nfm.wideBandSpectrum.SpectrumChan:
+					// Update last data time
+					nfm.wideBandSpectrum.mu.Lock()
+					nfm.wideBandSpectrum.LastDataTime = time.Now()
+					nfm.wideBandSpectrum.mu.Unlock()
+
+					// Add spectrum data to wide-band buffer
+					nfm.addWideBandSampleToBuffer(spectrum)
+				}
+			}
+		}()
+	}
 
 	// Start a goroutine for each band to receive its spectrum data
 	for bandName, bandSpectrum := range nfm.bandSpectrums {
@@ -555,6 +684,28 @@ func (nfm *NoiseFloorMonitor) addBandSampleToBuffer(bandName string, spectrum []
 	nfm.fftMu.Lock()
 	if buffer, ok := nfm.fftBuffers[bandName]; ok {
 		buffer.AddSample(timestamp, unwrapped)
+	}
+	nfm.fftMu.Unlock()
+}
+
+// addWideBandSampleToBuffer adds a spectrum sample to the wide-band FFT buffer
+func (nfm *NoiseFloorMonitor) addWideBandSampleToBuffer(spectrum []float32) {
+	timestamp := time.Now()
+
+	// Unwrap FFT bin ordering from radiod (same as per-band processing)
+	N := len(spectrum)
+	halfBins := N / 2
+	unwrapped := make([]float32, N)
+
+	// Put second half (negative frequencies) first
+	copy(unwrapped[0:halfBins], spectrum[halfBins:N])
+	// Put first half (positive frequencies) second
+	copy(unwrapped[halfBins:N], spectrum[0:halfBins])
+
+	// Add unwrapped sample to wide-band buffer
+	nfm.fftMu.Lock()
+	if nfm.wideBandFFTBuffer != nil {
+		nfm.wideBandFFTBuffer.AddSample(timestamp, unwrapped)
 	}
 	nfm.fftMu.Unlock()
 }
@@ -1443,6 +1594,28 @@ func (nfm *NoiseFloorMonitor) GetAveragedFFT(band string, duration time.Duration
 
 	if buffer, ok := nfm.fftBuffers[band]; ok {
 		return buffer.GetAveragedFFT(duration)
+	}
+	return nil
+}
+
+// GetWideBandFFT returns the max-hold FFT data for the wide-band spectrum (0-30 MHz) over 10 seconds
+// Uses 10-second max hold to match the per-band statistics calculation
+func (nfm *NoiseFloorMonitor) GetWideBandFFT() *BandFFT {
+	nfm.fftMu.RLock()
+	defer nfm.fftMu.RUnlock()
+
+	if nfm.wideBandFFTBuffer != nil {
+		// Return 10-second max hold for wide-band display (preserves peaks, matches per-band stats)
+		fft := nfm.wideBandFFTBuffer.GetMaxHoldFFT(10 * time.Second)
+		if fft == nil && DebugMode {
+			log.Printf("DEBUG: Wide-band FFT max hold returned nil (may need more samples)")
+		}
+
+		// No markers for wide-band spectrum (covers all bands)
+		return fft
+	}
+	if DebugMode {
+		log.Printf("DEBUG: No wide-band FFT buffer found")
 	}
 	return nil
 }

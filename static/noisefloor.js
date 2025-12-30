@@ -10,6 +10,7 @@ class NoiseFloorMonitor {
         this.dynamicRangeChart = null;
         this.ft8SnrChart = null;
         this.bandStateChart = null;
+        this.wideBandChart = null; // Wide-band spectrum chart (0-30 MHz)
         this.refreshInterval = null;
         this.fftRefreshInterval = null;
         this.currentDate = 'live';
@@ -401,6 +402,11 @@ class NoiseFloorMonitor {
             }
         }
 
+        // Load wide-band spectrum (only in "all bands" view)
+        if (this.currentBand === 'all') {
+            await this.createWideBandSpectrum('wideband-fft');
+        }
+
         this.displayLiveData(data);
         await this.updateTrendChart(data);
         await this.updateDynamicRangeChart(data);
@@ -595,11 +601,17 @@ class NoiseFloorMonitor {
     displayLiveData(data) {
         const dashboard = document.getElementById('dashboard');
         const trendsContainer = document.getElementById('trendsContainer');
+        const widebandContainer = document.getElementById('widebandContainer');
 
         // Filter by selected band if not "all"
         const bands = this.currentBand === 'all'
             ? this.sortBands(Object.keys(data))
             : [this.currentBand];
+
+        // Show/hide wide-band spectrum based on view mode
+        if (widebandContainer) {
+            widebandContainer.style.display = this.currentBand === 'all' ? 'block' : 'none';
+        }
 
         // Toggle layout classes based on view mode
         if (this.currentBand === 'all') {
@@ -1248,6 +1260,171 @@ class NoiseFloorMonitor {
             });
         } catch (error) {
             console.error(`Error creating FFT spectrum for ${band}:`, error);
+        }
+    }
+
+    async createWideBandSpectrum(canvasId) {
+        try {
+            // Fetch wide-band FFT data (0-30 MHz)
+            const response = await fetch('/api/noisefloor/fft/wideband');
+
+            if (!response.ok) {
+                return; // Silently fail if no data
+            }
+
+            const fftData = await response.json();
+
+            if (!fftData || !fftData.data || fftData.data.length === 0) {
+                return;
+            }
+
+            const ctx = document.getElementById(canvasId);
+            if (!ctx) return;
+
+            // Calculate frequency labels (0-30 MHz range)
+            const startFreqMHz = fftData.start_freq / 1e6; // Convert to MHz
+            const binWidthMHz = fftData.bin_width / 1e6;
+            const numBins = fftData.data.length;
+
+            // Create frequency labels in MHz
+            const frequencies = [];
+            for (let i = 0; i < numBins; i++) {
+                const freqMHz = startFreqMHz + (i * binWidthMHz);
+                frequencies.push(freqMHz);
+            }
+
+            // Calculate Y-axis scaling
+            const dataMin = Math.min(...fftData.data);
+            const dataMax = Math.max(...fftData.data);
+            const range = dataMax - dataMin;
+            const padding = range * 0.05;
+            const yMin = Math.floor(dataMin - padding);
+            const yMax = Math.ceil(dataMax + padding);
+
+            // Check if chart already exists
+            if (this.wideBandChart) {
+                // Update existing chart data (no flicker)
+                this.wideBandChart.data.labels = frequencies;
+                this.wideBandChart.data.datasets[0].data = fftData.data;
+
+                // Update Y-axis scaling
+                this.wideBandChart.options.scales.y.min = yMin;
+                this.wideBandChart.options.scales.y.max = yMax;
+
+                this.wideBandChart.update('none');
+                return;
+            }
+
+            // Create new chart and store reference
+            this.wideBandChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: frequencies,
+                    datasets: [{
+                        label: 'Full Spectrum',
+                        data: fftData.data,
+                        borderColor: '#4CAF50',
+                        backgroundColor: '#4CAF5022',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    animation: false,
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        title: {
+                            display: true,
+                            text: 'Full HF Spectrum (10s max-hold)',
+                            color: 'rgba(255, 255, 255, 0.9)',
+                            font: {
+                                size: 12
+                            }
+                        },
+                        tooltip: {
+                            enabled: true,
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                title: (items) => {
+                                    return `${items[0].parsed.x.toFixed(3)} MHz`;
+                                },
+                                label: (item) => {
+                                    return `${item.parsed.y.toFixed(1)} dB`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            display: true,
+                            min: 0,
+                            max: 30,
+                            title: {
+                                display: true,
+                                text: 'Frequency (MHz)',
+                                color: 'rgba(255, 255, 255, 0.7)',
+                                font: {
+                                    size: 10
+                                }
+                            },
+                            ticks: {
+                                color: 'rgba(255, 255, 255, 0.7)',
+                                font: {
+                                    size: 9
+                                },
+                                callback: (value) => value.toFixed(0)
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            min: yMin,
+                            max: yMax,
+                            ticks: {
+                                color: 'rgba(255, 255, 255, 0.7)',
+                                font: {
+                                    size: 9,
+                                    family: 'monospace'
+                                },
+                                callback: (value) => {
+                                    const str = value.toFixed(0);
+                                    return str.padStart(4, ' ');
+                                },
+                                autoSkip: true,
+                                maxTicksLimit: 8
+                            },
+                            title: {
+                                display: true,
+                                text: 'Power (dB)',
+                                color: 'rgba(255, 255, 255, 0.7)',
+                                font: {
+                                    size: 10
+                                }
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            }
+                        }
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error creating wide-band spectrum:', error);
         }
     }
 
@@ -2661,6 +2838,11 @@ class NoiseFloorMonitor {
     }
 
     async updateFFTSpectrums() {
+        // Update wide-band spectrum first (only in "all bands" view and live mode)
+        if (this.currentBand === 'all' && this.currentDate === 'live') {
+            await this.createWideBandSpectrum('wideband-fft');
+        }
+
         // Get all visible bands
         const bands = this.currentBand === 'all'
             ? ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m']
@@ -3190,6 +3372,12 @@ class NoiseFloorMonitor {
             if (this.currentBandData) {
                 this.removePreviewIndicator(this.currentBandData.band);
             }
+        }
+
+        // Destroy wide-band chart
+        if (this.wideBandChart) {
+            this.wideBandChart.destroy();
+            this.wideBandChart = null;
         }
 
         // Destroy all stored charts

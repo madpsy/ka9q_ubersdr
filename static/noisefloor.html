@@ -493,6 +493,15 @@
 
         <div id="liveData">
             <h2 style="margin-bottom: 20px; font-size: 1.8em;">📊 Current Conditions</h2>
+            
+            <!-- Wide-band spectrum (0-30 MHz) -->
+            <div class="chart-container" id="widebandContainer" style="margin-bottom: 20px;">
+                <h2>📡 Full HF Spectrum (0-30 MHz)</h2>
+                <div style="height: 300px;">
+                    <canvas id="wideband-fft"></canvas>
+                </div>
+            </div>
+            
             <div class="dashboard" id="dashboard">
                 <div class="loading">
                     <div class="spinner"></div>

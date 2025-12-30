@@ -35,6 +35,7 @@ class MinimalRadio {
         this.spectrumConnected = false;
         this.spectrumCallback = null;
         this.spectrumConfig = null; // Store spectrum config (centerFreq, binCount, etc.)
+        this.binarySpectrumData8 = null; // State for binary8 delta decoding
         
         // Heartbeat timer
         this.heartbeatInterval = null;
@@ -605,7 +606,7 @@ class MinimalRadio {
                 this.connectionValidated = true;
             }
 
-            // Create spectrum WebSocket connection
+            // Create spectrum WebSocket connection with binary8 mode
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             let wsUrl = `${protocol}//${window.location.host}/ws/user-spectrum?user_session_id=${encodeURIComponent(this.userSessionID)}`;
 
@@ -614,8 +615,12 @@ class MinimalRadio {
                 wsUrl += `&password=${encodeURIComponent(window.bypassPassword)}`;
             }
 
+            // Request binary8 mode for maximum bandwidth reduction (8-bit encoding)
+            wsUrl += `&mode=binary8`;
+
             console.log('Connecting to spectrum WebSocket:', wsUrl);
             this.spectrumWs = new WebSocket(wsUrl);
+            this.spectrumWs.binaryType = 'arraybuffer'; // Enable binary message handling
 
             this.spectrumWs.onopen = () => {
                 console.log('Spectrum WebSocket connected');
@@ -630,23 +635,71 @@ class MinimalRadio {
                 try {
                     let msg;
 
-                    // Check if message is binary (compressed) or text (uncompressed)
-                    if (event.data instanceof Blob) {
-                        // Binary message - decompress with gzip
-                        const compressedData = await event.data.arrayBuffer();
+                    // Check if message is binary protocol (ArrayBuffer) or JSON
+                    if (event.data instanceof ArrayBuffer) {
+                        // Binary protocol - check magic header
+                        const view = new DataView(event.data);
 
-                        // Decompress using DecompressionStream
-                        const decompressedStream = new Response(
-                            new Blob([compressedData]).stream().pipeThrough(new DecompressionStream('gzip'))
-                        );
-                        const decompressedText = await decompressedStream.text();
-                        msg = JSON.parse(decompressedText);
+                        // Check for "SPEC" magic (0x53 0x50 0x45 0x43)
+                        if (event.data.byteLength >= 4 &&
+                            view.getUint8(0) === 0x53 &&
+                            view.getUint8(1) === 0x50 &&
+                            view.getUint8(2) === 0x45 &&
+                            view.getUint8(3) === 0x43) {
+
+                            // Binary spectrum protocol detected
+                            console.log('Binary spectrum protocol detected');
+
+                            // Parse binary spectrum message
+                            msg = this.parseBinarySpectrum(view);
+                        } else {
+                            // Legacy binary (gzipped JSON) - decompress
+                            try {
+                                const decompressedStream = new Response(
+                                    new Blob([event.data]).stream().pipeThrough(new DecompressionStream('gzip'))
+                                );
+                                const decompressedText = await decompressedStream.text();
+                                msg = JSON.parse(decompressedText);
+                            } catch (decompressErr) {
+                                console.error('Failed to decompress gzip data:', decompressErr);
+                                return;
+                            }
+                        }
+                    } else if (event.data instanceof Blob) {
+                        // Blob message - convert to ArrayBuffer and check format
+                        const arrayBuffer = await event.data.arrayBuffer();
+                        const view = new DataView(arrayBuffer);
+
+                        // Check for "SPEC" magic
+                        if (arrayBuffer.byteLength >= 4 &&
+                            view.getUint8(0) === 0x53 &&
+                            view.getUint8(1) === 0x50 &&
+                            view.getUint8(2) === 0x45 &&
+                            view.getUint8(3) === 0x43) {
+
+                            // Binary spectrum protocol
+                            msg = this.parseBinarySpectrum(view);
+                        } else {
+                            // Legacy gzipped JSON
+                            try {
+                                const decompressedStream = new Response(
+                                    new Blob([arrayBuffer]).stream().pipeThrough(new DecompressionStream('gzip'))
+                                );
+                                const decompressedText = await decompressedStream.text();
+                                msg = JSON.parse(decompressedText);
+                            } catch (decompressErr) {
+                                console.error('Failed to decompress gzip data:', decompressErr);
+                                return;
+                            }
+                        }
                     } else {
                         // Text message - parse directly
                         msg = JSON.parse(event.data);
                     }
 
-                    this.handleSpectrumMessage(msg);
+                    if (msg) {
+                        this.handleSpectrumMessage(msg);
+                    }
                 } catch (err) {
                     console.error('Error parsing spectrum message:', err);
                 }
@@ -667,6 +720,78 @@ class MinimalRadio {
             console.error('Failed to connect spectrum WebSocket:', error);
             throw error;
         }
+    }
+
+    // Parse binary spectrum message (matching spectrum-display.js)
+    parseBinarySpectrum(view) {
+        // Parse header (22 bytes)
+        const version = view.getUint8(4);
+        const flags = view.getUint8(5);
+        const timestamp = Number(view.getBigUint64(6, true)); // little-endian
+        const frequency = Number(view.getBigUint64(14, true)); // little-endian
+
+        if (version !== 0x01) {
+            console.error('Unsupported binary protocol version:', version);
+            return null;
+        }
+
+        let spectrumData;
+
+        if (flags === 0x03) {
+            // Full frame (uint8) - binary8 format
+            const binCount = view.byteLength - 22;
+            spectrumData = new Float32Array(binCount);
+
+            for (let i = 0; i < binCount; i++) {
+                // Convert uint8 to dBFS: 0 = -256 dB, 255 = -1 dB
+                const uint8Value = view.getUint8(22 + i);
+                spectrumData[i] = uint8Value - 256;
+            }
+
+            // Store for delta decoding (as uint8)
+            this.binarySpectrumData8 = new Uint8Array(binCount);
+            for (let i = 0; i < binCount; i++) {
+                this.binarySpectrumData8[i] = view.getUint8(22 + i);
+            }
+
+            console.log('Binary8 spectrum frame received:', binCount, 'bins');
+
+        } else if (flags === 0x04) {
+            // Delta frame (uint8) - binary8 format
+            if (!this.binarySpectrumData8) {
+                console.error('Binary8 delta frame received before full frame');
+                return null;
+            }
+
+            const changeCount = view.getUint16(22, true); // little-endian
+            let offset = 24;
+
+            // Apply changes to previous uint8 data
+            for (let i = 0; i < changeCount; i++) {
+                const index = view.getUint16(offset, true); // little-endian
+                const value = view.getUint8(offset + 2); // uint8 value
+                this.binarySpectrumData8[index] = value;
+                offset += 3; // 2 bytes index + 1 byte value
+            }
+
+            // Convert uint8 array to float32 for display
+            spectrumData = new Float32Array(this.binarySpectrumData8.length);
+            for (let i = 0; i < this.binarySpectrumData8.length; i++) {
+                spectrumData[i] = this.binarySpectrumData8[i] - 256;
+            }
+
+        } else {
+            console.error('Unknown binary frame flags:', flags);
+            return null;
+        }
+
+        // Return in same format as JSON messages
+        return {
+            type: 'spectrum',
+            data: Array.from(spectrumData),
+            frequency: frequency,
+            timestamp: timestamp
+        };
     }
 
     // Handle spectrum WebSocket messages

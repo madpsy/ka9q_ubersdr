@@ -453,7 +453,8 @@
             <div class="header">
                 <div class="header-content">
                     <h1>Configuration Editor</h1>
-                    <p>Edit UberSDR configuration. Changes require server restart to take effect.</p>
+                    <p id="configEditorSubtitle">Edit UberSDR configuration. Changes require server restart to take effect.</p>
+                    <p id="configCallsignName" style="margin-top: 8px; font-size: 14px; color: #000; font-weight: bold;"></p>
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <button id="publicInstanceBtn" class="btn" onclick="window.location.href='/create_public.html'" style="display: none; background: #28a745;">
@@ -1107,9 +1108,29 @@
                 currentConfig = await response.json();
                 renderVisualEditor();
                 updatePublicInstanceButton();
+                updateCallsignNameDisplay();
                 showAlert('Configuration loaded successfully', 'success');
             } catch (error) {
                 showAlert('Error loading configuration: ' + error.message, 'error');
+            }
+        }
+
+        // Update callsign and name display in header
+        function updateCallsignNameDisplay() {
+            const callsignNameEl = document.getElementById('configCallsignName');
+            if (!callsignNameEl) return;
+
+            const callsign = currentConfig?.admin?.callsign || '';
+            const name = currentConfig?.admin?.name || '';
+
+            if (callsign && name) {
+                callsignNameEl.textContent = `Callsign: ${callsign} - Name: ${name}`;
+            } else if (callsign) {
+                callsignNameEl.textContent = `Callsign: ${callsign}`;
+            } else if (name) {
+                callsignNameEl.textContent = `Name: ${name}`;
+            } else {
+                callsignNameEl.textContent = '';
             }
         }
 

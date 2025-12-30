@@ -1302,9 +1302,13 @@ class NoiseFloorMonitor {
                 frequencies.push(freqMHz);
             }
 
-            // Calculate Y-axis range from actual data
+            // Calculate Y-axis range from actual data with small padding
             const dataMin = Math.min(...fftData.data);
             const dataMax = Math.max(...fftData.data);
+            const range = dataMax - dataMin;
+            const padding = Math.max(2, range * 0.05); // At least 2 dB padding, or 5% of range
+            const yMin = dataMin - padding;
+            const yMax = dataMax + padding;
 
             // Check if chart already exists
             if (this.wideBandChart) {
@@ -1313,8 +1317,8 @@ class NoiseFloorMonitor {
                 this.wideBandChart.data.datasets[0].data = fftData.data;
 
                 // Update Y-axis scaling to fit data tightly
-                this.wideBandChart.options.scales.y.suggestedMin = dataMin;
-                this.wideBandChart.options.scales.y.suggestedMax = dataMax;
+                this.wideBandChart.options.scales.y.min = yMin;
+                this.wideBandChart.options.scales.y.max = yMax;
 
                 this.wideBandChart.update('none');
                 return;
@@ -1394,9 +1398,8 @@ class NoiseFloorMonitor {
                         y: {
                             type: 'linear',
                             display: true,
-                            beginAtZero: false,
-                            suggestedMin: dataMin,
-                            suggestedMax: dataMax,
+                            min: yMin,
+                            max: yMax,
                             ticks: {
                                 color: 'rgba(255, 255, 255, 0.7)',
                                 font: {

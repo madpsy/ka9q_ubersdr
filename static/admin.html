@@ -1124,11 +1124,11 @@
             const name = currentConfig?.admin?.name || '';
 
             if (callsign && name) {
-                callsignNameEl.textContent = `Callsign: ${callsign} - Name: ${name}`;
+                callsignNameEl.textContent = `${callsign} - ${name}`;
             } else if (callsign) {
-                callsignNameEl.textContent = `Callsign: ${callsign}`;
+                callsignNameEl.textContent = callsign;
             } else if (name) {
-                callsignNameEl.textContent = `Name: ${name}`;
+                callsignNameEl.textContent = name;
             } else {
                 callsignNameEl.textContent = '';
             }

@@ -496,7 +496,15 @@
             
             <!-- Wide-band spectrum (0-30 MHz) -->
             <div class="chart-container" id="widebandContainer" style="margin-bottom: 20px;">
-                <h2>📡 Full HF Spectrum (0-30 MHz)</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h2 style="margin: 0;">📡 Full HF Spectrum (0-30 MHz)</h2>
+                    <div id="wideband-stats" style="display: flex; gap: 15px; font-size: 0.9em; opacity: 0.9;">
+                        <span>Min: <strong id="wideband-min">--</strong></span>
+                        <span>Max: <strong id="wideband-max">--</strong></span>
+                        <span>P5: <strong id="wideband-p5">--</strong></span>
+                        <span>Range: <strong id="wideband-range">--</strong></span>
+                    </div>
+                </div>
                 <div style="height: 300px;">
                     <canvas id="wideband-fft"></canvas>
                 </div>

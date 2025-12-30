@@ -1315,12 +1315,24 @@ class NoiseFloorMonitor {
             
             const dataMin = Math.min(...validValues);
             const dataMax = Math.max(...validValues);
+            
+            // Calculate P5 (noise floor estimate)
+            const sortedValues = [...validValues].sort((a, b) => a - b);
+            const p5 = sortedValues[Math.floor(sortedValues.length * 0.05)];
+            
             const range = dataMax - dataMin;
+            const dynamicRange = dataMax - p5;
             const padding = Math.max(2, range * 0.05); // At least 2 dB padding, or 5% of range
             const yMin = dataMin - padding;
             const yMax = dataMax + padding;
 
-            console.log(`Wide-band spectrum Y-axis: min=${dataMin.toFixed(1)} dB, max=${dataMax.toFixed(1)} dB, range=${range.toFixed(1)} dB, yMin=${yMin.toFixed(1)}, yMax=${yMax.toFixed(1)}`);
+            // Update statistics display
+            document.getElementById('wideband-min').textContent = `${dataMin.toFixed(1)} dB`;
+            document.getElementById('wideband-max').textContent = `${dataMax.toFixed(1)} dB`;
+            document.getElementById('wideband-p5').textContent = `${p5.toFixed(1)} dB`;
+            document.getElementById('wideband-range').textContent = `${dynamicRange.toFixed(1)} dB`;
+
+            console.log(`Wide-band spectrum Y-axis: min=${dataMin.toFixed(1)} dB, max=${dataMax.toFixed(1)} dB, P5=${p5.toFixed(1)} dB, range=${range.toFixed(1)} dB, yMin=${yMin.toFixed(1)}, yMax=${yMax.toFixed(1)}`);
 
             // Check if chart already exists
             if (this.wideBandChart) {

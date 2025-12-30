@@ -1303,26 +1303,24 @@ class NoiseFloorMonitor {
             }
 
             // Calculate Y-axis range from actual data with small padding
-            const dataMin = Math.min(...fftData.data);
-            const dataMax = Math.max(...fftData.data);
+            // Only use data from valid frequency range (0-30 MHz) to exclude FFT artifacts
+            const validIndices = [];
+            const validValues = [];
+            for (let i = 0; i < frequencies.length; i++) {
+                if (frequencies[i] >= 0 && frequencies[i] <= 30) {
+                    validIndices.push(i);
+                    validValues.push(fftData.data[i]);
+                }
+            }
             
-            // Find where min and max occur
-            const minIndex = fftData.data.indexOf(dataMin);
-            const maxIndex = fftData.data.indexOf(dataMax);
-            const minFreq = frequencies[minIndex];
-            const maxFreq = frequencies[maxIndex];
-            
-            // Calculate percentile-based range (P5 to P95) for better scaling
-            const sortedData = [...fftData.data].sort((a, b) => a - b);
-            const p5 = sortedData[Math.floor(sortedData.length * 0.05)];
-            const p95 = sortedData[Math.floor(sortedData.length * 0.95)];
-            const percentileRange = p95 - p5;
-            const padding = Math.max(2, percentileRange * 0.1); // 10% padding based on P5-P95 range
-            const yMin = p5 - padding;
-            const yMax = p95 + padding;
+            const dataMin = Math.min(...validValues);
+            const dataMax = Math.max(...validValues);
+            const range = dataMax - dataMin;
+            const padding = Math.max(2, range * 0.05); // At least 2 dB padding, or 5% of range
+            const yMin = dataMin - padding;
+            const yMax = dataMax + padding;
 
-            console.log(`Wide-band spectrum data: min=${dataMin.toFixed(1)} dB @ ${minFreq.toFixed(1)} MHz, max=${dataMax.toFixed(1)} dB @ ${maxFreq.toFixed(1)} MHz`);
-            console.log(`Wide-band spectrum Y-axis (P5-P95): P5=${p5.toFixed(1)} dB, P95=${p95.toFixed(1)} dB, yMin=${yMin.toFixed(1)}, yMax=${yMax.toFixed(1)}`);
+            console.log(`Wide-band spectrum Y-axis: min=${dataMin.toFixed(1)} dB, max=${dataMax.toFixed(1)} dB, range=${range.toFixed(1)} dB, yMin=${yMin.toFixed(1)}, yMax=${yMax.toFixed(1)}`);
 
             // Check if chart already exists
             if (this.wideBandChart) {

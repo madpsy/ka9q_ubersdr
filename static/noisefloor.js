@@ -1281,10 +1281,19 @@ class NoiseFloorMonitor {
             const ctx = document.getElementById(canvasId);
             if (!ctx) return;
 
-            // Calculate frequency labels (0-30 MHz range)
-            const startFreqMHz = fftData.start_freq / 1e6; // Convert to MHz
-            const binWidthMHz = fftData.bin_width / 1e6;
+            // Calculate frequency labels correctly
+            // The FFT is centered, so we need to calculate based on center frequency
+            // After unwrapping: data goes from (center - bandwidth/2) to (center + bandwidth/2)
             const numBins = fftData.data.length;
+            const binWidthHz = fftData.bin_width;
+            const totalBandwidthHz = numBins * binWidthHz;
+            
+            // Calculate actual start frequency (center - half bandwidth)
+            // For 15 MHz center with 30 MHz bandwidth: start = 0 MHz, end = 30 MHz
+            const centerFreqHz = 15000000; // 15 MHz (from backend config)
+            const startFreqHz = centerFreqHz - (totalBandwidthHz / 2);
+            const startFreqMHz = startFreqHz / 1e6;
+            const binWidthMHz = binWidthHz / 1e6;
 
             // Create frequency labels in MHz
             const frequencies = [];

@@ -1557,6 +1557,26 @@ class NoiseFloorMonitor {
                         },
                         annotation: {
                             annotations: annotations
+                        },
+                        zoom: {
+                            pan: {
+                                enabled: false
+                            },
+                            zoom: {
+                                drag: {
+                                    enabled: true,
+                                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                                    borderColor: 'rgba(255, 255, 255, 0.5)',
+                                    borderWidth: 1
+                                },
+                                mode: 'x',
+                                onZoomComplete: () => {
+                                    // Update chart after zoom
+                                    if (this.wideBandChart) {
+                                        this.wideBandChart.update('none');
+                                    }
+                                }
+                            }
                         }
                     },
                     scales: {
@@ -1621,6 +1641,13 @@ class NoiseFloorMonitor {
                     }
                 }
             });
+
+            // Add double-click to reset zoom
+            ctx.ondblclick = () => {
+                if (this.wideBandChart) {
+                    this.wideBandChart.resetZoom();
+                }
+            };
         } catch (error) {
             console.error('Error creating wide-band spectrum:', error);
         }

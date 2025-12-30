@@ -1401,7 +1401,7 @@ class NoiseFloorMonitor {
                             label: {
                                 display: true,
                                 content: `${minFreqMHz.toFixed(3)} MHz`,
-                                position: 'start',
+                                position: 'end',
                                 backgroundColor: 'rgba(33, 150, 243, 0.9)',
                                 color: '#fff',
                                 font: { size: 10, weight: 'bold' },
@@ -1418,7 +1418,7 @@ class NoiseFloorMonitor {
                             label: {
                                 display: true,
                                 content: `${maxFreqMHz.toFixed(3)} MHz`,
-                                position: 'start',
+                                position: 'end',
                                 backgroundColor: 'rgba(255, 152, 0, 0.9)',
                                 color: '#fff',
                                 font: { size: 10, weight: 'bold' },
@@ -1466,7 +1466,7 @@ class NoiseFloorMonitor {
                     label: {
                         display: true,
                         content: `${minFreqMHz.toFixed(3)} MHz`,
-                        position: 'start',
+                        position: 'end',
                         backgroundColor: 'rgba(33, 150, 243, 0.9)',
                         color: '#fff',
                         font: {
@@ -1487,7 +1487,7 @@ class NoiseFloorMonitor {
                     label: {
                         display: true,
                         content: `${maxFreqMHz.toFixed(3)} MHz`,
-                        position: 'start',
+                        position: 'end',
                         backgroundColor: 'rgba(255, 152, 0, 0.9)',
                         color: '#fff',
                         font: {

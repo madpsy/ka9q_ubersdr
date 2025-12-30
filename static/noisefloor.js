@@ -1350,8 +1350,9 @@ class NoiseFloorMonitor {
             }
 
             // Create gradient fill (similar to main spectrum line graph)
+            // Gradient from bottom (weak signal) to top (strong signal)
             const gradient = ctx.getContext('2d').createLinearGradient(0, 300, 0, 0);
-            // Jet color scheme (blue -> cyan -> yellow -> red)
+            // Jet color scheme (blue -> cyan -> yellow -> red) from bottom to top
             gradient.addColorStop(0, 'rgba(0, 0, 143, 0.8)');      // Dark blue (bottom/weak)
             gradient.addColorStop(0.2, 'rgba(0, 0, 255, 0.8)');    // Blue
             gradient.addColorStop(0.4, 'rgba(0, 255, 255, 0.8)');  // Cyan
@@ -1367,12 +1368,12 @@ class NoiseFloorMonitor {
                     datasets: [{
                         label: 'Full Spectrum',
                         data: fftData.data,
-                        borderColor: 'rgba(255, 255, 255, 0.3)',
+                        borderColor: 'rgba(255, 255, 255, 0)',
                         backgroundColor: gradient,
                         borderWidth: 0,
                         pointRadius: 0,
                         tension: 0.1,
-                        fill: true
+                        fill: 'start'
                     }]
                 },
                 options: {

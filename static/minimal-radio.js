@@ -14,6 +14,12 @@ class MinimalRadio {
         this.serverSampleRate = null;
         this.audioBufferCount = 0;
         
+        // Opus decoder state
+        this.opusDecoder = null;
+        this.opusDecoderInitialized = false;
+        this.opusDecoderSampleRate = null;
+        this.opusDecoderChannels = null;
+
         // Playback settings
         this.currentFrequency = null;
         this.currentMode = 'usb';
@@ -146,10 +152,10 @@ class MinimalRadio {
     async stopPreview() {
         console.log('Stopping preview');
         this.isPlaying = false;
-        
+
         // Stop heartbeat
         this.stopHeartbeat();
-        
+
         // Close WebSocket
         if (this.ws) {
             if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
@@ -157,19 +163,25 @@ class MinimalRadio {
             }
             this.ws = null;
         }
-        
+
         // Close audio context
         if (this.audioContext) {
             await this.audioContext.close();
             this.audioContext = null;
         }
-        
+
+        // Reset Opus decoder state
+        this.opusDecoder = null;
+        this.opusDecoderInitialized = false;
+        this.opusDecoderSampleRate = null;
+        this.opusDecoderChannels = null;
+
         // Reset state
         this.serverSampleRate = null;
         this.audioBufferCount = 0;
         this.nextPlayTime = 0;
         this.audioStartTime = 0;
-        
+
         // Reset connection validation flag for next session
         this.connectionValidated = false;
     }
@@ -227,23 +239,28 @@ class MinimalRadio {
                 this.connectionValidated = true;
             }
             
-            // Create WebSocket connection
+            // Create WebSocket connection with Opus format
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}`;
-            
+            const wsUrl = `${protocol}//${window.location.host}/ws?frequency=${this.currentFrequency}&mode=${this.currentMode}&user_session_id=${encodeURIComponent(this.userSessionID)}&format=opus`;
+
             this.ws = new WebSocket(wsUrl);
-            
+
             this.ws.onopen = () => {
-                console.log('WebSocket connected');
+                console.log('WebSocket connected (Opus format)');
                 this.sendTuneCommand();
             };
-            
-            this.ws.onmessage = (event) => {
+
+            this.ws.onmessage = async (event) => {
                 try {
-                    const message = JSON.parse(event.data);
-                    this.handleWebSocketMessage(message);
+                    // Check if binary (Opus) or text (JSON)
+                    if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+                        await this.handleBinaryMessage(event.data);
+                    } else {
+                        const message = JSON.parse(event.data);
+                        this.handleWebSocketMessage(message);
+                    }
                 } catch (error) {
-                    console.error('Failed to parse WebSocket message:', error);
+                    console.error('Failed to process WebSocket message:', error);
                 }
             };
             
@@ -304,10 +321,89 @@ class MinimalRadio {
         }
     }
     
-    // Handle audio data
+    // Handle binary Opus audio messages
+    async handleBinaryMessage(data) {
+        if (!this.audioContext) {
+            return;
+        }
+
+        try {
+            // Convert Blob to ArrayBuffer if needed
+            let arrayBuffer;
+            if (data instanceof Blob) {
+                arrayBuffer = await data.arrayBuffer();
+            } else {
+                arrayBuffer = data;
+            }
+
+            // Parse binary packet header (matching Python client format)
+            // 8 bytes: timestamp (uint64, little-endian)
+            // 4 bytes: sample rate (uint32, little-endian)
+            // 1 byte: channels (uint8)
+            // remaining: Opus encoded data
+            const view = new DataView(arrayBuffer);
+
+            if (arrayBuffer.byteLength < 13) {
+                console.error('Binary packet too short:', arrayBuffer.byteLength, 'bytes');
+                return;
+            }
+
+            const timestamp = view.getBigUint64(0, true); // little-endian
+            const sampleRate = view.getUint32(8, true); // little-endian
+            const channels = view.getUint8(12);
+            const opusData = new Uint8Array(arrayBuffer, 13);
+
+            // Initialize or reinitialize decoder if sample rate or channels changed
+            if (!this.opusDecoderInitialized ||
+                this.opusDecoderSampleRate !== sampleRate ||
+                this.opusDecoderChannels !== channels) {
+                const success = await this.initOpusDecoder(sampleRate, channels);
+                if (!success) {
+                    console.error('Failed to initialize Opus decoder');
+                    return;
+                }
+            }
+
+            // Decode Opus packet to PCM using decodeFrame method
+            const decoded = await this.opusDecoder.decodeFrame(opusData);
+
+            if (!decoded || !decoded.channelData || decoded.channelData.length === 0) {
+                console.error('Opus decode returned empty data');
+                return;
+            }
+
+            // Create stereo audio buffer from decoded PCM data
+            const numChannels = Math.max(2, decoded.channelData.length);
+            const audioBuffer = this.audioContext.createBuffer(
+                numChannels,
+                decoded.channelData[0].length,
+                sampleRate
+            );
+
+            // Copy decoded data to audio buffer
+            if (decoded.channelData.length === 1) {
+                // Mono source - duplicate to both channels
+                audioBuffer.getChannelData(0).set(decoded.channelData[0]);
+                audioBuffer.getChannelData(1).set(decoded.channelData[0]);
+            } else {
+                // Stereo or multi-channel source
+                for (let channel = 0; channel < decoded.channelData.length && channel < 2; channel++) {
+                    audioBuffer.getChannelData(channel).set(decoded.channelData[channel]);
+                }
+            }
+
+            // Play the decoded audio
+            this.playAudioBuffer(audioBuffer);
+
+        } catch (e) {
+            console.error('Failed to process binary Opus message:', e);
+        }
+    }
+
+    // Handle audio data (legacy PCM format - kept for compatibility)
     async handleAudioData(message) {
         if (!message.data) return;
-        
+
         // Initialize audio context on first audio packet
         if (!this.audioContext && message.sampleRate) {
             this.serverSampleRate = message.sampleRate;
@@ -316,9 +412,9 @@ class MinimalRadio {
             await this.initializeAudio(this.serverSampleRate);
             return; // Skip first packet
         }
-        
+
         if (!this.audioContext) return;
-        
+
         try {
             // Decode base64 PCM data
             const binaryString = atob(message.data);
@@ -326,11 +422,11 @@ class MinimalRadio {
             for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i);
             }
-            
+
             // Convert big-endian int16 to float
             const numSamples = bytes.length / 2;
             const floatData = new Float32Array(numSamples);
-            
+
             for (let i = 0; i < numSamples; i++) {
                 const highByte = bytes[i * 2];
                 const lowByte = bytes[i * 2 + 1];
@@ -340,7 +436,7 @@ class MinimalRadio {
                 }
                 floatData[i] = sample / 32767.0;
             }
-            
+
             // Create audio buffer
             const audioBuffer = this.audioContext.createBuffer(
                 1,
@@ -348,11 +444,53 @@ class MinimalRadio {
                 message.sampleRate || this.serverSampleRate || 12000
             );
             audioBuffer.getChannelData(0).set(floatData);
-            
+
             this.playAudioBuffer(audioBuffer);
-            
+
         } catch (error) {
             console.error('Failed to process audio data:', error);
+        }
+    }
+
+    // Initialize Opus decoder
+    async initOpusDecoder(sampleRate, channels) {
+        console.log('initOpusDecoder called:', sampleRate, 'Hz,', channels, 'channels');
+
+        if (this.opusDecoderInitialized) {
+            console.log('Decoder already initialized');
+            return true;
+        }
+
+        // Check if OpusDecoder library is available
+        let OpusDecoderClass = null;
+        if (typeof OpusDecoder !== 'undefined') {
+            OpusDecoderClass = OpusDecoder;
+        } else if (window["opus-decoder"] && window["opus-decoder"].OpusDecoder) {
+            OpusDecoderClass = window["opus-decoder"].OpusDecoder;
+        }
+
+        console.log('Checking for OpusDecoder:', OpusDecoderClass ? 'found' : 'not found');
+        if (!OpusDecoderClass) {
+            console.error('OpusDecoder library not loaded');
+            return false;
+        }
+
+        try {
+            console.log('Creating OpusDecoder instance...');
+            this.opusDecoder = new OpusDecoderClass({
+                sampleRate: sampleRate,
+                channels: channels
+            });
+            console.log('Waiting for decoder.ready...');
+            await this.opusDecoder.ready;
+            this.opusDecoderInitialized = true;
+            this.opusDecoderSampleRate = sampleRate;
+            this.opusDecoderChannels = channels;
+            console.log('Opus decoder initialized successfully');
+            return true;
+        } catch (e) {
+            console.error('Failed to initialize Opus decoder:', e);
+            return false;
         }
     }
     

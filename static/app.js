@@ -6936,18 +6936,56 @@ function populateBookmarkSelector() {
     // Clear existing options except the first one
     selector.innerHTML = '<option value="">Select Bookmark...</option>';
 
-    // Add each bookmark as an option
+    // Group bookmarks by their group field
+    const grouped = {};
+    const ungrouped = [];
+
     window.bookmarks.forEach(bookmark => {
-        const option = document.createElement('option');
-        option.value = JSON.stringify({
-            name: bookmark.name,
-            frequency: bookmark.frequency,
-            mode: bookmark.mode,
-            extension: bookmark.extension
-        });
-        option.textContent = bookmark.name;
-        selector.appendChild(option);
+        if (bookmark.group) {
+            if (!grouped[bookmark.group]) {
+                grouped[bookmark.group] = [];
+            }
+            grouped[bookmark.group].push(bookmark);
+        } else {
+            ungrouped.push(bookmark);
+        }
     });
+
+    // Add grouped bookmarks with optgroup elements
+    Object.keys(grouped).sort().forEach(groupName => {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = groupName;
+
+        grouped[groupName].forEach(bookmark => {
+            const option = document.createElement('option');
+            option.value = JSON.stringify({
+                name: bookmark.name,
+                frequency: bookmark.frequency,
+                mode: bookmark.mode,
+                extension: bookmark.extension,
+                group: bookmark.group
+            });
+            option.textContent = bookmark.name;
+            optgroup.appendChild(option);
+        });
+
+        selector.appendChild(optgroup);
+    });
+
+    // Add ungrouped bookmarks at the end
+    if (ungrouped.length > 0) {
+        ungrouped.forEach(bookmark => {
+            const option = document.createElement('option');
+            option.value = JSON.stringify({
+                name: bookmark.name,
+                frequency: bookmark.frequency,
+                mode: bookmark.mode,
+                extension: bookmark.extension
+            });
+            option.textContent = bookmark.name;
+            selector.appendChild(option);
+        });
+    }
 
     log(`Bookmark selector populated with ${window.bookmarks.length} bookmarks`);
 }

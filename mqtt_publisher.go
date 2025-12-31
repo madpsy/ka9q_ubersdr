@@ -425,6 +425,34 @@ func (mp *MQTTPublisher) publishSpectrumData(config *Config) {
 
 	timestamp := time.Now().Unix()
 
+	// Publish wideband spectrum data (0-30 MHz)
+	widebandFFT := mp.noiseFloorMonitor.GetWideBandFFT()
+	if widebandFFT != nil && len(widebandFFT.Data) > 0 {
+		// Create wideband spectrum payload
+		widebandPayload := map[string]interface{}{
+			"timestamp":  timestamp,
+			"band":       "wideband",
+			"start_freq": widebandFFT.StartFreq,
+			"end_freq":   widebandFFT.EndFreq,
+			"bin_width":  widebandFFT.BinWidth,
+			"bin_count":  len(widebandFFT.Data),
+			"data":       widebandFFT.Data,
+		}
+
+		// Publish to wideband spectrum topic
+		topic := fmt.Sprintf("%s/spectrum/wideband", mp.config.TopicPrefix)
+
+		data, err := json.Marshal(widebandPayload)
+		if err != nil {
+			log.Printf("MQTT ERROR: Failed to marshal wideband spectrum payload: %v", err)
+		} else {
+			token := mp.client.Publish(topic, mp.config.QoS, mp.config.Retain, data)
+			if token.Wait() && token.Error() != nil {
+				log.Printf("MQTT ERROR: Failed to publish wideband spectrum: %v", token.Error())
+			}
+		}
+	}
+
 	// Get FFT data for each configured band
 	for _, band := range config.NoiseFloor.Bands {
 		fft := mp.noiseFloorMonitor.GetLatestFFT(band.Name)

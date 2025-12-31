@@ -4,6 +4,13 @@
 VERSION=$(grep -oP 'const Version = "\K[^"]+' version.go)
 IMAGE=madpsy/ka9q_ubersdr
 
+# Check for --no-latest flag
+TAG_LATEST=true
+if [[ "$1" == "--no-latest" ]]; then
+    TAG_LATEST=false
+    echo "Running in --no-latest mode (will not tag as latest)"
+fi
+
 echo "Ensure version.go has been version bumped"
 echo "Current version: $VERSION"
 echo ""
@@ -19,15 +26,28 @@ fi
 
 echo "Build successful!"
 
-# Tag version as latest
-docker tag $IMAGE:$VERSION $IMAGE:latest
+# Tag version as latest (unless --no-latest flag is set)
+if [ "$TAG_LATEST" = true ]; then
+    echo "Tagging as latest..."
+    docker tag $IMAGE:$VERSION $IMAGE:latest
+else
+    echo "Skipping 'latest' tag (--no-latest flag set)"
+fi
 
-# Push both tags
+# Push tags
 echo "Pushing to Docker Hub..."
 docker push $IMAGE:$VERSION
-docker push $IMAGE:latest
 
-# Commit and push version changes
-git add .
-git commit -m "$VERSION"
-git push -v
+if [ "$TAG_LATEST" = true ]; then
+    docker push $IMAGE:latest
+fi
+
+# Commit and push version changes (unless --no-latest flag is set)
+if [ "$TAG_LATEST" = true ]; then
+    echo "Committing and pushing to git..."
+    git add .
+    git commit -m "$VERSION"
+    git push -v
+else
+    echo "Skipping git commit and push (--no-latest flag set)"
+fi

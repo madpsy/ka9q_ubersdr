@@ -551,6 +551,11 @@
                             </select>
                         </div>
                         <div class="config-field">
+                            <label>Group (Optional)</label>
+                            <input type="text" id="newBookmarkGroup" placeholder="e.g., Digital Modes, Voice, Beacons">
+                            <small>Optional group name for organizing bookmarks</small>
+                        </div>
+                        <div class="config-field">
                             <label>Extension (Optional)</label>
                             <select id="newBookmarkExtension">
                                 <option value="">None</option>
@@ -1693,6 +1698,7 @@
                         <th style="padding: 12px; text-align: left;">Name</th>
                         <th style="padding: 12px; text-align: left;">Frequency (Hz)</th>
                         <th style="padding: 12px; text-align: left;">Mode</th>
+                        <th style="padding: 12px; text-align: left;">Group</th>
                         <th style="padding: 12px; text-align: left;">Extension</th>
                         <th style="padding: 12px; text-align: center;">Actions</th>
                     </tr>
@@ -1720,10 +1726,16 @@
                     extensionDisplay = `<span style="color: #667eea; font-weight: bold;">${displayName}</span>`;
                 }
 
+                // Get display for group
+                const groupDisplay = bookmark.group ?
+                    `<span style="color: #28a745; font-weight: bold;">${bookmark.group}</span>` :
+                    '<em style="color: #999;">—</em>';
+
                 row.innerHTML = `
                     <td style="padding: 12px;">${bookmark.name}</td>
                     <td style="padding: 12px;">${bookmark.frequency.toLocaleString()}</td>
                     <td style="padding: 12px;">${bookmark.mode.toUpperCase()}</td>
+                    <td style="padding: 12px;">${groupDisplay}</td>
                     <td style="padding: 12px;">${extensionDisplay}</td>
                     <td style="padding: 12px; text-align: center;">
                         <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBookmark(${index})">Edit</button>
@@ -1742,6 +1754,7 @@
             document.getElementById('newBookmarkName').value = '';
             document.getElementById('newBookmarkFreq').value = '';
             document.getElementById('newBookmarkMode').value = 'usb';
+            document.getElementById('newBookmarkGroup').value = '';
             document.getElementById('newBookmarkExtension').value = '';
         }
 
@@ -1754,6 +1767,7 @@
             document.getElementById('newBookmarkName').value = bookmark.name;
             document.getElementById('newBookmarkFreq').value = bookmark.frequency;
             document.getElementById('newBookmarkMode').value = bookmark.mode;
+            document.getElementById('newBookmarkGroup').value = bookmark.group || '';
             document.getElementById('newBookmarkExtension').value = bookmark.extension || '';
 
             // Scroll the form into view
@@ -1769,6 +1783,7 @@
             const name = document.getElementById('newBookmarkName').value.trim();
             const frequency = parseInt(document.getElementById('newBookmarkFreq').value);
             const mode = document.getElementById('newBookmarkMode').value;
+            const group = document.getElementById('newBookmarkGroup').value.trim();
             const extension = document.getElementById('newBookmarkExtension').value.trim();
             const editIndex = parseInt(document.getElementById('editBookmarkIndex').value);
 
@@ -1779,6 +1794,9 @@
 
             // Build bookmark object
             const bookmarkData = { name, frequency, mode };
+            if (group) {
+                bookmarkData.group = group;
+            }
             if (extension) {
                 bookmarkData.extension = extension;
             }
@@ -1858,6 +1876,9 @@
                 yamlContent += `  - name: "${bookmark.name}"\n`;
                 yamlContent += `    frequency: ${bookmark.frequency}\n`;
                 yamlContent += `    mode: ${bookmark.mode}\n`;
+                if (bookmark.group) {
+                    yamlContent += `    group: ${bookmark.group}\n`;
+                }
                 if (bookmark.extension) {
                     yamlContent += `    extension: ${bookmark.extension}\n`;
                 }
@@ -1913,6 +1934,8 @@
                                 currentBookmark.frequency = parseInt(trimmed.substring(10).trim());
                             } else if (trimmed.startsWith('mode:')) {
                                 currentBookmark.mode = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
+                            } else if (trimmed.startsWith('group:')) {
+                                currentBookmark.group = trimmed.substring(6).trim().replace(/^["']|["']$/g, '');
                             } else if (trimmed.startsWith('extension:')) {
                                 currentBookmark.extension = trimmed.substring(10).trim().replace(/^["']|["']$/g, '');
                             }

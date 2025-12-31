@@ -944,6 +944,7 @@ func main() {
 	http.HandleFunc("/admin/decoder-config", adminHandler.AuthMiddleware(adminHandler.HandleDecoderConfig))
 	http.HandleFunc("/admin/decoder-bands", adminHandler.AuthMiddleware(adminHandler.HandleDecoderBands))
 	http.HandleFunc("/admin/cwskimmer-config", adminHandler.AuthMiddleware(adminHandler.HandleCWSkimmerConfig))
+	http.HandleFunc("/admin/radiod-config", adminHandler.AuthMiddleware(adminHandler.HandleRadiodConfig))
 	http.HandleFunc("/admin/system-stats", adminHandler.AuthMiddleware(adminHandler.HandleSystemStats))
 	http.HandleFunc("/admin/noisefloor-health", adminHandler.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleNoiseFloorHealth(w, r, noiseFloorMonitor)

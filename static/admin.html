@@ -471,6 +471,7 @@
                     <button class="tab active" onclick="switchTab('sessions')">Active Sessions</button>
                     <button class="tab" onclick="switchTab('banned')">Banned IPs</button>
                     <button class="tab" onclick="switchTab('visual')">Config</button>
+                    <button class="tab" onclick="switchTab('radiod')">Radiod</button>
                     <button class="tab" onclick="switchTab('bookmarks')">Bookmarks</button>
                     <button class="tab" onclick="switchTab('bands')">Bands</button>
                     <button class="tab" onclick="switchTab('extensions')">Extensions</button>
@@ -516,6 +517,18 @@
                         <div class="spinner"></div>
                         <p>Loading configuration...</p>
                     </div>
+                </div>
+
+                <!-- Radiod Config Tab -->
+                <div id="radiodTab" class="tab-content">
+                    <div class="alert alert-info" style="margin-bottom: 20px;">
+                        ℹ️ <strong>Note:</strong> Radiod configuration changes require a radiod restart to take effect. Use "Save & Restart Radiod" to apply changes immediately.
+                    </div>
+                    <div id="radiodConfig" class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading radiod configuration...</p>
+                    </div>
+                    <textarea id="radiodConfigEditor" style="width: 100%; min-height: 500px; font-family: monospace; font-size: 13px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; display: none;"></textarea>
                 </div>
 
                 <!-- Bookmarks Tab -->
@@ -690,6 +703,11 @@
                     <button class="btn btn-secondary" onclick="exportConfig()">Export Config</button>
                     <button class="btn btn-secondary" onclick="importConfig()">Import Config</button>
                     <button class="btn btn-danger" onclick="resetConfig()">Reset to Default</button>
+                </div>
+                <div class="button-group" id="radiodButtons" style="display: none;">
+                    <button class="btn" onclick="saveRadiodConfig()">Save Configuration</button>
+                    <button class="btn btn-danger" onclick="saveRadiodConfigAndRestart()">Save & Restart Radiod</button>
+                    <button class="btn btn-secondary" onclick="loadRadiodConfig()">Reload</button>
                 </div>
                 <div class="button-group" id="bookmarkButtons" style="display: none;">
                     <button class="btn" onclick="showAddBookmarkForm()">Add New Bookmark</button>
@@ -1032,6 +1050,7 @@
 
             // Hide all button groups
             document.getElementById('configButtons').style.display = 'none';
+            document.getElementById('radiodButtons').style.display = 'none';
             document.getElementById('bookmarkButtons').style.display = 'none';
             document.getElementById('bandButtons').style.display = 'none';
             document.getElementById('extensionButtons').style.display = 'none';
@@ -1067,39 +1086,44 @@
                 document.querySelector('.tab:nth-child(3)').classList.add('active');
                 document.getElementById('visualTab').classList.add('active');
                 document.getElementById('configButtons').style.display = 'flex';
-            } else if (tab === 'bookmarks') {
+            } else if (tab === 'radiod') {
                 document.querySelector('.tab:nth-child(4)').classList.add('active');
+                document.getElementById('radiodTab').classList.add('active');
+                document.getElementById('radiodButtons').style.display = 'flex';
+                loadRadiodConfig();
+            } else if (tab === 'bookmarks') {
+                document.querySelector('.tab:nth-child(5)').classList.add('active');
                 document.getElementById('bookmarksTab').classList.add('active');
                 document.getElementById('bookmarkButtons').style.display = 'flex';
                 loadBookmarks();
             } else if (tab === 'bands') {
-                document.querySelector('.tab:nth-child(5)').classList.add('active');
+                document.querySelector('.tab:nth-child(6)').classList.add('active');
                 document.getElementById('bandsTab').classList.add('active');
                 document.getElementById('bandButtons').style.display = 'flex';
                 loadBands();
             } else if (tab === 'extensions') {
-                document.querySelector('.tab:nth-child(6)').classList.add('active');
+                document.querySelector('.tab:nth-child(7)').classList.add('active');
                 document.getElementById('extensionsTab').classList.add('active');
                 document.getElementById('extensionButtons').style.display = 'flex';
                 loadAvailableExtensions();
             } else if (tab === 'decoder') {
-                document.querySelector('.tab:nth-child(7)').classList.add('active');
+                document.querySelector('.tab:nth-child(8)').classList.add('active');
                 document.getElementById('decoderTab').classList.add('active');
                 document.getElementById('decoderButtons').style.display = 'flex';
                 loadDecoderConfig();
             } else if (tab === 'cwskimmer') {
-                document.querySelector('.tab:nth-child(8)').classList.add('active');
+                document.querySelector('.tab:nth-child(9)').classList.add('active');
                 document.getElementById('cwskimmerTab').classList.add('active');
                 document.getElementById('cwskimmerButtons').style.display = 'flex';
                 loadCWSkimmerConfig();
             } else if (tab === 'monitor') {
-                document.querySelector('.tab:nth-child(9)').classList.add('active');
+                document.querySelector('.tab:nth-child(10)').classList.add('active');
                 document.getElementById('monitorTab').classList.add('active');
                 document.getElementById('monitorButtons').style.display = 'flex';
                 loadMonitorHealth();
                 startMonitorAutoRefresh();
             } else if (tab === 'system') {
-                document.querySelector('.tab:nth-child(10)').classList.add('active');
+                document.querySelector('.tab:nth-child(11)').classList.add('active');
                 document.getElementById('systemTab').classList.add('active');
                 document.getElementById('systemButtons').style.display = 'flex';
                 loadSystemStats();
@@ -4220,6 +4244,90 @@
             } catch (error) {
                 showAlert('Error importing CW Skimmer configuration: ' + error.message, 'error');
             }
+        }
+
+        // Radiod configuration management
+        let currentRadiodConfig = '';
+
+        async function loadRadiodConfig() {
+            try {
+                const response = await authenticatedFetch('/admin/radiod-config');
+                if (!response) return; // Auth failed, already handled
+                if (!response.ok) throw new Error('Failed to load radiod config');
+
+                const data = await response.json();
+                currentRadiodConfig = data.config || '';
+                renderRadiodConfig();
+                showAlert('Radiod configuration loaded successfully', 'success');
+            } catch (error) {
+                showAlert('Error loading radiod configuration: ' + error.message, 'error');
+            }
+        }
+
+        function renderRadiodConfig() {
+            const container = document.getElementById('radiodConfig');
+            const editor = document.getElementById('radiodConfigEditor');
+            
+            container.style.display = 'none';
+            editor.style.display = 'block';
+            editor.value = currentRadiodConfig;
+        }
+
+        async function saveRadiodConfig(restart = false) {
+            const saveButton = event?.target || document.querySelector('#radiodButtons .btn');
+            const originalText = saveButton?.textContent;
+            if (saveButton) {
+                saveButton.disabled = true;
+                saveButton.textContent = 'Saving...';
+            }
+
+            try {
+                showAlert('Saving radiod configuration...', 'info');
+
+                // Get the current content from the editor
+                const editor = document.getElementById('radiodConfigEditor');
+                const configContent = editor.value;
+
+                const url = restart ? '/admin/radiod-config?restart=true' : '/admin/radiod-config';
+                const response = await authenticatedFetch(url, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: configContent
+                });
+
+                if (!response) return; // Auth failed, already handled
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to save radiod config');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || 'Radiod configuration saved successfully', 'success');
+
+                // Update current config
+                currentRadiodConfig = configContent;
+
+                // If restarting radiod, show a message
+                if (restart && result.restart) {
+                    showAlert('Radiod is restarting... Changes will take effect shortly.', 'info');
+                }
+            } catch (error) {
+                showAlert('Error saving radiod configuration: ' + error.message, 'error');
+            } finally {
+                // Re-enable save button
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.textContent = originalText;
+                }
+            }
+        }
+
+        async function saveRadiodConfigAndRestart() {
+            if (!confirm('⚠️ WARNING: This will restart radiod immediately!\n\nAll active radio streams will be interrupted briefly.\n\nAre you sure you want to save the radiod configuration and restart radiod?')) {
+                return;
+            }
+            await saveRadiodConfig(true);
         }
 
         // System statistics management

@@ -2863,6 +2863,107 @@ func (ah *AdminHandler) handleUpdateCWSkimmerConfig(w http.ResponseWriter, r *ht
 	}
 }
 
+// HandleRadiodConfig handles GET and PUT requests for radiod configuration
+func (ah *AdminHandler) HandleRadiodConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		ah.handleGetRadiodConfig(w, r)
+	case http.MethodPut:
+		ah.handleUpdateRadiodConfig(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetRadiodConfig returns the radiod configuration file content
+func (ah *AdminHandler) handleGetRadiodConfig(w http.ResponseWriter, r *http.Request) {
+	// Read the radiod config file from /etc/ka9q-radio/radiod@ubersdr.conf
+	radiodConfigPath := "/etc/ka9q-radio/radiod@ubersdr.conf"
+	data, err := os.ReadFile(radiodConfigPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read radiod config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return the raw config file content
+	response := map[string]interface{}{
+		"config": string(data),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding radiod config: %v", err)
+	}
+}
+
+// handleUpdateRadiodConfig updates the radiod configuration file
+func (ah *AdminHandler) handleUpdateRadiodConfig(w http.ResponseWriter, r *http.Request) {
+	// Check for restart flag
+	restart := r.URL.Query().Get("restart") == "true"
+
+	// Read the raw config content from request body
+	configContent, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Backup existing file with timestamp before replacing
+	radiodConfigPath := "/etc/ka9q-radio/radiod@ubersdr.conf"
+	if _, err := os.Stat(radiodConfigPath); err == nil {
+		timestamp := time.Now().Format("20060102-150405")
+		backupPath := fmt.Sprintf("%s.%s", radiodConfigPath, timestamp)
+		if err := os.Rename(radiodConfigPath, backupPath); err != nil {
+			log.Printf("Warning: Failed to backup radiod config: %v", err)
+		} else {
+			log.Printf("Backed up radiod config to %s", backupPath)
+		}
+	}
+
+	// Write the new config to file
+	if err := os.WriteFile(radiodConfigPath, configContent, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write radiod config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Radiod configuration updated by admin")
+
+	w.WriteHeader(http.StatusOK)
+
+	if restart {
+		// Trigger radiod restart by writing to the restart trigger file
+		restartTriggerPath := "/var/run/restart-trigger/restart"
+		if err := os.WriteFile(restartTriggerPath, []byte("restart"), 0644); err != nil {
+			log.Printf("Warning: Failed to write restart trigger: %v", err)
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  "success",
+				"message": "Radiod configuration updated, but failed to trigger restart. Please restart radiod manually.",
+				"restart": false,
+			}); err != nil {
+				log.Printf("Error encoding response: %v", err)
+			}
+		} else {
+			log.Printf("Radiod restart triggered via restart trigger file")
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  "success",
+				"message": "Radiod configuration updated. Radiod is restarting...",
+				"restart": true,
+			}); err != nil {
+				log.Printf("Error encoding response: %v", err)
+			}
+		}
+	} else {
+		if err := json.NewEncoder(w).Encode(map[string]string{
+			"status":  "success",
+			"message": "Radiod configuration updated. Restart radiod to apply changes.",
+		}); err != nil {
+			log.Printf("Error encoding response: %v", err)
+		}
+	}
+}
+
 // HandleSystemStats returns system statistics by executing system commands
 func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

@@ -2933,31 +2933,20 @@ func (ah *AdminHandler) handleUpdateRadiodConfig(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusOK)
 
 	if restart {
-		// Trigger radiod restart by writing to the restart trigger file
-		restartTriggerPath := "/var/run/restart-trigger/restart"
-		if err := os.WriteFile(restartTriggerPath, []byte("restart"), 0644); err != nil {
-			log.Printf("Warning: Failed to write restart trigger: %v", err)
-			if err := json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "success",
-				"message": "Radiod configuration updated, but failed to trigger restart. Please restart radiod manually.",
-				"restart": false,
-			}); err != nil {
-				log.Printf("Error encoding response: %v", err)
-			}
-		} else {
-			log.Printf("Radiod restart triggered via restart trigger file")
-			if err := json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "success",
-				"message": "Radiod configuration updated. Radiod is restarting...",
-				"restart": true,
-			}); err != nil {
-				log.Printf("Error encoding response: %v", err)
-			}
+		// Trigger ubersdr restart (which will also trigger radiod restart via entrypoint.sh)
+		// This ensures both radiod and ubersdr restart with the new config
+		ah.restartServer()
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "Radiod configuration updated. Server is restarting...",
+			"restart": true,
+		}); err != nil {
+			log.Printf("Error encoding response: %v", err)
 		}
 	} else {
 		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status":  "success",
-			"message": "Radiod configuration updated. Restart radiod to apply changes.",
+			"message": "Radiod configuration updated. Restart server to apply changes.",
 		}); err != nil {
 			log.Printf("Error encoding response: %v", err)
 		}

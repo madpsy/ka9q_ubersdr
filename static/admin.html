@@ -521,14 +521,17 @@
 
                 <!-- Radiod Config Tab -->
                 <div id="radiodTab" class="tab-content">
-                    <div class="alert alert-info" style="margin-bottom: 20px;">
-                        ℹ️ <strong>Note:</strong> Radiod configuration changes require a radiod restart to take effect. Use "Save & Restart Radiod" to apply changes immediately.
+                    <div id="radiodWarning" class="alert" style="margin-bottom: 20px; background: #fff3cd; border: 2px solid #ffc107; color: #856404;">
+                        ⚠️ <strong>WARNING:</strong> Editing the radiod configuration is for advanced users only and may break UberSDR.
+                        <div style="margin-top: 15px;">
+                            <button class="btn" onclick="enableRadiodEditing()" style="background: #dc3545; font-weight: bold;">I Have No Fear</button>
+                        </div>
                     </div>
                     <div id="radiodConfig" class="loading">
                         <div class="spinner"></div>
                         <p>Loading radiod configuration...</p>
                     </div>
-                    <textarea id="radiodConfigEditor" style="width: 100%; min-height: 500px; font-family: monospace; font-size: 13px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; display: none;"></textarea>
+                    <textarea id="radiodConfigEditor" style="width: 100%; min-height: 500px; font-family: monospace; font-size: 13px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f5f5f5; display: none;" readonly></textarea>
                 </div>
 
                 <!-- Bookmarks Tab -->
@@ -4248,6 +4251,7 @@
 
         // Radiod configuration management
         let currentRadiodConfig = '';
+        let radiodEditingEnabled = false;
 
         async function loadRadiodConfig() {
             try {
@@ -4271,9 +4275,30 @@
             container.style.display = 'none';
             editor.style.display = 'block';
             editor.value = currentRadiodConfig;
+            
+            // Reset editing state when loading
+            radiodEditingEnabled = false;
+            editor.readOnly = true;
+            editor.style.background = '#f5f5f5';
+            document.getElementById('radiodWarning').style.display = 'block';
+        }
+
+        function enableRadiodEditing() {
+            radiodEditingEnabled = true;
+            const editor = document.getElementById('radiodConfigEditor');
+            editor.readOnly = false;
+            editor.style.background = '#ffffff';
+            document.getElementById('radiodWarning').style.display = 'none';
+            showAlert('Radiod editing enabled. Be careful!', 'info');
         }
 
         async function saveRadiodConfig(restart = false) {
+            // Check if editing is enabled
+            if (!radiodEditingEnabled) {
+                showAlert('Please click "I Have No Fear" to enable editing before saving', 'error');
+                return;
+            }
+
             const saveButton = event?.target || document.querySelector('#radiodButtons .btn');
             const originalText = saveButton?.textContent;
             if (saveButton) {
@@ -4308,15 +4333,17 @@
                 // Update current config
                 currentRadiodConfig = configContent;
 
-                // If restarting radiod, show a message
+                // If restarting, show countdown overlay (same as Config tab)
                 if (restart && result.restart) {
-                    showAlert('Radiod is restarting... Changes will take effect shortly.', 'info');
+                    setTimeout(() => {
+                        showRestartCountdown();
+                    }, 500);
                 }
             } catch (error) {
                 showAlert('Error saving radiod configuration: ' + error.message, 'error');
             } finally {
-                // Re-enable save button
-                if (saveButton) {
+                // Re-enable save button (unless restarting)
+                if (saveButton && !restart) {
                     saveButton.disabled = false;
                     saveButton.textContent = originalText;
                 }
@@ -4324,7 +4351,13 @@
         }
 
         async function saveRadiodConfigAndRestart() {
-            if (!confirm('⚠️ WARNING: This will restart radiod immediately!\n\nAll active radio streams will be interrupted briefly.\n\nAre you sure you want to save the radiod configuration and restart radiod?')) {
+            // Check if editing is enabled
+            if (!radiodEditingEnabled) {
+                showAlert('Please click "I Have No Fear" to enable editing before saving', 'error');
+                return;
+            }
+
+            if (!confirm('⚠️ WARNING: This will restart the server immediately!\n\nAll active user sessions will be disconnected.\n\nAre you sure you want to save the radiod configuration and restart the server?')) {
                 return;
             }
             await saveRadiodConfig(true);

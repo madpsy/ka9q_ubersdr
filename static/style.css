@@ -891,7 +891,7 @@ input[type="range"]::-moz-range-thumb {
     transform: scale(0.75);
     transform-origin: top center;
     margin-top: 20px;
-    margin-bottom: -180px;
+    margin-bottom: 0px;
 }
 
 .audio-controls-header {

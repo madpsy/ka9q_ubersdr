@@ -2,6 +2,7 @@
 # Each bookmark has a name, frequency (in Hz), and mode
 # Supported modes: usb, lsb, cwu, cwl, am, fm, nfm
 # Optional: group - organize bookmarks into groups (displayed in dropdown)
+# Optional: comment - description shown when hovering over bookmark on spectrum
 # Optional: extension - name of decoder extension to open (e.g., "stats")
 
 bookmarks:
@@ -10,12 +11,14 @@ bookmarks:
     frequency: 5000000
     mode: "am"
     group: "Beacons"
+    comment: "NIST time standard station, Fort Collins, Colorado"
     extension: "stats"  # Optional: opens Stats Monitor extension
 
   - name: "WWV 10 MHz"
     frequency: 10000000
     mode: "am"
     group: "Beacons"
+    comment: "Most reliable WWV frequency for propagation monitoring"
 
   - name: "WWV 15 MHz"
     frequency: 15000000

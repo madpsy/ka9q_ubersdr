@@ -556,6 +556,11 @@
                             <small>Optional group name for organizing bookmarks</small>
                         </div>
                         <div class="config-field">
+                            <label>Comment (Optional)</label>
+                            <input type="text" id="newBookmarkComment" placeholder="e.g., Primary FT8 frequency, Contest station">
+                            <small>Optional comment shown when hovering over bookmark on spectrum</small>
+                        </div>
+                        <div class="config-field">
                             <label>Extension (Optional)</label>
                             <select id="newBookmarkExtension">
                                 <option value="">None</option>
@@ -1755,6 +1760,7 @@
             document.getElementById('newBookmarkFreq').value = '';
             document.getElementById('newBookmarkMode').value = 'usb';
             document.getElementById('newBookmarkGroup').value = '';
+            document.getElementById('newBookmarkComment').value = '';
             document.getElementById('newBookmarkExtension').value = '';
         }
 
@@ -1768,6 +1774,7 @@
             document.getElementById('newBookmarkFreq').value = bookmark.frequency;
             document.getElementById('newBookmarkMode').value = bookmark.mode;
             document.getElementById('newBookmarkGroup').value = bookmark.group || '';
+            document.getElementById('newBookmarkComment').value = bookmark.comment || '';
             document.getElementById('newBookmarkExtension').value = bookmark.extension || '';
 
             // Scroll the form into view
@@ -1784,6 +1791,7 @@
             const frequency = parseInt(document.getElementById('newBookmarkFreq').value);
             const mode = document.getElementById('newBookmarkMode').value;
             const group = document.getElementById('newBookmarkGroup').value.trim();
+            const comment = document.getElementById('newBookmarkComment').value.trim();
             const extension = document.getElementById('newBookmarkExtension').value.trim();
             const editIndex = parseInt(document.getElementById('editBookmarkIndex').value);
 
@@ -1796,6 +1804,9 @@
             const bookmarkData = { name, frequency, mode };
             if (group) {
                 bookmarkData.group = group;
+            }
+            if (comment) {
+                bookmarkData.comment = comment;
             }
             if (extension) {
                 bookmarkData.extension = extension;
@@ -1879,6 +1890,9 @@
                 if (bookmark.group) {
                     yamlContent += `    group: ${bookmark.group}\n`;
                 }
+                if (bookmark.comment) {
+                    yamlContent += `    comment: "${bookmark.comment}"\n`;
+                }
                 if (bookmark.extension) {
                     yamlContent += `    extension: ${bookmark.extension}\n`;
                 }
@@ -1936,6 +1950,8 @@
                                 currentBookmark.mode = trimmed.substring(5).trim().replace(/^["']|["']$/g, '');
                             } else if (trimmed.startsWith('group:')) {
                                 currentBookmark.group = trimmed.substring(6).trim().replace(/^["']|["']$/g, '');
+                            } else if (trimmed.startsWith('comment:')) {
+                                currentBookmark.comment = trimmed.substring(8).trim().replace(/^["']|["']$/g, '');
                             } else if (trimmed.startsWith('extension:')) {
                                 currentBookmark.extension = trimmed.substring(10).trim().replace(/^["']|["']$/g, '');
                             }

@@ -250,7 +250,8 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
             y: labelY,
             width: labelWidth,
             height: labelHeight + arrowLength,
-            bookmark: bookmark
+            bookmark: bookmark,
+            comment: bookmark.comment || null
         });
     });
 

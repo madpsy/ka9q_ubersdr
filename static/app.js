@@ -6963,7 +6963,8 @@ function populateBookmarkSelector() {
                 frequency: bookmark.frequency,
                 mode: bookmark.mode,
                 extension: bookmark.extension,
-                group: bookmark.group
+                group: bookmark.group,
+                comment: bookmark.comment
             });
             option.textContent = bookmark.name;
             optgroup.appendChild(option);
@@ -6980,7 +6981,8 @@ function populateBookmarkSelector() {
                 name: bookmark.name,
                 frequency: bookmark.frequency,
                 mode: bookmark.mode,
-                extension: bookmark.extension
+                extension: bookmark.extension,
+                comment: bookmark.comment
             });
             option.textContent = bookmark.name;
             selector.appendChild(option);

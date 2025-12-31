@@ -213,6 +213,9 @@ class SpectrumDisplay {
                         const freqStr = this.formatFrequency(pos.bookmark.frequency);
                         const modeStr = pos.bookmark.mode ? pos.bookmark.mode.toUpperCase() : 'N/A';
                         let tooltipText = `${pos.bookmark.name}: ${freqStr} ${modeStr}`;
+                        if (pos.bookmark.comment) {
+                            tooltipText += `<br><em>${pos.bookmark.comment}</em>`;
+                        }
                         if (pos.bookmark.extension) {
                             // Get display name from decoder manager if available
                             const displayName = window.decoderManager ?
@@ -3408,6 +3411,9 @@ class SpectrumDisplay {
                     const freqStr = this.formatFrequency(pos.bookmark.frequency);
                     const modeStr = pos.bookmark.mode ? pos.bookmark.mode.toUpperCase() : 'N/A';
                     let tooltipText = `${pos.bookmark.name}: ${freqStr} ${modeStr}`;
+                    if (pos.bookmark.comment) {
+                        tooltipText += `\n${pos.bookmark.comment}`;
+                    }
                     if (pos.bookmark.extension) {
                         // Get display name from decoder manager if available
                         const displayName = window.decoderManager ?

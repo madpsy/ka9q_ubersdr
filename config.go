@@ -60,6 +60,7 @@ type Bookmark struct {
 	Mode      string `yaml:"mode" json:"mode"`
 	Extension string `yaml:"extension,omitempty" json:"extension,omitempty"`
 	Group     string `yaml:"group,omitempty" json:"group,omitempty"`
+	Comment   string `yaml:"comment,omitempty" json:"comment,omitempty"`
 }
 
 // Band represents an amateur radio band

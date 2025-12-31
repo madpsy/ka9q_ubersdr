@@ -900,6 +900,9 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 	if newBookmark.Extension != "" {
 		bookmarkMap["extension"] = newBookmark.Extension
 	}
+	if newBookmark.Comment != "" {
+		bookmarkMap["comment"] = newBookmark.Comment
+	}
 	bookmarks = append(bookmarks, bookmarkMap)
 	bookmarksConfig["bookmarks"] = bookmarks
 
@@ -1073,6 +1076,9 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 	}
 	if updatedBookmark.Extension != "" {
 		bookmarkMap["extension"] = updatedBookmark.Extension
+	}
+	if updatedBookmark.Comment != "" {
+		bookmarkMap["comment"] = updatedBookmark.Comment
 	}
 	bookmarks[index] = bookmarkMap
 	bookmarksConfig["bookmarks"] = bookmarks

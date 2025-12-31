@@ -75,6 +75,8 @@ services:
       - ubersdr-config:/app/config
       # Shared volume for restart trigger
       - restart-trigger:/var/run/restart-trigger
+      # Shared radiod config for read/write access (allows ubersdr to modify radiod config)
+      - radiod-config:/etc/ka9q-radio
       # Shared volume for Caddy configuration
       - caddy-shared:/etc/caddy-shared
       # Version updater directory (accessible from host)

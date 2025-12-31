@@ -891,7 +891,16 @@ input[type="range"]::-moz-range-thumb {
     transform: scale(0.75);
     transform-origin: top center;
     margin-top: 20px;
+}
+
+/* When collapsed, ensure header is fully visible */
+.audio-controls-section:has(#audio-controls-filters-content[style*="display: none"]) {
     margin-bottom: 0px;
+}
+
+/* When expanded, use negative margin to compensate for scaled content */
+.audio-controls-section:has(#audio-controls-filters-content[style*="display: block"]) {
+    margin-bottom: -180px;
 }
 
 .audio-controls-header {

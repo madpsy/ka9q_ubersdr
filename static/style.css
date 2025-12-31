@@ -883,6 +883,38 @@ input[type="range"]::-moz-range-thumb {
     background: #e0a800;
 }
 
+/* Audio Controls Section (Collapsible) */
+.audio-controls-section {
+    padding: 0 30px;
+    margin-bottom: 20px;
+}
+
+.audio-controls-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    background: #2c3e50;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s;
+}
+
+.audio-controls-header:hover {
+    background: #3d566e;
+}
+
+.audio-controls-header h3 {
+    margin: 0;
+    font-size: 1.1em;
+    color: #ecf0f1;
+}
+
+.audio-controls-filters-content {
+    margin-top: 15px;
+}
+
 /* Audio Visualization Section (Collapsible) */
 .audio-visualization-section {
     padding: 0 30px;

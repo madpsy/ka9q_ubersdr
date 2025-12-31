@@ -387,7 +387,7 @@ class SpectrumDisplay {
 
                         // Check if click is within 30 pixels of bookmark (wider hit area)
                         if (Math.abs(x - bookmarkX) <= 30) {
-                            window.handleBookmarkClick(bookmark, e.shiftKey || e.ctrlKey);
+                            window.handleBookmarkClick(bookmark, e.shiftKey || e.ctrlKey, true);
                             return;
                         }
                     }
@@ -2973,7 +2973,7 @@ class SpectrumDisplay {
 
                             // Check if click is within 20 pixels of bookmark
                             if (Math.abs(x - bookmarkX) <= 20) {
-                                window.handleBookmarkClick(bookmark, e.shiftKey || e.ctrlKey);
+                                window.handleBookmarkClick(bookmark, e.shiftKey || e.ctrlKey, true);
                                 this.isDragging = false;
                                 this.dragDidMove = false;
                                 this.updateCursorStyle();

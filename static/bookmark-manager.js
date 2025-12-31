@@ -262,7 +262,8 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
 // Handle bookmark click (expose on window for spectrum-display.js access)
 // This function is called with bookmark object from spectrum-display.js
 // Second parameter can be either mode (old API) or shouldZoom boolean (new API with modifier key)
-function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom) {
+// Third parameter indicates if click came from spectrum marker (true) or dropdown (false/undefined)
+function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrumMarker) {
     // Support both old API (frequency, mode) and new API (bookmark object, shouldZoom)
     let frequency, bookmarkMode, extension, shouldZoom;
     
@@ -279,6 +280,9 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom) {
         bookmarkMode = modeOrShouldZoom;
         shouldZoom = false; // Default to no zoom for old API
     }
+
+    // Default fromSpectrumMarker to false if not provided (e.g., from dropdown)
+    fromSpectrumMarker = fromSpectrumMarker === true;
     
     // Access required functions from window object
     const wsManager = window.wsManager;
@@ -327,8 +331,9 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom) {
         updateURL();
     }
 
-    // Set skipNextPan flag to prevent auto-centering (unless modifier key held for zoom)
-    if (!shouldZoom && spectrumDisplay) {
+    // Set skipNextPan flag to prevent auto-centering only when clicking spectrum marker
+    // (not from dropdown, as dropdown selections may be outside visible spectrum)
+    if (!shouldZoom && fromSpectrumMarker && spectrumDisplay) {
         spectrumDisplay.skipNextPan = true;
     }
 

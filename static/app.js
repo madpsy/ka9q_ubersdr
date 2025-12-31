@@ -2206,10 +2206,10 @@ function playAudioBuffer(buffer) {
     source.buffer = buffer;
 
     // Audio chain:
-    // source -> analyser (for spectrum/waterfall) -> [squelch] -> [compressor] -> [bandpass] -> [notch] -> EQ -> vuAnalyser (for VU meter) -> gain (for volume/mute) -> destination
-    // The main analyser taps the signal for visualizations but doesn't affect it
+    // source -> analyser (for spectrum/waterfall) -> [squelch] -> [compressor] -> [bandpass] -> [notch] -> EQ -> vuAnalyser (for visualizations) -> gain (for volume/mute) -> destination
+    // The main analyser taps the signal early for spectrum/waterfall but doesn't affect it
     // The squelch gate is FIRST to prevent noise from reaching other filters
-    // The VU analyser measures after all processing but before volume/mute
+    // The vuAnalyser taps BEFORE volume/mute so visualizations work independently of volume settings
     source.connect(analyser);
 
     // Build the audio processing chain step by step
@@ -2377,13 +2377,22 @@ function playAudioBuffer(buffer) {
         }
     }
 
-    // Step 6: Gain node for volume/mute control
+    // Step 6: Tap vuAnalyser and postFilterAnalyser BEFORE volume/mute
+    // This ensures visualizations work independently of volume/mute settings
+    if (vuAnalyser) {
+        nextNode.connect(vuAnalyser);
+    }
+    if (postFilterAnalyser) {
+        nextNode.connect(postFilterAnalyser);
+    }
+
+    // Step 7: Gain node for volume/mute control
     const gainNode = audioContext.createGain();
     gainNode.gain.value = isMuted ? 0 : currentVolume;
     nextNode.connect(gainNode);
 
-    // Step 7: Tap signal for monitoring AFTER all processing but BEFORE final output
-    // These are just monitoring taps and don't affect the audio path
+    // Step 8: Tap other analysers for clipping detection AFTER volume/mute
+    // These monitor the actual output levels including volume/mute
     if (noiseReductionEnabled && noiseReductionAnalyser) {
         gainNode.connect(noiseReductionAnalyser);
     }
@@ -2393,15 +2402,8 @@ function playAudioBuffer(buffer) {
     if (equalizerEnabled && eqAnalyser) {
         gainNode.connect(eqAnalyser);
     }
-    // Connect post-filter analyser at same point as VU analyser
-    if (postFilterAnalyser) {
-        gainNode.connect(postFilterAnalyser);
-    }
-    if (vuAnalyser) {
-        gainNode.connect(vuAnalyser);
-    }
 
-    // Step 8: Stereo Virtualizer (optional, creates wider stereo image from mono)
+    // Step 9: Stereo Virtualizer (optional, creates wider stereo image from mono)
     let outputNode = gainNode;
     if (stereoVirtualizerEnabled && stereoSplitter && stereoMerger && stereoMakeupGain) {
         // Disconnect stereo nodes to clear old connections
@@ -2450,13 +2452,13 @@ function playAudioBuffer(buffer) {
         outputNode = stereoMakeupGain;
     }
 
-    // Step 9: Recorder tap (BEFORE stereo conversion so it records full processed audio)
+    // Step 10: Recorder tap (BEFORE stereo conversion so it records full processed audio)
     if (window.recorderGainNode) {
         // If recorder is active, tap the signal before stereo conversion
         outputNode.connect(window.recorderGainNode);
     }
 
-    // Step 10: Stereo channel routing (L/R selection for output only)
+    // Step 11: Stereo channel routing (L/R selection for output only)
     if (channelSplitter && channelMerger && channelLeftGain && channelRightGain) {
         // Disconnect nodes to clear old connections
         try {
@@ -2482,7 +2484,7 @@ function playAudioBuffer(buffer) {
         outputNode = channelMerger;
     }
 
-    // Step 11: Final output to destination
+    // Step 12: Final output to destination
     outputNode.connect(audioContext.destination);
 
     // Buffer management using configurable threshold
@@ -3654,6 +3656,24 @@ function toggleAudioVisualization() {
         audioVisualizationEnabled = false;
         if (compactVU) compactVU.style.display = 'flex';
         log('Audio visualization disabled (performance mode)');
+    }
+}
+
+// Toggle audio controls panel (filters section)
+function toggleAudioControls() {
+    const content = document.getElementById('audio-controls-filters-content');
+    const toggle = document.getElementById('audio-controls-toggle');
+
+    if (content.style.display === 'none') {
+        // Expand - show filters
+        content.style.display = 'block';
+        toggle.classList.add('expanded');
+        log('Audio filters expanded');
+    } else {
+        // Collapse - hide filters
+        content.style.display = 'none';
+        toggle.classList.remove('expanded');
+        log('Audio filters collapsed');
     }
 }
 
@@ -6466,6 +6486,7 @@ window.updateBandwidth = updateBandwidth;
 // Visualization controls
 window.openRecorderModal = openRecorderModal;
 window.toggleAudioVisualization = toggleAudioVisualization;
+window.toggleAudioControls = toggleAudioControls;
 window.updateFFTSize = updateFFTSize;
 window.updateScrollRate = updateScrollRate;
 window.updateOscilloscopeZoom = updateOscilloscopeZoom;

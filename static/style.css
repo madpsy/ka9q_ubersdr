@@ -1563,9 +1563,9 @@ input[type="range"]::-moz-range-thumb {
     gap: 20px;
     padding: 10px 30px;
     background: #adb5bd;
-    transform: scale(0.75);
+    transform: none;
     transform-origin: top center;
-    margin-bottom: -220px;
+    margin-bottom: 0;
 }
 
 /* Filter Panels Grid Container - 2x3 Grid (with NR2) */
@@ -1616,10 +1616,10 @@ input[type="range"]::-moz-range-thumb {
     padding: 10px 30px;
     background: #adb5bd;
     border-top: none;
-    transform: scale(0.75);
+    transform: none;
     transform-origin: top center;
     margin-top: 0;
-    margin-bottom: -80px;
+    margin-bottom: 0;
 }
 
 .equalizer-container {

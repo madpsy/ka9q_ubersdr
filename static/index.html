@@ -245,37 +245,96 @@
 
         </div>
 
-        <!-- Audio Controls Section (Collapsible) -->
-        <div class="audio-controls-section">
-            <div class="audio-controls-header" onclick="toggleAudioControls()">
-                <h3>Audio Controls</h3>
-                <span id="audio-controls-toggle" class="toggle-icon">▼</span>
+        <div class="audio-controls">
+            <div class="control-group">
+                <label for="volume">Volume</label>
+                <input type="range" id="volume" min="0" max="100" value="70" title="Volume (Up/Down arrows)">
+                <span id="volume-value">70%</span>
             </div>
-            <div class="audio-controls">
-                <div class="control-group">
-                    <label for="volume">Volume</label>
-                    <input type="range" id="volume" min="0" max="100" value="70" title="Volume (Up/Down arrows)">
-                    <span id="volume-value">70%</span>
+            <div class="control-group" style="display: flex; flex-direction: column; gap: 2px; align-items: flex-start;">
+                <label style="margin: 0;">
+                    <input type="checkbox" id="channel-left" checked onchange="updateChannelSelection()">
+                    Left
+                </label>
+                <label style="margin: 0;">
+                    <input type="checkbox" id="channel-right" checked onchange="updateChannelSelection()">
+                    Right
+                </label>
+            </div>
+            <div class="control-group">
+                <button id="mute-btn" onclick="toggleMute()" title="Toggle Mute (M key)">🔊 Mute</button>
+                <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 10px;" title="Toggle Noise Reduction (N key)">NR2</button>
+                <button id="rec-btn" onclick="openRecorderModal()" style="margin-left: 10px;" title="Open Recorder (R key)">⏺ Rec</button>
+            </div>
+            <div class="control-group vu-meter-compact-container" id="vu-meter-compact">
+                <div class="vu-meter">
+                    <div id="vu-meter-bar-compact" class="vu-meter-bar"></div>
+                    <div id="vu-meter-peak-compact" class="vu-meter-peak"></div>
+                    <div class="vu-meter-scale">
+                        <span>-60</span>
+                        <span>-40</span>
+                        <span>-20</span>
+                        <span>-10</span>
+                        <span>-5</span>
+                        <span>0</span>
+                    </div>
                 </div>
-                <div class="control-group" style="display: flex; flex-direction: column; gap: 2px; align-items: flex-start;">
-                    <label style="margin: 0;">
-                        <input type="checkbox" id="channel-left" checked onchange="updateChannelSelection()">
-                        Left
-                    </label>
-                    <label style="margin: 0;">
-                        <input type="checkbox" id="channel-right" checked onchange="updateChannelSelection()">
-                        Right
-                    </label>
+            </div>
+        </div>
+
+        <!-- Generic Extension Panel (shared by all extensions) -->
+        <div id="extension-panel" class="decoder-extension-panel" style="display: none;">
+            <div class="decoder-extension-container">
+                <div class="decoder-extension-header">
+                    <h3 id="extension-panel-title">Extension</h3>
+                    <div class="decoder-header-buttons">
+                        <button class="decoder-modal-btn" onclick="openExtensionModal()" title="Open in full screen">⛶</button>
+                        <button class="decoder-close-btn" onclick="closeExtensionPanel()">×</button>
+                    </div>
                 </div>
-                <div class="control-group">
-                    <button id="mute-btn" onclick="toggleMute()" title="Toggle Mute (M key)">🔊 Mute</button>
-                    <button id="nr2-quick-toggle" onclick="toggleNR2Quick()" style="background-color: #fd7e14; margin-left: 10px;" title="Toggle Noise Reduction (N key)">NR2</button>
-                    <button id="rec-btn" onclick="openRecorderModal()" style="margin-left: 10px;" title="Open Recorder (R key)">⏺ Rec</button>
+                <div id="extension-panel-content" class="decoder-extension-content">
+                    <!-- Extension content loaded dynamically -->
                 </div>
-                <div class="control-group vu-meter-compact-container" id="vu-meter-compact">
+            </div>
+        </div>
+
+        <!-- Generic Extension Modal (shared by all extensions) -->
+        <div id="extension-modal" class="decoder-extension-modal">
+            <div class="decoder-extension-modal-content">
+                <div class="decoder-extension-modal-header">
+                    <h2 id="extension-modal-title">Extension</h2>
+                    <div class="decoder-extension-modal-controls">
+                        <div class="decoder-extension-modal-zoom">
+                            <button class="decoder-extension-modal-zoom-btn" onclick="zoomExtensionModal(-0.1)">−</button>
+                            <span class="decoder-extension-modal-zoom-display" id="extension-modal-zoom">100%</span>
+                            <button class="decoder-extension-modal-zoom-btn" onclick="zoomExtensionModal(0.1)">+</button>
+                        </div>
+                        <button class="decoder-extension-modal-close" onclick="closeExtensionModal()">×</button>
+                    </div>
+                </div>
+                <div class="decoder-extension-modal-body">
+                    <div class="modal-content-wrapper" id="extension-modal-content-wrapper">
+                        <div id="extension-modal-content">
+                            <!-- Extension content cloned here for modal view -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Visualization Section (Collapsible) -->
+        <div class="audio-visualization-section">
+            <div class="audio-visualization-header" onclick="toggleAudioVisualization()">
+                <h3>Audio Visualisation</h3>
+                <span id="audio-viz-toggle" class="toggle-icon">▼</span>
+            </div>
+            <div id="audio-visualization-content" class="audio-visualization-content" style="display: none;">
+                <div class="visualizer-panel">
+                    <div class="top-visualizers">
+                <div class="vu-meter-container">
                     <div class="vu-meter">
-                        <div id="vu-meter-bar-compact" class="vu-meter-bar"></div>
-                        <div id="vu-meter-peak-compact" class="vu-meter-peak"></div>
+                        <div id="vu-meter-bar" class="vu-meter-bar"></div>
+                        <div id="vu-meter-peak" class="vu-meter-peak"></div>
                         <div class="vu-meter-scale">
                             <span>-60</span>
                             <span>-40</span>
@@ -285,15 +344,86 @@
                             <span>0</span>
                         </div>
                     </div>
+                    <div class="vu-meter-values">
+                        <div class="vu-value-item">
+                            <span class="vu-label">RMS:</span>
+                            <span id="vu-rms-value" class="vu-value">-∞ dB</span>
+                        </div>
+                        <div class="vu-value-item">
+                            <span class="vu-label">Peak:</span>
+                            <span id="vu-peak-value" class="vu-value">-∞ dB</span>
+                        </div>
+                        <div class="vu-value-item" style="display: flex; flex-direction: column; gap: 6px; font-size: 0.9em;">
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="save-filters-enable" onchange="toggleSaveFiltersEnabled()">
+                                <span>Save Filters</span>
+                            </label>
+                            <button onclick="clearFilterStorage()" style="padding: 4px 8px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; white-space: nowrap;">Clear Storage</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="oscilloscope-container">
+                    <canvas id="oscilloscope-canvas" width="400" height="140"></canvas>
+                    <div class="oscilloscope-controls" style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label for="oscilloscope-zoom">Timebase:</label>
+                            <input type="range" id="oscilloscope-zoom" min="1" max="200" value="200" step="1" oninput="updateOscilloscopeZoom()">
+                            <span id="oscilloscope-zoom-value">-- ms</span>
+                        </div>
+                        <div style="display: flex; gap: 5px;">
+                            <button id="auto-sync-btn" onclick="autoSyncOscilloscope()" style="padding: 4px 12px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" title="Toggle trigger lock for stable waveform">Auto Sync</button>
+                            <button id="auto-scale-btn" onclick="autoScaleOscilloscope()" style="padding: 4px 12px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" title="Toggle continuous auto-scaling of Y-axis">Auto Scale</button>
+                            <button id="set-1khz-btn" onclick="shiftFrequencyTo1kHz()" style="padding: 4px 12px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;" title="Shift detected signal to 1 kHz">Set 1 kHz</button>
+                        </div>
+                    </div>
                 </div>
             </div>
+            <div class="spectrum-container">
+                <canvas id="spectrum-canvas" width="2048" height="150"></canvas>
+            </div>
+            <div class="waterfall-container">
+                <div style="position: relative;">
+                    <canvas id="waterfall-canvas" width="2048" height="400"></canvas>
+                    <canvas id="waterfall-overlay-canvas" width="2048" height="400" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+                </div>
+                <div class="waterfall-controls">
+                    <div class="waterfall-control-group">
+                        <label for="fft-size">FFT Size:</label>
+                        <select id="fft-size" onchange="updateFFTSize()">
+                            <option value="2048">2048 (Fastest)</option>
+                            <option value="4096">4096 (Fast)</option>
+                            <option value="8192">8192 (Balanced)</option>
+                            <option value="16384" selected>16384 (High Detail)</option>
+                            <option value="32768">32768 (Maximum Detail)</option>
+                        </select>
+                    </div>
+                    <div class="waterfall-control-group">
+                        <label for="scroll-rate">Scroll Rate:</label>
+                        <select id="scroll-rate" onchange="updateScrollRate()">
+                            <option value="100">Slow (10 fps)</option>
+                            <option value="50">Medium (20 fps)</option>
+                            <option value="33" selected>Fast (30 fps)</option>
+                            <option value="16">Very Fast (60 fps)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+                </div>
+            </div>
+        </div>
 
-            <!-- Filters Content (Collapsible under Audio Controls) -->
+        <!-- Audio Filters Section (Collapsible) -->
+        <div class="audio-controls-section">
+            <div class="audio-controls-header" onclick="toggleAudioControls()">
+                <h3>Audio Filters</h3>
+                <span id="audio-controls-toggle" class="toggle-icon">▼</span>
+            </div>
             <div id="audio-controls-filters-content" class="audio-controls-filters-content" style="display: none;">
-                <!-- Filters: 2x3 Grid for Notch, Bandpass, NR2, Squelch, Compressor, Stereo Virtualizer -->
-                <div class="filters-grid filters-grid-2x3">
-                    <!-- Row 1, Column 1: Notch -->
-                    <div class="notch-panel">
+
+        <!-- Filters: 2x3 Grid for Notch, Bandpass, NR2, Squelch, Compressor, Stereo Virtualizer -->
+        <div class="filters-grid filters-grid-2x3">
+            <!-- Row 1, Column 1: Notch -->
+            <div class="notch-panel">
                 <div class="notch-container" style="position: relative;">
                     <span id="notch-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
                     <span id="notch-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
@@ -500,13 +630,13 @@
                         <button onclick="resetStereoVirtualizer()" class="eq-reset-btn">Reset</button>
                     </div>
                 </div>
-                    </div>
-                </div>
-                
-                <!-- End 2x3 Filters Grid -->
+            </div>
+        </div>
+        
+        <!-- End 2x3 Filters Grid -->
 
-                <!-- Equalizer: Full Width Below Grid -->
-                <div class="equalizer-panel">
+        <!-- Equalizer: Full Width Below Grid -->
+        <div class="equalizer-panel">
             <div class="equalizer-container" style="position: relative;">
                 <span id="equalizer-latency-badge" class="filter-latency-badge" style="display: none;">0ms</span>
                 <span id="equalizer-status-badge" class="filter-status-badge filter-disabled">DISABLED</span>
@@ -589,144 +719,12 @@
                         <button onclick="applyEQPreset('voice')" class="eq-reset-btn" style="margin-left: 20px;" title="Optimized for SSB voice communications">Voice</button>
                         <button onclick="applyEQPreset('cw')" class="eq-reset-btn" title="Optimized for CW (Morse code) reception">CW</button>
                     </div>
-                    </div>
-                </div>
-                </div>
-                <!-- End Equalizer -->
-            </div>
-            <!-- End audio-controls-filters-content -->
-        </div>
-        <!-- End audio-controls-section -->
-
-        <!-- Generic Extension Panel (shared by all extensions) -->
-        <div id="extension-panel" class="decoder-extension-panel" style="display: none;">
-            <div class="decoder-extension-container">
-                <div class="decoder-extension-header">
-                    <h3 id="extension-panel-title">Extension</h3>
-                    <div class="decoder-header-buttons">
-                        <button class="decoder-modal-btn" onclick="openExtensionModal()" title="Open in full screen">⛶</button>
-                        <button class="decoder-close-btn" onclick="closeExtensionPanel()">×</button>
-                    </div>
-                </div>
-                <div id="extension-panel-content" class="decoder-extension-content">
-                    <!-- Extension content loaded dynamically -->
                 </div>
             </div>
         </div>
-
-        <!-- Generic Extension Modal (shared by all extensions) -->
-        <div id="extension-modal" class="decoder-extension-modal">
-            <div class="decoder-extension-modal-content">
-                <div class="decoder-extension-modal-header">
-                    <h2 id="extension-modal-title">Extension</h2>
-                    <div class="decoder-extension-modal-controls">
-                        <div class="decoder-extension-modal-zoom">
-                            <button class="decoder-extension-modal-zoom-btn" onclick="zoomExtensionModal(-0.1)">−</button>
-                            <span class="decoder-extension-modal-zoom-display" id="extension-modal-zoom">100%</span>
-                            <button class="decoder-extension-modal-zoom-btn" onclick="zoomExtensionModal(0.1)">+</button>
-                        </div>
-                        <button class="decoder-extension-modal-close" onclick="closeExtensionModal()">×</button>
-                    </div>
-                </div>
-                <div class="decoder-extension-modal-body">
-                    <div class="modal-content-wrapper" id="extension-modal-content-wrapper">
-                        <div id="extension-modal-content">
-                            <!-- Extension content cloned here for modal view -->
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
-
-        <!-- Audio Visualization Section (Collapsible) -->
-        <div class="audio-visualization-section">
-            <div class="audio-visualization-header" onclick="toggleAudioVisualization()">
-                <h3>Audio Visualisation</h3>
-                <span id="audio-viz-toggle" class="toggle-icon">▼</span>
-            </div>
-            <div id="audio-visualization-content" class="audio-visualization-content" style="display: none;">
-                <div class="visualizer-panel">
-                    <div class="top-visualizers">
-                        <div class="vu-meter-container">
-                            <div class="vu-meter">
-                                <div id="vu-meter-bar" class="vu-meter-bar"></div>
-                                <div id="vu-meter-peak" class="vu-meter-peak"></div>
-                                <div class="vu-meter-scale">
-                                    <span>-60</span>
-                                    <span>-40</span>
-                                    <span>-20</span>
-                                    <span>-10</span>
-                                    <span>-5</span>
-                                    <span>0</span>
-                                </div>
-                            </div>
-                            <div class="vu-meter-values">
-                                <div class="vu-value-item">
-                                    <span class="vu-label">RMS:</span>
-                                    <span id="vu-rms-value" class="vu-value">-∞ dB</span>
-                                </div>
-                                <div class="vu-value-item">
-                                    <span class="vu-label">Peak:</span>
-                                    <span id="vu-peak-value" class="vu-value">-∞ dB</span>
-                                </div>
-                                <div class="vu-value-item" style="display: flex; flex-direction: column; gap: 6px; font-size: 0.9em;">
-                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                                        <input type="checkbox" id="save-filters-enable" onchange="toggleSaveFiltersEnabled()">
-                                        <span>Save Filters</span>
-                                    </label>
-                                    <button onclick="clearFilterStorage()" style="padding: 4px 8px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; white-space: nowrap;">Clear Storage</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="oscilloscope-container">
-                            <canvas id="oscilloscope-canvas" width="400" height="140"></canvas>
-                            <div class="oscilloscope-controls" style="display: flex; align-items: center; justify-content: space-between;">
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <label for="oscilloscope-zoom">Timebase:</label>
-                                    <input type="range" id="oscilloscope-zoom" min="1" max="200" value="200" step="1" oninput="updateOscilloscopeZoom()">
-                                    <span id="oscilloscope-zoom-value">-- ms</span>
-                                </div>
-                                <div style="display: flex; gap: 5px;">
-                                    <button id="auto-sync-btn" onclick="autoSyncOscilloscope()" style="padding: 4px 12px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" title="Toggle trigger lock for stable waveform">Auto Sync</button>
-                                    <button id="auto-scale-btn" onclick="autoScaleOscilloscope()" style="padding: 4px 12px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;" title="Toggle continuous auto-scaling of Y-axis">Auto Scale</button>
-                                    <button id="set-1khz-btn" onclick="shiftFrequencyTo1kHz()" style="padding: 4px 12px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;" title="Shift detected signal to 1 kHz">Set 1 kHz</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="spectrum-container">
-                        <canvas id="spectrum-canvas" width="2048" height="150"></canvas>
-                    </div>
-                    <div class="waterfall-container">
-                        <div style="position: relative;">
-                            <canvas id="waterfall-canvas" width="2048" height="400"></canvas>
-                            <canvas id="waterfall-overlay-canvas" width="2048" height="400" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
-                        </div>
-                        <div class="waterfall-controls">
-                            <div class="waterfall-control-group">
-                                <label for="fft-size">FFT Size:</label>
-                                <select id="fft-size" onchange="updateFFTSize()">
-                                    <option value="2048">2048 (Fastest)</option>
-                                    <option value="4096">4096 (Fast)</option>
-                                    <option value="8192">8192 (Balanced)</option>
-                                    <option value="16384" selected>16384 (High Detail)</option>
-                                    <option value="32768">32768 (Maximum Detail)</option>
-                                </select>
-                            </div>
-                            <div class="waterfall-control-group">
-                                <label for="scroll-rate">Scroll Rate:</label>
-                                <select id="scroll-rate" onchange="updateScrollRate()">
-                                    <option value="100">Slow (10 fps)</option>
-                                    <option value="50">Medium (20 fps)</option>
-                                    <option value="33" selected>Fast (30 fps)</option>
-                                    <option value="16">Very Fast (60 fps)</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <!-- End Audio Filters Section -->
 
         <!-- Active Channels Display -->
         <div class="active-channels-panel">

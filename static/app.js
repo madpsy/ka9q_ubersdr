@@ -7025,8 +7025,9 @@ function selectBookmarkFromDropdown(value) {
         const bookmarkData = JSON.parse(value);
 
         // Use the existing handleBookmarkClick function from bookmark-manager.js
+        // Pass false for shouldZoom and false for fromSpectrumMarker (dropdown selection)
         if (window.handleBookmarkClick) {
-            window.handleBookmarkClick(bookmarkData);
+            window.handleBookmarkClick(bookmarkData, false, false);
         }
 
     } catch (e) {

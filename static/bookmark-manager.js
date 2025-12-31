@@ -360,6 +360,15 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
     } else if (!fromSpectrumMarker) {
         // For dropdown selections, send pan request to center on bookmark
         if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
+            // Set flag to prevent edge detection from interfering after pan
+            spectrumDisplay.skipEdgeDetection = true;
+            // Clear the flag after a short delay (after pan completes)
+            setTimeout(() => {
+                if (spectrumDisplay) {
+                    spectrumDisplay.skipEdgeDetection = false;
+                }
+            }, 1000);
+
             spectrumDisplay.ws.send(JSON.stringify({
                 type: 'pan',
                 frequency: frequency

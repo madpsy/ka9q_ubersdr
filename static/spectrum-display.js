@@ -2249,7 +2249,7 @@ class SpectrumDisplay {
             const freqInput = document.getElementById('frequency');
             const hasInputFocus = freqInput && document.activeElement === freqInput;
             
-            if (this.config.onFrequencyClick && !this.isDragging && !hasInputFocus) {
+            if (this.config.onFrequencyClick && !this.isDragging && !hasInputFocus && !this.skipEdgeDetection) {
                 console.log(`Marker at edge - updating frequency to ${(newFreq/1e6).toFixed(3)} MHz`);
                 this.skipNextPan = true; // Don't pan back when we update frequency
                 this.config.onFrequencyClick(newFreq);

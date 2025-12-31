@@ -886,19 +886,24 @@ input[type="range"]::-moz-range-thumb {
 /* Audio Controls Section (Collapsible) */
 .audio-controls-section {
     padding: 0 30px;
-    margin-bottom: 20px;
+    background: #adb5bd;
+    border-top: none;
+    transform: scale(0.75);
+    transform-origin: top center;
+    margin-top: 20px;
+    margin-bottom: -180px;
 }
 
 .audio-controls-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 20px;
-    background: #2c3e50;
-    border-radius: 8px;
+    padding: 15px 20px;
+    background: #34495e;
     cursor: pointer;
     user-select: none;
-    transition: background 0.2s;
+    transition: background 0.3s;
+    border-radius: 6px;
 }
 
 .audio-controls-header:hover {
@@ -907,14 +912,14 @@ input[type="range"]::-moz-range-thumb {
 
 .audio-controls-header h3 {
     margin: 0;
-    font-size: 1.1em;
     color: #ecf0f1;
+    font-size: 1.1em;
 }
 
 .audio-controls-filters-content {
-    margin-top: 15px;
-    transform: scale(0.75);
-    transform-origin: top center;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out;
+    transform: none;
 }
 
 /* Audio Visualization Section (Collapsible) */

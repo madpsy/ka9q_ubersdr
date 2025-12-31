@@ -387,7 +387,7 @@ class SpectrumDisplay {
 
                         // Check if click is within 30 pixels of bookmark (wider hit area)
                         if (Math.abs(x - bookmarkX) <= 30) {
-                            window.handleBookmarkClick(bookmark);
+                            window.handleBookmarkClick(bookmark, e.shiftKey || e.ctrlKey);
                             return;
                         }
                     }
@@ -2973,7 +2973,7 @@ class SpectrumDisplay {
 
                             // Check if click is within 20 pixels of bookmark
                             if (Math.abs(x - bookmarkX) <= 20) {
-                                window.handleBookmarkClick(bookmark);
+                                window.handleBookmarkClick(bookmark, e.shiftKey || e.ctrlKey);
                                 this.isDragging = false;
                                 this.dragDidMove = false;
                                 this.updateCursorStyle();
@@ -3280,7 +3280,7 @@ class SpectrumDisplay {
         const handleWheel = (e) => {
             if (!this.scrollEnabled && !this.zoomScrollEnabled) return;
             if (!this.spectrumData) return;
-            
+
             e.preventDefault();
 
             const now = Date.now();
@@ -3295,15 +3295,22 @@ class SpectrumDisplay {
                 return; // Ignore this scroll event
             }
             lastScrollTime = now;
-            
-            if (this.zoomScrollEnabled) {
+
+            // Check if Ctrl or Shift is pressed to reverse behavior
+            const reverseMode = e.ctrlKey || e.shiftKey;
+
+            // Determine which mode to use based on checkbox and modifier keys
+            const useZoomMode = reverseMode ? this.scrollEnabled : this.zoomScrollEnabled;
+            const useScrollMode = reverseMode ? this.zoomScrollEnabled : this.scrollEnabled;
+
+            if (useZoomMode) {
                 // Zoom mode: scroll up = zoom in, scroll down = zoom out
                 if (e.deltaY < 0) {
                     this.zoomIn();
                 } else {
                     this.zoomOut();
                 }
-            } else if (this.scrollEnabled) {
+            } else if (useScrollMode) {
                 // Perform initial zoom on first scroll if at default zoom level
                 // Use aggressive zoom similar to band buttons (zoom to show ~100 kHz view)
                 if (!this.hasPerformedInitialZoom && this.zoomLevel === 1) {

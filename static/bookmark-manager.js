@@ -261,19 +261,23 @@ function drawBookmarksOnSpectrum(spectrumDisplay, log) {
 
 // Handle bookmark click (expose on window for spectrum-display.js access)
 // This function is called with bookmark object from spectrum-display.js
-function handleBookmarkClick(bookmarkOrFrequency, mode) {
-    // Support both old API (frequency, mode) and new API (bookmark object)
-    let frequency, bookmarkMode, extension;
+// Second parameter can be either mode (old API) or shouldZoom boolean (new API with modifier key)
+function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom) {
+    // Support both old API (frequency, mode) and new API (bookmark object, shouldZoom)
+    let frequency, bookmarkMode, extension, shouldZoom;
     
     if (typeof bookmarkOrFrequency === 'object') {
         // New API: bookmark object
         frequency = bookmarkOrFrequency.frequency;
         bookmarkMode = bookmarkOrFrequency.mode;
         extension = bookmarkOrFrequency.extension;
+        // Second parameter is shouldZoom boolean (true if Shift/Ctrl held)
+        shouldZoom = typeof modeOrShouldZoom === 'boolean' ? modeOrShouldZoom : false;
     } else {
         // Old API: separate frequency and mode parameters
         frequency = bookmarkOrFrequency;
-        bookmarkMode = mode;
+        bookmarkMode = modeOrShouldZoom;
+        shouldZoom = false; // Default to no zoom for old API
     }
     
     // Access required functions from window object
@@ -332,8 +336,8 @@ function handleBookmarkClick(bookmarkOrFrequency, mode) {
         }
     }
 
-    // Zoom spectrum to maximum (1 Hz/bin)
-    if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
+    // Zoom spectrum to maximum (1 Hz/bin) only if Shift or Ctrl key was held
+    if (shouldZoom && spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
         // Send zoom request directly to 1 Hz/bin for maximum zoom
         spectrumDisplay.ws.send(JSON.stringify({
             type: 'zoom',
@@ -345,7 +349,8 @@ function handleBookmarkClick(bookmarkOrFrequency, mode) {
         }
     } else {
         if (log && formatFrequency) {
-            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()}`);
+            const zoomHint = shouldZoom ? '' : ' (hold Shift/Ctrl to zoom)';
+            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()}${zoomHint}`);
         }
     }
     

@@ -900,7 +900,7 @@ input[type="range"]::-moz-range-thumb {
 
 /* When expanded, use negative margin to compensate for scaled content */
 .audio-controls-section:has(#audio-controls-filters-content[style*="display: block"]) {
-    margin-bottom: -180px;
+    margin-bottom: -300px;
 }
 
 .audio-controls-header {

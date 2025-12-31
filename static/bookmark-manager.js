@@ -327,6 +327,11 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom) {
         updateURL();
     }
 
+    // Set skipNextPan flag to prevent auto-centering (unless modifier key held for zoom)
+    if (!shouldZoom && spectrumDisplay) {
+        spectrumDisplay.skipNextPan = true;
+    }
+
     // Connect if not connected, otherwise tune
     if (wsManager && connect && autoTune) {
         if (!wsManager.isConnected()) {

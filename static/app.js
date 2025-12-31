@@ -2753,6 +2753,15 @@ function setBand(bandName) {
 
     // Zoom spectrum to show entire band
     if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
+        // Set flag to prevent edge detection from interfering after zoom
+        spectrumDisplay.skipEdgeDetection = true;
+        // Clear the flag after a short delay (after zoom completes)
+        setTimeout(() => {
+            if (spectrumDisplay) {
+                spectrumDisplay.skipEdgeDetection = false;
+            }
+        }, 1000);
+
         // Calculate bin bandwidth to show the full band width
         // totalBandwidth = binBandwidth * binCount
         // Assuming binCount is typically 2048, calculate binBandwidth

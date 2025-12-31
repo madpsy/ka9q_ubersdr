@@ -317,12 +317,12 @@ func NewNoiseFloorMonitor(config *Config, radiod *RadiodController, sessions *Se
 	}
 
 	// Initialize wide-band FFT buffer (0-30 MHz full HF coverage)
-	// Uses same parameters as main spectrum display: 1024 bins @ 30 kHz/bin
+	// Uses 2048 bins @ 15 kHz/bin for better frequency resolution
 	nfm.wideBandFFTBuffer = NewFFTBuffer(
 		"wideband",
 		0,              // 0 Hz start
 		30000000,       // 30 MHz end
-		30000.0,        // 30 kHz bin width (matches default spectrum config)
+		15000.0,        // 15 kHz bin width (2x better resolution than 30 kHz)
 		60*time.Second, // Keep 1 minute of samples
 	)
 
@@ -361,16 +361,16 @@ func (nfm *NoiseFloorMonitor) Start() error {
 	nfm.sessions.mu.RUnlock()
 
 	// Create wide-band spectrum channel
-	// Parameters match default spectrum config: 15 MHz center, 1024 bins, 30 kHz/bin
+	// Parameters: 15 MHz center, 2048 bins, 15 kHz/bin for 2x better resolution
 	if DebugMode {
-		log.Printf("DEBUG: Creating wide-band spectrum - freq: 15000000 Hz, bins: 1024, bw: 30000.0 Hz")
+		log.Printf("DEBUG: Creating wide-band spectrum - freq: 15000000 Hz, bins: 2048, bw: 15000.0 Hz")
 	}
 
 	if err := nfm.radiod.CreateSpectrumChannel(
 		"noisefloor-wideband",
 		15000000, // 15 MHz center (covers 0-30 MHz)
-		1024,     // 1024 bins
-		30000.0,  // 30 kHz per bin (~30.72 MHz total bandwidth)
+		2048,     // 2048 bins (doubled for better resolution)
+		15000.0,  // 15 kHz per bin (~30.72 MHz total bandwidth, 2x resolution)
 		wideBandSSRC,
 	); err != nil {
 		return fmt.Errorf("failed to create wide-band spectrum channel: %w", err)
@@ -386,8 +386,8 @@ func (nfm *NoiseFloorMonitor) Start() error {
 		SSRC:         wideBandSSRC,
 		IsSpectrum:   true,
 		Frequency:    15000000,
-		BinCount:     1024,
-		BinBandwidth: 30000.0,
+		BinCount:     2048,
+		BinBandwidth: 15000.0,
 		SpectrumChan: wideBandSpectrumChan,
 		CreatedAt:    time.Now(),
 		LastActive:   time.Now(),
@@ -405,15 +405,15 @@ func (nfm *NoiseFloorMonitor) Start() error {
 			Start:           0,
 			End:             30000000,
 			CenterFrequency: 15000000,
-			BinCount:        1024,
-			BinBandwidth:    30000.0,
+			BinCount:        2048,
+			BinBandwidth:    15000.0,
 		},
 		SSRC:         wideBandSSRC,
 		SessionID:    wideBandSessionID,
 		SpectrumChan: wideBandSpectrumChan,
 	}
 
-	log.Printf("Created wide-band spectrum session (SSRC: 0x%08x, 30 kHz resolution, 0-30 MHz)", wideBandSSRC)
+	log.Printf("Created wide-band spectrum session (SSRC: 0x%08x, 15 kHz resolution, 0-30 MHz, 2048 bins)", wideBandSSRC)
 
 	// Create a spectrum session for each band
 	for _, band := range nfm.config.NoiseFloor.Bands {

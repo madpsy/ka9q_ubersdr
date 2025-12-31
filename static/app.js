@@ -2751,16 +2751,13 @@ function setBand(bandName) {
         autoTune();
     }
 
-    // Zoom spectrum to show band with tighter view (0.6x band width for more detail)
-    // This provides one additional zoom level beyond showing the full band
+    // Zoom spectrum to show entire band
     if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
-        // Calculate bin bandwidth to show 60% of the band width
-        // This gives a focused view while still showing context
+        // Calculate bin bandwidth to show the full band width
         // totalBandwidth = binBandwidth * binCount
         // Assuming binCount is typically 2048, calculate binBandwidth
-        const focusedBandwidth = bandWidth * 0.6;
         const binCount = spectrumDisplay.binCount || 2048;
-        const binBandwidth = focusedBandwidth / binCount;
+        const binBandwidth = bandWidth / binCount;
 
         spectrumDisplay.ws.send(JSON.stringify({
             type: 'zoom',
@@ -2768,7 +2765,7 @@ function setBand(bandName) {
             binBandwidth: binBandwidth
         }));
 
-        log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - focusedBandwidth/2)} - ${formatFrequency(centerFreq + focusedBandwidth/2)})`);
+        log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()} (zoomed to ${formatFrequency(centerFreq - bandWidth/2)} - ${formatFrequency(centerFreq + bandWidth/2)})`);
     } else {
         log(`Tuned to ${bandName} band: ${formatFrequency(centerFreq)} ${mode.toUpperCase()}`);
     }

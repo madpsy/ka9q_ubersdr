@@ -27,6 +27,8 @@ var (
 	latestVersionMu sync.RWMutex
 	// versionRegex matches the version constant in version.go
 	versionRegex = regexp.MustCompile(`const\s+Version\s*=\s*"([^"]+)"`)
+	// sessionManager is used to check for active regular users before writing version file
+	sessionManager *SessionManager
 )
 
 // GetLatestVersion returns the latest version fetched from GitHub
@@ -118,11 +120,22 @@ func checkVersion() {
 	if version != Version {
 		log.Printf("Version check: Current=%s, Latest=%s ⚠️ UPDATE AVAILABLE", Version, version)
 
-		// Write the new version to file
-		if err := writeVersionFile(version); err != nil {
-			log.Printf("Warning: Failed to write version file: %v", err)
+		// Check for regular (non-bypassed) users before writing file
+		regularUserCount := 0
+		if sessionManager != nil {
+			regularUserCount = sessionManager.GetNonBypassedUserCount()
+		}
+
+		if regularUserCount > 0 {
+			// Don't write version file while regular users are connected
+			log.Printf("Version file NOT written: %d regular user(s) connected (bypassed/internal users excluded). Will retry on next check to avoid disrupting active users.", regularUserCount)
 		} else {
-			log.Printf("Version file updated: %s", versionFilePath)
+			// Safe to write version file - no regular users connected
+			if err := writeVersionFile(version); err != nil {
+				log.Printf("Warning: Failed to write version file: %v", err)
+			} else {
+				log.Printf("Version file updated: %s (no regular users connected - safe to update)", versionFilePath)
+			}
 		}
 	} else {
 		log.Printf("Version check: Current=%s, Latest=%s ✓ Up to date", Version, version)
@@ -132,11 +145,14 @@ func checkVersion() {
 // StartVersionChecker starts a goroutine that periodically checks for new versions
 // It performs an initial check at startup and then checks at the configured interval
 // If enabled is false, the version checker will not start
-func StartVersionChecker(enabled bool, intervalMinutes int) {
+func StartVersionChecker(enabled bool, intervalMinutes int, sessions *SessionManager) {
 	if !enabled {
 		log.Printf("Version checker disabled in configuration")
 		return
 	}
+
+	// Store session manager reference for checking active users
+	sessionManager = sessions
 
 	// Validate interval (minimum 60 minutes)
 	if intervalMinutes < 60 {

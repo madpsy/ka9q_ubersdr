@@ -339,9 +339,6 @@ func main() {
 	log.Printf("Server listen: %s", config.Server.Listen)
 	log.Printf("Max sessions: %d", config.Server.MaxSessions)
 
-	// Start version checker to fetch latest version from GitHub
-	StartVersionChecker(config.Admin.VersionCheckEnabled, config.Admin.VersionCheckInterval)
-
 	// Initialize radiod controller
 	radiod, err := NewRadiodController(
 		config.Radiod.StatusGroup,
@@ -355,6 +352,10 @@ func main() {
 
 	// Initialize session manager
 	sessions := NewSessionManager(config, radiod)
+
+	// Start version checker to fetch latest version from GitHub
+	// Must be called after sessions is initialized so it can check for active users
+	StartVersionChecker(config.Admin.VersionCheckEnabled, config.Admin.VersionCheckInterval, sessions)
 
 	// Initialize IP ban manager
 	bannedIPsPath := "banned_ips.yaml"

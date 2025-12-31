@@ -892,7 +892,13 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 		"name":      newBookmark.Name,
 		"frequency": newBookmark.Frequency,
 		"mode":      newBookmark.Mode,
-		"extension": newBookmark.Extension, // Always set extension, even if empty
+	}
+	// Only add optional fields if they are not empty
+	if newBookmark.Group != "" {
+		bookmarkMap["group"] = newBookmark.Group
+	}
+	if newBookmark.Extension != "" {
+		bookmarkMap["extension"] = newBookmark.Extension
 	}
 	bookmarks = append(bookmarks, bookmarkMap)
 	bookmarksConfig["bookmarks"] = bookmarks
@@ -1060,7 +1066,13 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		"name":      updatedBookmark.Name,
 		"frequency": updatedBookmark.Frequency,
 		"mode":      updatedBookmark.Mode,
-		"extension": updatedBookmark.Extension, // Always set extension, even if empty
+	}
+	// Only add optional fields if they are not empty
+	if updatedBookmark.Group != "" {
+		bookmarkMap["group"] = updatedBookmark.Group
+	}
+	if updatedBookmark.Extension != "" {
+		bookmarkMap["extension"] = updatedBookmark.Extension
 	}
 	bookmarks[index] = bookmarkMap
 	bookmarksConfig["bookmarks"] = bookmarks

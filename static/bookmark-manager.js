@@ -336,21 +336,20 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom) {
         }
     }
 
-    // Zoom spectrum to maximum (1 Hz/bin) only if Shift or Ctrl key was held
+    // Only zoom/center spectrum if Shift or Ctrl key was held
     if (shouldZoom && spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
-        // Send zoom request directly to 1 Hz/bin for maximum zoom
+        // Send zoom request to center and zoom to 1 Hz/bin for maximum zoom
         spectrumDisplay.ws.send(JSON.stringify({
             type: 'zoom',
             frequency: frequency,
             binBandwidth: 1.0  // Minimum bin bandwidth = maximum zoom
         }));
         if (log && formatFrequency) {
-            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()} (zoomed to max)`);
+            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()} (centered and zoomed)`);
         }
     } else {
         if (log && formatFrequency) {
-            const zoomHint = shouldZoom ? '' : ' (hold Shift/Ctrl to zoom)';
-            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()}${zoomHint}`);
+            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()} (hold Shift/Ctrl to center/zoom)`);
         }
     }
     

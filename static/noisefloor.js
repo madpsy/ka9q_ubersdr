@@ -1598,7 +1598,25 @@ class NoiseFloorMonitor {
                                 font: {
                                     size: 9
                                 },
-                                callback: (value) => value.toFixed(0)
+                                // Dynamic precision based on zoom level
+                                callback: function(value) {
+                                    const range = this.max - this.min;
+                                    // If zoomed in to < 5 MHz range, show 3 decimals
+                                    if (range < 5) {
+                                        return value.toFixed(3);
+                                    }
+                                    // If zoomed to < 15 MHz range, show 2 decimals
+                                    else if (range < 15) {
+                                        return value.toFixed(2);
+                                    }
+                                    // Otherwise show 1 decimal for full view
+                                    else {
+                                        return value.toFixed(1);
+                                    }
+                                },
+                                // Increase number of ticks for better granularity
+                                maxTicksLimit: 20,
+                                autoSkip: true
                             },
                             grid: {
                                 color: 'rgba(255, 255, 255, 0.1)'

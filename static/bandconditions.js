@@ -433,7 +433,7 @@ class BandConditionsMonitor {
 
                         const originalTime = new Date(d.timestamp);
                         const normalizedTime = new Date(today);
-                        normalizedTime.setHours(originalTime.getHours(), originalTime.getMinutes(), originalTime.getSeconds(), originalTime.getMilliseconds());
+                        normalizedTime.setUTCHours(originalTime.getUTCHours(), originalTime.getUTCMinutes(), originalTime.getUTCSeconds(), originalTime.getUTCMilliseconds());
 
                         return {
                             x: normalizedTime,
@@ -446,7 +446,7 @@ class BandConditionsMonitor {
                         x: (() => {
                             const originalTime = new Date(data[band].timestamp);
                             const normalizedTime = new Date(today);
-                            normalizedTime.setHours(originalTime.getHours(), originalTime.getMinutes(), originalTime.getSeconds(), originalTime.getMilliseconds());
+                            normalizedTime.setUTCHours(originalTime.getUTCHours(), originalTime.getUTCMinutes(), originalTime.getUTCSeconds(), originalTime.getUTCMilliseconds());
                             return normalizedTime;
                         })(),
                         y: band,

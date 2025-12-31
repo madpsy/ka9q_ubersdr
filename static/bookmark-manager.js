@@ -357,6 +357,17 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
         if (log && formatFrequency) {
             log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()} (centered and zoomed)`);
         }
+    } else if (!fromSpectrumMarker) {
+        // For dropdown selections, send pan request to center on bookmark
+        if (spectrumDisplay && spectrumDisplay.connected && spectrumDisplay.ws) {
+            spectrumDisplay.ws.send(JSON.stringify({
+                type: 'pan',
+                frequency: frequency
+            }));
+        }
+        if (log && formatFrequency) {
+            log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()}`);
+        }
     } else {
         if (log && formatFrequency) {
             log(`Tuned to bookmark: ${formatFrequency(frequency)} ${bookmarkMode.toUpperCase()} (hold Shift/Ctrl to center/zoom)`);

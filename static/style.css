@@ -913,6 +913,8 @@ input[type="range"]::-moz-range-thumb {
 
 .audio-controls-filters-content {
     margin-top: 15px;
+    transform: scale(0.75);
+    transform-origin: top center;
 }
 
 /* Audio Visualization Section (Collapsible) */

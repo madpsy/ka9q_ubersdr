@@ -2972,14 +2972,14 @@ func (ah *AdminHandler) HandleSystemStats(w http.ResponseWriter, r *http.Request
 	minutes := int(uptime.Minutes()) % 60
 	seconds := int(uptime.Seconds()) % 60
 
-	// Format uptime similar to ps output
+	// Format uptime in a human-readable format
 	var uptimeStr string
 	if days > 0 {
-		uptimeStr = fmt.Sprintf("%d-%02d:%02d:%02d", days, hours, minutes, seconds)
+		uptimeStr = fmt.Sprintf("%dd %02dh %02dm %02ds", days, hours, minutes, seconds)
 	} else if hours > 0 {
-		uptimeStr = fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+		uptimeStr = fmt.Sprintf("%02dh %02dm %02ds", hours, minutes, seconds)
 	} else {
-		uptimeStr = fmt.Sprintf("%02d:%02d", minutes, seconds)
+		uptimeStr = fmt.Sprintf("%02dm %02ds", minutes, seconds)
 	}
 	stats["ubersdr_uptime"] = uptimeStr
 

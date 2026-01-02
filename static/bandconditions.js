@@ -413,9 +413,9 @@ class BandConditionsMonitor {
                     continue;
                 }
 
-                // Normalize all timestamps to today's date
+                // Normalize all timestamps to today's date (UTC)
                 const today = new Date();
-                today.setHours(0, 0, 0, 0);
+                today.setUTCHours(0, 0, 0, 0);
 
                 const dataPoints = trendData.length > 0
                     ? trendData.map(d => {
@@ -485,7 +485,7 @@ class BandConditionsMonitor {
         const endOfDay = new Date(startOfDay);
         endOfDay.setUTCHours(23, 59, 59, 999);
 
-        // Create annotation for current time indicator
+        // Create annotation for current time indicator (UTC)
         const currentTimeNormalized = new Date(startOfDay);
         currentTimeNormalized.setUTCHours(now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds(), now.getUTCMilliseconds());
 

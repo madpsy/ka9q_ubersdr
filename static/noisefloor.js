@@ -2414,9 +2414,9 @@ class NoiseFloorMonitor {
                 }
 
                 // Convert FT8 SNR values to band states
-                // Normalize all timestamps to today's date (keeping time-of-day)
+                // Normalize all timestamps to today's date (keeping time-of-day) - UTC
                 const today = new Date();
-                today.setHours(0, 0, 0, 0);
+                today.setUTCHours(0, 0, 0, 0);
                 
                 const dataPoints = trendData.length > 0
                     ? trendData.map(d => {

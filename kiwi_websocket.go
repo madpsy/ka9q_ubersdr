@@ -294,7 +294,9 @@ func (kc *kiwiConn) handle() {
 	if kc.connType == "SND" {
 		// Audio connection
 		kc.sendMsg("sample_rate", "12000")
-		kc.sendMsg("audio_rate", "12000")
+		// Send audio_init message with both audio_rate and audio_rate_true
+		// Format: MSG audio_init audio_rate=12000 audio_rate_true=12000.000
+		kc.sendMsg("audio_init", "audio_rate=12000 audio_rate_true=12000.000")
 	} else {
 		// Waterfall connection
 		kc.sendMsg("wf_setup", "")

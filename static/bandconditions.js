@@ -614,7 +614,8 @@ class BandConditionsMonitor {
                             unit: 'hour',
                             displayFormats: {
                                 hour: 'HH:mm'
-                            }
+                            },
+                            timezone: 'UTC'
                         },
                         title: {
                             display: true,

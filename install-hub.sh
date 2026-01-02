@@ -53,17 +53,23 @@ fi
 echo "Running UberSDR mDNS installation script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/install-ubersdr-mdns.sh | sudo bash
 
-# Create ubersdr directory in user's home and fetch the docker-compose file
+# Create ubersdr directory in user's home
 echo "Creating ~/ubersdr directory..."
 mkdir -p ~/ubersdr
-echo "Fetching docker-compose configuration..."
-curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml -o ~/ubersdr/docker-compose.yml
+
+# Check if this is a fresh installation
+INSTALLED_MARKER="$HOME/ubersdr/installed"
+if [ -f "$INSTALLED_MARKER" ]; then
+    echo "Existing installation detected. Preserving docker-compose.yml file."
+else
+    echo "Fetching docker-compose configuration..."
+    curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/docker-compose-dockerhub.yml -o ~/ubersdr/docker-compose.yml
+fi
+
 echo "Fetching caddy-entrypoint.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/docker/caddy-entrypoint.sh -o ~/ubersdr/caddy-entrypoint.sh
 chmod +x ~/ubersdr/caddy-entrypoint.sh
 
-# Check if this is a fresh installation
-INSTALLED_MARKER="$HOME/ubersdr/installed"
 if [ -f "$INSTALLED_MARKER" ]; then
     # Re-installation - don't set new password
     echo

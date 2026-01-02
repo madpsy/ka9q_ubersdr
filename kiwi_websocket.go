@@ -472,13 +472,16 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		return
 	}
 
-	// Handle AR (Audio Rate) command - client sends "SET AR OK in=12000 out=44100"
-	if _, hasAR := params["AR"]; hasAR {
-		// Respond with audio_init message containing audio_rate and audio_rate_true
-		// Format: MSG audio_init audio_rate=12000 audio_rate_true=12000.000
-		kc.sendMsg("audio_init", "audio_rate=12000 audio_rate_true=12000.000")
-		log.Printf("KiwiSDR: Sent audio_init message in response to AR command")
-		return
+	// Handle AR (Audio Rate) command - client sends "SET in=12000 out=48000"
+	if inRate, hasIn := params["in"]; hasIn {
+		if _, hasOut := params["out"]; hasOut {
+			// Respond with audio_init message containing audio_rate and audio_rate_true
+			// Use the 'in' rate from the client
+			// Format: MSG audio_init audio_rate=12000 audio_rate_true=12000.000
+			kc.sendMsg("audio_init", fmt.Sprintf("audio_rate=%s audio_rate_true=%s.000", inRate, inRate))
+			log.Printf("KiwiSDR: Sent audio_init message in response to AR command (in=%s)", inRate)
+			return
+		}
 	}
 
 	// Handle keepalive

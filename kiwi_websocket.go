@@ -275,6 +275,7 @@ type kiwiConn struct {
 	password           string
 	adpcmEncoder       *IMAAdpcmEncoder // ADPCM encoder for audio compression
 	wfAdpcmEncoder     *IMAAdpcmEncoder // ADPCM encoder for waterfall compression
+	audioInitSent      bool             // Track if audio_init message has been sent
 	mu                 sync.RWMutex
 }
 
@@ -479,6 +480,9 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 			// Use the 'in' rate from the client
 			// Format: MSG audio_init audio_rate=12000 audio_rate_true=12000.000
 			kc.sendMsg("audio_init", fmt.Sprintf("audio_rate=%s audio_rate_true=%s.000", inRate, inRate))
+			kc.mu.Lock()
+			kc.audioInitSent = true
+			kc.mu.Unlock()
 			log.Printf("KiwiSDR: Sent audio_init message in response to AR command (in=%s)", inRate)
 			return
 		}
@@ -525,6 +529,16 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 		case audioPacket, ok := <-kc.session.AudioChan:
 			if !ok {
 				return
+			}
+
+			// Don't send audio packets until audio_init has been sent
+			kc.mu.RLock()
+			initSent := kc.audioInitSent
+			kc.mu.RUnlock()
+
+			if !initSent {
+				// Skip this packet, wait for audio_init to be sent
+				continue
 			}
 
 			packetCount++

@@ -1011,7 +1011,8 @@ func main() {
 	if config.Server.EnableKiwiSDR && config.Server.KiwiSDRListen != "" {
 		// Create separate HTTP server for KiwiSDR protocol
 		kiwiMux := http.NewServeMux()
-		kiwiMux.HandleFunc("/", kiwiHandler.HandleKiwiWebSocket) // Accept any path
+		kiwiMux.HandleFunc("/status", kiwiHandler.HandleKiwiStatus) // KiwiSDR status endpoint
+		kiwiMux.HandleFunc("/", kiwiHandler.HandleKiwiWebSocket)    // Accept any path for WebSocket
 
 		kiwiServer = &http.Server{
 			Addr:    config.Server.KiwiSDRListen,

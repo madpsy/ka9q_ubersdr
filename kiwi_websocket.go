@@ -40,6 +40,137 @@ func NewKiwiWebSocketHandler(sessions *SessionManager, audioReceiver *AudioRecei
 	}
 }
 
+// HandleKiwiStatus handles KiwiSDR /status HTTP endpoint
+// Returns server status in KiwiSDR key=value format
+func (kwsh *KiwiWebSocketHandler) HandleKiwiStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	// Get current user count (non-bypassed users only)
+	currentUsers := kwsh.sessions.GetNonBypassedUserCount()
+	maxUsers := kwsh.config.Server.MaxSessions
+
+	// Build status response in KiwiSDR format (key=value pairs, one per line)
+	var status strings.Builder
+
+	// Basic status
+	status.WriteString("status=active\n")
+	status.WriteString("offline=no\n")
+
+	// Server name and location
+	if kwsh.config.Admin.Name != "" {
+		status.WriteString(fmt.Sprintf("name=%s\n", kwsh.config.Admin.Name))
+	} else {
+		status.WriteString("name=UberSDR\n")
+	}
+
+	// Hardware info
+	status.WriteString(fmt.Sprintf("sdr_hw=UberSDR %s\n", Version))
+
+	// Admin email
+	if kwsh.config.Admin.Email != "" {
+		status.WriteString(fmt.Sprintf("op_email=%s\n", kwsh.config.Admin.Email))
+	}
+
+	// Frequency range (0-30 MHz in Hz)
+	status.WriteString("bands=0-30000000\n")
+	status.WriteString("freq_offset=0.000\n")
+
+	// User counts
+	status.WriteString(fmt.Sprintf("users=%d\n", currentUsers))
+	status.WriteString(fmt.Sprintf("users_max=%d\n", maxUsers))
+	status.WriteString("preempt=0\n")
+
+	// GPS coordinates
+	if kwsh.config.Admin.GPS.Lat != 0 || kwsh.config.Admin.GPS.Lon != 0 {
+		status.WriteString(fmt.Sprintf("gps=(%.6f, %.6f)\n", kwsh.config.Admin.GPS.Lat, kwsh.config.Admin.GPS.Lon))
+
+		// Calculate grid square from lat/lon
+		gridSquare := latLonToGridSquare(kwsh.config.Admin.GPS.Lat, kwsh.config.Admin.GPS.Lon)
+		status.WriteString(fmt.Sprintf("grid=%s\n", gridSquare))
+
+		status.WriteString("gps_good=1\n")
+	} else {
+		status.WriteString("gps_good=0\n")
+	}
+
+	// GPS fix stats (dummy values)
+	status.WriteString("fixes=0\n")
+	status.WriteString("fixes_min=0\n")
+	status.WriteString("fixes_hour=0\n")
+
+	// TDoA info (if callsign is set)
+	if kwsh.config.Admin.Callsign != "" {
+		status.WriteString(fmt.Sprintf("tdoa_id=%s\n", kwsh.config.Admin.Callsign))
+		status.WriteString("tdoa_ch=1\n")
+	}
+
+	// Altitude above sea level
+	if kwsh.config.Admin.ASL > 0 {
+		status.WriteString(fmt.Sprintf("asl=%d\n", kwsh.config.Admin.ASL))
+	}
+
+	// Location string
+	if kwsh.config.Admin.Location != "" {
+		status.WriteString(fmt.Sprintf("loc=%s\n", kwsh.config.Admin.Location))
+	}
+
+	// Software version
+	status.WriteString(fmt.Sprintf("sw_version=UberSDR_%s\n", Version))
+
+	// Antenna info (dummy value - could be added to config later)
+	status.WriteString("antenna=Multi-band HF antenna\n")
+
+	// SNR (dummy values)
+	status.WriteString("snr=20,20\n")
+	status.WriteString("ant_connected=1\n")
+
+	// ADC overflow count (dummy)
+	status.WriteString("adc_ov=0\n")
+
+	// Clock info (dummy values)
+	status.WriteString("clk_ext_freq=0\n")
+	status.WriteString("clk_ext_gps=0,0\n")
+
+	// Uptime in seconds
+	uptime := int(time.Since(StartTime).Seconds())
+	status.WriteString(fmt.Sprintf("uptime=%d\n", uptime))
+
+	// Current date/time
+	now := time.Now()
+	status.WriteString(fmt.Sprintf("gps_date=0,0\n"))
+	status.WriteString(fmt.Sprintf("date=%s\n", now.Format("Mon Jan _2 15:04:05 2006")))
+
+	// IP blacklist (dummy)
+	status.WriteString("ip_blacklist=00000000\n")
+
+	// DX file info (dummy)
+	status.WriteString("dx_file=0,00000000,0\n")
+
+	w.Write([]byte(status.String()))
+}
+
+// latLonToGridSquare converts latitude/longitude to Maidenhead grid square
+func latLonToGridSquare(lat, lon float64) string {
+	// Adjust longitude to 0-360 range
+	adjLon := lon + 180.0
+	adjLat := lat + 90.0
+
+	// Calculate field (first two characters)
+	field1 := byte('A' + int(adjLon/20.0))
+	field2 := byte('A' + int(adjLat/10.0))
+
+	// Calculate square (next two digits)
+	square1 := byte('0' + int(math.Mod(adjLon/2.0, 10)))
+	square2 := byte('0' + int(math.Mod(adjLat, 10)))
+
+	// Calculate subsquare (last two characters, lowercase)
+	subsq1 := byte('a' + int(math.Mod(adjLon*12.0, 24)))
+	subsq2 := byte('a' + int(math.Mod(adjLat*24.0, 24)))
+
+	return string([]byte{field1, field2, square1, square2, subsq1, subsq2})
+}
+
 // HandleKiwiWebSocket handles KiwiSDR-compatible WebSocket connections
 // Path format: /<timestamp>/<type> where type is "SND" or "W/F"
 // When running on dedicated port, accepts paths like: /1234567890/SND

@@ -1638,8 +1638,10 @@
             const alertBox = document.getElementById('alertBox');
             alertBox.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
             
-            // Scroll alert into view so user can see it
-            alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            // Only scroll alert into view for errors, not for success or info messages
+            if (type === 'error') {
+                alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
             
             setTimeout(() => {
                 alertBox.innerHTML = '';

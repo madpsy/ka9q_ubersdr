@@ -294,9 +294,7 @@ func (kc *kiwiConn) handle() {
 	if kc.connType == "SND" {
 		// Audio connection
 		kc.sendMsg("sample_rate", "12000")
-		// Send audio_init message with both audio_rate and audio_rate_true
-		// Format: MSG audio_init audio_rate=12000 audio_rate_true=12000.000
-		kc.sendMsg("audio_init", "audio_rate=12000 audio_rate_true=12000.000")
+		// Note: audio_init message is sent in response to "SET AR OK" command
 	} else {
 		// Waterfall connection
 		kc.sendMsg("wf_setup", "")
@@ -471,6 +469,15 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		kc.mu.Lock()
 		kc.wfCompression = wfCompStr == "1"
 		kc.mu.Unlock()
+		return
+	}
+
+	// Handle AR (Audio Rate) command - client sends "SET AR OK in=12000 out=44100"
+	if _, hasAR := params["AR"]; hasAR {
+		// Respond with audio_init message containing audio_rate and audio_rate_true
+		// Format: MSG audio_init audio_rate=12000 audio_rate_true=12000.000
+		kc.sendMsg("audio_init", "audio_rate=12000 audio_rate_true=12000.000")
+		log.Printf("KiwiSDR: Sent audio_init message in response to AR command")
 		return
 	}
 

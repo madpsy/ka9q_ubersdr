@@ -1845,6 +1845,9 @@
         function validateBookmarkForm() {
             const name = document.getElementById('newBookmarkName').value.trim();
             const freqValue = document.getElementById('newBookmarkFreq').value.trim();
+            const originalName = document.getElementById('editBookmarkIndex').value;
+            const originalFreq = document.getElementById('editBookmarkFreq').value;
+            const isEditing = originalName !== '' && originalFreq !== '';
             
             let isValid = true;
             const saveBtn = document.getElementById('saveBookmarkBtn');
@@ -1867,7 +1870,22 @@
                 freqError.style.display = 'block';
                 isValid = false;
             } else {
-                freqError.style.display = 'none';
+                // Check for duplicate name+frequency combination
+                const isDuplicate = currentBookmarks.some(bookmark => {
+                    // When editing, skip the bookmark we're editing (by original name+frequency)
+                    if (isEditing && bookmark.name === originalName && bookmark.frequency === parseInt(originalFreq)) {
+                        return false;
+                    }
+                    return bookmark.name === name && bookmark.frequency === frequency;
+                });
+                
+                if (isDuplicate) {
+                    freqError.textContent = `A bookmark '${name}' at ${frequency.toLocaleString()} Hz already exists`;
+                    freqError.style.display = 'block';
+                    isValid = false;
+                } else {
+                    freqError.style.display = 'none';
+                }
             }
             
             // Enable/disable save button based on validation

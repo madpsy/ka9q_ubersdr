@@ -214,12 +214,9 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 		return
 	}
 
-	// Check connection rate limit
-	if !kwsh.connRateLimiter.AllowConnection(clientIP) {
-		log.Printf("KiwiSDR connection rate limit exceeded for IP: %s", clientIP)
-		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-		return
-	}
+	// Skip connection rate limit for KiwiSDR protocol
+	// KiwiSDR clients need to open 2 connections rapidly (SND + W/F)
+	// Rate limiting is still enforced at the command level via rateLimiterManager
 
 	// Upgrade to WebSocket
 	rawConn, err := upgrader.Upgrade(w, r, nil)

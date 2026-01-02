@@ -554,7 +554,7 @@
                         </div>
                         <div class="config-field">
                             <label>Frequency (Hz)</label>
-                            <input type="number" id="newBookmarkFreq" placeholder="e.g., 10000000" oninput="validateBookmarkForm()">
+                            <input type="number" id="newBookmarkFreq" placeholder="e.g., 10000000" oninput="sanitizeNumberInput(this); validateBookmarkForm()" onpaste="handleNumberPaste(event, this)">
                             <small id="bookmarkFreqError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field">
@@ -610,12 +610,12 @@
                         </div>
                         <div class="config-field">
                             <label>Start Frequency (Hz)</label>
-                            <input type="number" id="newBandStart" placeholder="e.g., 14000000" oninput="validateBandForm()">
+                            <input type="number" id="newBandStart" placeholder="e.g., 14000000" oninput="sanitizeNumberInput(this); validateBandForm()" onpaste="handleNumberPaste(event, this)">
                             <small id="bandStartError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field">
                             <label>End Frequency (Hz)</label>
-                            <input type="number" id="newBandEnd" placeholder="e.g., 14350000" oninput="validateBandForm()">
+                            <input type="number" id="newBandEnd" placeholder="e.g., 14350000" oninput="sanitizeNumberInput(this); validateBandForm()" onpaste="handleNumberPaste(event, this)">
                             <small id="bandEndError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field">
@@ -821,6 +821,29 @@
     <script>
         let currentConfig = {};
         let currentTab = 'sessions';
+
+        // Sanitize number input to remove non-numeric characters
+        function sanitizeNumberInput(input) {
+            // Remove any non-digit characters except for leading minus (for negative numbers if needed)
+            const value = input.value;
+            const sanitized = value.replace(/[^\d]/g, '');
+            if (value !== sanitized) {
+                input.value = sanitized;
+            }
+        }
+
+        // Handle paste events to filter out non-numeric content
+        function handleNumberPaste(event, input) {
+            event.preventDefault();
+            const pastedText = (event.clipboardData || window.clipboardData).getData('text');
+            // Extract only digits from pasted content
+            const sanitized = pastedText.replace(/[^\d]/g, '');
+            if (sanitized) {
+                input.value = sanitized;
+                // Trigger input event to run validation
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }
 
         // Show restart countdown overlay
         function showRestartCountdown() {

@@ -119,8 +119,10 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 		rateLimiterManager: kwsh.rateLimiterManager,
 		sequence:           0,
 		compression:        true,
+		wfCompression:      true,
 		password:           "",
 		adpcmEncoder:       NewIMAAdpcmEncoder(),
+		wfAdpcmEncoder:     NewIMAAdpcmEncoder(),
 	}
 
 	// Handle the connection
@@ -141,8 +143,10 @@ type kiwiConn struct {
 	userSessionID      string
 	sequence           uint32
 	compression        bool
+	wfCompression      bool // Waterfall compression (separate from audio)
 	password           string
 	adpcmEncoder       *IMAAdpcmEncoder // ADPCM encoder for audio compression
+	wfAdpcmEncoder     *IMAAdpcmEncoder // ADPCM encoder for waterfall compression
 	mu                 sync.RWMutex
 }
 
@@ -324,10 +328,18 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 		return
 	}
 
-	// Handle compression
+	// Handle compression (audio)
 	if compStr, hasComp := params["compression"]; hasComp {
 		kc.mu.Lock()
 		kc.compression = compStr == "1"
+		kc.mu.Unlock()
+		return
+	}
+
+	// Handle waterfall compression
+	if wfCompStr, hasWfComp := params["wf_comp"]; hasWfComp {
+		kc.mu.Lock()
+		kc.wfCompression = wfCompStr == "1"
 		kc.mu.Unlock()
 		return
 	}
@@ -477,10 +489,19 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 
 			// Convert spectrum data (float32 dBm) to KiwiSDR waterfall format
 			// KiwiSDR expects 8-bit values: 0-255 representing -200 to 0 dBm
+			// Formula: byte_value = (dBm + 200) * 255 / 200
 			wfData := make([]byte, len(spectrumData))
 			for i, dbValue := range spectrumData {
-				// Clamp to -200..0 dBm range and convert to 0..255
-				byteVal := int(dbValue + 255)
+				// Clamp to -200..0 dBm range
+				clampedDb := dbValue
+				if clampedDb < -200 {
+					clampedDb = -200
+				}
+				if clampedDb > 0 {
+					clampedDb = 0
+				}
+				// Convert to 0..255 range: (dBm + 200) * 1.275
+				byteVal := int((clampedDb + 200) * 1.275)
 				if byteVal < 0 {
 					byteVal = 0
 				}
@@ -490,12 +511,33 @@ func (kc *kiwiConn) streamWaterfall(done <-chan struct{}) {
 				wfData[i] = byte(byteVal)
 			}
 
+			// Check if compression is enabled
+			kc.mu.RLock()
+			useCompression := kc.wfCompression
+			kc.mu.RUnlock()
+
+			var encodedData []byte
+			if useCompression {
+				// Reset encoder for each waterfall line (as per KiwiSDR protocol)
+				kc.wfAdpcmEncoder = NewIMAAdpcmEncoder()
+				// Convert bytes to int16 for ADPCM encoding
+				pcmData := make([]byte, len(wfData)*2)
+				for i, b := range wfData {
+					// Convert unsigned byte to signed int16 (centered at 0)
+					val := int16(b) - 128
+					binary.BigEndian.PutUint16(pcmData[i*2:], uint16(val))
+				}
+				encodedData = kc.wfAdpcmEncoder.Encode(pcmData)
+			} else {
+				encodedData = wfData
+			}
+
 			// Build W/F packet: [x_bin:4][flags_zoom:4][seq:4][data]
-			packet := make([]byte, 12+len(wfData))
+			packet := make([]byte, 12+len(encodedData))
 			binary.LittleEndian.PutUint32(packet[0:4], 0)           // x_bin (unused)
 			binary.LittleEndian.PutUint32(packet[4:8], 0)           // flags_zoom (unused)
 			binary.LittleEndian.PutUint32(packet[8:12], wfSequence) // sequence
-			copy(packet[12:], wfData)
+			copy(packet[12:], encodedData)
 
 			// Send with "W/F" tag + skip byte
 			fullPacket := append([]byte("W/F\x00"), packet...)

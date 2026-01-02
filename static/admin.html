@@ -549,11 +549,13 @@
                         <input type="hidden" id="editBookmarkFreq" value="">
                         <div class="config-field">
                             <label>Name</label>
-                            <input type="text" id="newBookmarkName" placeholder="e.g., WWV 10 MHz">
+                            <input type="text" id="newBookmarkName" placeholder="e.g., WWV 10 MHz" oninput="validateBookmarkForm()">
+                            <small id="bookmarkNameError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field">
                             <label>Frequency (Hz)</label>
-                            <input type="number" id="newBookmarkFreq" placeholder="e.g., 10000000">
+                            <input type="number" id="newBookmarkFreq" placeholder="e.g., 10000000" oninput="validateBookmarkForm()">
+                            <small id="bookmarkFreqError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field">
                             <label>Mode</label>
@@ -584,7 +586,7 @@
                             </select>
                             <small>Decoder extension to open automatically when bookmark is clicked</small>
                         </div>
-                        <button class="btn" onclick="saveBookmark()">Save Bookmark</button>
+                        <button class="btn" id="saveBookmarkBtn" onclick="saveBookmark()">Save Bookmark</button>
                         <button class="btn btn-secondary" onclick="cancelBookmarkForm()">Cancel</button>
                     </div>
                 </div>
@@ -603,15 +605,18 @@
                         <input type="hidden" id="editBandIndex" value="">
                         <div class="config-field">
                             <label>Label</label>
-                            <input type="text" id="newBandLabel" placeholder="e.g., 20m">
+                            <input type="text" id="newBandLabel" placeholder="e.g., 20m" oninput="validateBandForm()">
+                            <small id="bandLabelError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field">
                             <label>Start Frequency (Hz)</label>
-                            <input type="number" id="newBandStart" placeholder="e.g., 14000000">
+                            <input type="number" id="newBandStart" placeholder="e.g., 14000000" oninput="validateBandForm()">
+                            <small id="bandStartError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field">
                             <label>End Frequency (Hz)</label>
-                            <input type="number" id="newBandEnd" placeholder="e.g., 14350000">
+                            <input type="number" id="newBandEnd" placeholder="e.g., 14350000" oninput="validateBandForm()">
+                            <small id="bandEndError" style="color: #dc3545; display: none;"></small>
                         </div>
                         <div class="config-field">
                             <label>Group (Optional)</label>
@@ -632,7 +637,7 @@
                             </select>
                             <small>Optional mode to set when this band is selected</small>
                         </div>
-                        <button class="btn" onclick="saveBand()">Save Band</button>
+                        <button class="btn" id="saveBandBtn" onclick="saveBand()">Save Band</button>
                         <button class="btn btn-secondary" onclick="cancelBandForm()">Cancel</button>
                     </div>
                 </div>
@@ -1801,6 +1806,7 @@
             document.getElementById('newBookmarkGroup').value = '';
             document.getElementById('newBookmarkComment').value = '';
             document.getElementById('newBookmarkExtension').value = '';
+            validateBookmarkForm(); // Initial validation
         }
 
         async function editBookmark(name, frequency) {
@@ -1821,6 +1827,7 @@
             document.getElementById('newBookmarkGroup').value = bookmark.group || '';
             document.getElementById('newBookmarkComment').value = bookmark.comment || '';
             document.getElementById('newBookmarkExtension').value = bookmark.extension || '';
+            validateBookmarkForm(); // Initial validation
 
             // Scroll the form into view
             document.getElementById('addBookmarkForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1830,6 +1837,45 @@
             document.getElementById('addBookmarkForm').style.display = 'none';
             document.getElementById('editBookmarkIndex').value = '';
             document.getElementById('editBookmarkFreq').value = '';
+            // Clear validation errors
+            document.getElementById('bookmarkNameError').style.display = 'none';
+            document.getElementById('bookmarkFreqError').style.display = 'none';
+        }
+
+        function validateBookmarkForm() {
+            const name = document.getElementById('newBookmarkName').value.trim();
+            const freqValue = document.getElementById('newBookmarkFreq').value.trim();
+            
+            let isValid = true;
+            const saveBtn = document.getElementById('saveBookmarkBtn');
+            
+            // Validate name
+            const nameError = document.getElementById('bookmarkNameError');
+            if (!name) {
+                nameError.textContent = 'Name is required';
+                nameError.style.display = 'block';
+                isValid = false;
+            } else {
+                nameError.style.display = 'none';
+            }
+            
+            // Validate frequency
+            const freqError = document.getElementById('bookmarkFreqError');
+            const frequency = parseInt(freqValue);
+            if (!freqValue || isNaN(frequency)) {
+                freqError.textContent = 'Frequency is required';
+                freqError.style.display = 'block';
+                isValid = false;
+            } else {
+                freqError.style.display = 'none';
+            }
+            
+            // Enable/disable save button based on validation
+            if (saveBtn) {
+                saveBtn.disabled = !isValid;
+            }
+            
+            return isValid;
         }
 
         async function saveBookmark() {
@@ -1842,7 +1888,7 @@
             const originalName = document.getElementById('editBookmarkIndex').value;
             const originalFreq = document.getElementById('editBookmarkFreq').value;
 
-            if (!name || !frequency || !mode) {
+            if (!name || isNaN(frequency) || !mode) {
                 showAlert('Please fill in all required fields', 'error');
                 return;
             }
@@ -2143,6 +2189,7 @@
             document.getElementById('newBandEnd').value = '';
             document.getElementById('newBandGroup').value = '';
             document.getElementById('newBandMode').value = '';
+            validateBandForm(); // Initial validation
         }
 
         function editBand(label) {
@@ -2160,6 +2207,7 @@
             document.getElementById('newBandEnd').value = band.end;
             document.getElementById('newBandGroup').value = band.group || '';
             document.getElementById('newBandMode').value = band.mode || '';
+            validateBandForm(); // Initial validation
             
             // Scroll the form into view
             document.getElementById('addBandForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -2168,6 +2216,78 @@
         function cancelBandForm() {
             document.getElementById('addBandForm').style.display = 'none';
             document.getElementById('editBandIndex').value = '';
+            // Clear validation errors
+            document.getElementById('bandLabelError').style.display = 'none';
+            document.getElementById('bandStartError').style.display = 'none';
+            document.getElementById('bandEndError').style.display = 'none';
+        }
+
+        function validateBandForm() {
+            const label = document.getElementById('newBandLabel').value.trim();
+            const startValue = document.getElementById('newBandStart').value.trim();
+            const endValue = document.getElementById('newBandEnd').value.trim();
+            const originalLabel = document.getElementById('editBandIndex').value;
+            const isEditing = originalLabel !== '';
+            
+            let isValid = true;
+            const saveBtn = document.getElementById('saveBandBtn');
+            
+            // Validate label
+            const labelError = document.getElementById('bandLabelError');
+            if (!label) {
+                labelError.textContent = 'Label is required';
+                labelError.style.display = 'block';
+                isValid = false;
+            } else {
+                // Check for duplicate label
+                const isDuplicate = currentBands.some(band => {
+                    if (isEditing && band.label === originalLabel) {
+                        return false;
+                    }
+                    return band.label === label;
+                });
+                
+                if (isDuplicate) {
+                    labelError.textContent = `Label '${label}' already exists. Please choose a different label.`;
+                    labelError.style.display = 'block';
+                    isValid = false;
+                } else {
+                    labelError.style.display = 'none';
+                }
+            }
+            
+            // Validate start frequency
+            const startError = document.getElementById('bandStartError');
+            const start = parseInt(startValue);
+            if (!startValue || isNaN(start)) {
+                startError.textContent = 'Start frequency is required';
+                startError.style.display = 'block';
+                isValid = false;
+            } else {
+                startError.style.display = 'none';
+            }
+            
+            // Validate end frequency
+            const endError = document.getElementById('bandEndError');
+            const end = parseInt(endValue);
+            if (!endValue || isNaN(end)) {
+                endError.textContent = 'End frequency is required';
+                endError.style.display = 'block';
+                isValid = false;
+            } else if (!isNaN(start) && end <= start) {
+                endError.textContent = 'End frequency must be greater than start frequency';
+                endError.style.display = 'block';
+                isValid = false;
+            } else {
+                endError.style.display = 'none';
+            }
+            
+            // Enable/disable save button based on validation
+            if (saveBtn) {
+                saveBtn.disabled = !isValid;
+            }
+            
+            return isValid;
         }
 
         async function saveBand() {
@@ -2178,7 +2298,7 @@
             const mode = document.getElementById('newBandMode').value.trim();
             const originalLabel = document.getElementById('editBandIndex').value; // Original label if editing
 
-            if (!label || !start || !end) {
+            if (!label || isNaN(start) || isNaN(end)) {
                 showAlert('Please fill in all required fields', 'error');
                 return;
             }

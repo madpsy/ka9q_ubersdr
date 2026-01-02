@@ -545,7 +545,8 @@
                     </div>
                     <div id="addBookmarkForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
                         <h3 id="bookmarkFormTitle">Add New Bookmark</h3>
-                        <input type="hidden" id="editBookmarkIndex" value="-1">
+                        <input type="hidden" id="editBookmarkIndex" value="">
+                        <input type="hidden" id="editBookmarkFreq" value="">
                         <div class="config-field">
                             <label>Name</label>
                             <input type="text" id="newBookmarkName" placeholder="e.g., WWV 10 MHz">
@@ -599,7 +600,7 @@
                     </div>
                     <div id="addBandForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px;">
                         <h3 id="bandFormTitle">Add New Band</h3>
-                        <input type="hidden" id="editBandIndex" value="-1">
+                        <input type="hidden" id="editBandIndex" value="">
                         <div class="config-field">
                             <label>Label</label>
                             <input type="text" id="newBandLabel" placeholder="e.g., 20m">
@@ -1769,6 +1770,9 @@
                     `<span style="color: #666; font-style: italic;">${bookmark.comment}</span>` :
                     '<em style="color: #999;">—</em>';
 
+                // Escape name for use in onclick attribute
+                const escapedName = bookmark.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                
                 row.innerHTML = `
                     <td style="padding: 12px;">${bookmark.name}</td>
                     <td style="padding: 12px;">${bookmark.frequency.toLocaleString()}</td>
@@ -1777,8 +1781,8 @@
                     <td style="padding: 12px; max-width: 300px;">${commentDisplay}</td>
                     <td style="padding: 12px;">${extensionDisplay}</td>
                     <td style="padding: 12px; text-align: center;">
-                        <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBookmark(${index})">Edit</button>
-                        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBookmark(${index})">Delete</button>
+                        <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBookmark('${escapedName}', ${bookmark.frequency})">Edit</button>
+                        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBookmark('${escapedName}', ${bookmark.frequency})">Delete</button>
                     </td>
                 `;
                 tbody.appendChild(row);
@@ -1788,7 +1792,8 @@
         async function showAddBookmarkForm() {
             await populateExtensionDropdown(''); // Ensure dropdown is populated
             document.getElementById('bookmarkFormTitle').textContent = 'Add New Bookmark';
-            document.getElementById('editBookmarkIndex').value = '-1';
+            document.getElementById('editBookmarkIndex').value = '';
+            document.getElementById('editBookmarkFreq').value = '';
             document.getElementById('addBookmarkForm').style.display = 'block';
             document.getElementById('newBookmarkName').value = '';
             document.getElementById('newBookmarkFreq').value = '';
@@ -1798,11 +1803,17 @@
             document.getElementById('newBookmarkExtension').value = '';
         }
 
-        async function editBookmark(index) {
-            const bookmark = currentBookmarks[index];
+        async function editBookmark(name, frequency) {
+            // Find bookmark by name+frequency
+            const bookmark = currentBookmarks.find(b => b.name === name && b.frequency === frequency);
+            if (!bookmark) {
+                showAlert(`Bookmark not found: ${name} at ${frequency} Hz`, 'error');
+                return;
+            }
             await populateExtensionDropdown(bookmark.extension || ''); // Pass current extension to ensure it's in dropdown
             document.getElementById('bookmarkFormTitle').textContent = 'Edit Bookmark';
-            document.getElementById('editBookmarkIndex').value = index;
+            document.getElementById('editBookmarkIndex').value = name; // Store original name
+            document.getElementById('editBookmarkFreq').value = frequency; // Store original frequency
             document.getElementById('addBookmarkForm').style.display = 'block';
             document.getElementById('newBookmarkName').value = bookmark.name;
             document.getElementById('newBookmarkFreq').value = bookmark.frequency;
@@ -1817,7 +1828,8 @@
 
         function cancelBookmarkForm() {
             document.getElementById('addBookmarkForm').style.display = 'none';
-            document.getElementById('editBookmarkIndex').value = '-1';
+            document.getElementById('editBookmarkIndex').value = '';
+            document.getElementById('editBookmarkFreq').value = '';
         }
 
         async function saveBookmark() {
@@ -1827,7 +1839,8 @@
             const group = document.getElementById('newBookmarkGroup').value.trim();
             const comment = document.getElementById('newBookmarkComment').value.trim();
             const extension = document.getElementById('newBookmarkExtension').value.trim();
-            const editIndex = parseInt(document.getElementById('editBookmarkIndex').value);
+            const originalName = document.getElementById('editBookmarkIndex').value;
+            const originalFreq = document.getElementById('editBookmarkFreq').value;
 
             if (!name || !frequency || !mode) {
                 showAlert('Please fill in all required fields', 'error');
@@ -1847,9 +1860,11 @@
             }
 
             try {
-                if (editIndex >= 0) {
-                    // Update existing bookmark
-                    const response = await fetch('/admin/bookmarks?index=' + editIndex, {
+                const isEditing = originalName !== '' && originalFreq !== '';
+                
+                if (isEditing) {
+                    // Update existing bookmark using original name+frequency
+                    const response = await fetch(`/admin/bookmarks?name=${encodeURIComponent(originalName)}&frequency=${originalFreq}`, {
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
@@ -1857,7 +1872,10 @@
                         body: JSON.stringify(bookmarkData)
                     });
 
-                    if (!response.ok) throw new Error('Failed to update bookmark');
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to update bookmark');
+                    }
                     
                     const result = await response.json();
                     showAlert(result.message, 'success');
@@ -1871,7 +1889,10 @@
                         body: JSON.stringify(bookmarkData)
                     });
 
-                    if (!response.ok) throw new Error('Failed to add bookmark');
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to add bookmark');
+                    }
                     
                     const result = await response.json();
                     showAlert(result.message, 'success');
@@ -1884,17 +1905,20 @@
             }
         }
 
-        async function deleteBookmark(index) {
-            if (!confirm('Are you sure you want to delete this bookmark?')) {
+        async function deleteBookmark(name, frequency) {
+            if (!confirm(`Are you sure you want to delete the bookmark '${name}' at ${frequency.toLocaleString()} Hz?`)) {
                 return;
             }
 
             try {
-                const response = await fetch('/admin/bookmarks?index=' + index, {
+                const response = await fetch(`/admin/bookmarks?name=${encodeURIComponent(name)}&frequency=${frequency}`, {
                     method: 'DELETE'
                 });
 
-                if (!response.ok) throw new Error('Failed to delete bookmark');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to delete bookmark');
+                }
 
                 const result = await response.json();
                 showAlert(result.message, 'success');
@@ -2092,6 +2116,8 @@
                 const bandwidthKHz = (bandwidth / 1000).toFixed(0);
                 const groupDisplay = band.group ? `<span style="color: #667eea; font-weight: bold;">${band.group}</span>` : '<em style="color: #999;">—</em>';
                 const modeDisplay = band.mode ? `<span style="color: #28a745; font-weight: bold;">${band.mode.toUpperCase()}</span>` : '<em style="color: #999;">—</em>';
+                // Escape label for use in onclick attribute
+                const escapedLabel = band.label.replace(/'/g, "\\'").replace(/"/g, '&quot;');
                 row.innerHTML = `
                     <td style="padding: 12px;"><strong>${band.label}</strong></td>
                     <td style="padding: 12px;">${band.start.toLocaleString()}</td>
@@ -2100,8 +2126,8 @@
                     <td style="padding: 12px;">${groupDisplay}</td>
                     <td style="padding: 12px;">${modeDisplay}</td>
                     <td style="padding: 12px; text-align: center;">
-                        <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBand(${index})">Edit</button>
-                        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBand(${index})">Delete</button>
+                        <button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="editBand('${escapedLabel}')">Edit</button>
+                        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteBand('${escapedLabel}')">Delete</button>
                     </td>
                 `;
                 tbody.appendChild(row);
@@ -2110,7 +2136,7 @@
 
         function showAddBandForm() {
             document.getElementById('bandFormTitle').textContent = 'Add New Band';
-            document.getElementById('editBandIndex').value = '-1';
+            document.getElementById('editBandIndex').value = '';
             document.getElementById('addBandForm').style.display = 'block';
             document.getElementById('newBandLabel').value = '';
             document.getElementById('newBandStart').value = '';
@@ -2119,10 +2145,15 @@
             document.getElementById('newBandMode').value = '';
         }
 
-        function editBand(index) {
-            const band = currentBands[index];
+        function editBand(label) {
+            // Find band by label
+            const band = currentBands.find(b => b.label === label);
+            if (!band) {
+                showAlert('Band not found: ' + label, 'error');
+                return;
+            }
             document.getElementById('bandFormTitle').textContent = 'Edit Band';
-            document.getElementById('editBandIndex').value = index;
+            document.getElementById('editBandIndex').value = label; // Store original label
             document.getElementById('addBandForm').style.display = 'block';
             document.getElementById('newBandLabel').value = band.label;
             document.getElementById('newBandStart').value = band.start;
@@ -2136,7 +2167,7 @@
 
         function cancelBandForm() {
             document.getElementById('addBandForm').style.display = 'none';
-            document.getElementById('editBandIndex').value = '-1';
+            document.getElementById('editBandIndex').value = '';
         }
 
         async function saveBand() {
@@ -2145,7 +2176,7 @@
             const end = parseInt(document.getElementById('newBandEnd').value);
             const group = document.getElementById('newBandGroup').value.trim();
             const mode = document.getElementById('newBandMode').value.trim();
-            const editIndex = parseInt(document.getElementById('editBandIndex').value);
+            const originalLabel = document.getElementById('editBandIndex').value; // Original label if editing
 
             if (!label || !start || !end) {
                 showAlert('Please fill in all required fields', 'error');
@@ -2154,6 +2185,21 @@
 
             if (start >= end) {
                 showAlert('Start frequency must be less than end frequency', 'error');
+                return;
+            }
+
+            // Check for duplicate labels in the UI before sending to server
+            const isEditing = originalLabel !== '';
+            const isDuplicateLabel = currentBands.some(band => {
+                // When editing, skip the band we're editing (by original label)
+                if (isEditing && band.label === originalLabel) {
+                    return false;
+                }
+                return band.label === label;
+            });
+
+            if (isDuplicateLabel) {
+                showAlert(`A band with label '${label}' already exists. Please choose a different label.`, 'error');
                 return;
             }
 
@@ -2167,9 +2213,9 @@
             }
 
             try {
-                if (editIndex >= 0) {
-                    // Update existing band
-                    const response = await fetch('/admin/bands?index=' + editIndex, {
+                if (isEditing) {
+                    // Update existing band using original label
+                    const response = await fetch('/admin/bands?label=' + encodeURIComponent(originalLabel), {
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
@@ -2177,7 +2223,10 @@
                         body: JSON.stringify(bandData)
                     });
 
-                    if (!response.ok) throw new Error('Failed to update band');
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to update band');
+                    }
                     
                     const result = await response.json();
                     showAlert(result.message, 'success');
@@ -2191,7 +2240,10 @@
                         body: JSON.stringify(bandData)
                     });
 
-                    if (!response.ok) throw new Error('Failed to add band');
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(errorText || 'Failed to add band');
+                    }
                     
                     const result = await response.json();
                     showAlert(result.message, 'success');
@@ -2204,17 +2256,20 @@
             }
         }
 
-        async function deleteBand(index) {
-            if (!confirm('Are you sure you want to delete this band?')) {
+        async function deleteBand(label) {
+            if (!confirm(`Are you sure you want to delete the band '${label}'?`)) {
                 return;
             }
 
             try {
-                const response = await fetch('/admin/bands?index=' + index, {
+                const response = await fetch('/admin/bands?label=' + encodeURIComponent(label), {
                     method: 'DELETE'
                 });
 
-                if (!response.ok) throw new Error('Failed to delete band');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to delete band');
+                }
 
                 const result = await response.json();
                 showAlert(result.message, 'success');

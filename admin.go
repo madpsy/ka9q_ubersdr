@@ -930,12 +930,13 @@ func (ah *AdminHandler) handleAddBookmark(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleUpdateBookmarks updates a single bookmark by index or replaces all bookmarks
+// handleUpdateBookmarks updates a single bookmark by name+frequency or replaces all bookmarks
 func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Request) {
-	indexStr := r.URL.Query().Get("index")
+	nameParam := r.URL.Query().Get("name")
+	freqParam := r.URL.Query().Get("frequency")
 
-	// If no index provided, replace all bookmarks (for import functionality)
-	if indexStr == "" {
+	// If no name/frequency provided, replace all bookmarks (for import functionality)
+	if nameParam == "" || freqParam == "" {
 		var bookmarksConfig map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&bookmarksConfig); err != nil {
 			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
@@ -980,10 +981,10 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Update single bookmark by index
-	index, err := strconv.Atoi(indexStr)
+	// Update single bookmark by name+frequency
+	originalFreq, err := strconv.ParseUint(freqParam, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid index", http.StatusBadRequest)
+		http.Error(w, "Invalid frequency parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -1014,55 +1015,34 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 
 	// Get bookmarks array
 	bookmarks, ok := bookmarksConfig["bookmarks"].([]interface{})
-	if !ok || index < 0 || index >= len(bookmarks) {
-		http.Error(w, "Invalid bookmark index", http.StatusBadRequest)
+	if !ok {
+		http.Error(w, "Invalid bookmarks configuration", http.StatusInternalServerError)
 		return
 	}
 
-	// Sort bookmarks the same way as in GET to ensure index consistency
-	sort.Slice(bookmarks, func(i, j int) bool {
-		bookmarkI, okI := bookmarks[i].(map[string]interface{})
-		bookmarkJ, okJ := bookmarks[j].(map[string]interface{})
-		if !okI || !okJ {
-			return false
-		}
-		nameI, okI := bookmarkI["name"].(string)
-		nameJ, okJ := bookmarkJ["name"].(string)
-		if !okI || !okJ {
-			return false
-		}
+	// Find bookmark by name+frequency
+	bookmarkIndex := -1
+	for i, bookmarkInterface := range bookmarks {
+		if bookmarkMap, ok := bookmarkInterface.(map[string]interface{}); ok {
+			name, nameOk := bookmarkMap["name"].(string)
+			var freq uint64
+			if freqVal, ok := bookmarkMap["frequency"].(uint64); ok {
+				freq = freqVal
+			} else if freqVal, ok := bookmarkMap["frequency"].(int); ok {
+				freq = uint64(freqVal)
+			}
 
-		// Compare names (case-insensitive)
-		lowerNameI := strings.ToLower(nameI)
-		lowerNameJ := strings.ToLower(nameJ)
-		if lowerNameI != lowerNameJ {
-			return lowerNameI < lowerNameJ
-		}
-
-		// If names are equal, compare frequencies
-		freqI, okI := bookmarkI["frequency"].(uint64)
-		freqJ, okJ := bookmarkJ["frequency"].(uint64)
-		if okI && okJ {
-			return freqI < freqJ
-		}
-		// Handle int type as well (YAML might parse as int)
-		if !okI {
-			if freqIntI, ok := bookmarkI["frequency"].(int); ok {
-				freqI = uint64(freqIntI)
-				okI = true
+			if nameOk && name == nameParam && freq == originalFreq {
+				bookmarkIndex = i
+				break
 			}
 		}
-		if !okJ {
-			if freqIntJ, ok := bookmarkJ["frequency"].(int); ok {
-				freqJ = uint64(freqIntJ)
-				okJ = true
-			}
-		}
-		if okI && okJ {
-			return freqI < freqJ
-		}
-		return false
-	})
+	}
+
+	if bookmarkIndex == -1 {
+		http.Error(w, fmt.Sprintf("Bookmark '%s' at %d Hz not found", nameParam, originalFreq), http.StatusNotFound)
+		return
+	}
 
 	// Update bookmark at index
 	bookmarkMap := map[string]interface{}{
@@ -1080,7 +1060,7 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 	if updatedBookmark.Comment != "" {
 		bookmarkMap["comment"] = updatedBookmark.Comment
 	}
-	bookmarks[index] = bookmarkMap
+	bookmarks[bookmarkIndex] = bookmarkMap
 	bookmarksConfig["bookmarks"] = bookmarks
 
 	// Write back to file
@@ -1107,17 +1087,19 @@ func (ah *AdminHandler) handleUpdateBookmarks(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// handleDeleteBookmark deletes a bookmark by index
+// handleDeleteBookmark deletes a bookmark by name+frequency
 func (ah *AdminHandler) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
-	indexStr := r.URL.Query().Get("index")
-	if indexStr == "" {
-		http.Error(w, "Index parameter required", http.StatusBadRequest)
+	nameParam := r.URL.Query().Get("name")
+	freqParam := r.URL.Query().Get("frequency")
+
+	if nameParam == "" || freqParam == "" {
+		http.Error(w, "Name and frequency parameters required", http.StatusBadRequest)
 		return
 	}
 
-	index, err := strconv.Atoi(indexStr)
+	freq, err := strconv.ParseUint(freqParam, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid index", http.StatusBadRequest)
+		http.Error(w, "Invalid frequency parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -1136,13 +1118,37 @@ func (ah *AdminHandler) handleDeleteBookmark(w http.ResponseWriter, r *http.Requ
 
 	// Get bookmarks array
 	bookmarks, ok := bookmarksConfig["bookmarks"].([]interface{})
-	if !ok || index < 0 || index >= len(bookmarks) {
-		http.Error(w, "Invalid bookmark index", http.StatusBadRequest)
+	if !ok {
+		http.Error(w, "Invalid bookmarks configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Find bookmark by name+frequency
+	bookmarkIndex := -1
+	for i, bookmarkInterface := range bookmarks {
+		if bookmarkMap, ok := bookmarkInterface.(map[string]interface{}); ok {
+			name, nameOk := bookmarkMap["name"].(string)
+			var bookmarkFreq uint64
+			if freqVal, ok := bookmarkMap["frequency"].(uint64); ok {
+				bookmarkFreq = freqVal
+			} else if freqVal, ok := bookmarkMap["frequency"].(int); ok {
+				bookmarkFreq = uint64(freqVal)
+			}
+
+			if nameOk && name == nameParam && bookmarkFreq == freq {
+				bookmarkIndex = i
+				break
+			}
+		}
+	}
+
+	if bookmarkIndex == -1 {
+		http.Error(w, fmt.Sprintf("Bookmark '%s' at %d Hz not found", nameParam, freq), http.StatusNotFound)
 		return
 	}
 
 	// Remove bookmark at index
-	bookmarks = append(bookmarks[:index], bookmarks[index+1:]...)
+	bookmarks = append(bookmarks[:bookmarkIndex], bookmarks[bookmarkIndex+1:]...)
 	bookmarksConfig["bookmarks"] = bookmarks
 
 	// Write back to file
@@ -1334,6 +1340,16 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 		bands = existing
 	}
 
+	// Check for duplicate label
+	for _, bandInterface := range bands {
+		if bandMap, ok := bandInterface.(map[string]interface{}); ok {
+			if label, ok := bandMap["label"].(string); ok && label == newBand.Label {
+				http.Error(w, fmt.Sprintf("A band with label '%s' already exists", newBand.Label), http.StatusConflict)
+				return
+			}
+		}
+	}
+
 	// Add new band
 	bandMap := map[string]interface{}{
 		"label": newBand.Label,
@@ -1373,12 +1389,12 @@ func (ah *AdminHandler) handleAddBand(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleUpdateBands updates a single band by index or replaces all bands
+// handleUpdateBands updates a single band by label or replaces all bands
 func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request) {
-	indexStr := r.URL.Query().Get("index")
+	labelParam := r.URL.Query().Get("label")
 
-	// If no index provided, replace all bands (for import functionality)
-	if indexStr == "" {
+	// If no label provided, replace all bands (for import functionality)
+	if labelParam == "" {
 		var bandsConfig map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&bandsConfig); err != nil {
 			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
@@ -1502,13 +1518,7 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Update single band by index
-	index, err := strconv.Atoi(indexStr)
-	if err != nil {
-		http.Error(w, "Invalid index", http.StatusBadRequest)
-		return
-	}
-
+	// Update single band by label
 	var updatedBand Band
 	if err := json.NewDecoder(r.Body).Decode(&updatedBand); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
@@ -1547,9 +1557,40 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 
 	// Get bands array
 	bands, ok := bandsConfig["bands"].([]interface{})
-	if !ok || index < 0 || index >= len(bands) {
-		http.Error(w, "Invalid band index", http.StatusBadRequest)
+	if !ok {
+		http.Error(w, "Invalid bands configuration", http.StatusInternalServerError)
 		return
+	}
+
+	// Find band by label
+	bandIndex := -1
+	for i, bandInterface := range bands {
+		if bandMap, ok := bandInterface.(map[string]interface{}); ok {
+			if label, ok := bandMap["label"].(string); ok && label == labelParam {
+				bandIndex = i
+				break
+			}
+		}
+	}
+
+	if bandIndex == -1 {
+		http.Error(w, fmt.Sprintf("Band with label '%s' not found", labelParam), http.StatusNotFound)
+		return
+	}
+
+	// Check for duplicate labels (if label is being changed)
+	if updatedBand.Label != labelParam {
+		for i, bandInterface := range bands {
+			if i == bandIndex {
+				continue // Skip the band we're editing
+			}
+			if bandMap, ok := bandInterface.(map[string]interface{}); ok {
+				if label, ok := bandMap["label"].(string); ok && label == updatedBand.Label {
+					http.Error(w, fmt.Sprintf("A band with label '%s' already exists", updatedBand.Label), http.StatusConflict)
+					return
+				}
+			}
+		}
 	}
 
 	// Update band at index
@@ -1564,7 +1605,7 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 	if updatedBand.Mode != "" {
 		bandMap["mode"] = updatedBand.Mode
 	}
-	bands[index] = bandMap
+	bands[bandIndex] = bandMap
 	bandsConfig["bands"] = bands
 
 	// Write back to file
@@ -1591,17 +1632,11 @@ func (ah *AdminHandler) handleUpdateBands(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleDeleteBand deletes a band by index
+// handleDeleteBand deletes a band by label
 func (ah *AdminHandler) handleDeleteBand(w http.ResponseWriter, r *http.Request) {
-	indexStr := r.URL.Query().Get("index")
-	if indexStr == "" {
-		http.Error(w, "Index parameter required", http.StatusBadRequest)
-		return
-	}
-
-	index, err := strconv.Atoi(indexStr)
-	if err != nil {
-		http.Error(w, "Invalid index", http.StatusBadRequest)
+	labelParam := r.URL.Query().Get("label")
+	if labelParam == "" {
+		http.Error(w, "Label parameter required", http.StatusBadRequest)
 		return
 	}
 
@@ -1620,13 +1655,29 @@ func (ah *AdminHandler) handleDeleteBand(w http.ResponseWriter, r *http.Request)
 
 	// Get bands array
 	bands, ok := bandsConfig["bands"].([]interface{})
-	if !ok || index < 0 || index >= len(bands) {
-		http.Error(w, "Invalid band index", http.StatusBadRequest)
+	if !ok {
+		http.Error(w, "Invalid bands configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Find band by label
+	bandIndex := -1
+	for i, bandInterface := range bands {
+		if bandMap, ok := bandInterface.(map[string]interface{}); ok {
+			if label, ok := bandMap["label"].(string); ok && label == labelParam {
+				bandIndex = i
+				break
+			}
+		}
+	}
+
+	if bandIndex == -1 {
+		http.Error(w, fmt.Sprintf("Band with label '%s' not found", labelParam), http.StatusNotFound)
 		return
 	}
 
 	// Remove band at index
-	bands = append(bands[:index], bands[index+1:]...)
+	bands = append(bands[:bandIndex], bands[bandIndex+1:]...)
 	bandsConfig["bands"] = bands
 
 	// Write back to file

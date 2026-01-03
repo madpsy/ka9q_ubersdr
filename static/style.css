@@ -509,7 +509,7 @@ body {
     padding: 6px 12px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-    border: 2px solid #667eea;
+    border: none;
     border-radius: 6px;
     font-size: 1.1em;
     font-weight: bold;
@@ -555,7 +555,7 @@ body {
     padding: 8px 16px;
     border-radius: 8px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), inset 0 2px 4px rgba(0, 0, 0, 0.2);
-    border: 2px solid #667eea;
+    border: none;
     font-family: 'Courier New', monospace;
     font-size: 1.4em;
     font-weight: bold;

@@ -6087,23 +6087,30 @@
             const content = document.getElementById('frontendStatusContent');
             if (!modal || !content) return;
 
+            // Helper to format value or show N/A
+            const formatValue = (val, decimals = 1, suffix = '') => {
+                if (val === null || val === undefined) return '<em style="color: #999;">N/A</em>';
+                if (typeof val === 'number') return `<strong>${val.toFixed(decimals)}${suffix}</strong>`;
+                return `<strong>${val}${suffix}</strong>`;
+            };
+
             // Format the frontend status data
             let html = '<table style="width: 100%; border-collapse: collapse;">';
             html += '<tr style="border-bottom: 1px solid #ddd;"><th style="padding: 8px; text-align: left; background: #f5f5f5;">Parameter</th><th style="padding: 8px; text-align: right; background: #f5f5f5;">Value</th></tr>';
-            
-            html += `<tr><td style="padding: 8px;">LNA Gain</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.lna_gain} dB</strong></td></tr>`;
-            html += `<tr><td style="padding: 8px;">Mixer Gain</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.mixer_gain} dB</strong></td></tr>`;
-            html += `<tr><td style="padding: 8px;">IF Gain</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.if_gain} dB</strong></td></tr>`;
-            html += `<tr><td style="padding: 8px;">RF Gain</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.rf_gain.toFixed(1)}</strong></td></tr>`;
-            html += `<tr><td style="padding: 8px;">RF Attenuation</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.rf_atten.toFixed(1)}</strong></td></tr>`;
+
+            html += `<tr><td style="padding: 8px;">LNA Gain</td><td style="padding: 8px; text-align: right;">${formatValue(frontendStatus.lna_gain, 0, ' dB')}</td></tr>`;
+            html += `<tr><td style="padding: 8px;">Mixer Gain</td><td style="padding: 8px; text-align: right;">${formatValue(frontendStatus.mixer_gain, 0, ' dB')}</td></tr>`;
+            html += `<tr><td style="padding: 8px;">IF Gain</td><td style="padding: 8px; text-align: right;">${formatValue(frontendStatus.if_gain, 0, ' dB')}</td></tr>`;
+            html += `<tr><td style="padding: 8px;">RF Gain</td><td style="padding: 8px; text-align: right;">${formatValue(frontendStatus.rf_gain, 1, '')}</td></tr>`;
+            html += `<tr><td style="padding: 8px;">RF Attenuation</td><td style="padding: 8px; text-align: right;">${formatValue(frontendStatus.rf_atten, 1, '')}</td></tr>`;
             html += `<tr><td style="padding: 8px;">RF AGC</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.rf_agc ? 'ON' : 'OFF'}</strong></td></tr>`;
-            html += `<tr><td style="padding: 8px;">IF Power</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.if_power.toFixed(1)} dBFS</strong></td></tr>`;
-            
+            html += `<tr><td style="padding: 8px;">IF Power</td><td style="padding: 8px; text-align: right;">${formatValue(frontendStatus.if_power, 1, ' dBFS')}</td></tr>`;
+
             // Highlight overranges in red if > 0
             const overrangeStyle = frontendStatus.ad_overranges > 0 ? 'color: red; font-weight: bold;' : '';
             html += `<tr style="border-top: 2px solid #ddd;"><td style="padding: 8px;">A/D Overranges</td><td style="padding: 8px; text-align: right; ${overrangeStyle}"><strong>${frontendStatus.ad_overranges.toLocaleString()}</strong></td></tr>`;
             html += `<tr><td style="padding: 8px;">Samples Since Overrange</td><td style="padding: 8px; text-align: right;"><strong>${frontendStatus.samples_since_over.toLocaleString()}</strong></td></tr>`;
-            
+
             html += `<tr style="border-top: 2px solid #ddd;"><td style="padding: 8px;">Last Update</td><td style="padding: 8px; text-align: right;"><em>${new Date(frontendStatus.last_update).toLocaleString()}</em></td></tr>`;
             html += '</table>';
 

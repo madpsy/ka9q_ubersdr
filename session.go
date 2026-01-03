@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
@@ -1261,14 +1262,22 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 
 		// Add frontend status if available
 		if frontendStatus := sm.radiod.GetFrontendStatus(session.SSRC); frontendStatus != nil {
+			// Helper function to sanitize float values for JSON (replace Inf/NaN with nil)
+			sanitizeFloat := func(f float32) interface{} {
+				if math.IsInf(float64(f), 0) || math.IsNaN(float64(f)) {
+					return nil
+				}
+				return f
+			}
+
 			info["frontend_status"] = map[string]interface{}{
 				"lna_gain":           frontendStatus.LNAGain,
 				"mixer_gain":         frontendStatus.MixerGain,
 				"if_gain":            frontendStatus.IFGain,
-				"rf_gain":            frontendStatus.RFGain,
-				"rf_atten":           frontendStatus.RFAtten,
+				"rf_gain":            sanitizeFloat(frontendStatus.RFGain),
+				"rf_atten":           sanitizeFloat(frontendStatus.RFAtten),
 				"rf_agc":             frontendStatus.RFAGC,
-				"if_power":           frontendStatus.IFPower,
+				"if_power":           sanitizeFloat(frontendStatus.IFPower),
 				"ad_overranges":      frontendStatus.ADOverranges,
 				"samples_since_over": frontendStatus.SamplesSinceOver,
 				"last_update":        frontendStatus.LastUpdate.Format(time.RFC3339),

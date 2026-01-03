@@ -2415,8 +2415,7 @@ class NoiseFloorMonitor {
 
                 // Convert FT8 SNR values to band states
                 // Normalize all timestamps to today's date (keeping time-of-day) - UTC
-                const today = new Date();
-                today.setUTCHours(0, 0, 0, 0);
+                const now = new Date();
                 
                 const dataPoints = trendData.length > 0
                     ? trendData.map(d => {
@@ -2432,10 +2431,17 @@ class NoiseFloorMonitor {
                             state = 3; // EXCELLENT
                         }
                         
-                        // Normalize timestamp to today's date
+                        // Normalize timestamp to today's date using UTC
                         const originalTime = new Date(d.timestamp);
-                        const normalizedTime = new Date(today);
-                        normalizedTime.setUTCHours(originalTime.getUTCHours(), originalTime.getUTCMinutes(), originalTime.getUTCSeconds(), originalTime.getUTCMilliseconds());
+                        const normalizedTime = new Date(Date.UTC(
+                            now.getUTCFullYear(),
+                            now.getUTCMonth(),
+                            now.getUTCDate(),
+                            originalTime.getUTCHours(),
+                            originalTime.getUTCMinutes(),
+                            originalTime.getUTCSeconds(),
+                            originalTime.getUTCMilliseconds()
+                        ));
                         
                         return {
                             x: normalizedTime,
@@ -2447,9 +2453,15 @@ class NoiseFloorMonitor {
                     : [{
                         x: (() => {
                             const originalTime = new Date(data[band].timestamp);
-                            const normalizedTime = new Date(today);
-                            normalizedTime.setUTCHours(originalTime.getUTCHours(), originalTime.getUTCMinutes(), originalTime.getUTCSeconds(), originalTime.getUTCMilliseconds());
-                            return normalizedTime;
+                            return new Date(Date.UTC(
+                                now.getUTCFullYear(),
+                                now.getUTCMonth(),
+                                now.getUTCDate(),
+                                originalTime.getUTCHours(),
+                                originalTime.getUTCMinutes(),
+                                originalTime.getUTCSeconds(),
+                                originalTime.getUTCMilliseconds()
+                            ));
                         })(),
                         y: band,
                         v: data[band].ft8_snr < 6 ? 0 : (data[band].ft8_snr < 20 ? 1 : 2),
@@ -2518,14 +2530,19 @@ class NoiseFloorMonitor {
 
         // Calculate time range for x-axis (00:00 to 23:59 today UTC)
         const now = new Date();
-        const startOfDay = new Date(now);
-        startOfDay.setUTCHours(0, 0, 0, 0);
-        const endOfDay = new Date(startOfDay);
-        endOfDay.setUTCHours(23, 59, 59, 999);
+        const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+        const endOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
 
         // Create annotation for current time indicator (normalized to today UTC)
-        const currentTimeNormalized = new Date(startOfDay);
-        currentTimeNormalized.setUTCHours(now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds(), now.getUTCMilliseconds());
+        const currentTimeNormalized = new Date(Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate(),
+            now.getUTCHours(),
+            now.getUTCMinutes(),
+            now.getUTCSeconds(),
+            now.getUTCMilliseconds()
+        ));
         
         const currentTimeAnnotation = {
             type: 'line',

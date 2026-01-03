@@ -7404,11 +7404,17 @@ function setFrequencyInputValue(hzValue) {
     const freqInput = document.getElementById('frequency');
     if (!freqInput) return;
 
-    // Store the Hz value
-    freqInput.setAttribute('data-hz-value', Math.round(hzValue));
+    const roundedHz = Math.round(hzValue);
+
+    // CRITICAL: Set the Hz value attribute FIRST
+    freqInput.setAttribute('data-hz-value', roundedHz);
 
     // Update display in current unit
     updateFrequencyDisplay();
+
+    // CRITICAL: Ensure the attribute is still set after display update
+    // (in case updateFrequencyDisplay somehow clears it)
+    freqInput.setAttribute('data-hz-value', roundedHz);
 }
 
 // Convert displayed value to Hz when input changes

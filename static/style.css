@@ -504,35 +504,6 @@ body {
     z-index: 100;
 }
 
-/* Band/Frequency Toggle Button */
-.band-freq-toggle-btn {
-    padding: 6px 12px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 1.1em;
-    font-weight: bold;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
-    min-width: 45px;
-    height: 38px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.band-freq-toggle-btn:hover {
-    transform: translateY(-2px) scale(1.05);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.6);
-    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-}
-
-.band-freq-toggle-btn:active {
-    transform: translateY(0) scale(0.98);
-}
-
 /* Band Buttons Container */
 .band-buttons-container {
     display: flex;
@@ -542,9 +513,10 @@ body {
 
 /* Frequency Readout Container */
 .freq-readout-container {
-    display: none;
+    display: flex;
     align-items: center;
     justify-content: center;
+    margin-bottom: 10px;
 }
 
 .freq-readout-display {
@@ -1420,22 +1392,6 @@ input[type="range"]::-moz-range-thumb {
     color: #495057;
 }
 
-/* Current settings text (simple display under mode buttons) */
-.current-settings-text {
-    margin-top: 30px;
-    padding: 8px 12px;
-    text-align: center;
-    font-size: 0.95em;
-    color: #495057;
-    background: #f8f9fa;
-    border-radius: 4px;
-    font-weight: 500;
-}
-
-.current-settings-text span {
-    font-weight: bold;
-    color: #667eea;
-}
 
 .info-grid {
     display: grid;

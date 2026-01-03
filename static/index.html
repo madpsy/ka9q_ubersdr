@@ -157,7 +157,6 @@
         <!-- Band Status Bar -->
         <div class="band-status-bar">
             <div class="band-status-container">
-                <button id="band-freq-toggle" class="band-freq-toggle-btn" onclick="toggleBandFreqDisplay()" title="Toggle between band buttons and frequency readout">⇄</button>
                 <div id="band-buttons-container" class="band-buttons-container">
                     <div class="band-status-badge" data-band="160m" data-status="OPEN">160m</div>
                     <div class="band-status-badge" data-band="80m" data-status="OPEN">80m</div>
@@ -169,21 +168,6 @@
                     <div class="band-status-badge" data-band="15m" data-status="OPEN">15m</div>
                     <div class="band-status-badge" data-band="12m" data-status="OPEN">12m</div>
                     <div class="band-status-badge" data-band="10m" data-status="OPEN">10m</div>
-                </div>
-                <div id="freq-readout-container" class="freq-readout-container" style="display: none;">
-                    <div class="freq-readout-display">
-                        <span class="freq-digit" data-position="0" data-step="10000000">0</span>
-                        <span class="freq-digit" data-position="1" data-step="1000000">0</span>
-                        <span class="freq-separator">.</span>
-                        <span class="freq-digit" data-position="2" data-step="100000">0</span>
-                        <span class="freq-digit" data-position="3" data-step="10000">0</span>
-                        <span class="freq-digit" data-position="4" data-step="1000">0</span>
-                        <span class="freq-separator">.</span>
-                        <span class="freq-digit" data-position="5" data-step="100">0</span>
-                        <span class="freq-digit" data-position="6" data-step="10">0</span>
-                        <span class="freq-digit" data-position="7" data-step="1">0</span>
-                        <span class="freq-unit-label">MHz</span>
-                    </div>
                 </div>
             </div>
         </div>
@@ -237,6 +221,21 @@
             </div>
 
             <div class="control-group">
+                <div id="freq-readout-container" class="freq-readout-container">
+                    <div class="freq-readout-display">
+                        <span class="freq-digit" data-position="0" data-step="10000000">0</span>
+                        <span class="freq-digit" data-position="1" data-step="1000000">0</span>
+                        <span class="freq-separator">.</span>
+                        <span class="freq-digit" data-position="2" data-step="100000">0</span>
+                        <span class="freq-digit" data-position="3" data-step="10000">0</span>
+                        <span class="freq-digit" data-position="4" data-step="1000">0</span>
+                        <span class="freq-separator">.</span>
+                        <span class="freq-digit" data-position="5" data-step="100">0</span>
+                        <span class="freq-digit" data-position="6" data-step="10">0</span>
+                        <span class="freq-digit" data-position="7" data-step="1">0</span>
+                        <span class="freq-unit-label">MHz</span>
+                    </div>
+                </div>
                 <div class="preset-buttons">
                     <button onclick="setMode('usb')" id="mode-usb" class="mode-btn active" title="Upper Sideband (U key)">USB</button>
                     <button onclick="setMode('lsb')" id="mode-lsb" class="mode-btn" title="Lower Sideband (L key)">LSB</button>
@@ -256,9 +255,6 @@
                         <label for="bandwidth-high">High: <span id="bandwidth-high-value">3000</span> Hz</label>
                         <input type="range" id="bandwidth-high" min="500" max="6000" value="3000" step="100" oninput="updateBandwidthDisplay()" onchange="updateBandwidth()">
                     </div>
-                </div>
-                <div class="current-settings-text">
-                    <span id="current-freq">-</span> • <span id="current-mode">-</span> • <span id="current-bandwidth">-</span> • <span id="current-band">-</span>
                 </div>
             </div>
 

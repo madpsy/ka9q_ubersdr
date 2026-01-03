@@ -1,76 +1,5 @@
-// Band/Frequency Toggle Functionality
-// Allows toggling between band buttons and a frequency readout display
-
-let bandFreqMode = 'bands'; // 'bands' or 'frequency'
-
-/**
- * Load band/frequency mode preference from localStorage
- */
-function loadBandFreqModePreference() {
-    try {
-        const saved = localStorage.getItem('bandFreqMode');
-        if (saved && (saved === 'bands' || saved === 'frequency')) {
-            bandFreqMode = saved;
-            console.log(`Loaded band/frequency mode preference: ${bandFreqMode}`);
-            return true;
-        }
-    } catch (e) {
-        console.error('Failed to load band/frequency mode preference:', e);
-    }
-    return false;
-}
-
-/**
- * Save band/frequency mode preference to localStorage
- */
-function saveBandFreqModePreference() {
-    try {
-        localStorage.setItem('bandFreqMode', bandFreqMode);
-    } catch (e) {
-        console.error('Failed to save band/frequency mode preference:', e);
-    }
-}
-
-/**
- * Toggle between band buttons and frequency readout display
- */
-function toggleBandFreqDisplay() {
-    const bandButtonsContainer = document.getElementById('band-buttons-container');
-    const freqReadoutContainer = document.getElementById('freq-readout-container');
-
-    if (bandFreqMode === 'bands') {
-        // Switch to frequency mode
-        bandFreqMode = 'frequency';
-        bandButtonsContainer.style.display = 'none';
-        freqReadoutContainer.style.display = 'flex';
-        updateFrequencyReadout();
-    } else {
-        // Switch to bands mode
-        bandFreqMode = 'bands';
-        bandButtonsContainer.style.display = 'flex';
-        freqReadoutContainer.style.display = 'none';
-    }
-
-    // Save preference
-    saveBandFreqModePreference();
-}
-
-/**
- * Apply saved band/frequency mode on page load
- */
-function applyBandFreqMode() {
-    const bandButtonsContainer = document.getElementById('band-buttons-container');
-    const freqReadoutContainer = document.getElementById('freq-readout-container');
-
-    if (bandFreqMode === 'frequency') {
-        bandButtonsContainer.style.display = 'none';
-        freqReadoutContainer.style.display = 'flex';
-        updateFrequencyReadout();
-    } else {
-        bandButtonsContainer.style.display = 'flex';
-        freqReadoutContainer.style.display = 'none';
-    }
-}
+// Frequency Readout Display
+// Shows current frequency in a digital readout format
 
 /**
  * Update the frequency readout display with current frequency
@@ -215,18 +144,14 @@ function monitorFrequencyChanges() {
 
     // Update readout when frequency input changes
     freqInput.addEventListener('input', () => {
-        if (bandFreqMode === 'frequency') {
-            updateFrequencyReadout();
-        }
+        updateFrequencyReadout();
     });
 
     // Also monitor for programmatic changes to data-hz-value attribute
     const observer = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
             if (mutation.type === 'attributes' && mutation.attributeName === 'data-hz-value') {
-                if (bandFreqMode === 'frequency') {
-                    updateFrequencyReadout();
-                }
+                updateFrequencyReadout();
             }
         });
     });
@@ -240,24 +165,19 @@ function monitorFrequencyChanges() {
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-        // Load saved preference first
-        loadBandFreqModePreference();
-        // Apply the saved mode
-        applyBandFreqMode();
         // Setup interaction
         setupFrequencyDigitInteraction();
         monitorFrequencyChanges();
+        // Initial update
+        updateFrequencyReadout();
     });
 } else {
-    // Load saved preference first
-    loadBandFreqModePreference();
-    // Apply the saved mode
-    applyBandFreqMode();
     // Setup interaction
     setupFrequencyDigitInteraction();
     monitorFrequencyChanges();
+    // Initial update
+    updateFrequencyReadout();
 }
 
 // Export functions to global scope
-window.toggleBandFreqDisplay = toggleBandFreqDisplay;
 window.updateFrequencyReadout = updateFrequencyReadout;

@@ -186,7 +186,7 @@ func (b *UberSDRBridge) Stop() {
 	for i := 0; i < MaxReceivers; i++ {
 		if b.wsConns[i] != nil {
 			log.Printf("DEBUG: Stop: Closing WebSocket connection for receiver %d", i)
-			b.wsConns[i].Close()
+			_ = b.wsConns[i].Close()
 			b.wsConns[i] = nil
 			log.Printf("DEBUG: Stop: Closed WebSocket connection for receiver %d", i)
 		}
@@ -207,6 +207,8 @@ func (b *UberSDRBridge) monitorReceivers() {
 
 	// Track which receivers are connected
 	connectedReceivers := make(map[int]bool)
+	// Track if Protocol2 was running (to detect when it stops)
+	wasProtocol2Running := false
 
 	for {
 		// Check if we should stop before blocking on ticker
@@ -219,9 +221,30 @@ func (b *UberSDRBridge) monitorReceivers() {
 			return
 		}
 
-		select {
-		case <-ticker.C:
-			// Continue to check receivers
+		<-ticker.C
+
+		// Check if Protocol2 server is running
+		protocol2Running := b.hpsdrServer.IsRunning()
+
+		// Detect transition from running to stopped
+		if wasProtocol2Running && !protocol2Running {
+			log.Println("DEBUG: monitorReceivers: Protocol2 server stopped, cleaning up all receivers")
+			// Protocol2 server stopped, clean up all receivers
+			for i := 0; i < b.hpsdrServer.config.NumReceivers; i++ {
+				if connectedReceivers[i] {
+					log.Printf("DEBUG: monitorReceivers: Cleaning up receiver %d due to server shutdown", i)
+					b.cleanupReceiver(i)
+					connectedReceivers[i] = false
+				}
+			}
+		}
+
+		// Update tracking flag
+		wasProtocol2Running = protocol2Running
+
+		// If Protocol2 is not running, skip receiver checks
+		if !protocol2Running {
+			continue
 		}
 
 		// Check all receivers
@@ -298,37 +321,41 @@ func (b *UberSDRBridge) monitorReceivers() {
 				log.Printf("DEBUG: monitorReceivers: Receiver %d state change - disabled, cleaning up", i)
 				log.Printf("Bridge: Receiver %d disabled, cleaning up connection", i)
 				connectedReceivers[i] = false
-
-				// Close WebSocket connection
-				b.mu.Lock()
-				log.Printf("DEBUG: monitorReceivers: Receiver %d acquired lock for cleanup", i)
-				if b.wsConns[i] != nil {
-					log.Printf("DEBUG: monitorReceivers: Receiver %d closing WebSocket connection", i)
-					b.wsConns[i].Close()
-					b.wsConns[i] = nil
-					log.Printf("DEBUG: monitorReceivers: Receiver %d WebSocket connection closed", i)
-				}
-
-				// Clear lastFailedFreq/Mode when receiver is disabled
-				// This allows reconnection when the receiver is re-enabled
-				log.Printf("DEBUG: monitorReceivers: Receiver %d clearing failed state tracking", i)
-				b.lastFailedFreq[i] = 0
-				b.lastFailedMode[i] = ""
-				b.mu.Unlock()
-				log.Printf("DEBUG: monitorReceivers: Receiver %d released main lock", i)
-
-				// Clear sample buffer (do this AFTER releasing b.mu to avoid deadlock)
-				// The receiveAudio goroutine may be holding bufferMus while waiting on something
-				log.Printf("DEBUG: monitorReceivers: Receiver %d attempting to acquire buffer lock", i)
-				b.bufferMus[i].Lock()
-				log.Printf("DEBUG: monitorReceivers: Receiver %d clearing sample buffer", i)
-				b.sampleBuffers[i] = b.sampleBuffers[i][:0] // Clear buffer but keep capacity
-				b.bufferPrimed[i] = false                   // Reset buffer primed flag
-				b.bufferMus[i].Unlock()
-				log.Printf("DEBUG: monitorReceivers: Receiver %d cleanup complete", i)
+				b.cleanupReceiver(i)
 			}
 		}
 	}
+}
+
+// cleanupReceiver closes WebSocket connection and clears state for a receiver
+func (b *UberSDRBridge) cleanupReceiver(receiverNum int) {
+	// Close WebSocket connection
+	b.mu.Lock()
+	log.Printf("DEBUG: cleanupReceiver: Receiver %d acquired lock for cleanup", receiverNum)
+	if b.wsConns[receiverNum] != nil {
+		log.Printf("DEBUG: cleanupReceiver: Receiver %d closing WebSocket connection", receiverNum)
+		_ = b.wsConns[receiverNum].Close()
+		b.wsConns[receiverNum] = nil
+		log.Printf("DEBUG: cleanupReceiver: Receiver %d WebSocket connection closed", receiverNum)
+	}
+
+	// Clear lastFailedFreq/Mode when receiver is disabled
+	// This allows reconnection when the receiver is re-enabled
+	log.Printf("DEBUG: cleanupReceiver: Receiver %d clearing failed state tracking", receiverNum)
+	b.lastFailedFreq[receiverNum] = 0
+	b.lastFailedMode[receiverNum] = ""
+	b.mu.Unlock()
+	log.Printf("DEBUG: cleanupReceiver: Receiver %d released main lock", receiverNum)
+
+	// Clear sample buffer (do this AFTER releasing b.mu to avoid deadlock)
+	// The receiveAudio goroutine may be holding bufferMus while waiting on something
+	log.Printf("DEBUG: cleanupReceiver: Receiver %d attempting to acquire buffer lock", receiverNum)
+	b.bufferMus[receiverNum].Lock()
+	log.Printf("DEBUG: cleanupReceiver: Receiver %d clearing sample buffer", receiverNum)
+	b.sampleBuffers[receiverNum] = b.sampleBuffers[receiverNum][:0] // Clear buffer but keep capacity
+	b.bufferPrimed[receiverNum] = false                             // Reset buffer primed flag
+	b.bufferMus[receiverNum].Unlock()
+	log.Printf("DEBUG: cleanupReceiver: Receiver %d cleanup complete", receiverNum)
 }
 
 // sampleRateToMode converts sample rate (kHz) to ubersdr mode
@@ -401,7 +428,7 @@ func (b *UberSDRBridge) checkConnection(receiverNum int) (bool, error) {
 		log.Printf("Bridge: Receiver %d attempting connection anyway...", receiverNum)
 		return true, nil // Continue on error (like the web UI does)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var respData ConnectionCheckResponse
 	if err := json.NewDecoder(resp.Body).Decode(&respData); err != nil {
@@ -587,12 +614,21 @@ func (b *UberSDRBridge) tuneReceiver(receiverNum int, frequency int64, mode stri
 
 // receiveAudio receives audio from ubersdr and forwards to HPSDR for a specific receiver
 func (b *UberSDRBridge) receiveAudio(receiverNum int) {
-	for b.running {
+	log.Printf("DEBUG: receiveAudio: Receiver %d starting audio receive loop", receiverNum)
+	for {
+		// Check if bridge is still running
 		b.mu.RLock()
+		running := b.running
 		conn := b.wsConns[receiverNum]
 		b.mu.RUnlock()
 
+		if !running {
+			log.Printf("DEBUG: receiveAudio: Receiver %d exiting - bridge not running", receiverNum)
+			break
+		}
+
 		if conn == nil {
+			log.Printf("DEBUG: receiveAudio: Receiver %d exiting - connection is nil", receiverNum)
 			break
 		}
 
@@ -653,11 +689,11 @@ func (b *UberSDRBridge) receiveAudio(receiverNum int) {
 			// Don't stop the entire bridge, just this receiver
 			b.mu.Lock()
 			if b.wsConns[receiverNum] != nil {
-				b.wsConns[receiverNum].Close()
+				_ = b.wsConns[receiverNum].Close()
 				b.wsConns[receiverNum] = nil
 			}
 			b.mu.Unlock()
-			break
+			return
 
 		case "pong":
 			// Keepalive response, ignore

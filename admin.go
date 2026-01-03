@@ -1780,17 +1780,28 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 		return f
 	}
 
+	// Calculate time since last overrange if we have sample rate
+	var timeSinceOverrange string
+	if frontendStatus.InputSamprate > 0 && frontendStatus.SamplesSinceOver > 0 {
+		seconds := float64(frontendStatus.SamplesSinceOver) / float64(frontendStatus.InputSamprate)
+		timeSinceOverrange = formatDuration(time.Duration(seconds * float64(time.Second)))
+	} else {
+		timeSinceOverrange = "N/A"
+	}
+
 	response := map[string]interface{}{
-		"lna_gain":           frontendStatus.LNAGain,
-		"mixer_gain":         frontendStatus.MixerGain,
-		"if_gain":            frontendStatus.IFGain,
-		"rf_gain":            sanitizeFloat(frontendStatus.RFGain),
-		"rf_atten":           sanitizeFloat(frontendStatus.RFAtten),
-		"rf_agc":             frontendStatus.RFAGC,
-		"if_power":           sanitizeFloat(frontendStatus.IFPower),
-		"ad_overranges":      frontendStatus.ADOverranges,
-		"samples_since_over": frontendStatus.SamplesSinceOver,
-		"last_update":        frontendStatus.LastUpdate.Format(time.RFC3339),
+		"lna_gain":             frontendStatus.LNAGain,
+		"mixer_gain":           frontendStatus.MixerGain,
+		"if_gain":              frontendStatus.IFGain,
+		"rf_gain":              sanitizeFloat(frontendStatus.RFGain),
+		"rf_atten":             sanitizeFloat(frontendStatus.RFAtten),
+		"rf_agc":               frontendStatus.RFAGC,
+		"if_power":             sanitizeFloat(frontendStatus.IFPower),
+		"ad_overranges":        frontendStatus.ADOverranges,
+		"samples_since_over":   frontendStatus.SamplesSinceOver,
+		"time_since_overrange": timeSinceOverrange,
+		"input_samprate":       frontendStatus.InputSamprate,
+		"last_update":          frontendStatus.LastUpdate.Format(time.RFC3339),
 	}
 
 	w.WriteHeader(http.StatusOK)

@@ -19,6 +19,7 @@ import (
 const (
 	tagEOL              = 0
 	tagCommandTag       = 1
+	tagInputSamprate    = 10 // INPUT_SAMPRATE
 	tagOutputSSRC       = 18
 	tagLNAGain          = 25  // LNA_GAIN
 	tagMixerGain        = 26  // MIXER_GAIN
@@ -40,6 +41,7 @@ const (
 // FrontendStatus holds frontend gain and overload information from radiod
 type FrontendStatus struct {
 	SSRC             uint32    // Channel SSRC this status belongs to
+	InputSamprate    int       // Input sample rate in Hz
 	LNAGain          int32     // LNA gain in dB
 	MixerGain        int32     // Mixer gain in dB
 	IFGain           int32     // IF gain in dB
@@ -207,6 +209,9 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 		switch tag {
 		case tagOutputSSRC:
 			status.SSRC = decodeInt32(value)
+		case tagInputSamprate:
+			// decode_status.c line 54: uses decode_int
+			status.InputSamprate = decodeInt(value)
 		case tagLNAGain:
 			// decode_status.c line 114: uses decode_int8
 			status.LNAGain = int32(decodeInt8(value))

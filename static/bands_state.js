@@ -417,8 +417,22 @@ function updateBandBadgeActiveStates() {
     const freqInput = document.getElementById('frequency');
     if (!freqInput) return;
 
-    // Get frequency from data-hz-value attribute if available
-    const currentFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
+    // Get frequency from data-hz-value attribute if available, otherwise try to parse intelligently
+    let currentFreq;
+    const hzValue = freqInput.getAttribute('data-hz-value');
+    if (hzValue) {
+        currentFreq = parseInt(hzValue);
+    } else {
+        // Fallback: try to parse the value intelligently
+        const displayValue = parseFloat(freqInput.value);
+        if (isNaN(displayValue)) return;
+        // If value is small (< 100000), assume it's in MHz and convert
+        if (displayValue < 100) {
+            currentFreq = Math.round(displayValue * 1000000);
+        } else {
+            currentFreq = Math.round(displayValue);
+        }
+    }
     if (isNaN(currentFreq)) return;
 
     // Get band ranges from app.js (if available)

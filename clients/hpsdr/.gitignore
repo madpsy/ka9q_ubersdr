@@ -1,0 +1,26 @@
+# Binaries
+ubersdr-hpsdr-bridge
+ubersdr-hpsdr-bridge.exe
+
+# Go build artifacts
+*.o
+*.a
+*.so
+
+# Go test files
+*.test
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

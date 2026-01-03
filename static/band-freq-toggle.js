@@ -123,16 +123,36 @@ function changeFrequencyByStep(step, increment) {
     // Clamp frequency to reasonable bounds (0.1 MHz to 30 MHz for HF)
     currentFreq = Math.max(100000, Math.min(30000000, currentFreq));
 
-    // Update the frequency input value and data-hz-value attribute
-    freqInput.value = currentFreq;
-    freqInput.setAttribute('data-hz-value', currentFreq);
+    // Use the global setFrequencyInputValue function to properly update the input
+    if (typeof window.setFrequencyInputValue === 'function') {
+        window.setFrequencyInputValue(currentFreq);
+    } else {
+        // Fallback if function not available yet
+        freqInput.value = currentFreq;
+        freqInput.setAttribute('data-hz-value', currentFreq);
+    }
 
     // Update the readout display
     updateFrequencyReadout();
 
+    // Update band buttons
+    if (typeof window.updateBandButtons === 'function') {
+        window.updateBandButtons(currentFreq);
+    }
+
+    // Update band selector
+    if (typeof window.updateBandSelector === 'function') {
+        window.updateBandSelector();
+    }
+
+    // Update URL
+    if (typeof window.updateURL === 'function') {
+        window.updateURL();
+    }
+
     // Apply the frequency change
-    if (typeof handleFrequencyChange === 'function') {
-        handleFrequencyChange();
+    if (typeof window.autoTune === 'function') {
+        window.autoTune();
     }
 }
 
@@ -150,16 +170,20 @@ function monitorFrequencyChanges() {
         }
     });
 
-    // Also monitor for programmatic changes
-    const observer = new MutationObserver(() => {
-        if (bandFreqMode === 'frequency') {
-            updateFrequencyReadout();
-        }
+    // Also monitor for programmatic changes to data-hz-value attribute
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'attributes' && mutation.attributeName === 'data-hz-value') {
+                if (bandFreqMode === 'frequency') {
+                    updateFrequencyReadout();
+                }
+            }
+        });
     });
 
     observer.observe(freqInput, {
         attributes: true,
-        attributeFilter: ['value']
+        attributeFilter: ['data-hz-value']
     });
 }
 

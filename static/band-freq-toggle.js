@@ -9,7 +9,7 @@ let bandFreqMode = 'bands'; // 'bands' or 'frequency'
 function toggleBandFreqDisplay() {
     const bandButtonsContainer = document.getElementById('band-buttons-container');
     const freqReadoutContainer = document.getElementById('freq-readout-container');
-    
+
     if (bandFreqMode === 'bands') {
         // Switch to frequency mode
         bandFreqMode = 'frequency';
@@ -30,96 +30,73 @@ function toggleBandFreqDisplay() {
 function updateFrequencyReadout() {
     const freqInput = document.getElementById('frequency');
     if (!freqInput) return;
-    
+
     // Get frequency in Hz
     let freqHz = parseInt(freqInput.value) || 0;
-    
+
     // Convert to MHz with 5 decimal places
     const freqMHz = freqHz / 1000000;
     const freqStr = freqMHz.toFixed(5);
-    
+
     // Split into digits (format: XX.XXXXX)
     const parts = freqStr.split('.');
-    const wholePart = parts[0].padStart(2, '0'); // Ensure 2 digits
-    const decimalPart = parts[1] || '00000'; // Ensure 5 decimal places
-    
+    const wholePart = parts[0].padStart(2, '0'); // Ensure 2 digits (e.g., "07")
+    const decimalPart = (parts[1] || '00000').padEnd(5, '0'); // Ensure exactly 5 decimal places
+
     // Update each digit
     const digits = document.querySelectorAll('.freq-digit');
-    const allDigits = wholePart + decimalPart;
-    
-    digits.forEach((digit, index) => {
-        if (index < allDigits.length) {
-            digit.textContent = allDigits[index];
+
+    // First 2 digits are the whole MHz part
+    if (digits[0]) digits[0].textContent = wholePart[0];
+    if (digits[1]) digits[1].textContent = wholePart[1];
+
+    // Next 5 digits are the decimal part
+    for (let i = 0; i < 5; i++) {
+        if (digits[i + 2]) {
+            digits[i + 2].textContent = decimalPart[i];
         }
-    });
+    }
+
+    // Last digit (if exists, for 8th position)
+    if (digits[7] && decimalPart.length > 5) {
+        digits[7].textContent = decimalPart[5] || '0';
+    }
 }
 
 /**
- * Setup frequency digit interaction (hover to increment/decrement)
+ * Setup frequency digit interaction (scroll wheel and click to increment/decrement)
  */
 function setupFrequencyDigitInteraction() {
     const digits = document.querySelectorAll('.freq-digit');
-    
+
     digits.forEach(digit => {
-        let hoverInterval = null;
-        let isIncrementing = true;
-        
-        // Mouse enter - start changing frequency
-        digit.addEventListener('mouseenter', (e) => {
+        // Mouse wheel scroll - increment/decrement at this digit's step
+        digit.addEventListener('wheel', (e) => {
+            e.preventDefault(); // Prevent page scroll
             const step = parseInt(digit.getAttribute('data-step'));
-            
-            // Determine if incrementing or decrementing based on mouse position
-            const rect = digit.getBoundingClientRect();
-            const mouseY = e.clientY;
-            const digitCenterY = rect.top + rect.height / 2;
-            isIncrementing = mouseY < digitCenterY;
-            
-            // Change frequency immediately
-            changeFrequencyByStep(step, isIncrementing);
-            
-            // Continue changing while hovering
-            hoverInterval = setInterval(() => {
-                changeFrequencyByStep(step, isIncrementing);
-            }, 150);
+            const increment = e.deltaY < 0; // Scroll up = increment, scroll down = decrement
+
+            changeFrequencyByStep(step, increment);
+        }, { passive: false });
+
+        // Hover - show it's interactive
+        digit.addEventListener('mouseenter', () => {
+            digit.style.cursor = 'ns-resize'; // Up/down arrow cursor
         });
-        
-        // Mouse leave - stop changing frequency
+
+        // Reset cursor on mouse leave
         digit.addEventListener('mouseleave', () => {
-            if (hoverInterval) {
-                clearInterval(hoverInterval);
-                hoverInterval = null;
-            }
+            digit.style.cursor = 'pointer';
         });
-        
-        // Mouse move - update direction based on position
-        digit.addEventListener('mousemove', (e) => {
-            const rect = digit.getBoundingClientRect();
-            const mouseY = e.clientY;
-            const digitCenterY = rect.top + rect.height / 2;
-            const newIsIncrementing = mouseY < digitCenterY;
-            
-            // If direction changed, restart the interval
-            if (newIsIncrementing !== isIncrementing) {
-                isIncrementing = newIsIncrementing;
-                if (hoverInterval) {
-                    clearInterval(hoverInterval);
-                    const step = parseInt(digit.getAttribute('data-step'));
-                    changeFrequencyByStep(step, isIncrementing);
-                    hoverInterval = setInterval(() => {
-                        changeFrequencyByStep(step, isIncrementing);
-                    }, 150);
-                }
-            }
-        });
-        
-        // Click - single step change
+
+        // Click - single step change (click upper half = increment, lower half = decrement)
         digit.addEventListener('click', (e) => {
             const step = parseInt(digit.getAttribute('data-step'));
             const rect = digit.getBoundingClientRect();
             const mouseY = e.clientY;
             const digitCenterY = rect.top + rect.height / 2;
             const increment = mouseY < digitCenterY;
-            
+
             changeFrequencyByStep(step, increment);
         });
     });
@@ -133,24 +110,24 @@ function setupFrequencyDigitInteraction() {
 function changeFrequencyByStep(step, increment) {
     const freqInput = document.getElementById('frequency');
     if (!freqInput) return;
-    
+
     let currentFreq = parseInt(freqInput.value) || 0;
-    
+
     if (increment) {
         currentFreq += step;
     } else {
         currentFreq -= step;
     }
-    
+
     // Clamp frequency to reasonable bounds (0.1 MHz to 30 MHz for HF)
     currentFreq = Math.max(100000, Math.min(30000000, currentFreq));
-    
+
     // Update the frequency input
     freqInput.value = currentFreq;
-    
+
     // Update the readout display
     updateFrequencyReadout();
-    
+
     // Apply the frequency change
     if (typeof handleFrequencyChange === 'function') {
         handleFrequencyChange();
@@ -163,21 +140,21 @@ function changeFrequencyByStep(step, increment) {
 function monitorFrequencyChanges() {
     const freqInput = document.getElementById('frequency');
     if (!freqInput) return;
-    
+
     // Update readout when frequency input changes
     freqInput.addEventListener('input', () => {
         if (bandFreqMode === 'frequency') {
             updateFrequencyReadout();
         }
     });
-    
+
     // Also monitor for programmatic changes
     const observer = new MutationObserver(() => {
         if (bandFreqMode === 'frequency') {
             updateFrequencyReadout();
         }
     });
-    
+
     observer.observe(freqInput, {
         attributes: true,
         attributeFilter: ['value']

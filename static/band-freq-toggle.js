@@ -34,14 +34,14 @@ function updateFrequencyReadout() {
     // Get frequency in Hz - use data-hz-value attribute if available, otherwise parse the value
     let freqHz = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) || 0;
 
-    // Convert to MHz with 5 decimal places
+    // Convert to MHz with 6 decimal places
     const freqMHz = freqHz / 1000000;
-    const freqStr = freqMHz.toFixed(5);
+    const freqStr = freqMHz.toFixed(6);
 
-    // Split into digits (format: XX.XXX.XX - 2 whole, 3 decimal, 2 more decimal)
+    // Split into digits (format: XX.XXX.XXX - 2 whole, 3 decimal, 3 more decimal)
     const parts = freqStr.split('.');
     const wholePart = parts[0].padStart(2, '0'); // Ensure 2 digits (e.g., "14")
-    const decimalPart = (parts[1] || '00000').padEnd(5, '0'); // Ensure exactly 5 decimal places
+    const decimalPart = (parts[1] || '000000').padEnd(6, '0'); // Ensure exactly 6 decimal places
 
     // Update each digit
     const digits = document.querySelectorAll('.freq-digit');
@@ -57,8 +57,8 @@ function updateFrequencyReadout() {
         }
     }
 
-    // Last 2 digits are the final decimal part (e.g., "00")
-    for (let i = 0; i < 2; i++) {
+    // Last 3 digits are the final decimal part (e.g., "000")
+    for (let i = 0; i < 3; i++) {
         if (digits[i + 5]) {
             digits[i + 5].textContent = decimalPart[i + 3];
         }

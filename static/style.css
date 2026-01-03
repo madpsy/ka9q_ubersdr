@@ -504,6 +504,103 @@ body {
     z-index: 100;
 }
 
+/* Band/Frequency Toggle Button */
+.band-freq-toggle-btn {
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: 2px solid #667eea;
+    border-radius: 6px;
+    font-size: 1.1em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+    min-width: 45px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.band-freq-toggle-btn:hover {
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.6);
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+}
+
+.band-freq-toggle-btn:active {
+    transform: translateY(0) scale(0.98);
+}
+
+/* Band Buttons Container */
+.band-buttons-container {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* Frequency Readout Container */
+.freq-readout-container {
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+.freq-readout-display {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+    padding: 8px 16px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), inset 0 2px 4px rgba(0, 0, 0, 0.2);
+    border: 2px solid #667eea;
+    font-family: 'Courier New', monospace;
+    font-size: 1.4em;
+    font-weight: bold;
+}
+
+.freq-digit {
+    color: #00ff00;
+    text-shadow: 0 0 8px rgba(0, 255, 0, 0.6), 0 0 12px rgba(0, 255, 0, 0.4);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    user-select: none;
+    min-width: 20px;
+    text-align: center;
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.freq-digit:hover {
+    background: rgba(102, 126, 234, 0.4);
+    transform: scale(1.15);
+    box-shadow: 0 0 12px rgba(102, 126, 234, 0.6);
+    color: #00ffff;
+    text-shadow: 0 0 10px rgba(0, 255, 255, 0.8), 0 0 16px rgba(0, 255, 255, 0.5);
+}
+
+.freq-digit:active {
+    transform: scale(1.05);
+}
+
+.freq-separator {
+    color: #667eea;
+    font-weight: bold;
+    padding: 0 2px;
+    text-shadow: 0 0 6px rgba(102, 126, 234, 0.6);
+}
+
+.freq-unit-label {
+    color: #3498db;
+    font-size: 0.8em;
+    margin-left: 8px;
+    font-weight: bold;
+    text-shadow: 0 0 6px rgba(52, 152, 219, 0.6);
+}
+
 .band-status-badge {
     padding: 6px 14px;
     background: #6c757d;

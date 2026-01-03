@@ -157,16 +157,34 @@
         <!-- Band Status Bar -->
         <div class="band-status-bar">
             <div class="band-status-container">
-                <div class="band-status-badge" data-band="160m" data-status="OPEN">160m</div>
-                <div class="band-status-badge" data-band="80m" data-status="OPEN">80m</div>
-                <div class="band-status-badge" data-band="60m" data-status="OPEN">60m</div>
-                <div class="band-status-badge" data-band="40m" data-status="OPEN">40m</div>
-                <div class="band-status-badge" data-band="30m" data-status="OPEN">30m</div>
-                <div class="band-status-badge" data-band="20m" data-status="OPEN">20m</div>
-                <div class="band-status-badge" data-band="17m" data-status="OPEN">17m</div>
-                <div class="band-status-badge" data-band="15m" data-status="OPEN">15m</div>
-                <div class="band-status-badge" data-band="12m" data-status="OPEN">12m</div>
-                <div class="band-status-badge" data-band="10m" data-status="OPEN">10m</div>
+                <button id="band-freq-toggle" class="band-freq-toggle-btn" onclick="toggleBandFreqDisplay()" title="Toggle between band buttons and frequency readout">⇄</button>
+                <div id="band-buttons-container" class="band-buttons-container">
+                    <div class="band-status-badge" data-band="160m" data-status="OPEN">160m</div>
+                    <div class="band-status-badge" data-band="80m" data-status="OPEN">80m</div>
+                    <div class="band-status-badge" data-band="60m" data-status="OPEN">60m</div>
+                    <div class="band-status-badge" data-band="40m" data-status="OPEN">40m</div>
+                    <div class="band-status-badge" data-band="30m" data-status="OPEN">30m</div>
+                    <div class="band-status-badge" data-band="20m" data-status="OPEN">20m</div>
+                    <div class="band-status-badge" data-band="17m" data-status="OPEN">17m</div>
+                    <div class="band-status-badge" data-band="15m" data-status="OPEN">15m</div>
+                    <div class="band-status-badge" data-band="12m" data-status="OPEN">12m</div>
+                    <div class="band-status-badge" data-band="10m" data-status="OPEN">10m</div>
+                </div>
+                <div id="freq-readout-container" class="freq-readout-container" style="display: none;">
+                    <div class="freq-readout-display">
+                        <span class="freq-digit" data-position="0" data-step="10000000">0</span>
+                        <span class="freq-digit" data-position="1" data-step="1000000">0</span>
+                        <span class="freq-separator">.</span>
+                        <span class="freq-digit" data-position="2" data-step="100000">0</span>
+                        <span class="freq-digit" data-position="3" data-step="10000">0</span>
+                        <span class="freq-digit" data-position="4" data-step="1000">0</span>
+                        <span class="freq-separator">.</span>
+                        <span class="freq-digit" data-position="5" data-step="100">0</span>
+                        <span class="freq-digit" data-position="6" data-step="10">0</span>
+                        <span class="freq-digit" data-position="7" data-step="1">0</span>
+                        <span class="freq-unit-label">MHz</span>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -988,6 +1006,7 @@
     </footer>
 
     <script src="bands_state.js"></script>
+    <script src="band-freq-toggle.js"></script>
     <script src="extensions.js"></script>
     <script src="extension-loader.js"></script>
     <script src="carrier-detector.js"></script>

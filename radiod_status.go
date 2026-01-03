@@ -320,9 +320,11 @@ func decodeFloat(data []byte) float32 {
 		bits = (bits << 8) | uint32(b)
 	}
 
-	// Shift left to restore leading zeros
-	shift := (4 - len(data)) * 8
-	bits <<= shift
+	// Shift left to restore leading zeros only if data is shorter than 4 bytes
+	if len(data) < 4 {
+		shift := (4 - len(data)) * 8
+		bits <<= shift
+	}
 
 	return math.Float32frombits(bits)
 }
@@ -339,9 +341,11 @@ func decodeDouble(data []byte) float64 {
 		bits = (bits << 8) | uint64(b)
 	}
 
-	// Shift left to restore leading zeros
-	shift := (8 - len(data)) * 8
-	bits <<= shift
+	// Shift left to restore leading zeros only if data is shorter than 8 bytes
+	if len(data) < 8 {
+		shift := (8 - len(data)) * 8
+		bits <<= shift
+	}
 
 	return math.Float64frombits(bits)
 }

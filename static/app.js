@@ -7436,23 +7436,20 @@ function convertDisplayedFrequencyToHz() {
 // Override the existing handleFrequencyChange to work with units
 const originalHandleFrequencyChange = handleFrequencyChange;
 window.handleFrequencyChange = function() {
-    // Convert displayed value to Hz first
-    convertDisplayedFrequencyToHz();
-
     const freqInput = document.getElementById('frequency');
     if (!freqInput) return;
+
+    // Convert displayed value to Hz first
+    convertDisplayedFrequencyToHz();
 
     // Get the Hz value
     const hzValue = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
 
-    // For non-Hz units, skip the "less than 6 digits" check in original function
-    // by temporarily setting a valid Hz value
-    const originalValue = freqInput.value;
-    const originalDataValue = freqInput.getAttribute('data-hz-value');
+    // Temporarily set the input to Hz string for the original validation
+    const savedDisplayValue = freqInput.value;
     freqInput.value = hzValue.toString();
-    freqInput.setAttribute('data-hz-value', hzValue);
 
-    // Call the original function
+    // Call the original function (it will read freqInput.value as Hz)
     originalHandleFrequencyChange();
 
     // Restore the display value in the current unit

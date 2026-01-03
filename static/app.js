@@ -7404,7 +7404,7 @@ function updateFrequencyDisplay() {
     // Convert to display unit
     let displayValue;
     if (currentFrequencyUnit === 'kHz') {
-        displayValue = (hzValue / 1000).toFixed(2); // 2 decimals to show 10 Hz changes
+        displayValue = (hzValue / 1000).toFixed(3); // 3 decimals to show 1 Hz changes
     } else if (currentFrequencyUnit === 'MHz') {
         displayValue = (hzValue / 1000000).toFixed(6);
     } else {
@@ -7511,8 +7511,8 @@ window.validateFrequencyInput = function(input) {
         // Limit decimal places based on unit
         if (parts.length === 2) {
             if (currentFrequencyUnit === 'kHz') {
-                // kHz: limit to 1 decimal place
-                parts[1] = parts[1].substring(0, 1);
+                // kHz: limit to 3 decimal places (to show 1 Hz precision)
+                parts[1] = parts[1].substring(0, 3);
             } else if (currentFrequencyUnit === 'MHz') {
                 // MHz: limit to 6 decimal places
                 parts[1] = parts[1].substring(0, 6);

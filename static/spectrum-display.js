@@ -411,6 +411,9 @@ class SpectrumDisplay {
             minDb: config.minDb !== undefined ? config.minDb : -100,
             maxDb: config.maxDb !== undefined ? config.maxDb : 0,
             autoRange: true, // Auto-ranging always enabled
+            manualRangeEnabled: false, // Manual range override
+            manualMinDb: -120, // Manual minimum dB
+            manualMaxDb: -40, // Manual maximum dB
             rangeMargin: config.rangeMargin || 5, // dB margin for auto-range
             colorScheme: config.colorScheme || 'jet', // Default to jet color scheme
             intensity: config.intensity !== undefined ? config.intensity : 0.20, // Intensity adjustment (-1.0 to +1.0)
@@ -2463,6 +2466,13 @@ class SpectrumDisplay {
 
     // Update auto-range based on current data (matching app.js waterfall behavior)
     updateAutoRange() {
+        // Check for manual override FIRST
+        if (this.config.manualRangeEnabled) {
+            this.actualMinDb = this.config.manualMinDb;
+            this.actualMaxDb = this.config.manualMaxDb;
+            return;  // Skip automatic calculation
+        }
+
         if (!this.spectrumData || this.spectrumData.length === 0) {
             return;
         }
@@ -3270,6 +3280,48 @@ class SpectrumDisplay {
         // Initialize smooth checkbox state based on spectrum visibility
         if (smoothCheckbox && lineGraphToggle) {
             smoothCheckbox.disabled = !lineGraphToggle.checked;
+        }
+
+        // Setup manual range controls
+        const manualRangeCheckbox = document.getElementById('spectrum-manual-range-enable');
+        const manualRangeControls = document.getElementById('spectrum-manual-range-controls');
+        const minDbSlider = document.getElementById('spectrum-min-db');
+        const maxDbSlider = document.getElementById('spectrum-max-db');
+        const minDbValue = document.getElementById('spectrum-min-db-value');
+        const maxDbValue = document.getElementById('spectrum-max-db-value');
+
+        if (manualRangeCheckbox) {
+            manualRangeCheckbox.addEventListener('change', (e) => {
+                this.config.manualRangeEnabled = e.target.checked;
+                if (manualRangeControls) {
+                    manualRangeControls.style.display = e.target.checked ? 'flex' : 'none';
+                }
+
+                if (e.target.checked) {
+                    // Clear auto-range history when switching to manual
+                    this.autoRangeMinHistory = [];
+                    this.autoRangeMaxHistory = [];
+                    console.log(`Manual range enabled: ${this.config.manualMinDb} to ${this.config.manualMaxDb} dB`);
+                } else {
+                    console.log('Auto-range enabled');
+                }
+            });
+        }
+
+        if (minDbSlider && minDbValue) {
+            minDbSlider.addEventListener('input', (e) => {
+                const value = parseFloat(e.target.value);
+                this.config.manualMinDb = value;
+                minDbValue.textContent = value.toFixed(0);
+            });
+        }
+
+        if (maxDbSlider && maxDbValue) {
+            maxDbSlider.addEventListener('input', (e) => {
+                const value = parseFloat(e.target.value);
+                this.config.manualMaxDb = value;
+                maxDbValue.textContent = value.toFixed(0);
+            });
         }
 
         // Store reference to snap checkbox and label for mode-based enable/disable

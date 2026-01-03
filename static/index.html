@@ -110,7 +110,24 @@
                         </label>
                     </div>
                     <div class="spectrum-control-group">
-                        <label>Colour Scheme:</label>
+                        <label style="display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 0.9em; margin: 0;">
+                            <input type="checkbox" id="spectrum-manual-range-enable">
+                            <span>Manual Range</span>
+                        </label>
+                    </div>
+                    <div id="spectrum-manual-range-controls" class="spectrum-control-group" style="display: none; flex-direction: column; gap: 4px;">
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="min-width: 35px; font-size: 0.8em;">Min:</label>
+                            <input type="range" id="spectrum-min-db" min="-140" max="-20" value="-120" step="5" style="width: 80px;">
+                            <span id="spectrum-min-db-value" style="min-width: 40px; font-size: 0.8em; text-align: right;">-120</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="min-width: 35px; font-size: 0.8em;">Max:</label>
+                            <input type="range" id="spectrum-max-db" min="-80" max="0" value="-40" step="5" style="width: 80px;">
+                            <span id="spectrum-max-db-value" style="min-width: 40px; font-size: 0.8em; text-align: right;">-40</span>
+                        </div>
+                    </div>
+                    <div class="spectrum-control-group">
                         <select id="spectrum-colorscheme" onchange="updateSpectrumColorScheme()">
                             <option value="viridis">Viridis</option>
                             <option value="plasma">Plasma</option>
@@ -118,7 +135,6 @@
                         </select>
                     </div>
                     <div class="spectrum-control-group">
-                        <label>Signal:</label>
                         <div class="signal-meter">
                             <div id="signal-meter-bar" class="signal-meter-bar"></div>
                         </div>

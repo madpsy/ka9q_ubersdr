@@ -7496,6 +7496,10 @@ window.validateFrequencyInput = function(input) {
             const newCursorPos = Math.max(0, Math.min(value.length, cursorPos));
             input.setSelectionRange(newCursorPos, newCursorPos);
         }
+
+        // CRITICAL: Update data-hz-value immediately as user types
+        // This ensures all code that reads frequency gets the correct Hz value
+        convertDisplayedFrequencyToHz();
     }
 };
 

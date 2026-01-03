@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"log"
 	"math"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/ipv4"
@@ -67,11 +69,35 @@ func NewFrontendStatusTracker() *FrontendStatusTracker {
 
 // StartStatusListener starts listening for STATUS packets from radiod
 func (fst *FrontendStatusTracker) StartStatusListener(statusAddr *net.UDPAddr, iface *net.Interface) error {
-	// Create UDP connection for receiving STATUS packets
-	conn, err := net.ListenUDP("udp4", statusAddr)
+	// Create UDP socket with SO_REUSEADDR and SO_REUSEPORT to allow multiple listeners
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var opErr error
+			if err := c.Control(func(fd uintptr) {
+				// Set SO_REUSEADDR to allow multiple binds to same address
+				if err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+					opErr = fmt.Errorf("failed to set SO_REUSEADDR: %w", err)
+					return
+				}
+				// Set SO_REUSEPORT to allow multiple processes/goroutines to bind to same port
+				if err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, SO_REUSEPORT, 1); err != nil {
+					opErr = fmt.Errorf("failed to set SO_REUSEPORT: %w", err)
+					return
+				}
+			}); err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
+
+	// Listen on the multicast address with reuse options
+	listenPacket, err := lc.ListenPacket(context.Background(), "udp4", statusAddr.String())
 	if err != nil {
 		return fmt.Errorf("failed to create STATUS listener: %w", err)
 	}
+
+	conn := listenPacket.(*net.UDPConn)
 
 	// Join multicast group
 	p := ipv4.NewPacketConn(conn)
@@ -91,7 +117,7 @@ func (fst *FrontendStatusTracker) StartStatusListener(statusAddr *net.UDPAddr, i
 	}
 
 	fst.statusListener = conn
-	log.Printf("Started STATUS packet listener on %s", statusAddr)
+	log.Printf("Started frontend STATUS packet listener on %s (with SO_REUSEPORT)", statusAddr)
 
 	// Start listener goroutine
 	go fst.listenLoop()

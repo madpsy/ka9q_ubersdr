@@ -634,13 +634,6 @@ class BandConditionsMonitor {
                             unit: 'hour',
                             displayFormats: {
                                 hour: 'HH:mm'
-                            },
-                            timezone: 'UTC',
-                            tooltipFormat: 'HH:mm'
-                        },
-                        adapters: {
-                            date: {
-                                zone: 'UTC'
                             }
                         },
                         title: {
@@ -651,7 +644,14 @@ class BandConditionsMonitor {
                         ticks: {
                             color: '#fff',
                             source: 'auto',
-                            autoSkip: true
+                            autoSkip: true,
+                            callback: function(value, index, ticks) {
+                                // Format tick as UTC time
+                                const date = new Date(value);
+                                const hours = String(date.getUTCHours()).padStart(2, '0');
+                                const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+                                return `${hours}:${minutes}`;
+                            }
                         },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },

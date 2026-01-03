@@ -1493,38 +1493,47 @@ class SpectrumDisplay {
             smoothedData = this.spectrumData;
         }
 
-        // Find min and max values in smoothed data
-        let currentMinDb = Infinity;
-        let currentMaxDb = -Infinity;
-        for (let i = 0; i < smoothedData.length; i++) {
-            const db = smoothedData[i];
-            if (isFinite(db)) {
-                currentMinDb = Math.min(currentMinDb, db);
-                currentMaxDb = Math.max(currentMaxDb, db);
+        // Determine min/max based on manual or auto mode
+        let minDb, maxDb;
+
+        if (this.config.manualRangeEnabled) {
+            // Use manual range values
+            minDb = this.config.manualMinDb;
+            maxDb = this.config.manualMaxDb;
+        } else {
+            // Find min and max values in smoothed data
+            let currentMinDb = Infinity;
+            let currentMaxDb = -Infinity;
+            for (let i = 0; i < smoothedData.length; i++) {
+                const db = smoothedData[i];
+                if (isFinite(db)) {
+                    currentMinDb = Math.min(currentMinDb, db);
+                    currentMaxDb = Math.max(currentMaxDb, db);
+                }
             }
+
+            // Track minimum values over time for stable noise floor
+            this.lineGraphMinHistory.push({ value: currentMinDb, timestamp: now });
+
+            // Remove values older than 2 seconds
+            this.lineGraphMinHistory = this.lineGraphMinHistory.filter(m => now - m.timestamp <= this.lineGraphMinHistoryMaxAge);
+
+            // Use the average of recent minimums as the noise floor for smoother display
+            const avgMinDb = this.lineGraphMinHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMinHistory.length;
+
+            // Track maximum values over time for stable ceiling
+            this.lineGraphMaxHistory.push({ value: currentMaxDb, timestamp: now });
+
+            // Remove values older than 2 seconds
+            this.lineGraphMaxHistory = this.lineGraphMaxHistory.filter(m => now - m.timestamp <= this.lineGraphMaxHistoryMaxAge);
+
+            // Use the average of recent maximums as the ceiling for smoother display
+            const avgMaxDb = this.lineGraphMaxHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMaxHistory.length;
+
+            // Use smoothed minimum as floor, smoothed maximum as ceiling
+            minDb = avgMinDb;
+            maxDb = avgMaxDb;
         }
-
-        // Track minimum values over time for stable noise floor
-        this.lineGraphMinHistory.push({ value: currentMinDb, timestamp: now });
-
-        // Remove values older than 2 seconds
-        this.lineGraphMinHistory = this.lineGraphMinHistory.filter(m => now - m.timestamp <= this.lineGraphMinHistoryMaxAge);
-
-        // Use the average of recent minimums as the noise floor for smoother display
-        const avgMinDb = this.lineGraphMinHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMinHistory.length;
-
-        // Track maximum values over time for stable ceiling
-        this.lineGraphMaxHistory.push({ value: currentMaxDb, timestamp: now });
-
-        // Remove values older than 2 seconds
-        this.lineGraphMaxHistory = this.lineGraphMaxHistory.filter(m => now - m.timestamp <= this.lineGraphMaxHistoryMaxAge);
-
-        // Use the average of recent maximums as the ceiling for smoother display
-        const avgMaxDb = this.lineGraphMaxHistory.reduce((sum, m) => sum + m.value, 0) / this.lineGraphMaxHistory.length;
-
-        // Use smoothed minimum as floor, smoothed maximum as ceiling
-        const minDb = avgMinDb;
-        const maxDb = avgMaxDb;
         const dbRange = maxDb - minDb;
         if (dbRange === 0 || !isFinite(dbRange)) return;
 
@@ -3354,11 +3363,6 @@ class SpectrumDisplay {
                 this.config.manualMinDb = value;
                 minDbValue.textContent = value.toFixed(0);
                 localStorage.setItem('spectrumManualMinDb', value.toString());
-
-                // Force redraw if we have spectrum data
-                if (this.spectrumData && this.spectrumData.length > 0) {
-                    this.draw();
-                }
             });
         }
 
@@ -3368,11 +3372,6 @@ class SpectrumDisplay {
                 this.config.manualMaxDb = value;
                 maxDbValue.textContent = value.toFixed(0);
                 localStorage.setItem('spectrumManualMaxDb', value.toString());
-
-                // Force redraw if we have spectrum data
-                if (this.spectrumData && this.spectrumData.length > 0) {
-                    this.draw();
-                }
             });
         }
 

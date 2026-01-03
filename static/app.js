@@ -6205,22 +6205,35 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update cursor and band selector when frequency input changes
         const freqInput = document.getElementById('frequency');
         if (freqInput) {
-            // Add input event listener for real-time validation (digits only)
+            // Add input event listener for real-time validation
+            // Use the window version which will be overridden later to support decimals
             freqInput.addEventListener('input', (e) => {
-                validateFrequencyInput(e.target);
+                if (window.validateFrequencyInput) {
+                    window.validateFrequencyInput(e.target);
+                } else {
+                    validateFrequencyInput(e.target);
+                }
             });
 
             // Add Enter key handler to apply frequency
             freqInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    handleFrequencyChange();
+                    if (window.handleFrequencyChange) {
+                        window.handleFrequencyChange();
+                    } else {
+                        handleFrequencyChange();
+                    }
                 }
             });
 
             // Add blur handler to apply frequency when focus is lost
             freqInput.addEventListener('blur', () => {
-                handleFrequencyChange();
+                if (window.handleFrequencyChange) {
+                    window.handleFrequencyChange();
+                } else {
+                    handleFrequencyChange();
+                }
             });
         }
     } catch (err) {

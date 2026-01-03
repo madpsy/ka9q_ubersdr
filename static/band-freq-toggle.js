@@ -105,6 +105,16 @@ function changeFrequencyByStep(step, increment) {
     // Clamp frequency to reasonable bounds (0.1 MHz to 30 MHz for HF)
     currentFreq = Math.max(100000, Math.min(30000000, currentFreq));
 
+    // Disable edge detection temporarily when user manually changes frequency
+    if (window.spectrumDisplay) {
+        window.spectrumDisplay.skipEdgeDetection = true;
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetection = false;
+            }
+        }, 500);
+    }
+
     // Use the global setFrequencyInputValue function to properly update the input
     if (typeof window.setFrequencyInputValue === 'function') {
         window.setFrequencyInputValue(currentFreq);

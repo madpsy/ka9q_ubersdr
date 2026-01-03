@@ -7469,6 +7469,16 @@ window.handleFrequencyChange = function() {
     const savedDisplayValue = freqInput.value;
     freqInput.value = hzValue.toString();
 
+    // Disable edge detection temporarily when user manually changes frequency
+    if (window.spectrumDisplay) {
+        window.spectrumDisplay.skipEdgeDetection = true;
+        setTimeout(() => {
+            if (window.spectrumDisplay) {
+                window.spectrumDisplay.skipEdgeDetection = false;
+            }
+        }, 2000); // 2 seconds should be enough for spectrum to update
+    }
+
     // Call the original function (it will read freqInput.value as Hz)
     originalHandleFrequencyChange();
 

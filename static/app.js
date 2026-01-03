@@ -7445,9 +7445,12 @@ window.handleFrequencyChange = function() {
     // Get the Hz value
     const hzValue = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
 
-    // Temporarily set the input to Hz for validation
+    // For non-Hz units, skip the "less than 6 digits" check in original function
+    // by temporarily setting a valid Hz value
     const originalValue = freqInput.value;
-    freqInput.value = hzValue;
+    const originalDataValue = freqInput.getAttribute('data-hz-value');
+    freqInput.value = hzValue.toString();
+    freqInput.setAttribute('data-hz-value', hzValue);
 
     // Call the original function
     originalHandleFrequencyChange();

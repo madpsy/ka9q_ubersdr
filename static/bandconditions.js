@@ -615,14 +615,24 @@ class BandConditionsMonitor {
                             displayFormats: {
                                 hour: 'HH:mm'
                             },
-                            timezone: 'UTC'
+                            timezone: 'UTC',
+                            tooltipFormat: 'HH:mm'
+                        },
+                        adapters: {
+                            date: {
+                                zone: 'UTC'
+                            }
                         },
                         title: {
                             display: true,
                             text: 'Time (UTC)',
                             color: '#fff'
                         },
-                        ticks: { color: '#fff' },
+                        ticks: {
+                            color: '#fff',
+                            source: 'auto',
+                            autoSkip: true
+                        },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     y: {

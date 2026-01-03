@@ -6277,6 +6277,10 @@
             const content = document.getElementById('channelStatusContent');
             if (!content || !channelStatusSSRC) return;
 
+            // Save current scroll position before updating
+            const scrollContainer = content.querySelector('div[style*="overflow-y"]');
+            const scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+
             try {
                 // Fetch channel status from API
                 const response = await authenticatedFetch(`/admin/channel-status?ssrc=${encodeURIComponent(channelStatusSSRC)}`);
@@ -6383,6 +6387,12 @@
                 html += '</div>';
 
                 content.innerHTML = html;
+                
+                // Restore scroll position after content update
+                const newScrollContainer = content.querySelector('div[style*="overflow-y"]');
+                if (newScrollContainer && scrollTop > 0) {
+                    newScrollContainer.scrollTop = scrollTop;
+                }
             } catch (error) {
                 content.innerHTML = `<div style="text-align: center; padding: 40px; color: #dc3545;">Error loading channel status: ${error.message}</div>`;
             }

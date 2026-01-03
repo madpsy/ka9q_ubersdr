@@ -31,8 +31,8 @@ function updateFrequencyReadout() {
     const freqInput = document.getElementById('frequency');
     if (!freqInput) return;
 
-    // Get frequency in Hz
-    let freqHz = parseInt(freqInput.value) || 0;
+    // Get frequency in Hz - use data-hz-value attribute if available, otherwise parse the value
+    let freqHz = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) || 0;
 
     // Convert to MHz with 5 decimal places
     const freqMHz = freqHz / 1000000;
@@ -111,7 +111,8 @@ function changeFrequencyByStep(step, increment) {
     const freqInput = document.getElementById('frequency');
     if (!freqInput) return;
 
-    let currentFreq = parseInt(freqInput.value) || 0;
+    // Get current frequency from data-hz-value attribute
+    let currentFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) || 0;
 
     if (increment) {
         currentFreq += step;
@@ -122,8 +123,9 @@ function changeFrequencyByStep(step, increment) {
     // Clamp frequency to reasonable bounds (0.1 MHz to 30 MHz for HF)
     currentFreq = Math.max(100000, Math.min(30000000, currentFreq));
 
-    // Update the frequency input
+    // Update the frequency input value and data-hz-value attribute
     freqInput.value = currentFreq;
+    freqInput.setAttribute('data-hz-value', currentFreq);
 
     // Update the readout display
     updateFrequencyReadout();

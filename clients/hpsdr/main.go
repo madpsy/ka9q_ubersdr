@@ -91,6 +91,9 @@ type UberSDRBridge struct {
 	sampleBuffers [MaxReceivers][]complex64
 	bufferMus     [MaxReceivers]sync.Mutex
 
+	// Temporary conversion buffers (per receiver) - reused to avoid allocations
+	tempBuffers [MaxReceivers][]complex64
+
 	// PCM-zstd decoder
 	pcmDecoder *PCMBinaryDecoder
 }
@@ -126,6 +129,7 @@ func NewUberSDRBridge(url string, password string, hpsdrConfig Protocol2Config) 
 		bridge.lastFailedFreq[i] = 0                                       // No failed connection yet
 		bridge.lastFailedMode[i] = ""                                      // No failed connection yet
 		bridge.sampleBuffers[i] = make([]complex64, 0, SamplesPerPacket*2) // Pre-allocate buffer
+		bridge.tempBuffers[i] = make([]complex64, 0, 8192)                 // Pre-allocate temp buffer (typical WebSocket message size)
 	}
 
 	return bridge, nil
@@ -186,9 +190,6 @@ func (b *UberSDRBridge) monitorReceivers() {
 	// Track which receivers are connected
 	connectedReceivers := make(map[int]bool)
 
-	// Timeout for detecting disconnected HPSDR clients
-	const activityTimeout = 5 * time.Second
-
 	for {
 		// Check if we should stop before blocking on ticker
 		b.mu.RLock()
@@ -210,38 +211,6 @@ func (b *UberSDRBridge) monitorReceivers() {
 			enabled, frequency, sampleRate, err := b.hpsdrServer.GetReceiverState(i)
 			if err != nil {
 				continue
-			}
-
-			// Check for activity timeout if receiver is connected
-			if connectedReceivers[i] {
-				lastActivity, err := b.hpsdrServer.GetReceiverLastActivity(i)
-				if err == nil && !lastActivity.IsZero() {
-					timeSinceActivity := time.Since(lastActivity)
-					if timeSinceActivity > activityTimeout {
-						log.Printf("Bridge: Receiver %d timeout - no packets for %.1f seconds, closing connection",
-							i, timeSinceActivity.Seconds())
-
-						// Mark as disconnected
-						connectedReceivers[i] = false
-
-						// Close WebSocket connection
-						b.mu.Lock()
-						if b.wsConns[i] != nil {
-							b.wsConns[i].Close()
-							b.wsConns[i] = nil
-						}
-						b.lastFailedFreq[i] = 0
-						b.lastFailedMode[i] = ""
-						b.mu.Unlock()
-
-						// Clear sample buffer
-						b.bufferMus[i].Lock()
-						b.sampleBuffers[i] = b.sampleBuffers[i][:0]
-						b.bufferMus[i].Unlock()
-
-						continue
-					}
-				}
 			}
 
 			if enabled && frequency > 0 && sampleRate > 0 {
@@ -713,32 +682,42 @@ func (b *UberSDRBridge) forwardToHPSDR(receiverNum int, pcmData []byte) error {
 	// Left channel = I (in-phase), Right channel = Q (quadrature)
 	numSamples := len(pcmData) / 4 // 2 bytes per sample, 2 channels (I and Q)
 
-	// Lock the buffer for this receiver
-	b.bufferMus[receiverNum].Lock()
-	defer b.bufferMus[receiverNum].Unlock()
+	// Convert all incoming PCM samples to complex64 OUTSIDE the lock
+	// This reduces lock hold time significantly
+	// Reuse pre-allocated buffer to avoid allocations in hot path
+	if cap(b.tempBuffers[receiverNum]) < numSamples {
+		// Grow buffer if needed (rare)
+		b.tempBuffers[receiverNum] = make([]complex64, numSamples)
+	}
+	tempSamples := b.tempBuffers[receiverNum][:numSamples]
 
-	// Convert all incoming PCM samples to complex64 and add to buffer
 	for i := 0; i < numSamples; i++ {
 		idx := i * 4
 
 		// Read I (left channel) and Q (right channel) as int16 little-endian
-		iVal := int16(binary.LittleEndian.Uint16(pcmData[idx : idx+2]))
-		qVal := int16(binary.LittleEndian.Uint16(pcmData[idx+2 : idx+4]))
+		// Optimized: direct byte access instead of binary.LittleEndian.Uint16()
+		iVal := int16(uint16(pcmData[idx]) | uint16(pcmData[idx+1])<<8)
+		qVal := int16(uint16(pcmData[idx+2]) | uint16(pcmData[idx+3])<<8)
 
 		// Normalize int16 to float32 range [-1.0, 1.0]
-		// This matches how ka9q_hpsdr receives float32 IQ data from multicast
-		// The scaling factor in LoadIQData() will then convert to 24-bit integers
-		iNorm := float32(iVal) / 32768.0
-		qNorm := float32(qVal) / 32768.0
+		// Optimized: Use multiplication by reciprocal instead of division
+		// 1/32768.0 = 0.000030517578125 (exact in float32)
+		const reciprocal = float32(1.0 / 32768.0)
+		iNorm := float32(iVal) * reciprocal
+		qNorm := float32(qVal) * reciprocal
 
 		// Create complex sample: I + jQ
 		// Go's complex(real, imag) = real + imag*i
 		// So complex(I, Q) = I + jQ which is correct for IQ data
-		sample := complex(iNorm, qNorm)
-
-		// Add to buffer
-		b.sampleBuffers[receiverNum] = append(b.sampleBuffers[receiverNum], sample)
+		tempSamples[i] = complex(iNorm, qNorm)
 	}
+
+	// Now lock only for buffer operations and packet sending
+	b.bufferMus[receiverNum].Lock()
+	defer b.bufferMus[receiverNum].Unlock()
+
+	// Add converted samples to buffer
+	b.sampleBuffers[receiverNum] = append(b.sampleBuffers[receiverNum], tempSamples...)
 
 	// Send packets while we have enough samples
 	// This matches ka9q_hpsdr.c behavior: accumulate samples, then send when ready

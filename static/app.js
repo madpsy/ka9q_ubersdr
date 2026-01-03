@@ -7297,6 +7297,35 @@ window.updateFrequencyScrollMode = updateFrequencyScrollMode;
 // Frequency unit toggle functionality
 let currentFrequencyUnit = 'Hz'; // Can be 'Hz', 'kHz', or 'MHz'
 
+// Load frequency unit preference from localStorage
+function loadFrequencyUnitPreference() {
+    try {
+        const saved = localStorage.getItem('frequencyUnit');
+        if (saved && ['Hz', 'kHz', 'MHz'].includes(saved)) {
+            currentFrequencyUnit = saved;
+            // Update the label if it exists
+            const unitLabel = document.getElementById('frequency-unit');
+            if (unitLabel) {
+                unitLabel.textContent = currentFrequencyUnit;
+            }
+            console.log(`Loaded frequency unit preference: ${currentFrequencyUnit}`);
+            return true;
+        }
+    } catch (e) {
+        console.error('Failed to load frequency unit preference:', e);
+    }
+    return false;
+}
+
+// Save frequency unit preference to localStorage
+function saveFrequencyUnitPreference() {
+    try {
+        localStorage.setItem('frequencyUnit', currentFrequencyUnit);
+    } catch (e) {
+        console.error('Failed to save frequency unit preference:', e);
+    }
+}
+
 // Toggle frequency unit (Hz -> kHz -> MHz -> Hz)
 function toggleFrequencyUnit() {
     const unitLabel = document.getElementById('frequency-unit');
@@ -7319,6 +7348,9 @@ function toggleFrequencyUnit() {
 
     // Update the label
     unitLabel.textContent = currentFrequencyUnit;
+
+    // Save preference
+    saveFrequencyUnitPreference();
 
     // Convert and display the value in the new unit
     updateFrequencyDisplay();
@@ -7460,6 +7492,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const initialHz = parseInt(freqInput.value);
         if (!isNaN(initialHz)) {
             freqInput.setAttribute('data-hz-value', initialHz);
+        }
+
+        // Load saved unit preference
+        const unitLoaded = loadFrequencyUnitPreference();
+
+        // If a unit preference was loaded and it's not Hz, update the display
+        if (unitLoaded && currentFrequencyUnit !== 'Hz') {
+            updateFrequencyDisplay();
         }
 
         // Add blur event to convert and validate

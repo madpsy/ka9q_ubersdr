@@ -3440,7 +3440,8 @@ class SpectrumDisplay {
                 const freqInput = document.getElementById('frequency');
                 if (!freqInput) return;
 
-                const currentFreq = parseInt(freqInput.value);
+                // Get current frequency from data-hz-value attribute
+                const currentFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
                 if (isNaN(currentFreq)) return;
 
                 // Get step size from global configuration (set by dropdown in app.js)

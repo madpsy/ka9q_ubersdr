@@ -793,3 +793,21 @@ func (rc *RadiodController) GetAllFrontendStatus() map[uint32]*FrontendStatus {
 	}
 	return rc.frontendTracker.GetAllFrontendStatus()
 }
+
+// GetChannelStatus returns the channel status for a given SSRC
+// Returns nil if no status is available for that SSRC
+func (rc *RadiodController) GetChannelStatus(ssrc uint32) *ChannelStatus {
+	if rc.frontendTracker == nil {
+		return nil
+	}
+	return rc.frontendTracker.GetChannelStatus(ssrc)
+}
+
+// GetAllChannelStatus returns all channel status entries
+// Returns a map of SSRC -> ChannelStatus
+func (rc *RadiodController) GetAllChannelStatus() map[uint32]*ChannelStatus {
+	if rc.frontendTracker == nil {
+		return make(map[uint32]*ChannelStatus)
+	}
+	return rc.frontendTracker.GetAllChannelStatus()
+}

@@ -1827,6 +1827,132 @@ func (ah *AdminHandler) HandleFrontendStatus(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// HandleChannelStatus returns the audio channel status for a given SSRC
+// This endpoint is used to get per-channel status information for active audio sessions
+func (ah *AdminHandler) HandleChannelStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get SSRC parameter from query string
+	ssrcParam := r.URL.Query().Get("ssrc")
+	if ssrcParam == "" {
+		http.Error(w, "SSRC parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Parse SSRC (hex format: 0x12345678)
+	var ssrc uint32
+	if strings.HasPrefix(ssrcParam, "0x") || strings.HasPrefix(ssrcParam, "0X") {
+		// Hex format
+		val, err := strconv.ParseUint(ssrcParam[2:], 16, 32)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid SSRC format: %v", err), http.StatusBadRequest)
+			return
+		}
+		ssrc = uint32(val)
+	} else {
+		// Decimal format
+		val, err := strconv.ParseUint(ssrcParam, 10, 32)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid SSRC format: %v", err), http.StatusBadRequest)
+			return
+		}
+		ssrc = uint32(val)
+	}
+
+	// Get channel status for this SSRC
+	channelStatus := ah.sessions.radiod.GetChannelStatus(ssrc)
+	if channelStatus == nil {
+		http.Error(w, "Channel status not available for this SSRC", http.StatusNotFound)
+		return
+	}
+
+	// Helper function to sanitize float values for JSON (replace Inf/NaN with nil)
+	sanitizeFloat32 := func(f float32) interface{} {
+		if math.IsInf(float64(f), 0) || math.IsNaN(float64(f)) {
+			return nil
+		}
+		return f
+	}
+
+	sanitizeFloat64 := func(f float64) interface{} {
+		if math.IsInf(f, 0) || math.IsNaN(f) {
+			return nil
+		}
+		return f
+	}
+
+	// Determine demod type string
+	demodTypeStr := "Unknown"
+	switch channelStatus.DemodType {
+	case 0:
+		demodTypeStr = "Linear"
+	case 1:
+		demodTypeStr = "FM"
+	case 2:
+		demodTypeStr = "WFM/Stereo"
+	case 3:
+		demodTypeStr = "Spectrum"
+	}
+
+	// Build response with audio channel status information
+	response := map[string]interface{}{
+		"ssrc":        fmt.Sprintf("0x%08x", ssrc),
+		"last_update": channelStatus.LastUpdate.Format(time.RFC3339),
+
+		// Identity & Basic Info
+		"preset":     channelStatus.Preset,
+		"demod_type": demodTypeStr,
+
+		// Tuning Information
+		"radio_frequency":   sanitizeFloat64(channelStatus.RadioFrequency),
+		"freq_offset":       sanitizeFloat32(channelStatus.FreqOffset),
+		"doppler_frequency": sanitizeFloat64(channelStatus.DopplerFrequency),
+
+		// Signal Quality Metrics
+		"baseband_power": sanitizeFloat32(channelStatus.BasebandPower),
+		"noise_density":  sanitizeFloat32(channelStatus.NoiseDensity),
+		"pll_snr":        sanitizeFloat32(channelStatus.PllSnr),
+		"fm_snr":         sanitizeFloat32(channelStatus.FmSnr),
+		"squelch_open":   sanitizeFloat32(channelStatus.SquelchOpen),
+
+		// Output Status
+		"output_samprate":     channelStatus.OutputSamprate,
+		"output_level":        sanitizeFloat32(channelStatus.OutputLevel),
+		"output_samples":      channelStatus.OutputSamples,
+		"output_data_packets": channelStatus.OutputDataPackets,
+
+		// Filter Settings
+		"filter_low":   sanitizeFloat32(channelStatus.LowEdge),
+		"filter_high":  sanitizeFloat32(channelStatus.HighEdge),
+		"filter_drops": channelStatus.FilterDrops,
+
+		// AGC/Gain Control
+		"agc_enable": channelStatus.AgcEnable,
+		"gain":       sanitizeFloat32(channelStatus.Gain),
+		"headroom":   sanitizeFloat32(channelStatus.Headroom),
+
+		// Demodulator Status
+		"pll_lock":    channelStatus.PllLock,
+		"envelope":    channelStatus.Envelope,
+		"snr_squelch": channelStatus.SnrSquelch,
+
+		// FM-Specific (when demod_type = FM)
+		"peak_deviation": sanitizeFloat32(channelStatus.PeakDeviation),
+		"pl_tone":        sanitizeFloat32(channelStatus.PlTone),
+		"thresh_extend":  channelStatus.ThreshExtend,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding channel status: %v", err)
+	}
+}
+
 // HandleSystemLoad returns system load averages from /proc/loadavg and CPU core count
 func (ah *AdminHandler) HandleSystemLoad(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

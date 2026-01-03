@@ -840,6 +840,21 @@
                 </div>
             </div>
         </div>
+
+        <!-- Channel Status Modal -->
+        <div id="channelStatusModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Audio Channel Status</h2>
+                    <button class="modal-close" onclick="closeChannelStatusModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="channelStatusContent" style="font-family: monospace; font-size: 14px;">
+                        <!-- Content will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -2930,10 +2945,14 @@
 
                 // Create action buttons
                 let actionButtons = '';
-                // Add Status button if frontend status is available
-                if (audioSession && audioSession.frontend_status) {
-                    const frontendStatusJSON = JSON.stringify(audioSession.frontend_status).replace(/"/g, '&quot;');
-                    actionButtons += `<button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px; background-color: #4CAF50; color: white;" onclick='showFrontendStatus(${frontendStatusJSON})'>Status</button>`;
+                // Add Status button for audio sessions (enabled) or spectrum-only (disabled/greyed out)
+                if (audioSession) {
+                    // Audio session exists - enable Status button with SSRC
+                    const ssrc = audioSession.ssrc || '0x00000000';
+                    actionButtons += `<button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px; background-color: #4CAF50; color: white;" onclick='showChannelStatus("${ssrc}")'>Status</button>`;
+                } else if (spectrumSession) {
+                    // Spectrum-only session - show disabled Status button
+                    actionButtons += `<button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px; background-color: #ccc; color: #666; cursor: not-allowed;" disabled title="Status only available for audio channels">Status</button>`;
                 }
                 if (userSessionID !== 'N/A') {
                     actionButtons += `<button class="btn" style="padding: 6px 12px; font-size: 12px; margin-right: 5px;" onclick="kickUser('${userSessionID}')">Kick</button>`;
@@ -6221,16 +6240,149 @@
             }
         }
 
+        // Show channel status modal
+        async function showChannelStatus(ssrc) {
+            const modal = document.getElementById('channelStatusModal');
+            const content = document.getElementById('channelStatusContent');
+            if (!modal || !content) return;
+
+            // Show loading state
+            content.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="spinner"></div><p>Loading channel status...</p></div>';
+            modal.style.display = 'block';
+
+            try {
+                // Fetch channel status from API
+                const response = await authenticatedFetch(`/admin/channel-status?ssrc=${encodeURIComponent(ssrc)}`);
+                if (!response) {
+                    content.innerHTML = '<div style="text-align: center; padding: 40px; color: #dc3545;">Authentication failed</div>';
+                    return;
+                }
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    content.innerHTML = `<div style="text-align: center; padding: 40px; color: #dc3545;">Error: ${errorText}</div>`;
+                    return;
+                }
+
+                const ch = await response.json();
+
+                // Helper to format value or show N/A
+                const fmt = (val, decimals = 1, suffix = '') => {
+                    if (val === null || val === undefined) return '<em style="color: #999;">N/A</em>';
+                    if (typeof val === 'number') return `<strong>${val.toFixed(decimals)}${suffix}</strong>`;
+                    if (typeof val === 'boolean') return `<strong>${val ? 'Yes' : 'No'}</strong>`;
+                    return `<strong>${val}${suffix}</strong>`;
+                };
+
+                // Format frequency in MHz
+                const fmtFreq = (hz) => {
+                    if (!hz) return '<em style="color: #999;">N/A</em>';
+                    return `<strong>${(hz / 1e6).toFixed(6)} MHz</strong>`;
+                };
+
+                // Build categorized display
+                let html = '<div style="max-height: 60vh; overflow-y: auto;">';
+                
+                // Identity & Basic Info
+                html += '<h3 style="margin-top: 0; color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📡 Identity & Basic Info</h3>';
+                html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
+                html += `<tr><td style="padding: 6px;">SSRC</td><td style="padding: 6px; text-align: right; font-family: monospace;">${ch.ssrc || 'N/A'}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Preset</td><td style="padding: 6px; text-align: right;">${ch.preset || '<em style="color: #999;">N/A</em>'}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Demod Type</td><td style="padding: 6px; text-align: right;">${ch.demod_type || '<em style="color: #999;">N/A</em>'}</td></tr>`;
+                html += '</table>';
+
+                // Tuning Information
+                html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📻 Tuning Information</h3>';
+                html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
+                html += `<tr><td style="padding: 6px;">Radio Frequency</td><td style="padding: 6px; text-align: right;">${fmtFreq(ch.radio_frequency)}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Frequency Offset</td><td style="padding: 6px; text-align: right;">${fmt(ch.freq_offset, 1, ' Hz')}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Doppler Correction</td><td style="padding: 6px; text-align: right;">${fmt(ch.doppler_frequency, 1, ' Hz')}</td></tr>`;
+                html += '</table>';
+
+                // Signal Quality
+                html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📊 Signal Quality</h3>';
+                html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
+                html += `<tr><td style="padding: 6px;">Baseband Power</td><td style="padding: 6px; text-align: right;">${fmt(ch.baseband_power, 1, ' dBFS')}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Noise Density (N0)</td><td style="padding: 6px; text-align: right;">${fmt(ch.noise_density, 1, ' dBFS')}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">PLL SNR</td><td style="padding: 6px; text-align: right;">${fmt(ch.pll_snr, 1, ' dB')}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">FM SNR</td><td style="padding: 6px; text-align: right;">${fmt(ch.fm_snr, 1, ' dB')}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Squelch Open Threshold</td><td style="padding: 6px; text-align: right;">${fmt(ch.squelch_open, 1, ' dB')}</td></tr>`;
+                html += '</table>';
+
+                // Output Status
+                html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">🔊 Output Status</h3>';
+                html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
+                html += `<tr><td style="padding: 6px;">Output Sample Rate</td><td style="padding: 6px; text-align: right;">${ch.output_samprate ? (ch.output_samprate / 1000).toFixed(1) + ' kHz' : '<em style="color: #999;">N/A</em>'}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Output Level</td><td style="padding: 6px; text-align: right;">${fmt(ch.output_level, 1, ' dB')}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Output Samples</td><td style="padding: 6px; text-align: right;">${ch.output_samples ? ch.output_samples.toLocaleString() : '<em style="color: #999;">N/A</em>'}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">RTP Packets Sent</td><td style="padding: 6px; text-align: right;">${ch.output_data_packets ? ch.output_data_packets.toLocaleString() : '<em style="color: #999;">N/A</em>'}</td></tr>`;
+                html += '</table>';
+
+                // Filter Settings
+                html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">🔧 Filter Settings</h3>';
+                html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
+                html += `<tr><td style="padding: 6px;">Filter Low Edge</td><td style="padding: 6px; text-align: right;">${fmt(ch.filter_low, 0, ' Hz')}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Filter High Edge</td><td style="padding: 6px; text-align: right;">${fmt(ch.filter_high, 0, ' Hz')}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Filter Drops</td><td style="padding: 6px; text-align: right;">${ch.filter_drops !== null && ch.filter_drops !== undefined ? `<strong>${ch.filter_drops}</strong>` : '<em style="color: #999;">N/A</em>'}</td></tr>`;
+                html += '</table>';
+
+                // AGC/Gain Control
+                html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">🎚️ AGC & Gain</h3>';
+                html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
+                html += `<tr><td style="padding: 6px;">AGC Enabled</td><td style="padding: 6px; text-align: right;">${fmt(ch.agc_enable)}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Gain</td><td style="padding: 6px; text-align: right;">${fmt(ch.gain, 1, ' dB')}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Headroom</td><td style="padding: 6px; text-align: right;">${fmt(ch.headroom, 1, ' dB')}</td></tr>`;
+                html += '</table>';
+
+                // Demodulator Status
+                html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">⚙️ Demodulator Status</h3>';
+                html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
+                html += `<tr><td style="padding: 6px;">PLL Lock</td><td style="padding: 6px; text-align: right;">${fmt(ch.pll_lock)}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">Envelope Detection</td><td style="padding: 6px; text-align: right;">${fmt(ch.envelope)}</td></tr>`;
+                html += `<tr><td style="padding: 6px;">SNR Squelch</td><td style="padding: 6px; text-align: right;">${fmt(ch.snr_squelch)}</td></tr>`;
+                html += '</table>';
+
+                // FM-Specific (only show if values are present)
+                if (ch.peak_deviation || ch.pl_tone || ch.thresh_extend !== null) {
+                    html += '<h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📻 FM-Specific</h3>';
+                    html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
+                    html += `<tr><td style="padding: 6px;">Peak Deviation</td><td style="padding: 6px; text-align: right;">${fmt(ch.peak_deviation, 1, ' Hz')}</td></tr>`;
+                    html += `<tr><td style="padding: 6px;">PL Tone</td><td style="padding: 6px; text-align: right;">${fmt(ch.pl_tone, 1, ' Hz')}</td></tr>`;
+                    html += `<tr><td style="padding: 6px;">Threshold Extension</td><td style="padding: 6px; text-align: right;">${fmt(ch.thresh_extend)}</td></tr>`;
+                    html += '</table>';
+                }
+
+                html += `<div style="text-align: right; font-size: 11px; color: #999; margin-top: 10px;">Last Update: ${ch.last_update ? new Date(ch.last_update).toLocaleString() : 'N/A'}</div>`;
+                html += '</div>';
+
+                content.innerHTML = html;
+            } catch (error) {
+                content.innerHTML = `<div style="text-align: center; padding: 40px; color: #dc3545;">Error loading channel status: ${error.message}</div>`;
+            }
+        }
+
+        // Close channel status modal
+        function closeChannelStatusModal() {
+            const modal = document.getElementById('channelStatusModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
         // Close modal when clicking outside of it
         window.onclick = function(event) {
             const tunnelModal = document.getElementById('tunnelUsersModal');
             const frontendModal = document.getElementById('frontendStatusModal');
+            const channelModal = document.getElementById('channelStatusModal');
             
             if (event.target === tunnelModal) {
                 closeTunnelUsersModal();
             }
             if (event.target === frontendModal) {
                 closeFrontendStatusModal();
+            }
+            if (event.target === channelModal) {
+                closeChannelStatusModal();
             }
         }
 

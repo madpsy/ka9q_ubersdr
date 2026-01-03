@@ -207,22 +207,31 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 		case tagOutputSSRC:
 			status.SSRC = decodeInt32(value)
 		case tagLNAGain:
-			status.LNAGain = int32(decodeInt32(value))
+			// decode_status.c line 114: uses decode_int8
+			status.LNAGain = int32(decodeInt8(value))
 		case tagMixerGain:
-			status.MixerGain = int32(decodeInt32(value))
+			// decode_status.c line 117: uses decode_int8
+			status.MixerGain = int32(decodeInt8(value))
 		case tagIFGain:
-			status.IFGain = int32(decodeInt32(value))
+			// decode_status.c line 111: uses decode_int8
+			status.IFGain = int32(decodeInt8(value))
 		case tagRFGain:
+			// decode_status.c line 263: uses decode_float
 			status.RFGain = decodeFloat(value)
 		case tagRFAtten:
+			// decode_status.c line 266: uses decode_float
 			status.RFAtten = decodeFloat(value)
 		case tagRFAGC:
-			status.RFAGC = int32(decodeInt32(value))
+			// decode_status.c line 260: uses decode_int (not int8, not int32)
+			status.RFAGC = int32(decodeInt(value))
 		case tagIFPower:
+			// decode_status.c line 126: uses decode_float
 			status.IFPower = decodeFloat(value)
 		case tagADOver:
+			// decode_status.c line 60: uses decode_int64
 			status.ADOverranges = decodeInt64(value)
 		case tagSamplesSinceOver:
+			// decode_status.c line 63: uses decode_int64
 			status.SamplesSinceOver = decodeInt64(value)
 		}
 
@@ -275,6 +284,20 @@ func (fst *FrontendStatusTracker) Stop() {
 }
 
 // TLV Decoding functions - reverse of encoding functions in radiod.go
+
+// decodeInt decodes a variable-length integer (like decode_int in ka9q-radio)
+// Returns int (native int size)
+func decodeInt(data []byte) int {
+	if len(data) == 0 {
+		return 0
+	}
+
+	var result uint64
+	for _, b := range data {
+		result = (result << 8) | uint64(b)
+	}
+	return int(result)
+}
 
 // decodeInt32 decodes a 32-bit integer with leading zero suppression
 func decodeInt32(data []byte) uint32 {

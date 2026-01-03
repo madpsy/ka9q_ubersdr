@@ -20,7 +20,7 @@ class DigitalSpotsExtension extends DecoderExtension {
         this.countryFilter = 'all'; // Default to all countries
         this.callsignFilter = '';
         this.highlightNew = true;
-        this.showBadges = true; // Default to showing badges
+        this.showBadges = false; // Default to hiding badges
         this.unsubscribe = null;
         this.newSpotId = null;
         this.spotIdCounter = 0;

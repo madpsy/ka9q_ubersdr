@@ -3462,7 +3462,11 @@ class SpectrumDisplay {
                 newFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, newFreq));
                 
                 // Update frequency input
-                freqInput.value = newFreq;
+                if (window.setFrequencyInputValue) {
+                    window.setFrequencyInputValue(newFreq);
+                } else {
+                    freqInput.value = newFreq;
+                }
                 
                 // Update band buttons if function exists
                 if (typeof window.updateBandButtons === 'function') {
@@ -3934,7 +3938,11 @@ class SpectrumDisplay {
             // Update frequency input if available (correct ID is 'frequency', not 'frequency-input')
             const freqInput = document.getElementById('frequency');
             if (freqInput) {
-                freqInput.value = newDialFreq;
+                if (window.setFrequencyInputValue) {
+                    window.setFrequencyInputValue(newDialFreq);
+                } else {
+                    freqInput.value = newDialFreq;
+                }
 
                 // Update band buttons
                 if (typeof window.updateBandButtons === 'function') {

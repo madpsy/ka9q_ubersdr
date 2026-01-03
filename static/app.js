@@ -321,7 +321,8 @@ function updateBandButtons(frequency) {
 function updatePageTitle() {
     const freqInput = document.getElementById('frequency');
     if (freqInput && currentMode) {
-        const freq = parseInt(freqInput.value);
+        // Get frequency from data-hz-value attribute
+        const freq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
         if (!isNaN(freq)) {
             const freqMHz = (freq / 1000000).toFixed(3);
             document.title = `UberSDR - ${freqMHz} MHz ${currentMode.toUpperCase()}`;
@@ -1580,7 +1581,7 @@ function tuneToChannel(frequency, mode, bandwidthLow, bandwidthHigh) {
     // Update frequency input (only if not currently being edited)
     const freqInput = document.getElementById('frequency');
     if (freqInput && document.activeElement !== freqInput) {
-        freqInput.value = frequency;
+        setFrequencyInputValue(frequency);
     }
     updateBandButtons(frequency);
     updateBandSelector();
@@ -1903,7 +1904,7 @@ function updateStatus(msg) {
         // Only update frequency input if user is not currently editing it
         const freqInput = document.getElementById('frequency');
         if (freqInput && document.activeElement !== freqInput) {
-            freqInput.value = msg.frequency;
+            setFrequencyInputValue(msg.frequency);
         }
 
         // Update mode display (without band name)
@@ -2568,7 +2569,9 @@ function tune() {
         return;
     }
 
-    const frequency = parseInt(document.getElementById('frequency').value);
+    const freqInput = document.getElementById('frequency');
+    // Get frequency from data-hz-value attribute if available
+    const frequency = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
     const mode = currentMode;
     // Read from window globals to get the latest values
     const bandwidthLow = window.currentBandwidthLow;
@@ -2653,7 +2656,7 @@ function handleFrequencyChange() {
         }
 
         // Update input with clamped value
-        freqInput.value = frequency;
+        setFrequencyInputValue(frequency);
         log(`Frequency clamped to valid range: ${formatFrequency(frequency)}`, 'error');
     }
 
@@ -2685,7 +2688,7 @@ function setFrequency(freq) {
 
     const clampedFreq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, freq));
 
-    document.getElementById('frequency').value = clampedFreq;
+    setFrequencyInputValue(clampedFreq);
     updateBandButtons(clampedFreq);
     updateBandSelector();
     log(`Frequency preset: ${formatFrequency(clampedFreq)}`);
@@ -2718,7 +2721,7 @@ function setBand(bandName) {
     // Set frequency to band center (only if not currently being edited)
     const freqInput = document.getElementById('frequency');
     if (freqInput && document.activeElement !== freqInput) {
-        freqInput.value = centerFreq;
+        setFrequencyInputValue(centerFreq);
     }
     updateBandButtons(centerFreq);
     updateBandSelector();
@@ -2783,7 +2786,8 @@ function setBand(bandName) {
 // Adjust frequency by a given amount (Hz)
 function adjustFrequency(deltaHz) {
     const freqInput = document.getElementById('frequency');
-    const currentFreq = parseInt(freqInput.value);
+    // Get current frequency from data-hz-value attribute
+    const currentFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
     const newFreq = currentFreq + deltaHz;
 
     // Clamp to valid range: 100 kHz to 30 MHz
@@ -2803,7 +2807,7 @@ function adjustFrequency(deltaHz) {
         roundedFreq = Math.round(clampedFreq / 10) * 10;
     }
 
-    freqInput.value = roundedFreq;
+    setFrequencyInputValue(roundedFreq);
     updateBandButtons(roundedFreq);
     updateBandSelector();
 
@@ -2832,7 +2836,7 @@ function loadSettingsFromURL() {
         if (!isNaN(freq) && freq >= 100000 && freq <= 30000000) {
             const freqInput = document.getElementById('frequency');
             if (freqInput && document.activeElement !== freqInput) {
-                freqInput.value = freq;
+                setFrequencyInputValue(freq);
             }
             updateBandButtons(freq);
         }
@@ -2893,9 +2897,10 @@ function loadSettingsFromURL() {
 function updateURL() {
     const params = new URLSearchParams();
 
-    // Add frequency
-    const freq = parseInt(document.getElementById('frequency').value);
-    if (!isNaN(freq)) {
+    // Add frequency (get from data-hz-value attribute)
+    const freqInput = document.getElementById('frequency');
+    const freq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
+    if (!isNaN(freq) && freq > 0) {
         params.set('freq', freq);
     }
 
@@ -4023,7 +4028,7 @@ function performFrequencyShift() {
     newDialFreq = Math.round(newDialFreq);
 
     // Update frequency input
-    freqInput.value = newDialFreq;
+    setFrequencyInputValue(newDialFreq);
     updateBandButtons(newDialFreq);
     updateURL();
 
@@ -4194,7 +4199,7 @@ function enableFrequencyTracking() {
                 newDialFreq = Math.round(newDialFreq);
 
                 // Update frequency input
-                freqInput.value = newDialFreq;
+                setFrequencyInputValue(newDialFreq);
                 updateBandButtons(newDialFreq);
                 updateURL();
 
@@ -4308,7 +4313,7 @@ function enableFrequencyTracking() {
         newDialFreq = Math.round(newDialFreq);
 
         // Update frequency input
-        freqInput.value = newDialFreq;
+        setFrequencyInputValue(newDialFreq);
         updateBandButtons(newDialFreq);
         updateURL();
 
@@ -6119,7 +6124,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // When user clicks on spectrum, tune to that frequency
                 const freqInput = document.getElementById('frequency');
                 if (freqInput && document.activeElement !== freqInput) {
-                    freqInput.value = Math.round(freq);
+                    setFrequencyInputValue(Math.round(freq));
                 }
 
                 // Update cursor immediately
@@ -6228,7 +6233,8 @@ function updateSpectrumCursor() {
 
     const freqInput = document.getElementById('frequency');
     if (freqInput) {
-        const freq = parseInt(freqInput.value);
+        // Get frequency from data-hz-value attribute
+        const freq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
         if (!isNaN(freq)) {
             spectrumDisplay.updateConfig({
                 tunedFreq: freq,
@@ -6415,7 +6421,7 @@ function spectrumMaxZoom() {
 
     // Get current frequency from input
     const freqInput = document.getElementById('frequency');
-    const frequency = parseInt(freqInput.value);
+    const frequency = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
 
     if (isNaN(frequency)) {
         log('Invalid frequency for max zoom', 'error');
@@ -6445,7 +6451,7 @@ function spectrumCenterFrequency() {
 
     // Get current frequency from input
     const freqInput = document.getElementById('frequency');
-    const frequency = parseInt(freqInput.value);
+    const frequency = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
 
     if (isNaN(frequency)) {
         log('Invalid frequency for centering', 'error');
@@ -6494,7 +6500,9 @@ window.updateSpectrumGrid = updateSpectrumGrid;
 // Helper function for spectrum display to get current dial frequency
 window.getCurrentDialFrequency = function() {
     const freqInput = document.getElementById('frequency');
-    return freqInput ? parseInt(freqInput.value) : 0;
+    if (!freqInput) return 0;
+    // Get frequency from data-hz-value attribute
+    return parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
 };
 
 // Audio controls
@@ -6515,6 +6523,7 @@ window.log = log;
 window.validateFrequencyInput = validateFrequencyInput;
 window.handleFrequencyChange = handleFrequencyChange;
 window.setFrequency = setFrequency;
+window.setFrequencyInputValue = setFrequencyInputValue;
 window.setBand = setBand;
 window.adjustFrequency = adjustFrequency;
 window.setMode = setMode;
@@ -6846,7 +6855,7 @@ function selectBandFromDropdown(value) {
         // Set frequency to band center (only if not currently being edited)
         const freqInput = document.getElementById('frequency');
         if (freqInput && document.activeElement !== freqInput) {
-            freqInput.value = centerFreq;
+            setFrequencyInputValue(centerFreq);
         }
         updateBandButtons(centerFreq);
 
@@ -7341,6 +7350,18 @@ function updateFrequencyDisplay() {
 
     // Update the input field
     freqInput.value = displayValue;
+}
+
+// Helper function to set frequency value in Hz (used throughout the codebase)
+function setFrequencyInputValue(hzValue) {
+    const freqInput = document.getElementById('frequency');
+    if (!freqInput) return;
+
+    // Store the Hz value
+    freqInput.setAttribute('data-hz-value', Math.round(hzValue));
+
+    // Update display in current unit
+    updateFrequencyDisplay();
 }
 
 // Convert displayed value to Hz when input changes

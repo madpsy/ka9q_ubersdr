@@ -300,7 +300,11 @@ function handleBookmarkClick(bookmarkOrFrequency, modeOrShouldZoom, fromSpectrum
     // Set frequency (only if user is not currently editing it)
     const freqInput = document.getElementById('frequency');
     if (freqInput && document.activeElement !== freqInput) {
-        freqInput.value = frequency;
+        if (window.setFrequencyInputValue) {
+            window.setFrequencyInputValue(frequency);
+        } else {
+            freqInput.value = frequency;
+        }
     }
     
     if (updateBandButtons) {

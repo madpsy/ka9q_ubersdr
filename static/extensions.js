@@ -19,7 +19,10 @@ class RadioAPI {
     
     getFrequency() {
         const freqInput = document.getElementById('frequency');
-        return freqInput ? parseInt(freqInput.value) : 0;
+        if (!freqInput) return 0;
+        // Get the Hz value from data attribute if available, otherwise parse the value
+        const hzValue = freqInput.getAttribute('data-hz-value');
+        return hzValue ? parseInt(hzValue) : parseInt(freqInput.value);
     }
     
     getMode() {
@@ -126,16 +129,20 @@ class RadioAPI {
     setFrequency(freq) {
         const freqInput = document.getElementById('frequency');
         if (freqInput) {
-            freqInput.value = Math.round(freq);
+            if (window.setFrequencyInputValue) {
+                window.setFrequencyInputValue(Math.round(freq));
+            } else {
+                freqInput.value = Math.round(freq);
+            }
             if (window.updateBandButtons) window.updateBandButtons(freq);
             if (window.updateURL) window.updateURL();
-            
+
             if (this.isConnected()) {
                 if (window.autoTune) window.autoTune();
             } else {
                 if (window.connect) window.connect();
             }
-            
+
             this.notifyFrequencyChange(freq);
             return true;
         }

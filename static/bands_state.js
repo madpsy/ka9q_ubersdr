@@ -416,8 +416,9 @@ function updateBandBadgeActiveStates() {
     // Get current frequency from the frequency input
     const freqInput = document.getElementById('frequency');
     if (!freqInput) return;
-    
-    const currentFreq = parseInt(freqInput.value);
+
+    // Get frequency from data-hz-value attribute if available
+    const currentFreq = parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value);
     if (isNaN(currentFreq)) return;
 
     // Get band ranges from app.js (if available)

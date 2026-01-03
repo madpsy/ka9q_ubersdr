@@ -570,11 +570,9 @@ class BandConditionsMonitor {
                             title: (items) => {
                                 if (items.length === 0) return '';
                                 const date = new Date(items[0].parsed.x);
-                                return date.toLocaleString('en-GB', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    hour12: false
-                                });
+                                const hours = String(date.getUTCHours()).padStart(2, '0');
+                                const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+                                return `${hours}:${minutes} UTC`;
                             },
                             beforeBody: (items) => {
                                 if (items.length === 0) return [];
